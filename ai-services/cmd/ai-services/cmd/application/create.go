@@ -17,8 +17,9 @@ const (
 	applicationTemplatesPath = "applications/"
 )
 
+var extraContainerReadinessTimeout = 5 * time.Minute
+
 var templateName string
-var readinessTimeout = 5 * time.Minute
 
 var createCmd = &cobra.Command{
 	Use:   "create [name]",
@@ -91,14 +92,34 @@ var createCmd = &cobra.Command{
 				cmd.Printf("Performing Pod Readiness check...: %s\n", pod.ID)
 				for _, containerID := range pod.Containers {
 					cmd.Printf("Doing Container Readiness check...: %s\n", containerID)
+
+					// getting the Start Period set for a container
+					startPeriod, err := helpers.FetchContainerStartPeriod(runtime, containerID)
+					if err != nil {
+						return fmt.Errorf("fetching container start period failed: %w", err)
+					}
+
+					if startPeriod == -1 {
+						cmd.Println("No container health check is set. Hence skipping readiness check")
+						continue
+					}
+
+					// configure readiness timeout by appending start period with additional extra timeout
+					readinessTimeout := startPeriod + extraContainerReadinessTimeout
+
+					cmd.Printf("Setting the Waiting Readiness Timeout: %s\n", readinessTimeout)
+
 					if err := helpers.WaitForContainerReadiness(runtime, containerID, readinessTimeout); err != nil {
 						return fmt.Errorf("readiness check failed!: %w", err)
 					}
 					cmd.Printf("Container: %s is ready\n", containerID)
+					cmd.Println("-------")
 				}
+				cmd.Printf("Pod: %s has been successfully deployed and ready!\n", pod.ID)
+				cmd.Println("-------")
 			}
 
-			cmd.Println("-------")
+			cmd.Println("-------\n-------")
 		}
 
 		return nil

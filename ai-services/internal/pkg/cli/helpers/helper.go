@@ -105,3 +105,20 @@ func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string
 		time.Sleep(2 * time.Second)
 	}
 }
+
+func FetchContainerStartPeriod(runtime runtime.Runtime, containerNameOrId string) (time.Duration, error) {
+	// fetch the container stats
+	containerStats, err := runtime.InspectContainer(containerNameOrId)
+	if err != nil {
+		return 0, fmt.Errorf("failed to check container stats: %w", err)
+	}
+
+	// Healthcheck settings live under Config.Healthcheck
+	if containerStats.Config == nil || containerStats.Config.Healthcheck == nil {
+		return -1, nil
+	}
+
+	healthCheck := containerStats.Config.Healthcheck
+
+	return healthCheck.StartPeriod, nil
+}
