@@ -349,7 +349,7 @@ func executePodTemplates(runtime runtime.Runtime, appName string, podTemplateExe
 
 func deployPodAndReadinessCheck(runtime runtime.Runtime, name string, body io.Reader) error {
 
-	kubeReport, err := runtime.CreatePod(body)
+	kubeReport, err := podman.RunPodmanKubePlay(body)
 	if err != nil {
 		return fmt.Errorf("failed pod creation: %w", err)
 	}
@@ -358,11 +358,11 @@ func deployPodAndReadinessCheck(runtime runtime.Runtime, name string, body io.Re
 
 	for _, pod := range kubeReport.Pods {
 		fmt.Printf("Performing Pod Readiness check...: %s\n", pod.ID)
-		for _, containerID := range pod.Containers {
-			fmt.Printf("Doing Container Readiness check...: %s\n", containerID)
+		for _, container := range pod.Containers {
+			fmt.Printf("Doing Container Readiness check...: %s\n", container.ID)
 
 			// getting the Start Period set for a container
-			startPeriod, err := helpers.FetchContainerStartPeriod(runtime, containerID)
+			startPeriod, err := helpers.FetchContainerStartPeriod(runtime, container.ID)
 			if err != nil {
 				return fmt.Errorf("fetching container start period failed: %w", err)
 			}
@@ -377,10 +377,10 @@ func deployPodAndReadinessCheck(runtime runtime.Runtime, name string, body io.Re
 
 			fmt.Printf("Setting the Waiting Readiness Timeout: %s\n", readinessTimeout)
 
-			if err := helpers.WaitForContainerReadiness(runtime, containerID, readinessTimeout); err != nil {
+			if err := helpers.WaitForContainerReadiness(runtime, container.ID, readinessTimeout); err != nil {
 				return fmt.Errorf("readiness check failed!: %w", err)
 			}
-			fmt.Printf("Container: %s is ready\n", containerID)
+			fmt.Printf("Container: %s is ready\n", container.ID)
 			fmt.Println("-------")
 		}
 		fmt.Printf("Pod: %s has been successfully deployed and ready!\n", pod.ID)
