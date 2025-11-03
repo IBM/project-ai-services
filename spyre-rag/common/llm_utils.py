@@ -4,7 +4,9 @@ import time
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from common.misc_utils import get_prompts
+from common.misc_utils import get_prompts, get_logger
+
+logger = get_logger("LLM")
 
 llm_classify, table_summary, query_vllm_pmt, query_vllm_stream_pmt = get_prompts()
 
@@ -13,7 +15,7 @@ def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, batch_size=128)
     all_prompts = [llm_classify.format(text=item.strip()) for item in text_blocks]
     
     decisions = []
-    for i in tqdm(range(0, len(all_prompts), batch_size), desc="Classifying Text with LLM"):
+    for i in tqdm(range(0, len(all_prompts), batch_size)):
         batch_prompts = all_prompts[i:i + batch_size]
 
         payload = {
@@ -31,10 +33,10 @@ def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, batch_size=128)
                 reply = choice.get("text", "").strip().lower()
                 decisions.append("yes" in reply)
         except requests.exceptions.RequestException as e:
-            print(f"Error in vLLM: {e}, {e.response.text}")
+            logger.error(f"Error while classifying text with vLLM: {e}, {e.response.text}")
             decisions.append(True)
         except Exception as e:
-            print(f"Error in vLLM: {e}")
+            logger.error(f"Error while classifying text with vLLM: {e}")
             decisions.append(True)
     return decisions
 
@@ -44,9 +46,9 @@ def filter_with_llm(text_blocks, gen_model, llm_endpoint):
 
     # Run classification
     decisions = classify_text_with_llm(text_contents, gen_model, llm_endpoint)
-    print(f"[Debug] Prompts: {len(text_contents)}, Decisions: {len(decisions)}")
+    logger.debug(f"Prompts: {len(text_contents)}, Decisions: {len(decisions)}")
     filtered_blocks = [block for dcsn, block in zip(decisions, text_blocks) if dcsn]
-    print(f"[Debug] Filtered Blocks: {len(filtered_blocks)}, True Decisions: {sum(decisions)}")
+    logger.debug(f"Filtered Blocks: {len(filtered_blocks)}, True Decisions: {sum(decisions)}")
     return filtered_blocks
 
 
@@ -66,10 +68,10 @@ def summarize_single_table(prompt, gen_model, llm_endpoint):
         reply = result.get("choices", [{}])[0].get("text", "").strip()
         return reply
     except requests.exceptions.RequestException as e:
-        print(f"Error summarizing table: {e}, {e.response.text}")
+        logger.error(f"Error summarizing table: {e}, {e.response.text}")
         return "No summary."
     except Exception as e:
-        print(f"Error summarizing table: {e}")
+        logger.error(f"Error summarizing table: {e}")
         return "No summary."
 
 
@@ -84,12 +86,12 @@ def summarize_table(table_html, table_caption, gen_model, llm_endpoint, max_work
             for idx, prompt in enumerate(all_prompts)
         }
 
-        for future in tqdm(as_completed(futures), total=len(futures), desc="Summarizing Tables"):
+        for future in tqdm(as_completed(futures), total=len(futures)):
             idx = futures[future]
             try:
                 summaries[idx] = future.result()
             except Exception as e:
-                print(f"Thread failed at index {idx}: {e}")
+                logger.error(f"Thread failed at index {idx}: {e}")
                 summaries[idx] = "No summary."
 
     return summaries
@@ -99,15 +101,15 @@ def query_vllm(question, documents, llm_endpoint, ckpt, stop_words, max_new_toke
     template_token_count=250
     context = "\n\n".join([doc.get("page_content") for doc in documents])
     
-    print(f'Original Context: {context}')
+    logger.debug(f'Original Context: {context}')
     if dynamic_chunk_truncation:
         question_token_count=len(tokenize_with_llm(question, llm_endpoint))
         remaining_tokens=max_input_length-(template_token_count+question_token_count)
         context=detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:remaining_tokens], llm_endpoint)
-        print(f"Truncated Context: {context}")
+        logger.debug(f"Truncated Context: {context}")
 
     prompt = query_vllm_pmt.format(context=context, question=question)
-    print("PROMPT:  ", prompt)
+    logger.debug("PROMPT:  ", prompt)
     headers = {
         "accept": "application/json",
         "Content-type": "application/json"
@@ -142,15 +144,15 @@ def query_vllm_stream(question, documents, llm_endpoint, ckpt, stop_words, max_n
     template_token_count = 250
     context = "\n\n".join([doc.get("page_content") for doc in documents])
 
-    print(f'Original Context: {context}')
+    logger.debug(f'Original Context: {context}')
     if dynamic_chunk_truncation:
         question_token_count = len(tokenize_with_llm(question, llm_endpoint))
         reamining_tokens = max_input_length - (template_token_count + question_token_count)
         context = detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:reamining_tokens], llm_endpoint)
-        print(f"Truncated Context: {context}")
+        logger.debug(f"Truncated Context: {context}")
 
     prompt = query_vllm_stream_pmt.format(context=context, question=question)
-    print("PROMPT:  ", prompt)
+    logger.debug("PROMPT:  ", prompt)
     headers = {
         "accept": "application/json",
         "Content-type": "application/json"
@@ -167,21 +169,23 @@ def query_vllm_stream(question, documents, llm_endpoint, ckpt, stop_words, max_n
 
     try:
         # Use requests for synchronous HTTP requests
-        print("STREAMING RESPONSE")
+        logger.debug("STREAMING RESPONSE")
         with requests.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=True) as r:
             for line in r.iter_lines(decode_unicode=True):
                 if line:
-                    print("Earlier response: ", line)
+                    logger.debug("Earlier response: ", line)
                     line = line.replace("data: ", "")
                     try:
                         data = json.loads(line)
                         yield data.get("choices", [{}])[0]['delta']['content']
-                    except json.JSONDecodeError:
-                        print("error in decoding")
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Error while decoding JSON: {e}")
                         pass  # ignore malformed lines
     except requests.exceptions.RequestException as e:
+        logger.error(f"Error calling vLLM stream API: {e}, {e.response.text}")
         return {"error": str(e) + "\n" + e.response.text}, 0.
     except Exception as e:
+        logger.error(f"Error calling vLLM stream API: {e}")
         return {"error": str(e)}, 0.
 
 def tokenize_with_llm(prompt, llm_endpoint):
@@ -195,10 +199,10 @@ def tokenize_with_llm(prompt, llm_endpoint):
         tokens = result.get("tokens", [])
         return tokens
     except requests.exceptions.RequestException as e:
-        print(f"Error encoding prompt: {e}, {e.response.text}")
+        logger.error(f"Error encoding prompt: {e}, {e.response.text}")
         raise e
     except Exception as e:
-        print(f"Error encoding prompt: {e}")
+        logger.error(f"Error encoding prompt: {e}")
         raise e
 
 def detokenize_with_llm(tokens, llm_endpoint):
@@ -212,8 +216,8 @@ def detokenize_with_llm(tokens, llm_endpoint):
         prompt = result.get("prompt", "")
         return prompt
     except requests.exceptions.RequestException as e:
-        print(f"Error decoding tokens: {e}, {e.response.text}")
+        logger.error(f"Error decoding tokens: {e}, {e.response.text}")
         raise e
     except Exception as e:
-        print(f"Error decoding tokens: {e}")
+        logger.error(f"Error decoding tokens: {e}")
         raise e

@@ -22,7 +22,7 @@ def search_and_answer_backend(
             ranked_scores.append(score)
             if i == top_r:
                 break
-        logger.info(f"ranked documents: {ranked_documents} ")
+        logger.info(f"Ranked documents: {ranked_documents}")
     else:
         ranked_documents = retrieved_documents[:top_r]
         ranked_scores = retrieved_scores[:top_r]
@@ -71,7 +71,7 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
             ranked_scores.append(score)
             if i == top_r:
                 break
-        logger.info(f"ranked documents: {ranked_documents} ")
+        logger.info(f"Ranked documents: {ranked_documents}")
     else:
         ranked_documents = retrieved_documents[:top_r]
         ranked_scores = retrieved_scores[:top_r]

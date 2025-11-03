@@ -12,7 +12,7 @@ from pymilvus import (
     FieldSchema, DataType
 )
 from sklearn.feature_extraction.text import TfidfVectorizer
-from common.emb_utils import FastAPIEmbeddingFunction
+from common.emb_utils import Embedding
 from common.misc_utils import LOCAL_CACHE_DIR, get_logger
 
 logger = get_logger("Milvus")
@@ -102,8 +102,8 @@ class MilvusVectorStore:
     def _ensure_embedder(self, emb_model, emb_endpoint, max_tokens):
         config = {"model": emb_model, "endpoint": emb_endpoint, "max_tokens": max_tokens}
         if self._embedder is None or self._embedder_config != config:
-            logger.info(f"⚙️ Initializing embedder: {emb_model}")
-            self._embedder = FastAPIEmbeddingFunction(emb_model, emb_endpoint, max_tokens)
+            logger.debug(f"⚙️ Initializing embedder: {emb_model}")
+            self._embedder = Embedding(emb_model, emb_endpoint, max_tokens)
             self._embedder_config = config
 
     def reset_collection(self):
@@ -145,7 +145,7 @@ class MilvusVectorStore:
 
         logger.info(f"Inserting {len(chunks)} chunks into Milvus...")
 
-        for i in tqdm(range(0, len(chunks), batch_size), desc='Ingesting Data into Vector DB'):
+        for i in tqdm(range(0, len(chunks), batch_size)):
             batch = chunks[i:i + batch_size]
             page_contents = [doc.get("page_content") for doc in batch]
             embeddings = self._embedder.embed_documents(page_contents)
@@ -173,12 +173,12 @@ class MilvusVectorStore:
                 for cid, fn, t, s, pc, l in zip(chunk_ids, filenames, types, sources, page_contents, languages)
             ])
 
-        logger.info("Fitting external BM25 (TF-IDF)...")
+        logger.debug("Fitting external TF-IDF vectorizer")
         self.vectorizer = TfidfVectorizer()
         self.sparse_matrix = self.vectorizer.fit_transform(self.page_content_corpus)
 
         self._save_sparse_index()
-        logger.info(f"✅ Inserted {len(chunks)} chunks into collection '{self.collection_name}'.")
+        logger.info(f"Inserted {len(chunks)} chunks into collection '{self.collection_name}'.")
 
     def _rrf_fusion(self, dense_results, sparse_results, top_k):
         """

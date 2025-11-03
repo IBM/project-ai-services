@@ -20,7 +20,7 @@ def rerank_helper(co2_client: ClientV2, query: str, document: List[dict], model:
         score = result.results[0].relevance_score
         return document, score
     except Exception as e:
-        logger.error(f"[Rerank Error] {e}")
+        logger.error(f"Rerank Error {e}")
         return document, 0.0
 
 
@@ -51,7 +51,7 @@ def rerank_documents(
             try:
                 reranked.append(future.result())
             except Exception as e:
-                logger.error(f"[Thread Error] {e}")
+                logger.error(f"Thread error: {e}")
                 reranked.append((doc, 0.0))
 
     return sorted(reranked, key=lambda x: x[1], reverse=True)

@@ -1,6 +1,11 @@
 import json
 import time
 import fitz
+import logging
+import os
+os.environ['GRPC_VERBOSITY'] = 'ERROR' 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 import pdfplumber
 from tqdm import tqdm
 from pathlib import Path
@@ -14,6 +19,11 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 from sentence_splitter import SentenceSplitter
 
 from common.llm_utils import classify_text_with_llm, summarize_table, tokenize_with_llm
+from common.misc_utils import get_logger
+
+logging.getLogger('docling').setLevel(logging.CRITICAL)
+
+logger = get_logger("Docling")
 
 
 IMAGE_RESOLUTION_SCALE = 1.0
@@ -118,7 +128,7 @@ class TocHeaders:
             # Match text and title
             score = fuzz.partial_ratio(title.lower(), text.lower())
             if score >= threshold:
-                print(f'Heading: {title}, Level: {lvl}, Score: {score}')
+                logger.debug(f'Heading: {title}, Level: {lvl}, Score: {score}')
                 return "#" * lvl  # Return corresponding markdown header
         
         return ""  # No match found for this page/span combination
@@ -150,14 +160,14 @@ def find_text_font_size(
     try:
         with pdfplumber.open(pdf_path) as pdf:
             if page_number >= len(pdf.pages):
-                print(f"Page {page_number} does not exist in PDF.")
+                logger.debug(f"Page {page_number} does not exist in PDF.")
                 return []
 
             page = pdf.pages[page_number]
             words = page.extract_words(extra_attrs=["size", "fontname"])
 
             if not words:
-                print("No words found on page.")
+                logger.debug("No words found on page.")
                 return []
 
             # Group words into lines based on Y-coordinate
@@ -200,12 +210,14 @@ def find_text_font_size(
                     })
 
     except Exception as e:
-        print(f"Error processing PDF: {e}")
+        logger.error(f"Error processing PDF {pdf_path}: {e}")
 
     return matches
 
 
-def process_document(res, pdf_path, out_path, gen_model, gen_endpoint, start_time, timings):
+def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint, start_time, timings):
+    logger.info(f"Processing '{pdf_path}'")
+    
     doc_json = res.document.export_to_dict()
     stem = res.input.file.stem
 
@@ -215,11 +227,10 @@ def process_document(res, pdf_path, out_path, gen_model, gen_endpoint, start_tim
         toc_mapper = TocPageMapper(pdf_path)
         toc_mapper.match_toc_to_pages(threshold=80)
         page_mapping = toc_mapper.get_page_mapping()
-        print("Page Mapping:", page_mapping)
         toc_mapper.close()
         toc_headers = TocHeaders(pdf_path, page_mapping)
     except Exception as e:
-        print(f"No TOC found or failed to load TOC: {e}")
+        logger.debug(f"No TOC found or failed to load TOC: {e}")
 
     # --- Text Extraction ---
     t0 = time.time()
@@ -249,8 +260,9 @@ def process_document(res, pdf_path, out_path, gen_model, gen_endpoint, start_tim
 
         last_header_level = 0  # To track the last header level in case we don't find it in TOC
 
+        logger.info(f"Processing text content of '{pdf_path}'")
         t0 = time.time()
-        for text_obj in tqdm(filtered_text_dicts, desc="Document Structure Extraction"):
+        for text_obj in tqdm(filtered_text_dicts):
             label = text_obj.get("label", "")
 
             # Check if it's a section header and process TOC or fallback to font size extraction
@@ -323,6 +335,7 @@ def process_document(res, pdf_path, out_path, gen_model, gen_endpoint, start_tim
 
     # --- Table Extraction ---
     if len(res.document.tables):
+        logger.info(f"Processing table content of '{pdf_path}'")
         t0 = time.time()
         table_htmls_dict = {}
         table_captions_dict = {i: None for i in range(len(res.document.tables))}
@@ -337,10 +350,12 @@ def process_document(res, pdf_path, out_path, gen_model, gen_endpoint, start_tim
         table_captions_list = [table_captions_dict[key] for key in sorted(table_captions_dict)]
         timings['extract_tables'] = time.time() - t0
 
+        logger.info(f"Summarizing tables of '{pdf_path}'")
         t0 = time.time()
         table_summaries = summarize_table(table_htmls, table_captions_list, gen_model, gen_endpoint)
         timings['summarize_tables'] = time.time() - t0
 
+        logger.info(f"Classifying table summaries of '{pdf_path}'")
         t0 = time.time()
         decisions = classify_text_with_llm(table_summaries, gen_model, gen_endpoint)
         filtered_table_dicts = {
@@ -357,22 +372,24 @@ def process_document(res, pdf_path, out_path, gen_model, gen_endpoint, start_tim
         (Path(out_path) / f"{stem}_tables.json").write_text(json.dumps([], indent=2), encoding="utf-8")
 
     total_time = time.time() - start_time
-    print(f"\n[Timing for {stem}] Total: {total_time:.2f}s")
+    logger.debug(f"Timing for {stem} Total: {total_time:.2f}s")
     for k, v in timings.items():
-        print(f"  {k:<30}: {v:.2f}s")
+        logger.debug(f"  {k:<30}: {v:.2f}s")
 
 
 
 def convert_and_process(path, doc_converter, out_path, llm_model, llm_endpoint):
     try:
+        logger.info(f"Converting '{path}'")
         start_time = time.time()
         timings = {}
         t0 = time.time()
         res = doc_converter.convert(path)
         timings['conversion_time'] = time.time() - t0
-        process_document(res, path, out_path, llm_model, llm_endpoint, start_time, timings)
+        logger.info(f"'{path}' converted")
+        process_converted_document(res, path, out_path, llm_model, llm_endpoint, start_time, timings)
     except Exception as e:
-        print(f"Error converting or processing {path}: {e}")
+        logger.error(f"Error converting or processing {path}: {e}")
 
 
 def extract_document_data(input_paths, out_path, llm_model, llm_endpoint, force=False):
@@ -393,8 +410,6 @@ def extract_document_data(input_paths, out_path, llm_model, llm_endpoint, force=
             (Path(out_path) / f"{Path(path).stem}_tables.json").exists()
         )
     ]
-    print(f"Processing {len(filtered_input_paths)} files...")
-
     doc_converter = DocumentConverter(
         allowed_formats=[
             InputFormat.PDF
@@ -412,9 +427,9 @@ def extract_document_data(input_paths, out_path, llm_model, llm_endpoint, force=
                 try:
                     future.result()
                 except Exception as e:
-                    print(f"Unhandled exception: {e}")
+                    logger.error(f"Unhandled exception: {e}")
     else:
-        print("No files to process.")
+        logger.debug("No files to convert and process")
 
 def collect_header_font_sizes(elements):
     """
@@ -518,9 +533,7 @@ def flush_chunk(current_chunk, chunks, llm_endpoint, max_tokens):
     current_chunk["source_nodes"] = []
 
 
-def process_single_file(input_path, output_path, llm_endpoint, max_tokens=512):
-    print(f"Processing {input_path} -> {output_path}")
-    
+def chunk_single_file(input_path, output_path, llm_endpoint, max_tokens=512):    
     if not Path(output_path).exists():
         with open(input_path, "r") as f:
             data = json.load(f)
@@ -596,7 +609,7 @@ def process_single_file(input_path, output_path, llm_endpoint, max_tokens=512):
                     current_chunk["page_range"].append(page_no)
                 current_chunk["source_nodes"].append(ref)
             else:
-                print(f'Skipping adding "{label}".')
+                logger.debug(f'Skipping adding "{label}".')
 
         # Flush any remaining content
         flush_chunk(current_chunk, chunks, llm_endpoint, max_tokens)
@@ -605,11 +618,12 @@ def process_single_file(input_path, output_path, llm_endpoint, max_tokens=512):
         with open(output_path, "w") as f:
             json.dump(chunks, f, indent=2)
 
-        print(f"✅ {len(chunks)} RAG chunks saved to {output_path}")
+        logger.debug(f"{len(chunks)} RAG chunks saved to {output_path}")
     else:
-        print(f"{output_path} already exists.")
+        logger.debug(f"{output_path} already exists.")
 
 def hierarchical_chunk_with_token_split(input_paths, output_paths, llm_endpoint, max_tokens=512):
+    logger.info("Creating chunks from processed documents")
     if len(input_paths) != len(output_paths):
         raise ValueError("`input_paths` and `output_paths` must have the same length")
 
@@ -617,19 +631,20 @@ def hierarchical_chunk_with_token_split(input_paths, output_paths, llm_endpoint,
     with ProcessPoolExecutor(max_workers=8) as executor:
         futures = []
         for input_path, output_path in zip(input_paths, output_paths):
-            print(f"Submitting task for: {input_path} -> {output_path}")
-            futures.append(executor.submit(process_single_file, input_path, output_path, llm_endpoint, max_tokens))
+            logger.debug(f"Submitting '{input_path}' for chunking")
+            futures.append(executor.submit(chunk_single_file, input_path, output_path, llm_endpoint, max_tokens))
 
         # Wait for all futures to finish and handle exceptions
         for future in futures:
             try:
                 future.result()  # Capture exceptions if any
             except Exception as e:
-                print(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}")
+    logger.info("Chunks creation completed")
 
 
-def create_chunk_documents(in_txt_f, in_tab_f, orig_fn, include_meta_info_in_main_text, collection_name):
-
+def create_chunk_documents(in_txt_f, in_tab_f, orig_fn, include_meta_info_in_main_text):
+    logger.info(f"Creating combined chunk documents from '{in_txt_f}' & '{in_tab_f}'")
     with open(in_txt_f, "r") as f:
         txt_data = json.load(f)
 
@@ -675,6 +690,6 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn, include_meta_info_in_mai
 
     combined_docs = txt_docs + tab_docs
 
-    stats = f'{len(txt_docs)} Text Chunks, and {len(tab_docs)} Tables.'
+    logger.info(f"Combined chunk documents created")
 
-    return combined_docs, stats
+    return combined_docs

@@ -1,16 +1,16 @@
-import json
 from flask import Flask, request, jsonify, Response, stream_with_context
+import json
+import logging
+import os
 import time
-from common.db_utils import MilvusVectorStore
-from common.misc_utils import get_model_endpoints, get_logger
-from retrieve.backend_utils import search_and_answer_backend, search_only
-from common.llm_utils import query_vllm_stream
-import sys
 
-logger = get_logger("backend")
+from common.db_utils import MilvusVectorStore
+from common.llm_utils import query_vllm_stream
+from common.misc_utils import get_model_endpoints, set_log_level
+from retrieve.backend_utils import search_and_answer_backend, search_only
 
 vectorstore = None
-TRUNCATION      = True
+TRUNCATION  = True
 
 # Globals to be set dynamically
 emb_model_dict = {}
@@ -155,7 +155,16 @@ def get_reference_docs():
 if __name__ == "__main__":
     initialize_models()
     initialize_vectorstore()
-    port = 5000
-    if len(sys.argv) > 1:
-        port = sys.argv[1]
+
+    port = int(os.getenv("PORT", "5000"))
+
+    log_level = logging.INFO
+    level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
+    if level != "":
+        if "debug" in level:
+            log_level == logging.DEBUG
+        elif not "info" in level:
+            raise Exception(f"Unknown LOG_LEVEL passed: '{level}'")
+    set_log_level(log_level)
+
     app.run(host="0.0.0.0", port=port)

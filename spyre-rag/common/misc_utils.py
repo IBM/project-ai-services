@@ -88,3 +88,8 @@ def get_model_endpoints():
     }
 
     return emb_model_dict, llm_model_dict, reranker_model_dict
+
+def setup_cache_dir(dir):
+    cache_dir = os.path.join(LOCAL_CACHE_DIR, f'{dir}_cache')
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
