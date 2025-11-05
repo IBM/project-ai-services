@@ -1,11 +1,9 @@
 package podman
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"html/template"
 	"io"
 	"os"
 
@@ -69,36 +67,6 @@ func (pc *PodmanClient) ListPods(filters map[string][]string) (any, error) {
 	}
 
 	return podList, nil
-}
-
-func (pc *PodmanClient) CreatePodFromTemplate(filePath string, params map[string]any) error {
-	tmplBytes, err := os.ReadFile(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to read template: %w", err)
-	}
-
-	var rendered bytes.Buffer
-
-	tmpl, err := template.New("pod").Parse(string(tmplBytes))
-	if err != nil {
-		return fmt.Errorf("failed to parse template: %w", err)
-	}
-
-	if err := tmpl.Execute(&rendered, params); err != nil {
-		return fmt.Errorf("failed to execute template: %w", err)
-	}
-
-	// fmt.Println("Rendered YAML:\n", rendered.String())
-
-	// Wrap the bytes in a bytes.Reader
-	reader := bytes.NewReader(rendered.Bytes())
-
-	_, err = kube.PlayWithBody(pc.Context, reader, nil)
-	if err != nil {
-		return fmt.Errorf("failed to execute podman kube play: %w", err)
-	}
-
-	return nil
 }
 
 func (pc *PodmanClient) CreatePod(body io.Reader) (*types.KubePlayReport, error) {
