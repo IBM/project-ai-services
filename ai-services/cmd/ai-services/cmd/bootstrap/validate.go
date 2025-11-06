@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	log "github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -58,7 +59,7 @@ Available checks to skip:
   rhel            - RHEL OS and version check
   rhn             - Red Hat Network registration check
   power11  		  - Power 11 architecture check
-  rhaiis   		  - RHAIIS license check (already optional)`,
+  rhaiis   		  - RHAIIS license check`,
 		Example: `  # Run all validation checks
   aiservices bootstrap validate
 
@@ -66,7 +67,7 @@ Available checks to skip:
   aiservices bootstrap validate --skip-validation rhn
 
   # Skip multiple checks
-  aiservices bootstrap validate --skip-validation rhn,ltc
+  aiservices bootstrap validate --skip-validation rhn,power11
   
   # Run with verbose output
   aiservices bootstrap validate --verbose`,
@@ -81,7 +82,7 @@ Available checks to skip:
 
 			logger.Info("Running bootstrap validation...")
 
-			skip := parseSkipChecks(skipChecks)
+			skip := helpers.ParseSkipChecks(skipChecks)
 			if len(skip) > 0 {
 				logger.Warn("⚠️  WARNING: Skipping validation checks", zap.Strings("skipped", skipChecks))
 			}
@@ -97,7 +98,7 @@ Available checks to skip:
 	}
 
 	cmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{},
-		"Skip specific validation checks (comma-separated: root,rhel,rhn,ltc,podman,power11,rhaiis)")
+		"Skip specific validation checks (comma-separated: root,rhel,rhn,power11,rhaiis)")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output for debugging")
 
 	return cmd
@@ -158,20 +159,6 @@ func RunValidateCmd(skip map[string]bool) error {
 		return fmt.Errorf("%d validation check(s) failed", len(validationErrors))
 	}
 	return nil
-}
-
-func parseSkipChecks(skipChecks []string) map[string]bool {
-	skipMap := make(map[string]bool)
-	for _, check := range skipChecks {
-		parts := strings.Split(check, ",")
-		for _, part := range parts {
-			trimmed := strings.TrimSpace(strings.ToLower(part))
-			if trimmed != "" {
-				skipMap[trimmed] = true
-			}
-		}
-	}
-	return skipMap
 }
 
 func rootCheck() error {

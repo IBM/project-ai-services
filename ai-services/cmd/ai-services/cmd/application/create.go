@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	log "github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -32,6 +34,8 @@ var (
 	templateName                   string
 	envMutex                       sync.Mutex
 	skipModelDownload              bool
+	skipChecks                     []string
+	logger                         = log.GetLogger()
 )
 
 var createCmd = &cobra.Command{
@@ -50,10 +54,15 @@ var createCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appName := args[0]
 
+		// TODO: migrate to logger from cmd.Printf
+		skip := helpers.ParseSkipChecks(skipChecks)
+		if len(skip) > 0 {
+			logger.Warn("⚠️  WARNING: Skipping validation checks", zap.Strings("skipped", skipChecks))
+		}
+
 		// Validate the LPAR before creating the application
-		// Configuring --skip-check to nil, since we require every validation step from here
 		cmd.Printf("Validating the LPAR environment before creating application '%s'...\n", appName)
-		err := bootstrap.RunValidateCmd(nil)
+		err := bootstrap.RunValidateCmd(skip)
 		if err != nil {
 			return fmt.Errorf("❌ Bootstrap validation failed: %w", err)
 		}
@@ -275,6 +284,8 @@ func getTargetSMTLevel() (*int, error) {
 }
 
 func init() {
+	createCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{},
+		"Skip specific validation checks (comma-separated: root,rhel,rhn,power11,rhaiis)")
 	createCmd.Flags().StringVarP(&templateName, "template", "t", "", "Template name to use (required)")
 	createCmd.MarkFlagRequired("template")
 	createCmd.Flags().BoolVar(&skipModelDownload, "skip-model-download", false, "Set to true to skip model download during application creation. This assumes local models are already available at /var/lib/ai-services/models/ and is particularly beneficial for air-gapped networks with limited internet access. If not set correctly (e.g., set to true when models are missing, or left false in an air-gapped environment), the create command may fail.")

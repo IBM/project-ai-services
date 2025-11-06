@@ -243,3 +243,17 @@ func FetchContainerNames(podspec PodSpec) []string {
 	}
 	return containerNames
 }
+
+func ParseSkipChecks(skipChecks []string) map[string]bool {
+	skipMap := make(map[string]bool)
+	for _, check := range skipChecks {
+		parts := strings.Split(check, ",")
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(strings.ToLower(part))
+			if trimmed != "" {
+				skipMap[trimmed] = true
+			}
+		}
+	}
+	return skipMap
+}
