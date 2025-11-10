@@ -54,6 +54,16 @@ func (pc *PodmanClient) ListImages() ([]string, error) {
 	return imageNames, nil
 }
 
+func (pc *PodmanClient) PullImage(image string, options *images.PullOptions) error {
+	fmt.Printf("Pulling image %s...\n", image)
+	_, err := images.Pull(pc.Context, image, options)
+	if err != nil {
+		return fmt.Errorf("failed to pull image %s: %w", image, err)
+	}
+	fmt.Printf("Successfully pulled image %s\n", image)
+	return nil
+}
+
 func (pc *PodmanClient) ListPods(filters map[string][]string) (any, error) {
 	var listOpts pods.ListOptions
 
