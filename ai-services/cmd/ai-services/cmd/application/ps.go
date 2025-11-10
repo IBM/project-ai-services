@@ -51,9 +51,28 @@ var psCmd = &cobra.Command{
 
 		// TODO: Implement Tabular column with headers and pods list
 		for _, pod := range pods {
-			cmd.Printf("ApplicationName: %s, PodId: %s, PodName: %s, PodStatus: %s\n", strings.Split(pod.Name, "--")[0], pod.Id, pod.Name, pod.Status)
-		}
+			podPorts := []string{}
+			pInfo, err := runtimeClient.InspectPod(pod.Id)
+			if err != nil {
+				continue
+			}
 
+			if pInfo.InfraConfig == nil || pInfo.InfraConfig.PortBindings == nil {
+				continue
+			}
+
+			for _, ports := range pInfo.InfraConfig.PortBindings {
+				for _, port := range ports {
+					podPorts = append(podPorts, port.HostPort)
+				}
+			}
+
+			cmd.Printf("ApplicationName: %s, PodId: %s, PodName: %s, Status: %s, Exposed: %s\n", fetchPodNameFromLabels(pod.Labels), pod.Id, pod.Name, pod.Status, strings.Join(podPorts, ", "))
+		}
 		return nil
 	},
+}
+
+func fetchPodNameFromLabels(labels map[string]string) string {
+	return labels["ai-services.io/application"]
 }
