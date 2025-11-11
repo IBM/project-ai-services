@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
+	"syscall"
 
 	"github.com/containers/podman/v5/libpod/define"
 	"github.com/containers/podman/v5/pkg/bindings"
@@ -15,6 +17,7 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/kube"
 	"github.com/containers/podman/v5/pkg/bindings/pods"
 	"github.com/containers/podman/v5/pkg/domain/entities/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 type PodmanClient struct {
@@ -177,4 +180,58 @@ func (pc *PodmanClient) PodLogs(podNameOrID string) error {
 
 func (pc *PodmanClient) PodExists(nameOrID string) (bool, error) {
 	return pods.Exists(pc.Context, nameOrID, nil)
+}
+
+func (pc *PodmanClient) ContainerLogs(containerNameOrID string) error {
+	if containerNameOrID == "" {
+		return fmt.Errorf("container name or ID required to fetch logs")
+	}
+
+	// Creating context here that listens for Ctrl+C
+	ctx, stop := signal.NotifyContext(pc.Context, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	stdoutChan := make(chan string)
+	stderrChan := make(chan string)
+
+	opts := &containers.LogOptions{
+		Follow: utils.BoolPtr(true),
+		Stderr: utils.BoolPtr(true),
+		Stdout: utils.BoolPtr(true),
+	}
+
+	// Channel to signal goroutine completion
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case line, ok := <-stdoutChan:
+				if !ok {
+					return
+				}
+				fmt.Println(line)
+			case line, ok := <-stderrChan:
+				if !ok {
+					return
+				}
+				fmt.Fprintln(os.Stderr, line)
+			}
+		}
+	}()
+
+	err := containers.Logs(ctx, containerNameOrID, opts, stdoutChan, stderrChan)
+	<-done
+	if ctx.Err() == context.Canceled || ctx.Err() == context.DeadlineExceeded {
+		return nil
+	}
+
+	return err
+}
+
+func (pc *PodmanClient) ContainerExists(nameOrID string) (bool, error) {
+	return containers.Exists(pc.Context, nameOrID, nil)
 }
