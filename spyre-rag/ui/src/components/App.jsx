@@ -7,13 +7,12 @@ import {
   FeedbackInteractionType,
   CornersType,
   MinimizeButtonIconType,
-  PublicConfig,
 } from "@carbon/ai-chat";
 import "./App.scss"
 import HeaderNav from "./Header.jsx"
 import { Theme, Content, Grid, Column } from "@carbon/react";
 import { customSendMessage } from "./customSendMessage.jsx";
-import { renderUserDefinedResponse } from "./renderUserDefinedResponse.js";
+import { renderUserDefinedResponse } from "./renderUserDefinedResponse.jsx";
 
 const config = {
   messaging: {
