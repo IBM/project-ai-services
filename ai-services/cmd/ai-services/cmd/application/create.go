@@ -185,8 +185,19 @@ var createCmd = &cobra.Command{
 		// Loop through all pod templates, render and run kube play
 		cmd.Printf("Total Pod Templates to be processed: %d\n", len(tmpls))
 
+		// execute the pod Templates
 		if err := executePodTemplates(runtime, appName, appMetadata.PodTemplateExecutions, tmpls, applicationPodTemplatesPath, pciAddresses); err != nil {
 			return err
+		}
+
+		cmd.Printf("\n--- Successfully deployed the Application: '%s' ---\n", appName)
+		cmd.Println("-------")
+
+		// print the next steps to be performed at the end of create
+		if err := helpers.PrintNextSteps(runtime, appName, appTemplateName); err != nil {
+			// do not want to fail the overall create if we cannot print next steps
+			fmt.Printf("failed to display next steps: %v\n", err)
+			return nil
 		}
 
 		return nil

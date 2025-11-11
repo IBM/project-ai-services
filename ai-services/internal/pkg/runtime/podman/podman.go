@@ -174,3 +174,7 @@ func (pc *PodmanClient) PodLogs(podNameOrID string) error {
 
 	return err
 }
+
+func (pc *PodmanClient) PodExists(nameOrID string) (bool, error) {
+	return pods.Exists(pc.Context, nameOrID, nil)
+}

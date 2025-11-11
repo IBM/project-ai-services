@@ -113,6 +113,59 @@ func (e *embedTemplateProvider) LoadMetadata(template string) (*AppMetadata, err
 	return &appMetadata, nil
 }
 
+// LoadMdFiles loads all md files for a given application
+func (e *embedTemplateProvider) LoadMdFiles(path string) (map[string]*template.Template, error) {
+	tmpls := make(map[string]*template.Template)
+	completePath := fmt.Sprintf("%s/%s", e.root, path)
+	err := fs.WalkDir(e.fs, completePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
+			return nil
+		}
+
+		t, err := template.ParseFS(e.fs, path)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", path, err)
+		}
+
+		// key should be just the template file name (Eg:- pod1.yaml.tmpl)
+		tmpls[strings.TrimPrefix(path, fmt.Sprintf("%s/", completePath))] = t
+		return nil
+	})
+	return tmpls, err
+}
+
+func (e *embedTemplateProvider) LoadVarsFile(app string, params map[string]string) (*Vars, error) {
+	path := fmt.Sprintf("%s/%s/steps/vars_file.yaml", e.root, app)
+
+	data, err := e.fs.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read metadata: %w", err)
+	}
+
+	var rendered bytes.Buffer
+	tmpl, err := template.New("varsTemplate").Parse(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("parse template %s: %w", app, err)
+	}
+	if err := tmpl.Execute(&rendered, params); err != nil {
+		return nil, fmt.Errorf("failed to execute template %s: %v", path, err)
+	}
+
+	var vars Vars
+	if err := yaml.Unmarshal(data, &vars); err != nil {
+		return nil, err
+	}
+
+	if err := yaml.Unmarshal(rendered.Bytes(), &vars); err != nil {
+		return nil, fmt.Errorf("unable to read YAML as vars Pod: %w", err)
+	}
+
+	return &vars, nil
+}
+
 type EmbedOptions struct {
 	FS   *embed.FS
 	Root string

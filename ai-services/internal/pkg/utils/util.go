@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"maps"
+	"net"
 	"strings"
 )
 
@@ -82,4 +83,21 @@ func ParseKeyValues(pairs []string) (map[string]string, error) {
 	}
 
 	return out, nil
+}
+
+func GetHostIP() (string, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "", err
+	}
+
+	for _, address := range addrs {
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String(), nil
+			}
+		}
+	}
+
+	return "", nil
 }

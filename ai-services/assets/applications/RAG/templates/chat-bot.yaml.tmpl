@@ -4,6 +4,7 @@ metadata:
   name: "{{ .AppName }}--chat-bot"
   labels:
     ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/port/UI_PORT: "3000" # containerPort
   annotations:
     ai-services.io/ui--UI_PORT-expose: "3000" # containerPort
 spec:
