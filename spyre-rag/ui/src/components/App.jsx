@@ -1,12 +1,10 @@
 import React, { useState } from "react";
-import { createRoot } from "react-dom/client";
 import {
-  ChatContainer,
   ChatCustomElement,
   BusEventType,
   FeedbackInteractionType,
   CornersType,
-  MinimizeButtonIconType,
+  UserType,
 } from "@carbon/ai-chat";
 import "./App.scss"
 import HeaderNav from "./Header.jsx"
@@ -36,25 +34,30 @@ function App() {
 
   function onBeforeRender(instance) {
 
-    instance.updateMainHeaderAvatar({
-      source: 'https://isv-graphics.s3.us-south.cloud-object-storage.appdomain.cloud/PAC-background-new.jpg',
-      corners: 'round',
-    });
-    instance.updateMainHeaderTitle('DocuAssist');
-
+    instance.updateMainHeaderTitle("DocuAssistant");
     instance.on({ type: BusEventType.FEEDBACK, handler: feedbackHandler });
     setChatInstance(instance);
 
-    instance.messaging.addMessage({
-      output: {
-        generic: [
-          {
-            response_type: "text",
-            text: `Hi, I'm your assistant! You can ask me anything related to your documents`,
+    // Delay welcome message to avoid triggering initial loading indicator
+    setTimeout(() => {
+      instance.messaging.addMessage({
+        output: {
+          generic: [
+            {
+              response_type: "text",
+              text: `Hi, I'm your assistant! You can ask me anything related to your documents`,
+            },
+          ],
+        },
+        message_options: {
+          response_user_profile: {
+            id: "assistant",
+            nickname: "DocuAgent",
+            user_type: UserType.BOT,
           },
-        ],
-      },
-    });
+        },
+      });
+    }, 300);
   }
 
   function feedbackHandler(event) {

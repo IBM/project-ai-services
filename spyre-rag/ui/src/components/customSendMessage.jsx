@@ -1,7 +1,14 @@
 import axios from "axios";
+import { UserType } from "@carbon/ai-chat";
 
 async function customSendMessage(request, _options, instance) {
   const userInput = request.input.text;
+
+  const ResponseUserProfile = {
+    id: "assistant",
+    nickname: "DocuAgent",
+    user_type: UserType.BOT,
+  }
 
   function finalizeResponse(fullText) {
     let trimmed = fullText.trim(); // to remove trailing white-space
@@ -35,6 +42,11 @@ async function customSendMessage(request, _options, instance) {
     },
     streaming_metadata: {
       response_id: responseId,
+    },
+    partial_response: {
+      message_options: {
+        response_user_profile: ResponseUserProfile,
+      },
     },
   });
 
@@ -85,6 +97,11 @@ async function customSendMessage(request, _options, instance) {
           streaming_metadata: {
             response_id: responseId,
           },
+          partial_response: {
+            message_options: {
+              response_user_profile: ResponseUserProfile,
+            },
+          },
         });
       }
     }
@@ -102,6 +119,11 @@ async function customSendMessage(request, _options, instance) {
       },
       streaming_metadata: {
         response_id: responseId,
+      },
+      partial_response: {
+        message_options: {
+          response_user_profile: ResponseUserProfile,
+        },
       },
     });
 
@@ -133,6 +155,9 @@ async function customSendMessage(request, _options, instance) {
             },
           ],
         },
+        message_options: {
+          response_user_profile: ResponseUserProfile
+        },
       },
     });
 
@@ -153,6 +178,9 @@ async function customSendMessage(request, _options, instance) {
               },
             },
           ],
+        },
+        message_options: {
+          response_user_profile: ResponseUserProfile
         },
       },
     });
