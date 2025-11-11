@@ -5,6 +5,7 @@ from common.db_utils import MilvusVectorStore
 from common.misc_utils import get_model_endpoints, get_logger
 from retrieve.backend_utils import search_and_answer_backend, search_only
 from common.llm_utils import query_vllm_stream
+import sys
 
 logger = get_logger("backend")
 
@@ -154,4 +155,7 @@ def get_reference_docs():
 if __name__ == "__main__":
     initialize_models()
     initialize_vectorstore()
-    app.run(host="0.0.0.0", port=5000)
+    port = 5000
+    if len(sys.argv) > 1:
+        port = sys.argv[1]
+    app.run(host="0.0.0.0", port=port)
