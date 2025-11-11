@@ -1,9 +1,9 @@
 {
-    "name": "itops-chatbot",
+    "name": "chatbot",
     "version": "0.1.0",
     "private": true,
     "dependencies": {
-        "@carbon/ai-chat": "^0.3.2",
+        "@carbon/ai-chat": "^0.5.1",
         "@carbon/react": "^1.31.3",
         "@testing-library/jest-dom": "^5.16.5",
         "@testing-library/react": "^13.4.0",

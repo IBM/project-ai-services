@@ -8,7 +8,7 @@ const HeaderNav = () => {
   return (
     <Header aria-label="">
     <HeaderName to="/" prefix="">
-        DocuAssist &#8482;
+        DocuAssistant &#8482;
     </HeaderName>
     </Header>
   );
