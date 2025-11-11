@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 
 	"github.com/containers/podman/v5/libpod/define"
 	"github.com/containers/podman/v5/pkg/bindings"
@@ -149,4 +150,27 @@ func (pc *PodmanClient) InspectPod(nameOrID string) (*types.PodInspectReport, er
 		return nil, fmt.Errorf("failed to inspect the pod: %w", err)
 	}
 	return podInspectReport, nil
+}
+
+func (pc *PodmanClient) PodLogs(podNameOrID string) error {
+	if podNameOrID == "" {
+		return errors.New("pod name or ID cannot be empty")
+	}
+
+	ctx, cancel := context.WithCancel(pc.Context)
+	defer cancel()
+
+	// TODO: fetch pods logs via sdk way
+	cmdExec := exec.CommandContext(pc.Context, "podman", "pod", "logs", "-f", podNameOrID)
+	cmdExec.Stdout = os.Stdout
+	cmdExec.Stderr = os.Stderr
+
+	err := cmdExec.Run()
+
+	// If context was cancelled (Ctrl+C), don't treat it as an error
+	if ctx.Err() == context.Canceled {
+		return nil
+	}
+
+	return err
 }

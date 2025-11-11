@@ -31,11 +31,18 @@ const (
 
 var (
 	extraContainerReadinessTimeout = 5 * time.Minute
-	templateName                   string
 	envMutex                       sync.Mutex
-	skipModelDownload              bool
-	skipChecks                     []string
 	logger                         = log.GetLogger()
+)
+
+// Variables for flags placeholder
+var (
+	templateName      string
+	skipModelDownload bool
+	skipChecks        []string
+	rawArgParams      []string
+
+	argParams map[string]string
 )
 
 var createCmd = &cobra.Command{
@@ -48,6 +55,17 @@ var createCmd = &cobra.Command{
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
 			return errors.New("you must provide an application name")
+		}
+		return nil
+	},
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		var err error
+		// validate params flag
+		if len(rawArgParams) > 0 {
+			argParams, err = utils.ParseKeyValues(rawArgParams)
+			if err != nil {
+				return fmt.Errorf("error validating params flag: %v", err)
+			}
 		}
 		return nil
 	},
@@ -175,6 +193,15 @@ var createCmd = &cobra.Command{
 	},
 }
 
+func init() {
+	createCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{},
+		"Skip specific validation checks (comma-separated: root,rhel,rhn,power11,rhaiis)")
+	createCmd.Flags().StringVarP(&templateName, "template", "t", "", "Template name to use (required)")
+	createCmd.MarkFlagRequired("template")
+	createCmd.Flags().BoolVar(&skipModelDownload, "skip-model-download", false, "Set to true to skip model download during application creation. This assumes local models are already available at /var/lib/ai-services/models/ and is particularly beneficial for air-gapped networks with limited internet access. If not set correctly (e.g., set to true when models are missing, or left false in an air-gapped environment), the create command may fail.")
+	createCmd.Flags().StringSliceVar(&rawArgParams, "params", []string{}, "Parameters required to configure the application. Takes Comma-separated key=value pairs. Values Supported: UI_PORT=8000")
+}
+
 func getSMTLevel(output string) (int, error) {
 	out := strings.TrimSpace(output)
 
@@ -281,14 +308,6 @@ func getTargetSMTLevel() (*int, error) {
 		return nil, fmt.Errorf("failed to read app metadata: %w", err)
 	}
 	return appMetadata.SMTLevel, nil
-}
-
-func init() {
-	createCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{},
-		"Skip specific validation checks (comma-separated: root,rhel,rhn,power11,rhaiis)")
-	createCmd.Flags().StringVarP(&templateName, "template", "t", "", "Template name to use (required)")
-	createCmd.MarkFlagRequired("template")
-	createCmd.Flags().BoolVar(&skipModelDownload, "skip-model-download", false, "Set to true to skip model download during application creation. This assumes local models are already available at /var/lib/ai-services/models/ and is particularly beneficial for air-gapped networks with limited internet access. If not set correctly (e.g., set to true when models are missing, or left false in an air-gapped environment), the create command may fail.")
 }
 
 // fetchAppTemplateIndex -> Returns the index of app template if exists, otherwise -1
@@ -565,12 +584,50 @@ func checkForPodStartAnnotation(podAnnotations map[string]string) string {
 	return ""
 }
 
+func fetchHostPortMappingFromAnnotation(podAnnotations map[string]string) map[string]string {
+	// key -> port name and value -> container port
+	hostPortMapping := map[string]string{}
+
+	isContainerPortExposeAnnotation := func(annotation string) (string, bool) {
+		matches := vars.ContainerPortExposeAnnotationRegex.FindStringSubmatch(annotation)
+		if matches == nil {
+			return "", false
+		}
+		return matches[2], true
+	}
+
+	for annotationKey, val := range podAnnotations {
+		if portName, ok := isContainerPortExposeAnnotation(annotationKey); ok {
+			hostPortMapping[portName] = val
+		}
+	}
+
+	return hostPortMapping
+}
+
 func constructPodDeployOptions(podAnnotations map[string]string) map[string]string {
 	podStart := checkForPodStartAnnotation(podAnnotations)
 
+	// construct start option
 	podDeployOptions := map[string]string{}
 	if podStart != "" {
 		podDeployOptions["start"] = podStart
+	}
+
+	// construct publish option
+	portMappings := fetchHostPortMappingFromAnnotation(podAnnotations)
+	podDeployOptions["publish"] = ""
+
+	for portName, containerPort := range portMappings {
+		// store comma seperated values of port mappings
+		if hostPort, ok := argParams[portName]; ok {
+			// if the host port for this is supplied by user as part of params, use it
+			podDeployOptions["publish"] += hostPort + ":" + containerPort
+		} else {
+			// else just populate the containerPort, so that dynamically podman will populate
+			podDeployOptions["publish"] += containerPort
+		}
+		podDeployOptions["publish"] += ","
 	}
 
 	return podDeployOptions

@@ -10,6 +10,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	skipLogs bool
+)
+
 var startCmd = &cobra.Command{
 	Use:   "start [name]",
 	Short: "starts the application",
@@ -42,6 +46,7 @@ var startCmd = &cobra.Command{
 
 func init() {
 	startCmd.Flags().StringSlice("pod", []string{}, "Specific pod name(s) to start (optional)")
+	startCmd.Flags().BoolVar(&skipLogs, "skip-logs", false, "Skip displaying logs after starting the pod")
 }
 
 // startApplication starts all pods associated with the given application name
@@ -108,6 +113,10 @@ func startApplication(cmd *cobra.Command, client *podman.PodmanClient, appName s
 		cmd.Printf("\t-> %s\n", pod.Name)
 	}
 
+	printLogs := len(podsToStart) == 1 && !skipLogs
+	if printLogs {
+		cmd.Printf("⚠️  Note: After starting the pod, logs will be displayed. Press Ctrl+C to exit the logs and return to the terminal.\n")
+	}
 	cmd.Printf("Are you sure you want to start above pods? (y/N): ")
 
 	confirmStart, err := utils.ConfirmAction()
@@ -147,6 +156,18 @@ func startApplication(cmd *cobra.Command, client *podman.PodmanClient, appName s
 
 	if len(errors) > 0 {
 		return fmt.Errorf("failed to start pods: \n%s", strings.Join(errors, "\n"))
+	}
+
+	if printLogs {
+		cmd.Printf("\n--- Following logs for pod: %s ---\n", podsToStart[0].Name)
+		if err := client.PodLogs(podsToStart[0].Name); err != nil {
+			// Check if error is due to interrupt signal (Ctrl+C)
+			if strings.Contains(err.Error(), "signal: interrupt") || strings.Contains(err.Error(), "context canceled") {
+				cmd.Printf("\nLog following stopped.\n")
+				return nil
+			}
+			return fmt.Errorf("failed to follow logs for pod %s: %w", podsToStart[0].Name, err)
+		}
 	}
 
 	return nil

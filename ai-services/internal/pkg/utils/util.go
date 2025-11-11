@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"maps"
 	"strings"
 )
@@ -64,4 +65,21 @@ func UniqueSlice[T comparable](slice []T) []T {
 		}
 	}
 	return result
+}
+
+func ParseKeyValues(pairs []string) (map[string]string, error) {
+	out := map[string]string{}
+
+	for _, pair := range pairs {
+		if pair == "" {
+			continue
+		}
+		kv := strings.SplitN(pair, "=", 2)
+		if len(kv) != 2 {
+			return nil, fmt.Errorf("invalid format: %s (expected key=value)", pair)
+		}
+		out[kv[0]] = kv[1]
+	}
+
+	return out, nil
 }
