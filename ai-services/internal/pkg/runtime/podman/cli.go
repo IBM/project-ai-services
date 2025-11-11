@@ -16,6 +16,10 @@ const (
 	startFlagFalse = "--start=false"
 )
 
+var (
+	publishFlag = "--publish=%s"
+)
+
 func RunPodmanKubePlay(body io.Reader, opts map[string]string) (*KubePlayOutput, error) {
 	cmdName := "podman"
 
@@ -92,6 +96,15 @@ func buildCmdArgs(opts map[string]string) []string {
 		default:
 			// by default go with start set to true
 			cmdArgs = append(cmdArgs, startFlagTrue)
+		}
+	}
+
+	if v, ok := opts["publish"]; ok {
+		portMappings := strings.Split(v, ",")
+		for _, portMapping := range portMappings {
+			if portMapping != "" {
+				cmdArgs = append(cmdArgs, fmt.Sprintf(publishFlag, portMapping))
+			}
 		}
 	}
 

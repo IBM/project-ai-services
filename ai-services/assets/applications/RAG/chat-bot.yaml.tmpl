@@ -4,6 +4,8 @@ metadata:
   name: "{{ .AppName }}--chat-bot"
   labels:
     ai-services.io/application: "{{ .AppName }}"
+  annotations:
+    ai-services.io/ui--UI_PORT-expose: "3000" # containerPort
 spec:
   containers:
     - name: ui
@@ -19,8 +21,8 @@ spec:
         - name: BACKEND_PORT
           value: "5000" 
       ports:
-        - containerPort: 3000
-          hostPort: 3000
+        - name: UI_PORT
+          containerPort: 3000
           protocol: TCP
     - name: backend-server
       image: icr.io/ai-services-private/rag:v0.0.3
