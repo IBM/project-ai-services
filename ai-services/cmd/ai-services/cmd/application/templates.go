@@ -3,6 +3,7 @@ package application
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -27,9 +28,26 @@ var templatesCmd = &cobra.Command{
 		// sort appTemplateNames alphabetically
 		sort.Strings(appTemplateNames)
 
-		cmd.Println("Available Application Templates:")
-		for _, name := range appTemplateNames {
-			cmd.Println("- ", name)
+		appTemplateNameswithCustomArgs := helpers.FetchCustomArgsFromMetadata(appTemplateNames)
+
+		cmd.Printf("Available Application Templates (%d total)\n", len(appTemplateNames))
+		cmd.Println(strings.Repeat("=", 42))
+		cmd.Println()
+
+		for _, app := range appTemplateNames {
+			args := appTemplateNameswithCustomArgs[app]
+
+			cmd.Printf("Application: %s\n", app)
+
+			if len(args) == 0 {
+				cmd.Println("Supported Params: (none)")
+			} else {
+				cmd.Printf("Supported Params: %s\n", strings.Join(args, ", "))
+				cmd.Println()
+			}
+
+			cmd.Println(strings.Repeat("-", 42))
+			cmd.Println()
 		}
 		return nil
 	},

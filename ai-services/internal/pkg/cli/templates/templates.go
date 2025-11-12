@@ -11,6 +11,7 @@ type AppMetadata struct {
 	Version               string     `yaml:"version,omitempty"`
 	SMTLevel              *int       `yaml:"smtLevel,omitempty"`
 	PodTemplateExecutions [][]string `yaml:"podTemplateExecutions"`
+	CustomArgs            []string   `yaml:"customArgs,omitempty"`
 }
 
 type PodSpec struct {

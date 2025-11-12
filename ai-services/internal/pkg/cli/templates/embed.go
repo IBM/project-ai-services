@@ -99,8 +99,8 @@ func (e *embedTemplateProvider) LoadPodTemplate(app, file string, params any) (*
 }
 
 // LoadMetadata loads the metadata for a given application template
-func (e *embedTemplateProvider) LoadMetadata(template string) (*AppMetadata, error) {
-	path := fmt.Sprintf("%s/%s/metadata.yaml", e.root, template)
+func (e *embedTemplateProvider) LoadMetadata(appTemplateName string) (*AppMetadata, error) {
+	path := fmt.Sprintf("%s/%s/metadata.yaml", e.root, appTemplateName)
 	data, err := e.fs.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read metadata: %w", err)
