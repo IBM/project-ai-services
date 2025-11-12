@@ -11,7 +11,7 @@ joblib==1.5.2
 hf_xet==1.2.0
 numpy==1.26.4
 openai==2.6.0
-pdfplumber==0.11.7
+pdfplumber==0.11.8
 Pillow==10.3.0
 grpcio==1.67.1
 pymilvus==2.6.2
