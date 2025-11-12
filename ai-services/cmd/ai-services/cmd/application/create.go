@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	applicationTemplatesPath = "applications/"
+	applicationPath = "applications/"
 )
 
 var (
@@ -115,14 +115,14 @@ var createCmd = &cobra.Command{
 			appTemplateName = appTemplateNames[index]
 		}
 
-		applicationPodTemplatesPath := applicationTemplatesPath + appTemplateName
+		applicationPodTemplatesPath := applicationPath + appTemplateName + "/templates"
 
 		tmpls, err := helpers.LoadAllTemplates(applicationPodTemplatesPath)
 		if err != nil {
 			return fmt.Errorf("failed to parse the templates: %w", err)
 		}
 
-		metadataFilePath := applicationPodTemplatesPath + "/metadata.yaml"
+		metadataFilePath := applicationPath + appTemplateName + "/metadata.yaml"
 
 		// load metadata.yml to fetch the dependencies list
 		appMetadata, err := helpers.LoadMetadata(metadataFilePath)
@@ -301,7 +301,7 @@ func getTargetSMTLevel() (*int, error) {
 		appTemplateName = appTemplateNames[index]
 	}
 
-	metadataFilePath := applicationTemplatesPath + appTemplateName + "/metadata.yaml"
+	metadataFilePath := applicationPath + appTemplateName + "/metadata.yaml"
 
 	appMetadata, err := helpers.LoadMetadata(metadataFilePath)
 	if err != nil {

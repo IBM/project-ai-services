@@ -11,7 +11,7 @@ import "github.com/project-ai-services/ai-services/cmd/ai-services/cmd"
 // ai-services application templates (Multiple application templates Eg:- RAG)
 /*
 	- Reads the path from the assets
-	- Reads all the application template names from path: assets/applications/<AppTemplateName>/*.yaml.tmpl
+	- Reads all the application template names from path: assets/applications/<AppTemplateName>/templates/*.yaml.tmpl
 	- Prints all the Application template names in the terminal
 */
 

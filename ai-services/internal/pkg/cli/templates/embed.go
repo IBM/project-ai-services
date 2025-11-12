@@ -30,10 +30,10 @@ func (e *embedTemplateProvider) ListApplications() ([]string, error) {
 			return nil
 		}
 
-		// Templates Pattern :- "assets/applications/<AppName>/*.yaml.tmpl"
+		// Templates Pattern :- "assets/applications/<AppName>/templates/*.yaml.tmpl"
 		parts := strings.Split(path, "/")
 
-		if len(parts) >= 3 {
+		if len(parts) >= 4 {
 			appName := parts[1]
 			if slices.Contains(apps, appName) {
 				return nil
@@ -75,7 +75,7 @@ func (e *embedTemplateProvider) LoadAllTemplates(path string) (map[string]*templ
 
 // LoadPodTemplate loads and renders a pod template with the given parameters
 func (e *embedTemplateProvider) LoadPodTemplate(app, file string, params any) (*PodSpec, error) {
-	path := fmt.Sprintf("%s/%s/%s", e.root, app, file)
+	path := fmt.Sprintf("%s/%s/templates/%s", e.root, app, file)
 	data, err := e.fs.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read metadata: %w", err)
