@@ -54,6 +54,46 @@ func PrintNextSteps(runtime runtime.Runtime, app, appTemplate string) error {
 	return nil
 }
 
+func PrintInfo(runtime runtime.Runtime, app, appTemplate string) error {
+	params := map[string]string{"AppName": app}
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+
+	stepsPath := appTemplate + "/steps"
+	tmpls, err := tp.LoadMdFiles(stepsPath)
+	if err != nil {
+		// Returning if the steps folder doesnt exist do not do anything
+		return nil
+	}
+
+	if nextMd, ok := tmpls["info.md"]; ok {
+		varsData, err := tp.LoadVarsFile(appTemplate, params)
+		if err != nil {
+			return fmt.Errorf("failed to load vars file: %w", err)
+		}
+
+		// populate the host values set in vars file
+		if err := populateHostValues(params, varsData); err != nil {
+			return fmt.Errorf("failed to populate host values: %w", err)
+		}
+
+		// populate the pod values set in vars file
+		if err := populatePodValues(runtime, params, varsData); err != nil {
+			return fmt.Errorf("failed to populate pod values: %w", err)
+		}
+
+		var rendered bytes.Buffer
+		if err := nextMd.Execute(&rendered, params); err != nil {
+			return fmt.Errorf("failed to execute info.md: %w", err)
+		}
+
+		fmt.Println("Info: ")
+		fmt.Println("-------")
+		fmt.Println(rendered.String())
+	}
+
+	return nil
+}
+
 // populatePodValues -> populates the host values within the params
 func populateHostValues(params map[string]string, varsData *templates.Vars) error {
 	for _, host := range varsData.Hosts {
