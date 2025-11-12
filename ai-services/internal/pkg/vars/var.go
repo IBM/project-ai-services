@@ -14,5 +14,7 @@ var (
 type Label string
 
 var (
-	PodPortLabel Label = "ai-services.io/port/%s"
+	PodPortLabel  Label = "ai-services.io/port/%s"
+	TemplateLabel Label = "ai-services.io/template"
+	VersionLabel  Label = "ai-services.io/version"
 )
