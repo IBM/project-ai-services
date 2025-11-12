@@ -48,7 +48,7 @@ nav:
       - completion: commands/completion.md
       - help: commands/help.md
       - version: commands/version.md
-  - Chatbot: chatbot.md
+  - Chatbot: rag-setup.md
   - Tutorials: 
     - Creating an application: tutorials/create-app.md
     - Installing in air-gapped environment: tutorials/airgapped-env.md
