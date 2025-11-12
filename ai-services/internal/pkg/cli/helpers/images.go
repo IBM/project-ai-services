@@ -24,7 +24,9 @@ func ListImages(template string) ([]string, error) {
 	}
 
 	dummyParams := map[string]any{
-		"AppName": "dummy-app",
+		"AppName":         "dummy-app",
+		"AppTemplateName": "",
+		"Version":         "",
 	}
 
 	images := []string{

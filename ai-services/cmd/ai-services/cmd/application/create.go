@@ -186,7 +186,7 @@ var createCmd = &cobra.Command{
 		cmd.Printf("Total Pod Templates to be processed: %d\n", len(tmpls))
 
 		// execute the pod Templates
-		if err := executePodTemplates(runtime, appName, appMetadata.PodTemplateExecutions, tmpls, applicationPodTemplatesPath, pciAddresses); err != nil {
+		if err := executePodTemplates(runtime, appName, appMetadata, tmpls, applicationPodTemplatesPath, pciAddresses); err != nil {
 			return err
 		}
 
@@ -352,18 +352,20 @@ func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *h
 	return nil
 }
 
-func executePodTemplates(runtime runtime.Runtime, appName string, podTemplateExecutions [][]string,
+func executePodTemplates(runtime runtime.Runtime, appName string, appMetadata *helpers.AppMetadata,
 	tmpls map[string]*template.Template, podTemplatesPath string, pciAddresses []string) error {
 
 	globalParams := map[string]any{
-		"AppName": appName,
+		"AppName":         appName,
+		"AppTemplateName": appMetadata.Name,
+		"Version":         appMetadata.Version,
 		// Key -> container name
 		// Value -> range of key-value env pairs
 		"env": map[string]map[string]string{},
 	}
 
 	// looping over each layer of podTemplateExecutions
-	for i, layer := range podTemplateExecutions {
+	for i, layer := range appMetadata.PodTemplateExecutions {
 		fmt.Printf("\n Executing Layer %d: %v\n", i+1, layer)
 		fmt.Println("-------")
 		var wg sync.WaitGroup

@@ -4,6 +4,8 @@ metadata:
   name: "{{ .AppName }}--milvus"
   labels:
     ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
 spec:
   containers:
      # Etcd sidecar

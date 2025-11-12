@@ -4,6 +4,8 @@ metadata:
   name: "{{ .AppName }}--clean-docs"
   labels:
     ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
   annotations:
     ai-services.io/start: "off"
 spec:

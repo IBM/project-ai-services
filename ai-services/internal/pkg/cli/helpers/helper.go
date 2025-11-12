@@ -134,7 +134,8 @@ func FetchContainerStartPeriod(runtime runtime.Runtime, containerNameOrId string
 }
 
 type AppMetadata struct {
-	// TODO: Include other variables too
+	Name                  string     `yaml:"name,omitempty"`
+	Version               string     `yaml:"version,omitempty"`
 	SMTLevel              *int       `yaml:"smtLevel,omitempty"`
 	PodTemplateExecutions [][]string `yaml:"podTemplateExecutions"`
 }

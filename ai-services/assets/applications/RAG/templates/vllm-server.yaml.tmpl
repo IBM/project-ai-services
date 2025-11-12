@@ -4,6 +4,8 @@ metadata:
   name: "{{ .AppName }}--vllm-server"
   labels:
     ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
   annotations:
     ai-services.io/model1: BAAI/bge-reranker-v2-m3
     ai-services.io/model2: ibm-granite/granite-embedding-278m-multilingual

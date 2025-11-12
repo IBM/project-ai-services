@@ -19,7 +19,9 @@ func ListModels(template string) ([]string, error) {
 	}
 
 	dummyParams := map[string]any{
-		"AppName": "dummy-app",
+		"AppName":         "dummy-app",
+		"AppTemplateName": "",
+		"Version":         "",
 	}
 
 	models := func(podSpec templates.PodSpec) []string {
