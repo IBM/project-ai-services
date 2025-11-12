@@ -32,7 +32,7 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Commands: commands.md
-  - Chatbot: chatbot.md
+  - Chatbot: rag-setup.md
   - Tutorials: 
     - Creating an application: tutorials/create-app.md
     - Installing in air-gapped environment: tutorials/airgapped-env.md
