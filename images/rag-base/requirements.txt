@@ -14,7 +14,7 @@ openai==2.6.0
 pdfplumber==0.11.7
 Pillow==10.3.0
 grpcio==1.67.1
-pymilvus==2.6.2
+pymilvus==2.6.3
 pymupdf==1.26.5
 rapidfuzz==3.13.0
 regex==2025.10.23
