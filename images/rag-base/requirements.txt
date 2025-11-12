@@ -4,7 +4,7 @@ pypdfium2 @ file:///opt/wheels/pypdfium-wheels/pypdfium2-5.0.0b1%2B84.g35a88d2.d
 torch @ file:///opt/wheels/torch-wheels/torch-2.3.0%2Bcpu-cp39-cp39-linux_ppc64le.whl
 torchvision @ file:///opt/wheels/torch-vision-wheels/torchvision-0.16.0%2Bfbb4cc5-cp39-cp39-linux_ppc64le.whl
 
-cohere==5.19.0
+cohere==5.20.0
 fastapi[all]==0.121.0
 Flask==3.1.2
 joblib==1.5.2
