@@ -530,7 +530,7 @@ func fetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[
 }
 
 func fetchPodSpec(tp templates.Template, appTemplateName, podTemplateFileName, appName string) (*models.PodSpec, error) {
-	podSpec, err := tp.LoadPodTemplateWithDummyParams(appTemplateName, podTemplateFileName, appName)
+	podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, podTemplateFileName, appName, argParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load pod Template: '%s' for appTemplate: '%s' with error: %w", podTemplateFileName, appTemplateName, err)
 	}

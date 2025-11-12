@@ -32,7 +32,14 @@ var templatesCmd = &cobra.Command{
 
 		logger.Infoln("Available Application Templates:")
 		for _, name := range appTemplateNames {
-			logger.Infoln("- " + name)
+			appTemplatesValues, err := tp.ListApplicationTemplateValues(name)
+			if err != nil {
+				return fmt.Errorf("failed to list application template values: %w", err)
+			}
+			logger.Infof("- %s\n  Parameters supported:\n", name)
+			for _, v := range appTemplatesValues {
+				logger.Infoln("    " + v)
+			}
 		}
 		return nil
 	},

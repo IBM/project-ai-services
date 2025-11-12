@@ -11,7 +11,7 @@ metadata:
 spec:
   containers:
     - name: ingest-docs
-      image: icr.io/ai-services-private/rag:v0.0.4
+      image: "{{ .Values.backend.image }}"
       command:
         - "/var/venv/bin/python"
         - "-m"

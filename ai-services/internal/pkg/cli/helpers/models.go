@@ -32,7 +32,7 @@ func ListModels(template, appName string) ([]string, error) {
 
 	modelList := []string{}
 	for _, tmpl := range tmpls {
-		ps, err := tp.LoadPodTemplateWithDummyParams(template, tmpl.Name(), appName)
+		ps, err := tp.LoadPodTemplateWithValues(template, tmpl.Name(), appName, nil)
 		if err != nil {
 			return nil, fmt.Errorf("error loading pod template: %w", err)
 		}

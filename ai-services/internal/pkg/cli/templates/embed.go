@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"io/fs"
 	"slices"
+	"sort"
 	"strings"
 	"text/template"
 
-	"sigs.k8s.io/yaml"
-
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"go.yaml.in/yaml/v3"
 )
 
 type embedTemplateProvider struct {
@@ -49,6 +50,28 @@ func (e *embedTemplateProvider) ListApplications() ([]string, error) {
 	}
 
 	return apps, nil
+}
+
+// ListApplicationTemplateValues lists all available template value keys for a single application.
+func (e *embedTemplateProvider) ListApplicationTemplateValues(app string) ([]string, error) {
+	valuesPath := fmt.Sprintf("%s/%s/values.yaml", e.root, app)
+	valuesData, err := e.fs.ReadFile(valuesPath)
+	if err != nil {
+		return nil, fmt.Errorf("read values.yaml: %w", err)
+	}
+
+	var root yaml.Node
+	if err := yaml.Unmarshal(valuesData, &root); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal yaml.Node: %w", err)
+	}
+
+	var keys []string
+	if len(root.Content) > 0 {
+		utils.FlattenNode("", root.Content[0], &keys)
+	}
+
+	sort.Strings(keys)
+	return keys, nil
 }
 
 // LoadAllTemplates loads all templates for a given application
@@ -100,40 +123,35 @@ func (e *embedTemplateProvider) LoadPodTemplate(app, file string, params any) (*
 	return &spec, nil
 }
 
-// LoadPodTemplate loads and renders a pod template with the dummy parameters
-func (e *embedTemplateProvider) LoadPodTemplateWithDummyParams(app, file, appName string) (*models.PodSpec, error) {
-	dummyParams := map[string]any{
+func (e *embedTemplateProvider) LoadPodTemplateWithValues(app, file, appName string, overrides map[string]string) (*models.PodSpec, error) {
+	valuesPath := fmt.Sprintf("%s/%s/values.yaml", e.root, app)
+	valuesData, err := e.fs.ReadFile(valuesPath)
+	if err != nil {
+		return nil, fmt.Errorf("read values.yaml: %w", err)
+	}
+
+	var values map[string]any
+	if err := yaml.Unmarshal(valuesData, &values); err != nil {
+		return nil, fmt.Errorf("parse values.yaml: %w", err)
+	}
+
+	for key, val := range overrides {
+		utils.SetNestedValue(values, key, val)
+	}
+
+	// Build full params directly
+	params := map[string]any{
+		"Values":          values,
 		"AppName":         appName,
 		"AppTemplateName": "",
 		"Version":         "",
 	}
-
-	path := fmt.Sprintf("%s/%s/templates/%s", e.root, app, file)
-	data, err := e.fs.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read metadata: %w", err)
-	}
-
-	var rendered bytes.Buffer
-	tmpl, err := template.New("podTemplate").Parse(string(data))
-	if err != nil {
-		return nil, fmt.Errorf("parse template %s: %w", file, err)
-	}
-	if err := tmpl.Execute(&rendered, dummyParams); err != nil {
-		return nil, fmt.Errorf("failed to execute template %s: %v", path, err)
-	}
-
-	var spec models.PodSpec
-	if err := yaml.Unmarshal(rendered.Bytes(), &spec); err != nil {
-		return nil, fmt.Errorf("unable to read YAML as Kube Pod: %w", err)
-	}
-
-	return &spec, nil
+	return e.LoadPodTemplate(app, file, params)
 }
 
 // LoadMetadata loads the metadata for a given application template
-func (e *embedTemplateProvider) LoadMetadata(template string) (*AppMetadata, error) {
-	path := fmt.Sprintf("%s/%s/metadata.yaml", e.root, template)
+func (e *embedTemplateProvider) LoadMetadata(appTemplateName string) (*AppMetadata, error) {
+	path := fmt.Sprintf("%s/%s/metadata.yaml", e.root, appTemplateName)
 	data, err := e.fs.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read metadata: %w", err)
