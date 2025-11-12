@@ -5,7 +5,7 @@ torch @ file:///opt/wheels/torch-wheels/torch-2.3.0%2Bcpu-cp39-cp39-linux_ppc64l
 torchvision @ file:///opt/wheels/torch-vision-wheels/torchvision-0.16.0%2Bfbb4cc5-cp39-cp39-linux_ppc64le.whl
 
 cohere==5.19.0
-fastapi[all]==0.121.0
+fastapi[all]==0.121.1
 Flask==3.1.2
 joblib==1.5.2
 hf_xet==1.2.0
