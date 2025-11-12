@@ -13,7 +13,7 @@ numpy==1.26.4
 openai==2.6.0
 pdfplumber==0.11.7
 Pillow==10.3.0
-grpcio==1.67.1
+grpcio==1.76.0
 pymilvus==2.6.2
 pymupdf==1.26.5
 rapidfuzz==3.13.0
