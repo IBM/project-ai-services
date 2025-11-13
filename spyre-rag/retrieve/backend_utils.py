@@ -75,9 +75,11 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
     else:
         ranked_documents = retrieved_documents[:top_r]
         ranked_scores = retrieved_scores[:top_r]
-    replacement_dict = {"케": "fi", "昀": "f", "椀": "i", "氀": "l"}
-    for doc in ranked_documents:
-        if contains_chinese_regex(doc["page_content"]):
-            for key, val in replacement_dict.items():
-                doc["page_content"] = re.sub(key, val, doc["page_content"])
-    return ranked_documents
+
+    filter_threshold = 0.4
+    filtered_docs = []
+    for doc, score in zip(ranked_documents, ranked_scores):
+        if score >= filter_threshold:
+            filtered_docs.append(doc)
+
+    return filtered_docs
