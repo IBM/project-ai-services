@@ -17,6 +17,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	log "github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -122,12 +123,12 @@ var createCmd = &cobra.Command{
 			return fmt.Errorf("failed to parse the templates: %w", err)
 		}
 
-		metadataFilePath := applicationPath + appTemplateName + "/metadata.yaml"
+		tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
 
-		// load metadata.yml to fetch the dependencies list
-		appMetadata, err := helpers.LoadMetadata(metadataFilePath)
+		// load metadata.yml to read the app metadata
+		appMetadata, err := tp.LoadMetadata(appTemplateName)
 		if err != nil {
-			return fmt.Errorf("failed to read app metadata: %w", err)
+			return fmt.Errorf("failed to read the app metadata: %w", err)
 		}
 
 		if err := verifyPodTemplateExists(tmpls, appMetadata); err != nil {
@@ -312,12 +313,14 @@ func getTargetSMTLevel() (*int, error) {
 		appTemplateName = appTemplateNames[index]
 	}
 
-	metadataFilePath := applicationPath + appTemplateName + "/metadata.yaml"
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
 
-	appMetadata, err := helpers.LoadMetadata(metadataFilePath)
+	// load metadata.yml to read the app metadata
+	appMetadata, err := tp.LoadMetadata(appTemplateName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read app metadata: %w", err)
+		return nil, fmt.Errorf("failed to read the app metadata: %w", err)
 	}
+
 	return appMetadata.SMTLevel, nil
 }
 
@@ -335,7 +338,7 @@ func fetchAppTemplateIndex(appTemplateNames []string, templateName string) int {
 	return appTemplateIndex
 }
 
-func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *helpers.AppMetadata) error {
+func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *templates.AppMetadata) error {
 	flattenPodTemplateExecutions := utils.FlattenArray(appMetadata.PodTemplateExecutions)
 
 	if len(flattenPodTemplateExecutions) != len(tmpls) {
@@ -352,7 +355,7 @@ func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *h
 	return nil
 }
 
-func executePodTemplates(runtime runtime.Runtime, appName string, appMetadata *helpers.AppMetadata,
+func executePodTemplates(runtime runtime.Runtime, appName string, appMetadata *templates.AppMetadata,
 	tmpls map[string]*template.Template, podTemplatesPath string, pciAddresses []string) error {
 
 	globalParams := map[string]any{

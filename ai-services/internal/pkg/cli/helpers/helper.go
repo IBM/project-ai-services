@@ -133,26 +133,6 @@ func FetchContainerStartPeriod(runtime runtime.Runtime, containerNameOrId string
 	return healthCheck.StartPeriod, nil
 }
 
-type AppMetadata struct {
-	Name                  string     `yaml:"name,omitempty"`
-	Version               string     `yaml:"version,omitempty"`
-	SMTLevel              *int       `yaml:"smtLevel,omitempty"`
-	PodTemplateExecutions [][]string `yaml:"podTemplateExecutions"`
-}
-
-func LoadMetadata(path string) (*AppMetadata, error) {
-	data, err := assets.ApplicationFS.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read metadata: %w", err)
-	}
-
-	var appMetadata AppMetadata
-	if err := yaml.Unmarshal(data, &appMetadata); err != nil {
-		return nil, err
-	}
-	return &appMetadata, nil
-}
-
 func ListSpyreCards() ([]string, error) {
 	spyre_device_ids_list := []string{}
 	cmd := exec.Command("lspci", "-d", "1014:06a7")
