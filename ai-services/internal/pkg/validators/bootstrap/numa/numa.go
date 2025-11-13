@@ -42,11 +42,9 @@ func (r *NumaRule) Verify() error {
 		return fmt.Errorf("numa node on LPAR is %d, please set NUMA node to 1", numaCount)
 	}
 
-	logger.Infoln("NUMA node alignment on LPAR: 1")
 	return nil
 }
 
-func (r *NumaRule) Hint() string {
-	//TODO: modify the hint
-	return "this tools requires numa node set on 1 on LPAR"
+func (r *NumaRule) Message() string {
+	return "NUMA node alignment on LPAR: 1"
 }

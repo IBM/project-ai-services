@@ -80,14 +80,14 @@ var createCmd = &cobra.Command{
 		logger.Infof("Validating the LPAR environment before creating application '%s'...\n", appName)
 		err := bootstrap.RunValidateCmd(skip)
 		if err != nil {
-			return fmt.Errorf("Bootstrap validation failed: %w", err)
+			return fmt.Errorf("bootstrap validation failed: %w", err)
 		}
 
 		// Configure the LPAR before creating the application
 		logger.Infof("Configuring the LPAR")
 		err = bootstrap.RunConfigureCmd()
 		if err != nil {
-			return fmt.Errorf("Bootstrap configuration failed: %w", err)
+			return fmt.Errorf("bootstrap configuration failed: %w", err)
 		}
 
 		// Proceed to create application
