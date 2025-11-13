@@ -139,7 +139,7 @@ def query_vllm(question, documents, llm_endpoint, ckpt, stop_words, max_new_toke
         return {"error": str(e)}, 0.
 
 
-def query_vllm_stream(question, documents, llm_endpoint, ckpt, stop_words, max_new_tokens, stream=False,
+def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, stream=False,
                 max_input_length=6000, dynamic_chunk_truncation=True):
     template_token_count = 250
     context = "\n\n".join([doc.get("page_content") for doc in documents])
@@ -159,10 +159,10 @@ def query_vllm_stream(question, documents, llm_endpoint, ckpt, stop_words, max_n
     }
     payload = {
         "messages": [{"role": "user", "content": prompt}],
-        "model": ckpt,
+        "model": llm_model,
         "max_tokens": max_new_tokens,
         "repetition_penalty": 1.1,
-        "temperature": 0.0,
+        "temperature": temperature,
         "stop": stop_words,
         "stream": stream
     }
@@ -170,17 +170,11 @@ def query_vllm_stream(question, documents, llm_endpoint, ckpt, stop_words, max_n
     try:
         # Use requests for synchronous HTTP requests
         logger.debug("STREAMING RESPONSE")
-        with requests.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=True) as r:
+        with requests.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=stream) as r:
             for line in r.iter_lines(decode_unicode=True):
                 if line:
                     logger.debug("Earlier response: ", line)
-                    line = line.replace("data: ", "")
-                    try:
-                        data = json.loads(line)
-                        yield data.get("choices", [{}])[0]['delta']['content']
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Error while decoding JSON: {e}")
-                        pass  # ignore malformed lines
+                    yield line
     except requests.exceptions.RequestException as e:
         logger.error(f"Error calling vLLM stream API: {e}, {e.response.text}")
         return {"error": str(e) + "\n" + e.response.text}, 0.
