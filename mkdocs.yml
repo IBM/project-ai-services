@@ -31,7 +31,23 @@ plugins:
 nav:
   - Home: index.md
   - Installation: installation.md
-  - Commands: commands.md
+  - CLI Reference:
+    - Overview: commands.md
+    - Commands:
+      - application: commands/application.md
+      - application subcommands:
+        - create: commands/application/create.md
+        - delete: commands/application/delete.md
+        - image: commands/application/image.md
+        - info: commands/application/info.md
+        - model: commands/application/model.md
+        - ps: commands/application/ps.md
+        - start: commands/application/start.md
+        - stop: commands/application/stop.md
+        - templates: commands/application/templates.md
+      - completion: commands/completion.md
+      - help: commands/help.md
+      - version: commands/version.md
   - Chatbot: chatbot.md
   - Tutorials: 
     - Creating an application: tutorials/create-app.md
