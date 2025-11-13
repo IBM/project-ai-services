@@ -35,8 +35,13 @@ Replace these values with the actual IPs from your environment when performing t
 
     - Private n/w: `192.168.0.39`
 
-![air-gapped environment](../assets/lpar.jpg)
-Fig 1.0 - Air-gapped environment
+![air-gapped environment](../assets/air-gap-env-lpar.drawio.png)
+
+##### Fig 1.0 - Air-gapped environment
+
+> 1. Connected to internet
+> 2. Secure link
+> 3. Connected to secure internal network
 
 ## Prerequisites
 
