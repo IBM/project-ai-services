@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -185,6 +186,51 @@ var createCmd = &cobra.Command{
 		// Loop through all pod templates, render and run kube play
 		cmd.Printf("Total Pod Templates to be processed: %d\n", len(tmpls))
 
+		/*
+			Pod Execution Logic:
+			1. Check if pods already exists with the given application name
+			2. If doesn't exists, proceed to create all pods
+			3. If exists;
+				3.1 Check status of all pods
+				3.2 Skip healthy pods, and create missing pods
+		*/
+
+		existingPods, err := helpers.CheckExistingPodsForApplication(runtime, appName)
+		if err != nil {
+			return fmt.Errorf("failed while checking existing pods for application: %w", err)
+		}
+		var filteredPodTemplateExecutions [][]string
+		// Remove the pods to be skipped from the podTemplateExecutions
+		if len(existingPods) > 0 {
+			for _, layer := range appMetadata.PodTemplateExecutions {
+				var filteredLayer []string
+				for _, podTemplateName := range layer {
+					// derive expected pod name created by podman for this template:
+					// appName--<templateBase> where templateBase is filename without extensions like .yaml.tmpl
+					base := podTemplateName
+					if idx := strings.LastIndex(base, "/"); idx != -1 {
+						base = base[idx+1:]
+					}
+					base = strings.TrimSuffix(base, ".yaml.tmpl")
+
+					expectedPodName := fmt.Sprintf("%s--%s", appName, base)
+					skipPod := slices.Contains(existingPods, expectedPodName)
+					if !skipPod {
+						filteredLayer = append(filteredLayer, podTemplateName)
+					}
+				}
+				if len(filteredLayer) > 0 {
+					filteredPodTemplateExecutions = append(filteredPodTemplateExecutions, filteredLayer)
+				}
+			}
+			appMetadata.PodTemplateExecutions = filteredPodTemplateExecutions
+		}
+
+		if len(appMetadata.PodTemplateExecutions) == 0 {
+			logger.Info("All pods for the application exists. No new pods to create.")
+			return nil
+		}
+
 		// execute the pod Templates
 		if err := executePodTemplates(runtime, appName, appMetadata, tmpls, applicationPodTemplatesPath, pciAddresses); err != nil {
 			return err
@@ -337,10 +383,6 @@ func fetchAppTemplateIndex(appTemplateNames []string, templateName string) int {
 
 func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *helpers.AppMetadata) error {
 	flattenPodTemplateExecutions := utils.FlattenArray(appMetadata.PodTemplateExecutions)
-
-	if len(flattenPodTemplateExecutions) != len(tmpls) {
-		return errors.New("number of values specified in podTemplateExecutions under metadata.yml is mismatched. Please ensure all the pod template file names are specified")
-	}
 
 	// Make sure the podTemplateExecution mentioned in metadata.yaml is valid (corresponding pod template is present)
 	for _, podTemplate := range flattenPodTemplateExecutions {

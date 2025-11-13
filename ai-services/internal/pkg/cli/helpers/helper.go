@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/containers/podman/v5/libpod/define"
+	"github.com/containers/podman/v5/pkg/domain/entities/types"
 	v1 "github.com/containers/podman/v5/pkg/k8s.io/api/core/v1"
+	"go.uber.org/zap"
 	"sigs.k8s.io/yaml"
 
 	"github.com/project-ai-services/ai-services/assets"
@@ -257,4 +259,33 @@ func ParseSkipChecks(skipChecks []string) map[string]bool {
 		}
 	}
 	return skipMap
+}
+
+// CheckExistingPodsForApplication checks if there are pods already existing for the given application name
+func CheckExistingPodsForApplication(runtime runtime.Runtime, appName string) ([]string, error) {
+	// var podsExists bool
+	var podsToSkip []string
+	resp, err := runtime.ListPods(map[string][]string{
+		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods: %w", err)
+	}
+
+	var pods []*types.ListPodsReport
+	if val, ok := resp.([]*types.ListPodsReport); ok {
+		pods = val
+	}
+
+	if len(pods) == 0 {
+		logger.Logger.Info("No existing pods found for application", zap.String("application", appName))
+		return nil, nil
+	}
+
+	logger.Logger.Info("Checking status of existing pods...")
+	for _, pod := range pods {
+		logger.Logger.Info("Existing pod found", zap.String("podName", pod.Name), zap.String("status", pod.Status))
+		podsToSkip = append(podsToSkip, pod.Name)
+	}
+	return podsToSkip, nil
 }
