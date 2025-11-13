@@ -6,3 +6,5 @@ podTemplateExecutions:
   - [milvus.yaml.tmpl, vllm-server.yaml.tmpl]
   - [clean-docs.yaml.tmpl]
   - [ingest-docs.yaml.tmpl, chat-bot.yaml.tmpl]
+customArgs:
+  - UI_PORT

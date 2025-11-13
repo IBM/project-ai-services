@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"text/template"
 	"time"
@@ -17,9 +18,39 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/project-ai-services/ai-services/assets"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
+
+func FetchCustomArgsFromMetadata(appTemplateNames []string) map[string][]string {
+	out := make(map[string][]string)
+
+	for _, appTemplateName := range appTemplateNames {
+		tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+		meta, err := tp.LoadMetadata(appTemplateName)
+
+		if err != nil {
+			// Fails to load metadata, but is a valid application template
+			logger.Logger.Error(fmt.Sprintf("failed to load or parse metadata.yaml for %s: %v", appTemplateName, err))
+			out[appTemplateName] = []string{}
+			continue
+		}
+
+		// When customArgs is not defined in metadata.yaml
+		if meta.CustomArgs == nil {
+			out[appTemplateName] = []string{}
+			continue
+		}
+
+		out[appTemplateName] = meta.CustomArgs
+
+		// Sort custom args alphabetically
+		sort.Strings(out[appTemplateName])
+	}
+
+	return out
+}
 
 func FetchApplicationTemplatesNames() ([]string, error) {
 	apps := []string{}
