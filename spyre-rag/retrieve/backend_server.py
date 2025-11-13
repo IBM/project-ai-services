@@ -17,6 +17,8 @@ emb_model_dict = {}
 llm_model_dict = {}
 reranker_model_dict = {}
 
+logger = get_logger("backend_utils")
+
 def initialize_models():
     global emb_model_dict, llm_model_dict, reranker_model_dict
     emb_model_dict, llm_model_dict, reranker_model_dict = get_model_endpoints()
@@ -102,6 +104,10 @@ def stream():
         )
     except Exception as e:
         return jsonify({"error": repr(e)})
+
+    if not docs:
+        logger.info("No relevant documents found for this request")
+        # TODO: we probably need to stop execution here, what to return in Response instead?
 
     stop_words = ""
     if stop_words:
