@@ -23,19 +23,13 @@ func ListImages(template string) ([]string, error) {
 		return nil, fmt.Errorf("error loading templates for %s: %w", template, err)
 	}
 
-	dummyParams := map[string]any{
-		"AppName":         "dummy-app",
-		"AppTemplateName": "",
-		"Version":         "",
-	}
-
 	images := []string{
 		// include tool image as well which is used for all the housekeeping tasks
 		vars.ToolImage,
 	}
 
 	for _, tmpl := range tmpls {
-		ps, err := tp.LoadPodTemplate(template, tmpl.Name(), dummyParams)
+		ps, err := tp.LoadPodTemplateWithDummyParams(template, tmpl.Name())
 		if err != nil {
 			return nil, fmt.Errorf("error loading pod template: %w", err)
 		}
