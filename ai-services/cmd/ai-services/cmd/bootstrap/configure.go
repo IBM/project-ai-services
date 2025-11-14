@@ -93,7 +93,7 @@ func runServiceReport() error {
 	if err != nil {
 		return fmt.Errorf("❌ failed to load vfio kernel modules for spyre %w", err)
 	}
-	logger.Debug("VFIO kernel modules loaded on the host")
+	logger.Infoln("VFIO kernel modules loaded on the host", 2)
 
 	service_report_image := "icr.io/ai-services-private/tools:latest"
 	svc_tool_cmd := exec.Command(
