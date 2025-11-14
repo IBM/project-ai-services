@@ -79,21 +79,37 @@ func runServiceReport() error {
 	if err != nil {
 		return err
 	}
+
+	// Create host directories for vfio
+	cmd := `mkdir -p /etc/modules-load.d; mkdir -p /etc/udev/rules.d/`
+	_, err = exec.Command("bash", "-c", cmd).Output()
+	if err != nil {
+		return fmt.Errorf("❌ failed to create host volume mounts for servicereport tool %w", err)
+	}
+
+	// load vfio kernel modules
+	cmd = `modprobe vfio_pci`
+	_, err = exec.Command("bash", "-c", cmd).Output()
+	if err != nil {
+		return fmt.Errorf("❌ failed to load vfio kernel modules for spyre %w", err)
+	}
+	logger.Debug("VFIO kernel modules loaded on the host")
+
 	service_report_image := "icr.io/ai-services-private/tools:latest"
-	cmd := exec.Command(
+	svc_tool_cmd := exec.Command(
 		"podman",
 		"run",
+		"--privileged",
 		"--rm",
 		"--name", "servicereport",
 		"-v", "/etc/modprobe.d:/etc/modprobe.d",
 		"-v", "/etc/modules-load.d/:/etc/modules-load.d/",
 		"-v", "/etc/udev/rules.d/:/etc/udev/rules.d/",
-		"-v", "/dev/vfio/:/dev/vfio",
 		"-v", "/etc/security/limits.d/:/etc/security/limits.d/",
 		service_report_image,
 		"bash", "-c", "servicereport -r -p spyre",
 	)
-	out, err := cmd.CombinedOutput()
+	out, err := svc_tool_cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to run servicereport tool to validate Spyre cards configuration: %v, output: %s", err, string(out))
 	}
