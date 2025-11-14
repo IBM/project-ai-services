@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/bootstrap/root"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/bootstrap/spyre"
@@ -27,7 +28,7 @@ func configureCmd() *cobra.Command {
 
 			err := RunConfigureCmd()
 			if err != nil {
-				return fmt.Errorf("Bootstrap configuration failed: %w", err)
+				return fmt.Errorf("bootstrap configuration failed: %w", err)
 			}
 
 			logger.Infof("Bootstrap configuration completed successfully.")
@@ -42,32 +43,48 @@ func RunConfigureCmd() error {
 	if err := rootCheck.Verify(); err != nil {
 		return err
 	}
+	ctx := context.Background()
 
+	s := spinner.New("Checking podman installation")
+	s.Start(ctx)
 	// 1. Install and configure Podman if not done
 	// 1.1 Install Podman
 	if _, err := validators.Podman(); err != nil {
+		s.UpdateMessage("Installing podman")
 		// setup podman socket and enable service
-		logger.Infof("Podman not installed. Installing Podman...")
 		if err := installPodman(); err != nil {
+			s.Fail("failed to install podman")
 			return err
 		}
+		s.Stop("podman installed successfully")
+	} else {
+		s.Stop("podman already installed")
 	}
 
+	s = spinner.New("Verifying podman configuration")
+	s.Start(ctx)
 	// 1.2 Configure Podman
 	if err := validators.PodmanHealthCheck(); err != nil {
-		logger.Infof("Podman not configured. Configuring Podman...")
+		s.UpdateMessage("Configuring podman")
 		if err := setupPodman(); err != nil {
+			s.Fail("failed to configure podman")
 			return err
 		}
+		s.Stop("podman configured successfully")
 	} else {
-		logger.Infof("Podman already configured")
+		s.Stop("Podman already configured")
 	}
+
+	s = spinner.New("Checking spyre card configuration")
+	s.Start(ctx)
 	// 2. Spyre cards – run servicereport tool to validate and repair spyre configurations
 	if err := runServiceReport(); err != nil {
+		s.Fail("failed to configure spyre card")
 		return err
-	} else {
-		logger.Infof("Spyre cards configuration validated successfully.")
 	}
+	s.Stop("Spyre cards configuration validated successfully.")
+
+	logger.Infoln("LPAR configured successfully")
 
 	return nil
 }
@@ -107,7 +124,6 @@ func installPodman() error {
 	if err != nil {
 		return fmt.Errorf("failed to install podman: %v, output: %s", err, string(out))
 	}
-	logger.Infof("Podman installed successfully.")
 	return nil
 }
 

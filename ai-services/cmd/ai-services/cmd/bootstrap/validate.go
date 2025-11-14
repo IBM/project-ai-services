@@ -112,7 +112,6 @@ func RunValidateCmd(skip map[string]bool) error {
 		numa.NewNumaRule(),
 	}
 
-	var s *spinner.Spinner
 	var validationErrors []error
 	ctx := context.Background()
 
@@ -143,7 +142,7 @@ func RunValidateCmd(skip map[string]bool) error {
 		return fmt.Errorf("%d validation check(s) failed", len(validationErrors))
 	}
 
-	s.Stop("All validations passed")
+	logger.Infoln("All validations passed")
 
 	return nil
 }
