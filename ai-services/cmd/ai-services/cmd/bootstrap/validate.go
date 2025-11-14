@@ -1,11 +1,13 @@
 package bootstrap
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/bootstrap/numa"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/bootstrap/platform"
@@ -25,6 +27,9 @@ const (
 	CheckRHAIIS = "rhaiis"
 	CheckNUMA   = "numa"
 )
+
+// TODO: Populate this once we have the link
+const troubleshootingGuide = ""
 
 // validateCmd represents the validate subcommand of bootstrap
 func validateCmd() *cobra.Command {
@@ -78,15 +83,15 @@ Available checks to skip:
 
 			skip := helpers.ParseSkipChecks(skipChecks)
 			if len(skip) > 0 {
-				logger.Warningln("Skipping validation checks" + strings.Join(skipChecks, ", "))
+				logger.Warningln("Skipping validation checks: " + strings.Join(skipChecks, ", "))
 			}
 
 			err := RunValidateCmd(skip)
 			if err != nil {
+				logger.Infof("Please refer to troubleshooting guide for more information: %s", troubleshootingGuide)
 				return fmt.Errorf("bootstrap validation failed: %w", err)
 			}
 
-			logger.Infof("All validations passed")
 			return nil
 		},
 	}
@@ -108,29 +113,36 @@ func RunValidateCmd(skip map[string]bool) error {
 	}
 
 	var validationErrors []error
+	ctx := context.Background()
 
 	for _, rule := range validationRules {
 		ruleName := rule.String()
 		if skip[ruleName] {
 			continue
 		}
-		if err := rule.Verify(); err != nil {
+
+		s := spinner.New("Validating " + ruleName + " ...")
+		s.Start(ctx)
+		err := rule.Verify()
+
+		if err != nil {
+			s.Fail(err.Error())
+
 			// exit right away if user is not root as other check require root privileges
 			if ruleName == CheckRoot {
-				logger.Errorln(err.Error())
-				logger.Infof("Hint: %s", rule.Hint())
 				return fmt.Errorf("root privileges are required for validation")
 			}
 			validationErrors = append(validationErrors, fmt.Errorf("%s: %w", ruleName, err))
-			logger.Errorln(err.Error())
-			logger.Infof("Hint: %s", rule.Hint())
+		} else {
+			s.Stop(rule.Message())
 		}
 	}
 
 	if len(validationErrors) > 0 {
-		logger.Errorf("Validation failed with %d error(s)", len(validationErrors))
 		return fmt.Errorf("%d validation check(s) failed", len(validationErrors))
 	}
+
+	logger.Infoln("All validations passed")
 
 	return nil
 }

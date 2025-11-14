@@ -26,10 +26,9 @@ func (r *RootRule) Verify() error {
 		return fmt.Errorf("current user is not root (EUID: %d)", euid)
 	}
 
-	logger.Infoln("Current user is root")
 	return nil
 }
 
-func (r *RootRule) Hint() string {
-	return "Run this command with root privileges using 'sudo' or as the root user."
+func (r *RootRule) Message() string {
+	return "Current user is root"
 }

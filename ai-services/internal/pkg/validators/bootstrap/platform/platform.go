@@ -59,11 +59,10 @@ func (r *PlatformRule) Verify() error {
 		return fmt.Errorf("unsupported RHEL version: %s. Minimum required version is 9.6", version)
 	}
 
-	logger.Infof("Operating system is RHEL with version %s", version)
 	return nil
 
 }
 
-func (r *PlatformRule) Hint() string {
-	return "This tool requires RHEL version 9.6, please install or upgrade to a supported platform"
+func (r *PlatformRule) Message() string {
+	return "Operating system is RHEL with version 9.6"
 }

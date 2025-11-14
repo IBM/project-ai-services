@@ -5,7 +5,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"k8s.io/klog/v2"
 )
 
@@ -30,11 +29,9 @@ func (r *SpyreRule) Verify() error {
 		return fmt.Errorf("IBM Spyre Accelerator is not attached to the LPAR")
 	}
 
-	logger.Infoln("IBM Spyre Accelerator is attached to the LPAR")
 	return nil
 }
 
-func (r *SpyreRule) Hint() string {
-	//TODO: modify the hint
-	return "IBM Spyre Accelerator hardware is required but not detected"
+func (r *SpyreRule) Message() string {
+	return "IBM Spyre Accelerator is attached to the LPAR"
 }

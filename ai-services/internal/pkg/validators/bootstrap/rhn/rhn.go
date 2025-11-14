@@ -34,11 +34,9 @@ func (r *RHNRule) Verify() error {
 		return fmt.Errorf("failed to check registration status: %w", err)
 	}
 
-	logger.Infoln("System is registered with RHN")
 	return nil
 }
 
-func (r *RHNRule) Hint() string {
-	//TODO: modify the hint
-	return "Register your system with Red Hat Network using: subscription-manager register"
+func (r *RHNRule) Message() string {
+	return "System is registered with RHN"
 }
