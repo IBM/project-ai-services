@@ -35,6 +35,10 @@ function App() {
   function onBeforeRender(instance) {
 
     instance.updateMainHeaderTitle("DocuAssistant");
+    instance.updateLanguagePack({
+      ai_slug_title: undefined,
+      ai_slug_description: undefined,
+    })
     instance.on({ type: BusEventType.FEEDBACK, handler: feedbackHandler });
     setChatInstance(instance);
 
@@ -57,7 +61,7 @@ function App() {
           },
         },
       });
-    }, 300);
+    }, 500);
   }
 
   function feedbackHandler(event) {
