@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -15,7 +15,9 @@ var templatesCmd = &cobra.Command{
 	Short: "Lists the offered application templates",
 	Long:  `Retrieves information about the offered application templates`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		appTemplateNames, err := helpers.FetchApplicationTemplatesNames()
+		tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+
+		appTemplateNames, err := tp.ListApplications()
 		if err != nil {
 			return fmt.Errorf("failed to list application templates: %w", err)
 		}
