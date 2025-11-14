@@ -28,13 +28,12 @@ func (r *PowerRule) Verify() error {
 
 	data, err := os.ReadFile("/proc/cpuinfo")
 	if err == nil && strings.Contains(strings.ToLower(string(data)), "power11") {
-		logger.Infoln("System is running on IBM Power11 architecture")
 		return nil
 	}
 
 	return fmt.Errorf("unsupported IBM Power version: Power11 is required")
 }
 
-func (r *PowerRule) Hint() string {
-	return "This tools requires IBM Power11 (ppc64le) architecture."
+func (r *PowerRule) Message() string {
+	return "System is running on IBM Power11 (ppc64le)"
 }

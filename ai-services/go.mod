@@ -5,6 +5,7 @@ go 1.24.1
 require (
 	github.com/containers/podman/v5 v5.6.2
 	github.com/spf13/cobra v1.9.1
+	github.com/yarlson/pin v0.9.1
 	k8s.io/klog/v2 v2.130.1
 	sigs.k8s.io/yaml v1.6.0
 )
