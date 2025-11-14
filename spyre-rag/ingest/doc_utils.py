@@ -19,7 +19,7 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 from sentence_splitter import SentenceSplitter
 
 from common.llm_utils import classify_text_with_llm, summarize_table, tokenize_with_llm
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, generate_file_checksum, verify_checksum
 
 logging.getLogger('docling').setLevel(logging.CRITICAL)
 
@@ -403,13 +403,26 @@ def extract_document_data(input_paths, out_path, llm_model, llm_endpoint, force=
     pipeline_options.table_structure_options.do_cell_matching = True
     pipeline_options.do_ocr = False
 
-    # Skip files that already exist
-    filtered_input_paths = [
-        path for path in input_paths if force or not (
-            (Path(out_path) / f"{Path(path).stem}_clean_text.json").exists() and
-            (Path(out_path) / f"{Path(path).stem}_tables.json").exists()
-        )
-    ]
+
+    # Skip files that already exist by matching the cached checksum of the pdf
+    # if there is no difference in checksum and processed text & table json also exist, would skip for convert and process list
+    # else add the file to convert and process list(filtered_input_paths) 
+    filtered_input_paths = []
+    for path in input_paths:
+        f = (Path(out_path) / f"{Path(path).stem}.checksum")
+        if f.exists():
+            checksum = f.read_text()
+            if checksum != generate_file_checksum(path) \
+                or not (Path(out_path) / f"{Path(path).stem}_clean_text.json").exists() \
+                or not (Path(out_path) / f"{Path(path).stem}_tables.json").exists():
+                filtered_input_paths.append(path)
+        else:
+            filtered_input_paths.append(path)
+
+    for path in filtered_input_paths:
+        checksum = generate_file_checksum(path)
+        (Path(out_path) / f"{Path(path).stem}.checksum").write_text(checksum, encoding='utf-8')
+
     doc_converter = DocumentConverter(
         allowed_formats=[
             InputFormat.PDF
@@ -421,13 +434,10 @@ def extract_document_data(input_paths, out_path, llm_model, llm_endpoint, force=
         with ProcessPoolExecutor(max_workers=max(1, min(4, len(filtered_input_paths)))) as executor:
             futures = [
                 executor.submit(convert_and_process, path, doc_converter, out_path, llm_model, llm_endpoint)
-                for path in input_paths
+                for path in filtered_input_paths
             ]
             for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    logger.error(f"Unhandled exception: {e}")
+                future.result()
     else:
         logger.debug("No files to convert and process")
 
@@ -665,7 +675,7 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn, include_meta_info_in_mai
                 meta_info += f"Subsubsection: {block.get('subsubsection_title')} "
             txt_docs.append({
                 # "chunk_id": txt_id,
-                "page_content": f'{meta_info}\n{block.get("text")}' if include_meta_info_in_main_text else block.get("text"),
+                "page_content": f'{meta_info}\n{block.get("content")}' if include_meta_info_in_main_text else block.get("content"),
                 "filename": orig_fn,
                 "type": "text",
                 "source": meta_info,

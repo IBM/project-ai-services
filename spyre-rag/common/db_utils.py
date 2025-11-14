@@ -157,7 +157,7 @@ class MilvusVectorStore:
 
             chunk_ids = [generate_chunk_id(fn, pc, i+j) for j, (fn, pc) in enumerate(zip(filenames, page_contents))]
 
-            self.collection.insert([
+            self.collection.upsert([
                 chunk_ids,
                 embeddings,
                 page_contents,
