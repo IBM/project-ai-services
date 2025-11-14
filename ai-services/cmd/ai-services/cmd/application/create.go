@@ -163,14 +163,14 @@ var createCmd = &cobra.Command{
 
 		// Download models if flag is set to true(default: true)
 		if !skipModelDownload {
-			s = spinner.New("Downloading models as paret of application creation...")
+			s = spinner.New("Downloading models as part of application creation...")
 			s.Start(ctx)
 			models, err := helpers.ListModels(appTemplateName)
 			if err != nil {
 				s.Fail("failed to list models")
 				return err
 			}
-			logger.Infoln("Downloaded Models in application template " + templateName + ":")
+			logger.Infoln("Downloading models required for application template " + templateName + ":")
 			for _, model := range models {
 				s.UpdateMessage("Downloading model: " + model + "...")
 				err := helpers.DownloadModel(model, vars.ModelDirectory)
@@ -193,7 +193,7 @@ var createCmd = &cobra.Command{
 		// Loop through all pod templates, render and run kube play
 		logger.Infof("Total Pod Templates to be processed: %d\n", len(tmpls))
 
-		s = spinner.New("Deploying application '' " + appName + "...")
+		s = spinner.New("Deploying application '" + appName + "'...")
 		s.Start(ctx)
 		// execute the pod Templates
 		if err := executePodTemplates(runtime, appName, appMetadata, tmpls, applicationPodTemplatesPath, pciAddresses); err != nil {
