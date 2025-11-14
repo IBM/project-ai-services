@@ -20,4 +20,7 @@ type Runtime interface {
 	ListContainers(filters map[string][]string) (any, error)
 	InspectPod(nameOrId string) (*types.PodInspectReport, error)
 	PodExists(nameOrID string) (bool, error)
+	PodLogs(nameOrID string) error
+	ContainerLogs(containerNameOrID string) error
+	ContainerExists(nameOrID string) (bool, error)
 }

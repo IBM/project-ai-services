@@ -42,3 +42,7 @@ func (s *Spinner) Fail(message string) {
 	}
 	s.p.Fail(message)
 }
+
+func (s *Spinner) UpdateMessage(message string) {
+	s.p.UpdateMessage(message)
+}
