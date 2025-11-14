@@ -76,7 +76,7 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
         ranked_documents = retrieved_documents[:top_r]
         ranked_scores = retrieved_scores[:top_r]
 
-    filter_threshold = 0.4
+    filter_threshold = 0.55
     filtered_docs = []
     for doc, score in zip(ranked_documents, ranked_scores):
         if score >= filter_threshold:
