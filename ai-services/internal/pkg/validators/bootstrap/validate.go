@@ -3,6 +3,6 @@ package bootstrap
 // Rule defines the interface for validation rules
 type Rule interface {
 	Verify() error
-	Hint() string
+	Message() string
 	String() string
 }

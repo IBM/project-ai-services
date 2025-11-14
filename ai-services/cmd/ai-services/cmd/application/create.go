@@ -2,6 +2,7 @@ package application
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -70,7 +72,7 @@ var createCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appName := args[0]
-
+		ctx := context.Background()
 		skip := helpers.ParseSkipChecks(skipChecks)
 		if len(skip) > 0 {
 			logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
@@ -80,24 +82,28 @@ var createCmd = &cobra.Command{
 		logger.Infof("Validating the LPAR environment before creating application '%s'...\n", appName)
 		err := bootstrap.RunValidateCmd(skip)
 		if err != nil {
-			return fmt.Errorf("Bootstrap validation failed: %w", err)
+			return fmt.Errorf("bootstrap validation failed: %w", err)
 		}
 
 		// Configure the LPAR before creating the application
 		logger.Infof("Configuring the LPAR")
 		err = bootstrap.RunConfigureCmd()
 		if err != nil {
-			return fmt.Errorf("Bootstrap configuration failed: %w", err)
+			return fmt.Errorf("bootstrap configuration failed: %w", err)
 		}
 
 		// Proceed to create application
 		logger.Infof("Creating application '%s' using template '%s'\n", appName, templateName)
 
 		// set SMT level to target value, assuming it is running with root privileges (part of validation in bootstrap)
+		s := spinner.New("Checking SMT level")
+		s.Start(ctx)
 		err = setSMTLevel()
 		if err != nil {
+			s.Fail("failed to set SMT level")
 			return fmt.Errorf("failed to set SMT level: %w", err)
 		}
+		s.Stop("SMT level configured successfully")
 
 		// Fetch all the application Template names
 		appTemplateNames, err := helpers.FetchApplicationTemplatesNames()
@@ -157,19 +163,23 @@ var createCmd = &cobra.Command{
 
 		// Download models if flag is set to true(default: true)
 		if !skipModelDownload {
-			logger.Infoln("Downloading models as part of application creation...")
+			s = spinner.New("Downloading models as part of application creation...")
+			s.Start(ctx)
 			models, err := helpers.ListModels(appTemplateName)
 			if err != nil {
+				s.Fail("failed to list models")
 				return err
 			}
-			logger.Infoln("Downloaded Models in application template" + templateName + ":")
+			logger.Infoln("Downloading models required for application template " + templateName + ":")
 			for _, model := range models {
+				s.UpdateMessage("Downloading model: " + model + "...")
 				err := helpers.DownloadModel(model, vars.ModelDirectory)
 				if err != nil {
+					s.Fail("failed to download model: " + model)
 					return fmt.Errorf("failed to download model: %w", err)
 				}
 			}
-			logger.Infoln("Model download completed.")
+			s.Stop("Model download completed.")
 		}
 
 		// ---- ! ----
@@ -183,12 +193,14 @@ var createCmd = &cobra.Command{
 		// Loop through all pod templates, render and run kube play
 		logger.Infof("Total Pod Templates to be processed: %d\n", len(tmpls))
 
+		s = spinner.New("Deploying application '" + appName + "'...")
+		s.Start(ctx)
 		// execute the pod Templates
 		if err := executePodTemplates(runtime, appName, appMetadata, tmpls, applicationPodTemplatesPath, pciAddresses); err != nil {
 			return err
 		}
+		s.Stop("Application '" + appName + "' deployed successfully")
 
-		logger.Infof("\n--- Successfully deployed the Application: '%s' ---\n", appName)
 		logger.Infoln("-------")
 
 		// print the next steps to be performed at the end of create
@@ -290,9 +302,6 @@ func setSMTLevel() error {
 	if currentSMTlevel != *targetSMTLevel {
 		return fmt.Errorf("SMT level verification failed: expected %d, got %d", targetSMTLevel, currentSMTlevel)
 	}
-
-	fmt.Printf("SMT level set to %d successfully.\n", *targetSMTLevel)
-
 	return nil
 }
 
