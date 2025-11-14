@@ -17,8 +17,6 @@ emb_model_dict = {}
 llm_model_dict = {}
 reranker_model_dict = {}
 
-logger = get_logger("backend_utils")
-
 def initialize_models():
     global emb_model_dict, llm_model_dict, reranker_model_dict
     emb_model_dict, llm_model_dict, reranker_model_dict = get_model_endpoints()
@@ -105,19 +103,23 @@ def stream():
     except Exception as e:
         return jsonify({"error": repr(e)})
 
-    if not docs:
-        logger.info("No relevant documents found for this request")
-        # TODO: we probably need to stop execution here, what to return in Response instead?
+    resp_text = None
 
-    stop_words = ""
-    if stop_words:
-        stop_words = stop_words.strip(' ').split(',')
-        stop_words = [w.strip() for w in stop_words]
-        stop_words = list \
-            (set(stop_words) + set(['Context:', 'Question:', '\nContext:', '\nAnswer:', '\nQuestion:', 'Answer:']))
+    if docs:
+        stop_words = ""
+        if stop_words:
+            stop_words = stop_words.strip(' ').split(',')
+            stop_words = [w.strip() for w in stop_words]
+            stop_words = list \
+                (set(stop_words) + set(['Context:', 'Question:', '\nContext:', '\nAnswer:', '\nQuestion:', 'Answer:']))
+        else:
+            stop_words = ['Context:', 'Question:', '\nContext:', '\nAnswer:', '\nQuestion:', 'Answer:']
+
+        resp_text = stream_with_context(query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words,max_tokens, True, dynamic_chunk_truncation=TRUNCATION))
     else:
-        stop_words = ['Context:', 'Question:', '\nContext:', '\nAnswer:', '\nQuestion:', 'Answer:']
-    return Response(stream_with_context(query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words,max_tokens, True, dynamic_chunk_truncation=TRUNCATION)),
+        resp_text = "No documents found in the current context that are relevant to your request."
+
+    return Response(resp_text,
                     content_type='text/plain',
                     mimetype='text/event-stream', headers={
             'Cache-Control': 'no-cache',
@@ -125,7 +127,6 @@ def stream():
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Headers': 'Content-Type'
         })
-
 
 @app.route("/reference", methods=["POST"])
 def get_reference_docs():
