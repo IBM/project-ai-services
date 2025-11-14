@@ -32,6 +32,10 @@ function App() {
   function onAfterRender(instance) {
 
     instance.updateMainHeaderTitle("DocuAssistant");
+    instance.updateLanguagePack({
+      ai_slug_title: undefined,
+      ai_slug_description: undefined,
+    })
     instance.on({ type: BusEventType.FEEDBACK, handler: feedbackHandler });
 
     instance.messaging.addMessage({
