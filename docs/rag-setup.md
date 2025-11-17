@@ -27,7 +27,7 @@ Add your source documents to the designated ingestion directory path -> `/var/li
 
 ## Start Document Ingestion
 
-Trigger the ingestion process to parse and embed the uploaded documents. Once complete, the documents become searchable and ready for retrieval during chat interactions.
+Trigger the ingestion process to parse and upload the documents into DB. Once complete, the documents become searchable and ready for retrieval during chat interactions.
 
 ```bash
 ai-services application start <app-name> --pod=<app-name>--ingest-docs
