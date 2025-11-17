@@ -1,12 +1,12 @@
-const express = require('express');
-const axios = require('axios');
-const cors = require('cors');
+import express, { json } from 'express';
+import axios from 'axios';
+import cors from 'cors';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json());
+app.use(json());
 
 // Proxy endpoint
 app.post('/generate', async (req, res) => {

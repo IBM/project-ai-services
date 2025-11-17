@@ -45,7 +45,7 @@ export default [
       // TODO: Enable below later
       // 'semi': ['error', 'always'],
       // 'quotes': ['error', 'single'],
-      'no-unused-vars': 'warn',
+      'no-unused-vars': ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
 
       // disable
       'react/prop-types': 'off', // Required if we want to check prop type (Typecript)

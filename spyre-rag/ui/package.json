@@ -2,6 +2,7 @@
     "name": "chatbot",
     "version": "0.1.0",
     "private": true,
+    "type": "module",
     "dependencies": {
         "@carbon/ai-chat": "^0.5.1",
         "@carbon/react": "^1.31.3",

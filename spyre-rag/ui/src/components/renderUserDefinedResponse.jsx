@@ -1,6 +1,6 @@
 import { ReferenceDocsButton } from "./ReferenceDocsButton.jsx";
 
-function renderUserDefinedResponse(state, instance) {
+function renderUserDefinedResponse(state) {
   const { messageItem } = state;
   const type = messageItem?.user_defined?.user_defined_type;
 

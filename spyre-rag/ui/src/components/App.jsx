@@ -1,4 +1,3 @@
-import React, { useState } from "react";
 import {
   ChatCustomElement,
   BusEventType,
@@ -30,13 +29,10 @@ const config = {
 };
 
 function App() {
-  const [chatInstance, setChatInstance] = useState();
-
   function onAfterRender(instance) {
 
     instance.updateMainHeaderTitle("DocuAssistant");
     instance.on({ type: BusEventType.FEEDBACK, handler: feedbackHandler });
-    setChatInstance(instance);
 
     instance.messaging.addMessage({
       output: {
@@ -59,7 +55,7 @@ function App() {
 
   function feedbackHandler(event) {
     if (event.interactionType === FeedbackInteractionType.SUBMITTED) {
-      const { message, messageItem, ...reportData } = event;
+      const { message: _message, messageItem: _messageItem, ...reportData } = event;  
       setTimeout(() => {
         window.alert(JSON.stringify(reportData, null, 2));
       });
@@ -68,7 +64,7 @@ function App() {
 
 
   return (
-      <React.Fragment>
+      <>
         <Theme theme="white">
           <Content id="main-content">
             <Grid fullWidth className="chat-page-grid">
@@ -90,7 +86,7 @@ function App() {
             </Grid>
           </Content>
         </Theme>
-      </React.Fragment>
+      </>
   );
 }
 
