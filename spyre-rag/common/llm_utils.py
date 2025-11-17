@@ -96,6 +96,20 @@ def summarize_table(table_html, table_caption, gen_model, llm_endpoint, max_work
 
     return summaries
 
+def query_vllm_models(llm_endpoint, headers):
+    logger.debug('Querying VLLM models')
+    try:
+        response = requests.get(f"{llm_endpoint}/v1/models", headers=headers)
+        response.raise_for_status()
+        resp_json = response.json()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error calling vLLM models API: {e}, {e.response.text}")
+        return {"error": str(e) + "\n" + e.response.text}, 0.
+    except Exception as e:
+        logger.error(f"Error calling vLLM models API: {e}")
+        return {"error": str(e)}, 0.
+    return resp_json
+
 
 def query_vllm(question, documents, llm_endpoint, ckpt, stop_words, max_new_tokens, stream=False, max_input_length=6000, dynamic_chunk_truncation=True):
     template_token_count=250

@@ -5,7 +5,7 @@ import os
 import time
 
 from common.db_utils import MilvusVectorStore
-from common.llm_utils import query_vllm_stream
+from common.llm_utils import query_vllm_stream, query_vllm_models
 from common.misc_utils import get_model_endpoints, set_log_level
 from retrieve.backend_utils import search_and_answer_backend, search_only
 
@@ -104,10 +104,18 @@ def get_reference_docs():
         mimetype="application/json"
     )
 
+@app.route("/v1/models", methods=["GET"])
+def list_models():
+    logging.debug("List models..")
+    try:
+        llm_endpoint = llm_model_dict['llm_endpoint']
+        return query_vllm_models(llm_endpoint)
+    except Exception as e:
+        return jsonify({"error": repr(e)})
+
 @app.route("/v1/chat/completions", methods=["POST"])
 def stream_chat_complete():
     data = request.get_json()
-    logger.info("data: ", data)
     msgs = data.get("messages")[0]
     prompt = msgs.get("content")
     num_chunks_post_rrf = data.get("num_chunks_post_rrf", 10)
