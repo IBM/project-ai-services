@@ -21,7 +21,7 @@ var templatesCmd = &cobra.Command{
 		}
 
 		if len(appTemplateNames) == 0 {
-			cmd.PrintErrln("No application templates found.")
+			logger.Infoln("No application templates found.")
 			return nil
 		}
 

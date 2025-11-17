@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/spf13/cobra"
 )
@@ -24,7 +25,7 @@ func pull(template string) error {
 		return fmt.Errorf("error listing images: %w", err)
 	}
 
-	fmt.Printf("Downloading the images for the application... ")
+	logger.Infof("Downloading the images for the application... ")
 	runtimeClient, err := podman.NewPodmanClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to podman: %w", err)
