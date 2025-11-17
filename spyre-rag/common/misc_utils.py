@@ -1,6 +1,7 @@
-import os
+import hashlib
 import json
 import logging
+import os
 
 LOG_LEVEL = logging.INFO
 
@@ -93,3 +94,19 @@ def setup_cache_dir(dir):
     cache_dir = os.path.join(LOCAL_CACHE_DIR, f'{dir}_cache')
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
+
+def generate_file_checksum(file):
+    sha256 = hashlib.sha256()
+    with open(file, 'rb') as f:
+        for chunk in iter(lambda: f.read(128 * sha256.block_size), b''):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+def verify_checksum(file, checksum_file):
+    file_sha256 = generate_file_checksum(file)
+    f = open(checksum_file, "r")
+    data = f.read()
+    csum = data.split(' ')[0]
+    if csum == file_sha256:
+        return True
+    return False

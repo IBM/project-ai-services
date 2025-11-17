@@ -45,10 +45,10 @@ def ingest(directory_path, include_meta_info_in_main_text):
         max_tokens=emb_model_dict['max_tokens'] - 100 if include_meta_info_in_main_text else emb_model_dict['max_tokens']
     )
     combined_filtered_chunks = []
-    for in_txt_f, in_tab_f, orig_fn in zip(input_txt_files, input_tab_files, original_filenames):
+    for in_chunk_f, in_tab_f, orig_fn in zip(output_chunk_files, input_tab_files, original_filenames):
         # Combine all chunks (text, image summaries, table summaries)
         filtered_chunks = create_chunk_documents(
-            in_txt_f, in_tab_f, orig_fn, include_meta_info_in_main_text)
+            in_chunk_f, in_tab_f, orig_fn, include_meta_info_in_main_text)
         combined_filtered_chunks.extend(filtered_chunks)
 
     # Insert data into Milvus
