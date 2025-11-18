@@ -11,6 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/bootstrap/root"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/bootstrap/spyre"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 )
@@ -112,7 +113,6 @@ func runServiceReport() error {
 	}
 	logger.Infoln("VFIO kernel modules loaded on the host", 2)
 
-	service_report_image := "icr.io/ai-services-private/tools:latest"
 	svc_tool_cmd := exec.Command(
 		"podman",
 		"run",
@@ -123,7 +123,7 @@ func runServiceReport() error {
 		"-v", "/etc/modules-load.d/:/etc/modules-load.d/",
 		"-v", "/etc/udev/rules.d/:/etc/udev/rules.d/",
 		"-v", "/etc/security/limits.d/:/etc/security/limits.d/",
-		service_report_image,
+		vars.ToolImage,
 		"bash", "-c", "servicereport -r -p spyre",
 	)
 	out, err := svc_tool_cmd.CombinedOutput()
