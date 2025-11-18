@@ -23,11 +23,17 @@ spec:
         type: Directory
   containers:
     - name: instruct
-      image: icr.io/ibmaiu_internal/ppc64le/dd2/spyre-vllm:v1.0.1
-      command: ["/bin/sh", "-c"]
-      args: [
-          "/home/senuser/container-scripts/vllm_start.sh --served-model-name ibm-granite/granite-3.3-8b-instruct"
-      ]
+      image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-ci_236
+      command: ["/bin/bash"]
+      args:
+        - "-c"
+        - |
+          /opt/app-root/spyre_entrypoint.sh \
+          --model ${VLLM_MODEL_PATH} \
+          -tp ${AIU_WORLD_SIZE} \
+          --max-model-len ${MAX_MODEL_LEN} \
+          --max-num-seqs ${MAX_BATCH_SIZE} \
+          --served-model-name ibm-granite/granite-3.3-8b-instruct
       livenessProbe:
         httpGet:
           path: /health
@@ -39,10 +45,8 @@ spec:
       env:
         - name: VLLM_MODEL_PATH
           value: "/models/ibm-granite/granite-3.3-8b-instruct"
-        - name: TORCH_SENDNN_CACHE_ENABLE
-          value: "1"
-        - name: VLLM_SPYRE_REQUIRE_PRECOMPILED_DECODERS
-          value: "1"
+        - name: AIU_WORLD_SIZE
+          value: "4"
         - name: VLLM_SPYRE_USE_CB
           value: "1"
         - name: MAX_MODEL_LEN
