@@ -132,20 +132,19 @@ func runServiceReport() error {
 	}
 	logger.Infof("ServiceReport output: %v", string(out))
 
-	err = configureUsergroup()
-	if err != nil {
-		return fmt.Errorf("failed to create sentient group and add current user: %w", err)
+	if err := configureUsergroup(); err != nil {
+		return err
 	}
 
 	return nil
 }
 
 func configureUsergroup() error {
-	// Create host directories for vfio
-	cmd := `groupadd sentient; usermod -aG sentient root`
-	_, err := exec.Command("bash", "-c", cmd).Output()
+	cmd_str := `groupadd sentient; usermod -aG sentient $USER`
+	cmd := exec.Command("bash", "-c", cmd_str)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("❌ failed to create sentient group %w", err)
+		return fmt.Errorf("❌ failed to create sentient group and add current user to the sentient group. Error: %w, output: %w", err, string(out))
 	}
 
 	return nil
