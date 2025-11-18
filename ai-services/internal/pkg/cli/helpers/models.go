@@ -9,6 +9,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -19,13 +20,7 @@ func ListModels(template string) ([]string, error) {
 		return nil, fmt.Errorf("error loading templates for %s: %w", template, err)
 	}
 
-	dummyParams := map[string]any{
-		"AppName":         "dummy-app",
-		"AppTemplateName": "",
-		"Version":         "",
-	}
-
-	models := func(podSpec templates.PodSpec) []string {
+	models := func(podSpec models.PodSpec) []string {
 		modelAnnotations := []string{}
 		for key, value := range podSpec.Annotations {
 			if strings.HasPrefix(key, constants.ModelAnnotationKey) {
@@ -37,7 +32,7 @@ func ListModels(template string) ([]string, error) {
 
 	modelList := []string{}
 	for _, tmpl := range tmpls {
-		ps, err := tp.LoadPodTemplate(template, tmpl.Name(), dummyParams)
+		ps, err := tp.LoadPodTemplateWithDummyParams(template, tmpl.Name())
 		if err != nil {
 			return nil, fmt.Errorf("error loading pod template: %w", err)
 		}

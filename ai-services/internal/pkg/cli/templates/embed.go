@@ -9,8 +9,10 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/project-ai-services/ai-services/assets"
 	"sigs.k8s.io/yaml"
+
+	"github.com/project-ai-services/ai-services/assets"
+	"github.com/project-ai-services/ai-services/internal/pkg/models"
 )
 
 type embedTemplateProvider struct {
@@ -74,7 +76,7 @@ func (e *embedTemplateProvider) LoadAllTemplates(path string) (map[string]*templ
 }
 
 // LoadPodTemplate loads and renders a pod template with the given parameters
-func (e *embedTemplateProvider) LoadPodTemplate(app, file string, params any) (*PodSpec, error) {
+func (e *embedTemplateProvider) LoadPodTemplate(app, file string, params any) (*models.PodSpec, error) {
 	path := fmt.Sprintf("%s/%s/templates/%s", e.root, app, file)
 	data, err := e.fs.ReadFile(path)
 	if err != nil {
@@ -90,7 +92,38 @@ func (e *embedTemplateProvider) LoadPodTemplate(app, file string, params any) (*
 		return nil, fmt.Errorf("failed to execute template %s: %v", path, err)
 	}
 
-	var spec PodSpec
+	var spec models.PodSpec
+	if err := yaml.Unmarshal(rendered.Bytes(), &spec); err != nil {
+		return nil, fmt.Errorf("unable to read YAML as Kube Pod: %w", err)
+	}
+
+	return &spec, nil
+}
+
+// LoadPodTemplate loads and renders a pod template with the dummy parameters
+func (e *embedTemplateProvider) LoadPodTemplateWithDummyParams(app, file string) (*models.PodSpec, error) {
+	dummyParams := map[string]any{
+		"AppName":         "dummy-app",
+		"AppTemplateName": "",
+		"Version":         "",
+	}
+
+	path := fmt.Sprintf("%s/%s/templates/%s", e.root, app, file)
+	data, err := e.fs.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read metadata: %w", err)
+	}
+
+	var rendered bytes.Buffer
+	tmpl, err := template.New("podTemplate").Parse(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("parse template %s: %w", file, err)
+	}
+	if err := tmpl.Execute(&rendered, dummyParams); err != nil {
+		return nil, fmt.Errorf("failed to execute template %s: %v", path, err)
+	}
+
+	var spec models.PodSpec
 	if err := yaml.Unmarshal(rendered.Bytes(), &spec); err != nil {
 		return nil, fmt.Errorf("unable to read YAML as Kube Pod: %w", err)
 	}

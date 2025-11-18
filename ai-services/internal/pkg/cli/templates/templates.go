@@ -3,7 +3,7 @@ package templates
 import (
 	"text/template"
 
-	v1 "github.com/containers/podman/v5/pkg/k8s.io/api/core/v1"
+	"github.com/project-ai-services/ai-services/internal/pkg/models"
 )
 
 type AppMetadata struct {
@@ -11,10 +11,6 @@ type AppMetadata struct {
 	Version               string     `yaml:"version,omitempty"`
 	SMTLevel              *int       `yaml:"smtLevel,omitempty"`
 	PodTemplateExecutions [][]string `yaml:"podTemplateExecutions"`
-}
-
-type PodSpec struct {
-	v1.Pod
 }
 
 type Vars struct {
@@ -39,7 +35,9 @@ type Template interface {
 	// LoadAllTemplates loads all templates for a given application
 	LoadAllTemplates(path string) (map[string]*template.Template, error)
 	// LoadPodTemplate loads and renders a pod template with the given parameters
-	LoadPodTemplate(app, file string, params any) (*PodSpec, error)
+	LoadPodTemplate(app, file string, params any) (*models.PodSpec, error)
+	// LoadPodTemplateWithDummyParams loads and renders a pod template with the dummy parameters
+	LoadPodTemplateWithDummyParams(app, file string) (*models.PodSpec, error)
 	// LoadMetadata loads the metadata for a given application template
 	LoadMetadata(app string) (*AppMetadata, error)
 	// LoadMdFiles loads all md files for a given application

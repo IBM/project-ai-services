@@ -20,10 +20,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -105,31 +108,20 @@ var createCmd = &cobra.Command{
 		}
 		s.Stop("SMT level configured successfully")
 
-		// Fetch all the application Template names
-		appTemplateNames, err := helpers.FetchApplicationTemplatesNames()
-		if err != nil {
-			return fmt.Errorf("failed to list templates: %w", err)
+		tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+
+		// validate whether the provided template name is correct
+		if err := validators.ValidateAppTemplateExist(tp, templateName); err != nil {
+			return err
 		}
 
-		var appTemplateName string
-
-		if index := fetchAppTemplateIndex(appTemplateNames, templateName); index == -1 {
-			return errors.New("provided template name is wrong. Please provide a valid template name")
-		} else {
-			appTemplateName = appTemplateNames[index]
-		}
-
-		applicationPodTemplatesPath := applicationPath + appTemplateName + "/templates"
-
-		tmpls, err := helpers.LoadAllTemplates(applicationPodTemplatesPath)
+		tmpls, err := tp.LoadAllTemplates(templateName + "/templates")
 		if err != nil {
 			return fmt.Errorf("failed to parse the templates: %w", err)
 		}
 
-		tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
-
 		// load metadata.yml to read the app metadata
-		appMetadata, err := tp.LoadMetadata(appTemplateName)
+		appMetadata, err := tp.LoadMetadata(templateName)
 		if err != nil {
 			return fmt.Errorf("failed to read the app metadata: %w", err)
 		}
@@ -141,7 +133,7 @@ var createCmd = &cobra.Command{
 		// ---- Validate Spyre card Requirements ----
 
 		// calculate the required spyre cards
-		reqSpyreCardsCount, err := calculateReqSpyreCards(utils.ExtractMapKeys(tmpls), applicationPodTemplatesPath)
+		reqSpyreCardsCount, err := calculateReqSpyreCards(tp, utils.ExtractMapKeys(tmpls), templateName)
 		if err != nil {
 			return err
 		}
@@ -165,7 +157,7 @@ var createCmd = &cobra.Command{
 		if !skipModelDownload {
 			s = spinner.New("Downloading models as part of application creation...")
 			s.Start(ctx)
-			models, err := helpers.ListModels(appTemplateName)
+			models, err := helpers.ListModels(templateName)
 			if err != nil {
 				s.Fail("failed to list models")
 				return err
@@ -196,7 +188,7 @@ var createCmd = &cobra.Command{
 		s = spinner.New("Deploying application '" + appName + "'...")
 		s.Start(ctx)
 		// execute the pod Templates
-		if err := executePodTemplates(runtime, appName, appMetadata, tmpls, applicationPodTemplatesPath, pciAddresses); err != nil {
+		if err := executePodTemplates(runtime, tp, appName, appMetadata, tmpls, pciAddresses); err != nil {
 			return err
 		}
 		s.Stop("Application '" + appName + "' deployed successfully")
@@ -204,7 +196,7 @@ var createCmd = &cobra.Command{
 		logger.Infoln("-------")
 
 		// print the next steps to be performed at the end of create
-		if err := helpers.PrintNextSteps(runtime, appName, appTemplateName); err != nil {
+		if err := helpers.PrintNextSteps(runtime, appName, templateName); err != nil {
 			// do not want to fail the overall create if we cannot print next steps
 			logger.Infof("failed to display next steps: %v\n", err)
 			return nil
@@ -306,42 +298,20 @@ func setSMTLevel() error {
 }
 
 func getTargetSMTLevel() (*int, error) {
-	appTemplateNames, err := helpers.FetchApplicationTemplatesNames()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list templates: %w", err)
-	}
-
-	var appTemplateName string
-
-	if index := fetchAppTemplateIndex(appTemplateNames, templateName); index == -1 {
-		return nil, errors.New("provided template name is wrong. Please provide a valid template name")
-	} else {
-		appTemplateName = appTemplateNames[index]
-	}
-
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
 
+	// validate whether the provided template name is correct
+	if err := validators.ValidateAppTemplateExist(tp, templateName); err != nil {
+		return nil, err
+	}
+
 	// load metadata.yml to read the app metadata
-	appMetadata, err := tp.LoadMetadata(appTemplateName)
+	appMetadata, err := tp.LoadMetadata(templateName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the app metadata: %w", err)
 	}
 
 	return appMetadata.SMTLevel, nil
-}
-
-// fetchAppTemplateIndex -> Returns the index of app template if exists, otherwise -1
-func fetchAppTemplateIndex(appTemplateNames []string, templateName string) int {
-	appTemplateIndex := -1
-
-	for index, appTemplateName := range appTemplateNames {
-		if strings.EqualFold(appTemplateName, templateName) {
-			appTemplateIndex = index
-			break
-		}
-	}
-
-	return appTemplateIndex
 }
 
 func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *templates.AppMetadata) error {
@@ -361,8 +331,8 @@ func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *t
 	return nil
 }
 
-func executePodTemplates(runtime runtime.Runtime, appName string, appMetadata *templates.AppMetadata,
-	tmpls map[string]*template.Template, podTemplatesPath string, pciAddresses []string) error {
+func executePodTemplates(runtime runtime.Runtime, tp templates.Template, appName string, appMetadata *templates.AppMetadata,
+	tmpls map[string]*template.Template, pciAddresses []string) error {
 
 	globalParams := map[string]any{
 		"AppName":         appName,
@@ -390,10 +360,8 @@ func executePodTemplates(runtime runtime.Runtime, appName string, appMetadata *t
 				// Shallow Copy globalParams Map
 				params := utils.CopyMap(globalParams)
 
-				podTemplateFilePath := podTemplatesPath + "/" + podTemplateName
-
 				// fetch pod Spec
-				podSpec, err := fetchPodSpec(podTemplateFilePath)
+				podSpec, err := fetchPodSpec(tp, templateName, podTemplateName)
 				if err != nil {
 					errCh <- err
 				}
@@ -496,18 +464,15 @@ func validateSpyreCardRequirements(req int, actual int) error {
 	return nil
 }
 
-func calculateReqSpyreCards(podTemplateFileNames []string, podTemplatesPath string) (int, error) {
+func calculateReqSpyreCards(tp templates.Template, podTemplateFileNames []string, appTemplateName string) (int, error) {
 	totalReqSpyreCounts := 0
 
 	// Calculate Req Spyre Counts
 	for _, podTemplateFileName := range podTemplateFileNames {
-
-		podTemplateFilePath := podTemplatesPath + "/" + podTemplateFileName
-
-		// load the pod Template
-		podSpec, err := helpers.LoadPodTemplate(podTemplateFilePath)
+		// fetch pod spec
+		podSpec, err := fetchPodSpec(tp, appTemplateName, podTemplateFileName)
 		if err != nil {
-			return totalReqSpyreCounts, fmt.Errorf("failed to load pod Template: %s with error: %w", podTemplateFilePath, err)
+			return totalReqSpyreCounts, fmt.Errorf("failed to load pod Template: '%s' for appTemplate: '%s' with error: %w", podTemplateFileName, appTemplateName, err)
 		}
 
 		// fetch the spyreCount for all containers from the annotations
@@ -550,23 +515,23 @@ func fetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[
 	return spyreCards, spyreCardContainerMap, nil
 }
 
-func fetchPodSpec(podTemplateFilePath string) (*helpers.PodSpec, error) {
-	podSpec, err := helpers.LoadPodTemplate(podTemplateFilePath)
+func fetchPodSpec(tp templates.Template, appTemplateName, podTemplateFileName string) (*models.PodSpec, error) {
+	podSpec, err := tp.LoadPodTemplateWithDummyParams(appTemplateName, podTemplateFileName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load pod Template: %s with error: %w", podTemplateFilePath, err)
+		return nil, fmt.Errorf("failed to load pod Template: '%s' for appTemplate: '%s' with error: %w", podTemplateFileName, appTemplateName, err)
 	}
 
 	return podSpec, nil
 }
 
-func fetchPodAnnotations(podSpec *helpers.PodSpec) map[string]string {
-	return helpers.FetchPodAnnotations(*podSpec)
+func fetchPodAnnotations(podSpec *models.PodSpec) map[string]string {
+	return specs.FetchPodAnnotations(*podSpec)
 }
 
-func returnEnvParamsForPod(podSpec *helpers.PodSpec, podAnnotations map[string]string, pciAddresses *[]string) (map[string]map[string]string, error) {
+func returnEnvParamsForPod(podSpec *models.PodSpec, podAnnotations map[string]string, pciAddresses *[]string) (map[string]map[string]string, error) {
 
 	env := map[string]map[string]string{}
-	podContainerNames := helpers.FetchContainerNames(*podSpec)
+	podContainerNames := specs.FetchContainerNames(*podSpec)
 
 	// populate env with empty map
 	for _, containerName := range podContainerNames {
