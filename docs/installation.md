@@ -5,6 +5,8 @@ Before you begin, confirm that all prerequisites are satisfied.
 
 ## Prerequisites
 
+- User should have root privileges
+
 - HMC-based access (UI and/or CLI)
 
 - Spyre cards are attached, discoverable, and ACTIVATED (x cards)
