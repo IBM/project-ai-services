@@ -2,6 +2,10 @@
 
 This section explains how to set up a RAG using the existing templates provided in AI-services.
 
+![rag-setup](./assets/rag-tutorial.drawio.png)
+
+##### Fig 1.0 - RAG Chatbot Setup
+
 ## Pull and Run the AI-services binary 
 
 To get started, follow the [installation guide](./installation.md) to pull and run the AI-services binary.
