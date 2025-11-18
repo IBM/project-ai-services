@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -23,9 +24,9 @@ func list(templateName string) error {
 		return fmt.Errorf("error listing images: %w", err)
 	}
 
-	fmt.Printf("Container images for application template '%s' are:\n", templateName)
+	logger.Infof("Container images for application template '%s' are:\n", templateName)
 	for _, image := range images {
-		fmt.Printf("- %s\n", image)
+		logger.Infof("- %s\n", image)
 	}
 
 	return nil

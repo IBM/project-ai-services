@@ -8,6 +8,7 @@ import (
 	"github.com/containers/podman/v5/pkg/domain/entities/types"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -21,7 +22,7 @@ func PrintNextSteps(runtime runtime.Runtime, app, appTemplate string) error {
 	tmpls, err := tp.LoadMdFiles(stepsPath)
 	if err != nil {
 		// just printing and returning if the steps folder doesnt exist do not do anything
-		fmt.Printf("Unable to load steps: %v\n", err)
+		logger.Infof("Unable to load steps: %v\n", err)
 		return nil
 	}
 
@@ -46,9 +47,9 @@ func PrintNextSteps(runtime runtime.Runtime, app, appTemplate string) error {
 			return fmt.Errorf("failed to execute next.md: %w", err)
 		}
 
-		fmt.Println("Next Steps: ")
-		fmt.Println("-------")
-		fmt.Println(rendered.String())
+		logger.Infoln("Next Steps: ")
+		logger.Infoln("-------")
+		logger.Infoln(rendered.String())
 	}
 
 	return nil
@@ -86,9 +87,9 @@ func PrintInfo(runtime runtime.Runtime, app, appTemplate string) error {
 			return fmt.Errorf("failed to execute info.md: %w", err)
 		}
 
-		fmt.Println("Info: ")
-		fmt.Println("-------")
-		fmt.Println(rendered.String())
+		logger.Infoln("Info: ")
+		logger.Infoln("-------")
+		logger.Infoln(rendered.String())
 	}
 
 	return nil
@@ -120,7 +121,7 @@ func populatePodValues(runtime runtime.Runtime, params map[string]string, varsDa
 			}
 			if !exists {
 				// just print the msg
-				fmt.Printf("Pod with name: %s doesn't exist\n", pod.Name)
+				logger.Infof("Pod with name: %s doesn't exist\n", pod.Name)
 				continue
 			}
 

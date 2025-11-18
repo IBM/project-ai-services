@@ -17,6 +17,7 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/kube"
 	"github.com/containers/podman/v5/pkg/bindings/pods"
 	"github.com/containers/podman/v5/pkg/domain/entities/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
@@ -59,12 +60,12 @@ func (pc *PodmanClient) ListImages() ([]string, error) {
 }
 
 func (pc *PodmanClient) PullImage(image string, options *images.PullOptions) error {
-	fmt.Printf("Pulling image %s...\n", image)
+	logger.Infof("Pulling image %s...\n", image)
 	_, err := images.Pull(pc.Context, image, options)
 	if err != nil {
 		return fmt.Errorf("failed to pull image %s: %w", image, err)
 	}
-	fmt.Printf("Successfully pulled image %s\n", image)
+	logger.Infof("Successfully pulled image %s\n", image)
 	return nil
 }
 
@@ -213,12 +214,12 @@ func (pc *PodmanClient) ContainerLogs(containerNameOrID string) error {
 				if !ok {
 					return
 				}
-				fmt.Println(line)
+				logger.Infoln(line)
 			case line, ok := <-stderrChan:
 				if !ok {
 					return
 				}
-				fmt.Fprintln(os.Stderr, line)
+				logger.Errorln(line)
 			}
 		}
 	}()

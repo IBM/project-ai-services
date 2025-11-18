@@ -206,7 +206,7 @@ var createCmd = &cobra.Command{
 		// print the next steps to be performed at the end of create
 		if err := helpers.PrintNextSteps(runtime, appName, appTemplateName); err != nil {
 			// do not want to fail the overall create if we cannot print next steps
-			fmt.Printf("failed to display next steps: %v\n", err)
+			logger.Infof("failed to display next steps: %v\n", err)
 			return nil
 		}
 
@@ -268,14 +268,14 @@ func setSMTLevel() error {
 
 	if targetSMTLevel == nil {
 		// No SMT level specified in metadata.yaml
-		fmt.Printf("No SMT level specified in metadata.yaml. Keeping it to current level: %d\n", currentSMTlevel)
+		logger.Infof("No SMT level specified in metadata.yaml. Keeping it to current level: %d\n", currentSMTlevel)
 		return nil
 	}
 
 	// 3. Check if SMT level is already set to target value
 	if currentSMTlevel == *targetSMTLevel {
 		// already set
-		fmt.Printf("SMT level is already set to %d\n", *targetSMTLevel)
+		logger.Infof("SMT level is already set to %d\n", *targetSMTLevel)
 		return nil
 	}
 
@@ -375,8 +375,8 @@ func executePodTemplates(runtime runtime.Runtime, appName string, appMetadata *t
 
 	// looping over each layer of podTemplateExecutions
 	for i, layer := range appMetadata.PodTemplateExecutions {
-		fmt.Printf("\n Executing Layer %d: %v\n", i+1, layer)
-		fmt.Println("-------")
+		logger.Infof("\n Executing Layer %d: %v\n", i+1, layer)
+		logger.Infoln("-------")
 		var wg sync.WaitGroup
 		errCh := make(chan error, len(layer))
 
@@ -385,7 +385,7 @@ func executePodTemplates(runtime runtime.Runtime, appName string, appMetadata *t
 			wg.Add(1)
 			go func(t string) {
 				defer wg.Done()
-				fmt.Printf("Processing template: %s...\n", podTemplateName)
+				logger.Infof("Processing template: %s...\n", podTemplateName)
 
 				// Shallow Copy globalParams Map
 				params := utils.CopyMap(globalParams)
@@ -439,7 +439,7 @@ func executePodTemplates(runtime runtime.Runtime, appName string, appMetadata *t
 			return errors.Join(errs...)
 		}
 
-		fmt.Printf("Layer %d completed\n", i+1)
+		logger.Infof("Layer %d completed\n", i+1)
 	}
 
 	return nil
@@ -452,12 +452,12 @@ func deployPodAndReadinessCheck(runtime runtime.Runtime, name string, body io.Re
 		return fmt.Errorf("failed pod creation: %w", err)
 	}
 
-	fmt.Printf("Successfully ran podman kube play for %s\n", name)
+	logger.Infof("Successfully ran podman kube play for %s\n", name)
 
 	for _, pod := range kubeReport.Pods {
-		fmt.Printf("Performing Pod Readiness check...: %s\n", pod.ID)
+		logger.Infof("Performing Pod Readiness check...: %s\n", pod.ID)
 		for _, container := range pod.Containers {
-			fmt.Printf("Doing Container Readiness check...: %s\n", container.ID)
+			logger.Infof("Doing Container Readiness check...: %s\n", container.ID)
 
 			// getting the Start Period set for a container
 			startPeriod, err := helpers.FetchContainerStartPeriod(runtime, container.ID)
@@ -466,26 +466,26 @@ func deployPodAndReadinessCheck(runtime runtime.Runtime, name string, body io.Re
 			}
 
 			if startPeriod == -1 {
-				fmt.Println("No container health check is set. Hence skipping readiness check")
+				logger.Infoln("No container health check is set. Hence skipping readiness check")
 				continue
 			}
 
 			// configure readiness timeout by appending start period with additional extra timeout
 			readinessTimeout := startPeriod + extraContainerReadinessTimeout
 
-			fmt.Printf("Setting the Waiting Readiness Timeout: %s\n", readinessTimeout)
+			logger.Infof("Setting the Waiting Readiness Timeout: %s\n", readinessTimeout)
 
 			if err := helpers.WaitForContainerReadiness(runtime, container.ID, readinessTimeout); err != nil {
 				return fmt.Errorf("readiness check failed!: %w", err)
 			}
-			fmt.Printf("Container: %s is ready\n", container.ID)
-			fmt.Println("-------")
+			logger.Infof("Container: %s is ready\n", container.ID)
+			logger.Infoln("-------")
 		}
-		fmt.Printf("Pod: %s has been successfully deployed and ready!\n", pod.ID)
-		fmt.Println("-------")
+		logger.Infof("Pod: %s has been successfully deployed and ready!\n", pod.ID)
+		logger.Infoln("-------")
 	}
 
-	fmt.Println("-------\n-------")
+	logger.Infoln("-------\n-------")
 	return nil
 }
 

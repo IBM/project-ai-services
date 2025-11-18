@@ -2,6 +2,7 @@
     "name": "chatbot",
     "version": "0.1.0",
     "private": true,
+    "type": "module",
     "dependencies": {
         "@carbon/ai-chat": "^0.5.1",
         "@carbon/react": "^1.31.3",
@@ -19,14 +20,18 @@
     },
     "devDependencies": {
         "@vitejs/plugin-react": "^5.1.0",
-        "eslint-config-react-app": "^7.0.1",
+        "eslint": "^9.39.1",
+        "eslint-plugin-react": "^7.37.5",
+        "eslint-plugin-react-hooks": "^7.0.1",
         "typescript": "4.9.5",
         "vite": "^7.2.2"
     },
     "scripts": {
         "dev": "vite",
         "build": "vite build",
-        "preview": "vite preview"
+        "preview": "vite preview",
+        "lint": "eslint .",
+        "lint:fix": "eslint . --fix"
     },
     "eslintConfig": {
         "extends": [

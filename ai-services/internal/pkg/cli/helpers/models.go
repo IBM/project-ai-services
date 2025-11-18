@@ -8,6 +8,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -54,7 +55,7 @@ func DownloadModel(model, targetDir string) error {
 			return fmt.Errorf("failed to create target model directory: %w", err)
 		}
 	}
-	fmt.Printf("Downloading model %s to %s\n", model, targetDir)
+	logger.Infof("Downloading model %s to %s\n", model, targetDir)
 	command := "podman"
 	// All arguments must be passed as a slice of strings
 	args := []string{
@@ -77,6 +78,6 @@ func DownloadModel(model, targetDir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to execute command: %w", err)
 	}
-	fmt.Printf("Model downloaded successfully\n")
+	logger.Infoln("Model downloaded successfully")
 	return nil
 }
