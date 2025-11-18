@@ -1,0 +1,41 @@
+name: Build and archive Go Binary
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-24.04-ppc64le
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Go
+        run: |
+          GO_VERSION="1.24.1"
+          wget https://go.dev/dl/go${GO_VERSION}.linux-ppc64le.tar.gz
+          sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-ppc64le.tar.gz
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
+
+      - run: go version
+
+      - name: Build Go binary
+        run: |
+          cd ai-services
+          make build
+
+      - name: Archive binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-services-binary
+          path: ai-services/bin/ai-services
