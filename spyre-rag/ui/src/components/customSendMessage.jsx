@@ -130,12 +130,7 @@ async function customSendMessage(request, _options, instance) {
     // get docs out of context_response
     const docs = context_response.data?.documents || [];
 
-    // Final response (wraps the message in final format)
-    await instance.messaging.addMessageChunk({
-      final_response: {
-        id: responseId,
-        output: {
-          generic: [
+    const responseBlocks = [
             {
               response_type: "text",
               text: fullText,
@@ -144,16 +139,26 @@ async function customSendMessage(request, _options, instance) {
                 stream_stopped: false,
               },
             },
-            {
-              response_type: "user_defined",
-              user_defined: {
-                user_defined_type: "reference_docs_button",
-                docs,
-                original_text: fullText,
-                button_label: "Get reference documents",
-            },
-            },
-          ],
+          ]
+
+    if (docs.length > 0) {
+      responseBlocks.push({
+        response_type: "user_defined",
+        user_defined: {
+          user_defined_type: "reference_docs_button",
+          docs,
+          original_text: fullText,
+          button_label: "Get reference documents",
+        },
+      });
+    }
+
+    // Final response (wraps the message in final format)
+    await instance.messaging.addMessageChunk({
+      final_response: {
+        id: responseId,
+        output: {
+          generic: responseBlocks
         },
         message_options: {
           response_user_profile: ResponseUserProfile
