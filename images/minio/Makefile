@@ -9,6 +9,7 @@ build:
 	$(CONTAINER_BUILDER) build --pull=always --build-arg MINIO_RELEASE=${MINIO_RELEASE} -t $(REGISTRY)/$(IMAGE):$(TAG) .
 .PHONY: build
 
+
 push:
 	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(TAG)
 .PHONY: push
