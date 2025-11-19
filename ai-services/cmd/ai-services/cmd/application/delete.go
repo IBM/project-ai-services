@@ -68,9 +68,7 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 		logger.Infof("\t-> %s\n", pod.Name)
 	}
 
-	logger.Infof("Are you sure you want to delete above pods? (y/N): ")
-
-	confirmDelete, err := utils.ConfirmAction()
+	confirmDelete, err := utils.ConfirmAction("Are you sure you want to delete above pods? ")
 	if err != nil {
 		return fmt.Errorf("failed to take user input: %w", err)
 	}
