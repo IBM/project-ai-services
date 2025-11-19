@@ -1,61 +1,100 @@
-name: Upload Release Asset
+# name: Upload Release Asset
+
+# on:
+#   push:
+#     tags:
+#       - 'v*'
+
+# jobs:
+#   build:
+#     name: Build
+#     runs-on: ubuntu-24.04-ppc64le
+
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v5
+#         with:
+#           fetch-depth: 0
+      
+#       - name: Setup Go
+#         run: |
+#           GO_VERSION="1.24.1"
+#           wget https://go.dev/dl/go${GO_VERSION}.linux-ppc64le.tar.gz
+#           sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-ppc64le.tar.gz
+#           echo "/usr/local/go/bin" >> $GITHUB_PATH
+
+#       - run: go version
+
+#       - name: Build Go binary
+#         run: |
+#           cd ai-services
+#           make build
+
+#       - name: Archive binary
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: ai-services-binary
+#           path: ai-services/bin/ai-services
+
+#   release:
+#     needs: build
+#     runs-on: ubuntu-24.04-ppc64le
+#     if: ${{ success() }}
+#     steps:
+#       - name: Download all artifacts
+#         uses: actions/download-artifact@v6
+#         with:
+#           path: ./downloaded-artifacts
+
+#       - name: Create Release
+#         id: create_release
+#         uses: softprops/action-gh-release@v2
+#         env:
+#           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#         with:
+#           tag_name: ${{ github.ref_name }}
+#           name: Release ${{ steps.get_version.outputs.VERSION }}
+#           draft: true
+#           prerelease: true
+#           generate_release_notes: true
+#           files: |
+#             ./downloaded-artifacts/**
 
 on:
   push:
-    tags:
-      - 'v*'
+    paths:
+      - 'images/etcd/**'
+    branches:
+      - main
+  
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  ICR_REGISTRY: icr.io
+  ICR_NAMESPACE: ai-services-cicd
 
 jobs:
-  build:
-    name: Build
+  build-publish-image:
+    name: etcd
     runs-on: ubuntu-24.04-ppc64le
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
+      - name: Podman login
+        run: |
+          echo ${{ secrets.ICR_USERNAME }}
       
-      - name: Setup Go
+      - name: Build etcd image
+        working-directory: images/etcd
         run: |
-          GO_VERSION="1.24.1"
-          wget https://go.dev/dl/go${GO_VERSION}.linux-ppc64le.tar.gz
-          sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-ppc64le.tar.gz
-          echo "/usr/local/go/bin" >> $GITHUB_PATH
+          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
 
-      - run: go version
-
-      - name: Build Go binary
+      - name: Publish etcd image
+        working-directory: images/etcd
         run: |
-          cd ai-services
-          make build
-
-      - name: Archive binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-services-binary
-          path: ai-services/bin/ai-services
-
-  release:
-    needs: build
-    runs-on: ubuntu-24.04-ppc64le
-    if: ${{ success() }}
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v6
-        with:
-          path: ./downloaded-artifacts
-
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ steps.get_version.outputs.VERSION }}
-          draft: true
-          prerelease: true
-          generate_release_notes: true
-          files: |
-            ./downloaded-artifacts/**
+          make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
