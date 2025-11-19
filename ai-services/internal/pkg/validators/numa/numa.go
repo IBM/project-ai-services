@@ -15,7 +15,7 @@ func NewNumaRule() *NumaRule {
 	return &NumaRule{}
 }
 
-func (r *NumaRule) String() string {
+func (r *NumaRule) Name() string {
 	return "numa"
 }
 

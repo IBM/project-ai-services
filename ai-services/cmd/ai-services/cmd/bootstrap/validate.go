@@ -8,13 +8,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators/bootstrap"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators/bootstrap/numa"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators/bootstrap/platform"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators/bootstrap/power"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators/bootstrap/rhn"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators/bootstrap/root"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators/bootstrap/spyre"
+	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/spf13/cobra"
 )
 
@@ -103,20 +97,11 @@ Available checks to skip:
 }
 
 func RunValidateCmd(skip map[string]bool) error {
-	validationRules := []bootstrap.Rule{
-		root.NewRootRule(),
-		platform.NewPlatformRule(),
-		power.NewPowerRule(),
-		rhn.NewRHNRule(),
-		spyre.NewSpyreRule(),
-		numa.NewNumaRule(),
-	}
-
 	var validationErrors []error
 	ctx := context.Background()
 
-	for _, rule := range validationRules {
-		ruleName := rule.String()
+	for _, rule := range validators.DefaultRegistry.Rules() {
+		ruleName := rule.Name()
 		if skip[ruleName] {
 			continue
 		}

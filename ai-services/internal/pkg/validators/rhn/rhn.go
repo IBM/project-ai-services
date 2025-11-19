@@ -14,7 +14,7 @@ func NewRHNRule() *RHNRule {
 	return &RHNRule{}
 }
 
-func (r *RHNRule) String() string {
+func (r *RHNRule) Name() string {
 	return "rhn"
 }
 

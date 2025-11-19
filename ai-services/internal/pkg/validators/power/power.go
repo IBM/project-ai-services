@@ -15,7 +15,7 @@ func NewPowerRule() *PowerRule {
 	return &PowerRule{}
 }
 
-func (r *PowerRule) String() string {
+func (r *PowerRule) Name() string {
 	return "power"
 }
 

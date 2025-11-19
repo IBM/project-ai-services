@@ -15,7 +15,7 @@ func NewPlatformRule() *PlatformRule {
 	return &PlatformRule{}
 }
 
-func (r *PlatformRule) String() string {
+func (r *PlatformRule) Name() string {
 	return "platform"
 }
 

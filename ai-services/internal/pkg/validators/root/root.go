@@ -13,7 +13,7 @@ func NewRootRule() *RootRule {
 	return &RootRule{}
 }
 
-func (r *RootRule) String() string {
+func (r *RootRule) Name() string {
 	return "root"
 }
 

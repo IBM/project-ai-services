@@ -14,7 +14,7 @@ func NewSpyreRule() *SpyreRule {
 	return &SpyreRule{}
 }
 
-func (r *SpyreRule) String() string {
+func (r *SpyreRule) Name() string {
 	return "spyre"
 }
 
