@@ -114,7 +114,7 @@ def list_models():
         return jsonify({"error": repr(e)})
 
 @app.route("/v1/chat/completions", methods=["POST"])
-def stream_chat_complete():
+def chat_completion():
     data = request.get_json()
     msgs = data.get("messages")[0]
     prompt = msgs.get("content")
