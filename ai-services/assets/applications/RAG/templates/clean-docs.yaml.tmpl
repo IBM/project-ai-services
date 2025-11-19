@@ -32,7 +32,7 @@ spec:
         - name: MILVUS_COLLECTION_NAME
           value: "{{ .AppName  }}"
       volumeMounts:
-        - mountPath: /var/cache:Z
+        - mountPath: /var/cache:z
           name: cache
   restartPolicy: OnFailure
   volumes:

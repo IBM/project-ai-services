@@ -66,7 +66,7 @@ spec:
       ports:
         - containerPort: 8000
       volumeMounts:
-        - mountPath: /models:Z
+        - mountPath: /models:z
           name: models
           readOnly: true
         - mountPath: /dev/shm
@@ -93,7 +93,7 @@ spec:
       ports:
         - containerPort: 8001
       volumeMounts:
-        - mountPath: /models:Z
+        - mountPath: /models:z
           name: models
           readOnly: true
     - name: reranker
@@ -118,6 +118,6 @@ spec:
       ports:
         - containerPort: 8002
       volumeMounts:
-        - mountPath: /models:Z
+        - mountPath: /models:z
           name: models
           readOnly: true
