@@ -8,7 +8,6 @@ app.use(json());
 
 // Proxy endpoint
 app.post('/v1/chat/completions', async (req, res) => {
-  console.log("req is ", req)
   const targetURL = process.env.TARGET_URL
   console.log(`Forwarding request to: ${targetURL}`);
   try {
@@ -23,7 +22,6 @@ app.post('/v1/chat/completions', async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Access-Control-Allow-Origin', '*');
 
     // Pipe the stream directly from upstream to browser
     upstreamResponse.data.pipe(res);
