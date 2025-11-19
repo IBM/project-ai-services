@@ -1,11 +1,11 @@
-name: Images
+name: Minio
 on:
   push:
     # paths:
     #   - 'images/**'
     branches:
       - main
-  pull_request:
+  pull_request_target:
     # paths:
     #   - 'images/**'
     branches:
@@ -24,6 +24,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+      - name: Podman login
+        run: |
+          echo ${{ secrets.ICR_APIKEY }} | podman login ${{ env.ICR_REGISTRY }} -u ${{ secrets.ICR_USERNAME }} --password-stdin
       
       - name: Build minio image
         working-directory: images/minio
