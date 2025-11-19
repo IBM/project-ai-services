@@ -3,6 +3,7 @@ IMAGE=etcd
 TAG?=3.6.5
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
+
 CONTAINER_BUILDER?=podman
 build:
 	$(CONTAINER_BUILDER) build --pull=always --build-arg ETCD_VERSION=${TAG} -t $(REGISTRY)/$(IMAGE):$(TAG) .
