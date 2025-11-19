@@ -96,10 +96,10 @@ def summarize_table(table_html, table_caption, gen_model, llm_endpoint, max_work
 
     return summaries
 
-def query_vllm_models(llm_endpoint, headers):
+def query_vllm_models(llm_endpoint):
     logger.debug('Querying VLLM models')
     try:
-        response = requests.get(f"{llm_endpoint}/v1/models", headers=headers)
+        response = requests.get(f"{llm_endpoint}/v1/models")
         response.raise_for_status()
         resp_json = response.json()
     except requests.exceptions.RequestException as e:
