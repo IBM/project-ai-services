@@ -61,16 +61,8 @@
 #             ./downloaded-artifacts/**
 
 on:
-  push:
-    paths:
-      - 'images/etcd/**'
-    branches:
-      - main
+  pull_request:
   
-  pull_request_target:
-    types: [opened, reopened, synchronize]
-    branches:
-      - main
   workflow_dispatch:
 
 env:
