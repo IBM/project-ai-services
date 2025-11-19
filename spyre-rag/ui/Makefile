@@ -1,6 +1,6 @@
 REGISTRY?=icr.io/ai-services-private
 IMAGE=rag-ui
-TAG?=v0.0.2
+TAG?=v0.0.3
 
 CONTAINER_BUILDER?=podman
 build:
