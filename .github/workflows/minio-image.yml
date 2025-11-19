@@ -5,12 +5,6 @@ on:
       - 'images/minio/**'
     branches:
       - main
-  
-  pull_request:
-    paths:
-      - 'images/minio/**'
-    branches:
-      - main
 
 env:
   ICR_REGISTRY: icr.io

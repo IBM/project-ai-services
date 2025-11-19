@@ -6,11 +6,11 @@ on:
     branches:
       - main
   
-  pull_request:
-    paths:
-      - 'images/rag-base/**'
-    branches:
-      - main
+  # pull_request:
+  #   paths:
+  #     - 'images/rag-base/**'
+  #   branches:
+  #     - main
 
 env:
   ICR_REGISTRY: icr.io
