@@ -20,7 +20,7 @@ var pullCmd = &cobra.Command{
 }
 
 func pull(template string) error {
-	images, err := helpers.ListImages(template)
+	images, err := helpers.ListImages(template, "")
 	if err != nil {
 		return fmt.Errorf("error listing images: %w", err)
 	}

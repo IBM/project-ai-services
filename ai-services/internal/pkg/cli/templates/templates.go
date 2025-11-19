@@ -37,7 +37,7 @@ type Template interface {
 	// LoadPodTemplate loads and renders a pod template with the given parameters
 	LoadPodTemplate(app, file string, params any) (*models.PodSpec, error)
 	// LoadPodTemplateWithDummyParams loads and renders a pod template with the dummy parameters
-	LoadPodTemplateWithDummyParams(app, file string) (*models.PodSpec, error)
+	LoadPodTemplateWithDummyParams(app, file, appName string) (*models.PodSpec, error)
 	// LoadMetadata loads the metadata for a given application template
 	LoadMetadata(app string) (*AppMetadata, error)
 	// LoadMdFiles loads all md files for a given application

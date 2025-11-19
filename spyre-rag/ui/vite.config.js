@@ -7,12 +7,26 @@ export default defineConfig(() => {
     build: {
       outDir: 'build',
     },
-    server: {
-      port: 3000,
-    },
     preview: {
       port: 3010,
     },
     plugins: [react()],
+    server: {
+      port: 3000,
+      proxy: {
+        "/generate": {
+          target: "http://localhost:3001",
+          changeOrigin: true,
+        },
+        "/stream": {
+          target: "http://localhost:3001",
+          changeOrigin: true,
+        },
+        "/reference": {
+          target: "http://localhost:3001",
+          changeOrigin: true,
+        },
+      },
+    },
   };
 });

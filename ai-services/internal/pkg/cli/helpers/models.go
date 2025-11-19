@@ -13,7 +13,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-func ListModels(template string) ([]string, error) {
+func ListModels(template, appName string) ([]string, error) {
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
 	tmpls, err := tp.LoadAllTemplates(template)
 	if err != nil {
@@ -32,7 +32,7 @@ func ListModels(template string) ([]string, error) {
 
 	modelList := []string{}
 	for _, tmpl := range tmpls {
-		ps, err := tp.LoadPodTemplateWithDummyParams(template, tmpl.Name())
+		ps, err := tp.LoadPodTemplateWithDummyParams(template, tmpl.Name(), appName)
 		if err != nil {
 			return nil, fmt.Errorf("error loading pod template: %w", err)
 		}

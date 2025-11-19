@@ -19,7 +19,7 @@ var listCmd = &cobra.Command{
 }
 
 func list(templateName string) error {
-	images, err := helpers.ListImages(templateName)
+	images, err := helpers.ListImages(templateName, "")
 	if err != nil {
 		return fmt.Errorf("error listing images: %w", err)
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-func ListImages(template string) ([]string, error) {
+func ListImages(template, appName string) ([]string, error) {
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
 	apps, err := tp.ListApplications()
 	if err != nil {
@@ -29,7 +29,7 @@ func ListImages(template string) ([]string, error) {
 	}
 
 	for _, tmpl := range tmpls {
-		ps, err := tp.LoadPodTemplateWithDummyParams(template, tmpl.Name())
+		ps, err := tp.LoadPodTemplateWithDummyParams(template, tmpl.Name(), appName)
 		if err != nil {
 			return nil, fmt.Errorf("error loading pod template: %w", err)
 		}

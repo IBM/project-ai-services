@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/containers/podman/v5/libpod/define"
+	"github.com/containers/podman/v5/pkg/domain/entities/types"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -137,4 +138,33 @@ func ParseSkipChecks(skipChecks []string) map[string]bool {
 		}
 	}
 	return skipMap
+}
+
+// CheckExistingPodsForApplication checks if there are pods already existing for the given application name
+func CheckExistingPodsForApplication(runtime runtime.Runtime, appName string) ([]string, error) {
+	// var podsExists bool
+	var podsToSkip []string
+	resp, err := runtime.ListPods(map[string][]string{
+		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods: %w", err)
+	}
+
+	var pods []*types.ListPodsReport
+	if val, ok := resp.([]*types.ListPodsReport); ok {
+		pods = val
+	}
+
+	if len(pods) == 0 {
+		logger.Infof("No existing pods found for application: %s\n", appName)
+		return nil, nil
+	}
+
+	logger.Infoln("Checking status of existing pods...")
+	for _, pod := range pods {
+		logger.Infof("Existing pod found: %s with status: %s\n", pod.Name, pod.Status)
+		podsToSkip = append(podsToSkip, pod.Name)
+	}
+	return podsToSkip, nil
 }

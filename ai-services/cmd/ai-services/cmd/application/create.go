@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,10 +29,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
-)
-
-const (
-	applicationPath = "applications/"
 )
 
 var (
@@ -133,7 +130,7 @@ var createCmd = &cobra.Command{
 		// ---- Validate Spyre card Requirements ----
 
 		// calculate the required spyre cards
-		reqSpyreCardsCount, err := calculateReqSpyreCards(tp, utils.ExtractMapKeys(tmpls), templateName)
+		reqSpyreCardsCount, err := calculateReqSpyreCards(tp, utils.ExtractMapKeys(tmpls), templateName, appName)
 		if err != nil {
 			return err
 		}
@@ -157,7 +154,7 @@ var createCmd = &cobra.Command{
 		if !skipModelDownload {
 			s = spinner.New("Downloading models as part of application creation...")
 			s.Start(ctx)
-			models, err := helpers.ListModels(templateName)
+			models, err := helpers.ListModels(templateName, appName)
 			if err != nil {
 				s.Fail("failed to list models")
 				return err
@@ -185,10 +182,22 @@ var createCmd = &cobra.Command{
 		// Loop through all pod templates, render and run kube play
 		logger.Infof("Total Pod Templates to be processed: %d\n", len(tmpls))
 
+		/*
+			Pod Execution Logic:
+			1. Check if pods already exists with the given application name
+			2. If doesn't exists, proceed to create all pods
+			3. Else, skip existing pods, and create missing pods
+		*/
+
+		existingPods, err := helpers.CheckExistingPodsForApplication(runtime, appName)
+		if err != nil {
+			return fmt.Errorf("failed while checking existing pods for application: %w", err)
+		}
+
 		s = spinner.New("Deploying application '" + appName + "'...")
 		s.Start(ctx)
 		// execute the pod Templates
-		if err := executePodTemplates(runtime, tp, appName, appMetadata, tmpls, pciAddresses); err != nil {
+		if err := executePodTemplates(runtime, tp, appName, appMetadata, tmpls, pciAddresses, existingPods); err != nil {
 			return err
 		}
 		s.Stop("Application '" + appName + "' deployed successfully")
@@ -332,7 +341,7 @@ func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *t
 }
 
 func executePodTemplates(runtime runtime.Runtime, tp templates.Template, appName string, appMetadata *templates.AppMetadata,
-	tmpls map[string]*template.Template, pciAddresses []string) error {
+	tmpls map[string]*template.Template, pciAddresses []string, existingPods []string) error {
 
 	globalParams := map[string]any{
 		"AppName":         appName,
@@ -361,9 +370,14 @@ func executePodTemplates(runtime runtime.Runtime, tp templates.Template, appName
 				params := utils.CopyMap(globalParams)
 
 				// fetch pod Spec
-				podSpec, err := fetchPodSpec(tp, templateName, podTemplateName)
+				podSpec, err := fetchPodSpec(tp, templateName, podTemplateName, appName)
 				if err != nil {
 					errCh <- err
+				}
+
+				if slices.Contains(existingPods, podSpec.Name) {
+					logger.Infof("Skipping pod: %s as it already exists", podSpec.Name)
+					return
 				}
 
 				// fetch annotations from pod Spec
@@ -464,13 +478,13 @@ func validateSpyreCardRequirements(req int, actual int) error {
 	return nil
 }
 
-func calculateReqSpyreCards(tp templates.Template, podTemplateFileNames []string, appTemplateName string) (int, error) {
+func calculateReqSpyreCards(tp templates.Template, podTemplateFileNames []string, appTemplateName, appName string) (int, error) {
 	totalReqSpyreCounts := 0
 
 	// Calculate Req Spyre Counts
 	for _, podTemplateFileName := range podTemplateFileNames {
 		// fetch pod spec
-		podSpec, err := fetchPodSpec(tp, appTemplateName, podTemplateFileName)
+		podSpec, err := fetchPodSpec(tp, appTemplateName, podTemplateFileName, appName)
 		if err != nil {
 			return totalReqSpyreCounts, fmt.Errorf("failed to load pod Template: '%s' for appTemplate: '%s' with error: %w", podTemplateFileName, appTemplateName, err)
 		}
@@ -515,8 +529,8 @@ func fetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[
 	return spyreCards, spyreCardContainerMap, nil
 }
 
-func fetchPodSpec(tp templates.Template, appTemplateName, podTemplateFileName string) (*models.PodSpec, error) {
-	podSpec, err := tp.LoadPodTemplateWithDummyParams(appTemplateName, podTemplateFileName)
+func fetchPodSpec(tp templates.Template, appTemplateName, podTemplateFileName, appName string) (*models.PodSpec, error) {
+	podSpec, err := tp.LoadPodTemplateWithDummyParams(appTemplateName, podTemplateFileName, appName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load pod Template: '%s' for appTemplate: '%s' with error: %w", podTemplateFileName, appTemplateName, err)
 	}

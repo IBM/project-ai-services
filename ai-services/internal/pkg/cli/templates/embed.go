@@ -101,9 +101,9 @@ func (e *embedTemplateProvider) LoadPodTemplate(app, file string, params any) (*
 }
 
 // LoadPodTemplate loads and renders a pod template with the dummy parameters
-func (e *embedTemplateProvider) LoadPodTemplateWithDummyParams(app, file string) (*models.PodSpec, error) {
+func (e *embedTemplateProvider) LoadPodTemplateWithDummyParams(app, file, appName string) (*models.PodSpec, error) {
 	dummyParams := map[string]any{
-		"AppName":         "dummy-app",
+		"AppName":         appName,
 		"AppTemplateName": "",
 		"Version":         "",
 	}

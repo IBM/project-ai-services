@@ -19,17 +19,17 @@ var stopCmd = &cobra.Command{
 		- [name]: Application name (Required)
 		
 		Flags
-		- [pod-name]: Pod name (Optional)
-					  Can be specified multiple times: --pod-name=pod1 --pod-name=pod2
-                      Or comma-separated: --pod-name=pod1,pod2	
+		- [pod]: Pod name (Optional)
+					  Can be specified multiple times: --pod=pod1 --pod=pod2
+                      Or comma-separated: --pod=pod1,pod2	
 	`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		applicationName := args[0]
 
-		podnames, err := cmd.Flags().GetStringSlice("pod-name")
+		podnames, err := cmd.Flags().GetStringSlice("pod")
 		if err != nil {
-			return fmt.Errorf("failed to parse pod-name flag: %w", err)
+			return fmt.Errorf("failed to parse --pod flag: %w", err)
 		}
 
 		runtimeClient, err := podman.NewPodmanClient()
@@ -42,7 +42,7 @@ var stopCmd = &cobra.Command{
 }
 
 func init() {
-	stopCmd.Flags().StringSlice("pod-name", []string{}, "Specific pod name(s) to stop (optional)")
+	stopCmd.Flags().StringSlice("pod", []string{}, "Specific pod name(s) to stop (optional)")
 }
 
 // stopApplication stops all pods associated with the given application name
