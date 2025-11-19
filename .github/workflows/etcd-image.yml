@@ -1,0 +1,42 @@
+name: Minio
+on:
+  push:
+    paths:
+      - 'images/etcd/**'
+    branches:
+      - main
+  
+  # pull_request:
+  # branches:
+  #     - main
+  
+  pull_request_target:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  ICR_REGISTRY: icr.io
+  ICR_NAMESPACE: ai-services-cicd
+
+jobs:
+  build-publish-image:
+    name: etcd
+    runs-on: ubuntu-24.04-ppc64le
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Podman login
+        run: |
+          echo ${{ secrets.ICR_USERNAME }}
+      
+      - name: Build etcd image
+        working-directory: images/etcd
+        run: |
+          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
+
+      - name: Publish etcd image
+        working-directory: images/etcd
+        run: |
+          make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
