@@ -25,6 +25,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
       
+      - name: Log in to ${{ env.ICR_REGISTRY }}
+        uses: redhat-actions/podman-login@v1
+        with:
+          username: ${{ secrets.ICR_USERNAME }}
+          password: ${{ secrets.ICR_APIKEY }}
+          registry: ${{ env.ICR_REGISTRY }}
+        
       - name: Build spyre-rag image
         working-directory: spyre-rag
         run: |
