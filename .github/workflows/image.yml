@@ -1,13 +1,13 @@
 name: Images
 on:
   push:
-    paths:
-      - 'images/**'
+    # paths:
+    #   - 'images/**'
     branches:
       - main
   pull_request:
-    paths:
-      - 'images/**'
+    # paths:
+    #   - 'images/**'
     branches:
       - main
   workflow_dispatch:
@@ -33,4 +33,4 @@ jobs:
       - name: Publish minio image
         working-directory: images/minio
         run: |
-          make PUSH REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+          make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
