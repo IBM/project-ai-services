@@ -2,6 +2,7 @@ name: RAG
 version: 0.0.1
 description: "Description of RAG purpose"
 smtLevel: 2
+timeout: 1800
 podTemplateExecutions:
   - [milvus.yaml.tmpl, vllm-server.yaml.tmpl]
   - [clean-docs.yaml.tmpl]

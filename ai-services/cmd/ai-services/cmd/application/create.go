@@ -42,6 +42,8 @@ var (
 	skipModelDownload bool
 	skipChecks        []string
 	rawArgParams      []string
+	timeout           time.Duration
+	timeoutSeconds    int64
 
 	argParams map[string]string
 )
@@ -61,6 +63,7 @@ var createCmd = &cobra.Command{
 	},
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
+
 		// validate params flag
 		if len(rawArgParams) > 0 {
 			argParams, err = utils.ParseKeyValues(rawArgParams)
@@ -68,6 +71,18 @@ var createCmd = &cobra.Command{
 				return fmt.Errorf("error validating params flag: %v", err)
 			}
 		}
+
+		// fetch the timeout and normalize it to seconds
+		dur, err := cmd.Flags().GetDuration("timeout")
+		if err != nil {
+			return err
+		}
+
+		timeoutSeconds = int64(dur.Seconds())
+		if timeoutSeconds < 0 {
+			return fmt.Errorf("timeout must be >= 0")
+		}
+
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -196,10 +211,23 @@ var createCmd = &cobra.Command{
 
 		s = spinner.New("Deploying application '" + appName + "'...")
 		s.Start(ctx)
-		// execute the pod Templates
-		if err := executePodTemplates(runtime, tp, appName, appMetadata, tmpls, pciAddresses, existingPods); err != nil {
-			return err
+
+		// Set Timeout
+		if timeoutSeconds == 0 {
+			timeoutSeconds = appMetadata.Timeout
 		}
+		timeout = time.Duration(timeoutSeconds) * time.Second
+
+		logger.Infof("\nTimeout set: %ds\n", timeoutSeconds)
+
+		err = utils.RunWithTimeout(timeout, func(ctx context.Context) error {
+			return executePodTemplates(ctx, runtime, tp, appName, appMetadata, tmpls, pciAddresses, existingPods)
+		})
+		if err != nil {
+			logger.Errorf("Failed to execute and deploy pod templates: %v", err)
+			return nil
+		}
+
 		s.Stop("Application '" + appName + "' deployed successfully")
 
 		logger.Infoln("-------")
@@ -222,6 +250,7 @@ func init() {
 	createCmd.MarkFlagRequired("template")
 	createCmd.Flags().BoolVar(&skipModelDownload, "skip-model-download", false, "Set to true to skip model download during application creation. This assumes local models are already available at /var/lib/ai-services/models/ and is particularly beneficial for air-gapped networks with limited internet access. If not set correctly (e.g., set to true when models are missing, or left false in an air-gapped environment), the create command may fail.")
 	createCmd.Flags().StringSliceVar(&rawArgParams, "params", []string{}, "Parameters required to configure the application. Takes Comma-separated key=value pairs. Values Supported: UI_PORT=8000")
+	createCmd.Flags().DurationVar(&timeout, "timeout", 0, "timeout duration (e.g. 5s, 2m, 1h)")
 }
 
 func getSMTLevel(output string) (int, error) {
@@ -340,7 +369,7 @@ func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *t
 	return nil
 }
 
-func executePodTemplates(runtime runtime.Runtime, tp templates.Template, appName string, appMetadata *templates.AppMetadata,
+func executePodTemplates(ctx context.Context, runtime runtime.Runtime, tp templates.Template, appName string, appMetadata *templates.AppMetadata,
 	tmpls map[string]*template.Template, pciAddresses []string, existingPods []string) error {
 
 	globalParams := map[string]any{
@@ -352,76 +381,104 @@ func executePodTemplates(runtime runtime.Runtime, tp templates.Template, appName
 		"env": map[string]map[string]string{},
 	}
 
+	executePodTemplate := func(podTemplateName string) error {
+		logger.Infof("Processing template: %s...\n", podTemplateName)
+
+		// Shallow Copy globalParams Map
+		params := utils.CopyMap(globalParams)
+
+		// fetch pod Spec
+		podSpec, err := fetchPodSpec(tp, templateName, podTemplateName, appName)
+		if err != nil {
+			return err
+		}
+
+		if slices.Contains(existingPods, podSpec.Name) {
+			logger.Infof("Skipping pod: %s as it already exists", podSpec.Name)
+			return nil
+		}
+
+		// fetch annotations from pod Spec
+		podAnnotations := fetchPodAnnotations(podSpec)
+
+		// get the env params for a given pod
+		env, err := returnEnvParamsForPod(podSpec, podAnnotations, &pciAddresses)
+		if err != nil {
+			return err
+		}
+		params["env"] = env
+
+		podTemplate := tmpls[podTemplateName]
+
+		var rendered bytes.Buffer
+		if err := podTemplate.Execute(&rendered, params); err != nil {
+			return err
+		}
+
+		// Wrap the bytes in a bytes.Reader
+		reader := bytes.NewReader(rendered.Bytes())
+
+		// Deploy the Pod and do Readiness check
+		if err := deployPodAndReadinessCheck(runtime, podTemplateName, reader, constructPodDeployOptions(podAnnotations)); err != nil {
+			return err
+		}
+
+		return nil
+	}
+
 	// looping over each layer of podTemplateExecutions
 	for i, layer := range appMetadata.PodTemplateExecutions {
 		logger.Infof("\n Executing Layer %d: %v\n", i+1, layer)
 		logger.Infoln("-------")
 		var wg sync.WaitGroup
 		errCh := make(chan error, len(layer))
+		done := make(chan struct{})
 
 		// for each layer, fetch all the pod Template Names and do the pod deploy
 		for _, podTemplateName := range layer {
 			wg.Add(1)
 			go func(t string) {
 				defer wg.Done()
-				logger.Infof("Processing template: %s...\n", podTemplateName)
 
-				// Shallow Copy globalParams Map
-				params := utils.CopyMap(globalParams)
-
-				// fetch pod Spec
-				podSpec, err := fetchPodSpec(tp, templateName, podTemplateName, appName)
-				if err != nil {
-					errCh <- err
-				}
-
-				if slices.Contains(existingPods, podSpec.Name) {
-					logger.Infof("Skipping pod: %s as it already exists", podSpec.Name)
-					return
-				}
-
-				// fetch annotations from pod Spec
-				podAnnotations := fetchPodAnnotations(podSpec)
-
-				// get the env params for a given pod
-				env, err := returnEnvParamsForPod(podSpec, podAnnotations, &pciAddresses)
-				if err != nil {
-					errCh <- err
-				}
-				params["env"] = env
-
-				podTemplate := tmpls[podTemplateName]
-
-				var rendered bytes.Buffer
-				if err := podTemplate.Execute(&rendered, params); err != nil {
-					errCh <- err
-				}
-
-				// Wrap the bytes in a bytes.Reader
-				reader := bytes.NewReader(rendered.Bytes())
-
-				// Deploy the Pod and do Readiness check
-				if err := deployPodAndReadinessCheck(runtime, podTemplateName, reader, constructPodDeployOptions(podAnnotations)); err != nil {
-					errCh <- err
+				// Worker must respect context
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						if err := executePodTemplate(t); err != nil {
+							errCh <- err
+						}
+						return
+					}
 				}
 			}(podTemplateName)
 		}
 
-		wg.Wait()
-		close(errCh)
+		go func() {
+			// keep waiting until all the goroutines for a given layer are completed
+			wg.Wait()
+			close(errCh)
+			close(done)
+		}()
 
-		// collect all errors for this layer
-		var errs []error
-		for e := range errCh {
-			errs = append(errs, fmt.Errorf("layer %d: %w", i+1, e))
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-done:
+			// collect all errors for this layer
+			var errs []error
+			for e := range errCh {
+				errs = append(errs, fmt.Errorf("layer %d: %w", i+1, e))
+			}
+
+			// If an error exist for a given layer, then return (do not process further layers)
+			if len(errs) > 0 {
+				return errors.Join(errs...)
+			}
+
+			logger.Infof("Layer %d completed\n", i+1)
 		}
-
-		// If an error exist for a given layer, then return (do not process further layers)
-		if len(errs) > 0 {
-			return errors.Join(errs...)
-		}
-
-		logger.Infof("Layer %d completed\n", i+1)
 	}
 
 	return nil
