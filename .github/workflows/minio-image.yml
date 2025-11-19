@@ -7,8 +7,8 @@ on:
       - main
   
   pull_request:
-    # paths:
-    #   - 'images/minio/**'
+    paths:
+      - 'images/minio/**'
     branches:
       - main
 
@@ -25,16 +25,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
       
-      - name: Secret Echo
-        run: |
-          echo ${{ secrets.ICR_USERNAME }} 
-      
       - name: Build minio image
         working-directory: images/minio
         run: |
           make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: '${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}/minio:RELEASE.2025-10-15T17-29-55Z'
+          format: json
+          exit-code: 0
 
-      - name: Publish minio image
-        working-directory: images/minio
-        run: |
-          make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+
+      # - name: Publish minio image
+      #   working-directory: images/minio
+      #   run: |
+      #     make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
