@@ -11,6 +11,7 @@ on:
   #     - main
   
   pull_request_target:
+    types: [opened, reopened, synchronize]
     branches:
       - main
   workflow_dispatch:
