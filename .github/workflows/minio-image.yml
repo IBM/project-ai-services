@@ -1,0 +1,40 @@
+name: Minio
+on:
+  push:
+    paths:
+      - 'images/minio/**'
+    branches:
+      - main
+  
+  pull_request:
+    # paths:
+    #   - 'images/minio/**'
+    branches:
+      - main
+
+env:
+  ICR_REGISTRY: icr.io
+  ICR_NAMESPACE: ai-services-cicd
+
+jobs:
+  build-publish-image:
+    name: minio
+    runs-on: ubuntu-24.04-ppc64le
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      
+      - name: Secret Echo
+        run: |
+          echo ${{ secrets.ICR_USERNAME }} 
+      
+      - name: Build minio image
+        working-directory: images/minio
+        run: |
+          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
+
+      - name: Publish minio image
+        working-directory: images/minio
+        run: |
+          make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
