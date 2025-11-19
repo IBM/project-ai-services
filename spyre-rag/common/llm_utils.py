@@ -185,10 +185,11 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
         # Use requests for synchronous HTTP requests
         logger.debug("STREAMING RESPONSE")
         with requests.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=stream) as r:
-            for line in r.iter_lines(decode_unicode=True):
-                if line:
-                    logger.debug("Earlier response: ", line)
-                    yield line
+            for raw_line in r.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+
+                yield f"{raw_line}\n\n"
     except requests.exceptions.RequestException as e:
         logger.error(f"Error calling vLLM stream API: {e}, {e.response.text}")
         return {"error": str(e) + "\n" + e.response.text}, 0.

@@ -147,7 +147,7 @@ def stream_chat_complete():
         return jsonify({"error": repr(e)})
 
     return Response(stream_with_context(query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, stream, dynamic_chunk_truncation=TRUNCATION)),
-                    content_type='text/plain',
+                    content_type='text/event-stream',
                     mimetype='text/event-stream', headers={
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',

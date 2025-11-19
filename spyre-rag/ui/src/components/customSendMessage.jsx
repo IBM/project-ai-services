@@ -1,5 +1,12 @@
 import axios from "axios";
 import { UserType } from "@carbon/ai-chat";
+import { OpenAI } from "openai";
+
+const client = new OpenAI({
+  baseURL: window.location.origin + "/v1",
+  apiKey: "not-needed",
+  dangerouslyAllowBrowser: true, // Required for browser-side use to allow api-key
+});
 
 async function customSendMessage(request, _options, instance) {
   const userInput = request.input.text;
@@ -50,17 +57,18 @@ async function customSendMessage(request, _options, instance) {
     },
   });
 
+  const payload = {
+    messages: [{ role: "user", content: userInput }],
+    model: "ibm-granite/granite-3.3-8b-instruct",
+    temperature: 0.0,
+    stream: true,
+  };
+
   try {
 
     instance.updateIsLoadingCounter('increase');
 
-    const response = await fetch("/stream", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ prompt: userInput }),
-    });
+    const stream = await client.chat.completions.create(payload); 
 
     const context_response = await axios.post('/reference',  {
       prompt: userInput,
@@ -70,25 +78,20 @@ async function customSendMessage(request, _options, instance) {
     });
 
     instance.updateIsLoadingCounter('decrease');
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder("utf-8");
 
     let fullText = ""; // to accumulate final message
-    let done = false;
+    
+    for await (const chunk of stream) {
+      // to extract the content from the parsed JSON chunk
+      const textChunk = chunk.choices[0]?.delta?.content || "";
 
-    while (!done) {
-      const { value, done: doneReading } = await reader.read();
-      done = doneReading;
+      if (textChunk) {
+        fullText += textChunk;
 
-      if (value) {
-        const chunk = decoder.decode(value);
-        fullText += chunk;
-
-        // Send each streamed partial item chunk
         await instance.messaging.addMessageChunk({
           partial_item: {
             response_type: "text",
-            text: chunk,
+            text: textChunk, 
             streaming_metadata: {
               id: itemId,
               cancellable: true,

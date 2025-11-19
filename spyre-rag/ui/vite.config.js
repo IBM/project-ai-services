@@ -7,6 +7,9 @@ export default defineConfig(() => {
     build: {
       outDir: 'build',
     },
+    server: {
+      port: 3000,
+    },
     preview: {
       port: 3010,
     },
@@ -14,11 +17,7 @@ export default defineConfig(() => {
     server: {
       port: 3000,
       proxy: {
-        "/generate": {
-          target: "http://localhost:3001",
-          changeOrigin: true,
-        },
-        "/stream": {
+        "/v1/chat/completions": {
           target: "http://localhost:3001",
           changeOrigin: true,
         },
