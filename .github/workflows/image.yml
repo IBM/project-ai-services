@@ -1,13 +1,16 @@
 name: Minio
 on:
   push:
-    # paths:
-    #   - 'images/**'
+    paths:
+      - 'images/**'
     branches:
       - main
+  
+  # pull_request:
+  # branches:
+  #     - main
+  
   pull_request_target:
-    # paths:
-    #   - 'images/**'
     branches:
       - main
   workflow_dispatch:
