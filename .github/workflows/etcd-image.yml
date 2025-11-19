@@ -5,7 +5,7 @@ on:
       - 'images/etcd/**'
     branches:
       - main
-  
+
   pull_request:
     paths:
       - 'images/etcd/**'
@@ -24,21 +24,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-      
+
       - name: Build etcd image
         working-directory: images/etcd
         run: |
           make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
-      
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: '${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}/etcd:3.6.5'
-          format: json
-          exit-code: 0
 
-
-      # - name: Publish etcd image
-      #   working-directory: images/etcd
-      #   run: |
-      #     make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+      - name: Publish etcd image
+        working-directory: images/etcd
+        run: |
+          make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}

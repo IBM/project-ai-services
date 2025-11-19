@@ -29,14 +29,6 @@ jobs:
         working-directory: images/minio
         run: |
           make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
-      
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: '${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}/minio:RELEASE.2025-10-15T17-29-55Z'
-          format: json
-          exit-code: 0
-
 
       # - name: Publish minio image
       #   working-directory: images/minio
