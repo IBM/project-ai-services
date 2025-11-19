@@ -29,7 +29,7 @@ jobs:
         run: |
           podman login ${{ env.ICR_REGISTRY }} \
             --username ${{ secrets.ICR_USERNAME }} \
-            --password ${{ secrets.ICR_API_KEY }}
+            --password ${{ secrets.ICR_APIKEY }}
         
       - name: Build spyre-rag image
         working-directory: spyre-rag
