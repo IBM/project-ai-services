@@ -116,6 +116,8 @@ def list_models():
 @app.route("/v1/chat/completions", methods=["POST"])
 def chat_completion():
     data = request.get_json()
+    if data and len(data.get("messages", [])) == 0:
+        return jsonify({"error": "messages can't be empty"})
     msgs = data.get("messages")[0]
     prompt = msgs.get("content")
     num_chunks_post_rrf = data.get("num_chunks_post_rrf", 10)
