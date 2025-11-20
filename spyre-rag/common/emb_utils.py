@@ -7,7 +7,7 @@ logger = get_logger("embed")
 
 from common.misc_utils import get_logger
 
-logger = get_logger("embedding")
+logger = get_logger("Embedding")
 
 class Embedding:
     def __init__(self, emb_model, emb_endpoint, max_tokens):
