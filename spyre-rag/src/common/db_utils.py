@@ -110,9 +110,9 @@ class MilvusVectorStore:
         name = self._generate_collection_name()
         if utility.has_collection(name):
             utility.drop_collection(name)
-            logger.info(f"✅ Collection {name} deleted.")
+            logger.info(f"Collection {name} deleted.")
         else:
-            logger.info(f"ℹ️ Collection {name} does not exist.")
+            logger.info(f"Collection {name} does not exist!")
 
         files_to_remove = glob(os.path.join(LOCAL_CACHE_DIR, name+"*"))
         if files_to_remove:
@@ -124,7 +124,7 @@ class MilvusVectorStore:
                     os.remove(file_path)
                 except OSError as e:
                     logger.error(f"Error removing {file_path}: {e}")
-            logger.info("Local cache cleaned up")
+            logger.info("Local cache cleaned up.")
         else:
             logger.info("Local cache cleaned up already!")
 
@@ -143,7 +143,7 @@ class MilvusVectorStore:
         self.collection = self._setup_collection(self.collection_name, dim)
         self.collection.load()
 
-        logger.info(f"Inserting {len(chunks)} chunks into Milvus...")
+        logger.debug(f"Inserting {len(chunks)} chunks into Milvus...")
 
         for i in tqdm(range(0, len(chunks), batch_size)):
             batch = chunks[i:i + batch_size]
@@ -178,7 +178,7 @@ class MilvusVectorStore:
         self.sparse_matrix = self.vectorizer.fit_transform(self.page_content_corpus)
 
         self._save_sparse_index()
-        logger.info(f"Inserted {len(chunks)} chunks into collection '{self.collection_name}'.")
+        logger.debug(f"Inserted the chunks into collection.")
 
     def _rrf_fusion(self, dense_results, sparse_results, top_k):
         """
