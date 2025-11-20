@@ -1,0 +1,45 @@
+name: Go
+
+on:
+  push:
+    paths:
+      - 'ai-services/**'
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'ai-services/**'
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'ai-services/go.mod'
+
+      - run: go version
+
+      - name: Go mod tidy
+        working-directory: ai-services
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+ 
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.59.0
+          working-directory: ai-services
+
+      - name: Build Go binary
+        working-directory: ai-services
+        run: |
+          GOOS=linux GOARCH=ppc64le make build
