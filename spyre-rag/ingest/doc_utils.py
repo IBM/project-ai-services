@@ -1,6 +1,5 @@
 import json
 import time
-import fitz
 import logging
 import os
 os.environ['GRPC_VERBOSITY'] = 'ERROR' 
@@ -19,7 +18,7 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 from sentence_splitter import SentenceSplitter
 
 from common.llm_utils import classify_text_with_llm, summarize_table, tokenize_with_llm
-from common.misc_utils import get_logger, generate_file_checksum, verify_checksum
+from common.misc_utils import get_logger, generate_file_checksum
 
 logging.getLogger('docling').setLevel(logging.CRITICAL)
 
@@ -30,122 +29,6 @@ IMAGE_RESOLUTION_SCALE = 1.0
 excluded_labels = {
     'page_header', 'page_footer', 'caption', 'reference'
 }
-
-
-class TocPageMapper:
-    def __init__(self, doc_path: str):
-        """Initialize and extract the TOC from the document."""
-        self.doc_path = doc_path
-        self.doc = fitz.open(doc_path)
-        self.toc = self.doc.get_toc()  # Get the TOC
-        self.page_mapping = {}
-
-    def extract_text(self, page_number: int) -> str:
-        """Extract text from a given page number."""
-        page = self.doc.load_page(page_number)
-        return page.get_text("text")
-    
-    def match_toc_to_pages(self, threshold=80):
-        """
-        Try to match TOC entries to actual PDF pages based on text similarity.
-        This method assumes that TOC entries correspond to section headers.
-        """
-        for toc_entry in self.toc:
-            toc_page = toc_entry[-1]  # TOC page number (1-based index)
-            toc_title = toc_entry[1].strip()  # Title of the TOC entry
-            
-            # Extract text from the actual PDF page and compare it with TOC title
-            for actual_page in range(toc_page - 1, len(self.doc)):  # Start search from the TOC page onward
-                page_text = self.extract_text(actual_page)
-                score = fuzz.partial_ratio(toc_title.lower(), page_text.lower())  # Use fuzzy matching
-
-                if score >= threshold:
-                    self.page_mapping[toc_page] = actual_page + 1  # Save the mapping (1-based index)
-                    # print(f"Mapped TOC entry {'#'*toc_entry[0]} {toc_title} to PDF page {actual_page + 1} (Score: {score})")
-                    break  # Stop once a match is found
-
-    def get_page_mapping(self):
-        """Return the page mapping."""
-        return self.page_mapping
-
-    def close(self):
-        """Close the document."""
-        self.doc.close()
-
-
-
-class TocHeaders:
-    """Compute data for identifying header text based on the Table Of Contents (TOC).
-
-    This class uses the document's TOC to identify headers on pages. The header
-    identification is based on TOC entries which have hierarchical levels. This
-    is a more accurate and faster method for documents with a well-defined TOC.
-    """
-
-    def __init__(self, doc: str, page_mapping=None):
-        """
-        Read and store the TOC of the document. Optionally, use a page_mapping to adjust TOC pages to
-        the corresponding PDF page numbers if they don't align (e.g., prefatory pages not numbered in TOC).
-        
-        :param page_mapping: A dictionary that maps TOC page numbers to actual PDF page numbers.
-        """
-        if isinstance(doc, fitz.Document):
-            self.mydoc = doc
-        else:
-            self.mydoc = fitz.open(doc)
-
-        self.TOC = self.mydoc.get_toc()
-        if not self.TOC:
-            raise ValueError("No TOC found in the document.")
-        
-        # If a page_mapping is provided, use it to adjust TOC page numbers
-        self.page_mapping = page_mapping if page_mapping else {}
-
-    def get_header_id(self, span: dict, page=None, threshold=90) -> str:
-        """Return appropriate markdown header prefix based on TOC.
-
-        Given a text span from an extraction (e.g., from pdfplumber or another tool),
-        determine the markdown header prefix string of `#` characters based on the TOC
-        entries, adjusting for page number discrepancies if necessary.
-        """
-        
-        # Adjust for possible mismatch between TOC page and actual PDF page number
-        adjusted_page = self._get_adjusted_page_number(page)
-        if adjusted_page is None:
-            return ""
-        
-        # Retrieve the TOC entries that match the adjusted page number
-        my_toc = [t for t in self.TOC if adjusted_page - 1 <= t[-1] <= adjusted_page + 1]
-        if not my_toc:  # no TOC items present on this page
-            return ""
-        
-        # Check if the span matches a TOC entry
-        text = span["text"].strip()  # remove leading and trailing whitespace
-        for t in my_toc:
-            title = t[1].strip()  # title of TOC entry
-            lvl = t[0]  # level of TOC entry (e.g., 1 for top-level, 2 for subsections)
-            
-            # Match text and title
-            score = fuzz.partial_ratio(title.lower(), text.lower())
-            if score >= threshold:
-                logger.debug(f'Heading: {title}, Level: {lvl}, Score: {score}')
-                return "#" * lvl  # Return corresponding markdown header
-        
-        return ""  # No match found for this page/span combination
-
-    def _get_adjusted_page_number(self, page):
-        """Adjust the PDF page number using the page_mapping if provided."""
-        if self.page_mapping:
-            # Check if this page number needs to be adjusted based on the TOC
-            for toc_page, actual_page in self.page_mapping.items():
-                if page == actual_page:
-                    return toc_page
-        return page  # If no adjustment is needed, return the actual page number
-
-    def close(self):
-        """Close the document when done."""
-        self.mydoc.close()
-
 
 def find_text_font_size(
     pdf_path: str,
@@ -221,20 +104,9 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
     doc_json = res.document.export_to_dict()
     stem = res.input.file.stem
 
-    # Initialize TocHeaders to get the Table of Contents (TOC)
-    toc_headers = None
-    try:
-        toc_mapper = TocPageMapper(pdf_path)
-        toc_mapper.match_toc_to_pages(threshold=80)
-        page_mapping = toc_mapper.get_page_mapping()
-        toc_mapper.close()
-        toc_headers = TocHeaders(pdf_path, page_mapping)
-    except Exception as e:
-        logger.debug(f"No TOC found or failed to load TOC: {e}")
-
     # --- Text Extraction ---
     t0 = time.time()
-    filtered_blocks, image_captions, table_captions = [], [], []
+    filtered_blocks, table_captions = [], []
     for block in doc_json.get('texts', []):
         block_type = block.get('label', '')
         if block_type not in excluded_labels:
@@ -243,8 +115,6 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
             block_parent = block.get('parent', {}).get('$ref', '')
             if 'tables' in block_parent:
                 table_captions.append(block)
-            elif 'pictures' in block_parent:
-                image_captions.append(block)
     timings['extract_text_blocks'] = time.time() - t0
 
     if len(filtered_blocks):
@@ -257,8 +127,6 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
         filtered_text_dicts = filtered_blocks
 
         structured_output = []
-
-        last_header_level = 0  # To track the last header level in case we don't find it in TOC
 
         logger.info(f"Processing text content of '{pdf_path}'")
         t0 = time.time()
@@ -276,45 +144,21 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
                     if page_no is None or bbox_dict is None:
                         continue
 
-                    # Use TocHeaders to get the markdown header prefix from TOC if available
-                    if toc_headers:
-                        header_prefix = toc_headers.get_header_id({"text": text_obj.get("text", "")}, page_no)
-                        if header_prefix:
-                            # If TOC matches, use the level from TOC
-                            structured_output.append({
-                                "label": label,
-                                "text": f"{header_prefix} {text_obj.get('text', '')}",
-                                "page": page_no,
-                                "font_size": None,  # Font size isn't necessary if TOC matches
-                            })
-                            last_header_level = len(header_prefix.strip())  # Update last header level
-                        else:
-                            # If no match, use the previous header level + 1
-                            new_header_level = last_header_level + 1
-                            structured_output.append({
-                                "label": label,
-                                "text": f"{'#' * new_header_level} {text_obj.get('text', '')}",
-                                "page": page_no,
-                                "font_size": None,  # Font size isn't necessary if TOC matches
-                            })
-                    else:
-                        # Fallback to font size extraction if no TOC match is found
-                        matches = find_text_font_size(pdf_path, text_obj.get("text", ""), page_no - 1)
+                    matches = find_text_font_size(pdf_path, text_obj.get("text", ""), page_no - 1)
+                    if len(matches):
+                        font_size = 0
+                        count = 0
+                        for match in matches:
+                            font_size += match["font_size"] if match["match_score"] == 100 else 0
+                            count += 1 if match["match_score"] == 100 else 0
+                        font_size = font_size / count if count else None
 
-                        if len(matches):
-                            font_size = 0
-                            count = 0
-                            for match in matches:
-                                font_size += match["font_size"] if match["match_score"] == 100 else 0
-                                count += 1 if match["match_score"] == 100 else 0
-                            font_size = font_size / count if count else None
-
-                            structured_output.append({
-                                "label": label,
-                                "text": text_obj.get("text", ""),
-                                "page": page_no,
-                                "font_size": round(font_size, 2) if font_size else None
-                            })
+                        structured_output.append({
+                            "label": label,
+                            "text": text_obj.get("text", ""),
+                            "page": page_no,
+                            "font_size": round(font_size, 2) if font_size else None
+                        })
             else:
                 structured_output.append({
                     "label": label,
@@ -329,9 +173,6 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
         
     else:
         (Path(out_path) / f"{stem}_clean_text.json").write_text(json.dumps(filtered_blocks, indent=2), encoding="utf-8")
-
-    if toc_headers:
-        toc_headers.close()  # Close the TOC handler when done processing
 
     # --- Table Extraction ---
     if len(res.document.tables):
