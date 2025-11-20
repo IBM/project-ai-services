@@ -11,9 +11,14 @@ metadata:
     ai-services.io/model2: ibm-granite/granite-embedding-278m-multilingual
     ai-services.io/model3: ibm-granite/granite-3.3-8b-instruct
     ai-services.io/instruct--sypre-cards: "4"
+    ai-services.io/reranker--sypre-cards: "1"
 spec:
   volumes:
     - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 64Gi
+    - name: dshm2
       emptyDir:
         medium: Memory
         sizeLimit: 64Gi
@@ -33,12 +38,12 @@ spec:
           -tp ${AIU_WORLD_SIZE} \
           --max-model-len ${MAX_MODEL_LEN} \
           --max-num-seqs ${MAX_BATCH_SIZE} \
-          --served-model-name ibm-granite/granite-3.3-8b-instruct
+          --served-model-name ibm-granite/granite-3.3-8b-instruct --port 8000
       livenessProbe:
         httpGet:
           path: /health
           port: 8000
-        initialDelaySeconds: 600
+        initialDelaySeconds: 420
         periodSeconds: 30
         timeoutSeconds: 5
         failureThreshold: 3
@@ -53,6 +58,8 @@ spec:
           value: "32768"
         - name: MAX_BATCH_SIZE
           value: "32"
+        - name: MASTER_PORT
+          value: "12355"
         {{- /* Check if .env.instruct exists and is a non-empty map */}}
         {{- with .env.instruct }}
           {{- /* If it does, '.' (dot) is now scoped to .env.instruct */}}
@@ -101,11 +108,15 @@ spec:
           name: models
           readOnly: true
     - name: reranker
-      image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
-      command: ["/bin/sh", "-c"]
-      args: [
-          "vllm serve /models/BAAI/bge-reranker-v2-m3 --served-model-name BAAI/bge-reranker-v2-m3 --port 8002"
-      ]
+      image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-ci_236
+      command: ["/bin/bash"]
+      args:
+        - "-c"
+        - |
+          /opt/app-root/spyre_entrypoint.sh \
+          --model ${VLLM_MODEL_PATH} \
+          -tp ${AIU_WORLD_SIZE} \
+          --served-model-name BAAI/bge-reranker-v2-m3 --port 8002
       livenessProbe:
         httpGet:
           path: /health
@@ -114,14 +125,36 @@ spec:
         periodSeconds: 30
         timeoutSeconds: 5
         failureThreshold: 3
+      env:
+        - name: VLLM_MODEL_PATH
+          value: "/models/BAAI/bge-reranker-v2-m3"
+        - name: AIU_WORLD_SIZE
+          value: "1"
+        - name: VLLM_SPYRE_WARMUP_BATCH_SIZES
+          value: "4"
+        - name: VLLM_SPYRE_WARMUP_PROMPT_LENS
+          value: "512"
+        - name: MASTER_PORT
+          value: "12356"
+        {{- /* Check if .env.reranker exists and is a non-empty map */}}
+        {{- with .env.reranker }}
+          {{- /* If it does, '.' (dot) is now scoped to .env.reranker */}}
+          {{- range $k, $v := . }}
+        - name: {{ $k }}
+          value: "{{ $v }}"
+          {{- end }}
+        {{- end }}
       resources:
         requests:
-          memory: "10Gi"
+          podman.io/device=/dev/vfio: 1
+          memory: "150Gi"
         limits:
-          memory: "10Gi"
+          memory: "150Gi"
       ports:
         - containerPort: 8002
       volumeMounts:
         - mountPath: /models:z
           name: models
           readOnly: true
+        - mountPath: /dev/shm
+          name: dshm2
