@@ -5,14 +5,28 @@ import (
 	"strings"
 
 	"github.com/containers/podman/v5/pkg/domain/entities/types"
-	"github.com/jedib0t/go-pretty/v6/table"
-	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/spf13/cobra"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 )
+
+var output string
+
+func init() {
+	psCmd.Flags().StringVarP(
+		&output,
+		"output",
+		"o",
+		"",
+		"Output format (e.g., wide)",
+	)
+}
+
+func isOutputWide() bool {
+	return strings.ToLower(output) == "wide"
+}
 
 var psCmd = &cobra.Command{
 	Use:   "ps [name]",
@@ -53,35 +67,53 @@ var psCmd = &cobra.Command{
 			return nil
 		}
 
-		p := helpers.NewTableWriter()
+		p := utils.NewTableWriter()
 		defer p.CloseTableWriter()
 
-		t := p.GetTableWriter()
-		t.AppendHeader(table.Row{"Application Name", "Pod ID", "Pod Name", "Status", "Exposed"})
-		t.SetColumnConfigs([]table.ColumnConfig{
-			{Number: 4, Align: text.AlignCenter},
-		})
+		if isOutputWide() {
+			p.SetHeaders("APPLICATION NAME", "POD ID", "POD NAME", "STATUS", "EXPOSED")
+		} else {
+			p.SetHeaders("APPLICATION NAME", "POD NAME", "STATUS")
+		}
 
 		for _, pod := range pods {
+			if fetchPodNameFromLabels(pod.Labels) == "" {
+				//Skip pods which are not linked to ai-services
+				continue
+			}
 			podPorts := []string{}
 			pInfo, err := runtimeClient.InspectPod(pod.Id)
 			if err != nil {
 				continue
 			}
 
-			if pInfo.InfraConfig == nil || pInfo.InfraConfig.PortBindings == nil {
-				continue
-			}
-
-			for _, ports := range pInfo.InfraConfig.PortBindings {
-				for _, port := range ports {
-					podPorts = append(podPorts, port.HostPort)
+			if pInfo.InfraConfig != nil && pInfo.InfraConfig.PortBindings != nil {
+				for _, ports := range pInfo.InfraConfig.PortBindings {
+					for _, port := range ports {
+						podPorts = append(podPorts, port.HostPort)
+					}
 				}
 			}
+
 			if len(podPorts) == 0 {
-				podPorts = append(podPorts, "none")
+				podPorts = []string{"none"}
 			}
-			t.AppendRow(table.Row{fetchPodNameFromLabels(pod.Labels), pod.Id, pod.Name, pod.Status, strings.Join(podPorts, ", ")})
+
+			if isOutputWide() {
+				p.AppendRow(
+					fetchPodNameFromLabels(pod.Labels),
+					pod.Id[:12],
+					pod.Name,
+					pod.Status,
+					strings.Join(podPorts, ", "),
+				)
+			} else {
+				p.AppendRow(
+					fetchPodNameFromLabels(pod.Labels),
+					pod.Name,
+					pod.Status,
+				)
+			}
 		}
 		return nil
 	},
