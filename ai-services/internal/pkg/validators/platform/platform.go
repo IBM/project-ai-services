@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -65,4 +66,8 @@ func (r *PlatformRule) Verify() error {
 
 func (r *PlatformRule) Message() string {
 	return "Operating system is RHEL with version 9.6"
+}
+
+func (r *PlatformRule) Level() constants.ValidationLevel {
+	return constants.ValidationLevelError
 }

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -39,7 +40,7 @@ func (r *NumaRule) Verify() error {
 	}
 
 	if numaCount != 1 {
-		return fmt.Errorf("numa node on LPAR is %d, please set NUMA node to 1", numaCount)
+		return fmt.Errorf("the current NUMA node configuration (%d) is not aligned for maximum efficiency", numaCount)
 	}
 
 	return nil
@@ -47,4 +48,8 @@ func (r *NumaRule) Verify() error {
 
 func (r *NumaRule) Message() string {
 	return "NUMA node alignment on LPAR: 1"
+}
+
+func (r *NumaRule) Level() constants.ValidationLevel {
+	return constants.ValidationLevelWarning
 }

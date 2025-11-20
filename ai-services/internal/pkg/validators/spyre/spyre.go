@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"k8s.io/klog/v2"
 )
 
@@ -34,4 +35,8 @@ func (r *SpyreRule) Verify() error {
 
 func (r *SpyreRule) Message() string {
 	return "IBM Spyre Accelerator is attached to the LPAR"
+}
+
+func (r *SpyreRule) Level() constants.ValidationLevel {
+	return constants.ValidationLevelError
 }
