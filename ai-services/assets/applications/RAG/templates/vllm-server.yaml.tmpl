@@ -28,7 +28,7 @@ spec:
         type: Directory
   containers:
     - name: instruct
-      image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-ci_236
+      image: "{{ .Values.instruct.image }}"
       command: ["/bin/bash"]
       args:
         - "-c"
@@ -83,7 +83,7 @@ spec:
         - mountPath: /dev/shm
           name: dshm
     - name: embedding
-      image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
+      image: "{{ .Values.embedding.image }}"
       command: ["/bin/sh", "-c"]
       args: [
           "vllm serve /models/ibm-granite/granite-embedding-278m-multilingual --served-model-name ibm-granite/granite-embedding-278m-multilingual --port 8001"
@@ -108,7 +108,7 @@ spec:
           name: models
           readOnly: true
     - name: reranker
-      image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-ci_236
+      image: "{{ .Values.reranker.image }}"
       command: ["/bin/bash"]
       args:
         - "-c"
