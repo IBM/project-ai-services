@@ -1,0 +1,31 @@
+name: Spyre RAG
+on:
+  push:
+    paths:
+      - 'spyre-rag/src/**'
+    branches:
+      - main
+
+env:
+  ICR_REGISTRY: icr.io
+  ICR_NAMESPACE: ai-services-cicd
+
+jobs:
+  build-publish-image:
+    name: Build and Publish Image
+    runs-on: ubuntu-24.04-ppc64le
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      
+      - name: Build spyre-rag-ui image
+        working-directory: spyre-rag/src
+        run: |
+          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+
+      - name: Publish spyre-rag-ui image
+        working-directory: spyre-rag/src
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
