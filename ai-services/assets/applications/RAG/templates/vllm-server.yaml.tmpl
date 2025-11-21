@@ -12,6 +12,7 @@ metadata:
     ai-services.io/model3: ibm-granite/granite-3.3-8b-instruct
     ai-services.io/instruct--sypre-cards: "4"
     ai-services.io/reranker--sypre-cards: "1"
+    ai-services.io/embedding--sypre-cards: "1"
 spec:
   volumes:
     - name: dshm
@@ -19,6 +20,10 @@ spec:
         medium: Memory
         sizeLimit: 64Gi
     - name: dshm2
+      emptyDir:
+        medium: Memory
+        sizeLimit: 64Gi
+    - name: dshm3
       emptyDir:
         medium: Memory
         sizeLimit: 64Gi
@@ -60,10 +65,8 @@ spec:
           value: "32"
         - name: MASTER_PORT
           value: "12355"
-        {{- /* Check if .env.instruct exists and is a non-empty map */}}
         {{- with .env.instruct }}
-          {{- /* If it does, '.' (dot) is now scoped to .env.instruct */}}
-          {{- range $k, $v := . }}
+        {{- range $k, $v := . }}
         - name: {{ $k }}
           value: "{{ $v }}"
           {{- end }}
@@ -83,11 +86,15 @@ spec:
         - mountPath: /dev/shm
           name: dshm
     - name: embedding
-      image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
-      command: ["/bin/sh", "-c"]
-      args: [
-          "vllm serve /models/ibm-granite/granite-embedding-278m-multilingual --served-model-name ibm-granite/granite-embedding-278m-multilingual --port 8001"
-      ]
+      image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-ci_236
+      command: ["/bin/bash"]
+      args:
+        - "-c"
+        - |
+          /opt/app-root/spyre_entrypoint.sh \
+          --model ${VLLM_MODEL_PATH} \
+          -tp ${AIU_WORLD_SIZE} \
+          --served-model-name ibm-granite/granite-embedding-278m-multilingual --port 8001
       livenessProbe:
         httpGet:
           path: /health
@@ -96,17 +103,37 @@ spec:
         periodSeconds: 30
         timeoutSeconds: 5
         failureThreshold: 3
+      env:
+        - name: VLLM_MODEL_PATH
+          value: "/models/ibm-granite/granite-embedding-278m-multilingual"
+        - name: AIU_WORLD_SIZE
+          value: "1"
+        - name: VLLM_SPYRE_WARMUP_BATCH_SIZES
+          value: "4"
+        - name: VLLM_SPYRE_WARMUP_PROMPT_LENS
+          value: "512"
+        - name: MASTER_PORT
+          value: "12356"
+        {{- with .env.embedding }}
+        {{- range $k, $v := . }}
+        - name: {{ $k }}
+          value: "{{ $v }}"
+          {{- end }}
+        {{- end }}
       resources:
         requests:
-          memory: "10Gi"
+          podman.io/device=/dev/vfio: 1
+          memory: "150Gi"
         limits:
-          memory: "10Gi"
+          memory: "150Gi"
       ports:
         - containerPort: 8001
       volumeMounts:
         - mountPath: /models:z
           name: models
           readOnly: true
+        - mountPath: /dev/shm
+          name: dshm3
     - name: reranker
       image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-ci_236
       command: ["/bin/bash"]
@@ -136,10 +163,8 @@ spec:
           value: "512"
         - name: MASTER_PORT
           value: "12356"
-        {{- /* Check if .env.reranker exists and is a non-empty map */}}
         {{- with .env.reranker }}
-          {{- /* If it does, '.' (dot) is now scoped to .env.reranker */}}
-          {{- range $k, $v := . }}
+        {{- range $k, $v := . }}
         - name: {{ $k }}
           value: "{{ $v }}"
           {{- end }}
