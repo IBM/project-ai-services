@@ -2,7 +2,7 @@ import os
 import json
 from dataclasses import dataclass
 from typing import Optional
-from common.misc_utils import get_logger
+from misc_utils import get_logger
 
 logger = get_logger("settings")
 

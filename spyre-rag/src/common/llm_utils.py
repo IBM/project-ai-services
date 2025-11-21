@@ -5,14 +5,14 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from common.misc_utils import get_prompts, get_logger
+from common.settings import get_settings
+
 
 logger = get_logger("LLM")
-
-llm_classify, table_summary, query_vllm_pmt, query_vllm_stream_pmt = get_prompts()
-
+settings = get_settings()
 
 def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, batch_size=128):
-    all_prompts = [llm_classify.format(text=item.strip()) for item in text_blocks]
+    all_prompts = [settings.prompts.llm_classify.format(text=item.strip()) for item in text_blocks]
     
     decisions = []
     for i in tqdm(range(0, len(all_prompts), batch_size)):
@@ -76,7 +76,7 @@ def summarize_single_table(prompt, gen_model, llm_endpoint):
 
 
 def summarize_table(table_html, table_caption, gen_model, llm_endpoint, max_workers=32):
-    all_prompts = [table_summary.format(content=html) for html in table_html]
+    all_prompts = [settings.prompts.table_summary.format(content=html) for html in table_html]
 
     summaries = [None] * len(all_prompts)
 
@@ -122,7 +122,7 @@ def query_vllm(question, documents, llm_endpoint, ckpt, stop_words, max_new_toke
         context=detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:remaining_tokens], llm_endpoint)
         logger.debug(f"Truncated Context: {context}")
 
-    prompt = query_vllm_pmt.format(context=context, question=question)
+    prompt = settings.prompts.query_vllm.format(context=context, question=question)
     logger.debug("PROMPT:  ", prompt)
     headers = {
         "accept": "application/json",
@@ -165,7 +165,7 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
         context = detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:reamining_tokens], llm_endpoint)
         logger.debug(f"Truncated Context: {context}")
 
-    prompt = query_vllm_stream_pmt.format(context=context, question=question)
+    prompt = settings.prompts.query_vllm_stream.format(context=context, question=question)
     logger.debug("PROMPT:  ", prompt)
     headers = {
         "accept": "application/json",

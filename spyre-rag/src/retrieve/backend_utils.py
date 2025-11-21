@@ -2,10 +2,12 @@ import re
 
 from common.llm_utils import query_vllm
 from common.misc_utils import get_logger
+from common.settings import get_settings
 from retrieve.reranker_utils import rerank_documents
 from retrieve.retrieval_utils import retrieve_documents, contains_chinese_regex
 
 logger = get_logger("backend_utils")
+settings = get_settings()
 
 def search_and_answer_backend(
         question, llm_endpoint, llm_model, emb_model, emb_endpoint, max_tokens, reranker_model, reranker_endpoint,
@@ -76,10 +78,9 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
         ranked_documents = retrieved_documents[:top_r]
         ranked_scores = retrieved_scores[:top_r]
 
-    filter_threshold = 0.55
     filtered_docs = []
     for doc, score in zip(ranked_documents, ranked_scores):
-        if score >= filter_threshold:
+        if score >= settings.score_threshold:
             filtered_docs.append(doc)
 
     return filtered_docs
