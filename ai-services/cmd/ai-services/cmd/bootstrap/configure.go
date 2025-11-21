@@ -136,6 +136,15 @@ func runServiceReport() error {
 		return err
 	}
 
+	logger.Infof("reloading vfio kernel modules after running servicereport tool")
+	// reload vfio kernel modules
+	cmd = `rmmod vfio_pci; modprobe vfio_pci`
+	_, err = exec.Command("bash", "-c", cmd).Output()
+	if err != nil {
+		return fmt.Errorf("❌ failed to reload vfio kernel modules for spyre %w", err)
+	}
+	logger.Infoln("VFIO kernel modules reloaded on the host", 2)
+
 	return nil
 }
 
