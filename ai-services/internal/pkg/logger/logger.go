@@ -7,11 +7,12 @@ import (
 )
 
 func Init() {
-	klog.InitFlags(nil)
-	_ = flag.Set("alsologtostderr", "true")
-	_ = flag.Set("skip_headers", "true")
-	_ = flag.Set("skip_log_headers", "true")
-	flag.Parse()
+	klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
+	klog.InitFlags(klogFlags)
+	_ = klogFlags.Set("alsologtostderr", "true")
+	_ = klogFlags.Set("skip_headers", "true")
+	_ = klogFlags.Set("skip_log_headers", "true")
+	_ = klogFlags.Parse([]string{})
 }
 
 func Flush() {
