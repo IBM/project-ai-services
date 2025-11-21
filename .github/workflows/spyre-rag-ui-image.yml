@@ -16,8 +16,32 @@ env:
   ICR_NAMESPACE: ai-services-cicd
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: spyre-rag/ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: spyre-rag/ui
+        run: npm ci
+
+      - name: Run linter
+        working-directory: spyre-rag/ui
+        run: npm run lint
+
   build-publish-image:
     name: Build and Publish Image
+    needs: lint
     runs-on: ubuntu-24.04-ppc64le
 
     steps:
