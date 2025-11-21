@@ -1,4 +1,4 @@
-FROM registry.access.redhat.com/ubi9/ubi:9.6 as tools_builder
+FROM registry.access.redhat.com/ubi9/ubi:9.7 as tools_builder
 
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 
@@ -14,7 +14,7 @@ RUN dnf update ${DNF_FLAGS} -y \
   && pip3.12 install -r requirements.txt \
   && rm -rf /var/cache/dnf && dnf clean all -y
 
-FROM registry.access.redhat.com/ubi9/ubi:9.6
+FROM registry.access.redhat.com/ubi9/ubi:9.7
 
 ARG SR_VERSION
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
