@@ -21,7 +21,7 @@ var listCmd = &cobra.Command{
 
 func init() {
 	listCmd.Flags().StringVarP(&templateName, "template", "t", "", "Application template name (Required)")
-	listCmd.MarkFlagRequired("template")
+	_ = listCmd.MarkFlagRequired("template")
 }
 
 func list(cmd *cobra.Command) error {

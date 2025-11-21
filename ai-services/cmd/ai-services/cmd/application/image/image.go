@@ -20,5 +20,5 @@ func init() {
 	ImageCmd.AddCommand(listCmd)
 	ImageCmd.AddCommand(pullCmd)
 	ImageCmd.PersistentFlags().StringVarP(&templateName, "template", "t", "", "Application template name (Required)")
-	ImageCmd.MarkPersistentFlagRequired("template")
+	_ = ImageCmd.MarkPersistentFlagRequired("template")
 }

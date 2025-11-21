@@ -111,7 +111,9 @@ func FindFreeSpyreCards() ([]string, error) {
 			logger.Infoln("Device or resource busy, skipping..", 1)
 			continue
 		}
-		f.Close()
+		if err := f.Close(); err != nil {
+			logger.Infoln("Failed to close the device file handle", 1)
+		}
 
 		// free card available to use
 		dev_pci_path := fmt.Sprintf("/sys/kernel/iommu_groups/%s/devices", dev_file.Name())

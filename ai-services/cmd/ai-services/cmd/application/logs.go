@@ -42,7 +42,7 @@ Specify container name or ID to show logs of a specific container
 func init() {
 	logsCmd.Flags().StringVar(&podName, "pod", "", "Pod name to show logs from (required)")
 	logsCmd.Flags().StringVar(&containerNameOrID, "container", "", "Container logs to show logs from (Optional)")
-	logsCmd.MarkFlagRequired("pod")
+	_ = logsCmd.MarkFlagRequired("pod")
 }
 
 func showLogs(client *podman.PodmanClient, podName string, containerNameOrID string) error {

@@ -5,7 +5,6 @@ import "github.com/project-ai-services/ai-services/cmd/ai-services/cmd"
 // ai-services completion bash|zsh|fish|powershell
 // ai-services --version
 
-// Needs implementation
 // ai-services --help
 
 // ai-services application templates (Multiple application templates Eg:- RAG)

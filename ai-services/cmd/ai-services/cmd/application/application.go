@@ -27,5 +27,5 @@ func init() {
 	ApplicationCmd.AddCommand(logsCmd)
 	ApplicationCmd.AddCommand(model.ModelCmd)
 	ApplicationCmd.PersistentFlags().StringVar(&vars.ToolImage, "tool-image", vars.ToolImage, "Tool image to use for downloading the model(only for the development purpose)")
-	ApplicationCmd.PersistentFlags().MarkHidden("tool-image")
+	_ = ApplicationCmd.PersistentFlags().MarkHidden("tool-image")
 }
