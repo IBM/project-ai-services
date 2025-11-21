@@ -4,7 +4,7 @@ import time
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from common.misc_utils import get_prompts, get_logger
+from common.misc_utils import get_logger
 from common.settings import get_settings
 
 
