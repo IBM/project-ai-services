@@ -10,6 +10,7 @@ type AppMetadata struct {
 	Name                  string     `yaml:"name,omitempty"`
 	Version               string     `yaml:"version,omitempty"`
 	SMTLevel              *int       `yaml:"smtLevel,omitempty"`
+	Timeout               int64      `yaml:"smtLevel,omitempty"`
 	PodTemplateExecutions [][]string `yaml:"podTemplateExecutions"`
 }
 
