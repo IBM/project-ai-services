@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -137,8 +139,25 @@ func runServiceReport() error {
 		return err
 	}
 
-	cards, err := helpers.FindFreeSpyreCards()
+	cards, err := helpers.ListSpyreCards()
 	if err != nil || len(cards) == 0 {
+		return fmt.Errorf("❌ failed to list spyre cards on LPAR %w", err)
+	}
+	num_spyre_cards := len(cards)
+
+	// check if kernel modules for vfio are loaded
+	vfio_cmd := `lspci -k -d 1014:06a7 | grep "Kernel driver in use: vfio-pci" | wc -l`
+	out, err = exec.Command("bash", "-c", vfio_cmd).Output()
+	if err != nil {
+		return fmt.Errorf("❌ failed to check vfio cards with kernel modules loaded %w", err)
+	}
+
+	num_vf_cards, err := strconv.Atoi(strings.TrimSuffix(string(out), "\n"))
+	if err != nil {
+		return fmt.Errorf("❌ failed to convert number of virtual spyre cards count from string to integer %w", err)
+	}
+
+	if num_vf_cards != num_spyre_cards {
 		logger.Infof("failed to detect vfio cards, reloading vfio kernel modules..")
 		// reload vfio kernel modules
 		cmd = `rmmod vfio_pci; modprobe vfio_pci`
