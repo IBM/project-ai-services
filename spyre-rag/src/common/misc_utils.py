@@ -27,39 +27,6 @@ def get_logger(name):
 
     return logger
 
-def get_prompts():
-       
-    env_path = os.getenv("PROMPT_PATH")
-    if env_path and os.path.exists(env_path):
-        prompt_path = env_path
-    else:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        prompt_path = os.path.join(base_dir, "..", "prompts.json")
-        prompt_path = os.path.normpath(prompt_path)
-
-    try:
-        with open(prompt_path, "r", encoding="utf-8") as file:
-            data = json.load(file)
-
-            llm_classify = data.get("llm_classify")
-            table_summary = data.get("table_summary")
-            query_vllm = data.get("query_vllm")
-            query_vllm_stream = data.get("query_vllm_stream")
-
-            if any(prompt in (None, "") for prompt in (
-                    llm_classify,
-                    table_summary,
-                    query_vllm,
-                    query_vllm_stream,
-            )):
-                raise ValueError(f"One or more prompt variables are missing or empty in '{prompt_path}' file.")
-
-            return llm_classify, table_summary, query_vllm, query_vllm_stream
-    except FileNotFoundError:
-        raise FileNotFoundError(f"JSON file not found at: {prompt_path}")
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Error parsing JSON at {prompt_path}: {e}")
-
 
 def get_txt_tab_filenames(file_paths, out_path):
     original_filenames = [fp.split('/')[-1] for fp in file_paths]
