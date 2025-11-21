@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
@@ -136,14 +137,17 @@ func runServiceReport() error {
 		return err
 	}
 
-	logger.Infof("reloading vfio kernel modules after running servicereport tool")
-	// reload vfio kernel modules
-	cmd = `rmmod vfio_pci; modprobe vfio_pci`
-	_, err = exec.Command("bash", "-c", cmd).Output()
-	if err != nil {
-		return fmt.Errorf("❌ failed to reload vfio kernel modules for spyre %w", err)
+	cards, err := helpers.FindFreeSpyreCards()
+	if err != nil || len(cards) == 0 {
+		logger.Infof("failed to detect vfio cards, reloading vfio kernel modules..")
+		// reload vfio kernel modules
+		cmd = `rmmod vfio_pci; modprobe vfio_pci`
+		_, err = exec.Command("bash", "-c", cmd).Output()
+		if err != nil {
+			return fmt.Errorf("❌ failed to reload vfio kernel modules for spyre %w", err)
+		}
+		logger.Infoln("VFIO kernel modules reloaded on the host", 2)
 	}
-	logger.Infoln("VFIO kernel modules reloaded on the host", 2)
 
 	return nil
 }
