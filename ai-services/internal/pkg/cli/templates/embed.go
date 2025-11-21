@@ -124,21 +124,10 @@ func (e *embedTemplateProvider) LoadPodTemplate(app, file string, params any) (*
 }
 
 func (e *embedTemplateProvider) LoadPodTemplateWithValues(app, file, appName string, overrides map[string]string) (*models.PodSpec, error) {
-	valuesPath := fmt.Sprintf("%s/%s/values.yaml", e.root, app)
-	valuesData, err := e.fs.ReadFile(valuesPath)
+	values, err := e.LoadValues(app, overrides)
 	if err != nil {
-		return nil, fmt.Errorf("read values.yaml: %w", err)
+		return nil, fmt.Errorf("failed to load params for application: %w", err)
 	}
-
-	var values map[string]any
-	if err := yaml.Unmarshal(valuesData, &values); err != nil {
-		return nil, fmt.Errorf("parse values.yaml: %w", err)
-	}
-
-	for key, val := range overrides {
-		utils.SetNestedValue(values, key, val)
-	}
-
 	// Build full params directly
 	params := map[string]any{
 		"Values":          values,
@@ -147,6 +136,22 @@ func (e *embedTemplateProvider) LoadPodTemplateWithValues(app, file, appName str
 		"Version":         "",
 	}
 	return e.LoadPodTemplate(app, file, params)
+}
+
+func (e *embedTemplateProvider) LoadValues(app string, overrides map[string]string) (map[string]interface{}, error) {
+	valuesPath := fmt.Sprintf("%s/%s/values.yaml", e.root, app)
+	valuesData, err := e.fs.ReadFile(valuesPath)
+	if err != nil {
+		return nil, fmt.Errorf("read values.yaml: %w", err)
+	}
+	values := map[string]interface{}{}
+	if err := yaml.Unmarshal(valuesData, &values); err != nil {
+		return nil, fmt.Errorf("parse values.yaml: %w", err)
+	}
+	for key, val := range overrides {
+		utils.SetNestedValue(values, key, val)
+	}
+	return values, nil
 }
 
 // LoadMetadata loads the metadata for a given application template

@@ -342,11 +342,15 @@ func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *t
 
 func executePodTemplates(runtime runtime.Runtime, tp templates.Template, appName string, appMetadata *templates.AppMetadata,
 	tmpls map[string]*template.Template, pciAddresses []string, existingPods []string) error {
-
+	values, err := tp.LoadValues(templateName, argParams)
+	if err != nil {
+		return fmt.Errorf("failed to load params for application: %w", err)
+	}
 	globalParams := map[string]any{
 		"AppName":         appName,
 		"AppTemplateName": appMetadata.Name,
 		"Version":         appMetadata.Version,
+		"Values":          values,
 		// Key -> container name
 		// Value -> range of key-value env pairs
 		"env": map[string]map[string]string{},
