@@ -14,11 +14,12 @@ import (
 
 // Initialize the default registry with built-in rules
 func init() {
+	// adding root rule on top to verify this check first
+	DefaultRegistry.Register(root.NewRootRule())
 	DefaultRegistry.Register(numa.NewNumaRule())
 	DefaultRegistry.Register(platform.NewPlatformRule())
 	DefaultRegistry.Register(power.NewPowerRule())
 	DefaultRegistry.Register(rhn.NewRHNRule())
-	DefaultRegistry.Register(root.NewRootRule())
 	DefaultRegistry.Register(spyre.NewSpyreRule())
 }
 
@@ -28,6 +29,7 @@ type Rule interface {
 	Message() string
 	Name() string
 	Level() constants.ValidationLevel
+	Hint() string
 }
 
 // DefaultRegistry is the default registry instance that holds all registered checks.
