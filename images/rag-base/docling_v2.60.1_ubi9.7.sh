@@ -69,10 +69,15 @@ yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/AppStrea
 yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/BaseOS/ppc64le/os
 rpm --import https://www.centos.org/keys/RPM-GPG-KEY-CentOS-Official-SHA256
 yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
-#dnf config-manager --set-enabled codeready-builder-for-rhel-9-$(arch)-rpms && \
 yum install -y gn libtiff-devel geos-devel tesseract-devel spatialindex-devel rust cargo llvm16-devel ffmpeg-free ffmpeg-free-devel
 export LLVM_CONFIG=/usr/lib64/llvm16/bin/llvm-config
 pip3 install build pytest numpy
+
+# Remove Package Manager Cache
+yum clean all
+rm -rf /var/cache/yum
+rm -rf /usr/share/man/*
+rm -rf /usr/share/doc/*
 
 # ---------------------------
 # Build and Install cmake
@@ -90,6 +95,9 @@ fi
 make install -j$(nproc)
 export PATH=/usr/local/cmake/bin:$PATH
 cmake --version
+# Cleanup 
+cd $BUILD_HOME
+rm -rf "cmake-${CMAKE_VERSION}"
 
 # ---------------------------
 # Build and Install openjpeg
@@ -106,6 +114,9 @@ make -j$(nproc)
 make install
 export LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH
 ldconfig
+# Cleanup 
+cd $BUILD_HOME
+rm -rf openjpeg
 
 # ---------------------------
 # Build and Install pillow
@@ -116,6 +127,9 @@ cd Pillow
 git checkout $PILLOW_VERSION
 pip3 wheel . --verbose
 pip3 install *.whl
+# Cleanup 
+cd $BUILD_HOME
+rm -rf Pillow
 
 # ----------------------------------------
 # Build and Install opencv-python-headless
@@ -136,6 +150,12 @@ else
 	cd opencv-python
 fi
 pip3 install *.whl
+# Cleanup 
+cd $BUILD_HOME
+mv opencv-python opencv-python-back
+mkdir opencv-python
+cp -rp opencv-python-back/*.whl opencv-python/
+rm -rf opencv-python-back
 
 # ---------------------------
 # Build and Install pytorch
@@ -158,6 +178,12 @@ else
         pip3 install -r requirements.txt
 fi
 pip3 install $BUILD_HOME/pytorch/dist/torch-$PYTORCH_BUILD_VERSION-cp39-cp39-linux_$(arch).whl
+# Cleanup 
+cd $BUILD_HOME
+mv pytorch pytorch-back
+mkdir -p pytorch/dist
+cp -rp pytorch-back/dist/*.whl pytorch/dist/
+rm -rf pytorch-back
 
 # ---------------------------
 # Build and Install pypdfium2
@@ -172,6 +198,12 @@ python3 ./setupsrc/pypdfium2_setup/build_native.py --compiler gcc
 #PDFIUM_PLATFORM="sourcebuild" python3 -m pip install -v .
 PDFIUM_PLATFORM="sourcebuild" pip3 wheel . --verbose
 pip3 install *.whl
+# Cleanup 
+cd $BUILD_HOME
+mv pypdfium2 pypdfium2-back
+mkdir pypdfium2
+cp -rp pypdfium2-back/*.whl pypdfium2/
+rm -rf pypdfium2-back
 
 # ---------------------------
 # Build and Install TH
@@ -200,6 +232,13 @@ git apply ./0001-Exclude-source-that-has-commercial-license.patch
 
 python3 setup.py bdist_wheel
 pip3 install dist/*.whl
+# Cleanup 
+cd $BUILD_HOME
+mv vision vision-back
+mkdir -p vision/dist
+cp -rp vision-back/dist/*.whl vision/dist/
+rm -rf vision-back
+rm -rf torch7
 
 # -------------------------------------
 # Build and Install tree-sitter headers
@@ -210,6 +249,8 @@ cd tree-sitter-c
 git checkout $TREE_SITTER_VERSION
 mkdir -p /usr/include/tree_sitter/
 cp src/tree_sitter/*.h /usr/include/tree_sitter/
+# Cleanup 
+rm -rf tree-sitter-c
 
 # ------------------------
 # Build and Install abseil
@@ -223,6 +264,8 @@ cd build
 cmake -DBUILD_SHARED_LIBS=ON -DABSL_BUILD_TESTING=OFF ..
 make install
 ldconfig
+# Cleanup 
+rm -rf abseil-cpp
 
 # ---------------------------
 # Clone and Prepare Repository
@@ -243,6 +286,13 @@ if [ $ret -ne 0 ]; then
 	echo "------------------ ${PACKAGE_NAME}: Build Failed ------------------"
 	exit 1
 fi
+# Cleanup 
+cd $BUILD_HOME
+mv ${PACKAGE_NAME} ${PACKAGE_NAME}-back
+mkdir -p ${PACKAGE_NAME}/dist
+cp -rp ${PACKAGE_NAME}-back/dist/*.whl ${PACKAGE_NAME}/dist/
+rm -rf ${PACKAGE_NAME}-back
+
 export DOCLING_WHEEL=${BUILD_HOME}/${PACKAGE_NAME}/dist/${PACKAGE_NAME}-${PACKAGE_VERSION_WO_LEADING_V}-py3-none-any.whl
 #Install docling wheel and its dependencies
 pip install wheel==0.45.1 hf_xet==1.2.0 huggingface_hub==1.1.4
@@ -250,6 +300,10 @@ pip install --prefer-binary --extra-index-url=https://wheels.developerfirst.ibm.
         tree-sitter-python==0.23.2 tree_sitter_c==0.23.2 "numpy<2.0" tesserocr==2.9.1 openai-whisper==20230117 ${DOCLING_WHEEL}
 #pip3 install scikit-image==0.19.3 "numpy<2.0" tesserocr openai-whisper==20230117
 #pip3 install ${DOCLING_WHEEL}
+
+# Remove Cache from Python or Other Tools
+pip cache purge
+rm -rf ~/.cache/pip
 
 # ---------------------------
 # Skip Tests?
