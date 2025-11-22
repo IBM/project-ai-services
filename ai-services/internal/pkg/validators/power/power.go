@@ -42,3 +42,7 @@ func (r *PowerRule) Message() string {
 func (r *PowerRule) Level() constants.ValidationLevel {
 	return constants.ValidationLevelError
 }
+
+func (r *PowerRule) Hint() string {
+	return "This tools requires IBM Power11 (ppc64le)"
+}

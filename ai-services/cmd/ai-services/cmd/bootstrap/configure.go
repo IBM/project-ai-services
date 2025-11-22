@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -10,7 +11,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils/spinner"
+	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/root"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/spyre"
@@ -56,7 +57,7 @@ func RunConfigureCmd() error {
 	// 1. Install and configure Podman if not done
 	// 1.1 Install Podman
 	if _, err := validators.Podman(); err != nil {
-		s.Update("Installing podman")
+		s.UpdateMessage("Installing podman")
 		// setup podman socket and enable service
 		if err := installPodman(); err != nil {
 			s.Fail("failed to install podman")
@@ -71,7 +72,7 @@ func RunConfigureCmd() error {
 	s.Start(ctx)
 	// 1.2 Configure Podman
 	if err := validators.PodmanHealthCheck(); err != nil {
-		s.Update("Configuring podman")
+		s.UpdateMessage("Configuring podman")
 		if err := setupPodman(); err != nil {
 			s.Fail("failed to configure podman")
 			return err
@@ -131,11 +132,11 @@ func runServiceReport() error {
 		vars.ToolImage,
 		"bash", "-c", "servicereport -r -p spyre",
 	)
-	out, err := svc_tool_cmd.CombinedOutput()
+	svc_tool_cmd.Stdout = os.Stdout
+	err = svc_tool_cmd.Run()
 	if err != nil {
-		return fmt.Errorf("failed to run servicereport tool to validate Spyre cards configuration: %v, output: %s", err, string(out))
+		return fmt.Errorf("failed to run servicereport tool to validate Spyre cards configuration: %v", err)
 	}
-	logger.Infof("ServiceReport output: %v", string(out))
 
 	if err := configureUsergroup(); err != nil {
 		return err
@@ -149,7 +150,7 @@ func runServiceReport() error {
 
 	// check if kernel modules for vfio are loaded
 	vfio_cmd := `lspci -k -d 1014:06a7 | grep "Kernel driver in use: vfio-pci" | wc -l`
-	out, err = exec.Command("bash", "-c", vfio_cmd).Output()
+	out, err := exec.Command("bash", "-c", vfio_cmd).Output()
 	if err != nil {
 		return fmt.Errorf("❌ failed to check vfio cards with kernel modules loaded %w", err)
 	}
@@ -178,7 +179,7 @@ func configureUsergroup() error {
 	cmd := exec.Command("bash", "-c", cmd_str)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("❌ failed to create sentient group and add current user to the sentient group. Error: %w, output: %s", err, string(out))
+		return fmt.Errorf("failed to create sentient group and add current user to the sentient group. Error: %w, output: %s", err, string(out))
 	}
 
 	return nil

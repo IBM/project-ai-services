@@ -37,3 +37,7 @@ func (r *RootRule) Message() string {
 func (r *RootRule) Level() constants.ValidationLevel {
 	return constants.ValidationLevelError
 }
+
+func (r *RootRule) Hint() string {
+	return "Run this command with root privileges using 'sudo' or as the root user"
+}

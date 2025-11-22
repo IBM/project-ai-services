@@ -53,3 +53,7 @@ func (r *NumaRule) Message() string {
 func (r *NumaRule) Level() constants.ValidationLevel {
 	return constants.ValidationLevelWarning
 }
+
+func (r *NumaRule) Hint() string {
+	return "This tools requires numa node set on 1 on LPAR"
+}

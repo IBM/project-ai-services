@@ -45,3 +45,7 @@ func (r *RHNRule) Message() string {
 func (r *RHNRule) Level() constants.ValidationLevel {
 	return constants.ValidationLevelError
 }
+
+func (r *RHNRule) Hint() string {
+	return "Register your system with Red Hat Network using: subscription-manager register --username <username> --password <password> "
+}

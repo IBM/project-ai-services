@@ -40,3 +40,7 @@ func (r *SpyreRule) Message() string {
 func (r *SpyreRule) Level() constants.ValidationLevel {
 	return constants.ValidationLevelError
 }
+
+func (r *SpyreRule) Hint() string {
+	return "IBM Spyre Accelerator hardware is required but not detected."
+}

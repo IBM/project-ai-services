@@ -8,7 +8,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils/spinner"
+	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/spf13/cobra"
 )
@@ -23,8 +23,7 @@ const (
 	CheckNUMA   = "numa"
 )
 
-// TODO: Populate this once we have the link
-const troubleshootingGuide = ""
+const troubleshootingGuide = "https://www.ibm.com/docs/aiservices?topic=services-troubleshooting"
 
 // validateCmd represents the validate subcommand of bootstrap
 func validateCmd() *cobra.Command {
@@ -115,9 +114,11 @@ func RunValidateCmd(skip map[string]bool) error {
 		err := rule.Verify()
 
 		if err != nil {
+			s.Fail(err.Error())
+			s.StopWithHint(err.Error(), rule.Hint())
+
 			// exit right away if user is not root as other check require root privileges
 			if ruleName == CheckRoot {
-				s.Fail(err.Error())
 				return fmt.Errorf("root privileges are required for validation")
 			}
 			switch rule.Level() {
@@ -125,7 +126,7 @@ func RunValidateCmd(skip map[string]bool) error {
 				s.Fail(err.Error())
 				validationErrors = append(validationErrors, fmt.Errorf("%s: %w", ruleName, err))
 			case constants.ValidationLevelWarning:
-				logger.Warningf(err.Error())
+				s.Stop("Warning: " + err.Error())
 			}
 		} else {
 			s.Stop(rule.Message())
