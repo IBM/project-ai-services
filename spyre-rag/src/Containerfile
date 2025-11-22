@@ -5,4 +5,4 @@ WORKDIR /opt/rag
 COPY common common
 COPY ingest ingest
 COPY retrieve retrieve
-COPY prompts.json .
+COPY settings.json .
