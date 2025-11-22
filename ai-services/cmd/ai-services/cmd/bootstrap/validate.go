@@ -125,7 +125,7 @@ func RunValidateCmd(skip map[string]bool) error {
 				s.Fail(err.Error())
 				validationErrors = append(validationErrors, fmt.Errorf("%s: %w", ruleName, err))
 			case constants.ValidationLevelWarning:
-				logger.Warningf(err.Error())
+				s.Stop("Warning: " + err.Error())
 			}
 		} else {
 			s.Stop(rule.Message())
