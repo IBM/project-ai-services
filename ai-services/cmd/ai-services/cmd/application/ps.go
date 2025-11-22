@@ -34,6 +34,9 @@ var psCmd = &cobra.Command{
 	Long:  `Retrieves information about all the running applications if no name is provided`,
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Once precheck passes, silence usage for any *later* internal errors.
+		cmd.SilenceUsage = true
+
 		var applicationName string
 		if len(args) > 0 {
 			applicationName = args[0]
