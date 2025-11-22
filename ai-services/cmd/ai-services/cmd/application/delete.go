@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils/spinner"
 )
 
 var deleteCmd = &cobra.Command{
@@ -43,6 +45,7 @@ var deleteCmd = &cobra.Command{
 }
 
 func deleteApplication(client *podman.PodmanClient, appName string) error {
+	ctx := context.Background()
 	resp, err := client.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
 	})
@@ -85,19 +88,22 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 	// Loop over each of the pods and call delete
 	var errors []string
 	for _, pod := range pods {
-		logger.Infof("Deleting the pod: %s\n", pod.Name)
+		s := spinner.New("Deleting pod '" + pod.Name + "'")
+		s.Start(ctx)
 		if err := client.DeletePod(pod.Id, utils.BoolPtr(true)); err != nil {
 			errMsg := fmt.Sprintf("%s: %v", pod.Name, err)
 			errors = append(errors, errMsg)
 			continue
 		}
-		logger.Infof("Successfully removed the pod: %s\n", pod.Name)
+		s.Stop("Successfully removed the pod '" + pod.Name + "'")
 	}
 
 	// Aggregate errors at the end
 	if len(errors) > 0 {
 		return fmt.Errorf("failed to remove pods: \n%s", strings.Join(errors, "\n"))
 	}
+
+	logger.Infof("Application %s deleted successfully\n", appName)
 
 	return nil
 }
