@@ -14,6 +14,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"go.yaml.in/yaml/v3"
+	k8syaml "sigs.k8s.io/yaml"
 )
 
 type embedTemplateProvider struct {
@@ -116,7 +117,7 @@ func (e *embedTemplateProvider) LoadPodTemplate(app, file string, params any) (*
 	}
 
 	var spec models.PodSpec
-	if err := yaml.Unmarshal(rendered.Bytes(), &spec); err != nil {
+	if err := k8syaml.Unmarshal(rendered.Bytes(), &spec); err != nil {
 		return nil, fmt.Errorf("unable to read YAML as Kube Pod: %w", err)
 	}
 
