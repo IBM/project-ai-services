@@ -1,24 +1,28 @@
-FROM registry.access.redhat.com/ubi9/ubi:9.6 as docling-builder
+FROM registry.access.redhat.com/ubi9/ubi:9.7 as docling-builder
 
 WORKDIR /opt/docling-build
 
-RUN curl "https://raw.githubusercontent.com/ppc64le/build-scripts/96e6aad593db77d80191848b99c93f69c3c680ab/d/docling/docling_v2.36.0_ubi9.5.sh" > docling_v2.36.0_ubi9.5.sh && \
-    curl "https://raw.githubusercontent.com/ppc64le/build-scripts/c1ea12c200d6ab093a5477acf6c722bc6f36986a/d/docling/docling_v2.36.0.patch" > docling_v2.36.0.patch && \
-    curl "https://raw.githubusercontent.com/ppc64le/build-scripts/c1ea12c200d6ab093a5477acf6c722bc6f36986a/d/docling/opencv_docling_v2.36.0.patch" > opencv_docling_v2.36.0.patch
+COPY docling_v2.60.1_ubi9.7.sh .
+COPY docling_v2.60.1.patch .
+COPY opencv_docling_v2.60.1.patch .
 
-RUN chmod +x docling_v2.36.0_ubi9.5.sh && \
-    ./docling_v2.36.0_ubi9.5.sh --skip-tests
+RUN ./docling_v2.60.1_ubi9.7.sh --skip-tests
 
-FROM registry.access.redhat.com/ubi9/ubi:9.6
+FROM registry.access.redhat.com/ubi9/ubi:9.7
 
 RUN yum install -y git wget gcc gcc-c++ python3-devel pip python3-numpy zlib-devel libjpeg-devel ninja-build libicu-devel lcms2-devel glib2-devel freetype-devel gfortran openblas-devel libxml2-devel libxslt-devel llvm-devel clang-libs
 
-RUN yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
-    dnf config-manager --set-enabled codeready-builder-for-rhel-9-$(arch)-rpms && \
-    yum install -y gn geos-devel tesseract-devel spatialindex-devel
+RUN yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/CRB/ppc64le/os && \
+    yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/AppStream//ppc64le/os && \
+    yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/BaseOS/ppc64le/os && \
+    rpm --import https://centos.org/keys/RPM-GPG-KEY-CentOS-Official && \
+    yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    yum install -y gn geos-devel tesseract-devel spatialindex-devel llvm16-devel ffmpeg-free ffmpeg-free-devel
 
 WORKDIR /opt/wheels
 COPY --from=docling-builder /usr/local/lib64/*.so /usr/local/lib64
+COPY --from=docling-builder /usr/include/tree_sitter /usr/include/tree_sitter
+
 RUN ln /usr/local/lib64/libopenjp2.so /usr/local/lib64/libopenjp2.so.7
 RUN ln -s /usr/lib64/libclang.so.19.1 /usr/lib64/libclang.so
 ENV LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH
