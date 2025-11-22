@@ -10,7 +10,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils/spinner"
+	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/root"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/spyre"
@@ -56,7 +56,7 @@ func RunConfigureCmd() error {
 	// 1. Install and configure Podman if not done
 	// 1.1 Install Podman
 	if _, err := validators.Podman(); err != nil {
-		s.Update("Installing podman")
+		s.UpdateMessage("Installing podman")
 		// setup podman socket and enable service
 		if err := installPodman(); err != nil {
 			s.Fail("failed to install podman")
@@ -71,7 +71,7 @@ func RunConfigureCmd() error {
 	s.Start(ctx)
 	// 1.2 Configure Podman
 	if err := validators.PodmanHealthCheck(); err != nil {
-		s.Update("Configuring podman")
+		s.UpdateMessage("Configuring podman")
 		if err := setupPodman(); err != nil {
 			s.Fail("failed to configure podman")
 			return err

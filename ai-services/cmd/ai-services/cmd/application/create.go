@@ -25,8 +25,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
+	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -167,7 +167,7 @@ var createCmd = &cobra.Command{
 			}
 			logger.Infoln("Downloading models required for application template " + templateName + ":")
 			for _, model := range models {
-				s.Update("Downloading model: " + model + "...")
+				s.UpdateMessage("Downloading model: " + model + "...")
 				err := helpers.DownloadModel(model, vars.ModelDirectory)
 				if err != nil {
 					s.Fail("failed to download model: " + model)
@@ -194,11 +194,14 @@ var createCmd = &cobra.Command{
 			return fmt.Errorf("failed while checking existing pods for application: %w", err)
 		}
 
+		s = spinner.New("Deploying application '" + appName + "'...")
+		s.Start(ctx)
 		// execute the pod Templates
 		if err := executePodTemplates(runtime, tp, appName, appMetadata, tmpls, pciAddresses, existingPods); err != nil {
 			return err
 		}
-		logger.Infof("Application '%s' deployed successfully\n", appName)
+		s.Stop("Application '" + appName + "' deployed successfully")
+
 		logger.Infoln("-------")
 
 		// print the next steps to be performed at the end of create
