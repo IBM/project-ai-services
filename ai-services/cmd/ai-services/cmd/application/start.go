@@ -130,9 +130,8 @@ func startApplication(cmd *cobra.Command, client *podman.PodmanClient, appName s
 	if printLogs {
 		logger.Infoln("Note: After starting the pod, logs will be displayed. Press Ctrl+C to exit the logs and return to the terminal.")
 	}
-	logger.Infof("Are you sure you want to start above pods? (y/N): ")
 
-	confirmStart, err := utils.ConfirmAction()
+	confirmStart, err := utils.ConfirmAction("Are you sure you want to start above pods? ")
 	if err != nil {
 		return fmt.Errorf("failed to take user input: %w", err)
 	}
