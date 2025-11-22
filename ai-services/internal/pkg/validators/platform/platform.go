@@ -71,3 +71,7 @@ func (r *PlatformRule) Message() string {
 func (r *PlatformRule) Level() constants.ValidationLevel {
 	return constants.ValidationLevelError
 }
+
+func (r *PlatformRule) Hint() string {
+	return "This tool requires RHEL version 9.6, please install or upgrade to a supported platform"
+}

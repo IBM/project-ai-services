@@ -1,11 +1,11 @@
 ui:
   port: 3000
   # @hidden
-  image: icr.io/ai-services-private/rag-ui:v0.0.3
+  image: icr.io/ai-services-cicd/rag-ui:v0.0.5
 
 backend:
   # @hidden
-  image: icr.io/ai-services-private/rag:v0.0.4 
+  image: icr.io/ai-services-cicd/rag:v0.0.5
 
 etcd:
   # @hidden
@@ -13,7 +13,7 @@ etcd:
 
 minio:
   # @hidden
-  image: icr.io/ai-services-private/minio:RELEASE.2025-10-15T17-29-55Z 
+  image: icr.io/ai-services/minio:RELEASE.2025-10-15T17-29-55Z
 
 milvus:
   # @hidden

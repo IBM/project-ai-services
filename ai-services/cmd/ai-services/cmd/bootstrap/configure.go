@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -27,6 +28,8 @@ func configureCmd() *cobra.Command {
 		Long:   `Configure and initialize the LPAR.`,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Once precheck passes, silence usage for any *later* internal errors.
+			cmd.SilenceUsage = true
 
 			logger.Infoln("Running bootstrap configuration...")
 
@@ -129,11 +132,11 @@ func runServiceReport() error {
 		vars.ToolImage,
 		"bash", "-c", "servicereport -r -p spyre",
 	)
-	out, err := svc_tool_cmd.CombinedOutput()
+	svc_tool_cmd.Stdout = os.Stdout
+	err = svc_tool_cmd.Run()
 	if err != nil {
-		return fmt.Errorf("failed to run servicereport tool to validate Spyre cards configuration: %v, output: %s", err, string(out))
+		return fmt.Errorf("failed to run servicereport tool to validate Spyre cards configuration: %v", err)
 	}
-	logger.Infof("ServiceReport output: %v", string(out))
 
 	if err := configureUsergroup(); err != nil {
 		return err
@@ -147,7 +150,7 @@ func runServiceReport() error {
 
 	// check if kernel modules for vfio are loaded
 	vfio_cmd := `lspci -k -d 1014:06a7 | grep "Kernel driver in use: vfio-pci" | wc -l`
-	out, err = exec.Command("bash", "-c", vfio_cmd).Output()
+	out, err := exec.Command("bash", "-c", vfio_cmd).Output()
 	if err != nil {
 		return fmt.Errorf("❌ failed to check vfio cards with kernel modules loaded %w", err)
 	}
@@ -176,7 +179,7 @@ func configureUsergroup() error {
 	cmd := exec.Command("bash", "-c", cmd_str)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("❌ failed to create sentient group and add current user to the sentient group. Error: %w, output: %s", err, string(out))
+		return fmt.Errorf("failed to create sentient group and add current user to the sentient group. Error: %w, output: %s", err, string(out))
 	}
 
 	return nil

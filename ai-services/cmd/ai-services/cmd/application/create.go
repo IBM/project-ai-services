@@ -34,6 +34,8 @@ import (
 var (
 	extraContainerReadinessTimeout = 5 * time.Minute
 	envMutex                       sync.Mutex
+	retryCount                     = 3
+	retryInterval                  = 5 * time.Second
 )
 
 // Variables for flags placeholder
@@ -53,12 +55,7 @@ var createCmd = &cobra.Command{
 		Arguments
 		- [name]: Application name (Required)
 	`,
-	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 1 {
-			return errors.New("you must provide an application name")
-		}
-		return nil
-	},
+	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		// validate params flag
@@ -68,11 +65,16 @@ var createCmd = &cobra.Command{
 				return fmt.Errorf("error validating params flag: %v", err)
 			}
 		}
+
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appName := args[0]
 		ctx := context.Background()
+
+		// Once precheck passes, silence usage for any *later* internal errors.
+		cmd.SilenceUsage = true
+
 		skip := helpers.ParseSkipChecks(skipChecks)
 		if len(skip) > 0 {
 			logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
@@ -87,7 +89,9 @@ var createCmd = &cobra.Command{
 
 		// Configure the LPAR before creating the application
 		logger.Infof("Configuring the LPAR")
-		err = bootstrap.RunConfigureCmd()
+		err = utils.Retry(retryCount, retryInterval, nil, func() error {
+			return bootstrap.RunConfigureCmd()
+		})
 		if err != nil {
 			return fmt.Errorf("bootstrap configuration failed: %w", err)
 		}
@@ -168,7 +172,9 @@ var createCmd = &cobra.Command{
 			logger.Infoln("Downloading models required for application template " + templateName + ":")
 			for _, model := range models {
 				s.UpdateMessage("Downloading model: " + model + "...")
-				err := helpers.DownloadModel(model, vars.ModelDirectory)
+				err = utils.Retry(retryCount, retryInterval, nil, func() error {
+					return helpers.DownloadModel(model, vars.ModelDirectory)
+				})
 				if err != nil {
 					s.Fail("failed to download model: " + model)
 					return fmt.Errorf("failed to download model: %w", err)
@@ -342,11 +348,15 @@ func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *t
 
 func executePodTemplates(runtime runtime.Runtime, tp templates.Template, appName string, appMetadata *templates.AppMetadata,
 	tmpls map[string]*template.Template, pciAddresses []string, existingPods []string) error {
-
+	values, err := tp.LoadValues(templateName, argParams)
+	if err != nil {
+		return fmt.Errorf("failed to load params for application: %w", err)
+	}
 	globalParams := map[string]any{
 		"AppName":         appName,
 		"AppTemplateName": appMetadata.Name,
 		"Version":         appMetadata.Version,
+		"Values":          values,
 		// Key -> container name
 		// Value -> range of key-value env pairs
 		"env": map[string]map[string]string{},

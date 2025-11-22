@@ -23,6 +23,9 @@ var deleteCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		applicationName := args[0]
 
+		// Once precheck passes, silence usage for any *later* internal errors.
+		cmd.SilenceUsage = true
+
 		// podman connectivity
 		runtimeClient, err := podman.NewPodmanClient()
 		if err != nil {
