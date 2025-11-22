@@ -1,4 +1,4 @@
-docling @ file:///opt/wheels/docling-wheels/docling-2.36.0-py3-none-any.whl
+docling @ file:///opt/wheels/docling-wheels/docling-2.60.1-py3-none-any.whl
 opencv-python-headless @ file:///opt/wheels/opencv-wheels/opencv_python_headless-4.11.0.86-cp39-cp39-linux_ppc64le.whl
 pypdfium2 @ file:///opt/wheels/pypdfium-wheels/pypdfium2-5.0.0b1%2B84.g35a88d2.dirty-py3-none-linux_ppc64le.whl
 torch @ file:///opt/wheels/torch-wheels/torch-2.3.0%2Bcpu-cp39-cp39-linux_ppc64le.whl
@@ -11,6 +11,8 @@ joblib==1.5.2
 hf_xet==1.2.0
 numpy==1.26.4
 openai==2.6.0
+openai-whisper==20230117
+opencv-python==4.10.0.84
 pdfplumber==0.11.7
 Pillow==10.3.0
 grpcio==1.67.1
@@ -22,7 +24,10 @@ sentence-splitter==1.4
 scikit-image==0.19.3
 scikit_learn==1.6.1
 scipy==1.13.1
+tree-sitter-python==0.23.2
+tree_sitter_c==0.23.2
 tesserocr==2.9.1
 tqdm==4.67.1
 transformers==4.57.1
 uvicorn==0.38.0
+wheel==0.45.1
