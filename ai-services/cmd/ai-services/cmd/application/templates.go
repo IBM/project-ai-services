@@ -14,7 +14,15 @@ var templatesCmd = &cobra.Command{
 	Use:   "templates",
 	Short: "Lists the offered application templates",
 	Long:  `Retrieves information about the offered application templates`,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// Once precheck passes, silence usage for any *later* internal errors.
+		cmd.SilenceUsage = true
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Once precheck passes, silence usage for any *later* internal errors.
+		cmd.SilenceUsage = true
+
 		tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
 
 		appTemplateNames, err := tp.ListApplications()

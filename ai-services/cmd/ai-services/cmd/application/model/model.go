@@ -28,7 +28,7 @@ func models(template string) ([]string, error) {
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
 	apps, err := tp.ListApplications()
 	if err != nil {
-		return nil, fmt.Errorf("failed to list the applications")
+		return nil, fmt.Errorf("failed to list the applications, err: %w", err)
 	}
 
 	if !slices.Contains(apps, template) {

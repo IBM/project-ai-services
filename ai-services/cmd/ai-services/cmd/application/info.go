@@ -24,6 +24,9 @@ var infoCmd = &cobra.Command{
 		// fetch application name
 		applicationName := args[0]
 
+		// Once precheck passes, silence usage for any *later* internal errors.
+		cmd.SilenceUsage = true
+
 		runtimeClient, err := podman.NewPodmanClient()
 		if err != nil {
 			return fmt.Errorf("failed to connect to podman: %w", err)
