@@ -40,6 +40,7 @@ type Template interface {
 	LoadPodTemplate(app, file string, params any) (*models.PodSpec, error)
 	// LoadPodTemplateWithValues loads and renders a pod template with values from application
 	LoadPodTemplateWithValues(app, file, appName string, overrides map[string]string) (*models.PodSpec, error)
+	LoadValues(app string, overrides map[string]string) (map[string]interface{}, error)
 	// LoadMetadata loads the metadata for a given application template
 	LoadMetadata(app string) (*AppMetadata, error)
 	// LoadMdFiles loads all md files for a given application
