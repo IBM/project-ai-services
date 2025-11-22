@@ -14,7 +14,15 @@ var templatesCmd = &cobra.Command{
 	Use:   "templates",
 	Short: "Lists the offered application templates",
 	Long:  `Retrieves information about the offered application templates`,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// Once precheck passes, silence usage for any *later* internal errors.
+		cmd.SilenceUsage = true
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Once precheck passes, silence usage for any *later* internal errors.
+		cmd.SilenceUsage = true
+
 		tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
 
 		appTemplateNames, err := tp.ListApplications()
@@ -32,7 +40,14 @@ var templatesCmd = &cobra.Command{
 
 		logger.Infoln("Available Application Templates:")
 		for _, name := range appTemplateNames {
-			logger.Infoln("- " + name)
+			appTemplatesValues, err := tp.ListApplicationTemplateValues(name)
+			if err != nil {
+				return fmt.Errorf("failed to list application template values: %w", err)
+			}
+			logger.Infof("- %s\n  Parameters supported:\n", name)
+			for _, v := range appTemplatesValues {
+				logger.Infoln("    " + v)
+			}
 		}
 		return nil
 	},

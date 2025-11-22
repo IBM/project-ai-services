@@ -10,7 +10,7 @@ spec:
   containers:
      # Etcd sidecar
     - name: etcd
-      image: icr.io/ai-services/etcd:3.6.5
+      image: "{{ .Values.etcd.image }}"
       command:
         - etcd
         - --data-dir=/etcd
@@ -52,7 +52,7 @@ spec:
     
     # MinIO sidecar
     - name: minio
-      image: icr.io/ai-services-private/minio:RELEASE.2025-10-15T17-29-55Z
+      image: "{{ .Values.minio.image }}"
       command: ["minio", "server", "/minio_data", "--console-address", ":9001"]
       env:
         - name: MINIO_ROOT_USER
@@ -78,7 +78,7 @@ spec:
 
     # Milvus main container
     - name: milvus
-      image: icr.io/ppc64le-oss/milvus-ppc64le:v2.5.3
+      image: "{{ .Values.milvus.image }}"
       command: ["milvus", "run", "standalone"]
       env:
         - name: ETCD_ENDPOINTS

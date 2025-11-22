@@ -5,6 +5,8 @@ import (
 	"maps"
 	"net"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // BoolPtr -> converts to bool ptr
@@ -100,4 +102,76 @@ func GetHostIP() (string, error) {
 	}
 
 	return "", nil
+}
+
+func isHidden(n *yaml.Node) bool {
+	if n == nil {
+		return false
+	}
+	return strings.Contains(n.HeadComment, "@hidden")
+}
+
+func FlattenNode(prefix string, n *yaml.Node, out *[]string) {
+	if n == nil {
+		return
+	}
+
+	switch n.Kind {
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			keyNode := n.Content[i]
+			valNode := n.Content[i+1]
+
+			if isHidden(keyNode) {
+				continue
+			}
+
+			var newPrefix string
+			if prefix == "" {
+				newPrefix = keyNode.Value
+			} else {
+				newPrefix = prefix + "." + keyNode.Value
+			}
+			FlattenNode(newPrefix, valNode, out)
+		}
+
+	case yaml.SequenceNode:
+		for i, el := range n.Content {
+			FlattenNode(fmt.Sprintf("%s[%d]", prefix, i), el, out)
+		}
+
+	default:
+		if prefix != "" {
+			*out = append(*out, prefix)
+		}
+	}
+}
+
+// This function sets a nested value in a map based on a dotted key notation.
+// For example, converts ui.port = value to map["ui"]["port"] = value
+// It modifies the input map in place, no return value.
+func SetNestedValue(out map[string]any, dottedKey string, value any) {
+	//dottedKey of the form ui.image, ui.port, etc.
+	parts := strings.Split(dottedKey, ".")
+	current := out
+
+	for i := 0; i < len(parts)-1; i++ {
+		key := parts[i]
+
+		if next, ok := current[key]; ok {
+			if cast, ok := next.(map[string]any); ok {
+				current = cast
+			} else {
+				newMap := map[string]any{}
+				current[key] = newMap
+				current = newMap
+			}
+		} else {
+			newMap := map[string]any{}
+			current[key] = newMap
+			current = newMap
+		}
+	}
+	last := parts[len(parts)-1]
+	current[last] = value
 }

@@ -5,7 +5,6 @@ import (
 
 	"github.com/containers/podman/v5/pkg/domain/entities/types"
 	"github.com/spf13/cobra"
-	"k8s.io/klog/v2"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -24,6 +23,9 @@ var infoCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// fetch application name
 		applicationName := args[0]
+
+		// Once precheck passes, silence usage for any *later* internal errors.
+		cmd.SilenceUsage = true
 
 		runtimeClient, err := podman.NewPodmanClient()
 		if err != nil {
@@ -68,7 +70,7 @@ var infoCmd = &cobra.Command{
 
 		if err := helpers.PrintInfo(runtimeClient, applicationName, appTemplate); err != nil {
 			// not failing if overall info command, if we cannot display Info
-			klog.Errorf("failed to display info: %v\n", err)
+			logger.Errorf("failed to display info: %v\n", err)
 			return nil
 		}
 

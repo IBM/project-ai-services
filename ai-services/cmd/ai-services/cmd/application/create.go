@@ -53,12 +53,7 @@ var createCmd = &cobra.Command{
 		Arguments
 		- [name]: Application name (Required)
 	`,
-	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 1 {
-			return errors.New("you must provide an application name")
-		}
-		return nil
-	},
+	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		// validate params flag
@@ -68,11 +63,16 @@ var createCmd = &cobra.Command{
 				return fmt.Errorf("error validating params flag: %v", err)
 			}
 		}
+
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appName := args[0]
 		ctx := context.Background()
+
+		// Once precheck passes, silence usage for any *later* internal errors.
+		cmd.SilenceUsage = true
+
 		skip := helpers.ParseSkipChecks(skipChecks)
 		if len(skip) > 0 {
 			logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
@@ -90,6 +90,12 @@ var createCmd = &cobra.Command{
 		err = bootstrap.RunConfigureCmd()
 		if err != nil {
 			return fmt.Errorf("bootstrap configuration failed: %w", err)
+		}
+
+		// podman connectivity
+		runtime, err := podman.NewPodmanClient()
+		if err != nil {
+			return fmt.Errorf("failed to connect to podman: %w", err)
 		}
 
 		// Proceed to create application
@@ -129,10 +135,10 @@ var createCmd = &cobra.Command{
 
 		// ---- Validate Spyre card Requirements ----
 
-		// calculate the required spyre cards
-		reqSpyreCardsCount, err := calculateReqSpyreCards(tp, utils.ExtractMapKeys(tmpls), templateName, appName)
+		// calculate the required spyre cards of only those pods which are not deployed yet
+		reqSpyreCardsCount, err := calculateReqSpyreCards(runtime, tp, utils.ExtractMapKeys(tmpls), templateName, appName)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to calculateReqSpyreCards: %w", err)
 		}
 
 		var pciAddresses []string
@@ -172,12 +178,6 @@ var createCmd = &cobra.Command{
 		}
 
 		// ---- ! ----
-
-		// podman connectivity
-		runtime, err := podman.NewPodmanClient()
-		if err != nil {
-			return fmt.Errorf("failed to connect to podman: %w", err)
-		}
 
 		// Loop through all pod templates, render and run kube play
 		logger.Infof("Total Pod Templates to be processed: %d\n", len(tmpls))
@@ -342,11 +342,15 @@ func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *t
 
 func executePodTemplates(runtime runtime.Runtime, tp templates.Template, appName string, appMetadata *templates.AppMetadata,
 	tmpls map[string]*template.Template, pciAddresses []string, existingPods []string) error {
-
+	values, err := tp.LoadValues(templateName, argParams)
+	if err != nil {
+		return fmt.Errorf("failed to load params for application: %w", err)
+	}
 	globalParams := map[string]any{
 		"AppName":         appName,
 		"AppTemplateName": appMetadata.Name,
 		"Version":         appMetadata.Version,
+		"Values":          values,
 		// Key -> container name
 		// Value -> range of key-value env pairs
 		"env": map[string]map[string]string{},
@@ -478,7 +482,7 @@ func validateSpyreCardRequirements(req int, actual int) error {
 	return nil
 }
 
-func calculateReqSpyreCards(tp templates.Template, podTemplateFileNames []string, appTemplateName, appName string) (int, error) {
+func calculateReqSpyreCards(client *podman.PodmanClient, tp templates.Template, podTemplateFileNames []string, appTemplateName, appName string) (int, error) {
 	totalReqSpyreCounts := 0
 
 	// Calculate Req Spyre Counts
@@ -487,6 +491,17 @@ func calculateReqSpyreCards(tp templates.Template, podTemplateFileNames []string
 		podSpec, err := fetchPodSpec(tp, appTemplateName, podTemplateFileName, appName)
 		if err != nil {
 			return totalReqSpyreCounts, fmt.Errorf("failed to load pod Template: '%s' for appTemplate: '%s' with error: %w", podTemplateFileName, appTemplateName, err)
+		}
+
+		// check if pod already exists and skip counting if it does exists
+		exists, err := client.PodExists(podSpec.Name)
+		if err != nil {
+			return totalReqSpyreCounts, fmt.Errorf("failed to check pod status: %w", err)
+		}
+
+		if exists {
+			logger.Infof("Pod %s already exists, skipping spyre cards calculation", podSpec.Name, 2)
+			continue
 		}
 
 		// fetch the spyreCount for all containers from the annotations
@@ -530,7 +545,7 @@ func fetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[
 }
 
 func fetchPodSpec(tp templates.Template, appTemplateName, podTemplateFileName, appName string) (*models.PodSpec, error) {
-	podSpec, err := tp.LoadPodTemplateWithDummyParams(appTemplateName, podTemplateFileName, appName)
+	podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, podTemplateFileName, appName, argParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load pod Template: '%s' for appTemplate: '%s' with error: %w", podTemplateFileName, appTemplateName, err)
 	}

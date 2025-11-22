@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -39,4 +40,8 @@ func (r *RHNRule) Verify() error {
 
 func (r *RHNRule) Message() string {
 	return "System is registered with RHN"
+}
+
+func (r *RHNRule) Level() constants.ValidationLevel {
+	return constants.ValidationLevelError
 }

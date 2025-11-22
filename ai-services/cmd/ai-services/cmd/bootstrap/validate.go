@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
@@ -72,6 +73,8 @@ Available checks to skip:
   aiservices bootstrap validate --verbose`,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Once precheck passes, silence usage for any *later* internal errors.
+			cmd.SilenceUsage = true
 
 			logger.Infoln("Running bootstrap validation...")
 
@@ -103,6 +106,7 @@ func RunValidateCmd(skip map[string]bool) error {
 	for _, rule := range validators.DefaultRegistry.Rules() {
 		ruleName := rule.Name()
 		if skip[ruleName] {
+			logger.Warningf("%s check skipped; Proceeding without validation may result in deployment failure.", ruleName)
 			continue
 		}
 
@@ -111,13 +115,18 @@ func RunValidateCmd(skip map[string]bool) error {
 		err := rule.Verify()
 
 		if err != nil {
-			s.Fail(err.Error())
-
 			// exit right away if user is not root as other check require root privileges
 			if ruleName == CheckRoot {
+				s.Fail(err.Error())
 				return fmt.Errorf("root privileges are required for validation")
 			}
-			validationErrors = append(validationErrors, fmt.Errorf("%s: %w", ruleName, err))
+			switch rule.Level() {
+			case constants.ValidationLevelError:
+				s.Fail(err.Error())
+				validationErrors = append(validationErrors, fmt.Errorf("%s: %w", ruleName, err))
+			case constants.ValidationLevelWarning:
+				logger.Warningf(err.Error())
+			}
 		} else {
 			s.Stop(rule.Message())
 		}

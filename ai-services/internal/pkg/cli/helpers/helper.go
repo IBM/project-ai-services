@@ -84,6 +84,9 @@ func ListSpyreCards() ([]string, error) {
 	pci_devices_str := string(out)
 
 	for _, pci_dev := range strings.Split(pci_devices_str, "\n") {
+		if pci_dev == "" {
+			continue
+		}
 		logger.Infoln("Spyre card detected", 1)
 		dev_id := strings.Split(pci_dev, " ")[0]
 		logger.Infof("PCI id: %s\n", dev_id, 1)

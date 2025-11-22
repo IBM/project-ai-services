@@ -3,6 +3,7 @@ package validators
 import (
 	"sync"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/numa"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/platform"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/power"
@@ -26,6 +27,7 @@ type Rule interface {
 	Verify() error
 	Message() string
 	Name() string
+	Level() constants.ValidationLevel
 }
 
 // DefaultRegistry is the default registry instance that holds all registered checks.

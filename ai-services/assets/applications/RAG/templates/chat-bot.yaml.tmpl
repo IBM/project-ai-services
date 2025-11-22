@@ -12,7 +12,7 @@ metadata:
 spec:
   containers:
     - name: ui
-      image: icr.io/ai-services-private/rag-ui:v0.0.3
+      image: "{{ .Values.ui.image }}"
       resources:
         requests:
           memory: "1Gi"
@@ -28,7 +28,7 @@ spec:
           containerPort: 3000
           protocol: TCP
     - name: backend-server
-      image: icr.io/ai-services-private/rag:v0.0.4
+      image: "{{ .Values.backend.image }}"
       command:
         - "/var/venv/bin/python"
         - "-m"

@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -36,4 +37,8 @@ func (r *PowerRule) Verify() error {
 
 func (r *PowerRule) Message() string {
 	return "System is running on IBM Power11 (ppc64le)"
+}
+
+func (r *PowerRule) Level() constants.ValidationLevel {
+	return constants.ValidationLevelError
 }

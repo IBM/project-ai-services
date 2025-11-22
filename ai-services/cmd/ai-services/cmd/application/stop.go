@@ -11,6 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	stopPodNames []string
+)
+
 var stopCmd = &cobra.Command{
 	Use:   "stop [name]",
 	Short: "stops the running application",
@@ -24,20 +28,27 @@ var stopCmd = &cobra.Command{
                       Or comma-separated: --pod=pod1,pod2	
 	`,
 	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		applicationName := args[0]
-
-		podnames, err := cmd.Flags().GetStringSlice("pod")
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		var err error
+		stopPodNames, err = cmd.Flags().GetStringSlice("pod")
 		if err != nil {
 			return fmt.Errorf("failed to parse --pod flag: %w", err)
 		}
+
+		return nil
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		applicationName := args[0]
+
+		// Once precheck passes, silence usage for any *later* internal errors.
+		cmd.SilenceUsage = true
 
 		runtimeClient, err := podman.NewPodmanClient()
 		if err != nil {
 			return fmt.Errorf("failed to connect to podman: %w", err)
 		}
 
-		return stopApplication(cmd, runtimeClient, applicationName, podnames)
+		return stopApplication(cmd, runtimeClient, applicationName, stopPodNames)
 	},
 }
 
@@ -46,7 +57,7 @@ func init() {
 }
 
 // stopApplication stops all pods associated with the given application name
-func stopApplication(cmd *cobra.Command, client *podman.PodmanClient, appName string, podnames []string) error {
+func stopApplication(cmd *cobra.Command, client *podman.PodmanClient, appName string, podNames []string) error {
 	resp, err := client.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
 	})
@@ -71,7 +82,7 @@ func stopApplication(cmd *cobra.Command, client *podman.PodmanClient, appName st
 	*/
 
 	var podsToStop []*types.ListPodsReport
-	if len(podnames) > 0 {
+	if len(podNames) > 0 {
 
 		// 1. Filter pods
 		podMap := make(map[string]*types.ListPodsReport)
@@ -81,7 +92,7 @@ func stopApplication(cmd *cobra.Command, client *podman.PodmanClient, appName st
 
 		// maintain list of not found pod names
 		var notFound []string
-		for _, podname := range podnames {
+		for _, podname := range podNames {
 			if pod, exists := podMap[podname]; exists {
 				podsToStop = append(podsToStop, pod)
 			} else {

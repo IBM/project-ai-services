@@ -29,6 +29,8 @@ Specify container name or ID to show logs of a specific container
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Once precheck passes, silence usage for any *later* internal errors.
+		cmd.SilenceUsage = true
 
 		runtimeClient, err := podman.NewPodmanClient()
 		if err != nil {

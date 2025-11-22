@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -31,4 +32,8 @@ func (r *RootRule) Verify() error {
 
 func (r *RootRule) Message() string {
 	return "Current user is root"
+}
+
+func (r *RootRule) Level() constants.ValidationLevel {
+	return constants.ValidationLevelError
 }

@@ -10,6 +10,7 @@ import HeaderNav from "./Header.jsx"
 import { Theme, Content, Grid, Column } from "@carbon/react";
 import { customSendMessage } from "./customSendMessage.jsx";
 import { renderUserDefinedResponse } from "./renderUserDefinedResponse.jsx";
+import { AIExplanationCard } from "./AIExplanationCard.jsx";
 
 const config = {
   messaging: {
@@ -34,7 +35,7 @@ function App() {
     instance.updateMainHeaderTitle("DocuAssistant");
     instance.updateLanguagePack({
       ai_slug_title: undefined,
-      ai_slug_description: undefined,
+      ai_slug_description: < AIExplanationCard />,
     })
     instance.on({ type: BusEventType.FEEDBACK, handler: feedbackHandler });
 

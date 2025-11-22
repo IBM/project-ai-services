@@ -15,6 +15,8 @@ var listCmd = &cobra.Command{
 	Long:  ``,
 	Args:  cobra.MaximumNArgs(0),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Once precheck passes, silence usage for any *later* internal errors.
+		cmd.SilenceUsage = true
 		return list(cmd)
 	},
 }
@@ -29,7 +31,7 @@ func list(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("failed to list the models, err: %w", err)
 	}
-	logger.Infoln("Models in application template" + templateName + ":")
+	logger.Infoln("Models in application template " + templateName + ":")
 	for _, model := range models {
 		logger.Infoln("-" + model)
 	}
