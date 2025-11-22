@@ -27,6 +27,8 @@ func configureCmd() *cobra.Command {
 		Long:   `Configure and initialize the LPAR.`,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Once precheck passes, silence usage for any *later* internal errors.
+			cmd.SilenceUsage = true
 
 			logger.Infoln("Running bootstrap configuration...")
 

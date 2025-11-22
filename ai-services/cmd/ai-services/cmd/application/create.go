@@ -53,12 +53,7 @@ var createCmd = &cobra.Command{
 		Arguments
 		- [name]: Application name (Required)
 	`,
-	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 1 {
-			return errors.New("you must provide an application name")
-		}
-		return nil
-	},
+	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		// validate params flag
@@ -68,11 +63,16 @@ var createCmd = &cobra.Command{
 				return fmt.Errorf("error validating params flag: %v", err)
 			}
 		}
+
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appName := args[0]
 		ctx := context.Background()
+
+		// Once precheck passes, silence usage for any *later* internal errors.
+		cmd.SilenceUsage = true
+
 		skip := helpers.ParseSkipChecks(skipChecks)
 		if len(skip) > 0 {
 			logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)

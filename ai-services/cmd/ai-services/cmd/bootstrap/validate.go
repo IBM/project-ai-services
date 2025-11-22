@@ -73,6 +73,8 @@ Available checks to skip:
   aiservices bootstrap validate --verbose`,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Once precheck passes, silence usage for any *later* internal errors.
+			cmd.SilenceUsage = true
 
 			logger.Infoln("Running bootstrap validation...")
 
