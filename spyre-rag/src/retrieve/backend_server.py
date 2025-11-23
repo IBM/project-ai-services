@@ -152,7 +152,13 @@ def chat_completion():
     except Exception as e:
         return jsonify({"error": repr(e)})
 
-    return Response(stream_with_context(query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, stream, dynamic_chunk_truncation=TRUNCATION)),
+    resp_text = None
+    if docs:
+        resp_text = stream_with_context(query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, stream, dynamic_chunk_truncation=TRUNCATION))
+    else:
+        resp_text = "No documents found in the current context that are relevant to your request."
+
+    return Response(resp_text,
                     content_type='text/event-stream',
                     mimetype='text/event-stream', headers={
             'Cache-Control': 'no-cache',
