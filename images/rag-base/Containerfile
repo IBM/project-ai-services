@@ -1,39 +1,30 @@
-FROM registry.access.redhat.com/ubi9/ubi:9.7 as docling-builder
-
-WORKDIR /opt/docling-build
-
-COPY docling_v2.60.1_ubi9.7.sh .
-COPY docling_v2.60.1.patch .
-COPY opencv_docling_v2.60.1.patch .
-
-RUN ./docling_v2.60.1_ubi9.7.sh --skip-tests
+FROM localhost/docling:v2.60.1 as docling-builder
 
 FROM registry.access.redhat.com/ubi9/ubi:9.7
 
-RUN yum install -y git wget gcc gcc-c++ python3-devel pip python3-numpy zlib-devel libjpeg-devel ninja-build libicu-devel lcms2-devel glib2-devel freetype-devel gfortran openblas-devel libxml2-devel libxslt-devel llvm-devel clang-libs
+RUN yum install -y git wget gcc gcc-c++ python3.11-devel python3.11-pip python3.11-numpy zlib-devel libjpeg-devel ninja-build libicu-devel lcms2-devel glib2-devel freetype-devel gfortran openblas-devel libxml2-devel libxslt-devel llvm-devel clang-libs
 
 RUN yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/CRB/ppc64le/os && \
     yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/AppStream//ppc64le/os && \
     yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/BaseOS/ppc64le/os && \
     rpm --import https://centos.org/keys/RPM-GPG-KEY-CentOS-Official && \
     yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
-    yum install -y gn geos-devel tesseract-devel spatialindex-devel llvm16-devel ffmpeg-free ffmpeg-free-devel
+    yum install -y gn geos-devel tesseract-devel spatialindex-devel llvm16-devel ffmpeg-free ffmpeg-free-devel && \
+    yum clean all && rm -rf /var/cache/yum && rm -rf /usr/share/man/* && rm -rf /usr/share/doc/* && \
+    ln -s /usr/bin/pip3.11 /usr/bin/pip && ln -s /usr/bin/pip3.11 /usr/bin/pip3 && \
+    rm -rf /usr/bin/python && ln -s /usr/bin/python3.11 /usr/bin/python && \
+    rm -rf /usr/bin/python3 && ln -s /usr/bin/python3.11 /usr/bin/python3
 
 WORKDIR /opt/wheels
-COPY --from=docling-builder /usr/local/lib64/*.so /usr/local/lib64
+COPY --from=docling-builder /usr/local/lib64/*.so* /usr/local/lib64/
 COPY --from=docling-builder /usr/include/tree_sitter /usr/include/tree_sitter
 
-RUN ln /usr/local/lib64/libopenjp2.so /usr/local/lib64/libopenjp2.so.7
-RUN ln -s /usr/lib64/libclang.so.19.1 /usr/lib64/libclang.so
 ENV LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH
 COPY requirements.txt .
 COPY download_docling_models.py .
 
-RUN --mount=type=bind,from=docling-builder,source=/opt/docling-build/docling/dist/,target=/opt/wheels/docling-wheels/,ro \
-    --mount=type=bind,from=docling-builder,source=/opt/docling-build/opencv-python/,target=/opt/wheels/opencv-wheels/,ro \
-    --mount=type=bind,from=docling-builder,source=/opt/docling-build/pytorch/dist/,target=/opt/wheels/torch-wheels/,ro \
-    --mount=type=bind,from=docling-builder,source=/opt/docling-build/pypdfium2/,target=/opt/wheels/pypdfium-wheels/,ro \
-    --mount=type=bind,from=docling-builder,source=/opt/docling-build/vision/dist/,target=/opt/wheels/torch-vision-wheels/,ro \
+RUN --mount=type=bind,from=docling-builder,source=/tmp,target=/tmp,ro \
     python3 -m venv /var/venv && source /var/venv/bin/activate && \
-    pip3 install -r requirements.txt --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux && \
+    pip3 install -r requirements.txt --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux /tmp/*.whl && \
+    pip3 cache purge && \
     python download_docling_models.py
