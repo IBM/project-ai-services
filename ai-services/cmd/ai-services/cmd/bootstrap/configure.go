@@ -163,7 +163,7 @@ func runServiceReport() error {
 	if num_vf_cards != num_spyre_cards {
 		logger.Infof("failed to detect vfio cards, reloading vfio kernel modules..")
 		// reload vfio kernel modules
-		cmd = `rmmod vfio_pci; modprobe vfio_pci`
+		cmd = `udevadm control --reload-rules; rmmod vfio_pci; modprobe vfio_pci`
 		_, err = exec.Command("bash", "-c", cmd).Output()
 		if err != nil {
 			return fmt.Errorf("❌ failed to reload vfio kernel modules for spyre %w", err)
