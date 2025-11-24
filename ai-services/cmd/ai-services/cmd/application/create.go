@@ -189,17 +189,23 @@ var createCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("failed to list local images: %w", err)
 			}
-			notfoundImages := []string{}
-			for _, image := range images {
-				found := false
-				for _, lImage := range lImages {
-					// Check both RepoTags and RepoDigests for presence
-					if slices.Contains(lImage.RepoTags, image) || slices.Contains(lImage.RepoDigests, image) {
-						found = true
-						break
-					}
+			// Populate a map with all existing local images (tags and digests)
+			existingImages := make(map[string]bool)
+
+			for _, lImage := range lImages {
+				for _, tag := range lImage.RepoTags {
+					existingImages[tag] = true
 				}
-				if !found {
+				for _, digest := range lImage.RepoDigests {
+					existingImages[digest] = true
+				}
+			}
+
+			// Filter the requested images against the map
+			var notfoundImages []string
+
+			for _, image := range images {
+				if !existingImages[image] {
 					notfoundImages = append(notfoundImages, image)
 				}
 			}
