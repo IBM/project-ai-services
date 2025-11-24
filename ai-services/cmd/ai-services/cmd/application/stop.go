@@ -120,9 +120,7 @@ func stopApplication(cmd *cobra.Command, client *podman.PodmanClient, appName st
 		logger.Infof("\t-> %s\n", pod.Name)
 	}
 
-	logger.Infof("Are you sure you want to stop above pods? (y/N): ")
-
-	confirmStop, err := utils.ConfirmAction()
+	confirmStop, err := utils.ConfirmAction("Are you sure you want to stop the above pods? ")
 	if err != nil {
 		return fmt.Errorf("failed to take user input: %w", err)
 	}

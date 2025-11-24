@@ -3,6 +3,7 @@ package spinner
 import (
 	"context"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/yarlson/pin"
 )
 
@@ -45,4 +46,9 @@ func (s *Spinner) Fail(message string) {
 
 func (s *Spinner) UpdateMessage(message string) {
 	s.p.UpdateMessage(message)
+}
+
+func (s *Spinner) StopWithHint(msg, hint string) {
+	s.Fail(msg)
+	logger.Infof("HINT: %s\n", hint)
 }

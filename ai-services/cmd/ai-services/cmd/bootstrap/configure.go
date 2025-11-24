@@ -179,7 +179,7 @@ func configureUsergroup() error {
 	cmd := exec.Command("bash", "-c", cmd_str)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("❌ failed to create sentient group and add current user to the sentient group. Error: %w, output: %s", err, string(out))
+		return fmt.Errorf("failed to create sentient group and add current user to the sentient group. Error: %w, output: %s", err, string(out))
 	}
 
 	return nil
