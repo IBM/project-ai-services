@@ -142,6 +142,10 @@ func runServiceReport() error {
 		return err
 	}
 
+	if err := reloadUdevRules(); err != nil {
+		return err
+	}
+
 	cards, err := helpers.ListSpyreCards()
 	if err != nil || len(cards) == 0 {
 		return fmt.Errorf("❌ failed to list spyre cards on LPAR %w", err)
@@ -163,7 +167,7 @@ func runServiceReport() error {
 	if num_vf_cards != num_spyre_cards {
 		logger.Infof("failed to detect vfio cards, reloading vfio kernel modules..")
 		// reload vfio kernel modules
-		cmd = `udevadm control --reload-rules; rmmod vfio_pci; modprobe vfio_pci`
+		cmd = `rmmod vfio_pci; modprobe vfio_pci`
 		_, err = exec.Command("bash", "-c", cmd).Output()
 		if err != nil {
 			return fmt.Errorf("❌ failed to reload vfio kernel modules for spyre %w", err)
@@ -180,6 +184,16 @@ func configureUsergroup() error {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to create sentient group and add current user to the sentient group. Error: %w, output: %s", err, string(out))
+	}
+
+	return nil
+}
+
+func reloadUdevRules() error {
+	cmd := `udevadm control --reload-rules`
+	_, err := exec.Command("bash", "-c", cmd).Output()
+	if err != nil {
+		return fmt.Errorf("failed to reload udev rules. Error: %w", err)
 	}
 
 	return nil
