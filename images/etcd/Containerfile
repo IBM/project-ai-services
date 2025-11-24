@@ -6,7 +6,7 @@ USER root
 
 RUN dnf install -y --disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms make && dnf clean all
 
-ARG GO_VERSION=1.24.8
+ARG GO_VERSION=1.24.9
 
 RUN curl -LO https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz && \
     tar -C /usr/local -xvf go${GO_VERSION}.linux-${TARGETARCH}.tar.gz && \
