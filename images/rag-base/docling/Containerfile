@@ -140,7 +140,8 @@ RUN wget ${PATCH_FILE} && \
 #Install docling wheel and its dependencies
 RUN pip install wheel==0.45.1 hf_xet==1.2.0 huggingface_hub==1.1.4 && \
     pip install --prefer-binary --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \
-        tree_sitter_c==0.23.2 tree-sitter-python==0.23.2 "numpy<2.0" tesserocr==2.9.1 openai-whisper==20230117 uvloop==0.22.1 /tmp/*.whl
+        tree_sitter_c==0.23.2 tree-sitter-python==0.23.2 "numpy<2.0" tesserocr==2.9.1 openai-whisper==20230117 \
+        fastavro==1.12.1 uvloop==0.22.1 /tmp/*.whl
 
 #Copy wheels to be installed in the main stage
 RUN find /root/.cache/pip/wheels -name '*.whl' -exec cp "{}" /tmp  \;

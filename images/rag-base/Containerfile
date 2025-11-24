@@ -2,29 +2,31 @@ FROM localhost/docling:v2.60.1 as docling-builder
 
 FROM registry.access.redhat.com/ubi9/ubi:9.7
 
-RUN yum install -y git wget gcc gcc-c++ python3.11-devel python3.11-pip python3.11-numpy zlib-devel libjpeg-devel ninja-build libicu-devel lcms2-devel glib2-devel freetype-devel gfortran openblas-devel libxml2-devel libxslt-devel llvm-devel clang-libs
-
-RUN yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/CRB/ppc64le/os && \
+RUN yum install -y --setopt=tsflags=nodocs python3.11-devel python3.11-pip lcms2-devel openblas-devel && \
+    yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/CRB/ppc64le/os && \
     yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/AppStream//ppc64le/os && \
     yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/BaseOS/ppc64le/os && \
     rpm --import https://centos.org/keys/RPM-GPG-KEY-CentOS-Official && \
     yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
-    yum install -y gn geos-devel tesseract-devel spatialindex-devel llvm16-devel ffmpeg-free ffmpeg-free-devel && \
-    yum clean all && rm -rf /var/cache/yum && rm -rf /usr/share/man/* && rm -rf /usr/share/doc/* && \
+    yum install -y tesseract-devel spatialindex-devel ffmpeg-free-devel && \
+    yum clean all && rm -rf /var/cache/yum && \
+    rm -rf /usr/bin/python && rm -rf /usr/bin/python3 && \
     ln -s /usr/bin/pip3.11 /usr/bin/pip && ln -s /usr/bin/pip3.11 /usr/bin/pip3 && \
-    rm -rf /usr/bin/python && ln -s /usr/bin/python3.11 /usr/bin/python && \
-    rm -rf /usr/bin/python3 && ln -s /usr/bin/python3.11 /usr/bin/python3
+    ln -s /usr/bin/python3.11 /usr/bin/python && ln -s /usr/bin/python3.11 /usr/bin/python3
 
-WORKDIR /opt/wheels
 COPY --from=docling-builder /usr/local/lib64/*.so* /usr/local/lib64/
 COPY --from=docling-builder /usr/include/tree_sitter /usr/include/tree_sitter
 
 ENV LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH
+
+WORKDIR /opt/wheels
+
 COPY requirements.txt .
 COPY download_docling_models.py .
 
 RUN --mount=type=bind,from=docling-builder,source=/tmp,target=/tmp,ro \
     python3 -m venv /var/venv && source /var/venv/bin/activate && \
-    pip3 install -r requirements.txt --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux /tmp/*.whl && \
-    pip3 cache purge && \
+    pip install --upgrade pip && \
+    pip install -r requirements.txt --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux /tmp/*.whl && \
+    pip cache purge && \
     python download_docling_models.py
