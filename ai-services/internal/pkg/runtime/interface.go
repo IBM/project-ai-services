@@ -9,7 +9,7 @@ import (
 )
 
 type Runtime interface {
-	ListImages() ([]string, error)
+	ListImages() ([]*types.ImageSummary, error)
 	PullImage(image string, options *images.PullOptions) error
 	ListPods(filters map[string][]string) (any, error)
 	CreatePod(body io.Reader) (*types.KubePlayReport, error)

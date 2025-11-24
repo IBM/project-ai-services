@@ -42,6 +42,7 @@ var (
 var (
 	templateName      string
 	skipModelDownload bool
+	skipImageDownload bool
 	skipChecks        []string
 	rawArgParams      []string
 
@@ -160,6 +161,11 @@ var createCmd = &cobra.Command{
 			}
 		}
 
+		// ---- Download Container Images ----
+		if err := downloadImagesForTemplate(runtime, templateName, appName); err != nil {
+			return err
+		}
+
 		// Download models if flag is set to true(default: true)
 		if !skipModelDownload {
 			s = spinner.New("Downloading models as part of application creation...")
@@ -221,12 +227,68 @@ var createCmd = &cobra.Command{
 	},
 }
 
+func downloadImagesForTemplate(runtime runtime.Runtime, templateName, appName string) error {
+	// Fetch all images required for a given template
+	images, err := helpers.ListImages(templateName, appName)
+	if err != nil {
+		return fmt.Errorf("failed to list container images: %w", err)
+	}
+
+	if !skipImageDownload {
+		// Download container images if flag is set to false (default: false)
+		logger.Infoln("Downloading container images required for application template " + templateName + ":")
+		for _, image := range images {
+			logger.Infoln("Downloading image: " + image + "...")
+			if err := utils.Retry(retryCount, retryInterval, nil, func() error {
+				return runtime.PullImage(image, nil)
+			}); err != nil {
+				return fmt.Errorf("failed to download image: %w", err)
+			}
+		}
+		logger.Infoln("Downloading container images completed.")
+	} else {
+		logger.Infoln("Skipping container image download as per the flag --skip-image-download=true")
+		// Verify that images exist locally
+		lImages, err := runtime.ListImages()
+		if err != nil {
+			return fmt.Errorf("failed to list local images: %w", err)
+		}
+		// Populate a map with all existing local images (tags and digests)
+		existingImages := make(map[string]bool)
+
+		for _, lImage := range lImages {
+			for _, tag := range lImage.RepoTags {
+				existingImages[tag] = true
+			}
+			for _, digest := range lImage.RepoDigests {
+				existingImages[digest] = true
+			}
+		}
+
+		// Filter the requested images against the map
+		var notfoundImages []string
+
+		for _, image := range images {
+			if !existingImages[image] {
+				notfoundImages = append(notfoundImages, image)
+			}
+		}
+		if len(notfoundImages) > 0 {
+			return fmt.Errorf("some required images are not present locally: %v. Either pull the image manually or rerun create command without --skip-image-download flag", notfoundImages)
+		}
+		logger.Infoln("All required container images are present locally.")
+	}
+	return nil
+}
+
 func init() {
 	createCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{},
 		"Skip specific validation checks (comma-separated: root,rhel,rhn,power,rhaiis,numa)")
 	createCmd.Flags().StringVarP(&templateName, "template", "t", "", "Template name to use (required)")
 	_ = createCmd.MarkFlagRequired("template")
 	createCmd.Flags().BoolVar(&skipModelDownload, "skip-model-download", false, "Set to true to skip model download during application creation. This assumes local models are already available at /var/lib/ai-services/models/ and is particularly beneficial for air-gapped networks with limited internet access. If not set correctly (e.g., set to true when models are missing, or left false in an air-gapped environment), the create command may fail.")
+	// Add a flag for skipping image download
+	createCmd.Flags().BoolVar(&skipImageDownload, "skip-image-download", false, "Set to true to skip container image pull/download during application creation. This assumes required container images are already available locally. If not set correctly (e.g., set to true when images are missing), the create command may fail.")
 	createCmd.Flags().StringSliceVar(&rawArgParams, "params", []string{}, "Parameters required to configure the application. Takes Comma-separated key=value pairs. Values Supported: UI_PORT=8000")
 }
 
