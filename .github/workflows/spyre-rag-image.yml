@@ -19,12 +19,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
       
-      - name: Build spyre-rag-ui image
+      - name: Build spyre-rag image
         working-directory: spyre-rag/src
         run: |
           make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
 
-      - name: Publish spyre-rag-ui image
+      - name: Publish spyre-rag image
         working-directory: spyre-rag/src
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |

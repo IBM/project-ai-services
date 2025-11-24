@@ -104,6 +104,7 @@ func GetHostIP() (string, error) {
 	return "", nil
 }
 
+// Checks if a yaml.Node is marked as hidden via @hidden in the head comment
 func isHidden(n *yaml.Node) bool {
 	if n == nil {
 		return false
@@ -111,7 +112,23 @@ func isHidden(n *yaml.Node) bool {
 	return strings.Contains(n.HeadComment, "@hidden")
 }
 
-func FlattenNode(prefix string, n *yaml.Node, out *[]string) {
+// Retrives the description from a yaml.Node's head comment marked with @description
+func getDescription(n *yaml.Node) string {
+	if n == nil {
+		return ""
+	}
+
+	comment := n.HeadComment
+	idx := strings.Index(comment, "@description")
+	if idx < 0 {
+		return ""
+	}
+
+	desc := comment[idx+len("@description"):]
+	return strings.TrimSpace(desc)
+}
+
+func FlattenNode(prefix string, n *yaml.Node, descMap map[string]string) {
 	if n == nil {
 		return
 	}
@@ -132,17 +149,33 @@ func FlattenNode(prefix string, n *yaml.Node, out *[]string) {
 			} else {
 				newPrefix = prefix + "." + keyNode.Value
 			}
-			FlattenNode(newPrefix, valNode, out)
+
+			// description tied to key
+			if d := getDescription(keyNode); d != "" {
+				descMap[newPrefix] = d
+			}
+
+			FlattenNode(newPrefix, valNode, descMap)
 		}
 
 	case yaml.SequenceNode:
 		for i, el := range n.Content {
-			FlattenNode(fmt.Sprintf("%s[%d]", prefix, i), el, out)
+			newPrefix := fmt.Sprintf("%s[%d]", prefix, i)
+
+			// sequences probably not commented, but if they are:
+			if d := getDescription(el); d != "" {
+				descMap[newPrefix] = d
+			}
+
+			FlattenNode(newPrefix, el, descMap)
 		}
 
 	default:
+		// Leaf values
 		if prefix != "" {
-			*out = append(*out, prefix)
+			if d := getDescription(n); d != "" {
+				descMap[prefix] = d
+			}
 		}
 	}
 }
