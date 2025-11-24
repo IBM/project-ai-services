@@ -1,21 +1,14 @@
 import logging
 import time
 from glob import glob
-from tqdm import tqdm
 import argparse
 
 from common.misc_utils import setup_cache_dir, set_log_level, get_logger, get_txt_tab_filenames, get_model_endpoints
-from common.db_utils import MilvusVectorStore
-from ingest.doc_utils import extract_document_data, hierarchical_chunk_with_token_split, create_chunk_documents
-
-logger = get_logger("ingest")
 
 def reset_db():
     vector_store = MilvusVectorStore()
-    collection_name = vector_store._generate_collection_name()
-
     vector_store.reset_collection()
-    logger.info(f"✅ Cleaned Vector DB: {collection_name}")
+    logger.info(f"✅ DB Cleaned successfully!")
 
 def ingest(directory_path, include_meta_info_in_main_text):
     logger.info(f"Ingestion started from dir '{directory_path}'")
@@ -29,8 +22,7 @@ def ingest(directory_path, include_meta_info_in_main_text):
     input_file_paths = []
     for f_type in allowed_file_types:
         input_file_paths.extend(glob(f'{directory_path}/**/*.{f_type}', recursive=True))
-    input_files_being_processed = '\n'.join(f for f in input_file_paths)
-    logger.info(f"Processing following files: {input_files_being_processed}")
+    logger.info(f"Processing {len(input_file_paths)} documents")
     
     out_path = setup_cache_dir(collection_name)
 
@@ -50,7 +42,8 @@ def ingest(directory_path, include_meta_info_in_main_text):
         filtered_chunks = create_chunk_documents(
             in_chunk_f, in_tab_f, orig_fn, include_meta_info_in_main_text)
         combined_filtered_chunks.extend(filtered_chunks)
-
+    logger.info("All documents converted")
+    logger.info("Loading converted documents into DB")
     # Insert data into Milvus
     vector_store.insert_chunks(
         emb_model=emb_model_dict['emb_model'],
@@ -58,38 +51,41 @@ def ingest(directory_path, include_meta_info_in_main_text):
         max_tokens=emb_model_dict['max_tokens'],
         chunks=combined_filtered_chunks
     )
-
-    logger.debug(f"Inserted {len(combined_filtered_chunks)} chunks to the vector DB: {collection_name}")
+    logger.info("DB is loaded with the documents provided")
 
     # Log time taken for the file
     end_time = time.time()  # End the timer for the current file
     file_processing_time = end_time - start_time
-    logger.info(f"Time taken to ingest the documents into vector DB is: {file_processing_time:.2f} seconds")
+    logger.debug(f"Time taken to ingest the documents into vector DB is: {file_processing_time:.2f} seconds")
 
-    logger.info(f"✅ Ingestion completed successfully!")
+    logger.info(f"✅ Ingestion completed successfully, you can query your documents via chatbot")
 
-def main():
-    parser = argparse.ArgumentParser(description="Data Ingestion CLI", formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+common_parser = argparse.ArgumentParser(add_help=False)
+common_parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
-    command_parser = parser.add_subparsers(dest="command", required=True)
+parser = argparse.ArgumentParser(description="Data Ingestion CLI", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
+command_parser = parser.add_subparsers(dest="command", required=True)
 
-    ingest_parser = command_parser.add_parser("ingest", help="Ingest the DOCs", description="Ingest the DOCs into Milvus after all the processing\n", formatter_class=argparse.RawTextHelpFormatter)
-    ingest_parser.add_argument("--path", type=str, default="/var/docs", help="Path to the documents that needs to be ingested into the RAG")
-    ingest_parser.add_argument("--include-meta", action="store_true", help="Include meta info while ingesting the docs")
+ingest_parser = command_parser.add_parser("ingest", help="Ingest the DOCs", description="Ingest the DOCs into Milvus after all the processing\n", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
+ingest_parser.add_argument("--path", type=str, default="/var/docs", help="Path to the documents that needs to be ingested into the RAG")
+ingest_parser.add_argument("--include-meta", action="store_true", help="Include meta info while ingesting the docs")
 
-    command_parser.add_parser("clean-db", help="Clean the DB", description="Clean the Milvus DB\n", formatter_class=argparse.RawTextHelpFormatter)
+command_parser.add_parser("clean-db", help="Clean the DB", description="Clean the Milvus DB\n", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
 
-    command_args = parser.parse_args()
-    if command_args.debug:
-        set_log_level(logging.DEBUG)
-    else:
-        set_log_level(logging.INFO)
+command_args = parser.parse_args()
+if command_args.debug:
+    set_log_level(logging.DEBUG)
+else:
+    set_log_level(logging.INFO)
 
-    if command_args.command == "ingest":
-        ingest(command_args.path, command_args.include_meta)
-    elif command_args.command == "clean-db":
-        reset_db()
 
-if __name__ == "__main__":
-    main()
+from common.db_utils import MilvusVectorStore
+from ingest.doc_utils import extract_document_data, hierarchical_chunk_with_token_split, create_chunk_documents
+
+logger = get_logger("Ingest")
+
+if command_args.command == "ingest":
+    ingest(command_args.path, command_args.include_meta)
+elif command_args.command == "clean-db":
+    reset_db()
+

@@ -1,7 +1,5 @@
-import json
 import requests
 import time
-from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from common.misc_utils import get_logger
@@ -15,7 +13,7 @@ def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, batch_size=128)
     all_prompts = [settings.prompts.llm_classify.format(text=item.strip()) for item in text_blocks]
     
     decisions = []
-    for i in tqdm(range(0, len(all_prompts), batch_size)):
+    for i in range(0, len(all_prompts), batch_size):
         batch_prompts = all_prompts[i:i + batch_size]
 
         payload = {
@@ -86,7 +84,7 @@ def summarize_table(table_html, table_caption, gen_model, llm_endpoint, max_work
             for idx, prompt in enumerate(all_prompts)
         }
 
-        for future in tqdm(as_completed(futures), total=len(futures)):
+        for future in as_completed(futures):
             idx = futures[future]
             try:
                 summaries[idx] = future.result()

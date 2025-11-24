@@ -2,11 +2,12 @@ import json
 import time
 import logging
 import os
+
+from tqdm import tqdm
 os.environ['GRPC_VERBOSITY'] = 'ERROR' 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 import pdfplumber
-from tqdm import tqdm
 from pathlib import Path
 from rapidfuzz import fuzz
 from typing import List, Dict, Any
@@ -99,7 +100,7 @@ def find_text_font_size(
 
 
 def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint, start_time, timings):
-    logger.info(f"Processing '{pdf_path}'")
+    logger.debug(f"Processing '{pdf_path}'")
     
     doc_json = res.document.export_to_dict()
     stem = res.input.file.stem
@@ -128,9 +129,9 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
 
         structured_output = []
 
-        logger.info(f"Processing text content of '{pdf_path}'")
+        logger.debug(f"Processing text content of '{pdf_path}'")
         t0 = time.time()
-        for text_obj in tqdm(filtered_text_dicts):
+        for text_obj in filtered_text_dicts:
             label = text_obj.get("label", "")
 
             # Check if it's a section header and process TOC or fallback to font size extraction
@@ -176,7 +177,7 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
 
     # --- Table Extraction ---
     if len(res.document.tables):
-        logger.info(f"Processing table content of '{pdf_path}'")
+        logger.debug(f"Processing table content of '{pdf_path}'")
         t0 = time.time()
         table_htmls_dict = {}
         table_captions_dict = {i: None for i in range(len(res.document.tables))}
@@ -191,12 +192,12 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
         table_captions_list = [table_captions_dict[key] for key in sorted(table_captions_dict)]
         timings['extract_tables'] = time.time() - t0
 
-        logger.info(f"Summarizing tables of '{pdf_path}'")
+        logger.debug(f"Summarizing tables of '{pdf_path}'")
         t0 = time.time()
         table_summaries = summarize_table(table_htmls, table_captions_list, gen_model, gen_endpoint)
         timings['summarize_tables'] = time.time() - t0
 
-        logger.info(f"Classifying table summaries of '{pdf_path}'")
+        logger.debug(f"Classifying table summaries of '{pdf_path}'")
         t0 = time.time()
         decisions = classify_text_with_llm(table_summaries, gen_model, gen_endpoint)
         filtered_table_dicts = {
@@ -221,13 +222,13 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
 
 def convert_and_process(path, doc_converter, out_path, llm_model, llm_endpoint):
     try:
-        logger.info(f"Converting '{path}'")
+        logger.debug(f"Converting '{path}'")
         start_time = time.time()
         timings = {}
         t0 = time.time()
         res = doc_converter.convert(path)
         timings['conversion_time'] = time.time() - t0
-        logger.info(f"'{path}' converted")
+        logger.debug(f"'{path}' converted")
         process_converted_document(res, path, out_path, llm_model, llm_endpoint, start_time, timings)
     except Exception as e:
         logger.error(f"Error converting or processing {path}: {e}")
@@ -277,7 +278,7 @@ def extract_document_data(input_paths, out_path, llm_model, llm_endpoint, force=
                 executor.submit(convert_and_process, path, doc_converter, out_path, llm_model, llm_endpoint)
                 for path in filtered_input_paths
             ]
-            for future in as_completed(futures):
+            for future in tqdm(as_completed(futures), total=len(filtered_input_paths)):
                 future.result()
     else:
         logger.debug("No files to convert and process")
@@ -474,7 +475,7 @@ def chunk_single_file(input_path, output_path, llm_endpoint, max_tokens=512):
         logger.debug(f"{output_path} already exists.")
 
 def hierarchical_chunk_with_token_split(input_paths, output_paths, llm_endpoint, max_tokens=512):
-    logger.info("Creating chunks from processed documents")
+    logger.debug("Creating chunks from processed documents")
     if len(input_paths) != len(output_paths):
         raise ValueError("`input_paths` and `output_paths` must have the same length")
 
@@ -491,11 +492,11 @@ def hierarchical_chunk_with_token_split(input_paths, output_paths, llm_endpoint,
                 future.result()  # Capture exceptions if any
             except Exception as e:
                 logger.error(f"Error occurred: {e}")
-    logger.info("Chunks creation completed")
+    logger.debug("Chunks creation completed")
 
 
 def create_chunk_documents(in_txt_f, in_tab_f, orig_fn, include_meta_info_in_main_text):
-    logger.info(f"Creating combined chunk documents from '{in_txt_f}' & '{in_tab_f}'")
+    logger.debug(f"Creating combined chunk documents from '{in_txt_f}' & '{in_tab_f}'")
     with open(in_txt_f, "r") as f:
         txt_data = json.load(f)
 
@@ -541,6 +542,6 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn, include_meta_info_in_mai
 
     combined_docs = txt_docs + tab_docs
 
-    logger.info(f"Combined chunk documents created")
+    logger.debug(f"Combined chunk documents created")
 
     return combined_docs
