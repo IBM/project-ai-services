@@ -46,17 +46,8 @@ func NewPodmanClient() (*PodmanClient, error) {
 }
 
 // Example function to list images (you can expand with more Podman functionalities)
-func (pc *PodmanClient) ListImages() ([]string, error) {
-	imagesList, err := images.List(pc.Context, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var imageNames []string
-	for _, img := range imagesList {
-		imageNames = append(imageNames, img.ID)
-	}
-	return imageNames, nil
+func (pc *PodmanClient) ListImages() ([]*types.ImageSummary, error) {
+	return images.List(pc.Context, nil)
 }
 
 func (pc *PodmanClient) PullImage(image string, options *images.PullOptions) error {
