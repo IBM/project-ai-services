@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"slices"
-	"sort"
 	"strings"
 	"text/template"
 
@@ -54,7 +53,7 @@ func (e *embedTemplateProvider) ListApplications() ([]string, error) {
 }
 
 // ListApplicationTemplateValues lists all available template value keys for a single application.
-func (e *embedTemplateProvider) ListApplicationTemplateValues(app string) ([]string, error) {
+func (e *embedTemplateProvider) ListApplicationTemplateValues(app string) (map[string]string, error) {
 	valuesPath := fmt.Sprintf("%s/%s/values.yaml", e.root, app)
 	valuesData, err := e.fs.ReadFile(valuesPath)
 	if err != nil {
@@ -66,13 +65,13 @@ func (e *embedTemplateProvider) ListApplicationTemplateValues(app string) ([]str
 		return nil, fmt.Errorf("failed to unmarshal yaml.Node: %w", err)
 	}
 
-	var keys []string
+	parametersWithDescription := make(map[string]string)
+
 	if len(root.Content) > 0 {
-		utils.FlattenNode("", root.Content[0], &keys)
+		utils.FlattenNode("", root.Content[0], parametersWithDescription)
 	}
 
-	sort.Strings(keys)
-	return keys, nil
+	return parametersWithDescription, nil
 }
 
 // LoadAllTemplates loads all templates for a given application
