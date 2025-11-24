@@ -1,6 +1,6 @@
 ui:
   # @description The host port on which the RAG UI will run
-  port: 3000
+  port: ""
   # @hidden
   image: icr.io/ai-services-cicd/rag-ui:v0.0.6
 

@@ -1,7 +1,8 @@
 pods:
   - name: "{{ .AppName }}--chat-bot"
-    fetch: "UI_PORT"
-    type: ports
+    fetch: "3000"
+    alias: UI_PORT
+    type: port
 
 hosts:
   - fetch: HOST_IP

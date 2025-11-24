@@ -606,22 +606,61 @@ func checkForPodStartAnnotation(podAnnotations map[string]string) string {
 	return ""
 }
 
+// fetchHostPortMappingFromAnnotation returns the hostPortMappings from the pod port annotations for a given pod template
+// Returns:
+//
+//	hostPortMapping: Key -> containerPort, Value -> hostPort
+//
+// port annotation takes comma seperated values of 'hostPort:containerPort' combination
+// port annotation syntax: 'ai-services.io/ports': "<hostPart1>:<containerPort1>,<hostPart2>:<containerPort2>"
+//
+// Below are the hostPortMapping values based on different combinations
+//  1. 'ai-services.io/ports': "8000:3000"
+//     hostPortMapping = {"3000": "8000"}
+//  2. 'ai-services.io/ports': "8000:3000, 8001:3001"
+//     hostPortMapping = {"3000": "8000", "3001": "8001"}
+//  3. 'ai-services.io/ports': ":3000"
+//     hostPortMapping = {"3000": ""}
+//  4. 'ai-services.io/ports': "3000:"
+//     hostPortMapping = {} // Skip such values
+//  5. 'ai-services.io/ports': "3000"
+//     hostPortMapping = {"3000": ""}
 func fetchHostPortMappingFromAnnotation(podAnnotations map[string]string) map[string]string {
-	// key -> port name and value -> container port
+	// key -> containerPort and value -> hostPort
 	hostPortMapping := map[string]string{}
 
-	isContainerPortExposeAnnotation := func(annotation string) (string, bool) {
-		matches := vars.ContainerPortExposeAnnotationRegex.FindStringSubmatch(annotation)
-		if matches == nil {
-			return "", false
-		}
-		return matches[2], true
+	portMappings, ok := podAnnotations[constants.PodPortsAnnotationKey]
+	if !ok {
+		// return empty map if port annotation is not present
+		return hostPortMapping
 	}
 
-	for annotationKey, val := range podAnnotations {
-		if portName, ok := isContainerPortExposeAnnotation(annotationKey); ok {
-			hostPortMapping[portName] = val
+	portMapping := strings.SplitSeq(portMappings, ",")
+	for p := range portMapping {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
 		}
+
+		// Find colon
+		i := strings.Index(p, ":")
+		if i == -1 {
+			// No colon → whole thing is the containerPort
+			hostPortMapping[p] = ""
+			continue
+		}
+
+		// Before colon string is hostPort
+		hostPort := strings.TrimSpace(p[:i])
+		// After colon string is containerPort
+		containerPort := strings.TrimSpace(p[i+1:])
+
+		// If colon exists but NO value after the colon (containerPort) → then skip
+		if containerPort == "" {
+			continue
+		}
+
+		hostPortMapping[containerPort] = hostPort
 	}
 
 	return hostPortMapping
@@ -637,13 +676,13 @@ func constructPodDeployOptions(podAnnotations map[string]string) map[string]stri
 	}
 
 	// construct publish option
-	portMappings := fetchHostPortMappingFromAnnotation(podAnnotations)
+	hostPortMappings := fetchHostPortMappingFromAnnotation(podAnnotations)
 	podDeployOptions["publish"] = ""
 
-	for portName, containerPort := range portMappings {
-		// store comma seperated values of port mappings
-		if hostPort, ok := argParams[portName]; ok {
-			// if the host port for this is supplied by user as part of params, use it
+	// loop over each of the hostPortMappings to construct the 'publish' option
+	for containerPort, hostPort := range hostPortMappings {
+		if hostPort != "" {
+			// if the host port is present
 			podDeployOptions["publish"] += hostPort + ":" + containerPort
 		} else {
 			// else just populate the containerPort, so that dynamically podman will populate

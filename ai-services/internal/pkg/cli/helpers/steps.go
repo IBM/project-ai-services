@@ -11,7 +11,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 func PrintNextSteps(runtime runtime.Runtime, app, appTemplate string) error {
@@ -114,7 +113,7 @@ func populateHostValues(params map[string]string, varsData *templates.Vars) erro
 // populatePodValues -> populates the pod values within the params
 func populatePodValues(runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
 	for _, pod := range varsData.Pods {
-		if pod.Type == "ports" {
+		if pod.Type == "port" {
 			exists, err := runtime.PodExists(pod.Name)
 			if err != nil {
 				return fmt.Errorf("failed to check if pod exists: %w", err)
@@ -135,19 +134,12 @@ func populatePodValues(runtime runtime.Runtime, params map[string]string, varsDa
 				return fmt.Errorf("failed to fetch PortMappings for pod '%s': %w", pod.Name, err)
 			}
 
-			for labelKey, labelVal := range pInfo.Labels {
-				for arg := range strings.SplitSeq(pod.Fetch, ",") {
-					arg = strings.TrimSpace(arg)
-					if labelKey == fmt.Sprintf(string(vars.PodPortLabel), arg) {
-						if port, ok := portMappings[labelVal]; ok {
-							params[arg] = port
-						}
-					}
-				}
-
-			}
+			// The Fetch value will contain the containerPort whose hostPort value needs to be fetched
+			containerPort := strings.TrimSpace(pod.Fetch)
+			hostPort := portMappings[containerPort]
+			// Replace Alias with the hostPort value
+			params[pod.Alias] = hostPort
 		}
-
 	}
 
 	return nil

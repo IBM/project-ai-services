@@ -21,6 +21,7 @@ type Vars struct {
 type PodVar struct {
 	Name  string `yaml:"name,omitempty"`
 	Fetch string `yaml:"fetch,omitempty"`
+	Alias string `yaml:"alias,omitempty"`
 	Type  string `yaml:"type,omitempty"`
 }
 
