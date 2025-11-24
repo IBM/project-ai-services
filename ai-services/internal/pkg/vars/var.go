@@ -7,7 +7,7 @@ var (
 	SpyreCardAnnotationRegex = regexp.MustCompile(`^ai-services\.io\/([A-Za-z0-9][-A-Za-z0-9_.]*)--sypre-cards$`)
 	// ContainerPortExposeAnnotationRegex -> ai-services.io/<containerName>--<PortName>-expose
 	ContainerPortExposeAnnotationRegex = regexp.MustCompile(`^ai-services\.io\/([A-Za-z0-9][-A-Za-z0-9_.]*)--([A-Za-z0-9][-A-Za-z0-9_.]*)-expose$`)
-	ToolImage                          = "icr.io/ai-services/tools:0.1"
+	ToolImage                          = "icr.io/ai-services-cicd/tools:0.2"
 	ModelDirectory                     = "/var/lib/ai-services/models"
 )
 
