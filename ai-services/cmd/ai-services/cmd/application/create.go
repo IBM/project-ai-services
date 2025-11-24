@@ -227,7 +227,7 @@ func init() {
 	createCmd.Flags().StringVarP(&templateName, "template", "t", "", "Template name to use (required)")
 	_ = createCmd.MarkFlagRequired("template")
 	createCmd.Flags().BoolVar(&skipModelDownload, "skip-model-download", false, "Set to true to skip model download during application creation. This assumes local models are already available at /var/lib/ai-services/models/ and is particularly beneficial for air-gapped networks with limited internet access. If not set correctly (e.g., set to true when models are missing, or left false in an air-gapped environment), the create command may fail.")
-	createCmd.Flags().StringSliceVar(&rawArgParams, "params", []string{}, "Parameters required to configure the application. Takes Comma-separated key=value pairs. Values Supported: UI_PORT=8000")
+	createCmd.Flags().StringSliceVar(&rawArgParams, "params", []string{}, "Parameters required to configure the application. Takes Comma-separated key=value pairs. Values Supported: ui.port=8000")
 }
 
 func getSMTLevel(output string) (int, error) {

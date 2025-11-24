@@ -13,12 +13,12 @@ To get started, follow the [installation guide](./installation.md) to pull and r
 ## Create an App Using the RAG Template
 
 Initialize a new application using the built-in template - RAG. It generates all essential resources required to configure and run a complete RAG workflow.
-You can also specify UI port for the chatbot using the --params flag (for example: --params UI_PORT=3000). If not provided, the system automatically assigns a free port for the chatbot UI.
+You can also specify UI port for the chatbot using the --params flag (for example: --params ui.port=3000). If not provided, the system automatically assigns a free port for the chatbot UI.
 
 Provide a unique name for the application to ensure smooth deployment (replace with `<app-name>`).
 
 ```bash
-$ ai-services application create <app-name> -t RAG --params UI_PORT=3000
+$ ai-services application create <app-name> -t RAG --params ui.port=3000
 ```
 
 **Replace 3000 with any port number you wish to use for rendering the UI.**
