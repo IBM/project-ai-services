@@ -88,15 +88,6 @@ var createCmd = &cobra.Command{
 			return fmt.Errorf("bootstrap validation failed: %w", err)
 		}
 
-		// Configure the LPAR before creating the application
-		logger.Infof("Configuring the LPAR")
-		err = utils.Retry(retryCount, retryInterval, nil, func() error {
-			return bootstrap.RunConfigureCmd()
-		})
-		if err != nil {
-			return fmt.Errorf("bootstrap configuration failed: %w", err)
-		}
-
 		// podman connectivity
 		runtime, err := podman.NewPodmanClient()
 		if err != nil {
