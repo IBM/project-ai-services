@@ -1,22 +1,25 @@
-docling @ file:///opt/wheels/docling-wheels/docling-2.36.0-py3-none-any.whl
-opencv-python-headless @ file:///opt/wheels/opencv-wheels/opencv_python_headless-4.11.0.86-cp39-cp39-linux_ppc64le.whl
-pypdfium2 @ file:///opt/wheels/pypdfium-wheels/pypdfium2-5.0.0b1%2B84.g35a88d2.dirty-py3-none-linux_ppc64le.whl
-torch @ file:///opt/wheels/torch-wheels/torch-2.3.0%2Bcpu-cp39-cp39-linux_ppc64le.whl
-torchvision @ file:///opt/wheels/torch-vision-wheels/torchvision-0.16.0%2Bfbb4cc5-cp39-cp39-linux_ppc64le.whl
-
+antlr4_python3_runtime==4.9.3
 cohere==5.19.0
+docling==2.60.1
+docling_parse==4.7.1
 fastapi[all]==0.121.0
 Flask==3.1.2
-joblib==1.5.2
+grpcio==1.67.1
 hf_xet==1.2.0
+huggingface-hub==0.36.0
+joblib==1.5.2
 numpy==1.26.4
 openai==2.6.0
+openai-whisper==20230117
+opencv-python==4.10.0.84
 pdfplumber==0.11.7
 Pillow==10.3.0
-grpcio==1.67.1
+pyclipper==1.3.0.post6
+pylatexenc==2.10
 pymilvus==2.6.2
 rapidfuzz==3.13.0
 regex==2025.10.23
+rtree==1.4.1
 Requests==2.32.5
 sentence-splitter==1.4
 scikit-image==0.19.3
@@ -25,4 +28,8 @@ scipy==1.13.1
 tesserocr==2.9.1
 tqdm==4.67.1
 transformers==4.57.1
+tree_sitter_c==0.23.2
+tree_sitter_python==0.23.2
 uvicorn==0.38.0
+uvloop==0.22.1
+wheel==0.45.1
