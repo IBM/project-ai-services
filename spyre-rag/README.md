@@ -30,7 +30,7 @@ export MILVUS_HOST="mkumatag-milvus"
 export MILVUS_PORT=19530
 export MILVUS_DB_PREFIX=RAG_DB
 export DOCLING_MODELS_DIR=/var/docling-models
-export PROMPT_PATH=/var/prompts.json
+export SETTINGS_PATH=/var/settings.json
 export CACHE_DIR=/var/rag_cache
 ```
 

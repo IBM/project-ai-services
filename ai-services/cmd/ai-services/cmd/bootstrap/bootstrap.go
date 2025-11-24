@@ -1,6 +1,10 @@
 package bootstrap
 
 import (
+	"fmt"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/validators/root"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +29,24 @@ Available subcommands:
 
   # Get help on a specific subcommand
   aiservices bootstrap validate --help`,
-		Hidden: true,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			return root.NewRootRule().Verify()
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+
+			logger.Infof("Configuring the LPAR")
+			if configureErr := RunConfigureCmd(); configureErr != nil {
+				return fmt.Errorf("failed to bootstrap the LPAR: %w", configureErr)
+			}
+
+			logger.Infof("Validating LPAR")
+			if validateErr := RunValidateCmd(nil); validateErr != nil {
+				return fmt.Errorf("failed to bootstrap the LPAR: %w", validateErr)
+			}
+
+			logger.Infoln("LPAR boostrapped successfully")
+			return nil
+		},
 	}
 
 	// subcommands
