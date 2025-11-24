@@ -4,9 +4,13 @@ AI services, part of the IBM Open-Source AI Foundation for Power, deliver pre-bu
 
 ## 📘 Table of Contents
 
+- [**🗃️ Repository Structure**](#repository-structure)
+
 - [**🌟 Introduction**](https://www.ibm.com/docs/aiservices?topic=services-introduction)
 
 - [**🛠️ Installation Guide**](https://www.ibm.com/docs/aiservices?topic=services-installation)
+
+  - [Quick Start](#quick-start)
 
 - **💻 CLI Reference**
   - [Auto-completion](https://www.ibm.com/docs/aiservices?topic=reference-auto-completion)
@@ -21,6 +25,8 @@ AI services, part of the IBM Open-Source AI Foundation for Power, deliver pre-bu
 - [**🧯 Troubleshooting**](https://www.ibm.com/docs/aiservices?topic=services-troubleshooting)
 
 - [**❓ FAQ**](https://www.ibm.com/docs/aiservices?topic=services-faq)
+
+- [**🚀 Contributing**](./CONTRIBUTING.md)
 
 ---
 
@@ -39,7 +45,7 @@ $ sudo mv ai-services /usr/local/bin/
 ### Run the binary to get started
 
 ```bash
-% ai-services
+% ai-services --help
 A CLI tool for managing AI services infrastructure.
 
 Usage:
@@ -56,4 +62,22 @@ Flags:
   -v, --version   version for ai-services
 
 Use "ai-services [command] --help" for more information about a command.
+```
+
+---
+
+## Repository Structure
+
+
+```bash
+project-ai-services/
+├── README.md          # Project documentation
+├── ai-services/       # CLI tool for project-ai-services
+│   ├── assets/        # Application template files
+├── images/            # Helper/Utility image assets
+├── spyre-rag/         # Spyre RAG implementation
+├── test/              # Test assets
+│   ├── golden/        # Golden dataset
+
+
 ```
