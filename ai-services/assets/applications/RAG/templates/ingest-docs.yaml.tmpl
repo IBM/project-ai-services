@@ -51,9 +51,9 @@ spec:
   volumes:
     - name: docs
       hostPath:
-        path: "/var/lib/ai-services/{{ .AppName }}/docs"
+        path: "/var/lib/ai-services/applications/{{ .AppName }}/docs"
         type: DirectoryOrCreate
     - name: cache
       hostPath:
-        path: "/var/lib/ai-services/{{ .AppName }}/cache"
+        path: "/var/lib/ai-services/applications/{{ .AppName }}/cache"
         type: DirectoryOrCreate

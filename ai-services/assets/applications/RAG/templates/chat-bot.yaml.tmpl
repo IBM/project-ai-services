@@ -66,5 +66,5 @@ spec:
   volumes:
     - name: cache
       hostPath:
-        path: "/var/lib/ai-services/{{ .AppName }}/cache"
+        path: "/var/lib/ai-services/applications/{{ .AppName }}/cache"
         type: DirectoryOrCreate
