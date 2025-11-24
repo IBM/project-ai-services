@@ -169,14 +169,10 @@ var createCmd = &cobra.Command{
 				return fmt.Errorf("failed to list container images: %w", err)
 			}
 			logger.Infoln("Downloading container images required for application template " + templateName + ":")
-			runtimeClient, err := podman.NewPodmanClient()
-			if err != nil {
-				return fmt.Errorf("failed to connect to podman: %w", err)
-			}
 			for _, image := range images {
 				logger.Infoln("Downloading image: " + image + "...")
 				if err := utils.Retry(retryCount, retryInterval, nil, func() error {
-					return runtimeClient.PullImage(image, nil)
+					return runtime.PullImage(image, nil)
 				}); err != nil {
 					return fmt.Errorf("failed to download image: %w", err)
 				}
@@ -189,11 +185,7 @@ var createCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("failed to list container images: %w", err)
 			}
-			runtimeClient, err := podman.NewPodmanClient()
-			if err != nil {
-				return fmt.Errorf("failed to connect to podman: %w", err)
-			}
-			lImages, err := runtimeClient.ListImages()
+			lImages, err := runtime.ListImages()
 			if err != nil {
 				return fmt.Errorf("failed to list local images: %w", err)
 			}
