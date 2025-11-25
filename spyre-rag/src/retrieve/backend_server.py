@@ -4,7 +4,7 @@ import logging
 import os
 import time
 
-from common.db_utils import MilvusVectorStore
+from common.db_utils import MilvusVectorStore, MilvusNotReadyError
 from common.llm_utils import query_vllm_stream, query_vllm_models
 from common.misc_utils import get_model_endpoints, set_log_level
 from retrieve.backend_utils import search_and_answer_backend, search_only
@@ -97,6 +97,8 @@ def get_reference_docs():
             use_reranker,
             vectorstore=vectorstore
         )
+    except MilvusNotReadyError as e:
+        return jsonify({"error": str(e)}), 503   # Service unavailable
     except Exception as e:
         return jsonify({"error": repr(e)})
     return Response(
@@ -145,6 +147,8 @@ def chat_completion():
             use_reranker,
             vectorstore=vectorstore
         )
+    except MilvusNotReadyError as e:
+        return jsonify({"error": str(e)}), 503   # Service unavailable
     except Exception as e:
         return jsonify({"error": repr(e)})
 
@@ -155,6 +159,21 @@ def chat_completion():
             'Connection': 'keep-alive',
             'Access-Control-Allow-Headers': 'Content-Type'
         })
+
+@app.route("/db-status")
+def db_status():
+    try:
+        emb_model = emb_model_dict['emb_model']
+        emb_endpoint = emb_model_dict['emb_endpoint']
+        emb_max_tokens = emb_model_dict['max_tokens']
+        status = vectorstore.check_db_populated(emb_model, emb_endpoint, emb_max_tokens)
+        if status==True:
+            return jsonify({"ready": True}), 200
+        else:
+            return jsonify({"ready": False, "message": "No data ingested"}), 200
+        
+    except Exception as e:
+        return jsonify({"ready": False, "message": str(e)}), 500
 
 
 if __name__ == "__main__":
