@@ -1,10 +1,22 @@
 import requests
+from requests.adapters import HTTPAdapter
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from common.misc_utils import get_logger
 from common.settings import get_settings
 
+POOL_SIZE = 10 
+
+adapter = HTTPAdapter(
+    pool_connections=POOL_SIZE, 
+    pool_maxsize=POOL_SIZE, 
+    pool_block=True 
+)
+
+SESSION = requests.Session()
+SESSION.mount("http://", adapter)
+SESSION.mount("https://", adapter)
 
 logger = get_logger("LLM")
 settings = get_settings()
@@ -23,7 +35,7 @@ def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, batch_size=128)
             "max_tokens": 3,
         }
         try:
-            response = requests.post(f"{llm_endpoint}/v1/completions", json=payload)
+            response = SESSION.post(f"{llm_endpoint}/v1/completions", json=payload)
             response.raise_for_status()
             result = response.json()
             choices = result.get("choices", [])
@@ -60,7 +72,7 @@ def summarize_single_table(prompt, gen_model, llm_endpoint):
         "stream": False,
     }
     try:
-        response = requests.post(f"{llm_endpoint}/v1/completions", json=payload)
+        response = SESSION.post(f"{llm_endpoint}/v1/completions", json=payload)
         response.raise_for_status()
         result = response.json()
         reply = result.get("choices", [{}])[0].get("text", "").strip()
@@ -97,7 +109,7 @@ def summarize_table(table_html, table_caption, gen_model, llm_endpoint, max_work
 def query_vllm_models(llm_endpoint):
     logger.debug('Querying VLLM models')
     try:
-        response = requests.get(f"{llm_endpoint}/v1/models")
+        response = SESSION.get(f"{llm_endpoint}/v1/models")
         response.raise_for_status()
         resp_json = response.json()
     except requests.exceptions.RequestException as e:
@@ -139,7 +151,7 @@ def query_vllm(question, documents, llm_endpoint, ckpt, stop_words, max_new_toke
     try:
         start_time = time.time()
         # Use requests for synchronous HTTP requests
-        response = requests.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers)
+        response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers)
         response.raise_for_status()
         response_data = response.json()
         end_time = time.time()
@@ -182,7 +194,7 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
     try:
         # Use requests for synchronous HTTP requests
         logger.debug("STREAMING RESPONSE")
-        with requests.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=stream) as r:
+        with SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=stream) as r:
             for raw_line in r.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
@@ -200,7 +212,7 @@ def tokenize_with_llm(prompt, llm_endpoint):
         "prompt": prompt
     }
     try:
-        response = requests.post(f"{llm_endpoint}/tokenize", json=payload)
+        response = SESSION.post(f"{llm_endpoint}/tokenize", json=payload)
         response.raise_for_status()
         result = response.json()
         tokens = result.get("tokens", [])
@@ -217,7 +229,7 @@ def detokenize_with_llm(tokens, llm_endpoint):
         "tokens": tokens
     }
     try:
-        response = requests.post(f"{llm_endpoint}/detokenize", json=payload)
+        response = SESSION.post(f"{llm_endpoint}/detokenize", json=payload)
         response.raise_for_status()
         result = response.json()
         prompt = result.get("prompt", "")
