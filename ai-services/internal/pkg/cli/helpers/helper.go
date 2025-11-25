@@ -47,13 +47,40 @@ func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string
 			return nil
 		}
 
-		// if deadline exeeds, stop the readiness check
+		// if deadline exceeds, stop the container readiness check
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for readiness")
+			return fmt.Errorf("operation timed out waiting for container readiness")
 		}
 
-		// every 2 seconds inspect the container
-		time.Sleep(2 * time.Second)
+		// every 10 seconds inspect the container
+		time.Sleep(10 * time.Second)
+	}
+}
+
+// WaitForContainersCreation waits until all the containers in the provided podID are created within the specified timeout
+func WaitForContainersCreation(runtime runtime.Runtime, podID string, expectedContainerCount int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	for {
+		// fetch the pod info
+		pInfo, err := runtime.InspectPod(podID)
+		if err != nil {
+			return fmt.Errorf("failed to do pod inspect for podID: %s with error: %w", podID, err)
+		}
+
+		// if the expected count is reached, then all the containers are created
+		// Note: Adding +1 to the expectedContainerCount as there is an additional 'infra' container added to all pods by podman
+		if len(pInfo.Containers) == expectedContainerCount+1 {
+			return nil
+		}
+
+		// if deadline exceeds, stop the container creation check
+		if time.Now().After(deadline) {
+			return fmt.Errorf("operation timed out waiting for container creation")
+		}
+
+		// every 10 seconds inspect the pod
+		time.Sleep(10 * time.Second)
 	}
 }
 
