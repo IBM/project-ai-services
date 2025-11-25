@@ -6,11 +6,11 @@ ui:
 
 backend:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.6
+  image: icr.io/ai-services-cicd/rag:v0.0.8
 
 etcd:
   # @hidden
-  image: icr.io/ai-services-cicd/etcd:3.6.5-1
+  image: icr.io/ai-services-cicd/etcd:3.6.5-2
 
 minio:
   # @hidden
