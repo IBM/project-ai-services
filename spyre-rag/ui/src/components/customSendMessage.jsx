@@ -11,6 +11,32 @@ const client = new OpenAI({
 async function customSendMessage(request, _options, instance) {
   const userInput = request.input.text;
 
+  try {
+      const res = await axios.get("/db-status");
+      if (res.data.ready === false) {
+      await instance.messaging.addMessage({
+        output: {
+          generic: [
+            {
+              response_type: "text",
+              text: "⚠️ The knowledge database is not ready. Please ingest documents first.",
+            },
+          ],
+        },
+        message_options: {
+          response_user_profile: {
+            id: "assistant",
+            nickname: "DocuAgent",
+            user_type: UserType.BOT,
+          },
+        },
+      });
+      return;
+      }
+  } catch {
+      // No action needed
+  }
+
   const ResponseUserProfile = {
     id: "assistant",
     nickname: "DocuAgent",
@@ -169,8 +195,9 @@ async function customSendMessage(request, _options, instance) {
       },
     });
 
-  } catch (err) {
-    console.error("Error during streaming:", err);
+  } catch {
+
+    instance.updateIsLoadingCounter('decrease');
 
     await instance.messaging.addMessageChunk({
       final_response: {
@@ -179,7 +206,7 @@ async function customSendMessage(request, _options, instance) {
           generic: [
             {
               response_type: "text",
-              text: "Sorry, something went wrong during streaming.",
+              text: "Error occurred during active stream.",
               streaming_metadata: {
                 id: itemId,
                 stream_stopped: true,

@@ -34,7 +34,7 @@ app.post('/v1/chat/completions', async (req, res) => {
 
   } catch (error) {
     console.error('OpenAI API Error:', error.message);
-    res.status(500).json({ error: 'Failed to fetch response from model API' });
+    res.status(error.response.status).json({ error: 'Failed to fetch response from model API' });
   }
 });
 
@@ -54,9 +54,28 @@ app.post('/reference', async (req, res) => {
 
   } catch (error) {
     console.error('OpenAI API Error:', error.message);
-    res.status(500).json({ error: 'Failed to fetch response from model API' });
+    res.status(error.response.status).json({ error: error.response.data.error });
   }
 });
+
+app.get('/db-status', async (req, res) => {
+  const targetURL = process.env.TARGET_URL;
+  console.log(`Checking DB status at: ${targetURL}`);
+
+  try {
+    const response = await axios.get(`${targetURL}/db-status`, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    res.json(response.data); // return server response to React client
+  } catch (error) {
+    console.error('DB Status Check Error:', error.message);
+
+    // If backend is unreachable, returning false instead of crashing
+    res.status(200).json({ status: false });
+  }
+});
+
 
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);

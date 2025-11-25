@@ -27,6 +27,8 @@ def generate_chunk_id(filename: str, page_content: str, index: int) -> int:
     chunk_id = chunk_int % (2**63)  # Fit into signed 64-bit range
     return np.int64(chunk_id)
 
+class MilvusNotReadyError(Exception):
+    pass
 
 class MilvusVectorStore:
     def __init__(
@@ -212,13 +214,23 @@ class MilvusVectorStore:
             final_results.append(result)
 
         return final_results
+    
+    def check_db_populated(self, emb_model, emb_endpoint, max_tokens):
+        self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
+        self.collection_name = self._generate_collection_name()
+
+        if not utility.has_collection(self.collection_name):
+            return False
+        return True
 
     def search(self, query, emb_model, emb_endpoint, max_tokens, top_k=5, deployment_type='cpu', mode="hybrid", language='en'):
         self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
         self.collection_name = self._generate_collection_name()
 
         if not utility.has_collection(self.collection_name):
-            raise ValueError(f"❌ Collection '{self.collection_name}' does not exist in Milvus.")
+            raise MilvusNotReadyError(
+                    f"Milvus database is empty. Ingest documents first."
+                )
 
         query_vector = self._embedder.embed_query(query)
         self.collection = Collection(name=self.collection_name)
