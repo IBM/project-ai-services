@@ -11,11 +11,10 @@ huggingface-hub==0.36.0
 httptools==0.6.4
 joblib==1.5.2
 lxml==5.4.0
-numpy==1.26.4
+numpy==2.3.1
 openai==2.6.0
-openai-whisper==20230117
 opencv-python==4.10.0.84
-pandas==2.3.0
+pandas==2.2.3
 pdfplumber==0.11.8
 Pillow==10.3.0
 psutil==7.0.0
@@ -28,7 +27,7 @@ regex==2025.10.23
 rtree==1.4.1
 Requests==2.32.5
 sentence-splitter==1.4
-scikit-image==0.19.3
+scikit-image==0.25.2
 scikit_learn==1.6.1
 scipy==1.16.0
 shapely==2.1.0

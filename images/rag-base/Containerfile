@@ -2,7 +2,7 @@ FROM localhost/docling:v2.60.1 as docling-builder
 
 FROM registry.access.redhat.com/ubi9/ubi:9.7
 
-RUN yum install -y --setopt=tsflags=nodocs python3.11-devel python3.11-pip lcms2-devel openblas-devel && \
+RUN yum install -y --setopt=tsflags=nodocs python3.12-devel python3.12-pip lcms2-devel openblas-devel && \
     yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/CRB/ppc64le/os && \
     yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/AppStream//ppc64le/os && \
     yum config-manager --add-repo https://mirror.stream.centos.org/9-stream/BaseOS/ppc64le/os && \
@@ -11,8 +11,8 @@ RUN yum install -y --setopt=tsflags=nodocs python3.11-devel python3.11-pip lcms2
     yum install -y tesseract-devel spatialindex-devel ffmpeg-free-devel && \
     yum clean all && rm -rf /var/cache/yum && \
     rm -rf /usr/bin/python && rm -rf /usr/bin/python3 && \
-    ln -s /usr/bin/pip3.11 /usr/bin/pip && ln -s /usr/bin/pip3.11 /usr/bin/pip3 && \
-    ln -s /usr/bin/python3.11 /usr/bin/python && ln -s /usr/bin/python3.11 /usr/bin/python3
+    ln -s /usr/bin/pip3.12 /usr/bin/pip && ln -s /usr/bin/pip3.12 /usr/bin/pip3 && \
+    ln -s /usr/bin/python3.12 /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python3
 
 COPY --from=docling-builder /usr/local/lib64/*.so* /usr/local/lib64/
 COPY --from=docling-builder /usr/include/tree_sitter /usr/include/tree_sitter
