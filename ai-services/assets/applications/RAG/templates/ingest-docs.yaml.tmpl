@@ -19,9 +19,9 @@ spec:
         - "ingest"
       resources:
         requests:
-          memory: "10Gi"
+          memory: "128Gi"
         limits:
-          memory: "10Gi"
+          memory: "128Gi"
       env:
         - name: EMB_ENDPOINT
           value: "http://{{ .AppName  }}--vllm-server:8001"
