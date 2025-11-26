@@ -18,7 +18,7 @@ func (r *ServiceReportRule) Name() string {
 
 func (r *ServiceReportRule) Verify() error {
 	klog.V(2).Infoln("Validating if ServiceReport tool has run on LPAR")
-	if err := helpers.RunServiceReportContainer("servicereport -v -p spyre"); err != nil {
+	if err := helpers.RunServiceReportContainer("servicereport -v -p spyre", "validate"); err != nil {
 		return err
 	}
 	return nil

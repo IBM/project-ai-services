@@ -96,28 +96,6 @@ func RunConfigureCmd() error {
 	return nil
 }
 
-// func RunServiceReportContainer(runCmd string) error {
-// 	svc_tool_cmd := exec.Command(
-// 		"podman",
-// 		"run",
-// 		"--privileged",
-// 		"--rm",
-// 		"--name", "servicereport",
-// 		"-v", "/etc/modprobe.d:/etc/modprobe.d",
-// 		"-v", "/etc/modules-load.d/:/etc/modules-load.d/",
-// 		"-v", "/etc/udev/rules.d/:/etc/udev/rules.d/",
-// 		"-v", "/etc/security/limits.d/:/etc/security/limits.d/",
-// 		vars.ToolImage,
-// 		"bash", "-c", runCmd,
-// 	)
-// 	svc_tool_cmd.Stdout = os.Stdout
-// 	err := svc_tool_cmd.Run()
-// 	if err != nil {
-// 		return fmt.Errorf("failed to run servicereport tool to validate Spyre cards configuration: %v", err)
-// 	}
-// 	return nil
-// }
-
 func runServiceReport() error {
 	// validate spyre attachment first before running servicereport
 	spyreCheck := spyre.NewSpyreRule()
@@ -127,7 +105,7 @@ func runServiceReport() error {
 	}
 
 	// Create host directories for vfio
-	cmd := `mkdir -p /etc/modules-load.d; mkdir -p /etc/udev/rules.d/; mkdir -p /etc/sos`
+	cmd := `mkdir -p /etc/modules-load.d; mkdir -p /etc/udev/rules.d/`
 	_, err = exec.Command("bash", "-c", cmd).Output()
 	if err != nil {
 		return fmt.Errorf("❌ failed to create host volume mounts for servicereport tool %w", err)
@@ -141,7 +119,7 @@ func runServiceReport() error {
 	}
 	logger.Infoln("VFIO kernel modules loaded on the host", 2)
 
-	if err := helpers.RunServiceReportContainer("servicereport -r -p spyre"); err != nil {
+	if err := helpers.RunServiceReportContainer("servicereport -r -p spyre", "configure"); err != nil {
 		return err
 	}
 

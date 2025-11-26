@@ -132,21 +132,39 @@ func FindFreeSpyreCards() ([]string, error) {
 	return free_spyre_dev_id_list, nil
 }
 
-func RunServiceReportContainer(runCmd string) error {
-	svc_tool_cmd := exec.Command(
-		"podman",
-		"run",
-		"--privileged",
-		"--rm",
-		"--name", "servicereport",
-		"-v", "/etc/modprobe.d:/etc/modprobe.d",
-		"-v", "/etc/modules-load.d/:/etc/modules-load.d/",
-		"-v", "/etc/udev/rules.d/:/etc/udev/rules.d/",
-		"-v", "/etc/security/limits.d/:/etc/security/limits.d/",
-		"-v", "/etc/sos:/etc/sos",
-		vars.ToolImage,
-		"bash", "-c", runCmd,
-	)
+func RunServiceReportContainer(runCmd string, mode string) error {
+	var svc_tool_cmd *exec.Cmd
+	if mode == "configure" {
+		svc_tool_cmd = exec.Command(
+			"podman",
+			"run",
+			"--privileged",
+			"--rm",
+			"--name", "servicereport",
+			"-v", "/etc/modprobe.d:/etc/modprobe.d",
+			"-v", "/etc/modules-load.d/:/etc/modules-load.d/",
+			"-v", "/etc/udev/rules.d/:/etc/udev/rules.d/",
+			"-v", "/etc/security/limits.d/:/etc/security/limits.d/",
+			vars.ToolImage,
+			"bash", "-c", runCmd,
+		)
+	} else if mode == "validate" {
+		svc_tool_cmd = exec.Command(
+			"podman",
+			"run",
+			"--privileged",
+			"--rm",
+			"--name", "servicereport",
+			"-v", "/etc/group:/etc/group:ro",
+			"-v", "/etc/modprobe.d:/etc/modprobe.d",
+			"-v", "/etc/modules-load.d/:/etc/modules-load.d/",
+			"-v", "/etc/udev/rules.d/:/etc/udev/rules.d/",
+			"-v", "/etc/security/limits.d/:/etc/security/limits.d/",
+			"-v", "/etc/sos:/etc/sos",
+			vars.ToolImage,
+			"bash", "-c", runCmd,
+		)
+	}
 	svc_tool_cmd.Stdout = os.Stdout
 	svc_tool_cmd.Stderr = os.Stderr
 	err := svc_tool_cmd.Run()
