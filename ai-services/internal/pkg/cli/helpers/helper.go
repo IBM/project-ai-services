@@ -157,11 +157,11 @@ func RunServiceReportContainer(runCmd string, mode string) error {
 			"--rm",
 			"--name", "servicereport",
 			"-v", "/etc/group:/etc/group:ro",
-			"-v", "/etc/modprobe.d:/etc/modprobe.d",
-			"-v", "/etc/modules-load.d/:/etc/modules-load.d/",
-			"-v", "/etc/udev/rules.d/:/etc/udev/rules.d/",
-			"-v", "/etc/security/limits.d/:/etc/security/limits.d/",
-			"-v", "/etc/sos:/etc/sos",
+			"-v", "/etc/modprobe.d:/etc/modprobe.d:ro",
+			"-v", "/etc/modules-load.d/:/etc/modules-load.d/:ro",
+			"-v", "/etc/udev/rules.d/:/etc/udev/rules.d/:ro",
+			"-v", "/etc/security/limits.d/:/etc/security/limits.d/:ro",
+			"-v", "/etc/sos:/etc/sos:ro",
 			vars.ToolImage,
 			"bash", "-c", runCmd,
 		)
@@ -171,8 +171,8 @@ func RunServiceReportContainer(runCmd string, mode string) error {
 
 	svc_tool_cmd.Stdout = os.Stdout
 	svc_tool_cmd.Stderr = os.Stderr
-	err := svc_tool_cmd.Run()
-	if err != nil {
+
+	if err := svc_tool_cmd.Run(); err != nil {
 		return fmt.Errorf("failed to run servicereport tool to validate Spyre cards configuration: %v", err)
 	}
 	return nil
