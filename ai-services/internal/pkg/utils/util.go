@@ -222,3 +222,10 @@ func SetNestedValue(out map[string]any, dottedKey string, value any) {
 	last := parts[len(parts)-1]
 	current[last] = value
 }
+
+func VerifyAppName(appName string) error {
+	if appName == "" || strings.Contains(appName, "..") || strings.ContainsAny(appName, "/\\") {
+		return fmt.Errorf("invalid application name: %s", appName)
+	}
+	return nil
+}
