@@ -117,7 +117,7 @@ func RunValidateCmd(skip map[string]bool) error {
 			s.Fail(err.Error())
 			s.StopWithHint(err.Error(), rule.Hint())
 
-			// exit right away if user is not root as other check require root privileges
+			// exit right away if user is not root as other checks require root privileges
 			if ruleName == CheckRoot {
 				return fmt.Errorf("root privileges are required for validation")
 			}

@@ -3,7 +3,6 @@ package bootstrap
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -15,7 +14,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/root"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/spyre"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 )
@@ -92,9 +90,33 @@ func RunConfigureCmd() error {
 	s.Stop("Spyre cards configuration validated successfully.")
 
 	logger.Infoln("LPAR configured successfully")
+	logger.Infoln("-------------------------------------------------------------------")
+	logger.Infoln("Re-login to the shell to relect necessary permissions assigned to vfio cards")
 
 	return nil
 }
+
+// func RunServiceReportContainer(runCmd string) error {
+// 	svc_tool_cmd := exec.Command(
+// 		"podman",
+// 		"run",
+// 		"--privileged",
+// 		"--rm",
+// 		"--name", "servicereport",
+// 		"-v", "/etc/modprobe.d:/etc/modprobe.d",
+// 		"-v", "/etc/modules-load.d/:/etc/modules-load.d/",
+// 		"-v", "/etc/udev/rules.d/:/etc/udev/rules.d/",
+// 		"-v", "/etc/security/limits.d/:/etc/security/limits.d/",
+// 		vars.ToolImage,
+// 		"bash", "-c", runCmd,
+// 	)
+// 	svc_tool_cmd.Stdout = os.Stdout
+// 	err := svc_tool_cmd.Run()
+// 	if err != nil {
+// 		return fmt.Errorf("failed to run servicereport tool to validate Spyre cards configuration: %v", err)
+// 	}
+// 	return nil
+// }
 
 func runServiceReport() error {
 	// validate spyre attachment first before running servicereport
@@ -105,7 +127,7 @@ func runServiceReport() error {
 	}
 
 	// Create host directories for vfio
-	cmd := `mkdir -p /etc/modules-load.d; mkdir -p /etc/udev/rules.d/`
+	cmd := `mkdir -p /etc/modules-load.d; mkdir -p /etc/udev/rules.d/; mkdir -p /etc/sos`
 	_, err = exec.Command("bash", "-c", cmd).Output()
 	if err != nil {
 		return fmt.Errorf("❌ failed to create host volume mounts for servicereport tool %w", err)
@@ -119,23 +141,8 @@ func runServiceReport() error {
 	}
 	logger.Infoln("VFIO kernel modules loaded on the host", 2)
 
-	svc_tool_cmd := exec.Command(
-		"podman",
-		"run",
-		"--privileged",
-		"--rm",
-		"--name", "servicereport",
-		"-v", "/etc/modprobe.d:/etc/modprobe.d",
-		"-v", "/etc/modules-load.d/:/etc/modules-load.d/",
-		"-v", "/etc/udev/rules.d/:/etc/udev/rules.d/",
-		"-v", "/etc/security/limits.d/:/etc/security/limits.d/",
-		vars.ToolImage,
-		"bash", "-c", "servicereport -r -p spyre",
-	)
-	svc_tool_cmd.Stdout = os.Stdout
-	err = svc_tool_cmd.Run()
-	if err != nil {
-		return fmt.Errorf("failed to run servicereport tool to validate Spyre cards configuration: %v", err)
+	if err := helpers.RunServiceReportContainer("servicereport -r -p spyre"); err != nil {
+		return err
 	}
 
 	if err := configureUsergroup(); err != nil {

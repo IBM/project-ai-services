@@ -9,6 +9,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/power"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/rhn"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/root"
+	"github.com/project-ai-services/ai-services/internal/pkg/validators/servicereport"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/spyre"
 )
 
@@ -21,6 +22,7 @@ func init() {
 	DefaultRegistry.Register(power.NewPowerRule())
 	DefaultRegistry.Register(rhn.NewRHNRule())
 	DefaultRegistry.Register(spyre.NewSpyreRule())
+	DefaultRegistry.Register(servicereport.NewServiceReportRule())
 }
 
 // Rule defines the interface for validation rules

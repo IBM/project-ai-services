@@ -13,6 +13,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 type HealthStatus string
@@ -129,6 +130,30 @@ func FindFreeSpyreCards() ([]string, error) {
 		free_spyre_dev_id_list = append(free_spyre_dev_id_list, pci)
 	}
 	return free_spyre_dev_id_list, nil
+}
+
+func RunServiceReportContainer(runCmd string) error {
+	svc_tool_cmd := exec.Command(
+		"podman",
+		"run",
+		"--privileged",
+		"--rm",
+		"--name", "servicereport",
+		"-v", "/etc/modprobe.d:/etc/modprobe.d",
+		"-v", "/etc/modules-load.d/:/etc/modules-load.d/",
+		"-v", "/etc/udev/rules.d/:/etc/udev/rules.d/",
+		"-v", "/etc/security/limits.d/:/etc/security/limits.d/",
+		"-v", "/etc/sos:/etc/sos",
+		vars.ToolImage,
+		"bash", "-c", runCmd,
+	)
+	svc_tool_cmd.Stdout = os.Stdout
+	svc_tool_cmd.Stderr = os.Stderr
+	err := svc_tool_cmd.Run()
+	if err != nil {
+		return fmt.Errorf("failed to run servicereport tool to validate Spyre cards configuration: %v", err)
+	}
+	return nil
 }
 
 func ParseSkipChecks(skipChecks []string) map[string]bool {
