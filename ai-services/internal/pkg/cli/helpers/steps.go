@@ -4,8 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
-
-	"github.com/containers/podman/v5/pkg/domain/entities/types"
+	"text/template"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -36,9 +35,14 @@ func PrintNextSteps(runtime runtime.Runtime, app, appTemplate string) error {
 			return fmt.Errorf("failed to populate host values: %w", err)
 		}
 
-		// populate the pod values set in vars file
-		if err := populatePodValues(runtime, params, varsData); err != nil {
+		// populate the pod info set in vars file
+		if err := populatePodInfo(runtime, params, varsData); err != nil {
 			return fmt.Errorf("failed to populate pod values: %w", err)
+		}
+
+		// populate the container info set in vars file
+		if err := populateContainerInfo(runtime, params, varsData); err != nil {
+			return fmt.Errorf("failed to populate container values: %w", err)
 		}
 
 		var rendered bytes.Buffer
@@ -76,9 +80,14 @@ func PrintInfo(runtime runtime.Runtime, app, appTemplate string) error {
 			return fmt.Errorf("failed to populate host values: %w", err)
 		}
 
-		// populate the pod values set in vars file
-		if err := populatePodValues(runtime, params, varsData); err != nil {
+		// populate the pod info set in vars file
+		if err := populatePodInfo(runtime, params, varsData); err != nil {
 			return fmt.Errorf("failed to populate pod values: %w", err)
+		}
+
+		// populate the container info set in vars file
+		if err := populateContainerInfo(runtime, params, varsData); err != nil {
+			return fmt.Errorf("failed to populate container values: %w", err)
 		}
 
 		var rendered bytes.Buffer
@@ -110,57 +119,88 @@ func populateHostValues(params map[string]string, varsData *templates.Vars) erro
 	return nil
 }
 
-// populatePodValues -> populates the pod values within the params
-func populatePodValues(runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
+func populatePodInfo(runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
 	for _, pod := range varsData.Pods {
-		if pod.Type == "port" {
-			exists, err := runtime.PodExists(pod.Name)
-			if err != nil {
-				return fmt.Errorf("failed to check if pod exists: %w", err)
-			}
-			if !exists {
-				// just print the msg
-				logger.Infof("Pod with name: %s doesn't exist\n", pod.Name)
-				continue
-			}
-
-			pInfo, err := runtime.InspectPod(pod.Name)
-			if err != nil {
-				return fmt.Errorf("failed to inspect Pod '%s': %w", pod.Name, err)
-			}
-
-			portMappings, err := fetchPodPortMapping(pInfo)
-			if err != nil {
-				return fmt.Errorf("failed to fetch PortMappings for pod '%s': %w", pod.Name, err)
-			}
-
-			// The Fetch value will contain the containerPort whose hostPort value needs to be fetched
-			containerPort := strings.TrimSpace(pod.Fetch)
-			hostPort := portMappings[containerPort]
-			// Replace Alias with the hostPort value
-			params[pod.Alias] = hostPort
+		exists, err := runtime.PodExists(pod.Name)
+		if err != nil {
+			return fmt.Errorf("failed to check if pod exists: %w", err)
 		}
+		if !exists {
+			// just print the msg
+			logger.Infof("Pod with name: %s doesn't exist\n", pod.Name)
+			continue
+		}
+
+		pInfo, err := runtime.InspectPod(pod.Name)
+		if err != nil {
+			return fmt.Errorf("failed to inspect Pod '%s': %w", pod.Name, err)
+		}
+
+		// Fetch specific Pod info based on the fetch value
+		result, err := fetchDataSpecificInfo(pInfo, pod.Format)
+		if err != nil {
+			// just print the msg
+			logger.Errorf("failed to fetch podInfo for pod: %s with err: %v\n", pod.Name, err)
+			continue
+		}
+
+		// update the specific result to the params for given alias set
+		params[pod.Alias] = result
 	}
 
 	return nil
 }
 
-func fetchPodPortMapping(pInfo *types.PodInspectReport) (map[string]string, error) {
-	portMappings := map[string]string{}
-
-	if pInfo.InfraConfig == nil || pInfo.InfraConfig.PortBindings == nil {
-		return portMappings, nil
-	}
-
-	for portKey, ports := range pInfo.InfraConfig.PortBindings {
-		for _, port := range ports {
-			// remove protocol
-			containerPort := strings.Split(portKey, "/")[0]
-			portMappings[containerPort] = port.HostPort
-			// populating only the single host port value
-			break
+func populateContainerInfo(runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
+	for _, container := range varsData.Containers {
+		exists, err := runtime.ContainerExists(container.Name)
+		if err != nil {
+			return fmt.Errorf("failed to check if container exists: %w", err)
 		}
+		if !exists {
+			// just print the msg
+			logger.Infof("Container with name: %s doesn't exist\n", container.Name)
+			continue
+		}
+
+		cInfo, err := runtime.InspectContainer(container.Name)
+		if err != nil {
+			return fmt.Errorf("failed to inspect Container '%s': %w", container.Name, err)
+		}
+
+		// Fetch specific Container info based on the fetch value
+		result, err := fetchDataSpecificInfo(cInfo, container.Format)
+		if err != nil {
+			// just print the msg
+			logger.Errorf("failed to fetch podInfo for pod: %s with err: %v\n", container.Name, err)
+			continue
+		}
+
+		// update the specific result to the params for given alias set
+		params[container.Alias] = result
 	}
 
-	return portMappings, nil
+	return nil
+}
+
+// fetchDataSpecificInfo fetches the value from pod/container info based on the provided format
+// data can be either the podInfo or the containerInfo
+// format passed should support the podman --format notation without using '{{}}'
+func fetchDataSpecificInfo(data any, format string) (string, error) {
+	// Converting format to template literal
+	// Eg:- Template format: ".State" becomes "{{ .State }}"
+	format = fmt.Sprintf("{{ %s }}", strings.TrimSpace(format))
+
+	var result strings.Builder
+	tmpl, err := template.New("format").Parse(format)
+	if err != nil {
+		return "", fmt.Errorf("parsing template for format %q: %w", format, err)
+	}
+
+	err = tmpl.Execute(&result, data)
+	if err != nil {
+		return "", fmt.Errorf("executing template for format %q: %w", format, err)
+	}
+
+	return strings.TrimSpace(result.String()), nil
 }
