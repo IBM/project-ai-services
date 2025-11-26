@@ -30,19 +30,8 @@ RUN dnf config-manager --add-repo https://mirror.stream.centos.org/9-stream/CRB/
     dnf clean all && rm -rf /var/cache/dnf && rm -rf /usr/share/man/* && rm -rf /usr/share/doc/* && \
     ln -s /usr/bin/pip3.12 /usr/bin/pip && ln -s /usr/bin/pip3.12 /usr/bin/pip3 && \
     rm -rf /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python && \
-    rm -rf /usr/bin/python3 && ln -s /usr/bin/python3.12 /usr/bin/python3
-
-#Install cmake
-WORKDIR /tmp
-RUN wget -c https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}.tar.gz && \
-    tar -zxvf cmake-${CMAKE_VERSION}.tar.gz && \
-    rm -rf cmake-${CMAKE_VERSION}.tar.gz && \
-    cd cmake-${CMAKE_VERSION} && \
-    ./bootstrap --prefix=/usr/local/cmake --parallel=2 -- -DBUILD_TESTING:BOOL=OFF -DCMAKE_BUILD_TYPE:STRING=Release -DCMAKE_USE_OPENSSL:BOOL=ON && \
-    make install -j$(nproc) && \
-    cmake --version && \
-    # Cleanup
-    cd /tmp && rm -rf /tmp/"cmake-${CMAKE_VERSION}"
+    rm -rf /usr/bin/python3 && ln -s /usr/bin/python3.12 /usr/bin/python3 && \
+    pip install cmake
 
 # Build and Install openjpeg
 WORKDIR /tmp
