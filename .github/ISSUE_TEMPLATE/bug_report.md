@@ -40,11 +40,17 @@ Please run the following commands and paste their output:
 ```bash
 ai-services bootstrap configure
 ai-services bootstrap validate
+ai-services application ps -o wide
 ```
 
 ## 📸 Screenshots / Logs
 <!-- If applicable, add screenshots to help explain your problem. -->
 Attach pod logs or screenshots if available.
+If reporting issue for an unhealthy/mis-behaving pod, attach logs for specific pod(s)
+```bash
+ai-services application logs --pod <podName>
+```
+
 
 ## 📎 Additional Context
 <!-- Add any other context about the problem here. -->
