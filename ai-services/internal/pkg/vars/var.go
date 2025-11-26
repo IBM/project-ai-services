@@ -15,3 +15,7 @@ var (
 	TemplateLabel Label = "ai-services.io/template"
 	VersionLabel  Label = "ai-services.io/version"
 )
+
+var (
+	LparAffinityThreshold = 70
+)

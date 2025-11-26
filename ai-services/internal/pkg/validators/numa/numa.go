@@ -8,6 +8,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 type NumaRule struct{}
@@ -21,33 +22,33 @@ func (r *NumaRule) Name() string {
 }
 
 func (r *NumaRule) Verify() error {
-	logger.Infoln("Validating Numa Node config...", 2)
-	cmd := `lscpu | grep -i "NUMA node(s)"`
+	logger.Infoln("Validating Numa Node alignment on LPAR", 2)
+	cmd := `cat /proc/ppc64/lparcfg  | grep affinity`
 	out, err := exec.Command("bash", "-c", cmd).Output()
 	if err != nil {
-		return fmt.Errorf("failed to execute lscpu command: %w", err)
+		return fmt.Errorf("failed to check affinity score on LPAR: %w", err)
 	}
 
-	fields := strings.Fields(string(out))
-	if len(fields) == 0 {
-		return fmt.Errorf("failed to get NUMA node fields")
+	fields := strings.Split(string(out), "=")
+	if len(fields) != 2 {
+		return fmt.Errorf("failed to get affinity score")
 	}
 
-	numaVal := fields[len(fields)-1]
-	numaCount, err := strconv.Atoi(numaVal)
+	affinityScoreStr := fields[1]
+	affinityScore, err := strconv.Atoi(strings.Trim(affinityScoreStr, "\n"))
 	if err != nil {
-		return fmt.Errorf("error extracting numa count: %w", err)
+		return fmt.Errorf("error extracting affinity score: %w", err)
 	}
 
-	if numaCount != 1 {
-		return fmt.Errorf("the current NUMA node configuration (%d) is not aligned for maximum efficiency", numaCount)
+	if affinityScore < vars.LparAffinityThreshold {
+		return fmt.Errorf("the current LPAR affinity score (%d) is not matching the threshold %d", affinityScore, vars.LparAffinityThreshold)
 	}
 
 	return nil
 }
 
 func (r *NumaRule) Message() string {
-	return "NUMA node alignment on LPAR: 1"
+	return fmt.Sprintf("LPAR affinity score is above the threshold: %d", vars.LparAffinityThreshold)
 }
 
 func (r *NumaRule) Level() constants.ValidationLevel {
@@ -55,5 +56,5 @@ func (r *NumaRule) Level() constants.ValidationLevel {
 }
 
 func (r *NumaRule) Hint() string {
-	return "This tools requires numa node set on 1 on LPAR"
+	return fmt.Sprintf("LPAR affinity score needs to be above the threshold: %d", vars.LparAffinityThreshold)
 }
