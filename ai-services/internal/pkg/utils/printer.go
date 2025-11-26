@@ -92,19 +92,14 @@ func (p *Printer) CloseTableWriter() {
 			}
 		}
 
-		// truncate at 30 chars max
-		if maxLen+2 <= 30 {
-			cols[colIdx].Width = maxLen + 2
-		} else {
-			cols[colIdx].Width = 30
-		}
+		cols[colIdx].Width = maxLen + 2
 	}
 
 	p.model.SetColumns(cols)
 
 	out := p.model.View()
 
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.TrimSpace(line) != "" {
 			logger.Infoln(line)
 		}

@@ -57,13 +57,13 @@ var psCmd = &cobra.Command{
 	},
 }
 
-func runPsCmd(client *podman.PodmanClient, appName string) error {
+func runPsCmd(runtimeClient *podman.PodmanClient, appName string) error {
 	listFilters := map[string][]string{}
 	if appName != "" {
 		listFilters["label"] = []string{fmt.Sprintf("ai-services.io/application=%s", appName)}
 	}
 
-	resp, err := client.ListPods(listFilters)
+	resp, err := runtimeClient.ListPods(listFilters)
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -84,7 +84,7 @@ func runPsCmd(client *podman.PodmanClient, appName string) error {
 	defer p.CloseTableWriter()
 
 	if isOutputWide() {
-		p.SetHeaders("APPLICATION NAME", "POD ID", "POD NAME", "STATUS", "EXPOSED")
+		p.SetHeaders("APPLICATION NAME", "POD ID", "POD NAME", "STATUS", "EXPOSED", "CONTAINERS")
 	} else {
 		p.SetHeaders("APPLICATION NAME", "POD NAME", "STATUS")
 	}
@@ -94,31 +94,21 @@ func runPsCmd(client *podman.PodmanClient, appName string) error {
 			//Skip pods which are not linked to ai-services
 			continue
 		}
-		podPorts := []string{}
-		pInfo, err := client.InspectPod(pod.Id)
-		if err != nil {
-			continue
-		}
-
-		if pInfo.InfraConfig != nil && pInfo.InfraConfig.PortBindings != nil {
-			for _, ports := range pInfo.InfraConfig.PortBindings {
-				for _, port := range ports {
-					podPorts = append(podPorts, port.HostPort)
-				}
-			}
-		}
-
-		if len(podPorts) == 0 {
-			podPorts = []string{"none"}
-		}
 
 		if isOutputWide() {
+			podPorts, err := getPodPorts(runtimeClient, pod.Id)
+			if err != nil {
+				// if failed to fetch ports for pod, then set podPorts to none
+				podPorts = []string{"none"}
+			}
+			containerNames := getContainerNames(runtimeClient, pod)
 			p.AppendRow(
 				fetchPodNameFromLabels(pod.Labels),
 				pod.Id[:12],
 				pod.Name,
 				pod.Status,
 				strings.Join(podPorts, ", "),
+				strings.Join(containerNames, ", "),
 			)
 		} else {
 			p.AppendRow(
@@ -133,4 +123,51 @@ func runPsCmd(client *podman.PodmanClient, appName string) error {
 
 func fetchPodNameFromLabels(labels map[string]string) string {
 	return labels["ai-services.io/application"]
+}
+
+func getPodPorts(runtimeClient *podman.PodmanClient, podID string) ([]string, error) {
+	podPorts := []string{}
+	pInfo, err := runtimeClient.InspectPod(podID)
+	if err != nil {
+		return podPorts, err
+	}
+
+	if pInfo.InfraConfig != nil && pInfo.InfraConfig.PortBindings != nil {
+		for _, ports := range pInfo.InfraConfig.PortBindings {
+			for _, port := range ports {
+				podPorts = append(podPorts, port.HostPort)
+			}
+		}
+	}
+
+	if len(podPorts) == 0 {
+		podPorts = []string{"none"}
+	}
+
+	return podPorts, nil
+}
+
+func getContainerNames(runtimeClient *podman.PodmanClient, pod *types.ListPodsReport) []string {
+	containerNames := []string{}
+
+	for _, container := range pod.Containers {
+		cInfo, err := runtimeClient.InspectContainer(container.Id)
+		if err != nil {
+			// skip container if inspect failed
+			continue
+		}
+
+		if cInfo.IsInfra {
+			// skip infra container
+			continue
+		}
+
+		containerNames = append(containerNames, cInfo.Name)
+	}
+
+	if len(containerNames) == 0 {
+		containerNames = []string{"none"}
+	}
+
+	return containerNames
 }
