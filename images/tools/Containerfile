@@ -14,7 +14,7 @@ RUN dnf update ${DNF_FLAGS} -y \
   && pip3.12 install -r requirements.txt \
   && rm -rf /var/cache/dnf && dnf clean all -y
 
-FROM registry.access.redhat.com/ubi9/ubi:9.7
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
 
 ARG SR_VERSION
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
@@ -22,9 +22,10 @@ ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9
 COPY --from=tools_builder /opt/venv /opt/venv
 
 RUN curl -o ServiceReport-${SR_VERSION}.ppc64le.rpm https://public.dhe.ibm.com/software/server/POWER/Linux/yum/OSS/RHEL/9/ppc64le/ServiceReport-${SR_VERSION}.ppc64le.rpm \
-  && dnf install ${DNF_FLAGS} -y kmod sos python3.12 \
-  ServiceReport-${SR_VERSION}.ppc64le.rpm \
-  && rm -rf /var/cache/dnf && dnf clean all -y
+  && microdnf install ${DNF_FLAGS} -y kmod sos python3.12 systemd python3-pyudev \
+  && rpm -ivh ServiceReport-${SR_VERSION}.ppc64le.rpm \
+  && rm -rf /var/cache/microdnf \
+  && rm ServiceReport-${SR_VERSION}.ppc64le.rpm
 
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH=${VIRTUAL_ENV}/bin:$PATH
