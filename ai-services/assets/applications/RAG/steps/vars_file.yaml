@@ -1,8 +1,12 @@
 pods:
   - name: "{{ .AppName }}--chat-bot"
-    fetch: "3000"
+    format: "(index (index .InfraConfig.PortBindings \"3000/tcp\") 0).HostPort"
     alias: UI_PORT
-    type: port
+
+containers:
+  - name: "{{ .AppName }}--chat-bot-ui"
+    format: ".State.Status"
+    alias: UI_STATUS
 
 hosts:
   - fetch: HOST_IP

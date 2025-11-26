@@ -14,15 +14,21 @@ type AppMetadata struct {
 }
 
 type Vars struct {
-	Pods  []PodVar  `yaml:"pods,omitempty"`
-	Hosts []HostVar `yaml:"hosts,omitempty"`
+	Pods       []PodVar       `yaml:"pods,omitempty"`
+	Containers []ContainerVar `yaml:"containers,omitempty"`
+	Hosts      []HostVar      `yaml:"hosts,omitempty"`
 }
 
 type PodVar struct {
-	Name  string `yaml:"name,omitempty"`
-	Fetch string `yaml:"fetch,omitempty"`
-	Alias string `yaml:"alias,omitempty"`
-	Type  string `yaml:"type,omitempty"`
+	Name   string `yaml:"name,omitempty"`
+	Format string `yaml:"format,omitempty"`
+	Alias  string `yaml:"alias,omitempty"`
+}
+
+type ContainerVar struct {
+	Name   string `yaml:"name,omitempty"`
+	Format string `yaml:"format,omitempty"`
+	Alias  string `yaml:"alias,omitempty"`
 }
 
 type HostVar struct {

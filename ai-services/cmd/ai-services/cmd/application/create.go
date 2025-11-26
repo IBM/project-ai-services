@@ -73,8 +73,8 @@ var createCmd = &cobra.Command{
 				return fmt.Errorf("values file '%s' does not exist", vf)
 			}
 		}
-
-		return nil
+		appName := args[0]
+		return utils.VerifyAppName(appName)
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appName := args[0]

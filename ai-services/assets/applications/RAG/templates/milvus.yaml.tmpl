@@ -120,13 +120,13 @@ spec:
   volumes:
     - name: etcd-data
       hostPath:
-        path: "/var/lib/ai-services/{{ .AppName }}/volumes/etcd"
+        path: "/var/lib/ai-services/applications/{{ .AppName }}/volumes/etcd"
         type: DirectoryOrCreate
     - name: minio-storage
       hostPath:
-        path: "/var/lib/ai-services/{{ .AppName }}/volumes/minio"
+        path: "/var/lib/ai-services/applications/{{ .AppName }}/volumes/minio"
         type: DirectoryOrCreate
     - name: milvus-data
       hostPath:
-        path: "/var/lib/ai-services/{{ .AppName }}/volumes/milvus"
+        path: "/var/lib/ai-services/applications/{{ .AppName }}/volumes/milvus"
         type: DirectoryOrCreate
