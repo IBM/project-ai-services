@@ -13,11 +13,6 @@ def reset_db():
 def ingest(directory_path, include_meta_info_in_main_text):
     logger.info(f"Ingestion started from dir '{directory_path}'")
 
-    emb_model_dict, llm_model_dict, _ = get_model_endpoints()
-    # Initialize/reset the database before processing any files
-    vector_store = MilvusVectorStore()
-    collection_name = vector_store._generate_collection_name()
-
     # Process each document in the directory
     allowed_file_types = ['pdf']
     input_file_paths = []
@@ -30,6 +25,11 @@ def ingest(directory_path, include_meta_info_in_main_text):
         return
 
     logger.info(f"Processing {file_cnt} documents")
+
+    emb_model_dict, llm_model_dict, _ = get_model_endpoints()
+    # Initialize/reset the database before processing any files
+    vector_store = MilvusVectorStore()
+    collection_name = vector_store._generate_collection_name()
     
     out_path = setup_cache_dir(collection_name)
 
