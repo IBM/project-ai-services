@@ -31,7 +31,7 @@ RUN git clone --branch ${MC_VERSION} --single-branch https://github.com/minio/mc
 # Build the mc binary. The output will be a single 'mc' executable.
 RUN make
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
+FROM registry.access.redhat.com/ubi9/ubi-micro:9.7
 
 ENV MINIO_ACCESS_KEY_FILE=access_key \
     MINIO_SECRET_KEY_FILE=secret_key \
