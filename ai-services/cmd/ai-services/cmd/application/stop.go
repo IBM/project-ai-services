@@ -44,7 +44,7 @@ Arguments
 			return fmt.Errorf("failed to connect to podman: %w", err)
 		}
 
-		return stopApplication(cmd, runtimeClient, applicationName, stopPodNames)
+		return stopApplication(runtimeClient, applicationName, stopPodNames)
 	},
 }
 
@@ -53,7 +53,7 @@ func init() {
 }
 
 // stopApplication stops all pods associated with the given application name
-func stopApplication(cmd *cobra.Command, client *podman.PodmanClient, appName string, podNames []string) error {
+func stopApplication(client *podman.PodmanClient, appName string, podNames []string) error {
 	resp, err := client.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
 	})

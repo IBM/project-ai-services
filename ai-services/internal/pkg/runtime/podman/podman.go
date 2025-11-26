@@ -122,7 +122,21 @@ func (pc *PodmanClient) ListContainers(filters map[string][]string) (any, error)
 }
 
 func (pc *PodmanClient) StopPod(id string) error {
-	_, err := pods.Stop(pc.Context, id, &pods.StopOptions{})
+	inspectReport, err := pc.InspectPod(id)
+	if err != nil {
+		return fmt.Errorf("failed to inspect pod: %w", err)
+	}
+
+	for _, container := range inspectReport.Containers {
+		// skipping infra container as it will be stopped when other containers are stopped
+		if container.ID != inspectReport.InfraContainerID {
+			err := containers.Stop(pc.Context, container.ID, nil)
+			if err != nil {
+				return fmt.Errorf("failed to stop pod container %s; err: %w", container.ID, err)
+			}
+		}
+	}
+	_, err = pods.Stop(pc.Context, id, &pods.StopOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to stop the pod: %w", err)
 	}
