@@ -134,7 +134,8 @@ func FindFreeSpyreCards() ([]string, error) {
 
 func RunServiceReportContainer(runCmd string, mode string) error {
 	var svc_tool_cmd *exec.Cmd
-	if mode == "configure" {
+	switch mode {
+	case "configure":
 		svc_tool_cmd = exec.Command(
 			"podman",
 			"run",
@@ -148,7 +149,7 @@ func RunServiceReportContainer(runCmd string, mode string) error {
 			vars.ToolImage,
 			"bash", "-c", runCmd,
 		)
-	} else if mode == "validate" {
+	case "validate":
 		svc_tool_cmd = exec.Command(
 			"podman",
 			"run",
@@ -164,7 +165,10 @@ func RunServiceReportContainer(runCmd string, mode string) error {
 			vars.ToolImage,
 			"bash", "-c", runCmd,
 		)
+	default:
+		return fmt.Errorf("invalid mode passed. Allowed options are configure, validate")
 	}
+
 	svc_tool_cmd.Stdout = os.Stdout
 	svc_tool_cmd.Stderr = os.Stderr
 	err := svc_tool_cmd.Run()
