@@ -60,16 +60,16 @@ Available checks to skip:
   rhaiis   		  - RHAIIS license check
   numa			  - NUMA node check`,
 		Example: `  # Run all validation checks
-  aiservices bootstrap validate
+  ai-services bootstrap validate
 
   # Skip RHN registration check
-  aiservices bootstrap validate --skip-validation rhn
+  ai-services bootstrap validate --skip-validation rhn
 
   # Skip multiple checks
-  aiservices bootstrap validate --skip-validation rhn,power
+  ai-services bootstrap validate --skip-validation rhn,power
   
   # Run with verbose output
-  aiservices bootstrap validate --verbose`,
+  ai-services bootstrap validate --verbose`,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Once precheck passes, silence usage for any *later* internal errors.

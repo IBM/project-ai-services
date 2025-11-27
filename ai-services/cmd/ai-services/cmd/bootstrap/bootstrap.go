@@ -23,13 +23,13 @@ Available subcommands:
   validate   - Check system prerequisites and configuration
   configure  - Configure and initialize the AI services infrastructure`,
 		Example: `  # Validate the environment
-  aiservices bootstrap validate
+  ai-services bootstrap validate
 
   # Configure the infrastructure
-  aiservices bootstrap configure
+  ai-services bootstrap configure
 
   # Get help on a specific subcommand
-  aiservices bootstrap validate --help`,
+  ai-services bootstrap validate --help`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return root.NewRootRule().Verify()
 		},

@@ -33,5 +33,5 @@ func (r *ServiceReportRule) Level() constants.ValidationLevel {
 }
 
 func (r *ServiceReportRule) Hint() string {
-	return "ServiceReport tool needs to be run on LPAR, please `ai_services bootstrap configure`"
+	return "ServiceReport tool needs to be run on LPAR, please use `ai-services bootstrap configure`"
 }
