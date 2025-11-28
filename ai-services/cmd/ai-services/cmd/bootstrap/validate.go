@@ -15,12 +15,12 @@ import (
 
 // Validation check types
 const (
-	CheckRoot   = "root"
-	CheckRHEL   = "rhel"
-	CheckRHN    = "rhn"
-	CheckPower  = "power"
-	CheckRHAIIS = "rhaiis"
-	CheckNUMA   = "numa"
+	CheckRoot         = "root"
+	CheckRHEL         = "rhel"
+	CheckRHN          = "rhn"
+	CheckPower        = "power"
+	CheckRHAIIS       = "rhaiis"
+	CheckLparAffinity = "lpar-affinity"
 )
 
 const troubleshootingGuide = "https://www.ibm.com/docs/aiservices?topic=services-troubleshooting"
@@ -43,7 +43,7 @@ System Checks:
   • RHEL version validation (9.6 or higher)
   • Power architecture validation
   • RHN registration status
-  • NUMA node alignment on LPAR
+  • LPAR affinity score check
 
 License:
   • RHAIIS license
@@ -58,7 +58,7 @@ Available checks to skip:
   rhn             - Red Hat Network registration check
   power  		  - Power architecture check
   rhaiis   		  - RHAIIS license check
-  numa			  - NUMA node check`,
+  lpar-affinity   - LPAR affintiy score check`,
 		Example: `  # Run all validation checks
   ai-services bootstrap validate
 
@@ -93,7 +93,7 @@ Available checks to skip:
 	}
 
 	cmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{},
-		"Skip specific validation checks (comma-separated: root,rhel,rhn,power,rhaiis,numa)")
+		"Skip specific validation checks (comma-separated: root,rhel,rhn,power,rhaiis,lpar-affinity)")
 
 	return cmd
 }

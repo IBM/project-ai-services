@@ -1,4 +1,4 @@
-package numa
+package lpar_affinity
 
 import (
 	"fmt"
@@ -11,18 +11,18 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-type NumaRule struct{}
+type LparAffinityRule struct{}
 
-func NewNumaRule() *NumaRule {
-	return &NumaRule{}
+func NewLparAffinityRule() *LparAffinityRule {
+	return &LparAffinityRule{}
 }
 
-func (r *NumaRule) Name() string {
-	return "numa"
+func (r *LparAffinityRule) Name() string {
+	return "lpar-affinity"
 }
 
-func (r *NumaRule) Verify() error {
-	logger.Infoln("Validating Numa Node alignment on LPAR", 2)
+func (r *LparAffinityRule) Verify() error {
+	logger.Infoln("Validating affinity score on LPAR", 2)
 	cmd := `cat /proc/ppc64/lparcfg  | grep affinity`
 	out, err := exec.Command("bash", "-c", cmd).Output()
 	if err != nil {
@@ -47,14 +47,14 @@ func (r *NumaRule) Verify() error {
 	return nil
 }
 
-func (r *NumaRule) Message() string {
+func (r *LparAffinityRule) Message() string {
 	return fmt.Sprintf("LPAR affinity score is above the threshold: %d", vars.LparAffinityThreshold)
 }
 
-func (r *NumaRule) Level() constants.ValidationLevel {
+func (r *LparAffinityRule) Level() constants.ValidationLevel {
 	return constants.ValidationLevelWarning
 }
 
-func (r *NumaRule) Hint() string {
+func (r *LparAffinityRule) Hint() string {
 	return fmt.Sprintf("LPAR affinity score needs to be above the threshold: %d", vars.LparAffinityThreshold)
 }
