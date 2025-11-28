@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - 'images/minio/**'
+      - '.github/workflows/minio-image.yml'
     branches:
       - main
 
@@ -28,6 +29,15 @@ jobs:
         working-directory: images/minio
         run: |
           make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
+      - name: Trivy vulnerability scan
+        id: trivy
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: ${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}/minio:RELEASE.2025-10-15T17-29-55Z-2
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: 1
 
       - name: Publish minio image
         working-directory: images/minio

@@ -5,6 +5,8 @@ on:
       - 'spyre-rag/src/**'
     branches:
       - main
+  workflow_dispatch:
+    inputs: {}
 
 env:
   ICR_REGISTRY: icr.io
@@ -13,19 +15,24 @@ env:
 jobs:
   build-publish-image:
     name: Build and Publish Image
-    runs-on: ubuntu-24.04-ppc64le
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-      
-      - name: Build spyre-rag image
-        working-directory: spyre-rag/src
-        run: |
-          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
 
-      - name: Publish spyre-rag image
-        working-directory: spyre-rag/src
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+      - name: login
+        run: podman login -u ${{ secrets.ICR_USERNAME }} -p "${{ secrets.ICR_APIKEY }}" icr.io
+      - name: pull
+        run: podman pull icr.io/ai-services-cicd/rag:v0.0.12
+
+      - name: Trivy vulnerability scan
+        id: trivy
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: icr.io/ai-services-cicd/rag:v0.0.12
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: 1
+
