@@ -14,20 +14,36 @@ on:
 env:
   ICR_REGISTRY: icr.io
   ICR_NAMESPACE: ai-services-cicd
+  IMAGE_FILE_NAME: image.tar
 
 jobs:
   build-publish-image:
     name: Build and Publish Image
     runs-on: ubuntu-24.04-ppc64le
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-      
+
       - name: Build minio image
         working-directory: images/minio
         run: |
           make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
+
+      - name: Save minio image to file
+        working-directory: images/minio
+        run: |
+          IMAGE_NAME=$(make image-name REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} )
+          podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
+      
+      - name: Trivy vulnerability scan
+        id: trivy
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          input: images/minio/${{ env.IMAGE_FILE_NAME }}
+          format: table
+          severity: CRITICAL,HIGH,MEDIUM
+          exit-code: 1
+        continue-on-error: true
 
       - name: Publish minio image
         working-directory: images/minio
