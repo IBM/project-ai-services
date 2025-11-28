@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"fmt"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/root"
 	"github.com/spf13/cobra"
@@ -15,13 +16,23 @@ func BootstrapCmd() *cobra.Command {
 		Short: "Initializes AI services infrastructure",
 		Long: `Bootstrap and configure the infrastructure required for AI services.
 
-The bootstrap command prepares and validates the environment needed
+The bootstrap command configures and validates the environment needed
 to run AI services on Power11 systems, ensuring prerequisites are met
 and initial configuration is completed.
 
 Available subcommands:
-  validate   - Check system prerequisites and configuration
-  configure  - Configure and initialize the AI services infrastructure`,
+  configure - Configure performs below actions
+  • Installs podman on host if not installed
+  • Runs servicereport tool to configure required spyre cards
+  • Initializes the AI services infrastructure
+
+  validate - Checks below system prerequisites
+  • Root user
+  • Power11 server
+  • RHEL OS
+  • LPAR affinity
+  • Spyre cards availability
+  • ServiceReport validation`,
 		Example: `  # Validate the environment
   ai-services bootstrap validate
 
@@ -46,6 +57,10 @@ Available subcommands:
 			}
 
 			logger.Infoln("LPAR boostrapped successfully")
+			logger.Infoln("----------------------------------------------------------------------------")
+			style := lipgloss.NewStyle().Foreground(lipgloss.Color("#32BD27"))
+			message := style.Render("Re-login to the shell to reflect necessary permissions assigned to vfio cards")
+			logger.Infoln(message)
 			return nil
 		},
 	}

@@ -90,8 +90,6 @@ func RunConfigureCmd() error {
 	s.Stop("Spyre cards configuration validated successfully.")
 
 	logger.Infoln("LPAR configured successfully")
-	logger.Infoln("-------------------------------------------------------------------")
-	logger.Infoln("Re-login to the shell to relect necessary permissions assigned to vfio cards")
 
 	return nil
 }
