@@ -46,7 +46,7 @@ var templatesCmd = &cobra.Command{
 			}
 			logger.Infof("- %s\n    Supported Parameters:\n", name)
 			for k, v := range appTemplatesParametersWithDescription {
-				logger.Infoln("\t" + k + "\t\t-- " + v)
+				logger.Infoln("\t" + k + ":  " + v)
 			}
 		}
 		return nil

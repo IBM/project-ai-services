@@ -20,15 +20,17 @@ type Vars struct {
 }
 
 type PodVar struct {
-	Name   string `yaml:"name,omitempty"`
-	Format string `yaml:"format,omitempty"`
-	Alias  string `yaml:"alias,omitempty"`
+	Name    string  `yaml:"name,omitempty"`
+	Format  string  `yaml:"format,omitempty"`
+	Default *string `yaml:"default,omitempty"`
+	Alias   string  `yaml:"alias,omitempty"`
 }
 
 type ContainerVar struct {
-	Name   string `yaml:"name,omitempty"`
-	Format string `yaml:"format,omitempty"`
-	Alias  string `yaml:"alias,omitempty"`
+	Name    string  `yaml:"name,omitempty"`
+	Format  string  `yaml:"format,omitempty"`
+	Default *string `yaml:"default,omitempty"`
+	Alias   string  `yaml:"alias,omitempty"`
 }
 
 type HostVar struct {
