@@ -185,6 +185,10 @@ def stream_docs_not_found():
     message = "No documents found in the knowledge base for this query."
     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
 
+@app.get("/health", summary = "Liveness probe", include_in_schema = False)
+async def health():
+    return jsonify({"status": "ok"}), 200
+
 if __name__ == "__main__":
     initialize_models()
     initialize_vectorstore()
