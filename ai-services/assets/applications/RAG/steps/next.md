@@ -6,9 +6,9 @@
 {{- if ne .UI_PORT "" }}
 
 - Chatbot UI is available to use at http://{{ .HOST_IP }}:{{ .UI_PORT }}.
-{{ end }}
+{{- end }}
 
 {{- if ne .BACKEND_PORT "" }}
 
 - Chatbot Backend is available to use at http://{{ .HOST_IP }}:{{ .BACKEND_PORT }}.
-{{ end }}
+{{- end }}
