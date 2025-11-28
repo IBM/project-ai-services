@@ -821,6 +821,10 @@ func constructPodDeployOptions(podAnnotations map[string]string) map[string]stri
 
 	// loop over each of the hostPortMappings to construct the 'publish' option
 	for containerPort, hostPort := range hostPortMappings {
+		if hostPort == "0" {
+			// if the host port is set to 0, then do not expose the particular containerPort
+			continue
+		}
 		if hostPort != "" {
 			// if the host port is present
 			podDeployOptions["publish"] += hostPort + ":" + containerPort

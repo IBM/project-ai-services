@@ -7,7 +7,7 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
   annotations:
-    ai-services.io/ports: "{{ .Values.ui.port }}:3000"
+    ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"
 spec:
   containers:
     - name: ui
@@ -54,6 +54,9 @@ spec:
           value: "RAG_DB"
         - name: MILVUS_COLLECTION_NAME
           value: "{{ .AppName  }}"
+      ports:
+        - containerPort: 5000
+          protocol: TCP
       resources:
         requests:
           memory: "1Gi"
