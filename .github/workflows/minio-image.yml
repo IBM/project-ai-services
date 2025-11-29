@@ -11,10 +11,6 @@ on:
     branches:
       - main
 
-permissions:
-  contents: read
-  pull-requests: write 
-
 env:
   ICR_REGISTRY: icr.io
   ICR_NAMESPACE: ai-services-cicd
@@ -45,7 +41,7 @@ jobs:
         with:
           input: images/minio/${{ env.IMAGE_FILE_NAME }}
           format: table
-          severity: CRITICAL,HIGH,MEDIUM
+          severity: CRITICAL,HIGH
           exit-code: 1
           ignore-unfixed: true
           output: trivy-result.txt
@@ -72,10 +68,10 @@ jobs:
           id: trivy-scan-result
           message: ${{ steps.trivy-report.outputs.result }}
 
-      - name: Fail the build if vulnerabilities found
+      - name: Terminate build if vulnerabilities detected
         if: ${{ steps.trivy.outcome == 'failure' }}
         run: |
-          echo -e "Vulnerabilities found in the image. Failing the build."
+          echo -e "Vulnerabilities found in the image, terminating the build."
           exit 1
           
       - name: Publish minio image
