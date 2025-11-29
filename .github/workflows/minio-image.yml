@@ -11,6 +11,10 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+  pull-requests: write 
+
 env:
   ICR_REGISTRY: icr.io
   ICR_NAMESPACE: ai-services-cicd
