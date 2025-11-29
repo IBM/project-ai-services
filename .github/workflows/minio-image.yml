@@ -47,21 +47,26 @@ jobs:
           output: trivy-result.txt
         continue-on-error: true
 
-      - name: Log trivy scan result
-        run: cat trivy-result.txt
-
-      - name: Format Trivy Scan Result
+      - name: Trivy result
         if: ${{ steps.trivy.outcome == 'failure' }}
+        id: trivy-report
         run: |
-          if [ -s trivy-result.txt ]; then
-            echo -e "## Vulnerability Scan Results\n<details><summary>Details</summary>\n\n\`\`\`\n$(cat trivy-result.txt)\n\`\`\`\n</details>" > formatted-trivy-result.md
-          fi
+          cat trivy-result.txt
+          echo -e "## Vulnerability Scan Results\n<details><summary>Details</summary>\n\n\`\`\`\n$(cat trivy-result.txt)\n\`\`\`\n</details>" > formatted-trivy-result.md
+          echo "result<<EOF" >> $GITHUB_OUTPUT
+          cat formatted-trivy-result.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
 
       - name: Notify Vulnerabilities via PR Comment
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: hasura/comment-progress@v2.3.0
         if: ${{ steps.trivy.outcome == 'failure' }}
         with:
-          path: formatted-trivy-result.md
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          number: ${{ github.event.pull_request.number }}
+          id: trivy-scan-result
+          message: ${{ steps.trivy-report.outputs.result }}
 
       - name: Fail the build if vulnerabilities found
         if: ${{ steps.trivy.outcome == 'failure' }}
