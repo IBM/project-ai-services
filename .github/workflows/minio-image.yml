@@ -34,7 +34,7 @@ jobs:
         run: |
           IMAGE_NAME=$(make image-name REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} )
           podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
-      
+
       - name: Trivy vulnerability scan
         id: trivy
         uses: aquasecurity/trivy-action@0.33.1
@@ -45,29 +45,30 @@ jobs:
           exit-code: 1
           ignore-unfixed: true
           output: trivy-result.txt
-      
-      - name: Trivy Scan Result
+        continue-on-error: true
+
+      - name: Log trivy scan result
         run: cat trivy-result.txt
 
       - name: Format Trivy Scan Result
+        if: ${{ steps.trivy.outcome == 'failure' }}
         run: |
           if [ -s trivy-result.txt ]; then
             echo -e "## Vulnerability Scan Results\n<details><summary>Details</summary>\n\n\`\`\`\n$(cat trivy-result.txt)\n\`\`\`\n</details>" > formatted-trivy-result.md
           fi
-      
-      - name: Comment PR with Trivy scan results
+
+      - name: Notify Vulnerabilities via PR Comment
         uses: marocchino/sticky-pull-request-comment@v2
-        if: ${{ hashFiles('formatted-trivy-result.md') != '' }}
+        if: ${{ steps.trivy.outcome == 'failure' }}
         with:
           path: formatted-trivy-result.md
-      
-      - name: Check if vulnerabilities exist
-        run: |
-          if [ -s trivy-result.txt ]; then
-            echo -e "Vulnerabilities found in the image. Failing the build."
-            exit 1
-          fi
 
+      - name: Fail the build if vulnerabilities found
+        if: ${{ steps.trivy.outcome == 'failure' }}
+        run: |
+          echo -e "Vulnerabilities found in the image. Failing the build."
+          exit 1
+          
       - name: Publish minio image
         working-directory: images/minio
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
