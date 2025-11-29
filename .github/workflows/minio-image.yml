@@ -14,21 +14,65 @@ on:
 env:
   ICR_REGISTRY: icr.io
   ICR_NAMESPACE: ai-services-cicd
+  IMAGE_FILE_NAME: image.tar
 
 jobs:
   build-publish-image:
     name: Build and Publish Image
     runs-on: ubuntu-24.04-ppc64le
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-      
+
       - name: Build minio image
         working-directory: images/minio
         run: |
           make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
 
+      - name: Save minio image to file
+        working-directory: images/minio
+        run: |
+          IMAGE_NAME=$(make image-name REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} )
+          podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
+
+      - name: Trivy vulnerability scan
+        id: trivy
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          input: images/minio/${{ env.IMAGE_FILE_NAME }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          ignore-unfixed: true
+          output: trivy-result.txt
+        continue-on-error: true
+
+      - name: Trivy result
+        id: trivy-report
+        run: |
+          cat trivy-result.txt
+          echo -e "## Vulnerability Scan Results\n<details><summary>Details</summary>\n\n\`\`\`\n$(cat trivy-result.txt)\n\`\`\`\n</details>" > formatted-trivy-result.md
+          echo "result<<EOF" >> $GITHUB_OUTPUT
+          cat formatted-trivy-result.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+
+      - name: Notify Vulnerabilities via PR Comment
+        uses: hasura/comment-progress@v2.3.0
+        if: ${{ steps.trivy.outcome == 'failure' }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          number: ${{ github.event.pull_request.number }}
+          id: trivy-scan-result
+          message: ${{ steps.trivy-report.outputs.result }}
+
+      - name: Terminate build if vulnerabilities detected
+        if: ${{ steps.trivy.outcome == 'failure' }}
+        run: |
+          echo -e "Vulnerabilities found in the image, terminating the build."
+          exit 1
+          
       - name: Publish minio image
         working-directory: images/minio
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
