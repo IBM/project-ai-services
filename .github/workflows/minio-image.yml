@@ -48,7 +48,6 @@ jobs:
         continue-on-error: true
 
       - name: Trivy result
-        if: ${{ steps.trivy.outcome == 'failure' }}
         id: trivy-report
         run: |
           cat trivy-result.txt
