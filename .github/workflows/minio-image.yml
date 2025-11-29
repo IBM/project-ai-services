@@ -43,7 +43,30 @@ jobs:
           format: table
           severity: CRITICAL,HIGH,MEDIUM
           exit-code: 1
-        continue-on-error: true
+          ignore-unfixed: true
+          output: trivy-result.txt
+      
+      - name: Trivy Scan Result
+        run: cat trivy-result.txt
+
+      - name: Format Trivy Scan Result
+        run: |
+          if [ -s trivy-result.txt ]; then
+            echo -e "## Vulnerability Scan Results\n<details><summary>Details</summary>\n\n\`\`\`\n$(cat trivy-result.txt)\n\`\`\`\n</details>" > formatted-trivy-result.md
+          fi
+      
+      - name: Comment PR with Trivy scan results
+        uses: marocchino/sticky-pull-request-comment@v2
+        if: ${{ hashFiles('formatted-trivy-result.md') != '' }}
+        with:
+          path: formatted-trivy-result.md
+      
+      - name: Check if vulnerabilities exist
+        run: |
+          if [ -s trivy-result.txt ]; then
+            echo -e "Vulnerabilities found in the image. Failing the build."
+            exit 1
+          fi
 
       - name: Publish minio image
         working-directory: images/minio
