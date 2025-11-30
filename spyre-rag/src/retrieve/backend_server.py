@@ -27,7 +27,7 @@ def initialize_vectorstore():
 
 app = Flask(__name__)
 
-@app.route("/generate", methods=["POST"])
+@app.post("/generate", include_in_schema = True)
 def generate():
     data = request.get_json()
     prompt = data.get("prompt", "")
@@ -73,7 +73,7 @@ def generate():
         mimetype="application/json"
     )
 
-@app.route("/reference", methods=["POST"])
+@app.post("/reference", include_in_schema = True)
 def get_reference_docs():
     data = request.get_json()
     prompt = data.get("prompt", "")
@@ -106,7 +106,7 @@ def get_reference_docs():
         mimetype="application/json"
     )
 
-@app.route("/v1/models", methods=["GET"])
+@app.get("/v1/models", include_in_schema = True)
 def list_models():
     logging.debug("List models..")
     try:
@@ -115,7 +115,7 @@ def list_models():
     except Exception as e:
         return jsonify({"error": repr(e)})
 
-@app.route("/v1/chat/completions", methods=["POST"])
+@app.post("/v1/chat/completions", include_in_schema = True)
 def chat_completion():
     data = request.get_json()
     if data and len(data.get("messages", [])) == 0:
@@ -166,7 +166,7 @@ def chat_completion():
             'Access-Control-Allow-Headers': 'Content-Type'
         })
 
-@app.route("/db-status")
+@app.get("/db-status", include_in_schema = False)
 def db_status():
     try:
         emb_model = emb_model_dict['emb_model']
@@ -185,9 +185,10 @@ def stream_docs_not_found():
     message = "No documents found in the knowledge base for this query."
     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
 
-@app.get("/health", summary = "Liveness probe", include_in_schema = False)
+@app.get("/health", include_in_schema = False)
 async def health():
     return jsonify({"status": "ok"}), 200
+
 
 if __name__ == "__main__":
     initialize_models()
