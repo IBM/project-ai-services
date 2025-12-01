@@ -186,7 +186,7 @@ def stream_docs_not_found():
     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
 
 @app.get("/health")
-async def health():
+def health():
     return jsonify({"status": "ok"}), 200
 
 
