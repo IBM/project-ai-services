@@ -1,0 +1,43 @@
+name: Image Scanner
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        required: true
+        type: string
+      image-name:
+        required: true
+        type: string
+      registry:
+        required: true
+        type: string
+env:
+  IMAGE_FILE_NAME: image.tar
+
+jobs:
+  cves:
+    runs-on: ubuntu-24.04-ppc64le
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      
+      - name: Build ${{ inputs.image-name }} image
+        working-directory: ${{ inputs.path }}
+        run: |
+          make build REGISTRY=${{ inputs.registry }}
+      
+      - name: Save ${{ inputs.image-name }} image in file
+        working-directory: ${{ inputs.path }}
+        run: |
+          IMAGE_NAME=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "${{ inputs.registry }}" | head -n 1)
+          podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          input: ${{ env.IMAGE_FILE_NAME }}
+          format: table
+          severity: CRITICAL,HIGH,MEDIUM
+          exit-code: 1
+          ignore-unfixed: true
