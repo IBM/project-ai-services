@@ -11,17 +11,10 @@ import (
 	"github.com/containers/podman/v5/libpod/define"
 	"github.com/containers/podman/v5/pkg/domain/entities/types"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
-)
-
-type HealthStatus string
-
-const (
-	Ready    HealthStatus = "healthy"
-	Starting HealthStatus = "starting"
-	NotReady HealthStatus = "unhealthy"
 )
 
 func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string, timeout time.Duration) error {
@@ -43,7 +36,7 @@ func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string
 			return nil
 		}
 
-		if healthStatus.Status == string(Ready) {
+		if healthStatus.Status == string(constants.Ready) {
 			return nil
 		}
 
