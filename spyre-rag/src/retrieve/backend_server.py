@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import time
-from threading import Semaphore
+from threading import BoundedSemaphore
 from functools import wraps
 
 from common.db_utils import MilvusVectorStore, MilvusNotReadyError
@@ -21,7 +21,7 @@ llm_model_dict = {}
 reranker_model_dict = {}
 
 settings = get_settings()
-concurrency_limiter = Semaphore(settings.max_concurrent_requests)
+concurrency_limiter = BoundedSemaphore(settings.max_concurrent_requests)
 
 def initialize_models():
     global emb_model_dict, llm_model_dict, reranker_model_dict
@@ -142,20 +142,16 @@ def list_models():
         return jsonify({"error": repr(e)})
 
 
-def lock_stream(stream_g):
-    if concurrency_limiter.acquire(blocking = False):
-        try:
-            for chunk in stream_g:
-                yield chunk
-        finally:
-            concurrency_limiter.release()
+def locked_stream(stream_g):
+    try:
+        for chunk in stream_g:
+            yield chunk
+    finally:
+        concurrency_limiter.release()
 
 
 @app.post("/v1/chat/completions")
 def chat_completion():
-    if not concurrency_limiter.acquire(blocking = False):
-        return jsonify({"error": "Server busy. Try again shortly."}), 429
-
     data = request.get_json()
     if data and len(data.get("messages", [])) == 0:
         return jsonify({"error": "messages can't be empty"})
@@ -192,9 +188,18 @@ def chat_completion():
         return jsonify({"error": repr(e)})
 
     resp_text = None
+
     if docs:
-        vllm_stream = query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, stream, dynamic_chunk_truncation=TRUNCATION)
-        resp_text = stream_with_context(lock_stream(vllm_stream))
+        if not concurrency_limiter.acquire(blocking=False):
+            return jsonify({"error": "Server busy. Try again shortly."}), 429
+
+        try:
+            vllm_stream = query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, stream, dynamic_chunk_truncation=TRUNCATION)
+        except Exception as e:
+            concurrency_limiter.release()
+            return jsonify({"error": repr(e)}), 500
+
+        resp_text = stream_with_context(locked_stream(vllm_stream))
     else:
         resp_text = stream_with_context(stream_docs_not_found())
 
