@@ -137,7 +137,7 @@ func populatePodInfo(runtime runtime.Runtime, params map[string]string, varsData
 		}
 
 		// Fetch specific Pod info based on the fetch value
-		result, err := fetchDataSpecificInfo(pInfo, pod.Format)
+		result, err := fetchDataSpecificInfo(pInfo, pod.Format, pod.Default)
 		if err != nil {
 			// just print the msg
 			logger.Errorf("failed to fetch podInfo for pod: %s with err: %v\n", pod.Name, err)
@@ -169,7 +169,7 @@ func populateContainerInfo(runtime runtime.Runtime, params map[string]string, va
 		}
 
 		// Fetch specific Container info based on the fetch value
-		result, err := fetchDataSpecificInfo(cInfo, container.Format)
+		result, err := fetchDataSpecificInfo(cInfo, container.Format, container.Default)
 		if err != nil {
 			// just print the msg
 			logger.Errorf("failed to fetch podInfo for pod: %s with err: %v\n", container.Name, err)
@@ -186,7 +186,7 @@ func populateContainerInfo(runtime runtime.Runtime, params map[string]string, va
 // fetchDataSpecificInfo fetches the value from pod/container info based on the provided format
 // data can be either the podInfo or the containerInfo
 // format passed should support the podman --format notation without using '{{}}'
-func fetchDataSpecificInfo(data any, format string) (string, error) {
+func fetchDataSpecificInfo(data any, format string, defaultValue *string) (string, error) {
 	// Converting format to template literal
 	// Eg:- Template format: ".State" becomes "{{ .State }}"
 	format = fmt.Sprintf("{{ %s }}", strings.TrimSpace(format))
@@ -199,6 +199,11 @@ func fetchDataSpecificInfo(data any, format string) (string, error) {
 
 	err = tmpl.Execute(&result, data)
 	if err != nil {
+		// if there is an error executing the template (Can occur for example if there is no port set)
+		// if default value is passed, use the default value or else return error
+		if defaultValue != nil {
+			return strings.TrimSpace(*defaultValue), nil
+		}
 		return "", fmt.Errorf("executing template for format %q: %w", format, err)
 	}
 

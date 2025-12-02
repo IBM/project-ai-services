@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/containers/podman/v5/libpod/define"
 	"github.com/containers/podman/v5/pkg/domain/entities/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/spf13/cobra"
 
@@ -95,12 +97,20 @@ func runPsCmd(runtimeClient *podman.PodmanClient, appName string) error {
 
 	for _, pod := range pods {
 		if fetchPodNameFromLabels(pod.Labels) == "" {
-			//Skip pods which are not linked to ai-services
+			// skip pods which are not linked to ai-services
+			continue
+		}
+
+		// do pod inspect
+		pInfo, err := runtimeClient.InspectPod(pod.Id)
+		if err != nil {
+			// log and skip pod if inspect failed
+			logger.Errorf("Failed to do pod inspect: '%s' with error: %v", pod.Id, err)
 			continue
 		}
 
 		if isOutputWide() {
-			podPorts, err := getPodPorts(runtimeClient, pod.Id)
+			podPorts, err := getPodPorts(pInfo, pod.Id)
 			if err != nil {
 				// if failed to fetch ports for pod, then set podPorts to none
 				podPorts = []string{"none"}
@@ -110,7 +120,7 @@ func runPsCmd(runtimeClient *podman.PodmanClient, appName string) error {
 				fetchPodNameFromLabels(pod.Labels),
 				pod.Id[:12],
 				pod.Name,
-				pod.Status,
+				getPodStatus(runtimeClient, pInfo),
 				strings.Join(podPorts, ", "),
 				strings.Join(containerNames, ", "),
 			)
@@ -118,7 +128,7 @@ func runPsCmd(runtimeClient *podman.PodmanClient, appName string) error {
 			p.AppendRow(
 				fetchPodNameFromLabels(pod.Labels),
 				pod.Name,
-				pod.Status,
+				getPodStatus(runtimeClient, pInfo),
 			)
 		}
 	}
@@ -126,15 +136,11 @@ func runPsCmd(runtimeClient *podman.PodmanClient, appName string) error {
 }
 
 func fetchPodNameFromLabels(labels map[string]string) string {
-	return labels["ai-services.io/application"]
+	return labels[constants.ApplicationAnnotationKey]
 }
 
-func getPodPorts(runtimeClient *podman.PodmanClient, podID string) ([]string, error) {
+func getPodPorts(pInfo *types.PodInspectReport, podID string) ([]string, error) {
 	podPorts := []string{}
-	pInfo, err := runtimeClient.InspectPod(podID)
-	if err != nil {
-		return podPorts, err
-	}
 
 	if pInfo.InfraConfig != nil && pInfo.InfraConfig.PortBindings != nil {
 		for _, ports := range pInfo.InfraConfig.PortBindings {
@@ -158,13 +164,13 @@ func getContainerNames(runtimeClient *podman.PodmanClient, pod *types.ListPodsRe
 		cInfo, err := runtimeClient.InspectContainer(container.Id)
 		if err != nil {
 			// skip container if inspect failed
+			logger.Infof("failed to do container inspect for pod: '%s', containerID: '%s' with error: %v", pod.Name, container.Id, err, 2)
 			continue
 		}
 
-		if cInfo.IsInfra {
-			// skip infra container
-			continue
-		}
+		// Along with container name append the container status too
+		status := fetchContainerStatus(cInfo)
+		cInfo.Name += fmt.Sprintf(" (%s)", status)
 
 		containerNames = append(containerNames, cInfo.Name)
 	}
@@ -174,4 +180,53 @@ func getContainerNames(runtimeClient *podman.PodmanClient, pod *types.ListPodsRe
 	}
 
 	return containerNames
+}
+
+func getPodStatus(runtimeClient *podman.PodmanClient, pInfo *types.PodInspectReport) string {
+	// if the pod Status is running, make sure to check if its healthy or not, otherwise fallback to default pod state
+	if pInfo.State == "Running" {
+		healthyContainers := 0
+		for _, container := range pInfo.Containers {
+			cInfo, err := runtimeClient.InspectContainer(container.ID)
+			if err != nil {
+				// skip container if inspect failed
+				logger.Infof("failed to do container inspect for pod: '%s', containerID: '%s' with error: %v", pInfo.Name, container.ID, err, 2)
+				continue
+			}
+
+			status := fetchContainerStatus(cInfo)
+			if status == string(constants.Ready) {
+				healthyContainers++
+			}
+		}
+
+		// if all the containers are healthy, then append 'healthy' to pod state or else mark it as unhealthy
+		if healthyContainers == len(pInfo.Containers) {
+			pInfo.State += fmt.Sprintf(" (%s)", constants.Ready)
+		} else {
+			pInfo.State += fmt.Sprintf(" (%s)", constants.NotReady)
+		}
+	}
+
+	return pInfo.State
+}
+
+func fetchContainerStatus(cInfo *define.InspectContainerData) string {
+	containerStatus := cInfo.State.Status
+
+	// if container status is not running, then return the container status
+	if containerStatus != "running" {
+		return containerStatus
+	}
+
+	// if running, proceed with checking health status of the container
+	healthStatusCheck := cInfo.State.Health
+
+	// if health status check is set, then return the particular health status
+	if healthStatusCheck != nil {
+		return healthStatusCheck.Status
+	}
+
+	// if health status check is not set, consider it to be healthy by default
+	return string(constants.Ready)
 }

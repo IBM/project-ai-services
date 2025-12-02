@@ -4,7 +4,7 @@ import (
 	"sync"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators/numa"
+	"github.com/project-ai-services/ai-services/internal/pkg/validators/lpar_affinity"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/platform"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/power"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/rhn"
@@ -17,7 +17,7 @@ import (
 func init() {
 	// adding root rule on top to verify this check first
 	DefaultRegistry.Register(root.NewRootRule())
-	DefaultRegistry.Register(numa.NewNumaRule())
+	DefaultRegistry.Register(lpar_affinity.NewLparAffinityRule())
 	DefaultRegistry.Register(platform.NewPlatformRule())
 	DefaultRegistry.Register(power.NewPowerRule())
 	DefaultRegistry.Register(rhn.NewRHNRule())

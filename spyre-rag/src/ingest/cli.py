@@ -3,14 +3,14 @@ import time
 from glob import glob
 import argparse
 
-from common.misc_utils import setup_cache_dir, set_log_level, get_logger, get_txt_tab_filenames, get_model_endpoints
+from common.misc_utils import *
 
 def reset_db():
     vector_store = MilvusVectorStore()
     vector_store.reset_collection()
     logger.info(f"✅ DB Cleaned successfully!")
 
-def ingest(directory_path, include_meta_info_in_main_text):
+def ingest(directory_path):
     logger.info(f"Ingestion started from dir '{directory_path}'")
 
     # Process each document in the directory
@@ -34,22 +34,25 @@ def ingest(directory_path, include_meta_info_in_main_text):
     out_path = setup_cache_dir(collection_name)
 
     start_time = time.time()
-    extract_document_data(
+    converted_files = extract_document_data(
         input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'])
+    logger.debug(f"Converted files: {converted_files}")
 
-    original_filenames, input_txt_files, input_tab_files = get_txt_tab_filenames(input_file_paths, out_path)
-    output_chunk_files = [f.replace('_clean_text.json', '_clean_chunk.json') for f in input_txt_files]
-    hierarchical_chunk_with_token_split(
-        input_txt_files, output_chunk_files, llm_model_dict["llm_endpoint"],
-        max_tokens=emb_model_dict['max_tokens'] - 100 if include_meta_info_in_main_text else emb_model_dict['max_tokens']
+    original_filenames, input_txt_files, input_tab_files = get_txt_tab_filenames(converted_files, out_path)
+    chunk_files = [f.replace(text_suffix, chunk_suffix) for f in input_txt_files]
+    chunked_files = hierarchical_chunk_with_token_split(
+        input_txt_files, chunk_files, emb_model_dict["emb_endpoint"],
+        max_tokens=emb_model_dict['max_tokens'] - 100
     )
+    logger.debug(f"Chunked files: {chunked_files}")
+
     combined_filtered_chunks = []
-    for in_chunk_f, in_tab_f, orig_fn in zip(output_chunk_files, input_tab_files, original_filenames):
+    for in_chunk_f, in_tab_f, orig_fn in zip(chunked_files, input_tab_files, original_filenames):
         # Combine all chunks (text, image summaries, table summaries)
         filtered_chunks = create_chunk_documents(
-            in_chunk_f, in_tab_f, orig_fn, include_meta_info_in_main_text)
+            in_chunk_f, in_tab_f, orig_fn)
         combined_filtered_chunks.extend(filtered_chunks)
-    logger.info("All documents converted")
+
     logger.info("Loading converted documents into DB")
     # Insert data into Milvus
     vector_store.insert_chunks(
@@ -58,14 +61,18 @@ def ingest(directory_path, include_meta_info_in_main_text):
         max_tokens=emb_model_dict['max_tokens'],
         chunks=combined_filtered_chunks
     )
-    logger.info("DB is loaded with the documents provided")
+    logger.info("Converted documents loaded into DB")
 
     # Log time taken for the file
     end_time = time.time()  # End the timer for the current file
     file_processing_time = end_time - start_time
     logger.debug(f"Time taken to ingest the documents into vector DB is: {file_processing_time:.2f} seconds")
-
-    logger.info(f"✅ Ingestion completed successfully, you can query your documents via chatbot")
+    
+    unprocessed_files = get_unprocessed_files(input_file_paths, chunked_files)
+    if len(unprocessed_files):
+        logger.info(f"Ingestion completed partially, please re-run the ingestion again to ingest the following files.\n{"\n".join(unprocessed_files)}\nIf the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
+    else:
+        logger.info(f"✅ Ingestion completed successfully, you can query your documents via chatbot")
 
 common_parser = argparse.ArgumentParser(add_help=False)
 common_parser.add_argument("--debug", action="store_true", help="Enable debug logging")
@@ -75,7 +82,6 @@ command_parser = parser.add_subparsers(dest="command", required=True)
 
 ingest_parser = command_parser.add_parser("ingest", help="Ingest the DOCs", description="Ingest the DOCs into Milvus after all the processing\n", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
 ingest_parser.add_argument("--path", type=str, default="/var/docs", help="Path to the documents that needs to be ingested into the RAG")
-ingest_parser.add_argument("--include-meta", action="store_true", help="Include meta info while ingesting the docs")
 
 command_parser.add_parser("clean-db", help="Clean the DB", description="Clean the Milvus DB\n", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
 
@@ -92,7 +98,7 @@ from ingest.doc_utils import extract_document_data, hierarchical_chunk_with_toke
 logger = get_logger("Ingest")
 
 if command_args.command == "ingest":
-    ingest(command_args.path, command_args.include_meta)
+    ingest(command_args.path)
 elif command_args.command == "clean-db":
     reset_db()
 

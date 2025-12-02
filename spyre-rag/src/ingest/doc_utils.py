@@ -7,103 +7,43 @@ from tqdm import tqdm
 os.environ['GRPC_VERBOSITY'] = 'ERROR' 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-import pdfplumber
 from pathlib import Path
-from rapidfuzz import fuzz
-from typing import List, Dict, Any
-from collections import defaultdict, Counter
 from docling.datamodel.base_models import InputFormat
+from docling.datamodel.document import DoclingDocument
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from concurrent.futures import as_completed, ProcessPoolExecutor
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from sentence_splitter import SentenceSplitter
 
 from common.llm_utils import classify_text_with_llm, summarize_table, tokenize_with_llm
-from common.misc_utils import get_logger, generate_file_checksum
+from common.misc_utils import get_logger, generate_file_checksum, text_suffix, table_suffix
+from ingest.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size
 
 logging.getLogger('docling').setLevel(logging.CRITICAL)
 
 logger = get_logger("Docling")
 
-
-IMAGE_RESOLUTION_SCALE = 1.0
 excluded_labels = {
-    'page_header', 'page_footer', 'caption', 'reference'
+    'page_header', 'page_footer', 'caption', 'reference', 'footnote'
 }
-
-def find_text_font_size(
-    pdf_path: str,
-    search_string: str,
-    page_number: int = 0,
-    fuzz_threshold: float = 80,
-    exact_match_first: bool = False
-) -> List[Dict[str, Any]]:
-    """ Searches for text in a PDF page and returns font info and bbox for fuzzy-matching lines. """
-    matches = []
-
-    try:
-        with pdfplumber.open(pdf_path) as pdf:
-            if page_number >= len(pdf.pages):
-                logger.debug(f"Page {page_number} does not exist in PDF.")
-                return []
-
-            page = pdf.pages[page_number]
-            words = page.extract_words(extra_attrs=["size", "fontname"])
-
-            if not words:
-                logger.debug("No words found on page.")
-                return []
-
-            # Group words into lines based on Y-coordinate
-            lines_dict = defaultdict(list)
-            for word in words:
-                if not all(k in word for k in ("text", "top", "x0", "x1", "bottom", "size", "fontname")):
-                    continue  # skip incomplete word entries
-                top_key = round(word["top"], 1)
-                lines_dict[top_key].append(word)
-
-            for line_words in lines_dict.values():
-                sorted_line = sorted(line_words, key=lambda w: w["x0"])
-                line_text = " ".join(w["text"] for w in sorted_line)
-
-                # Try exact match if enabled
-                if exact_match_first and search_string.lower() == line_text.lower():
-                    score = 100
-                else:
-                    score = fuzz.partial_ratio(line_text.lower(), search_string.lower())
-
-                if score >= fuzz_threshold:
-                    font_sizes = [w["size"] for w in sorted_line if w["size"] is not None]
-                    font_names = [w["fontname"] for w in sorted_line if w["fontname"]]
-
-                    # Most common font size and name as representative
-                    font_size = Counter(font_sizes).most_common(1)[0][0] if font_sizes else None
-                    font_name = Counter(font_names).most_common(1)[0][0] if font_names else None
-
-                    x0 = min(w["x0"] for w in sorted_line)
-                    x1 = max(w["x1"] for w in sorted_line)
-                    top = min(w["top"] for w in sorted_line)
-                    bottom = max(w["bottom"] for w in sorted_line)
-
-                    matches.append({
-                        "matched_text": line_text,
-                        "match_score": score,
-                        "font_size": font_size,
-                        "font_name": font_name,
-                        "bbox": (x0, top, x1, bottom)
-                    })
-
-    except Exception as e:
-        logger.error(f"Error processing PDF {pdf_path}: {e}")
-
-    return matches
-
 
 def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint, start_time, timings):
     logger.debug(f"Processing '{pdf_path}'")
     
-    doc_json = res.document.export_to_dict()
-    stem = res.input.file.stem
+    doc_json = res.export_to_dict()
+    stem = Path(pdf_path).stem
+
+    # Initialize TocHeaders to get the Table of Contents (TOC)
+    toc_headers = None
+    try:
+        toc_headers = get_toc(pdf_path)
+    except Exception as e:
+        logger.debug(f"No TOC found or failed to load TOC: {e}")
+
+    # Load pdf pages one time when TOC headers not found for retrieving the font size of header texts
+    pdf_pages = None
+    if not toc_headers:
+        pdf_pages = load_pdf_pages(pdf_path)
 
     # --- Text Extraction ---
     t0 = time.time()
@@ -128,7 +68,7 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
         filtered_text_dicts = filtered_blocks
 
         structured_output = []
-
+        last_header_level = 0
         logger.debug(f"Processing text content of '{pdf_path}'")
         t0 = time.time()
         for text_obj in filtered_text_dicts:
@@ -145,21 +85,42 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
                     if page_no is None or bbox_dict is None:
                         continue
 
-                    matches = find_text_font_size(pdf_path, text_obj.get("text", ""), page_no - 1)
-                    if len(matches):
-                        font_size = 0
-                        count = 0
-                        for match in matches:
-                            font_size += match["font_size"] if match["match_score"] == 100 else 0
-                            count += 1 if match["match_score"] == 100 else 0
-                        font_size = font_size / count if count else None
+                    if toc_headers:
+                        header_prefix = get_matching_header_lvl(toc_headers, text_obj.get("text", ""))
+                        if header_prefix:
+                            # If TOC matches, use the level from TOC
+                            structured_output.append({
+                                "label": label,
+                                "text": f"{header_prefix} {text_obj.get('text', '')}",
+                                "page": page_no,
+                                "font_size": None,  # Font size isn't necessary if TOC matches
+                            })
+                            last_header_level = len(header_prefix.strip())  # Update last header level
+                        else:
+                            # If no match, use the previous header level + 1
+                            new_header_level = last_header_level + 1
+                            structured_output.append({
+                                "label": label,
+                                "text": f"{'#' * new_header_level} {text_obj.get('text', '')}",
+                                "page": page_no,
+                                "font_size": None,  # Font size isn't necessary if TOC matches
+                            })
+                    else:
+                        matches = find_text_font_size(pdf_pages, text_obj.get("text", ""), page_no - 1)
+                        if len(matches):
+                            font_size = 0
+                            count = 0
+                            for match in matches:
+                                font_size += match["font_size"] if match["match_score"] == 100 else 0
+                                count += 1 if match["match_score"] == 100 else 0
+                            font_size = font_size / count if count else None
 
-                        structured_output.append({
-                            "label": label,
-                            "text": text_obj.get("text", ""),
-                            "page": page_no,
-                            "font_size": round(font_size, 2) if font_size else None
-                        })
+                            structured_output.append({
+                                "label": label,
+                                "text": text_obj.get("text", ""),
+                                "page": page_no,
+                                "font_size": round(font_size, 2) if font_size else None
+                            })
             else:
                 structured_output.append({
                     "label": label,
@@ -170,19 +131,19 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
 
         timings["font_size_extraction"] = time.time() - t0
 
-        (Path(out_path) / f"{stem}_clean_text.json").write_text(json.dumps(structured_output, indent=2), encoding="utf-8")
+        (Path(out_path) / f"{stem}{text_suffix}").write_text(json.dumps(structured_output, indent=2), encoding="utf-8")
         
     else:
-        (Path(out_path) / f"{stem}_clean_text.json").write_text(json.dumps(filtered_blocks, indent=2), encoding="utf-8")
+        (Path(out_path) / f"{stem}{text_suffix}").write_text(json.dumps(filtered_blocks, indent=2), encoding="utf-8")
 
     # --- Table Extraction ---
-    if len(res.document.tables):
+    if len(res.tables):
         logger.debug(f"Processing table content of '{pdf_path}'")
         t0 = time.time()
         table_htmls_dict = {}
-        table_captions_dict = {i: None for i in range(len(res.document.tables))}
-        for table_ix, table in enumerate(res.document.tables):
-            table_htmls_dict[table_ix] = table.export_to_html(doc=res.document)
+        table_captions_dict = {i: None for i in range(len(res.tables))}
+        for table_ix, table in enumerate(res.tables):
+            table_htmls_dict[table_ix] = table.export_to_html(doc=res)
             for caption_idx, block in enumerate(table_captions):
                 if block.get('parent')['$ref'] == f'#/tables/{table_ix}':
                     table_captions_dict[table_ix] = block.get('text', '')
@@ -208,39 +169,49 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
             }
             for idx, (keep, html, caption, summary) in enumerate(zip(decisions, table_htmls, table_captions_list, table_summaries)) if keep
         }
-        (Path(out_path) / f"{stem}_tables.json").write_text(json.dumps(filtered_table_dicts, indent=2), encoding="utf-8")
+        (Path(out_path) / f"{stem}{table_suffix}").write_text(json.dumps(filtered_table_dicts, indent=2), encoding="utf-8")
         timings['filter_tables'] = time.time() - t0
     else:
-        (Path(out_path) / f"{stem}_tables.json").write_text(json.dumps([], indent=2), encoding="utf-8")
+        (Path(out_path) / f"{stem}{table_suffix}").write_text(json.dumps([], indent=2), encoding="utf-8")
 
     total_time = time.time() - start_time
     logger.debug(f"Timing for {stem} Total: {total_time:.2f}s")
     for k, v in timings.items():
         logger.debug(f"  {k:<30}: {v:.2f}s")
 
-
-
 def convert_and_process(path, doc_converter, out_path, llm_model, llm_endpoint):
     try:
-        logger.debug(f"Converting '{path}'")
-        start_time = time.time()
         timings = {}
-        t0 = time.time()
-        res = doc_converter.convert(path)
-        timings['conversion_time'] = time.time() - t0
-        logger.debug(f"'{path}' converted")
-        process_converted_document(res, path, out_path, llm_model, llm_endpoint, start_time, timings)
+        start_time = time.time()
+        f = (Path(out_path) / f"{Path(path).stem}_converted.json")
+        logger.debug(f"Checking {str(f)}")
+        converted_doc = None
+        if f.exists():
+            logger.debug("Loading from converted json")
+            with Path(str(f)).open("r") as fp:
+                doc_dict = json.load(fp)
+                converted_doc = DoclingDocument.model_validate(doc_dict)
+        else:
+            logger.debug(f"Not exist, converting '{path}'")
+            start_time = time.time()
+            t0 = time.time()
+            converted_doc = doc_converter.convert(path).document
+            timings['conversion_time'] = time.time() - t0
+            logger.debug(f"'{path}' converted")
+            converted_doc.save_as_json(str(f))
+        process_converted_document(converted_doc, path, out_path, llm_model, llm_endpoint, start_time, timings)
+        logger.debug(f"Processed: {path}")
+        return path
     except Exception as e:
-        logger.error(f"Error converting or processing {path}: {e}")
-
+        raise Exception(f"Error converting and processing '{path}': {e}")
 
 def extract_document_data(input_paths, out_path, llm_model, llm_endpoint, force=False):
     # Accelerator & pipeline options
     pipeline_options = PdfPipelineOptions()
-
     # Docling model files are getting downloaded to this /var/docling-models dir by this project-ai-services/images/rag-base/download_docling_models.py script in project-ai-services/images/rag-base/Containerfile
     pipeline_options.artifacts_path = "/var/docling-models"
     
+
     pipeline_options.do_table_structure = True
     pipeline_options.table_structure_options.do_cell_matching = True
     pipeline_options.do_ocr = False
@@ -250,14 +221,17 @@ def extract_document_data(input_paths, out_path, llm_model, llm_endpoint, force=
     # if there is no difference in checksum and processed text & table json also exist, would skip for convert and process list
     # else add the file to convert and process list(filtered_input_paths) 
     filtered_input_paths = []
+    converted_paths = []
     for path in input_paths:
         f = (Path(out_path) / f"{Path(path).stem}.checksum")
         if f.exists():
             checksum = f.read_text()
             if checksum != generate_file_checksum(path) \
-                or not (Path(out_path) / f"{Path(path).stem}_clean_text.json").exists() \
-                or not (Path(out_path) / f"{Path(path).stem}_tables.json").exists():
+                or not (Path(out_path) / f"{Path(path).stem}{text_suffix}").exists() \
+                or not (Path(out_path) / f"{Path(path).stem}{table_suffix}").exists():
                 filtered_input_paths.append(path)
+            else:
+                converted_paths.append(path)
         else:
             filtered_input_paths.append(path)
 
@@ -279,9 +253,14 @@ def extract_document_data(input_paths, out_path, llm_model, llm_endpoint, force=
                 for path in filtered_input_paths
             ]
             for future in tqdm(as_completed(futures), total=len(filtered_input_paths)):
-                future.result()
+                try:
+                    converted_paths.append(future.result())
+                except Exception as e:
+                    logger.error(f"{e}")
     else:
         logger.debug("No files to convert and process")
+
+    return converted_paths
 
 def collect_header_font_sizes(elements):
     """
@@ -316,18 +295,18 @@ def get_header_level(text, font_size, sorted_font_sizes):
     return level, text
 
 
-def count_tokens(text, llm_endpoint):
-    token_len = len(tokenize_with_llm(text, llm_endpoint))
+def count_tokens(text, emb_endpoint):
+    token_len = len(tokenize_with_llm(text, emb_endpoint))
     return token_len
 
-def split_text_into_token_chunks(text, llm_endpoint, max_tokens=512, overlap=50):
+def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50):
     sentences = SentenceSplitter(language='en').split(text)
     chunks = []
     current_chunk = []
     current_token_count = 0
 
     for sentence in sentences:
-        token_len = count_tokens(sentence, llm_endpoint)
+        token_len = count_tokens(sentence, emb_endpoint)
 
         if current_token_count + token_len > max_tokens:
             # save current chunk
@@ -337,7 +316,7 @@ def split_text_into_token_chunks(text, llm_endpoint, max_tokens=512, overlap=50)
             if overlap > 0 and len(current_chunk) > 0:
                 overlap_text = current_chunk[-1]
                 current_chunk = [overlap_text]
-                current_token_count = count_tokens(sentence, llm_endpoint)
+                current_token_count = count_tokens(overlap_text, emb_endpoint)
             else:
                 current_chunk = []
                 current_token_count = 0
@@ -353,13 +332,13 @@ def split_text_into_token_chunks(text, llm_endpoint, max_tokens=512, overlap=50)
     return chunks
 
 
-def flush_chunk(current_chunk, chunks, llm_endpoint, max_tokens):
+def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens):
     content = current_chunk["content"].strip()
     if not content:
         return
 
     # Split content into token chunks
-    token_chunks = split_text_into_token_chunks(content, llm_endpoint, max_tokens=max_tokens)
+    token_chunks = split_text_into_token_chunks(content, emb_endpoint, max_tokens=max_tokens)
 
     for i, part in enumerate(token_chunks):
         chunk = {
@@ -385,7 +364,7 @@ def flush_chunk(current_chunk, chunks, llm_endpoint, max_tokens):
     current_chunk["source_nodes"] = []
 
 
-def chunk_single_file(input_path, output_path, llm_endpoint, max_tokens=512):    
+def chunk_single_file(input_path, output_path, emb_endpoint, max_tokens=512):    
     if not Path(output_path).exists():
         with open(input_path, "r") as f:
             data = json.load(f)
@@ -435,7 +414,7 @@ def chunk_single_file(input_path, output_path, llm_endpoint, max_tokens=512):
                     current_subsubsection = full_title
 
                 # Flush current chunk and update
-                flush_chunk(current_chunk, chunks, llm_endpoint, max_tokens)
+                flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens)
                 current_chunk["chapter_title"] = current_chapter
                 current_chunk["section_title"] = current_section
                 current_chunk["subsection_title"] = current_subsection
@@ -464,7 +443,7 @@ def chunk_single_file(input_path, output_path, llm_endpoint, max_tokens=512):
                 logger.debug(f'Skipping adding "{label}".')
 
         # Flush any remaining content
-        flush_chunk(current_chunk, chunks, llm_endpoint, max_tokens)
+        flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens)
 
         # Save the processed chunks to the output file
         with open(output_path, "w") as f:
@@ -474,7 +453,9 @@ def chunk_single_file(input_path, output_path, llm_endpoint, max_tokens=512):
     else:
         logger.debug(f"{output_path} already exists.")
 
-def hierarchical_chunk_with_token_split(input_paths, output_paths, llm_endpoint, max_tokens=512):
+    return output_path
+
+def hierarchical_chunk_with_token_split(input_paths, output_paths, emb_endpoint, max_tokens=512):
     logger.debug("Creating chunks from processed documents")
     if len(input_paths) != len(output_paths):
         raise ValueError("`input_paths` and `output_paths` must have the same length")
@@ -484,18 +465,19 @@ def hierarchical_chunk_with_token_split(input_paths, output_paths, llm_endpoint,
         futures = []
         for input_path, output_path in zip(input_paths, output_paths):
             logger.debug(f"Submitting '{input_path}' for chunking")
-            futures.append(executor.submit(chunk_single_file, input_path, output_path, llm_endpoint, max_tokens))
+            futures.append(executor.submit(chunk_single_file, input_path, output_path, emb_endpoint, max_tokens))
 
+        chunked_files = []
         # Wait for all futures to finish and handle exceptions
         for future in futures:
             try:
-                future.result()  # Capture exceptions if any
+                chunked_files.append(future.result())  # Capture exceptions if any
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred while chunking: {e}")
     logger.debug("Chunks creation completed")
+    return chunked_files
 
-
-def create_chunk_documents(in_txt_f, in_tab_f, orig_fn, include_meta_info_in_main_text):
+def create_chunk_documents(in_txt_f, in_tab_f, orig_fn):
     logger.debug(f"Creating combined chunk documents from '{in_txt_f}' & '{in_tab_f}'")
     with open(in_txt_f, "r") as f:
         txt_data = json.load(f)
@@ -517,7 +499,7 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn, include_meta_info_in_mai
                 meta_info += f"Subsubsection: {block.get('subsubsection_title')} "
             txt_docs.append({
                 # "chunk_id": txt_id,
-                "page_content": f'{meta_info}\n{block.get("content")}' if include_meta_info_in_main_text else block.get("content"),
+                "page_content": f'{meta_info}\n{block.get("content")}' if meta_info != '' else block.get("content"),
                 "filename": orig_fn,
                 "type": "text",
                 "source": meta_info,

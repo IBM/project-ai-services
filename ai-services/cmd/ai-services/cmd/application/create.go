@@ -281,7 +281,7 @@ func downloadImagesForTemplate(runtime runtime.Runtime, templateName, appName st
 
 func init() {
 	createCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{},
-		"Skip specific validation checks (comma-separated: root,rhel,rhn,power,rhaiis,numa)")
+		"Skip specific validation checks (comma-separated: root,rhel,rhn,power,rhaiis,lpar-affinity)")
 	createCmd.Flags().StringVarP(&templateName, "template", "t", "", "Application template to use (required)")
 	_ = createCmd.MarkFlagRequired("template")
 	// Add a flag for skipping image download
@@ -821,6 +821,10 @@ func constructPodDeployOptions(podAnnotations map[string]string) map[string]stri
 
 	// loop over each of the hostPortMappings to construct the 'publish' option
 	for containerPort, hostPort := range hostPortMappings {
+		if hostPort == "0" {
+			// if the host port is set to 0, then do not expose the particular containerPort
+			continue
+		}
 		if hostPort != "" {
 			// if the host port is present
 			podDeployOptions["publish"] += hostPort + ":" + containerPort

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/containers/podman/v5/pkg/domain/entities/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -47,7 +48,7 @@ Note: Logs are streamed only when a single pod is specified, and only after the 
 			return fmt.Errorf("failed to connect to podman: %w", err)
 		}
 
-		return startApplication(cmd, runtimeClient, applicationName, startPodNames)
+		return startApplication(runtimeClient, applicationName, startPodNames)
 	},
 }
 
@@ -57,7 +58,7 @@ func init() {
 }
 
 // startApplication starts all pods associated with the given application name
-func startApplication(cmd *cobra.Command, client *podman.PodmanClient, appName string, podNames []string) error {
+func startApplication(client *podman.PodmanClient, appName string, podNames []string) error {
 	resp, err := client.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
 	})
@@ -76,9 +77,10 @@ func startApplication(cmd *cobra.Command, client *podman.PodmanClient, appName s
 	}
 
 	/*
-		1. Filter pods based on provided pod names, as we want to start only those
-		2. Warn if any provided pod names do not exist
-		3. Proceed to start only the valid pods
+		1. If pod names are provided, filter the pods to only include those names.
+		2. Warn the user if any provided pod names do not exist.
+		3. If no pod names are provided, proceed to start only those pods which don't have the "ai-services.io/start=off" label set.
+		4. However, if pod names are provided, ignore the "ai-services.io/start=off" annotation and attempt to start the specified pods.
 	*/
 
 	var podsToStart []*types.ListPodsReport
@@ -110,8 +112,27 @@ func startApplication(cmd *cobra.Command, client *podman.PodmanClient, appName s
 			return nil
 		}
 	} else {
-		// No specific pod names provided, start all pods
-		podsToStart = pods
+		// 3. No pod names provided, start pods based on annotation
+	outerloop:
+		for _, pod := range pods {
+			for _, container := range pod.Containers {
+				// inspect one of containers to get pod annotations
+				data, err := client.InspectContainer(container.Names)
+				if err != nil {
+					return fmt.Errorf("failed to inspect container %s: %w", container.Names, err)
+				}
+				annotations := data.Config.Annotations
+				if val, exists := annotations[constants.PodStartAnnotationkey]; exists && val == constants.PodStartOff {
+					continue outerloop
+				}
+			}
+			podsToStart = append(podsToStart, pod)
+		}
+	}
+
+	if len(podsToStart) == 0 {
+		logger.Infoln("No pods available to start.")
+		return nil
 	}
 
 	logger.Infof("Found %d pods for given applicationName: %s.\n", len(podsToStart), appName)

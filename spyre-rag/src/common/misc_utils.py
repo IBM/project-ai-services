@@ -1,11 +1,14 @@
 import hashlib
-import json
 import logging
 import os
+from pathlib import Path
 
 LOG_LEVEL = logging.INFO
 
 LOCAL_CACHE_DIR = "/var/cache"
+chunk_suffix = "_clean_chunk.json"
+text_suffix = "_clean_text.json"
+table_suffix = "_tables.json"
 
 def set_log_level(level):
     global LOG_LEVEL
@@ -33,8 +36,8 @@ def get_txt_tab_filenames(file_paths, out_path):
     input_txt_files, input_tab_files = [], []
     for fn in original_filenames:
         f, _ = os.path.splitext(fn)
-        input_txt_files.append(f'{out_path}/{f}_clean_text.json')
-        input_tab_files.append(f'{out_path}/{f}_tables.json')
+        input_txt_files.append(f'{out_path}/{f}{text_suffix}')
+        input_tab_files.append(f'{out_path}/{f}{table_suffix}')
     return original_filenames, input_txt_files, input_tab_files
 
 
@@ -77,3 +80,18 @@ def verify_checksum(file, checksum_file):
     if csum == file_sha256:
         return True
     return False
+
+def get_unprocessed_files(original_files, processed_chunk_files):
+    processed_pdfs = []
+    for file in processed_chunk_files:
+        path = Path(file)
+        file = path.name
+        processed_pdfs.append(file.replace(chunk_suffix, ".pdf"))
+
+    original_file_names = []
+    for file in original_files:
+        path = Path(file)
+        file = path.name
+        original_file_names.append(file)
+
+    return set(original_file_names).difference(set(processed_pdfs))
