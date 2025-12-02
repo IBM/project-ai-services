@@ -25,7 +25,6 @@ jobs:
           make build REGISTRY=${{ inputs.registry }}
       
       - name: Save image in file
-        working-directory: ${{ inputs.path }}
         run: |
           IMAGE_NAME=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "${{ inputs.registry }}" | head -n 1)
           podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
