@@ -41,4 +41,4 @@ jobs:
     with:
       path: 'images/minio'
       image-name: 'minio'
-      registry: 'icr.io/ai-services-cicd'
+      registry: ${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
