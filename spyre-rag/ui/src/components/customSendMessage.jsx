@@ -195,9 +195,15 @@ async function customSendMessage(request, _options, instance) {
       },
     });
 
-  } catch {
+  } catch(err) {
 
     instance.updateIsLoadingCounter('decrease');
+
+    let errorMessage = "Error occurred during active stream.";
+
+    if (err.status === 429) {
+      errorMessage = "⚠️ Server busy. Try again shortly.";
+    }
 
     await instance.messaging.addMessageChunk({
       final_response: {
@@ -206,7 +212,7 @@ async function customSendMessage(request, _options, instance) {
           generic: [
             {
               response_type: "text",
-              text: "Error occurred during active stream.",
+              text: errorMessage,
               streaming_metadata: {
                 id: itemId,
                 stream_stopped: true,

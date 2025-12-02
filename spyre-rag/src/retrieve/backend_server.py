@@ -3,10 +3,13 @@ import json
 import logging
 import os
 import time
+from threading import Semaphore
+from functools import wraps
 
 from common.db_utils import MilvusVectorStore, MilvusNotReadyError
 from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_models
 from common.misc_utils import get_model_endpoints, set_log_level
+from common.settings import get_settings
 from retrieve.backend_utils import search_and_answer_backend, search_only
 
 vectorstore = None
@@ -16,6 +19,9 @@ TRUNCATION  = True
 emb_model_dict = {}
 llm_model_dict = {}
 reranker_model_dict = {}
+
+settings = get_settings()
+concurrency_limiter = Semaphore(settings.max_concurrent_requests)
 
 def initialize_models():
     global emb_model_dict, llm_model_dict, reranker_model_dict
@@ -32,7 +38,20 @@ POOL_SIZE = 32
 
 create_llm_session(pool_maxsize=POOL_SIZE)
 
+def limit_concurrency(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not concurrency_limiter.acquire(blocking=False):
+            return jsonify({"error": "Server busy. Try again shortly."}), 429
+        try:
+            return f(*args, **kwargs)
+        finally:
+            concurrency_limiter.release()
+    return wrapper
+
+
 @app.post("/generate")
+@limit_concurrency
 def generate():
     data = request.get_json()
     prompt = data.get("prompt", "")
@@ -121,6 +140,7 @@ def list_models():
         return jsonify({"error": repr(e)})
 
 @app.post("/v1/chat/completions")
+@limit_concurrency
 def chat_completion():
     data = request.get_json()
     if data and len(data.get("messages", [])) == 0:
