@@ -36,19 +36,8 @@ jobs:
         run: |
           make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
 
-  pre-scan:
-    runs-on: ubuntu-24.04-ppc64le
-    outputs:
-      registry: ${{ steps.registry.outputs.registry }}
-    steps:
-      - name: Load registry value
-        id: registry
-        run: |
-          echo "registry=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}" >> $GITHUB_OUTPUT
-
   scan:
     uses: ./.github/workflows/scanner.yml
     needs: pre-scan
     with:
       path: 'images/minio'
-      registry: ${{ needs.pre-scan.outputs.registry }}
