@@ -15,7 +15,6 @@ on:
 env:
   ICR_REGISTRY: icr.io
   ICR_NAMESPACE: ai-services-cicd
-  IMAGE_FILE_NAME: image.tar
 
 jobs:
   build-publish-image:

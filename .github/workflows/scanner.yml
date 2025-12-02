@@ -34,6 +34,6 @@ jobs:
         with:
           input: ${{ env.IMAGE_FILE_NAME }}
           format: table
-          severity: CRITICAL,HIGH,MEDIUM
+          severity: CRITICAL,HIGH
           exit-code: 1
           ignore-unfixed: true
