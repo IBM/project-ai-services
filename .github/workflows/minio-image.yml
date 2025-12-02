@@ -38,6 +38,5 @@ jobs:
 
   scan:
     uses: ./.github/workflows/scanner.yml
-    needs: pre-scan
     with:
       path: 'images/minio'
