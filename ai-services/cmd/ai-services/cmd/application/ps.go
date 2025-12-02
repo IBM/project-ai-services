@@ -90,7 +90,7 @@ func runPsCmd(runtimeClient *podman.PodmanClient, appName string) error {
 	defer p.CloseTableWriter()
 
 	if isOutputWide() {
-		p.SetHeaders("APPLICATION NAME", "POD ID", "POD NAME", "STATUS", "EXPOSED", "CONTAINERS")
+		p.SetHeaders("APPLICATION NAME", "POD ID", "POD NAME", "STATUS", "CREATED", "EXPOSED", "CONTAINERS")
 	} else {
 		p.SetHeaders("APPLICATION NAME", "POD NAME", "STATUS")
 	}
@@ -121,6 +121,7 @@ func runPsCmd(runtimeClient *podman.PodmanClient, appName string) error {
 				pod.Id[:12],
 				pod.Name,
 				getPodStatus(runtimeClient, pInfo),
+				utils.TimeAgo(pInfo.Created),
 				strings.Join(podPorts, ", "),
 				strings.Join(containerNames, ", "),
 			)
