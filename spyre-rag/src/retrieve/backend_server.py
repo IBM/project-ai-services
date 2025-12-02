@@ -97,6 +97,7 @@ def generate():
         mimetype="application/json"
     )
 
+
 @app.post("/reference")
 def get_reference_docs():
     data = request.get_json()
@@ -130,6 +131,7 @@ def get_reference_docs():
         mimetype="application/json"
     )
 
+
 @app.get("/v1/models")
 def list_models():
     logging.debug("List models..")
@@ -139,9 +141,21 @@ def list_models():
     except Exception as e:
         return jsonify({"error": repr(e)})
 
+
+def lock_stream(stream_g):
+    if concurrency_limiter.acquire(blocking = False):
+        try:
+            for chunk in stream_g:
+                yield chunk
+        finally:
+            concurrency_limiter.release()
+
+
 @app.post("/v1/chat/completions")
-@limit_concurrency
 def chat_completion():
+    if not concurrency_limiter.acquire(blocking = False):
+        return jsonify({"error": "Server busy. Try again shortly."}), 429
+
     data = request.get_json()
     if data and len(data.get("messages", [])) == 0:
         return jsonify({"error": "messages can't be empty"})
@@ -179,7 +193,8 @@ def chat_completion():
 
     resp_text = None
     if docs:
-        resp_text = stream_with_context(query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, stream, dynamic_chunk_truncation=TRUNCATION))
+        vllm_stream = query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, stream, dynamic_chunk_truncation=TRUNCATION)
+        resp_text = stream_with_context(lock_stream(vllm_stream))
     else:
         resp_text = stream_with_context(stream_docs_not_found())
 
@@ -190,6 +205,7 @@ def chat_completion():
             'Connection': 'keep-alive',
             'Access-Control-Allow-Headers': 'Content-Type'
         })
+
 
 @app.get("/db-status")
 def db_status():
@@ -206,9 +222,11 @@ def db_status():
     except Exception as e:
         return jsonify({"ready": False, "message": str(e)}), 500
 
+
 def stream_docs_not_found():
     message = "No documents found in the knowledge base for this query."
     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
+
 
 @app.get("/health")
 def health():
