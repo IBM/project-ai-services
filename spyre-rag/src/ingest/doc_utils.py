@@ -23,20 +23,26 @@ logging.getLogger('docling').setLevel(logging.CRITICAL)
 
 logger = get_logger("Docling")
 
+is_debug = logger.isEnabledFor(logging.DEBUG) 
+tqdm_wrapper = None
+if is_debug:
+    tqdm_wrapper = tqdm
+else:
+    tqdm_wrapper = lambda x, **kwargs: x
+
 excluded_labels = {
     'page_header', 'page_footer', 'caption', 'reference', 'footnote'
 }
 
-def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint, start_time, timings):
-    logger.debug(f"Processing '{pdf_path}'")
-    
+def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint, start_time, timings):    
     doc_json = res.export_to_dict()
     stem = Path(pdf_path).stem
 
     # Initialize TocHeaders to get the Table of Contents (TOC)
     toc_headers = None
+    page_count = 0
     try:
-        toc_headers = get_toc(pdf_path)
+        toc_headers, page_count = get_toc(pdf_path)
     except Exception as e:
         logger.debug(f"No TOC found or failed to load TOC: {e}")
 
@@ -44,6 +50,7 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
     pdf_pages = None
     if not toc_headers:
         pdf_pages = load_pdf_pages(pdf_path)
+        page_count = len(pdf_pages)
 
     # --- Text Extraction ---
     t0 = time.time()
@@ -69,9 +76,8 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
 
         structured_output = []
         last_header_level = 0
-        logger.debug(f"Processing text content of '{pdf_path}'")
         t0 = time.time()
-        for text_obj in filtered_text_dicts:
+        for text_obj in tqdm_wrapper(filtered_text_dicts, desc=f"Processing text content of '{pdf_path}'"):
             label = text_obj.get("label", "")
 
             # Check if it's a section header and process TOC or fallback to font size extraction
@@ -137,12 +143,12 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
         (Path(out_path) / f"{stem}{text_suffix}").write_text(json.dumps(filtered_blocks, indent=2), encoding="utf-8")
 
     # --- Table Extraction ---
-    if len(res.tables):
-        logger.debug(f"Processing table content of '{pdf_path}'")
+    table_count = len(res.tables)
+    if table_count:
         t0 = time.time()
         table_htmls_dict = {}
         table_captions_dict = {i: None for i in range(len(res.tables))}
-        for table_ix, table in enumerate(res.tables):
+        for table_ix, table in enumerate(tqdm_wrapper(res.tables, desc=f"Processing table content of '{pdf_path}'")):
             table_htmls_dict[table_ix] = table.export_to_html(doc=res)
             for caption_idx, block in enumerate(table_captions):
                 if block.get('parent')['$ref'] == f'#/tables/{table_ix}':
@@ -153,14 +159,12 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
         table_captions_list = [table_captions_dict[key] for key in sorted(table_captions_dict)]
         timings['extract_tables'] = time.time() - t0
 
-        logger.debug(f"Summarizing tables of '{pdf_path}'")
         t0 = time.time()
-        table_summaries = summarize_table(table_htmls, table_captions_list, gen_model, gen_endpoint)
+        table_summaries = summarize_table(table_htmls, gen_model, gen_endpoint, pdf_path)
         timings['summarize_tables'] = time.time() - t0
 
-        logger.debug(f"Classifying table summaries of '{pdf_path}'")
         t0 = time.time()
-        decisions = classify_text_with_llm(table_summaries, gen_model, gen_endpoint)
+        decisions = classify_text_with_llm(table_summaries, gen_model, gen_endpoint, pdf_path)
         filtered_table_dicts = {
             idx: {
                 'html': html,
@@ -178,9 +182,11 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
     logger.debug(f"Timing for {stem} Total: {total_time:.2f}s")
     for k, v in timings.items():
         logger.debug(f"  {k:<30}: {v:.2f}s")
+    return page_count, table_count
 
 def convert_and_process(path, doc_converter, out_path, llm_model, llm_endpoint):
     try:
+        logger.info(f"Processing '{path}'")
         timings = {}
         start_time = time.time()
         f = (Path(out_path) / f"{Path(path).stem}_converted.json")
@@ -199,9 +205,8 @@ def convert_and_process(path, doc_converter, out_path, llm_model, llm_endpoint):
             timings['conversion_time'] = time.time() - t0
             logger.debug(f"'{path}' converted")
             converted_doc.save_as_json(str(f))
-        process_converted_document(converted_doc, path, out_path, llm_model, llm_endpoint, start_time, timings)
-        logger.debug(f"Processed: {path}")
-        return path
+        page_count, table_count = process_converted_document(converted_doc, path, out_path, llm_model, llm_endpoint, start_time, timings)
+        return path, {"page_count": page_count, "table_count": table_count}
     except Exception as e:
         raise Exception(f"Error converting and processing '{path}': {e}")
 
@@ -245,22 +250,25 @@ def extract_document_data(input_paths, out_path, llm_model, llm_endpoint, force=
         ],
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
     )
-
+    converted_pdf_stats = {}
     if filtered_input_paths:
         with ProcessPoolExecutor(max_workers=max(1, min(4, len(filtered_input_paths)))) as executor:
             futures = [
                 executor.submit(convert_and_process, path, doc_converter, out_path, llm_model, llm_endpoint)
                 for path in filtered_input_paths
             ]
-            for future in tqdm(as_completed(futures), total=len(filtered_input_paths)):
+            for future in as_completed(futures):
                 try:
-                    converted_paths.append(future.result())
+                    path, pdf_stats = future.result()
+                    converted_paths.append(path)
+                    converted_pdf_stats[path] = pdf_stats
+                    logger.info(f"Processed '{path}'")
                 except Exception as e:
                     logger.error(f"{e}")
     else:
         logger.debug("No files to convert and process")
 
-    return converted_paths
+    return converted_paths, converted_pdf_stats
 
 def collect_header_font_sizes(elements):
     """
@@ -387,7 +395,7 @@ def chunk_single_file(input_path, output_path, emb_endpoint, max_tokens=512):
         current_subsection = None
         current_subsubsection = None
 
-        for idx, block in enumerate(data):
+        for idx, block in enumerate(tqdm_wrapper(data, desc=f"Chunking {input_path}")):
             label = block.get("label")
             text = block.get("text", "").strip()
             try:
@@ -456,7 +464,6 @@ def chunk_single_file(input_path, output_path, emb_endpoint, max_tokens=512):
     return output_path
 
 def hierarchical_chunk_with_token_split(input_paths, output_paths, emb_endpoint, max_tokens=512):
-    logger.debug("Creating chunks from processed documents")
     if len(input_paths) != len(output_paths):
         raise ValueError("`input_paths` and `output_paths` must have the same length")
 
@@ -469,7 +476,7 @@ def hierarchical_chunk_with_token_split(input_paths, output_paths, emb_endpoint,
 
         chunked_files = []
         # Wait for all futures to finish and handle exceptions
-        for future in futures:
+        for future in tqdm_wrapper(futures, desc="Creating chunks from processed documents"):
             try:
                 chunked_files.append(future.result())  # Capture exceptions if any
             except Exception as e:
