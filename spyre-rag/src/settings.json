@@ -6,5 +6,6 @@
       "query_vllm_stream": "You are given:\n1. **A short context text** containing factual information.\n2. **A user's question** seeking clarification or advice.\n3. **Return a concise, to-the-point answer grounded strictly in the provided context.**\n\nThe answer should be accurate, easy to follow, based on the context(s), and include clear reasoning or justification.\nIf the context does not provide enough information, answer using your general knowledge.\n\nContext:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
   },
 
-  "score_threshold": 0.5
+  "score_threshold": 0.5, 
+  "max_concurrent_requests": 32
 }

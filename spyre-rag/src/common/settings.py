@@ -38,18 +38,28 @@ class Prompts:
 class Settings:
     prompts: Prompts
     score_threshold: float
+    max_concurrent_requests: int
 
     def __post_init__(self):
         default_score_threshold = 0.4
+        default_max_concurrent_requests = 32
+
         if not (isinstance(self.score_threshold, float) and 0 < self.score_threshold < 1):
             object.__setattr__(self, "score_threshold", default_score_threshold)
             logger.warning(f"Setting score threshold to default '{default_score_threshold}' as it is missing or malformed in the settings")
+
+        if not (isinstance(self.max_concurrent_requests, int) and self.max_concurrent_requests > 0):
+            object.__setattr__(self, "max_concurrent_requests", default_max_concurrent_requests)
+            logger.warning(
+                f"Setting max_concurrent_requests to default '{default_max_concurrent_requests}' as it is missing or malformed in the settings"
+            )
 
     @classmethod
     def from_dict(cls, data: dict):
         return cls(
             prompts = Prompts.from_dict(data.get("prompts")),
-            score_threshold = data.get("score_threshold")
+            score_threshold = data.get("score_threshold"),
+            max_concurrent_requests = data.get("max_concurrent_requests")
         )
 
     @classmethod
