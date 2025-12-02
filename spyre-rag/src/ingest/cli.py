@@ -11,6 +11,10 @@ def reset_db():
     logger.info(f"✅ DB Cleaned successfully!")
 
 def ingest(directory_path):
+
+    def ingestion_failed():
+        logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
+
     logger.info(f"Ingestion started from dir '{directory_path}'")
 
     # Process each document in the directory
@@ -36,6 +40,9 @@ def ingest(directory_path):
     start_time = time.time()
     converted_files = extract_document_data(
         input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'])
+    if not converted_files:
+        ingestion_failed()
+        return
     logger.debug(f"Converted files: {converted_files}")
 
     original_filenames, input_txt_files, input_tab_files = get_txt_tab_filenames(converted_files, out_path)
@@ -44,6 +51,9 @@ def ingest(directory_path):
         input_txt_files, chunk_files, emb_model_dict["emb_endpoint"],
         max_tokens=emb_model_dict['max_tokens'] - 100
     )
+    if not chunked_files:
+        ingestion_failed()
+        return
     logger.debug(f"Chunked files: {chunked_files}")
 
     combined_filtered_chunks = []
@@ -52,6 +62,10 @@ def ingest(directory_path):
         filtered_chunks = create_chunk_documents(
             in_chunk_f, in_tab_f, orig_fn)
         combined_filtered_chunks.extend(filtered_chunks)
+
+    if not combined_filtered_chunks:
+        ingestion_failed()
+        return
 
     logger.info("Loading converted documents into DB")
     # Insert data into Milvus
