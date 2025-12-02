@@ -44,7 +44,15 @@ var templatesCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("failed to list application template values: %w", err)
 			}
-			logger.Infof("- %s\n    Supported Parameters:\n", name)
+			logger.Infof("- %s\n", name)
+			metadata, err := tp.LoadMetadata(name)
+			if err != nil {
+				return fmt.Errorf("failed to load application metadata: %w", err)
+			}
+			if metadata.Description != "" {
+				logger.Infof("  Description: %s", metadata.Description)
+			}
+			logger.Infoln("\n  Supported Parameters:")
 			for k, v := range appTemplatesParametersWithDescription {
 				logger.Infoln("\t" + k + ":  " + v)
 			}

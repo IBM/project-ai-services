@@ -8,6 +8,7 @@ import (
 
 type AppMetadata struct {
 	Name                  string     `yaml:"name,omitempty"`
+	Description           string     `yaml:"description,omitempty"`
 	Version               string     `yaml:"version,omitempty"`
 	SMTLevel              *int       `yaml:"smtLevel,omitempty"`
 	PodTemplateExecutions [][]string `yaml:"podTemplateExecutions"`

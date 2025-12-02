@@ -1,9 +1,0 @@
-name: RAG
-version: 0.0.1
-description: "Description of RAG purpose"
-smtLevel: 2
-podTemplateExecutions:
-  - [milvus.yaml.tmpl, vllm-server.yaml.tmpl]
-  - [clean-docs.yaml.tmpl]
-  - [ingest-docs.yaml.tmpl, chat-bot.yaml.tmpl]
-

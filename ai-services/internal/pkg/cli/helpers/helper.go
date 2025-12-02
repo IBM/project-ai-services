@@ -166,6 +166,7 @@ func RunServiceReportContainer(runCmd string, mode string) error {
 			"-v", "/etc/modules-load.d/:/etc/modules-load.d/",
 			"-v", "/etc/udev/rules.d/:/etc/udev/rules.d/",
 			"-v", "/etc/security/limits.d/:/etc/security/limits.d/",
+			"-v", "/etc/sos:/etc/sos",
 			vars.ToolImage,
 			"bash", "-c", runCmd,
 		)

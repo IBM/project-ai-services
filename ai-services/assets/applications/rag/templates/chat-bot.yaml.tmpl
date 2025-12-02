@@ -25,6 +25,14 @@ spec:
       ports:
         - containerPort: 3000
           protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /
+          port: 3000
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
     - name: backend-server
       image: "{{ .Values.backend.image }}"
       command:
@@ -57,6 +65,14 @@ spec:
       ports:
         - containerPort: 5000
           protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 5000
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
       resources:
         requests:
           memory: "1Gi"
