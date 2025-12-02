@@ -8,7 +8,7 @@ on:
   pull_request:
     paths:
       - 'spyre-rag/ui/**'
-      - .github/workflows/spyre-rag-ui.yml
+      - .github/workflows/spyre-rag-ui-image.yml
     branches:
       - main
 
