@@ -29,6 +29,8 @@ env:
   IMAGE_FILE_NAME: image.tar
   ICR_REGISTRY: icr.io
   ICR_NAMESPACE: ai-services-cicd
+  TRIVY_SBOM_FILE: trivy.json
+  PARLAY_SBOM_FILE: parlay.json
 
 jobs:
   cves:
@@ -65,3 +67,49 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: 1
           ignore-unfixed: ${{ inputs.ignore-unfixed }}
+          ignore-unfixed: true
+
+  license:
+    runs-on: ubuntu-24.04-ppc64le
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      
+      - name: Build image
+        working-directory: ${{ inputs.path }}
+        run: |
+          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
+      
+      - name: Save image in file
+        run: |
+          IMAGE_NAME=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}" | head -n 1)
+          podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
+
+      - name: Generate trivy sbom scan report
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          input: ${{ env.IMAGE_FILE_NAME }}
+          format: cyclonedx
+          output: ${{ env.TRIVY_SBOM_FILE }}
+      
+      - name: Enrich trivy SBOM with parlay
+        run: |
+          mkdir -p $HOME/bin
+          wget https://github.com/snyk/parlay/releases/download/v0.6.4/parlay_Linux_ppc64le.tar.gz
+          tar -xzf parlay_Linux_ppc64le.tar.gz
+          chmod +x parlay
+          mv parlay $HOME/bin
+          export PATH=$HOME/bin:$PATH
+          parlay --version
+          parlay ecosystems enrich ${{ env.TRIVY_SBOM_FILE }} | jq . > ${{ env.PARLAY_SBOM_FILE }}
+      
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-json-artifact
+          path: |
+            ${{ env.TRIVY_SBOM_FILE }}
+            ${{ env.PARLAY_SBOM_FILE }}
+            
+      - name: Run license scan
+        run: python .github/scripts/license_scan.py ${{ env.TRIVY_SBOM_FILE }} ${{ env.PARLAY_SBOM_FILE }}
