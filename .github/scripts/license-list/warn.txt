@@ -14,3 +14,8 @@ LGPL-3.0-only
 LGPL-3.0-or-later
 LGPL-2.0-only
 LGPL-2.0-or-later
+GPL-3.0-with-GCC-exception
+GPL-2.0-with-classpath-exception
+NPL-1.0
+NPL-1.1
+Vim
