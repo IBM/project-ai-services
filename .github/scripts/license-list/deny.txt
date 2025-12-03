@@ -53,13 +53,9 @@ Elastic-2.0
 EUPL-1.0
 EUPL-1.1
 EUPL-1.2
-GPL-3.0-with-GCC-exception
-GPL-2.0-with-classpath-exception
 MS-LPL
 MS-RL
 MPL-2.0-no-copyleft-exception
-NPL-1.0
-NPL-1.1
 NPSL-7.80-or-prior
 ODC-By-1.0
 ODbL-1.0
@@ -69,4 +65,3 @@ SSPL-1.0
 Ubuntu-Font-Licence-1.0
 Unique
 UnRAR
-Vim
