@@ -229,3 +229,12 @@ func VerifyAppName(appName string) error {
 	}
 	return nil
 }
+
+func ValidateParams(params, supportedParams map[string]string) error {
+	for param := range params {
+		if _, ok := supportedParams[param]; !ok {
+			return fmt.Errorf("unsupported parameter: %s, run 'ai-services application templates' for more help", param)
+		}
+	}
+	return nil
+}

@@ -63,7 +63,19 @@ var createCmd = &cobra.Command{
 		if len(rawArgParams) > 0 {
 			argParams, err = utils.ParseKeyValues(rawArgParams)
 			if err != nil {
-				return fmt.Errorf("error validating params flag: %v", err)
+				return fmt.Errorf("error validating params flag: %w", err)
+			}
+			tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+			if err := validators.ValidateAppTemplateExist(tp, templateName); err != nil {
+				return err
+			}
+			supportedParams, err := tp.ListApplicationTemplateValues(templateName)
+			if err != nil {
+				return fmt.Errorf("failed to list application template values: %w", err)
+			}
+			err = utils.ValidateParams(argParams, supportedParams)
+			if err != nil {
+				return fmt.Errorf("error validating params: %w", err)
 			}
 		}
 
