@@ -6,6 +6,7 @@ on:
     branches:
       - main
 
+
 env:
   ICR_REGISTRY: icr.io
   ICR_NAMESPACE: ai-services-cicd
