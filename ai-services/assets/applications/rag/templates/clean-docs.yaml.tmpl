@@ -34,7 +34,7 @@ spec:
       volumeMounts:
         - mountPath: /var/cache:z
           name: cache
-  restartPolicy: OnFailure
+  restartPolicy: Never
   volumes:
     - name: cache
       hostPath:

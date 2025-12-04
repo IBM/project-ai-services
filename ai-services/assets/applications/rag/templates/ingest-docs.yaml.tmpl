@@ -19,9 +19,9 @@ spec:
         - "ingest"
       resources:
         requests:
-          memory: "128Gi"
+          memory: "40Gi"
         limits:
-          memory: "128Gi"
+          memory: "40Gi"
       env:
         - name: EMB_ENDPOINT
           value: "http://{{ .AppName  }}--vllm-server:8001"
@@ -49,7 +49,7 @@ spec:
           readOnly: true
         - mountPath: /var/cache:z
           name: cache
-  restartPolicy: OnFailure
+  restartPolicy: Never
   volumes:
     - name: docs
       hostPath:
