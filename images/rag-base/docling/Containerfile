@@ -113,8 +113,8 @@ RUN wget ${PATCH_FILE} && \
     cd /tmp && rm -rf /tmp/"${PACKAGE_NAME}"
 
 #Install docling wheel and its dependencies
-RUN pip install wheel==0.45.1 hf_xet==1.2.0 huggingface_hub==1.1.4 && \
-    pip install --prefer-binary --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \
+RUN pip install --prefer-binary --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \
+        wheel==0.45.1 hf-xet==1.1.1 huggingface-hub==0.36.0 \
         tree_sitter_c==0.23.2 tree-sitter-python==0.23.2 tesserocr==2.9.1 rapidocr==3.4.2 \
         docling-parse==4.7.1 pylatexenc==2.10 rtree==1.4.1 pyclipper==1.4.0 antlr4-python3-runtime==4.9.3 \
         fastavro==1.12.1 uvloop==0.22.1 /tmp/*.whl

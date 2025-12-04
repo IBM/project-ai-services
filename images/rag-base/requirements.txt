@@ -6,11 +6,12 @@ fastapi[all]==0.121.0
 fastavro==1.12.1
 Flask==3.1.2
 grpcio==1.67.1
-hf_xet==1.2.0
+hf-xet==1.1.1
 huggingface-hub==0.36.0
 httptools==0.6.4
 joblib==1.5.2
 lxml==5.4.0
+markupsafe==3.0.2
 numpy==2.3.1
 openai==2.6.0
 opencv-python==4.10.0.84
@@ -23,6 +24,7 @@ pyclipper==1.4.0
 pylatexenc==2.10
 pymilvus==2.6.2
 pywavelets==1.8.0
+pyyaml==6.0.2
 rapidfuzz==3.13.0
 rapidocr==3.4.2
 regex==2025.10.23
