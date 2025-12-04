@@ -32,6 +32,12 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      ICR_USERNAME:
+        required: false
+      ICR_APIKEY:
+        required: false
+      
 
 env:
   IMAGE_FILE_NAME: image.tar
