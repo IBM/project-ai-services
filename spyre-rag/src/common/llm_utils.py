@@ -9,11 +9,15 @@ from tqdm import tqdm
 from common.misc_utils import get_logger
 from common.settings import get_settings
 
-POOL_SIZE = 10 
+# Setting 3 connection pools, since we would connect 3 LLM endpoints(instruct, embedding & reranker) for all the operations
+POOL_CONNECTIONS = 3
+
+# Per processor pool 8 requests are getting spawned, since we are creating 4 processor pools, used 8 to match the vLLM's Max Batch Size 32
+POOL_SIZE = 8
 
 adapter = HTTPAdapter(
-    pool_connections=POOL_SIZE, 
-    pool_maxsize=POOL_SIZE, 
+    pool_connections=POOL_CONNECTIONS,
+    pool_maxsize=POOL_SIZE,
     pool_block=True 
 )
 
@@ -32,7 +36,7 @@ else:
     
 settings = get_settings()
 
-def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, pdf_path, batch_size=128):
+def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, pdf_path, batch_size=32):
     all_prompts = [settings.prompts.llm_classify.format(text=item.strip()) for item in text_blocks]
     
     decisions = []
