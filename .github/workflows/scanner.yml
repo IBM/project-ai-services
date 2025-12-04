@@ -4,13 +4,21 @@ on:
   workflow_call:
     inputs:
       path:
-        required: true
+        required: false
         type: string
     secrets:
       ICR_USERNAME:
         required: false
       ICR_APIKEY:
         required: false
+      skip-cves-scan:
+        required: false
+        type: boolean
+        default: false
+      is-repo-scan:
+        required: false
+        type: boolean
+        default: false
 
 env:
   IMAGE_FILE_NAME: image.tar
@@ -22,6 +30,7 @@ env:
 jobs:
   cves:
     runs-on: ubuntu-24.04-ppc64le
+    if: ${{ !inputs['skip-cves-scan'] }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -52,19 +61,31 @@ jobs:
         uses: actions/checkout@v5
       
       - name: Build image
+        if: ${{ !inputs['is-repo-scan'] }}
         working-directory: ${{ inputs.path }}
         run: |
           make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
       
       - name: Save image in file
+        if: ${{ !inputs['is-repo-scan'] }}
         run: |
           IMAGE_NAME=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}" | head -n 1)
           podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
 
       - name: Generate trivy sbom scan report
+        if: ${{ !inputs['is-repo-scan'] }}
         uses: aquasecurity/trivy-action@0.33.1
         with:
           input: ${{ env.IMAGE_FILE_NAME }}
+          format: cyclonedx
+          output: ${{ env.TRIVY_SBOM_FILE }}
+      
+      - name: Generate trivy sbom scan report for the repo
+        if: ${{ inputs['is-repo-scan'] }}
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: fs
+          input: ./ai-services
           format: cyclonedx
           output: ${{ env.TRIVY_SBOM_FILE }}
       
