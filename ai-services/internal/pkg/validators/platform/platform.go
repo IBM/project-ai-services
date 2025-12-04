@@ -65,7 +65,7 @@ func (r *PlatformRule) Verify() error {
 }
 
 func (r *PlatformRule) Message() string {
-	return "Operating system is RHEL with version 9.6"
+	return "The LPAR is running a supported version of the operating system (RHEL 9.6 or higher)."
 }
 
 func (r *PlatformRule) Level() constants.ValidationLevel {
