@@ -20,16 +20,16 @@ minio:
 
 milvus:
   # @hidden
-  image: icr.io/ppc64le-oss/milvus-ppc64le:v2.5.3 
+  image: icr.io/ppc64le-oss/milvus-ppc64le:v2.5.3
 
 instruct:
   # @hidden
-  image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-ci_236 
+  image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-1764185711
 
 embedding:
   # @hidden
-  image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1 
+  image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
 
 reranker:
   # @hidden
-  image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-ci_236
+  image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-1764185711
