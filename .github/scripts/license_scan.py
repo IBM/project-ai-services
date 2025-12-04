@@ -43,6 +43,8 @@ def merge_sbom_data(trivy_data, parlay_data):
 def classify_license(licenses_data):
     deny_license_list = load_licenses_file("deny.txt")
     warn_license_list = load_licenses_file("warn.txt")
+    approved_pkgs = load_approved_pkgs()
+
     classified_pkg = {
         "deny": {},
         "warn": {},
@@ -53,6 +55,11 @@ def classify_license(licenses_data):
     for key, value in licenses_data.items():
         pkg_license = value["License by Trivy"] + \
             " " + value["License by Parlay"]
+        
+        if key in approved_pkgs and validate_license(key, approved_pkgs, pkg_license):
+            classified_pkg["allowed"][key] = value
+            continue
+
         if is_licence_exist(pkg_license, deny_license_list):
             classified_pkg["deny"][key] = value
         elif is_licence_exist(pkg_license, warn_license_list):
@@ -62,6 +69,17 @@ def classify_license(licenses_data):
         else:
             classified_pkg["allowed"][key] = value
     return classified_pkg
+
+
+def validate_license(pkg_name, approved_pkg, pkg_license):
+    license_in_approved = approved_pkg[pkg_name]
+    if isinstance(license_in_approved, list):
+        for lic in license_in_approved:
+            if lic in pkg_license:
+                return True
+    elif license_in_approved in pkg_license:
+        return True
+    return False
 
 
 def scan_pkg_license(licenses_data):
@@ -99,6 +117,17 @@ def load_licenses_file(file_name):
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
+
+
+def load_approved_pkgs():
+    try:
+        with open(f".github/scripts/license-list/approved_pkg.json", 'r') as approved_pkg_file:
+            approved_pkg_data = json.load(approved_pkg_file)
+            return approved_pkg_data.get("approved_pkg", {})
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
 
 def print_result(licence_list, msg):
     if len(licence_list) == 0:
