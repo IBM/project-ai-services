@@ -5,6 +5,7 @@ on:
       - 'spyre-rag/src/**'
     branches:
       - main
+  pull_request:
 
 env:
   ICR_REGISTRY: icr.io
