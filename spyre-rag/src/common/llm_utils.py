@@ -1,7 +1,10 @@
+import logging
 import requests
 from requests.adapters import HTTPAdapter
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from tqdm import tqdm
 
 from common.misc_utils import get_logger
 from common.settings import get_settings
@@ -19,13 +22,21 @@ SESSION.mount("http://", adapter)
 SESSION.mount("https://", adapter)
 
 logger = get_logger("LLM")
+
+is_debug = logger.isEnabledFor(logging.DEBUG) 
+tqdm_wrapper = None
+if is_debug:
+    tqdm_wrapper = tqdm
+else:
+    tqdm_wrapper = lambda x, **kwargs: x
+    
 settings = get_settings()
 
-def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, batch_size=128):
+def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, pdf_path, batch_size=128):
     all_prompts = [settings.prompts.llm_classify.format(text=item.strip()) for item in text_blocks]
     
     decisions = []
-    for i in range(0, len(all_prompts), batch_size):
+    for i in tqdm_wrapper(range(0, len(all_prompts), batch_size), desc=f"Classifying table summaries of '{pdf_path}'"):
         batch_prompts = all_prompts[i:i + batch_size]
 
         payload = {
@@ -43,7 +54,10 @@ def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, batch_size=128)
                 reply = choice.get("text", "").strip().lower()
                 decisions.append("yes" in reply)
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error while classifying text with vLLM: {e}, {e.response.text}")
+            error_details = str(e)
+            if e.response is not None:
+                error_details += f", Response Text: {e.response.text}"
+            logger.error(f"Error while classifying text with vLLM: {error_details}")
             decisions.append(True)
         except Exception as e:
             logger.error(f"Error while classifying text with vLLM: {e}")
@@ -78,14 +92,17 @@ def summarize_single_table(prompt, gen_model, llm_endpoint):
         reply = result.get("choices", [{}])[0].get("text", "").strip()
         return reply
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error summarizing table: {e}, {e.response.text}")
+        error_details = str(e)
+        if e.response is not None:
+            error_details += f", Response Text: {e.response.text}"
+        logger.error(f"Error summarizing table: {error_details}")
         return "No summary."
     except Exception as e:
         logger.error(f"Error summarizing table: {e}")
         return "No summary."
 
 
-def summarize_table(table_html, table_caption, gen_model, llm_endpoint, max_workers=32):
+def summarize_table(table_html, gen_model, llm_endpoint, pdf_path, max_workers=32):
     all_prompts = [settings.prompts.table_summary.format(content=html) for html in table_html]
 
     summaries = [None] * len(all_prompts)
@@ -96,7 +113,7 @@ def summarize_table(table_html, table_caption, gen_model, llm_endpoint, max_work
             for idx, prompt in enumerate(all_prompts)
         }
 
-        for future in as_completed(futures):
+        for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts), desc=f"Summarizing tables of '{pdf_path}'"):
             idx = futures[future]
             try:
                 summaries[idx] = future.result()
@@ -158,7 +175,11 @@ def query_vllm(question, documents, llm_endpoint, ckpt, stop_words, max_new_toke
         request_time = end_time - start_time
         return response_data, request_time
     except requests.exceptions.RequestException as e:
-        return {"error": str(e) + "\n" + e.response.text}, 0.
+        error_details = str(e)
+        if e.response is not None:
+            error_details += f", Response Text: {e.response.text}"
+        
+        return {"error": error_details}, 0.
     except Exception as e:
         return {"error": str(e)}, 0.
 
@@ -201,8 +222,11 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
 
                 yield f"{raw_line}\n\n"
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error calling vLLM stream API: {e}, {e.response.text}")
-        return {"error": str(e) + "\n" + e.response.text}, 0.
+        error_details = str(e)
+        if e.response is not None:
+            error_details += f", Response Text: {e.response.text}"
+        logger.error(f"Error calling vLLM stream API: {error_details}")
+        return {"error": error_details}, 0.
     except Exception as e:
         logger.error(f"Error calling vLLM stream API: {e}")
         return {"error": str(e)}, 0.
@@ -218,7 +242,10 @@ def tokenize_with_llm(prompt, llm_endpoint):
         tokens = result.get("tokens", [])
         return tokens
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error encoding prompt: {e}, {e.response.text}")
+        error_details = str(e)
+        if e.response is not None:
+            error_details += f", Response Text: {e.response.text}"
+        logger.error(f"Error encoding prompt: {error_details}")
         raise e
     except Exception as e:
         logger.error(f"Error encoding prompt: {e}")
@@ -235,7 +262,10 @@ def detokenize_with_llm(tokens, llm_endpoint):
         prompt = result.get("prompt", "")
         return prompt
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error decoding tokens: {e}, {e.response.text}")
+        error_details = str(e)
+        if e.response is not None:
+            error_details += f", Response Text: {e.response.text}"
+        logger.error(f"Error decoding tokens: {error_details}")
         raise e
     except Exception as e:
         logger.error(f"Error decoding tokens: {e}")

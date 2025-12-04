@@ -41,6 +41,8 @@ spec:
           value: "RAG_DB"
         - name: MILVUS_COLLECTION_NAME
           value: "{{ .AppName  }}"
+        - name: LOG_LEVEL
+          value: "{{ .Values.ingest.log_level}}"
       volumeMounts:
         - mountPath: /var/docs:z
           name: docs
