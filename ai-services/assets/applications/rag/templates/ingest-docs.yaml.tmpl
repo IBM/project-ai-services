@@ -19,9 +19,9 @@ spec:
         - "ingest"
       resources:
         requests:
-          memory: "128Gi"
+          memory: "40Gi"
         limits:
-          memory: "128Gi"
+          memory: "40Gi"
       env:
         - name: EMB_ENDPOINT
           value: "http://{{ .AppName  }}--vllm-server:8001"
@@ -41,13 +41,15 @@ spec:
           value: "RAG_DB"
         - name: MILVUS_COLLECTION_NAME
           value: "{{ .AppName  }}"
+        - name: LOG_LEVEL
+          value: "{{ .Values.ingest.log_level}}"
       volumeMounts:
         - mountPath: /var/docs:z
           name: docs
           readOnly: true
         - mountPath: /var/cache:z
           name: cache
-  restartPolicy: OnFailure
+  restartPolicy: Never
   volumes:
     - name: docs
       hostPath:

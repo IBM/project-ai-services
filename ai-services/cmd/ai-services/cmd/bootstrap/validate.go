@@ -93,7 +93,7 @@ Available checks to skip:
 	}
 
 	cmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{},
-		"Skip specific validation checks (comma-separated: root,rhel,rhn,power,rhaiis,lpar-affinity)")
+		"Skip specific validation checks (comma-separated: root,rhel,rhn,power,lpar-affinity)")
 
 	return cmd
 }

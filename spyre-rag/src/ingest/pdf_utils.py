@@ -5,6 +5,7 @@ from rapidfuzz import fuzz
 from collections import defaultdict, Counter
 from pdfminer.pdfdocument import PDFDocument, PDFNoOutlines
 from pdfminer.pdfparser import PDFParser, PDFSyntaxError
+from pdfminer.pdfpage import PDFPage
 
 from common.misc_utils import get_logger
 
@@ -24,6 +25,7 @@ def get_matching_header_lvl(toc, title, threshold=80):
 
 def get_toc(file):
     toc = {}
+    page_count = 0
     with open(file, "rb") as fp:
         try:
             parser = PDFParser(fp)
@@ -35,6 +37,7 @@ def get_toc(file):
 
             for (level, title, _, _, _) in outlines:
                 toc[title] = level
+            page_count = len(list(PDFPage.create_pages(document)))
 
         except PDFNoOutlines:
             logger.debug("No outlines found.")
@@ -45,7 +48,7 @@ def get_toc(file):
                 parser.close()
             except NameError:
                 pass  # nothing to do
-    return toc
+    return toc, page_count
 
 def load_pdf_pages(pdf_path):
     pdf_pages = []
