@@ -8,7 +8,7 @@ ENV CGO_ENABLED=0
 
 RUN dnf install -y --disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms wget git make && dnf clean all
 
-ARG GO_VERSION=1.24.9
+ARG GO_VERSION=1.24.11
 RUN wget -q https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz -O go.tar.gz && \
     rm -rf /usr/local/go && \
     tar -C /usr/local -xzf go.tar.gz && \
