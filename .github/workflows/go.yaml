@@ -9,8 +9,14 @@ on:
   pull_request:
     paths:
       - 'ai-services/**'
+      - .github/workflows/go.yaml
     branches:
       - main
+
+env:
+  TRIVY_SBOM_FILE: trivy.json
+  PARLAY_SBOM_FILE: parlay.json
+
 
 jobs:
   build:
@@ -43,3 +49,8 @@ jobs:
         working-directory: ai-services
         run: |
           GOOS=linux GOARCH=ppc64le make build
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      skip-cves-scan: true
+      is-repo-scan: true
