@@ -166,6 +166,11 @@ func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []str
 		}
 	}
 
+	// validate CLI Overrides before applying since we are adding them directly
+	if err := utils.ValidateParams(cliOverrides, values); err != nil {
+		return nil, err
+	}
+
 	// Load user provided CLI overides
 	for key, val := range cliOverrides {
 		utils.SetNestedValue(values, key, val)

@@ -47,6 +47,7 @@ var (
 	rawArgParams      []string
 	argParams         map[string]string
 	valuesFiles       []string
+	values            map[string]any
 )
 
 var createCmd = &cobra.Command{
@@ -69,13 +70,9 @@ var createCmd = &cobra.Command{
 			if err := validators.ValidateAppTemplateExist(tp, templateName); err != nil {
 				return err
 			}
-			supportedParams, err := tp.ListApplicationTemplateValues(templateName)
+			values, err = tp.LoadValues(templateName, valuesFiles, argParams)
 			if err != nil {
-				return fmt.Errorf("failed to list application template values: %w", err)
-			}
-			err = utils.ValidateParams(argParams, supportedParams)
-			if err != nil {
-				return fmt.Errorf("error validating params: %w", err)
+				return fmt.Errorf("failed to load params for application: %w", err)
 			}
 		}
 
@@ -471,10 +468,6 @@ func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *t
 
 func executePodTemplates(runtime runtime.Runtime, tp templates.Template, appName string, appMetadata *templates.AppMetadata,
 	tmpls map[string]*template.Template, pciAddresses []string, existingPods []string) error {
-	values, err := tp.LoadValues(templateName, valuesFiles, argParams)
-	if err != nil {
-		return fmt.Errorf("failed to load params for application: %w", err)
-	}
 	globalParams := map[string]any{
 		"AppName":         appName,
 		"AppTemplateName": appMetadata.Name,
