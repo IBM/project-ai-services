@@ -299,7 +299,7 @@ func downloadImagesForTemplate(runtime runtime.Runtime, templateName, appName st
 
 func init() {
 	createCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{},
-		"Skip specific validation checks (comma-separated: root,rhel,rhn,power,lpar-affinity)")
+		"Skip specific validation checks (comma-separated: root,rhel,rhn,power,numa)")
 	createCmd.Flags().StringVarP(&templateName, "template", "t", "", "Application template to use (required)")
 	_ = createCmd.MarkFlagRequired("template")
 	// Add a flag for skipping image download
