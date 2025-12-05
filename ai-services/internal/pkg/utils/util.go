@@ -230,11 +230,43 @@ func VerifyAppName(appName string) error {
 	return nil
 }
 
-func ValidateParams(params, supportedParams map[string]string) error {
+func ValidateParams(params map[string]string, supportedParams map[string]interface{}) error {
 	for param := range params {
-		if _, ok := supportedParams[param]; !ok {
-			return fmt.Errorf("unsupported parameter: %s, run 'ai-services application templates' for more help", param)
+		key := param
+		if strings.Contains(param, "=") {
+			key = strings.Split(param, "=")[0]
+		}
+
+		if !checkParamsInValues(key, supportedParams) {
+			return fmt.Errorf("unsupported parameter: %s", key)
 		}
 	}
 	return nil
+}
+
+/*
+checkParamsInValues traverses the netsed map structure, and return true only if the full path exists.
+Eg: for param = "ui.port", it checks if values["ui"]["port"] exists.
+*/
+func checkParamsInValues(param string, values map[string]interface{}) bool {
+	parts := strings.Split(param, ".")
+	current := values
+
+	for i := range parts {
+		key := parts[i]
+
+		if val, ok := current[key]; ok {
+			if i == len(parts)-1 {
+				return true
+			}
+			if cast, ok := val.(map[string]interface{}); ok {
+				current = cast
+			} else {
+				return false
+			}
+		} else {
+			return false
+		}
+	}
+	return false
 }

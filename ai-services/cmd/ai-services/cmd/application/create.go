@@ -69,9 +69,9 @@ var createCmd = &cobra.Command{
 			if err := validators.ValidateAppTemplateExist(tp, templateName); err != nil {
 				return err
 			}
-			supportedParams, err := tp.ListApplicationTemplateValues(templateName)
+			supportedParams, err := tp.LoadValues(templateName, valuesFiles, argParams)
 			if err != nil {
-				return fmt.Errorf("failed to list application template values: %w", err)
+				return fmt.Errorf("failed to load params for application: %w", err)
 			}
 			err = utils.ValidateParams(argParams, supportedParams)
 			if err != nil {
