@@ -26,7 +26,7 @@ async function customSendMessage(request, _options, instance) {
         message_options: {
           response_user_profile: {
             id: "assistant",
-            nickname: "DocuAgent",
+            nickname: "Assistant",
             user_type: UserType.BOT,
           },
         },
@@ -39,7 +39,7 @@ async function customSendMessage(request, _options, instance) {
 
   const ResponseUserProfile = {
     id: "assistant",
-    nickname: "DocuAgent",
+    nickname: "Assistant",
     user_type: UserType.BOT,
   }
 
