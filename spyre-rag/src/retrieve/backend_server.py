@@ -5,7 +5,7 @@ import os
 import time
 
 from common.db_utils import MilvusVectorStore, MilvusNotReadyError
-from common.llm_utils import query_vllm_stream, query_vllm_models
+from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_models
 from common.misc_utils import get_model_endpoints, set_log_level
 from retrieve.backend_utils import search_and_answer_backend, search_only
 
@@ -26,6 +26,11 @@ def initialize_vectorstore():
     vectorstore = MilvusVectorStore()
 
 app = Flask(__name__)
+
+# Setting 32 to fully utilse the vLLM's Max Batch Size
+POOL_SIZE = 32
+
+create_llm_session(pool_maxsize=POOL_SIZE)
 
 @app.post("/generate")
 def generate():

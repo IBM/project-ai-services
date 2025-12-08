@@ -9,22 +9,6 @@ from tqdm import tqdm
 from common.misc_utils import get_logger
 from common.settings import get_settings
 
-# Setting 3 connection pools, since we would connect 3 LLM endpoints(instruct, embedding & reranker) for all the operations
-POOL_CONNECTIONS = 3
-
-# Per processor pool 8 requests are getting spawned, since we are creating 4 processor pools, used 8 to match the vLLM's Max Batch Size 32
-POOL_SIZE = 8
-
-adapter = HTTPAdapter(
-    pool_connections=POOL_CONNECTIONS,
-    pool_maxsize=POOL_SIZE,
-    pool_block=True 
-)
-
-SESSION = requests.Session()
-SESSION.mount("http://", adapter)
-SESSION.mount("https://", adapter)
-
 logger = get_logger("LLM")
 
 is_debug = logger.isEnabledFor(logging.DEBUG) 
@@ -35,6 +19,25 @@ else:
     tqdm_wrapper = lambda x, **kwargs: x
     
 settings = get_settings()
+
+SESSION = None
+
+def create_llm_session(pool_maxsize, pool_connections: int = 1, pool_block: bool = True):
+    global SESSION
+
+    # SESSION object will be used by instruct LLM's endpoint only. Hence keeping pool_connections = 1
+    if SESSION is None:
+        adapter = HTTPAdapter(
+            pool_connections=pool_connections,
+            pool_maxsize=pool_maxsize,
+            pool_block=pool_block
+        )
+
+        session = requests.Session()
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+
+        SESSION = session
 
 def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, pdf_path, batch_size=32):
     all_prompts = [settings.prompts.llm_classify.format(text=item.strip()) for item in text_blocks]
@@ -67,17 +70,6 @@ def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, pdf_path, batch
             logger.error(f"Error while classifying text with vLLM: {e}")
             decisions.append(True)
     return decisions
-
-
-def filter_with_llm(text_blocks, gen_model, llm_endpoint):
-    text_contents = [block.get('text') for block in text_blocks]
-
-    # Run classification
-    decisions = classify_text_with_llm(text_contents, gen_model, llm_endpoint)
-    logger.debug(f"Prompts: {len(text_contents)}, Decisions: {len(decisions)}")
-    filtered_blocks = [block for dcsn, block in zip(decisions, text_blocks) if dcsn]
-    logger.debug(f"Filtered Blocks: {len(filtered_blocks)}, True Decisions: {sum(decisions)}")
-    return filtered_blocks
 
 
 def summarize_single_table(prompt, gen_model, llm_endpoint):
@@ -235,12 +227,12 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
         logger.error(f"Error calling vLLM stream API: {e}")
         return {"error": str(e)}, 0.
 
-def tokenize_with_llm(prompt, llm_endpoint):
+def tokenize_with_llm(prompt, emb_endpoint):
     payload = {
         "prompt": prompt
     }
     try:
-        response = SESSION.post(f"{llm_endpoint}/tokenize", json=payload)
+        response = requests.post(f"{emb_endpoint}/tokenize", json=payload)
         response.raise_for_status()
         result = response.json()
         tokens = result.get("tokens", [])
@@ -255,12 +247,12 @@ def tokenize_with_llm(prompt, llm_endpoint):
         logger.error(f"Error encoding prompt: {e}")
         raise e
 
-def detokenize_with_llm(tokens, llm_endpoint):
+def detokenize_with_llm(tokens, emb_endpoint):
     payload = {
         "tokens": tokens
     }
     try:
-        response = SESSION.post(f"{llm_endpoint}/detokenize", json=payload)
+        response = requests.post(f"{emb_endpoint}/detokenize", json=payload)
         response.raise_for_status()
         result = response.json()
         prompt = result.get("prompt", "")
