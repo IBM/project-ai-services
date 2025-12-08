@@ -32,7 +32,7 @@ const config = {
 function App() {
   function onAfterRender(instance) {
 
-    instance.updateMainHeaderTitle("DocuAssistant");
+    instance.updateMainHeaderTitle("DigitalAssistant");
     instance.updateLanguagePack({
       ai_slug_title: undefined,
       ai_slug_description: < AIExplanationCard />,
@@ -51,7 +51,7 @@ function App() {
       message_options: {
         response_user_profile: {
           id: "assistant",
-          nickname: "DocuAgent",
+          nickname: "Assistant",
           user_type: UserType.BOT,
         },
       },
