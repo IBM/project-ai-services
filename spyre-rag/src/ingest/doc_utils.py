@@ -15,7 +15,7 @@ from concurrent.futures import as_completed, ProcessPoolExecutor
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from sentence_splitter import SentenceSplitter
 
-from common.llm_utils import classify_text_with_llm, summarize_table, tokenize_with_llm
+from common.llm_utils import create_llm_session, classify_text_with_llm, summarize_table, tokenize_with_llm
 from common.misc_utils import get_logger, generate_file_checksum, text_suffix, table_suffix
 from ingest.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size
 
@@ -33,6 +33,11 @@ else:
 excluded_labels = {
     'page_header', 'page_footer', 'caption', 'reference', 'footnote'
 }
+
+# Per processor pool 8 requests are getting spawned, since we are creating 4 processor pools, used 8 to match the vLLM's Max Batch Size 32
+POOL_SIZE = 8
+
+create_llm_session(pool_maxsize=POOL_SIZE)
 
 def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint, start_time, timings):    
     doc_json = res.export_to_dict()
@@ -66,11 +71,6 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
     timings['extract_text_blocks'] = time.time() - t0
 
     if len(filtered_blocks):
-
-        # t0 = time.time()
-        # filtered_text_dicts = filter_with_llm(filtered_blocks, gen_model, gen_endpoint)
-        # (Path(out_path) / f"{stem}_filtered_text.json").write_text(json.dumps(filtered_text_dicts, indent=2), encoding="utf-8")
-        # timings['llm_filter_text'] = time.time() - t0
 
         filtered_text_dicts = filtered_blocks
 
