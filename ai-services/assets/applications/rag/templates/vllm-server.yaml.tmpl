@@ -98,9 +98,9 @@ spec:
         failureThreshold: 3
       resources:
         requests:
-          memory: "10Gi"
+          memory: "4Gi"
         limits:
-          memory: "10Gi"
+          memory: "4Gi"
       ports:
         - containerPort: 8001
       volumeMounts:
@@ -147,9 +147,9 @@ spec:
       resources:
         requests:
           podman.io/device=/dev/vfio: 1
-          memory: "4Gi"
+          memory: "3Gi"
         limits:
-          memory: "4Gi"
+          memory: "3Gi"
       ports:
         - containerPort: 8002
       volumeMounts:

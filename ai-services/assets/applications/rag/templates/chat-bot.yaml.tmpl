@@ -14,9 +14,9 @@ spec:
       image: "{{ .Values.ui.image }}"
       resources:
         requests:
-          memory: "1Gi"
+          memory: "150Mi"
         limits:
-          memory: "5Gi"
+          memory: "150Mi"
       env:
         - name: BACKEND_HOST
           value: "{{ .AppName  }}--chat-bot"
@@ -75,9 +75,9 @@ spec:
         failureThreshold: 3
       resources:
         requests:
-          memory: "1Gi"
+          memory: "500Mi"
         limits:
-          memory: "5Gi"
+          memory: "500Mi"
       volumeMounts:
         - mountPath: /var/cache:z
           name: cache
