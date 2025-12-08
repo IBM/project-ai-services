@@ -1,9 +1,7 @@
 import logging
 import requests
 from requests.adapters import HTTPAdapter
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
 from tqdm import tqdm
 
 from common.misc_utils import get_logger
@@ -132,52 +130,6 @@ def query_vllm_models(llm_endpoint):
         logger.error(f"Error calling vLLM models API: {e}")
         return {"error": str(e)}, 0.
     return resp_json
-
-
-def query_vllm(question, documents, llm_endpoint, ckpt, stop_words, max_new_tokens, stream=False, max_input_length=6000, dynamic_chunk_truncation=True):
-    template_token_count=250
-    context = "\n\n".join([doc.get("page_content") for doc in documents])
-    
-    logger.debug(f'Original Context: {context}')
-    if dynamic_chunk_truncation:
-        question_token_count=len(tokenize_with_llm(question, llm_endpoint))
-        remaining_tokens=max_input_length-(template_token_count+question_token_count)
-        context=detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:remaining_tokens], llm_endpoint)
-        logger.debug(f"Truncated Context: {context}")
-
-    prompt = settings.prompts.query_vllm.format(context=context, question=question)
-    logger.debug("PROMPT:  ", prompt)
-    headers = {
-        "accept": "application/json",
-        "Content-type": "application/json"
-    }
-    payload = {
-        "messages": [{"role": "user", "content": prompt}],
-        "model": ckpt,
-        "max_tokens": max_new_tokens,
-        "repetition_penalty": 1.1,
-        "temperature": 0.0,
-        "stop": stop_words,
-        "stream": stream
-    }
-    
-    try:
-        start_time = time.time()
-        # Use requests for synchronous HTTP requests
-        response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers)
-        response.raise_for_status()
-        response_data = response.json()
-        end_time = time.time()
-        request_time = end_time - start_time
-        return response_data, request_time
-    except requests.exceptions.RequestException as e:
-        error_details = str(e)
-        if e.response is not None:
-            error_details += f", Response Text: {e.response.text}"
-        
-        return {"error": error_details}, 0.
-    except Exception as e:
-        return {"error": str(e)}, 0.
 
 
 def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, stream=False,

@@ -2,7 +2,6 @@ from flask import Flask, request, jsonify, Response, stream_with_context
 import json
 import logging
 import os
-import time
 from threading import BoundedSemaphore
 from functools import wraps
 
@@ -10,7 +9,7 @@ from common.db_utils import MilvusVectorStore, MilvusNotReadyError
 from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_models
 from common.misc_utils import get_model_endpoints, set_log_level
 from common.settings import get_settings
-from retrieve.backend_utils import search_and_answer_backend, search_only
+from retrieve.backend_utils import search_only
 
 vectorstore = None
 TRUNCATION  = True
@@ -48,54 +47,6 @@ def limit_concurrency(f):
         finally:
             concurrency_limiter.release()
     return wrapper
-
-
-@app.post("/generate")
-@limit_concurrency
-def generate():
-    data = request.get_json()
-    prompt = data.get("prompt", "")
-    num_chunks_post_rrf = data.get("num_chunks_post_rrf", 10)
-    num_docs_reranker = data.get("num_docs_reranker", 3)
-    use_reranker = data.get("use_reranker", True)
-    max_tokens = data.get("max_tokens", 512)
-    start_time = time.time()
-    try:
-        emb_model = emb_model_dict['emb_model']
-        emb_endpoint = emb_model_dict['emb_endpoint']
-        emb_max_tokens = emb_model_dict['max_tokens']
-        llm_model = llm_model_dict['llm_model']
-        llm_endpoint = llm_model_dict['llm_endpoint']
-        reranker_model = reranker_model_dict['reranker_model']
-        reranker_endpoint = reranker_model_dict['reranker_endpoint']
-
-        stop_words = ""
-
-        (rag_ans, docs) = search_and_answer_backend(
-            prompt,
-            llm_endpoint,
-            llm_model,
-            emb_model, emb_endpoint, emb_max_tokens,
-            reranker_model,
-            reranker_endpoint,
-            num_chunks_post_rrf,
-            num_docs_reranker,
-            use_reranker,
-            max_tokens,
-            stop_words=stop_words,
-            language="en",
-            vectorstore=vectorstore,
-            stream=False,
-            truncation=TRUNCATION
-        )
-    except Exception as e:
-        return jsonify({"error": repr(e)}), 500
-    end_time = time.time()
-    request_time = end_time - start_time
-    return Response(
-        json.dumps({"response": rag_ans, "documents": docs, "request time": request_time}, default=str),
-        mimetype="application/json"
-    )
 
 
 @app.post("/reference")

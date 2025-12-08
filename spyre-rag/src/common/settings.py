@@ -10,14 +10,12 @@ logger = get_logger("settings")
 class Prompts:
     llm_classify: str
     table_summary: str
-    query_vllm:    str
     query_vllm_stream: str
 
     def __post_init__(self):
         if any(prompt in (None, "") for prompt in (
             self.llm_classify,
             self.table_summary,
-            self.query_vllm,
             self.query_vllm_stream,
         )):
             raise ValueError(f"One or more prompt variables are missing or empty.")
@@ -30,7 +28,6 @@ class Prompts:
         return cls(
             llm_classify = data.get("llm_classify"),
             table_summary = data.get("table_summary"),
-            query_vllm = data.get("query_vllm"),
             query_vllm_stream = data.get("query_vllm_stream")
         )
 

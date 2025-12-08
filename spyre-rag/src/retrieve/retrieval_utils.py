@@ -1,8 +1,4 @@
 import base64
-import regex as re
-
-def contains_chinese_regex(text):
-    return bool(re.search(r'\p{Han}', text))
 
 
 def format_table_html(table_html):
