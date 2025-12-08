@@ -27,7 +27,7 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
 
     logger.debug(f"Ranked documents: {ranked_documents}")
     logger.debug(f"Score threshold:  {settings.score_threshold}")
-    logger.info(f"Ranked scores:    {ranked_scores}")
+    logger.info(f"Document search completed, ranked scores: {ranked_scores}")
 
     filtered_docs = []
     for doc, score in zip(ranked_documents, ranked_scores):
