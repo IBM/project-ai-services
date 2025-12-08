@@ -2,9 +2,9 @@
   "prompts": {
       "llm_classify": "You are an intelligent assistant helping to curate a knowledge base for a Retrieval-Augmented Generation (RAG) system.\nYour task is to decide whether the following text should be included in the knowledge corpus. Respond only with \"yes\" or \"no\".\n\nRespond \"yes\" if the text contains factual, instructional, or explanatory information that could help answer general user questions on any topic.\nRespond \"no\" if the text contains personal, administrative, or irrelevant content, such as names, acknowledgements, contact info, disclaimers, legal notices, or unrelated commentary.\n\nText: {text}\n\nAnswer:",
       "table_summary": "You are an intelligent assistant analyzing set of documents.\nYou are given a table extracted from a document. Your task is to summarize the key points and insights from the table. Avoid repeating the entire content; focus on what is meaningful or important.\n\nTable:\n{content}\n\nSummary:",
-      "query_vllm": "You are given:\n1. **A short context** containing factual information.\n2. **A user's question** seeking clarification or advice.\n3. **Return a concise, to-the-point answer grounded strictly in the provided context.**\n\nThe answer should be accurate, easy to follow, based on the context(s), and include clear reasoning or justification.\nIf the context does not provide enough information, answer using your general knowledge.\n\nContext:\n{context}\n\nQuestion:\n{question}\n\nAnswer:",
       "query_vllm_stream": "You are given:\n1. **A short context text** containing factual information.\n2. **A user's question** seeking clarification or advice.\n3. **Return a concise, to-the-point answer grounded strictly in the provided context.**\n\nThe answer should be accurate, easy to follow, based on the context(s), and include clear reasoning or justification.\nIf the context does not provide enough information, answer using your general knowledge.\n\nContext:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
   },
 
-  "score_threshold": 0.5
+  "score_threshold": 0.5, 
+  "max_concurrent_requests": 32
 }

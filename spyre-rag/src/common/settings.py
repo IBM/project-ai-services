@@ -10,14 +10,12 @@ logger = get_logger("settings")
 class Prompts:
     llm_classify: str
     table_summary: str
-    query_vllm:    str
     query_vllm_stream: str
 
     def __post_init__(self):
         if any(prompt in (None, "") for prompt in (
             self.llm_classify,
             self.table_summary,
-            self.query_vllm,
             self.query_vllm_stream,
         )):
             raise ValueError(f"One or more prompt variables are missing or empty.")
@@ -30,7 +28,6 @@ class Prompts:
         return cls(
             llm_classify = data.get("llm_classify"),
             table_summary = data.get("table_summary"),
-            query_vllm = data.get("query_vllm"),
             query_vllm_stream = data.get("query_vllm_stream")
         )
 
@@ -38,18 +35,28 @@ class Prompts:
 class Settings:
     prompts: Prompts
     score_threshold: float
+    max_concurrent_requests: int
 
     def __post_init__(self):
         default_score_threshold = 0.4
+        default_max_concurrent_requests = 32
+
         if not (isinstance(self.score_threshold, float) and 0 < self.score_threshold < 1):
             object.__setattr__(self, "score_threshold", default_score_threshold)
             logger.warning(f"Setting score threshold to default '{default_score_threshold}' as it is missing or malformed in the settings")
+
+        if not (isinstance(self.max_concurrent_requests, int) and self.max_concurrent_requests > 0):
+            object.__setattr__(self, "max_concurrent_requests", default_max_concurrent_requests)
+            logger.warning(
+                f"Setting max_concurrent_requests to default '{default_max_concurrent_requests}' as it is missing or malformed in the settings"
+            )
 
     @classmethod
     def from_dict(cls, data: dict):
         return cls(
             prompts = Prompts.from_dict(data.get("prompts")),
-            score_threshold = data.get("score_threshold")
+            score_threshold = data.get("score_threshold"),
+            max_concurrent_requests = data.get("max_concurrent_requests")
         )
 
     @classmethod

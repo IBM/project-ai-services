@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - 'images/minio/**'
+      - .github/workflows/minio-image.yml
     branches:
       - main
 
@@ -19,11 +20,10 @@ jobs:
   build-publish-image:
     name: Build and Publish Image
     runs-on: ubuntu-24.04-ppc64le
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-      
+
       - name: Build minio image
         working-directory: images/minio
         run: |
@@ -34,3 +34,8 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      path: 'images/minio'

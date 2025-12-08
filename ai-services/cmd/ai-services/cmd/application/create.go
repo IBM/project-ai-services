@@ -47,6 +47,7 @@ var (
 	rawArgParams      []string
 	argParams         map[string]string
 	valuesFiles       []string
+	values            map[string]any
 )
 
 var createCmd = &cobra.Command{
@@ -63,7 +64,15 @@ var createCmd = &cobra.Command{
 		if len(rawArgParams) > 0 {
 			argParams, err = utils.ParseKeyValues(rawArgParams)
 			if err != nil {
-				return fmt.Errorf("error validating params flag: %v", err)
+				return fmt.Errorf("error validating params flag: %w", err)
+			}
+			tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+			if err := validators.ValidateAppTemplateExist(tp, templateName); err != nil {
+				return err
+			}
+			values, err = tp.LoadValues(templateName, valuesFiles, argParams)
+			if err != nil {
+				return fmt.Errorf("failed to load params for application: %w", err)
 			}
 		}
 
@@ -136,6 +145,24 @@ var createCmd = &cobra.Command{
 			return fmt.Errorf("failed to verify pod template: %w", err)
 		}
 
+		/*
+			Pod Execution Logic:
+			1. Check if pods already exists with the given application name
+			2. If doesn't exists, proceed to create all pods
+			3. Else, skip existing pods, and create missing pods
+		*/
+
+		existingPods, err := helpers.CheckExistingPodsForApplication(runtime, appName)
+		if err != nil {
+			return fmt.Errorf("failed while checking existing pods for application: %w", err)
+		}
+
+		// if all the pods for given application are already deployed, just log and do not proceed further
+		if len(existingPods) == len(tmpls) {
+			logger.Infof("Pods for given app: %s are already deployed. Please use 'ai-services application ps %s' to see the pods deployed\n", appName, appName)
+			return nil
+		}
+
 		// ---- Validate Spyre card Requirements ----
 
 		// calculate the required spyre cards of only those pods which are not deployed yet
@@ -191,18 +218,6 @@ var createCmd = &cobra.Command{
 
 		// Loop through all pod templates, render and run kube play
 		logger.Infof("Total Pod Templates to be processed: %d\n", len(tmpls))
-
-		/*
-			Pod Execution Logic:
-			1. Check if pods already exists with the given application name
-			2. If doesn't exists, proceed to create all pods
-			3. Else, skip existing pods, and create missing pods
-		*/
-
-		existingPods, err := helpers.CheckExistingPodsForApplication(runtime, appName)
-		if err != nil {
-			return fmt.Errorf("failed while checking existing pods for application: %w", err)
-		}
 
 		s = spinner.New("Deploying application '" + appName + "'...")
 		s.Start(ctx)
@@ -281,7 +296,7 @@ func downloadImagesForTemplate(runtime runtime.Runtime, templateName, appName st
 
 func init() {
 	createCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{},
-		"Skip specific validation checks (comma-separated: root,rhel,rhn,power,rhaiis,lpar-affinity)")
+		"Skip specific validation checks (comma-separated: root,rhel,rhn,power,numa)")
 	createCmd.Flags().StringVarP(&templateName, "template", "t", "", "Application template to use (required)")
 	_ = createCmd.MarkFlagRequired("template")
 	// Add a flag for skipping image download
@@ -453,10 +468,6 @@ func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *t
 
 func executePodTemplates(runtime runtime.Runtime, tp templates.Template, appName string, appMetadata *templates.AppMetadata,
 	tmpls map[string]*template.Template, pciAddresses []string, existingPods []string) error {
-	values, err := tp.LoadValues(templateName, valuesFiles, argParams)
-	if err != nil {
-		return fmt.Errorf("failed to load params for application: %w", err)
-	}
 	globalParams := map[string]any{
 		"AppName":         appName,
 		"AppTemplateName": appMetadata.Name,

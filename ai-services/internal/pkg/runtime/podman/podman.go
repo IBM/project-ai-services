@@ -145,7 +145,12 @@ func (pc *PodmanClient) StopPod(id string) error {
 }
 
 func (pc *PodmanClient) StartPod(id string) error {
-	_, err := pods.Start(pc.Context, id, &pods.StartOptions{})
+	// TODO: perform pod start SDK way
+	cmdExec := exec.Command("podman", "pod", "start", id)
+	cmdExec.Stdout = os.Stdout
+	cmdExec.Stderr = os.Stderr
+
+	err := cmdExec.Run()
 	if err != nil {
 		return fmt.Errorf("failed to start the pod: %w", err)
 	}

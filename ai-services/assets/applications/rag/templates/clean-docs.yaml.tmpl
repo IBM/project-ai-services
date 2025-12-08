@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "{{ .AppName }}--ingest-docs"
+  name: "{{ .AppName }}--clean-docs"
   labels:
     ai-services.io/application: "{{ .AppName }}"
     ai-services.io/template: "{{ .AppTemplateName }}"
@@ -10,29 +10,19 @@ metadata:
     ai-services.io/start: "off"
 spec:
   containers:
-    - name: ingest-docs
+    - name: clean-docs
       image: "{{ .Values.backend.image }}"
       command:
         - "/var/venv/bin/python"
         - "-m"
         - "ingest.cli"
-        - "ingest"
+        - "clean-db"
       resources:
         requests:
-          memory: "128Gi"
+          memory: "1Gi"
         limits:
-          memory: "128Gi"
+          memory: "1Gi"
       env:
-        - name: EMB_ENDPOINT
-          value: "http://{{ .AppName  }}--vllm-server:8001"
-        - name: EMB_MODEL
-          value: "ibm-granite/granite-embedding-278m-multilingual"
-        - name: EMB_MAX_TOKENS
-          value: "512"
-        - name: LLM_ENDPOINT
-          value: "http://{{ .AppName  }}--vllm-server:8000"
-        - name: LLM_MODEL
-          value: "ibm-granite/granite-3.3-8b-instruct"
         - name: MILVUS_HOST
           value: "{{ .AppName  }}--milvus"
         - name: MILVUS_PORT
@@ -42,17 +32,10 @@ spec:
         - name: MILVUS_COLLECTION_NAME
           value: "{{ .AppName  }}"
       volumeMounts:
-        - mountPath: /var/docs:z
-          name: docs
-          readOnly: true
         - mountPath: /var/cache:z
           name: cache
-  restartPolicy: OnFailure
+  restartPolicy: Never
   volumes:
-    - name: docs
-      hostPath:
-        path: "/var/lib/ai-services/applications/{{ .AppName }}/docs"
-        type: DirectoryOrCreate
     - name: cache
       hostPath:
         path: "/var/lib/ai-services/applications/{{ .AppName }}/cache"

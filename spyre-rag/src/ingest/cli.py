@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 from glob import glob
 import argparse
@@ -11,6 +12,10 @@ def reset_db():
     logger.info(f"✅ DB Cleaned successfully!")
 
 def ingest(directory_path):
+
+    def ingestion_failed():
+        logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
+
     logger.info(f"Ingestion started from dir '{directory_path}'")
 
     # Process each document in the directory
@@ -24,7 +29,7 @@ def ingest(directory_path):
         logger.info(f"No documents found to process in '{directory_path}'")
         return
 
-    logger.info(f"Processing {file_cnt} documents")
+    logger.info(f"Processing {file_cnt} document(s)")
 
     emb_model_dict, llm_model_dict, _ = get_model_endpoints()
     # Initialize/reset the database before processing any files
@@ -34,8 +39,11 @@ def ingest(directory_path):
     out_path = setup_cache_dir(collection_name)
 
     start_time = time.time()
-    converted_files = extract_document_data(
+    converted_files, converted_pdf_stats = extract_document_data(
         input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'])
+    if not converted_files:
+        ingestion_failed()
+        return
     logger.debug(f"Converted files: {converted_files}")
 
     original_filenames, input_txt_files, input_tab_files = get_txt_tab_filenames(converted_files, out_path)
@@ -44,6 +52,9 @@ def ingest(directory_path):
         input_txt_files, chunk_files, emb_model_dict["emb_endpoint"],
         max_tokens=emb_model_dict['max_tokens'] - 100
     )
+    if not chunked_files:
+        ingestion_failed()
+        return
     logger.debug(f"Chunked files: {chunked_files}")
 
     combined_filtered_chunks = []
@@ -52,6 +63,10 @@ def ingest(directory_path):
         filtered_chunks = create_chunk_documents(
             in_chunk_f, in_tab_f, orig_fn)
         combined_filtered_chunks.extend(filtered_chunks)
+
+    if not combined_filtered_chunks:
+        ingestion_failed()
+        return
 
     logger.info("Loading converted documents into DB")
     # Insert data into Milvus
@@ -66,13 +81,29 @@ def ingest(directory_path):
     # Log time taken for the file
     end_time = time.time()  # End the timer for the current file
     file_processing_time = end_time - start_time
-    logger.debug(f"Time taken to ingest the documents into vector DB is: {file_processing_time:.2f} seconds")
     
     unprocessed_files = get_unprocessed_files(input_file_paths, chunked_files)
     if len(unprocessed_files):
         logger.info(f"Ingestion completed partially, please re-run the ingestion again to ingest the following files.\n{"\n".join(unprocessed_files)}\nIf the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
     else:
-        logger.info(f"✅ Ingestion completed successfully, you can query your documents via chatbot")
+        logger.info(f"✅ Ingestion completed successfully, Time taken: {file_processing_time:.2f} seconds. You can query your documents via chatbot")
+    if not converted_pdf_stats:
+        return
+    
+    logger.info(f"Stats of processed PDFs:")
+    max_file_len = max(len(key) for key in converted_pdf_stats.keys())
+    total_pages = sum(converted_pdf_stats[file]["page_count"] for file in converted_pdf_stats)
+    total_tables = sum(converted_pdf_stats[file]["table_count"] for file in converted_pdf_stats)
+
+    header_format = f"| {"PDF":<{max_file_len}} | {"Total Pages":^{15}} | {"Total Tables":>{15}} |"
+    print("-" * len(header_format))
+    print(header_format)
+    print("-" * len(header_format))
+    for file in converted_pdf_stats:
+        print(f"| {file:<{max_file_len}} | {converted_pdf_stats[file]["page_count"]:^{15}} | {converted_pdf_stats[file]["table_count"]:>{15}} |")
+    print("-" * len(header_format))
+    print(f"| {"Total":<{max_file_len}} | {total_pages:^{15}} | {total_tables:>{15}} |")
+    print("-" * len(header_format))
 
 common_parser = argparse.ArgumentParser(add_help=False)
 common_parser.add_argument("--debug", action="store_true", help="Enable debug logging")
@@ -85,12 +116,18 @@ ingest_parser.add_argument("--path", type=str, default="/var/docs", help="Path t
 
 command_parser.add_parser("clean-db", help="Clean the DB", description="Clean the Milvus DB\n", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
 
+# Setting log level, 1st priority is to the flag received via cli, 2nd priority to the LOG_LEVEL env var.
+log_level = logging.INFO
+
+env_log_level = os.getenv("LOG_LEVEL", "")
+if "debug" in env_log_level.lower():
+    log_level = logging.DEBUG
+
 command_args = parser.parse_args()
 if command_args.debug:
-    set_log_level(logging.DEBUG)
-else:
-    set_log_level(logging.INFO)
+    log_level = logging.DEBUG
 
+set_log_level(log_level)
 
 from common.db_utils import MilvusVectorStore
 from ingest.doc_utils import extract_document_data, hierarchical_chunk_with_token_split, create_chunk_documents
@@ -101,4 +138,3 @@ if command_args.command == "ingest":
     ingest(command_args.path)
 elif command_args.command == "clean-db":
     reset_db()
-

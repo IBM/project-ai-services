@@ -136,6 +136,10 @@ class MilvusVectorStore:
         self.sparse_matrix = None
 
     def insert_chunks(self, emb_model, emb_endpoint, max_tokens, chunks, batch_size=10):
+        if not chunks:
+            logger.debug("Nothing to chunk!")
+            return
+
         self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
         self.collection_name = self._generate_collection_name()
 

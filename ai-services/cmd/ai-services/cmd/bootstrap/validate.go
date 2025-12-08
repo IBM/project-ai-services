@@ -15,12 +15,12 @@ import (
 
 // Validation check types
 const (
-	CheckRoot         = "root"
-	CheckRHEL         = "rhel"
-	CheckRHN          = "rhn"
-	CheckPower        = "power"
-	CheckRHAIIS       = "rhaiis"
-	CheckLparAffinity = "lpar-affinity"
+	CheckRoot   = "root"
+	CheckRHEL   = "rhel"
+	CheckRHN    = "rhn"
+	CheckPower  = "power"
+	CheckRHAIIS = "rhaiis"
+	CheckNuma   = "numa"
 )
 
 const troubleshootingGuide = "https://www.ibm.com/docs/aiservices?topic=services-troubleshooting"
@@ -53,13 +53,13 @@ All checks must pass for successful bootstrap configuration.
 
 //TODO: generate this via some program
 Available checks to skip:
-  root    		  - Root privileges check
+  root            - Root privileges check
   rhel            - RHEL OS and version check
   rhn             - Red Hat Network registration check
-  power  		  - Power architecture check
-  rhaiis   		  - RHAIIS license check
-  lpar-affinity   - LPAR affintiy score check`,
-		Example: `  # Run all validation checks
+  power           - Power architecture check
+  rhaiis          - RHAIIS license check
+  numa            - Numa node alignment`,
+  Example: `  # Run all validation checks
   ai-services bootstrap validate
 
   # Skip RHN registration check
@@ -93,7 +93,7 @@ Available checks to skip:
 	}
 
 	cmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{},
-		"Skip specific validation checks (comma-separated: root,rhel,rhn,power,rhaiis,lpar-affinity)")
+		"Skip specific validation checks (comma-separated: root,rhel,rhn,power,numa)")
 
 	return cmd
 }

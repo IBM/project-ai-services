@@ -2,12 +2,14 @@ from flask import Flask, request, jsonify, Response, stream_with_context
 import json
 import logging
 import os
-import time
+from threading import BoundedSemaphore
+from functools import wraps
 
 from common.db_utils import MilvusVectorStore, MilvusNotReadyError
-from common.llm_utils import query_vllm_stream, query_vllm_models
+from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_models
 from common.misc_utils import get_model_endpoints, set_log_level
-from retrieve.backend_utils import search_and_answer_backend, search_only
+from common.settings import get_settings
+from retrieve.backend_utils import search_only
 
 vectorstore = None
 TRUNCATION  = True
@@ -16,6 +18,9 @@ TRUNCATION  = True
 emb_model_dict = {}
 llm_model_dict = {}
 reranker_model_dict = {}
+
+settings = get_settings()
+concurrency_limiter = BoundedSemaphore(settings.max_concurrent_requests)
 
 def initialize_models():
     global emb_model_dict, llm_model_dict, reranker_model_dict
@@ -27,51 +32,22 @@ def initialize_vectorstore():
 
 app = Flask(__name__)
 
-@app.post("/generate")
-def generate():
-    data = request.get_json()
-    prompt = data.get("prompt", "")
-    num_chunks_post_rrf = data.get("num_chunks_post_rrf", 10)
-    num_docs_reranker = data.get("num_docs_reranker", 3)
-    use_reranker = data.get("use_reranker", True)
-    max_tokens = data.get("max_tokens", 512)
-    start_time = time.time()
-    try:
-        emb_model = emb_model_dict['emb_model']
-        emb_endpoint = emb_model_dict['emb_endpoint']
-        emb_max_tokens = emb_model_dict['max_tokens']
-        llm_model = llm_model_dict['llm_model']
-        llm_endpoint = llm_model_dict['llm_endpoint']
-        reranker_model = reranker_model_dict['reranker_model']
-        reranker_endpoint = reranker_model_dict['reranker_endpoint']
+# Setting 32 to fully utilse the vLLM's Max Batch Size
+POOL_SIZE = 32
 
-        stop_words = ""
+create_llm_session(pool_maxsize=POOL_SIZE)
 
-        (rag_ans, docs) = search_and_answer_backend(
-            prompt,
-            llm_endpoint,
-            llm_model,
-            emb_model, emb_endpoint, emb_max_tokens,
-            reranker_model,
-            reranker_endpoint,
-            num_chunks_post_rrf,
-            num_docs_reranker,
-            use_reranker,
-            max_tokens,
-            stop_words=stop_words,
-            language="en",
-            vectorstore=vectorstore,
-            stream=False,
-            truncation=TRUNCATION
-        )
-    except Exception as e:
-        return jsonify({"error": repr(e)}), 500
-    end_time = time.time()
-    request_time = end_time - start_time
-    return Response(
-        json.dumps({"response": rag_ans, "documents": docs, "request time": request_time}, default=str),
-        mimetype="application/json"
-    )
+def limit_concurrency(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not concurrency_limiter.acquire(blocking=False):
+            return jsonify({"error": "Server busy. Try again shortly."}), 429
+        try:
+            return f(*args, **kwargs)
+        finally:
+            concurrency_limiter.release()
+    return wrapper
+
 
 @app.post("/reference")
 def get_reference_docs():
@@ -106,6 +82,7 @@ def get_reference_docs():
         mimetype="application/json"
     )
 
+
 @app.get("/v1/models")
 def list_models():
     logging.debug("List models..")
@@ -114,6 +91,15 @@ def list_models():
         return query_vllm_models(llm_endpoint)
     except Exception as e:
         return jsonify({"error": repr(e)})
+
+
+def locked_stream(stream_g):
+    try:
+        for chunk in stream_g:
+            yield chunk
+    finally:
+        concurrency_limiter.release()
+
 
 @app.post("/v1/chat/completions")
 def chat_completion():
@@ -153,8 +139,18 @@ def chat_completion():
         return jsonify({"error": repr(e)})
 
     resp_text = None
+
     if docs:
-        resp_text = stream_with_context(query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, stream, dynamic_chunk_truncation=TRUNCATION))
+        if not concurrency_limiter.acquire(blocking=False):
+            return jsonify({"error": "Server busy. Try again shortly."}), 429
+
+        try:
+            vllm_stream = query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, stream, dynamic_chunk_truncation=TRUNCATION)
+        except Exception as e:
+            concurrency_limiter.release()
+            return jsonify({"error": repr(e)}), 500
+
+        resp_text = stream_with_context(locked_stream(vllm_stream))
     else:
         resp_text = stream_with_context(stream_docs_not_found())
 
@@ -165,6 +161,7 @@ def chat_completion():
             'Connection': 'keep-alive',
             'Access-Control-Allow-Headers': 'Content-Type'
         })
+
 
 @app.get("/db-status")
 def db_status():
@@ -181,9 +178,11 @@ def db_status():
     except Exception as e:
         return jsonify({"ready": False, "message": str(e)}), 500
 
+
 def stream_docs_not_found():
     message = "No documents found in the knowledge base for this query."
     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
+
 
 @app.get("/health")
 def health():
