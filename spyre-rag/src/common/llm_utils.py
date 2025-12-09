@@ -20,10 +20,13 @@ settings = get_settings()
 
 SESSION = None
 
-def create_llm_session(pool_maxsize, pool_connections: int = 1, pool_block: bool = True):
+def create_llm_session(pool_maxsize, pool_connections: int = 2, pool_block: bool = True):
     global SESSION
 
-    # SESSION object will be used by instruct LLM's endpoint only. Hence keeping pool_connections = 1
+    # SESSION object will be used by instruct and embedding endpoints. Hence keeping pool_connections = 2
+    # Need to use SESSION object for following reasons:
+    # - To limit the number of concurrent requests getting created to instruct vLLM's API to 32
+    # - To fix the ephemeral port exhaustion issue during chunking, since numerous tokenize calls are made to embedding server
     if SESSION is None:
         adapter = HTTPAdapter(
             pool_connections=pool_connections,
@@ -124,8 +127,11 @@ def query_vllm_models(llm_endpoint):
         response.raise_for_status()
         resp_json = response.json()
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error calling vLLM models API: {e}, {e.response.text}")
-        return {"error": str(e) + "\n" + e.response.text}, 0.
+        error_details = str(e)
+        if e.response is not None:
+            error_details += f", Response Text: {e.response.text}"
+        logger.error(f"Error calling vLLM models API: {error_details}")
+        return {"error": error_details}, 0.
     except Exception as e:
         logger.error(f"Error calling vLLM models API: {e}")
         return {"error": str(e)}, 0.
@@ -184,7 +190,7 @@ def tokenize_with_llm(prompt, emb_endpoint):
         "prompt": prompt
     }
     try:
-        response = requests.post(f"{emb_endpoint}/tokenize", json=payload)
+        response = SESSION.post(f"{emb_endpoint}/tokenize", json=payload)
         response.raise_for_status()
         result = response.json()
         tokens = result.get("tokens", [])
@@ -204,7 +210,7 @@ def detokenize_with_llm(tokens, emb_endpoint):
         "tokens": tokens
     }
     try:
-        response = requests.post(f"{emb_endpoint}/detokenize", json=payload)
+        response = SESSION.post(f"{emb_endpoint}/detokenize", json=payload)
         response.raise_for_status()
         result = response.json()
         prompt = result.get("prompt", "")
