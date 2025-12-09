@@ -49,7 +49,9 @@ jobs:
           TAG_VALUE=$(make image-tag)
           IMAGE_NAME=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}/${{ inputs.image }}:${TAG_VALUE}
 
-          podman pull --creds ${{ secrets.ICR_USERNAME }}:${{ secrets.ICR_APIKEY }}  $IMAGE_NAME
+          echo "Image: $IMAGE_NAME"
+          
+          podman pull --creds ${{ secrets.ICR_USERNAME }}:${{ secrets.ICR_APIKEY }} $IMAGE_NAME
           podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
 
       - name: Save image in file
