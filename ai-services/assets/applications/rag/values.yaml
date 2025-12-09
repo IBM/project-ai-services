@@ -28,7 +28,7 @@ milvus:
 
 instruct:
   # @hidden
-  image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-1764185711
+  image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-1764891918
 
 embedding:
   # @hidden
@@ -36,4 +36,4 @@ embedding:
 
 reranker:
   # @hidden
-  image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-1764185711
+  image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-1764891918
