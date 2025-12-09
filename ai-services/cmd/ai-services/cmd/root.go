@@ -18,7 +18,7 @@ import (
 var RootCmd = &cobra.Command{
 	Use:     "ai-services",
 	Short:   "AI Services CLI",
-	Long:    `A CLI tool for managing AI services infrastructure.`,
+	Long:    `A CLI tool for managing AI Services infrastructure.`,
 	Version: version.GetVersion(),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Ensures logs flush after each command run
