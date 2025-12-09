@@ -93,10 +93,11 @@ def list_models():
         return jsonify({"error": repr(e)})
 
 
-def locked_stream(stream_g):
+def locked_stream(stream_g, stream):
     try:
-        for chunk in stream_g:
-            yield chunk
+        if stream:
+            for chunk in stream_g:
+                yield chunk
     finally:
         concurrency_limiter.release()
 
@@ -150,17 +151,25 @@ def chat_completion():
             concurrency_limiter.release()
             return jsonify({"error": repr(e)}), 500
 
-        resp_text = stream_with_context(locked_stream(vllm_stream))
+        resp_text = stream_with_context(locked_stream(vllm_stream, stream))
     else:
         resp_text = stream_with_context(stream_docs_not_found())
 
+    if stream:
+        return Response(resp_text,
+                        content_type='text/event-stream',
+                        mimetype='text/event-stream', headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Headers': 'Content-Type'
+            })
     return Response(resp_text,
-                    content_type='text/event-stream',
-                    mimetype='text/event-stream', headers={
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'Access-Control-Allow-Headers': 'Content-Type'
-        })
+                content_type='text/plain',
+                headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Headers': 'Content-Type'
+                })
 
 
 @app.get("/db-status")

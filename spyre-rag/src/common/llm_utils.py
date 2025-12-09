@@ -164,6 +164,8 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
         # Use requests for synchronous HTTP requests
         logger.debug("STREAMING RESPONSE")
         with SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=stream) as r:
+            if not stream:
+                return r
             for raw_line in r.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
