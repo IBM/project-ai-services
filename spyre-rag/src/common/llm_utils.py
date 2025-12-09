@@ -137,9 +137,8 @@ def query_vllm_models(llm_endpoint):
         return {"error": str(e)}, 0.
     return resp_json
 
-
-def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, stream=False,
-                max_input_length=6000, dynamic_chunk_truncation=True):
+def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
+                stream, max_input_length=6000, dynamic_chunk_truncation=True):
     template_token_count = 250
     context = "\n\n".join([doc.get("page_content") for doc in documents])
 
@@ -165,11 +164,35 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
         "stop": stop_words,
         "stream": stream
     }
+    return headers, payload
 
+def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
+                max_input_length=6000, dynamic_chunk_truncation=True):
+    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False,
+                                  max_input_length=6000, dynamic_chunk_truncation=True)
+    try:
+        # Use requests for synchronous HTTP requests
+        response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=False)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        error_details = str(e)
+        if e.response is not None:
+            error_details += f", Response Text: {e.response.text}"
+        logger.error(f"Error calling vLLM API: {error_details}")
+        return {"error": error_details}, 0.
+    except Exception as e:
+        logger.error(f"Error calling vLLM API: {e}")
+        return {"error": str(e)}, 0.
+    return response.json()
+
+def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
+                max_input_length=6000, dynamic_chunk_truncation=True):
+    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, True,
+                                  max_input_length=6000, dynamic_chunk_truncation=True)
     try:
         # Use requests for synchronous HTTP requests
         logger.debug("STREAMING RESPONSE")
-        with SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=stream) as r:
+        with SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=True) as r:
             for raw_line in r.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
