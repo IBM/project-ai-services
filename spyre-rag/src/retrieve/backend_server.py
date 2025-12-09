@@ -190,11 +190,6 @@ def health():
 
 
 if __name__ == "__main__":
-    initialize_models()
-    initialize_vectorstore()
-
-    port = int(os.getenv("PORT", "5000"))
-
     log_level = logging.INFO
     level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
     if level != "":
@@ -204,4 +199,7 @@ if __name__ == "__main__":
             raise Exception(f"Unknown LOG_LEVEL passed: '{level}'")
     set_log_level(log_level)
 
+    initialize_models()
+    initialize_vectorstore()
+    port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port)
