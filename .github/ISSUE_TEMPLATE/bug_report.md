@@ -29,9 +29,7 @@ Steps to reproduce the behavior:
 ## 🖥️ Environment Info
 
 - RHEL Version: [output of `cat /etc/redhat-release`]
-- GoLang Version: [output of `go version`]
 - AI Services Version: [output of `ai-services version`]
-- If not using RHEL - add OS and version details here
 
 ## 🧪 Diagnostic Commands & Output
 
