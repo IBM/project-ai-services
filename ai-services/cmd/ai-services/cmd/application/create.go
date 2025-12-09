@@ -66,14 +66,6 @@ var createCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("error validating params flag: %w", err)
 			}
-			tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
-			if err := validators.ValidateAppTemplateExist(tp, templateName); err != nil {
-				return err
-			}
-			values, err = tp.LoadValues(templateName, valuesFiles, argParams)
-			if err != nil {
-				return fmt.Errorf("failed to load params for application: %w", err)
-			}
 		}
 
 		// validate values files
@@ -82,6 +74,18 @@ var createCmd = &cobra.Command{
 				return fmt.Errorf("values file '%s' does not exist", vf)
 			}
 		}
+
+		tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+		if err := validators.ValidateAppTemplateExist(tp, templateName); err != nil {
+			return err
+		}
+
+		// load the values and verify params arg values passed
+		values, err = tp.LoadValues(templateName, valuesFiles, argParams)
+		if err != nil {
+			return fmt.Errorf("failed to load params for application: %w", err)
+		}
+
 		appName := args[0]
 		return utils.VerifyAppName(appName)
 	},
