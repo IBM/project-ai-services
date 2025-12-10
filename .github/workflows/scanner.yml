@@ -6,13 +6,15 @@ on:
       path:
         required: true
         type: string
-      image:
-        required: false
-        type: string
+      # Set skip-image-build to true, when you want to scan the latest image from the registry
+      # Set skip-image-build to false, when you want to build the image and scan it 
       skip-image-build:
         required: false
         type: boolean
         default: false
+      image:
+        required: false
+        type: string
       ignore-unfixed:
         required: false
         type: boolean
