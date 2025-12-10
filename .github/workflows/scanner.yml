@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       path:
-        required: false
+        required: true
         type: string
       image:
         required: false
@@ -48,9 +48,6 @@ jobs:
         run: |
           TAG_VALUE=$(make image-tag)
           IMAGE_NAME=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}/${{ inputs.image }}:${TAG_VALUE}
-
-          echo "Image: $IMAGE_NAME"
-          
           podman pull --creds ${{ secrets.ICR_USERNAME }}:${{ secrets.ICR_APIKEY }} $IMAGE_NAME
           podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
 
