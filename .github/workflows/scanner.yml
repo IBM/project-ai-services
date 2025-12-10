@@ -6,12 +6,12 @@ on:
       path:
         required: true
         type: string
-      # Set skip-image-build to true, when you want to scan the latest image from the registry
-      # Set skip-image-build to false, when you want to build the image and scan it 
+      # Set skip-image-build to true, to scan the latest image from the registry else set to false for building the image and scanning it
       skip-image-build:
         required: false
         type: boolean
         default: false
+      # Set the image name, when skip-image-build is true
       image:
         required: false
         type: string
