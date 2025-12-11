@@ -28,7 +28,11 @@ on:
         required: false
         type: boolean
         default: false
-      is-repo-scan:
+      skip-license-scan:
+        required: false
+        type: boolean
+        default: false
+      is-image-scan:
         required: false
         type: boolean
         default: false
@@ -45,6 +49,7 @@ env:
   ICR_NAMESPACE: ai-services-cicd
   TRIVY_SBOM_FILE: trivy.json
   PARLAY_SBOM_FILE: parlay.json
+  PARLAY_VERSION: v0.9.0
 
 jobs:
   cves:
@@ -86,50 +91,42 @@ jobs:
 
   license:
     runs-on: ubuntu-24.04-ppc64le
+    if: ${{ !inputs['skip-license-scan'] }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-      
+
       - name: Build image
-        if: ${{ !inputs['is-repo-scan'] }}
+        if: ${{ inputs['is-image-scan'] }}
         working-directory: ${{ inputs.path }}
         run: |
           make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
-      
+
       - name: Save image in file
-        if: ${{ !inputs['is-repo-scan'] }}
+        if: ${{ inputs['is-image-scan'] }}
         run: |
           IMAGE_NAME=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}" | head -n 1)
           podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
 
       - name: Generate trivy sbom scan report
-        if: ${{ !inputs['is-repo-scan'] }}
         uses: aquasecurity/trivy-action@0.33.1
         with:
-          input: ${{ env.IMAGE_FILE_NAME }}
+          scan-type: ${{ inputs['is-image-scan'] && 'image' || 'fs' }}
+          input: ${{ inputs['is-image-scan'] && env.IMAGE_FILE_NAME || './ai-services' }}
           format: cyclonedx
           output: ${{ env.TRIVY_SBOM_FILE }}
-      
-      - name: Generate trivy sbom scan report for the repo
-        if: ${{ inputs['is-repo-scan'] }}
-        uses: aquasecurity/trivy-action@0.33.1
-        with:
-          scan-type: fs
-          input: ./ai-services
-          format: cyclonedx
-          output: ${{ env.TRIVY_SBOM_FILE }}
-      
+
       - name: Enrich trivy SBOM with parlay
         run: |
           mkdir -p $HOME/bin
-          wget https://github.com/snyk/parlay/releases/download/v0.6.4/parlay_Linux_ppc64le.tar.gz
+          wget https://github.com/snyk/parlay/releases/download/${{ env.PARLAY_VERSION }}/parlay_Linux_ppc64le.tar.gz
           tar -xzf parlay_Linux_ppc64le.tar.gz
           chmod +x parlay
           mv parlay $HOME/bin
           export PATH=$HOME/bin:$PATH
           parlay --version
           parlay ecosystems enrich ${{ env.TRIVY_SBOM_FILE }} | jq . > ${{ env.PARLAY_SBOM_FILE }}
-      
+
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4
         with:
@@ -138,5 +135,5 @@ jobs:
             ${{ env.TRIVY_SBOM_FILE }}
             ${{ env.PARLAY_SBOM_FILE }}
             
-      - name: Run license scan
+      - name: Licenses scan
         run: python .github/scripts/license_scan.py ${{ env.TRIVY_SBOM_FILE }} ${{ env.PARLAY_SBOM_FILE }}
