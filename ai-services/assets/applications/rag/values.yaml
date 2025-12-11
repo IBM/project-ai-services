@@ -25,6 +25,8 @@ minio:
 milvus:
   # @hidden
   image: icr.io/ppc64le-oss/milvus-ppc64le:v2.5.3
+  # @description Sets the memory limit for the Milvus service(Default: 4Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
+  memoryLimit: 4Gi
 
 instruct:
   # @hidden
