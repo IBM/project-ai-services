@@ -40,3 +40,4 @@ jobs:
     uses: ./.github/workflows/scanner.yml
     with:
       path: 'images/minio'
+      is-image-scan: false
