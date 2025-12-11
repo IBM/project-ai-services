@@ -2,13 +2,13 @@ ui:
   # @description Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/rag-ui:v0.0.10
+  image: icr.io/ai-services/rag-ui:v0.0.10
 
 backend:
   # @description Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.
   port: "0"
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.20
+  image: icr.io/ai-services/rag:v0.0.20
 
 ingest:
   # @hidden
@@ -30,7 +30,7 @@ milvus:
 
 instruct:
   # @hidden
-  image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-1764891918
+  image: registry.redhat.io/rhaiis/vllm-spyre-rhel9:3.2.5
 
 embedding:
   # @hidden
@@ -38,4 +38,4 @@ embedding:
 
 reranker:
   # @hidden
-  image: icr.io/ibmaiu_internal/ppc64le/dd2/rhaiis:3.2.5-1764891918
+  image: registry.redhat.io/rhaiis/vllm-spyre-rhel9:3.2.5
