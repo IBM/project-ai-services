@@ -1,10 +1,21 @@
-from flask import Flask, request, jsonify, Response, stream_with_context
-import json
-import logging
 import os
+import logging
+from common.misc_utils import set_log_level
+
+log_level = logging.INFO
+level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
+if level != "":
+    if "debug" in level:
+        log_level == logging.DEBUG
+    elif not "info" in level:
+        raise Exception(f"Unknown LOG_LEVEL passed: '{level}'")
+set_log_level(log_level)
+
+
+from flask import Flask, request, jsonify, Response, stream_with_contex
+import json
 from threading import BoundedSemaphore
 from functools import wraps
-
 from common.db_utils import MilvusVectorStore, MilvusNotReadyError
 from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_models
 from common.misc_utils import get_model_endpoints, set_log_level
@@ -190,15 +201,6 @@ def health():
 
 
 if __name__ == "__main__":
-    log_level = logging.INFO
-    level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
-    if level != "":
-        if "debug" in level:
-            log_level == logging.DEBUG
-        elif not "info" in level:
-            raise Exception(f"Unknown LOG_LEVEL passed: '{level}'")
-    set_log_level(log_level)
-
     initialize_models()
     initialize_vectorstore()
     port = int(os.getenv("PORT", "5000"))
