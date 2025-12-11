@@ -12,7 +12,7 @@ if level != "":
 set_log_level(log_level)
 
 
-from flask import Flask, request, jsonify, Response, stream_with_contex
+from flask import Flask, request, jsonify, Response, stream_with_context
 import json
 from threading import BoundedSemaphore
 from functools import wraps
