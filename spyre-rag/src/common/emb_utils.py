@@ -42,8 +42,11 @@ class Embedding:
             embeddings = [data['embedding'] for data in r['data']]
             return [np.array(embed, dtype=np.float32) for embed in embeddings]
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error while calling embedding API: {e}, {e.response.text}")
+            error_details = str(e)
+            if e.response is not None:
+                error_details += f", Response Text: {e.response.text}"
+            logger.error(f"Error calling embedding API: {error_details}")
             raise e
         except Exception as e:
-            logger.error(f"Error while calling embedding API: {e}")
+            logger.error(f"Error calling embedding API: {e}")
             raise e

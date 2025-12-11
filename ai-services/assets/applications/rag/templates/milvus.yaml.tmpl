@@ -105,9 +105,9 @@ spec:
           # hostPort: 9091
       resources:
         requests:
-          memory: 1Gi
+          memory: "{{ .Values.milvus.memoryLimit }}"
         limits:
-          memory: 1Gi
+          memory: "{{ .Values.milvus.memoryLimit }}"
       volumeMounts:
         - mountPath: /var/lib/milvus
           name: milvus-data
