@@ -2,7 +2,7 @@ import argparse
 import json
 import sys
 
-
+# Parse CycloneDX SBOM and extract package licenses
 def parse_cyclonedx(data, tool_name):
     sbom = {}
     if "components" in data:
@@ -26,24 +26,34 @@ def parse_cyclonedx(data, tool_name):
     return sbom
 
 
-def merge_sbom_data(trivy_data, parlay_data):
-    merged_data = {}
-    for key, value in trivy_data.items():
-        merged_data[key] = value
-        merged_data[key].setdefault("License by Parlay", "-")
-    for key, value in parlay_data.items():
-        if key in merged_data:
-            merged_data[key].update(value)
-        else:
-            merged_data[key] = value
-            merged_data[key].setdefault("License by Trivy", "-")
-    return merged_data
+# Scan and classify package licenses to allowed, warn, deny, unknown
+def scan_pkg_license(trivy_data, parlay_data):
+    classified_pkg = classify_license(trivy_data, parlay_data)
 
+    # Print classified package licenses
+    for category, pkg_list in classified_pkg.items():
+        print_result(pkg_list, f"\n\n{'*'*40} {category.capitalize()} {'*'*40}\n\n")
+    
+    # Print summary of classification
+    print("\n\nSummary of pkg license classification")
+    print(f"{'-'*40}")
+    print(f"Denied  : {len(classified_pkg['deny'])}")
+    print(f"Warn    : {len(classified_pkg['warn'])}")
+    print(f"Unknown : {len(classified_pkg['unknown'])}")
+    print(f"Allowed : {len(classified_pkg['allowed'])}")
+    print(f"Total   : {len(trivy_data)}")
 
-def classify_license(licenses_data):
+    # Exit with error if any denied licenses found
+    if len(classified_pkg["deny"]) > 0:
+        print("Error: please remove the package which have denied licenses")
+        sys.exit(1)
+
+# Classify package licenses into deny, warn, unknown, allowed
+def classify_license(trivy_data, parlay_data):
     deny_license_list = load_licenses_file("deny.txt")
     warn_license_list = load_licenses_file("warn.txt")
-    approved_pkgs = load_approved_pkgs()
+    # Loading packages with approved licenses
+    approved_pkgs = load_approved_pkgs("approved_pkg.json")
 
     classified_pkg = {
         "deny": {},
@@ -52,63 +62,27 @@ def classify_license(licenses_data):
         "allowed": {}
     }
 
-    for key, value in licenses_data.items():
-        pkg_license = value["License by Trivy"] + \
-            " " + value["License by Parlay"]
+    for pkg_name, value in trivy_data.items():
+        pkg_licenses = value + " " + parlay_data.get(pkg_name, "")
+        pkg_license_dic = {
+            "License by Trivy": value,
+            "License by Parlay": parlay_data.get(pkg_name, ""),
+        }
         
-        if key in approved_pkgs and validate_license(key, approved_pkgs, pkg_license):
-            classified_pkg["allowed"][key] = value
-            continue
-
-        if is_licence_exist(pkg_license, deny_license_list):
-            classified_pkg["deny"][key] = value
-        elif is_licence_exist(pkg_license, warn_license_list):
-            classified_pkg["warn"][key] = value
-        elif is_licence_exist(pkg_license, ["UNKNOWN", "Unlicense"]):
-            classified_pkg["unknown"][key] = value
+        if is_pkg_license_approved(pkg_name, pkg_licenses, approved_pkgs):
+            classified_pkg["allowed"][pkg_name] = pkg_license_dic
+        elif is_licence_exist(deny_license_list, pkg_licenses):
+            classified_pkg["deny"][pkg_name] = pkg_license_dic
+        elif is_licence_exist(warn_license_list, pkg_licenses):
+            classified_pkg["warn"][pkg_name] = pkg_license_dic
+        elif is_licence_exist(["UNKNOWN", "Unlicense"], pkg_licenses):
+            classified_pkg["unknown"][pkg_name] = pkg_license_dic
         else:
-            classified_pkg["allowed"][key] = value
+            classified_pkg["allowed"][pkg_name] = pkg_license_dic
     return classified_pkg
 
 
-def validate_license(pkg_name, approved_pkg, pkg_license):
-    license_in_approved = approved_pkg[pkg_name]
-    if isinstance(license_in_approved, list):
-        for lic in license_in_approved:
-            if lic in pkg_license:
-                return True
-    elif license_in_approved in pkg_license:
-        return True
-    return False
-
-
-def scan_pkg_license(licenses_data):
-    classified_pkg = classify_license(licenses_data)
-
-    for category, pkg_list in classified_pkg.items():
-        if category != "allowed":
-            print_result(pkg_list, f"\n\n{'*'*40} {category.capitalize()} {'*'*40}\n\n")
-    
-    print("\n\nSummary of pkg license classification")
-    print(f"{'-'*40}")
-    print(f"Denied  : {len(classified_pkg['deny'])}")
-    print(f"Warn    : {len(classified_pkg['warn'])}")
-    print(f"Unknown : {len(classified_pkg['unknown'])}")
-    print(f"Allowed : {len(classified_pkg['allowed'])}")
-    print(f"Total   : {len(licenses_data)}")
-
-    if len(classified_pkg["deny"]) > 0:
-        print("Error: please remove the package which have denied licenses")
-        sys.exit(1)
-
-
-def is_licence_exist(pkg_license, license_list):
-    for license in license_list:
-        if license in pkg_license:
-            return True
-    return False
-
-
+# Load license list from the given file
 def load_licenses_file(file_name):
     try:
         with open(f".github/scripts/license-list/{file_name}", 'r') as licenses:
@@ -119,14 +93,22 @@ def load_licenses_file(file_name):
         sys.exit(1)
 
 
-def load_approved_pkgs():
+# Loads approved packages from the JSON file
+def load_approved_pkgs(file_name):
     try:
-        with open(f".github/scripts/license-list/approved_pkg.json", 'r') as approved_pkg_file:
+        with open(f".github/scripts/license-list/{file_name}", 'r') as approved_pkg_file:
             approved_pkg_data = json.load(approved_pkg_file)
             return approved_pkg_data.get("approved_pkg", {})
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
+
+
+def is_licence_exist(license_list, pkg_license):
+    for license in license_list:
+        if license in pkg_license:
+            return True
+    return False
 
 
 def print_result(licence_list, msg):
@@ -142,13 +124,26 @@ def print_result(licence_list, msg):
             "License by Trivy", "-"), value.get("License by Parlay", "-")))
 
 
+def is_pkg_license_approved(pkg_name, pkg_licenses, approved_pkg):
+    if pkg_name not in approved_pkg:
+        return False
+    licenses = approved_pkg[pkg_name]
+    if isinstance(licenses, list):
+        for lic in licenses:
+            if lic in pkg_licenses:
+                return True
+    elif licenses in pkg_licenses:
+        return True
+    return False
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog='SBOM Gen', description='Generate readable SBOM combining Trivy and Parlay data')
     parser.add_argument(
-        'trivy_file', help="File path for Trivy CycloneDX input", default="sbom-trivy.json")
+        'trivy_file', nargs='?', help="File path for Trivy CycloneDX input", default="trivy.json")
     parser.add_argument(
-        'parlay_file', help="File path for Parlay CycloneDX input")
+        'parlay_file',nargs='?', help="File path for Parlay CycloneDX input", default="parlay.json")
     args = parser.parse_args()
 
     with open(args.trivy_file, encoding="utf-8") as trivy_file:
@@ -157,6 +152,4 @@ if __name__ == "__main__":
     with open(args.parlay_file, encoding="utf-8") as parlay_file:
         parlay_data = parse_cyclonedx(json.load(parlay_file), "Parlay")
 
-    merged_data = merge_sbom_data(trivy_data, parlay_data)
-
-    scan_pkg_license(merged_data)
+    scan_pkg_license(trivy_data, parlay_data)
