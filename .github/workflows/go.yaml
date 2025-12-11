@@ -53,4 +53,4 @@ jobs:
     uses: ./.github/workflows/scanner.yml
     with:
       skip-cves-scan: true
-      is-repo-scan: true
+      is-image-scan: false

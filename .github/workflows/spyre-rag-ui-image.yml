@@ -88,3 +88,4 @@ jobs:
     uses: ./.github/workflows/scanner.yml
     with:
       path: 'spyre-rag/ui'
+      is-image-scan: false

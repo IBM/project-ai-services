@@ -12,7 +12,6 @@ on:
     branches:
       - main
 
-
 env:
   ICR_REGISTRY: icr.io
   ICR_NAMESPACE: ai-services-cicd
@@ -41,3 +40,4 @@ jobs:
     uses: ./.github/workflows/scanner.yml
     with:
       path: 'images/etcd'
+      is-image-scan: true

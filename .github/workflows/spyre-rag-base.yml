@@ -41,3 +41,4 @@ jobs:
     uses: ./.github/workflows/scanner.yml
     with:
       path: 'images/rag-base'
+      is-image-scan: false

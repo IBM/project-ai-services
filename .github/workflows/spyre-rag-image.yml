@@ -35,6 +35,7 @@ jobs:
     uses: ./.github/workflows/scanner.yml
     with:
       path: 'spyre-rag/src'
+      is-image-scan: false
     secrets:
       ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
       ICR_APIKEY: ${{ secrets.ICR_APIKEY }}
