@@ -270,6 +270,7 @@
     "libusbx": "LGPL-2.0-or-later",
     "microdnf": "GPL-2.0-or-later",
     "python3-pyudev": "LGPL-2.0-or-later",
-    "sos": "GPL-2.0-or-later"
+    "sos": "GPL-2.0-or-later",
+    "github.com/opencontainers/go-digest": "Apache-2.0"
   }
 }
