@@ -16,7 +16,7 @@ AI Services, part of the IBM Open-Source AI Foundation for Power, deliver pre-bu
 
 - [**🤖 RAG Chatbot**](https://www.ibm.com/docs/en/aiservices?topic=services-rag-chatbot)
   - [Archtecture](https://www.ibm.com/docs/en/aiservices?topic=chatbot-architecture)
-  - [Setting up RAG Chatbot](https://www.ibm.com/docs/en/aiservices?topic=chatbot-architecture)
+  - [Setting up RAG Chatbot](https://www.ibm.com/docs/en/aiservices?topic=chatbot-setting-up-rag)
 
 - **💻 CLI Reference**
   - [Auto-completion](https://www.ibm.com/docs/aiservices?topic=reference-auto-completion)
