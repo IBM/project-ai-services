@@ -13,9 +13,11 @@ ENV TORCHVISION_VERSION=v0.22.1
 ENV TREE_SITTER_VERSION=v0.23.2
 ENV ABSEIL_VERSION=20230802.2
 ENV LLVM_CONFIG=/usr/lib64/llvm16/bin/llvm-config
-ENV PATCH_FILE=https://raw.githubusercontent.com/sumitd2/build-scripts/56793b2ab048005cf519ddf593a38cda406783ae/d/docling/docling_v${PACKAGE_VERSION}.patch
 ENV PATH=/usr/local/cmake/bin:${PATH}:/usr/local/bin
 ENV LD_LIBRARY_PATH=/usr/local/lib64
+
+COPY 0001-Exclude-source-that-has-commercial-license_v0.22.1.patch /tmp/torchvision.patch
+COPY docling_v2.60.1.patch /tmp/docling.patch
 
 #Install required repos
 RUN dnf config-manager --add-repo https://mirror.stream.centos.org/9-stream/CRB/ppc64le/os && \
@@ -23,7 +25,7 @@ RUN dnf config-manager --add-repo https://mirror.stream.centos.org/9-stream/CRB/
     dnf config-manager --add-repo https://mirror.stream.centos.org/9-stream/BaseOS/ppc64le/os && \
     rpm --import https://centos.org/keys/RPM-GPG-KEY-CentOS-Official && \
     dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
-    dnf install -y git wget gcc gcc-c++ make python3.12-devel python3.12-pip openssl-devel openssl-fips-provider-so \
+    dnf install -y git gcc gcc-c++ make python3.12-devel python3.12-pip openssl-devel openssl-fips-provider-so \
         zlib-devel libjpeg-devel ninja-build libicu-devel lcms2-devel glib2-devel freetype-devel gfortran \
         openblas-devel libxml2-devel libxslt-devel ncurses-devel gn libpng-devel libtiff-devel geos-devel \
         tesseract-devel spatialindex-devel rust cargo llvm16-devel ffmpeg-free ffmpeg-free-devel && \
@@ -66,8 +68,7 @@ RUN git clone https://github.com/pytorch/vision.git && \
     cd vision && \
     git checkout $TORCHVISION_VERSION && \
     # Below patch is needed to exclude the models that come under SWAG license (CC-BY-NC-4.0)
-    wget https://raw.githubusercontent.com/ppc64le/build-scripts/refs/heads/master/t/torchvision/0001-Exclude-source-that-has-commercial-license.patch && \
-    git apply ./0001-Exclude-source-that-has-commercial-license.patch && \
+    git apply /tmp/torchvision.patch && \
     pip install --upgrade pip setuptools wheel && \
     pip install --prefer-binary --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ torch==2.7.1 libprotobuf==4.25.8 numpy==2.3.1 && \
     cp -rp /usr/local/lib/python3.12/site-packages/libprotobuf/lib64/*.so* /usr/local/lib64/ && \
@@ -101,11 +102,10 @@ RUN git clone https://github.com/abseil/abseil-cpp && \
 
 #Get source, apply patch and build wheel
 WORKDIR /tmp
-RUN wget ${PATCH_FILE} && \
-    git clone "${PACKAGE_URL}" && \
+RUN git clone "${PACKAGE_URL}" && \
     cd "${PACKAGE_NAME}" && \
     git checkout "v${PACKAGE_VERSION}" && \
-    git apply ../${PACKAGE_NAME}_v${PACKAGE_VERSION}.patch && \
+    git apply /tmp/docling.patch && \
     pip install build && \
     python -m build --wheel && \
     cp dist/*.whl /tmp && \
