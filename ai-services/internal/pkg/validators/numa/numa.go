@@ -56,7 +56,7 @@ func (r *NumaRule) Level() constants.ValidationLevel {
 
 func (r *NumaRule) Hint() string {
 	return fmt.Sprintf(`This tools requires numa node alignment set to 1 on LPAR. For optimal performance, ensure that all CPUs are aligned to a single NUMA node.
-For detailed instructions and best practices on NUMA configuration, please refer to %shttps://www.ibm.com/docs/aiservices?topic=services-chip-alignment-in-lpar%s`,
+For detailed instructions and best practices on NUMA configuration, please refer to %shttps://www.ibm.com/docs/aiservices?topic=installation-chip-alignment-in-lpar%s`,
 		"\033[34m",
 		"\033[0m")
 }
