@@ -17,6 +17,29 @@ env:
   ICR_NAMESPACE: ai-services-cicd
 
 jobs:
+  format:
+    name: format
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: spyre-rag/ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: spyre-rag/ui
+        run: npm ci
+
+      - name: Run Prettier check
+        working-directory: spyre-rag/ui
+        run: npm run format:check
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -42,7 +65,7 @@ jobs:
 
   build-publish-image:
     name: Build and Publish Image
-    needs: lint
+    needs: [lint, format]
     runs-on: ubuntu-24.04-ppc64le
 
     steps:
