@@ -31,7 +31,7 @@ func NewPodmanClient() (*PodmanClient, error) {
 	// but it can be overridden by the CONTAINER_HOST and CONTAINER_SSHKEY environment variable to support remote connections.
 	// Please use `podman system connection list` to see available connections.
 	// Reference:
-	// MacOS instructions runing in a remote VM:
+	// MacOS instructions running in a remote VM:
 	// export CONTAINER_HOST=ssh://root@127.0.0.1:62904/run/podman/podman.sock
 	// export CONTAINER_SSHKEY=/Users/manjunath/.local/share/containers/podman/machine/machine
 	uri := "unix:///run/podman/podman.sock"

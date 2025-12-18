@@ -126,7 +126,7 @@ func isHidden(n *yaml.Node) bool {
 	return strings.Contains(n.HeadComment, "@hidden")
 }
 
-// Retrives the description from a yaml.Node's head comment marked with @description
+// Retrieves the description from a yaml.Node's head comment marked with @description
 func getDescription(n *yaml.Node) string {
 	if n == nil {
 		return ""
@@ -245,7 +245,7 @@ func ValidateParams(params map[string]string, supportedParams map[string]any) er
 }
 
 /*
-checkParamsInValues traverses the netsed map structure, and return true only if the full path exists.
+checkParamsInValues traverses the nested map structure, and return true only if the full path exists.
 Eg: for param = "ui.port", it checks if values["ui"]["port"] exists.
 */
 func checkParamsInValues(param string, values map[string]any) bool {
@@ -257,12 +257,12 @@ func checkParamsInValues(param string, values map[string]any) bool {
 		// Check if the current key exists in the current map level
 		val, ok := current[key]
 		if !ok {
-			// Key doesnt exist at this level, so parameter path is invalid
-			// Example: if "ui" doesnt exist in values, return false
+			// Key doesn't exists at this level, so parameter path is invalid
+			// Example: if "ui" doesn't exist in values, return false
 			return false
 		}
-		// If we have reached the last part of the path, the parameter exits
-		// Example: for "ui.port", when i=1 (on "port"), we found it; hence returing true
+		// If we have reached the last part of the path, the parameter exists
+		// Example: for "ui.port", when i=1 (on "port"), we found it; hence returning true
 		if i == len(parts)-1 {
 			return true
 		}
@@ -271,8 +271,8 @@ func checkParamsInValues(param string, values map[string]any) bool {
 		// Example: for "ui.port", when i=0 (on "ui"), we need values["ui"] to be a map
 		cast, ok := val.(map[string]any)
 		if !ok {
-			// Value exists but isnt a map, so we cant traverse further
-			// Example: if user suuplies "ui.port.number" but port is a string, so return false
+			// Value exists but isn't a map, so we cant traverse further
+			// Example: if user supplies "ui.port.number" but port is a string, so return false
 			return false
 		}
 
