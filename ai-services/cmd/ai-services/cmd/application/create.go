@@ -735,7 +735,7 @@ func returnEnvParamsForPod(podSpec *models.PodSpec, podAnnotations map[string]st
 	}
 
 	if spyreCards == 0 {
-		// The pod doesnt require any spyre cards. // populate the given container with empty map
+		// The pod doesn't require any spyre cards. // populate the given container with empty map
 		return env, nil
 	}
 
@@ -766,7 +766,7 @@ func checkForPodStartAnnotation(podAnnotations map[string]string) string {
 //
 //	hostPortMapping: Key -> containerPort, Value -> hostPort
 //
-// port annotation takes comma seperated values of 'hostPort:containerPort' combination
+// port annotation takes comma separated values of 'hostPort:containerPort' combination
 // port annotation syntax: 'ai-services.io/ports': "<hostPart1>:<containerPort1>,<hostPart2>:<containerPort2>"
 //
 // Below are the hostPortMapping values based on different combinations
