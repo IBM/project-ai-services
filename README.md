@@ -15,7 +15,7 @@ AI Services, part of the IBM Open-Source AI Foundation for Power, deliver pre-bu
   - [Configuring in Air-gapped Environment](https://www.ibm.com/docs/aiservices?topic=installation-configuring-air-gapped-environment)
 
 - [**🤖 RAG Chatbot**](https://www.ibm.com/docs/en/aiservices?topic=services-rag-chatbot)
-  - [Archtecture](https://www.ibm.com/docs/en/aiservices?topic=chatbot-architecture)
+  - [Architecture](https://www.ibm.com/docs/en/aiservices?topic=chatbot-architecture)
   - [Setting up RAG Chatbot](https://www.ibm.com/docs/en/aiservices?topic=chatbot-setting-up-rag)
 
 - **💻 CLI Reference**
@@ -28,7 +28,7 @@ AI Services, part of the IBM Open-Source AI Foundation for Power, deliver pre-bu
 
 - [**⚠️ Limitations**](https://www.ibm.com/docs/aiservices?topic=services-limitations)
 
-- [**👩‍💻Developer Guide**](https://www.ibm.com/docs/en/aiservices?topic=services-developer-guide)
+- [**👩‍💻 Developer Guide**](https://www.ibm.com/docs/en/aiservices?topic=services-developer-guide)
 
 - [**🚀 Contributing**](./CONTRIBUTING.md)
 
