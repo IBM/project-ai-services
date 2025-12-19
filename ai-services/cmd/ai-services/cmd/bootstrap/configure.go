@@ -37,9 +37,11 @@ func configureCmd() *cobra.Command {
 			}
 
 			logger.Infof("Bootstrap configuration completed successfully.")
+
 			return nil
 		},
 	}
+
 	return cmd
 }
 
@@ -59,6 +61,7 @@ func RunConfigureCmd() error {
 		// setup podman socket and enable service
 		if err := installPodman(); err != nil {
 			s.Fail("failed to install podman")
+
 			return err
 		}
 		s.Stop("podman installed successfully")
@@ -73,6 +76,7 @@ func RunConfigureCmd() error {
 		s.UpdateMessage("Configuring podman")
 		if err := setupPodman(); err != nil {
 			s.Fail("failed to configure podman")
+
 			return err
 		}
 		s.Stop("podman configured successfully")
@@ -85,6 +89,7 @@ func RunConfigureCmd() error {
 	// 2. Spyre cards – run servicereport tool to validate and repair spyre configurations
 	if err := runServiceReport(); err != nil {
 		s.Fail("failed to configure spyre card")
+
 		return err
 	}
 	s.Stop("Spyre cards configuration validated successfully.")
@@ -188,11 +193,11 @@ func installPodman() error {
 	if err != nil {
 		return fmt.Errorf("failed to install podman: %v, output: %s", err, string(out))
 	}
+
 	return nil
 }
 
 func setupPodman() error {
-
 	// start podman socket
 	if err := systemctl("start", "podman.socket"); err != nil {
 		return fmt.Errorf("failed to start podman socket: %w", err)
@@ -210,6 +215,7 @@ func setupPodman() error {
 	}
 
 	logger.Infof("Podman configured successfully.")
+
 	return nil
 }
 
@@ -222,5 +228,6 @@ func systemctl(action, unit string) error {
 	if err != nil {
 		return fmt.Errorf("failed to %s %s: %v, output: %s", action, unit, err, string(out))
 	}
+
 	return nil
 }

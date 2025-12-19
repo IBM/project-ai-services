@@ -115,6 +115,7 @@ func ListSpyreCards() ([]string, error) {
 	}
 
 	logger.Infoln("List of discovered Spyre cards: "+strings.Join(spyre_device_ids_list, ", "), 1)
+
 	return spyre_device_ids_list, nil
 }
 
@@ -123,6 +124,7 @@ func FindFreeSpyreCards() ([]string, error) {
 	dev_files, err := os.ReadDir("/dev/vfio")
 	if err != nil {
 		log.Fatalf("failed to check device files under /dev/vfio. Error: %v", err)
+
 		return free_spyre_dev_id_list, err
 	}
 
@@ -133,6 +135,7 @@ func FindFreeSpyreCards() ([]string, error) {
 		f, err := os.Open("/dev/vfio/" + dev_file.Name())
 		if err != nil {
 			logger.Infoln("Device or resource busy, skipping..", 1)
+
 			continue
 		}
 		if err := f.Close(); err != nil {
@@ -149,6 +152,7 @@ func FindFreeSpyreCards() ([]string, error) {
 		pci := string(out)
 		free_spyre_dev_id_list = append(free_spyre_dev_id_list, pci)
 	}
+
 	return free_spyre_dev_id_list, nil
 }
 
@@ -196,6 +200,7 @@ func RunServiceReportContainer(runCmd string, mode string) error {
 	if err := svc_tool_cmd.Run(); err != nil {
 		return fmt.Errorf("failed to run servicereport tool to validate Spyre cards configuration: %v", err)
 	}
+
 	return nil
 }
 
@@ -210,12 +215,13 @@ func ParseSkipChecks(skipChecks []string) map[string]bool {
 			}
 		}
 	}
+
 	return skipMap
 }
 
 // CheckExistingPodsForApplication checks if there are pods already existing for the given application name
 func CheckExistingPodsForApplication(runtime runtime.Runtime, appName string) ([]string, error) {
-	// var podsExists bool
+	//nolint:prealloc // as capacity is unknown and depends on runtime.ListPods response
 	var podsToSkip []string
 	resp, err := runtime.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
@@ -231,6 +237,7 @@ func CheckExistingPodsForApplication(runtime runtime.Runtime, appName string) ([
 
 	if len(pods) == 0 {
 		logger.Infof("No existing pods found for application: %s\n", appName)
+
 		return nil, nil
 	}
 
@@ -239,5 +246,6 @@ func CheckExistingPodsForApplication(runtime runtime.Runtime, appName string) ([
 		logger.Infof("Existing pod found: %s with status: %s\n", pod.Name, pod.Status)
 		podsToSkip = append(podsToSkip, pod.Name)
 	}
+
 	return podsToSkip, nil
 }

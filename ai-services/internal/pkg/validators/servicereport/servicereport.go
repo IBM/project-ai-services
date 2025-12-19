@@ -21,6 +21,7 @@ func (r *ServiceReportRule) Verify() error {
 	if err := helpers.RunServiceReportContainer("servicereport -v -p spyre", "validate"); err != nil {
 		return err
 	}
+
 	return nil
 }
 

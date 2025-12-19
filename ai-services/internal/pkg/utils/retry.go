@@ -19,7 +19,6 @@ func Retry(
 	backoff BackoffFunc,
 	fn func() error,
 ) error {
-
 	delay := initialDelay
 	var err error
 

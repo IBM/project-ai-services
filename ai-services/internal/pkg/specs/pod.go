@@ -7,9 +7,10 @@ func FetchPodAnnotations(podspec models.PodSpec) map[string]string {
 }
 
 func FetchContainerNames(podspec models.PodSpec) []string {
-	var containerNames []string
+	containerNames := make([]string, 0, len(podspec.Spec.Containers))
 	for _, v1Container := range podspec.Spec.Containers {
 		containerNames = append(containerNames, v1Container.Name)
 	}
+
 	return containerNames
 }

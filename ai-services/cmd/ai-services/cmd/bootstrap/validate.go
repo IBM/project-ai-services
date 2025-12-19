@@ -27,7 +27,6 @@ const troubleshootingGuide = "https://www.ibm.com/docs/aiservices?topic=services
 
 // validateCmd represents the validate subcommand of bootstrap
 func validateCmd() *cobra.Command {
-
 	var skipChecks []string
 
 	cmd := &cobra.Command{
@@ -59,7 +58,7 @@ Available checks to skip:
   power           - Power architecture check
   rhaiis          - RHAIIS license check
   numa            - Numa node alignment`,
-  Example: `  # Run all validation checks
+		Example: `  # Run all validation checks
   ai-services bootstrap validate
 
   # Skip RHN registration check
@@ -85,6 +84,7 @@ Available checks to skip:
 			err := RunValidateCmd(skip)
 			if err != nil {
 				logger.Infof("Please refer to troubleshooting guide for more information: %s", troubleshootingGuide)
+
 				return fmt.Errorf("bootstrap validation failed: %w", err)
 			}
 
@@ -106,6 +106,7 @@ func RunValidateCmd(skip map[string]bool) error {
 		ruleName := rule.Name()
 		if skip[ruleName] {
 			logger.Warningf("%s check skipped; Proceeding without validation may result in deployment failure.", ruleName)
+
 			continue
 		}
 

@@ -68,6 +68,7 @@ func stopApplication(client *podman.PodmanClient, appName string, podNames []str
 
 	if len(pods) == 0 {
 		logger.Infof("No pods found with given application: %s\n", appName)
+
 		return nil
 	}
 
@@ -79,7 +80,6 @@ func stopApplication(client *podman.PodmanClient, appName string, podNames []str
 
 	var podsToStop []*types.ListPodsReport
 	if len(podNames) > 0 {
-
 		// 1. Filter pods
 		podMap := make(map[string]*types.ListPodsReport)
 		for _, pod := range pods {
@@ -103,6 +103,7 @@ func stopApplication(client *podman.PodmanClient, appName string, podNames []str
 
 		if len(podsToStop) == 0 {
 			logger.Infof("No valid pods found to stop for application: %s\n", appName)
+
 			return nil
 		}
 	} else {
@@ -123,6 +124,7 @@ func stopApplication(client *podman.PodmanClient, appName string, podNames []str
 
 	if !confirmStop {
 		logger.Infof("Skipping stopping of pods\n")
+
 		return nil
 	}
 
@@ -135,6 +137,7 @@ func stopApplication(client *podman.PodmanClient, appName string, podNames []str
 		if err := client.StopPod(pod.Id); err != nil {
 			errMsg := fmt.Sprintf("%s: %v", pod.Name, err)
 			errors = append(errors, errMsg)
+
 			continue
 		}
 		logger.Infof("Successfully stopped the pod: %s\n", pod.Name)

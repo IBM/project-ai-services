@@ -20,6 +20,7 @@ func New(message string) *Spinner {
 		pin.WithFailSymbol('✖'),
 		pin.WithFailSymbolColor(pin.ColorRed),
 	)
+
 	return &Spinner{
 		p: p,
 	}

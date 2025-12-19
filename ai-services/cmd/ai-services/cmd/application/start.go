@@ -73,6 +73,7 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 
 	if len(pods) == 0 {
 		logger.Infof("No pods found with given application: %s\n", appName)
+
 		return nil
 	}
 
@@ -85,7 +86,6 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 
 	var podsToStart []*types.ListPodsReport
 	if len(podNames) > 0 {
-
 		// 1. Filter pods
 		podMap := make(map[string]*types.ListPodsReport)
 		for _, pod := range pods {
@@ -109,6 +109,7 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 
 		if len(podsToStart) == 0 {
 			logger.Infof("No valid pods found to start for application: %s\n", appName)
+
 			return nil
 		}
 	} else {
@@ -132,6 +133,7 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 
 	if len(podsToStart) == 0 {
 		logger.Infoln("No pods available to start.")
+
 		return nil
 	}
 
@@ -153,6 +155,7 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 
 	if !confirmStart {
 		logger.Infoln("Skipping starting of pods")
+
 		return nil
 	}
 
@@ -166,16 +169,19 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 		if err != nil {
 			errMsg := fmt.Sprintf("%s: %v", pod.Name, err)
 			errors = append(errors, errMsg)
+
 			continue
 		}
 
 		if podData.State == "Running" {
 			logger.Infof("Pod %s is already running. Skipping...\n", pod.Name)
+
 			continue
 		}
 		if err := client.StartPod(pod.Id); err != nil {
 			errMsg := fmt.Sprintf("%s: %v", pod.Name, err)
 			errors = append(errors, errMsg)
+
 			continue
 		}
 		logger.Infof("Successfully started the pod: %s\n", pod.Name)
@@ -191,8 +197,10 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 			// Check if error is due to interrupt signal (Ctrl+C)
 			if strings.Contains(err.Error(), "signal: interrupt") || strings.Contains(err.Error(), "context canceled") {
 				logger.Infoln("Log following stopped.")
+
 				return nil
 			}
+
 			return fmt.Errorf("failed to follow logs for pod %s: %w", podsToStart[0].Name, err)
 		}
 	}

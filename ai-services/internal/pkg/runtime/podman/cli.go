@@ -66,9 +66,9 @@ func RunPodmanKubePlay(body io.Reader, opts map[string]string) (*KubePlayOutput,
 
 // Helper function to extract podIds from RunKubePlay stdout
 func extractPodIDsFromOutput(output string) []string {
-	var ids []string
-	lines := strings.SplitSeq(output, "\n")
-	for line := range lines {
+	lines := strings.Split(output, "\n")
+	ids := make([]string, 0, len(lines))
+	for _, line := range lines {
 		if strings.HasPrefix(line, "Pod") {
 			// Skip line with Pod prefix
 			continue
@@ -81,6 +81,7 @@ func extractPodIDsFromOutput(output string) []string {
 		id := strings.TrimSpace(line)
 		ids = append(ids, id)
 	}
+
 	return ids
 }
 

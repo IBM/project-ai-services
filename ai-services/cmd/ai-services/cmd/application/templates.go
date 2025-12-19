@@ -17,6 +17,7 @@ var templatesCmd = &cobra.Command{
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
+
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -32,6 +33,7 @@ var templatesCmd = &cobra.Command{
 
 		if len(appTemplateNames) == 0 {
 			logger.Infoln("No application templates found.")
+
 			return nil
 		}
 
@@ -57,6 +59,7 @@ var templatesCmd = &cobra.Command{
 				logger.Infoln("\t" + k + ":  " + v)
 			}
 		}
+
 		return nil
 	},
 }

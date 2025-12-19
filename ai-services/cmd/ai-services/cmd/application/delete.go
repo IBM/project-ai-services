@@ -59,7 +59,6 @@ func init() {
 }
 
 func deleteApplication(client *podman.PodmanClient, appName string) error {
-
 	appDir := filepath.Join(constants.ApplicationsPath, filepath.Base(appName))
 	appExists := false
 
@@ -102,6 +101,7 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 		confirmActionPrompt = "Are you sure you want to delete the application data? "
 	} else {
 		logger.Infof("Application %s does not exist", appName)
+
 		return nil
 	}
 
@@ -112,6 +112,7 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 
 	if !confirmDelete {
 		logger.Infoln("Deletion cancelled")
+
 		return nil
 	}
 
@@ -123,6 +124,7 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 			logger.Infof("Deleting pod: %s\n", pod.Name)
 			if err := client.DeletePod(pod.Id, utils.BoolPtr(true)); err != nil {
 				errors = append(errors, fmt.Sprintf("pod %s: %v", pod.Name, err))
+
 				continue
 			}
 			logger.Infof("Successfully removed pod: %s\n", pod.Name)

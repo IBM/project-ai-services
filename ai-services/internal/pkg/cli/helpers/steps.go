@@ -21,6 +21,7 @@ func PrintNextSteps(runtime runtime.Runtime, app, appTemplate string) error {
 	if err != nil {
 		// just printing and returning if the steps folder doesnt exist do not do anything
 		logger.Infof("Unable to load steps: %v\n", err)
+
 		return nil
 	}
 
@@ -128,6 +129,7 @@ func populatePodInfo(runtime runtime.Runtime, params map[string]string, varsData
 		if !exists {
 			// just print the msg
 			logger.Infof("Pod with name: %s doesn't exist\n", pod.Name)
+
 			continue
 		}
 
@@ -141,6 +143,7 @@ func populatePodInfo(runtime runtime.Runtime, params map[string]string, varsData
 		if err != nil {
 			// just print the msg
 			logger.Errorf("failed to fetch podInfo for pod: %s with err: %v\n", pod.Name, err)
+
 			continue
 		}
 
@@ -160,6 +163,7 @@ func populateContainerInfo(runtime runtime.Runtime, params map[string]string, va
 		if !exists {
 			// just print the msg
 			logger.Infof("Container with name: %s doesn't exist\n", container.Name)
+
 			continue
 		}
 
@@ -173,6 +177,7 @@ func populateContainerInfo(runtime runtime.Runtime, params map[string]string, va
 		if err != nil {
 			// just print the msg
 			logger.Errorf("failed to fetch podInfo for pod: %s with err: %v\n", container.Name, err)
+
 			continue
 		}
 
@@ -204,6 +209,7 @@ func fetchDataSpecificInfo(data any, format string, defaultValue *string) (strin
 		if defaultValue != nil {
 			return strings.TrimSpace(*defaultValue), nil
 		}
+
 		return "", fmt.Errorf("executing template for format %q: %w", format, err)
 	}
 

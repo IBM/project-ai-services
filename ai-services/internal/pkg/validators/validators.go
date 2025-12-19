@@ -61,5 +61,6 @@ func (r *ValidationRegistry) Register(rule Rule) {
 func (r *ValidationRegistry) Rules() []Rule {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
 	return r.rules
 }

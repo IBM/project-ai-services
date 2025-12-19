@@ -31,7 +31,7 @@ func NewPodmanClient() (*PodmanClient, error) {
 	// but it can be overridden by the CONTAINER_HOST and CONTAINER_SSHKEY environment variable to support remote connections.
 	// Please use `podman system connection list` to see available connections.
 	// Reference:
-	// MacOS instructions runing in a remote VM:
+	// MacOS instructions running in a remote VM:
 	// export CONTAINER_HOST=ssh://root@127.0.0.1:62904/run/podman/podman.sock
 	// export CONTAINER_SSHKEY=/Users/manjunath/.local/share/containers/podman/machine/machine
 	uri := "unix:///run/podman/podman.sock"
@@ -42,6 +42,7 @@ func NewPodmanClient() (*PodmanClient, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return &PodmanClient{Context: ctx}, nil
 }
 
@@ -57,6 +58,7 @@ func (pc *PodmanClient) PullImage(image string, options *images.PullOptions) err
 		return fmt.Errorf("failed to pull image %s: %w", image, err)
 	}
 	logger.Infof("Successfully pulled image %s\n", image)
+
 	return nil
 }
 
@@ -163,6 +165,7 @@ func (pc *PodmanClient) InspectPod(nameOrID string) (*types.PodInspectReport, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect the pod: %w", err)
 	}
+
 	return podInspectReport, nil
 }
 
