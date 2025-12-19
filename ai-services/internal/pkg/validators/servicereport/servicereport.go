@@ -3,7 +3,7 @@ package servicereport
 import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"k8s.io/klog/v2"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 type ServiceReportRule struct{}
@@ -17,7 +17,7 @@ func (r *ServiceReportRule) Name() string {
 }
 
 func (r *ServiceReportRule) Verify() error {
-	klog.V(2).Infoln("Validating if ServiceReport tool has run on LPAR")
+	logger.Infoln("Validating if ServiceReport tool has run on LPAR", constants.VerbosityLevelDebug)
 	if err := helpers.RunServiceReportContainer("servicereport -v -p spyre", "validate"); err != nil {
 		return err
 	}

@@ -21,3 +21,7 @@ const (
 	Starting HealthStatus = "starting"
 	NotReady HealthStatus = "unhealthy"
 )
+
+const (
+	VerbosityLevelDebug = 2
+)

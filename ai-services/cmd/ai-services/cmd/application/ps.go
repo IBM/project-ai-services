@@ -160,7 +160,7 @@ func getContainerNames(runtimeClient *podman.PodmanClient, pod *types.ListPodsRe
 		cInfo, err := runtimeClient.InspectContainer(container.Id)
 		if err != nil {
 			// skip container if inspect failed
-			logger.Infof("failed to do container inspect for pod: '%s', containerID: '%s' with error: %v", pod.Name, container.Id, err, 2)
+			logger.Infof("failed to do container inspect for pod: '%s', containerID: '%s' with error: %v", pod.Name, container.Id, err, constants.VerbosityLevelDebug)
 
 			continue
 		}
@@ -187,7 +187,7 @@ func getPodStatus(runtimeClient *podman.PodmanClient, pInfo *types.PodInspectRep
 			cInfo, err := runtimeClient.InspectContainer(container.ID)
 			if err != nil {
 				// skip container if inspect failed
-				logger.Infof("failed to do container inspect for pod: '%s', containerID: '%s' with error: %v", pInfo.Name, container.ID, err, 2)
+				logger.Infof("failed to do container inspect for pod: '%s', containerID: '%s' with error: %v", pInfo.Name, container.ID, err, constants.VerbosityLevelDebug)
 
 				continue
 			}

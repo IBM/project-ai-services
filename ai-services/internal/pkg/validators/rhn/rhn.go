@@ -20,7 +20,7 @@ func (r *RHNRule) Name() string {
 }
 
 func (r *RHNRule) Verify() error {
-	logger.Infoln("Validating RHN registration...", 2)
+	logger.Infoln("Validating RHN registration...", constants.VerbosityLevelDebug)
 	cmd := exec.Command("dnf", "repolist")
 	output, err := cmd.CombinedOutput()
 
