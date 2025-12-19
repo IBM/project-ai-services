@@ -24,13 +24,7 @@ def rerank_helper(co2_client: ClientV2, query: str, document: List[dict], model:
         return document, 0.0
 
 
-def rerank_documents(
-    query: str,
-    documents: List[dict],
-    model: str = "/wca4z-pvc-ckpt/HF_cache/models--BAAI--bge-reranker-large/snapshots/55611d7bca2a7133960a6d3b71e083071bbfc312",
-    endpoint: str = "https://akm-rerank-bge-reranker-large-vllm-code.apps.dmf.dipc.res.ibm.com",
-    max_workers: int = 8
-) -> List[Tuple[dict, float]]:
+def rerank_documents(query: str, documents: List[dict], model: str, endpoint: str, max_workers: int = 8) -> List[Tuple[dict, float]]:
     """
     Rerank LangChain Documents for a given query using vLLM-compatible Cohere API.
 
@@ -55,19 +49,3 @@ def rerank_documents(
                 reranked.append((doc, 0.0))
 
     return sorted(reranked, key=lambda x: x[1], reverse=True)
-
-
-if __name__ == "__main__":
-    docs = [
-        {"page_content": "The capital of France is Paris.", "metadata": {"source": "wiki"}},
-        {"page_content": "Reranking helps in better search.", "metadata": {"source": "blog"}},
-        {"page_content": "Milvus is a vector database.", "metadata": {"source": "tech"}}
-    ]
-
-    query = "What is the capital of France?"
-
-    ranked_docs = rerank_documents(query, docs)
-
-    for i, (doc, score) in enumerate(ranked_docs, 1):
-        logger.info(f"{i}. [Score: {score:.4f}] {doc.page_content} (Source: {doc.metadata.get('source')})")
-
