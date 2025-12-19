@@ -45,7 +45,6 @@ Available subcommands:
 			return root.NewRootRule().Verify()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-
 			logger.Infof("Configuring the LPAR")
 			if configureErr := RunConfigureCmd(); configureErr != nil {
 				return fmt.Errorf("failed to bootstrap the LPAR: %w", configureErr)

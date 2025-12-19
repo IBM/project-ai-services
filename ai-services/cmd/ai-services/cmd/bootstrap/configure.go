@@ -198,7 +198,6 @@ func installPodman() error {
 }
 
 func setupPodman() error {
-
 	// start podman socket
 	if err := systemctl("start", "podman.socket"); err != nil {
 		return fmt.Errorf("failed to start podman socket: %w", err)

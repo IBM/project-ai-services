@@ -86,7 +86,6 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 
 	var podsToStart []*types.ListPodsReport
 	if len(podNames) > 0 {
-
 		// 1. Filter pods
 		podMap := make(map[string]*types.ListPodsReport)
 		for _, pod := range pods {

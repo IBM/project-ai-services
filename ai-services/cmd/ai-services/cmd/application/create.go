@@ -378,7 +378,6 @@ func getSMTLevel(output string) (int, error) {
 }
 
 func setSMTLevel() error {
-
 	/*
 		1. Fetch current SMT level
 		2. Fetch the target SMT level
@@ -736,7 +735,6 @@ func fetchPodAnnotations(podSpec *models.PodSpec) map[string]string {
 }
 
 func returnEnvParamsForPod(podSpec *models.PodSpec, podAnnotations map[string]string, pciAddresses *[]string) (map[string]map[string]string, error) {
-
 	env := map[string]map[string]string{}
 	podContainerNames := specs.FetchContainerNames(*podSpec)
 

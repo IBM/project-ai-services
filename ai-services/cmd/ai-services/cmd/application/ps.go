@@ -112,7 +112,7 @@ func runPsCmd(runtimeClient *podman.PodmanClient, appName string) error {
 		}
 
 		if isOutputWide() {
-			podPorts, err := getPodPorts(pInfo, pod.Id)
+			podPorts, err := getPodPorts(pInfo)
 			if err != nil {
 				// if failed to fetch ports for pod, then set podPorts to none
 				podPorts = []string{"none"}
@@ -143,7 +143,7 @@ func fetchPodNameFromLabels(labels map[string]string) string {
 	return labels[constants.ApplicationAnnotationKey]
 }
 
-func getPodPorts(pInfo *types.PodInspectReport, podID string) ([]string, error) {
+func getPodPorts(pInfo *types.PodInspectReport) ([]string, error) {
 	podPorts := []string{}
 
 	if pInfo.InfraConfig != nil && pInfo.InfraConfig.PortBindings != nil {

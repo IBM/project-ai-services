@@ -80,7 +80,6 @@ func stopApplication(client *podman.PodmanClient, appName string, podNames []str
 
 	var podsToStop []*types.ListPodsReport
 	if len(podNames) > 0 {
-
 		// 1. Filter pods
 		podMap := make(map[string]*types.ListPodsReport)
 		for _, pod := range pods {

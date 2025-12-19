@@ -61,7 +61,6 @@ func (r *PlatformRule) Verify() error {
 	}
 
 	return nil
-
 }
 
 func (r *PlatformRule) Message() string {

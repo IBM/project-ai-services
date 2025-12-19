@@ -27,7 +27,6 @@ const troubleshootingGuide = "https://www.ibm.com/docs/aiservices?topic=services
 
 // validateCmd represents the validate subcommand of bootstrap
 func validateCmd() *cobra.Command {
-
 	var skipChecks []string
 
 	cmd := &cobra.Command{

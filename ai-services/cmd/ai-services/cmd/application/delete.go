@@ -59,7 +59,6 @@ func init() {
 }
 
 func deleteApplication(client *podman.PodmanClient, appName string) error {
-
 	appDir := filepath.Join(constants.ApplicationsPath, filepath.Base(appName))
 	appExists := false
 
