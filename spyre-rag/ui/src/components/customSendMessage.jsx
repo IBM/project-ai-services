@@ -95,7 +95,7 @@ async function customSendMessage(request, _options, instance) {
   };
 
   try {
-    instance.updateIsLoadingCounter('increase');
+    instance.updateIsMessageLoadingCounter('increase');
 
     const stream = await client.chat.completions.create(payload);
 
@@ -106,7 +106,7 @@ async function customSendMessage(request, _options, instance) {
       },
     });
 
-    instance.updateIsLoadingCounter('decrease');
+    instance.updateIsMessageLoadingCounter('decrease');
 
     let fullText = ''; // to accumulate final message
 
@@ -198,7 +198,7 @@ async function customSendMessage(request, _options, instance) {
       },
     });
   } catch (err) {
-    instance.updateIsLoadingCounter('decrease');
+    instance.updateIsMessageLoadingCounter('decrease');
 
     let errorMessage = 'Error occurred during active stream.';
 

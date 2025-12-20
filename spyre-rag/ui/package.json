@@ -4,7 +4,7 @@
     "private": true,
     "type": "module",
     "dependencies": {
-        "@carbon/ai-chat": "^0.5.1",
+        "@carbon/ai-chat": "^1.4.3",
         "@carbon/react": "^1.31.3",
         "@testing-library/jest-dom": "^5.16.5",
         "@testing-library/react": "^13.4.0",
