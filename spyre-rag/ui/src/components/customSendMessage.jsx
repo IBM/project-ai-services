@@ -185,6 +185,16 @@ async function customSendMessage(request, _options, instance) {
       });
     }
 
+    responseBlocks.push({
+      response_type: 'user_defined',
+      user_defined: {
+        user_defined_type: 'feedback_hub_widget',
+        userInput: userInput,
+        aiResponse: fullText,
+        projectId: '64e75260-c918-11f0-b7e9-0a58ac1b15c7',
+      },
+    });
+
     // Final response (wraps the message in final format)
     await instance.messaging.addMessageChunk({
       final_response: {

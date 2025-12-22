@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel='stylesheet' href='https://ai-builder-studio.feab05c7.public.multi-containers.ibm.com/static/feedback-widget/css/main.css' />
+</head>
+<body>
+    <div id='widget-container'></div>
+
+    <script src='https://ai-builder-studio.feab05c7.public.multi-containers.ibm.com/static/feedback-widget/js/main.js'></script>
+
+    <script>
+        window.onload = () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            const searchDetails = {
+                project_id: urlParams.get('project_id'),
+                question: urlParams.get('question'),
+                answer: urlParams.get('answer'),
+                search_details: JSON.stringify({ metadata: [] })
+            };
+
+            const options = {
+                headers: {
+                    auth_token: urlParams.get('auth_token')
+                }
+            };
+
+            if (window.renderWidget) {
+                window.renderWidget('widget-container', searchDetails, options);
+            }
+        };
+    </script>
+</body>
+</html>
