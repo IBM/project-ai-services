@@ -17,6 +17,10 @@ import (
 	k8syaml "sigs.k8s.io/yaml"
 )
 
+const (
+	minPathPartsForAppName = 4
+)
+
 type embedTemplateProvider struct {
 	fs   *embed.FS
 	root string
@@ -37,7 +41,7 @@ func (e *embedTemplateProvider) ListApplications() ([]string, error) {
 		// Templates Pattern :- "assets/applications/<AppName>/templates/*.yaml.tmpl"
 		parts := strings.Split(path, "/")
 
-		if len(parts) >= 4 {
+		if len(parts) >= minPathPartsForAppName {
 			appName := parts[1]
 			if slices.Contains(apps, appName) {
 				return nil

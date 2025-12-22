@@ -9,13 +9,18 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/root"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/spyre"
 	"github.com/spf13/cobra"
-	"k8s.io/klog/v2"
+)
+
+const (
+	sleepDuration  = 2 * time.Second
+	contextTimeout = 30 * time.Second
 )
 
 // validateCmd represents the validate subcommand of bootstrap
@@ -120,7 +125,7 @@ func runServiceReport() error {
 	if err != nil {
 		return fmt.Errorf("❌ failed to load vfio kernel modules for spyre %w", err)
 	}
-	logger.Infoln("VFIO kernel modules loaded on the host", 2)
+	logger.Infoln("VFIO kernel modules loaded on the host", constants.VerbosityLevelDebug)
 
 	if err := helpers.RunServiceReportContainer("servicereport -r -p spyre", "configure"); err != nil {
 		return err
@@ -160,7 +165,7 @@ func runServiceReport() error {
 		if err != nil {
 			return fmt.Errorf("❌ failed to reload vfio kernel modules for spyre %w", err)
 		}
-		logger.Infoln("VFIO kernel modules reloaded on the host", 2)
+		logger.Infoln("VFIO kernel modules reloaded on the host", constants.VerbosityLevelDebug)
 	}
 
 	return nil
@@ -207,8 +212,8 @@ func setupPodman() error {
 		return fmt.Errorf("failed to enable podman socket: %w", err)
 	}
 
-	klog.V(2).Info("Waiting for podman socket to be ready...")
-	time.Sleep(2 * time.Second) // wait for socket to be ready
+	logger.Infoln("Waiting for podman socket to be ready...", constants.VerbosityLevelDebug)
+	time.Sleep(sleepDuration) // wait for socket to be ready
 
 	if err := validators.PodmanHealthCheck(); err != nil {
 		return fmt.Errorf("podman health check failed after configuration: %w", err)
@@ -220,7 +225,7 @@ func setupPodman() error {
 }
 
 func systemctl(action, unit string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "systemctl", action, unit)

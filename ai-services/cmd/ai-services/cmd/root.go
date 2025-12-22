@@ -4,13 +4,12 @@ import (
 	"flag"
 	"os"
 
-	"k8s.io/klog/v2"
-
 	"github.com/spf13/cobra"
 
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/application"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -22,7 +21,7 @@ var RootCmd = &cobra.Command{
 	Version: version.GetVersion(),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Ensures logs flush after each command run
-		klog.V(2).Info("Logger initialized (PersistentPreRun)")
+		logger.Infoln("Logger initialized (PersistentPreRun)", constants.VerbosityLevelDebug)
 	},
 }
 

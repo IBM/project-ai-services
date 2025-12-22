@@ -11,6 +11,10 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+const (
+	maxKeyValueParts = 2
+)
+
 // BoolPtr -> converts to bool ptr
 func BoolPtr(v bool) *bool {
 	return &v
@@ -83,8 +87,8 @@ func ParseKeyValues(pairs []string) (map[string]string, error) {
 		if pair == "" {
 			continue
 		}
-		kv := strings.SplitN(pair, "=", 2)
-		if len(kv) != 2 {
+		kv := strings.SplitN(pair, "=", maxKeyValueParts)
+		if len(kv) != maxKeyValueParts {
 			return nil, fmt.Errorf("invalid format: %s (expected key=value)", pair)
 		}
 		out[kv[0]] = kv[1]

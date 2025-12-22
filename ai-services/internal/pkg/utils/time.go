@@ -5,6 +5,20 @@ import (
 	"time"
 )
 
+const (
+	hoursPerDay  = 24
+	daysPerWeek  = 7
+	daysPerMonth = 30
+	daysPerYear  = 365
+)
+
+const (
+	day   = time.Hour * hoursPerDay
+	week  = day * daysPerWeek
+	month = day * daysPerMonth
+	year  = day * daysPerYear
+)
+
 // formatTimeDuration formats a duration into a human-readable string
 // It returns time elapsed in terms of seconds, minutes, hours, days, weeks, months or years.
 func formatTimeDuration(d time.Duration) string {
@@ -21,20 +35,20 @@ func formatTimeDuration(d time.Duration) string {
 	case d < time.Hour:
 		minutes := d / time.Minute
 		result = fmt.Sprintf("%d minutes", minutes)
-	case d < 24*time.Hour:
+	case d < day:
 		hours := d / time.Hour
 		result = fmt.Sprintf("%d hours", hours)
-	case d < 7*24*time.Hour:
-		days := d / (24 * time.Hour)
+	case d < week:
+		days := d / day
 		result = fmt.Sprintf("%d days", days)
-	case d < 30*24*time.Hour:
-		weeks := d / (7 * 24 * time.Hour)
+	case d < month:
+		weeks := d / week
 		result = fmt.Sprintf("%d weeks", weeks)
-	case d < 365*24*time.Hour:
-		months := d / (30 * 24 * time.Hour)
+	case d < year:
+		months := d / month
 		result = fmt.Sprintf("%d months", months)
 	default:
-		years := d / (365 * 24 * time.Hour)
+		years := d / year
 		result = fmt.Sprintf("%d years", years)
 	}
 

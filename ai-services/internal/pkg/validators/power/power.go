@@ -21,7 +21,7 @@ func (r *PowerRule) Name() string {
 }
 
 func (r *PowerRule) Verify() error {
-	logger.Infoln("Validating IBM Power version...", 2)
+	logger.Infoln("Validating IBM Power version...", constants.VerbosityLevelDebug)
 
 	if runtime.GOARCH != "ppc64le" {
 		return fmt.Errorf("unsupported architecture: %s. IBM Power architecture (ppc64le) is required", runtime.GOARCH)

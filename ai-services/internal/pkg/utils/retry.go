@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -41,7 +42,7 @@ func Retry(
 		}
 
 		// Sleep till delay
-		logger.Infof("[Retry] Sleeping %v before retrying...\n", delay, 2)
+		logger.Infof("[Retry] Sleeping %v before retrying...\n", delay, constants.VerbosityLevelDebug)
 		time.Sleep(delay)
 
 		// Apply backoff if provided
