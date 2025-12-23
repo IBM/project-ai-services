@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ var (
 	aiServiceBin string
 	binVersion   string
 	ctx          context.Context
+	podmanReady  bool
 )
 
 func TestE2E(t *testing.T) {
@@ -65,9 +67,16 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred(), "failed to get binary version")
 	fmt.Printf("[SETUP] ai-services version: %s\n", binVersion)
 
+	// Check Podman environment - NON-BLOCKING
 	By("Checking Podman environment")
 	err = bootstrap.CheckPodman()
-	Expect(err).NotTo(HaveOccurred(), "podman is not available")
+	if err != nil {
+		podmanReady = false
+		fmt.Printf("[WARNING] Podman not available: %v - will be installed via bootstrap configure", err)
+	} else {
+		podmanReady = true
+		fmt.Printf("[SETUP]Podman environment verified\n")
+	}
 
 	By("E2E setup completed")
 	fmt.Printf("[SETUP] ================================================\n")
@@ -93,7 +102,9 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 	Context("CLI Commands", func() {
 
 		It("bootstraps AI Services", func() {
-			cli.Bootstrap()
+			output, err := cli.Bootstrap(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cli.ValidateBootstrapOutput(output)).To(Succeed())
 		})
 
 		It("creates an application", func() {

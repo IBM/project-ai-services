@@ -1,8 +1,24 @@
 package cli
 
-import "log"
+import (
+	"fmt"
+	"strings"
+)
 
 // ValidateOutput validates CLI output and filesystem state
-func ValidateOutput() {
-	log.Println("[CLI] Placeholder for output & filesystem validation")
+
+func ValidateBootstrapOutput(output string) error {
+	required := []string{
+		"LPAR configured successfully",
+		"All validations passed",
+		"LPAR bootstrapped successfully",
+	}
+
+	for _, r := range required {
+		if !strings.Contains(output, r) {
+			return fmt.Errorf("bootstrap validation failed: missing '%s'", r)
+		}
+	}
+
+	return nil
 }
