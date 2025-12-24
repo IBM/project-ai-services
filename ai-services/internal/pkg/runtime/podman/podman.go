@@ -46,7 +46,7 @@ func NewPodmanClient() (*PodmanClient, error) {
 	return &PodmanClient{Context: ctx}, nil
 }
 
-// Example function to list images (you can expand with more Podman functionalities)
+// ListImages function to list images (you can expand with more Podman functionalities)
 func (pc *PodmanClient) ListImages() ([]*types.ImageSummary, error) {
 	return images.List(pc.Context, nil)
 }

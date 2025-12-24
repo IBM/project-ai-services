@@ -6,7 +6,6 @@ import (
 )
 
 var (
-	// Below values will be overridden during build
 	Version   string = "unknown"
 	GitCommit string = "unknown"
 	BuildDate string = ""
