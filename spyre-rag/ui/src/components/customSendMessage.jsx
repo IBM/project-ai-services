@@ -1,4 +1,4 @@
-import { UserType } from '@carbon/ai-chat';
+import { CancellationReason, UserType } from '@carbon/ai-chat';
 import axios from 'axios';
 import { OpenAI } from 'openai';
 
@@ -94,6 +94,23 @@ async function customSendMessage(request, _options, instance) {
     stream: true,
   };
 
+  let isCanceled = false;
+  const abortHandler = () => {
+    isCanceled = true;
+    const reason = _options.signal?.reason;
+
+    // Use enum for type-safe comparisons
+    if (reason === CancellationReason.STOP_STREAMING) {
+      console.log('User clicked stop streaming');
+    } else if (reason === CancellationReason.CONVERSATION_RESTARTED) {
+      console.log('Conversation was restarted/cleared');
+    } else if (reason === CancellationReason.TIMEOUT) {
+      console.log('Request timed out');
+    }
+  };
+  // Listen to abort signal (handles stop button, restart/clear, and timeout)
+  _options.signal?.addEventListener('abort', abortHandler);
+
   try {
     instance.updateIsMessageLoadingCounter('increase');
 
@@ -111,6 +128,8 @@ async function customSendMessage(request, _options, instance) {
     let fullText = ''; // to accumulate final message
 
     for await (const chunk of stream) {
+      if (isCanceled) break;
+
       // to extract the content from the parsed JSON chunk
       const textChunk = chunk.choices[0]?.delta?.content || '';
 
@@ -226,6 +245,8 @@ async function customSendMessage(request, _options, instance) {
         },
       },
     });
+  } finally {
+    _options.signal?.removeEventListener('abort', abortHandler);
   }
 }
 
