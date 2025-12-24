@@ -1,4 +1,4 @@
-import { CancellationReason, UserType } from '@carbon/ai-chat';
+import { UserType } from '@carbon/ai-chat';
 import axios from 'axios';
 import { OpenAI } from 'openai';
 
@@ -97,16 +97,6 @@ async function customSendMessage(request, _options, instance) {
   let isCanceled = false;
   const abortHandler = () => {
     isCanceled = true;
-    const reason = _options.signal?.reason;
-
-    // Use enum for type-safe comparisons
-    if (reason === CancellationReason.STOP_STREAMING) {
-      console.log('User clicked stop streaming');
-    } else if (reason === CancellationReason.CONVERSATION_RESTARTED) {
-      console.log('Conversation was restarted/cleared');
-    } else if (reason === CancellationReason.TIMEOUT) {
-      console.log('Request timed out');
-    }
   };
   // Listen to abort signal (handles stop button, restart/clear, and timeout)
   _options.signal?.addEventListener('abort', abortHandler);
