@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// bootstrapCmd represents the bootstrap command
+// BootstrapCmd represents the bootstrap command
 func BootstrapCmd() *cobra.Command {
 	bootstrapCmd := &cobra.Command{
 		Use:   "bootstrap",
