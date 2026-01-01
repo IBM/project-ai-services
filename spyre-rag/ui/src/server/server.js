@@ -1,5 +1,8 @@
 import axios from 'axios';
+import dotenv from 'dotenv';
 import express, { json } from 'express';
+
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -36,6 +39,21 @@ app.post('/v1/chat/completions', async (req, res) => {
     res
       .status(error.response.status)
       .json({ error: 'Failed to fetch response from model API' });
+  }
+});
+
+app.get('/feedback-token', async (req, res) => {
+  try {
+    const response = await axios.post(
+      'https://abs-feedbackhub.ai-builder-studio.dal.app.cirrus.ibm.com/feedback-hub/v1/token',
+      {
+        project_id: process.env.PROJECT_ID,
+        secret_id: process.env.SECRET_ID,
+      },
+    );
+    res.json(response.data);
+  } catch (error) {
+    res.status(500).send('Error generating token');
   }
 });
 

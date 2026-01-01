@@ -25,6 +25,10 @@ export default defineConfig(() => {
         "/db-status": {
           target: "http://localhost:3001",
           changeOrigin: true,
+        }, 
+        "/feedback-token": {
+          target: "http://localhost:3001",
+          changeOrigin: true,
         }
       },
     },
