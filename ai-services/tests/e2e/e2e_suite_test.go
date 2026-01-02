@@ -85,62 +85,46 @@ var _ = BeforeSuite(func() {
 
 var _ = AfterSuite(func() {
 	fmt.Println("[TEARDOWN] AI Services E2E teardown")
-
 	By("Cleaning up E2E environment")
 	cleanup.CleanupTemp(tempDir)
-
 	By("Cleanup completed")
 })
 
 var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
-
 	Context("Bootstrap Steps", func() {
-
 		It("runs bootstrap configure", func() {
 			output, err := cli.BootstrapConfigure(ctx)
-			Expect(err).NotTo(HaveOccurred(), "bootstrap configure failed")
-			fmt.Println("[TEST] Bootstrap configure output:")
-			fmt.Println(output)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cli.ValidateBootstrapConfigureOutput(output)).To(Succeed())
 		})
-
 		It("runs bootstrap validate", func() {
 			output, err := cli.BootstrapValidate(ctx)
-			Expect(err).NotTo(HaveOccurred(), "bootstrap validate failed")
-			fmt.Println("[TEST] Bootstrap validate output:")
-			fmt.Println(output)
-			Expect(cli.ValidateBootstrapOutput(output)).To(Succeed(), "bootstrap validation failed")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cli.ValidateBootstrapValidateOutput(output)).To(Succeed())
 		})
-
 		It("runs full bootstrap", func() {
 			output, err := cli.Bootstrap(ctx)
-			Expect(err).NotTo(HaveOccurred(), "full bootstrap failed")
-			Expect(cli.ValidateBootstrapOutput(output)).To(Succeed(), "bootstrap output missing required steps")
-			fmt.Println("[TEST] Full bootstrap output verified")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cli.ValidateBootstrapFullOutput(output)).To(Succeed())
 		})
 	})
-
 	Context("Application Lifecycle", func() {
-
 		It("creates an application", func() {
 			err := cli.CreateApp("test-app")
 			Expect(err).NotTo(HaveOccurred(), "create-app command failed")
 			fmt.Println("[TEST] Application created: test-app")
 		})
-
 		It("starts the application", func() {
 			err := cli.StartApp("test-app")
 			Expect(err).NotTo(HaveOccurred(), "start-app command failed")
 			fmt.Println("[TEST] Application started: test-app")
 		})
-
 	})
-
 	Context("RAG / Golden Dataset Validation", func() {
 		It("validates responses against golden dataset", func() {
 			Skip("RAG validation not implemented yet")
 		})
 	})
-
 	Context("Podman / Container Validation", func() {
 		It("verifies application containers are healthy", func() {
 			if !podmanReady {
