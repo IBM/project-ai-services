@@ -5,19 +5,38 @@ import (
 	"strings"
 )
 
-// ValidateBootstrapOutput ensures required bootstrap output is present
-func ValidateBootstrapOutput(output string) error {
+func ValidateBootstrapConfigureOutput(output string) error {
 	required := []string{
-		"LPAR configured successfully",  // configure step
-		"All validations passed",        // validate step
-		"LPAR boostrapped successfully", // full bootstrap confirmation
+		"LPAR configured successfully",
+		"Bootstrap configuration completed successfully",
 	}
-
 	for _, r := range required {
 		if !strings.Contains(output, r) {
-			return fmt.Errorf("bootstrap validation failed: missing '%s'", r)
+			return fmt.Errorf("bootstrap configure validation failed: missing '%s'", r)
 		}
 	}
-
+	return nil
+}
+func ValidateBootstrapValidateOutput(output string) error {
+	required := []string{
+		"All validations passed",
+	}
+	for _, r := range required {
+		if !strings.Contains(output, r) {
+			return fmt.Errorf("bootstrap validate validation failed: missing '%s'", r)
+		}
+	}
+	return nil
+}
+func ValidateBootstrapFullOutput(output string) error {
+	required := []string{
+		"LPAR configured successfully",
+		"All validations passed",
+	}
+	for _, r := range required {
+		if !strings.Contains(output, r) {
+			return fmt.Errorf("full bootstrap validation failed: missing '%s'", r)
+		}
+	}
 	return nil
 }
