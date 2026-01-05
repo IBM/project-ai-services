@@ -57,7 +57,7 @@ func init() {
 	startCmd.Flags().BoolVar(&skipLogs, "skip-logs", false, "Skip displaying logs after starting the pod")
 }
 
-// startApplication starts all pods associated with the given application name
+// startApplication starts all pods associated with the given application name.
 func startApplication(client *podman.PodmanClient, appName string, podNames []string) error {
 	pods, err := fetchPodsFromRuntime(client, appName)
 	if err != nil {

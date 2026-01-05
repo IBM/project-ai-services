@@ -25,7 +25,7 @@ type PodmanClient struct {
 	Context context.Context
 }
 
-// NewPodmanClient creates and returns a new PodmanClient instance
+// NewPodmanClient creates and returns a new PodmanClient instance.
 func NewPodmanClient() (*PodmanClient, error) {
 	// Default Podman socket URI is unix:///run/podman/podman.sock running on the local machine,
 	// but it can be overridden by the CONTAINER_HOST and CONTAINER_SSHKEY environment variable to support remote connections.
@@ -46,7 +46,7 @@ func NewPodmanClient() (*PodmanClient, error) {
 	return &PodmanClient{Context: ctx}, nil
 }
 
-// ListImages function to list images (you can expand with more Podman functionalities)
+// ListImages function to list images (you can expand with more Podman functionalities).
 func (pc *PodmanClient) ListImages() ([]*types.ImageSummary, error) {
 	return images.List(pc.Context, nil)
 }

@@ -38,7 +38,7 @@ var (
 	retryInterval                  = 5 * time.Second
 )
 
-// Variables for flags placeholder
+// Variables for flags placeholder.
 var (
 	templateName      string
 	skipModelDownload bool

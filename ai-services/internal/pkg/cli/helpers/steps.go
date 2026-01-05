@@ -104,7 +104,7 @@ func PrintInfo(runtime runtime.Runtime, app, appTemplate string) error {
 	return nil
 }
 
-// populatePodValues -> populates the host values within the params
+// populatePodValues -> populates the host values within the params.
 func populateHostValues(params map[string]string, varsData *templates.Vars) error {
 	for _, host := range varsData.Hosts {
 		if host.Type == "ip" {
@@ -188,9 +188,9 @@ func populateContainerInfo(runtime runtime.Runtime, params map[string]string, va
 	return nil
 }
 
-// fetchDataSpecificInfo fetches the value from pod/container info based on the provided format
-// data can be either the podInfo or the containerInfo
-// format passed should support the podman --format notation without using '{{}}'
+// fetchDataSpecificInfo fetches the value from pod/container info based on the provided format.
+// Data can be either the podInfo or the containerInfo.
+// Format passed should support the podman --format notation without using '{{}}'.
 func fetchDataSpecificInfo(data any, format string, defaultValue *string) (string, error) {
 	// Converting format to template literal
 	// Eg:- Template format: ".State" becomes "{{ .State }}"

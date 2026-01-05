@@ -21,7 +21,7 @@ const (
 	/*
 		Templates Pattern :- "assets/applications/<AppName>/templates/*.yaml.tmpl"
 		After splitting, the application name is located at third part.
-		So we ensure the path contains enough segments which is appName index + 1
+		So we ensure the path contains enough segments which is appName index + 1.
 	*/
 	minPathPartsForAppName = 4
 )
@@ -31,7 +31,7 @@ type embedTemplateProvider struct {
 	root string
 }
 
-// ListApplications lists all available application templates
+// ListApplications lists all available application templates.
 func (e *embedTemplateProvider) ListApplications() ([]string, error) {
 	apps := []string{}
 
@@ -85,7 +85,7 @@ func (e *embedTemplateProvider) ListApplicationTemplateValues(app string) (map[s
 	return parametersWithDescription, nil
 }
 
-// LoadAllTemplates loads all templates for a given application
+// LoadAllTemplates loads all templates for a given application.
 func (e *embedTemplateProvider) LoadAllTemplates(path string) (map[string]*template.Template, error) {
 	tmpls := make(map[string]*template.Template)
 	completePath := fmt.Sprintf("%s/%s", e.root, path)
@@ -111,7 +111,7 @@ func (e *embedTemplateProvider) LoadAllTemplates(path string) (map[string]*templ
 	return tmpls, err
 }
 
-// LoadPodTemplate loads and renders a pod template with the given parameters
+// LoadPodTemplate loads and renders a pod template with the given parameters.
 func (e *embedTemplateProvider) LoadPodTemplate(app, file string, params any) (*models.PodSpec, error) {
 	path := fmt.Sprintf("%s/%s/templates/%s", e.root, app, file)
 	data, err := e.fs.ReadFile(path)
@@ -192,7 +192,7 @@ func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []str
 	return values, nil
 }
 
-// LoadMetadata loads the metadata for a given application template
+// LoadMetadata loads the metadata for a given application template.
 func (e *embedTemplateProvider) LoadMetadata(appTemplateName string) (*AppMetadata, error) {
 	path := fmt.Sprintf("%s/%s/metadata.yaml", e.root, appTemplateName)
 	data, err := e.fs.ReadFile(path)
@@ -208,7 +208,7 @@ func (e *embedTemplateProvider) LoadMetadata(appTemplateName string) (*AppMetada
 	return &appMetadata, nil
 }
 
-// LoadMdFiles loads all md files for a given application
+// LoadMdFiles loads all md files for a given application.
 func (e *embedTemplateProvider) LoadMdFiles(path string) (map[string]*template.Template, error) {
 	tmpls := make(map[string]*template.Template)
 	completePath := fmt.Sprintf("%s/%s", e.root, path)
@@ -268,7 +268,7 @@ type EmbedOptions struct {
 	Root string
 }
 
-// NewEmbedTemplateProvider creates a new instance of embedTemplateProvider
+// NewEmbedTemplateProvider creates a new instance of embedTemplateProvider.
 func NewEmbedTemplateProvider(options EmbedOptions) Template {
 	t := &embedTemplateProvider{}
 	if options.FS != nil {
