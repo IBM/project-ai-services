@@ -11,3 +11,7 @@ build:
 push:
 	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(TAG)
 .PHONY: push
+
+image-tag:
+	@echo $(TAG)
+.PHONY: image-tag
