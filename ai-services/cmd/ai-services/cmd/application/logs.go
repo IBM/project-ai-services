@@ -47,24 +47,33 @@ func showLogs(client *podman.PodmanClient, podName string, containerNameOrID str
 	logger.Warningln("Press Ctrl+C to exit the logs and return to the terminal.")
 	logger.Infof("Fetching logs for application pod: %s", podName)
 
-	if containerNameOrID != "" {
-		exists, err := client.ContainerExists(containerNameOrID)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			return fmt.Errorf("container %s doesn't exists", containerNameOrID)
-		}
-		logger.Infof("Fetching logs for container: %s", containerNameOrID)
-		err = client.ContainerLogs(containerNameOrID)
-		if err != nil {
-			return fmt.Errorf("failed to fetch container: %s logs; err: %w", containerNameOrID, err)
-		}
-	} else {
-		err := client.PodLogs(podName)
-		if err != nil {
+	if containerNameOrID == "" {
+		if err := client.PodLogs(podName); err != nil {
 			return fmt.Errorf("failed to fetch pod: %s logs; err: %w", podName, err)
 		}
+
+		return nil
+	}
+
+	if err := fetchContainerLogs(client, containerNameOrID); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func fetchContainerLogs(client *podman.PodmanClient, containerNameOrID string) error {
+	exists, err := client.ContainerExists(containerNameOrID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("container %s doesn't exists", containerNameOrID)
+	}
+	logger.Infof("Fetching logs for container: %s", containerNameOrID)
+	err = client.ContainerLogs(containerNameOrID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch container: %s logs; err: %w", containerNameOrID, err)
 	}
 
 	return nil

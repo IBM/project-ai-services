@@ -141,49 +141,12 @@ func fetchPodsFromRuntime(client *podman.PodmanClient, appName string) ([]*types
 }
 
 func fetchPodsToStart(client *podman.PodmanClient, pods []*types.ListPodsReport, podNames []string) ([]*types.ListPodsReport, error) {
-	var podsToStart []*types.ListPodsReport
-
 	if len(podNames) > 0 {
-		// 1. Filter pods
-		podMap := make(map[string]*types.ListPodsReport)
-		for _, pod := range pods {
-			podMap[pod.Name] = pod
-		}
-
-		// maintain list of not found pod names
-		var notFound []string
-		for _, podname := range podNames {
-			if pod, exists := podMap[podname]; exists {
-				podsToStart = append(podsToStart, pod)
-			} else {
-				notFound = append(notFound, podname)
-			}
-		}
-
-		// 2. Warn if any provided pod names do not exist
-		if len(notFound) > 0 {
-			logger.Warningf("The following specified pods were not found and will be skipped: %s\n", strings.Join(notFound, ", "))
-		}
-	} else {
-		// 3. No pod names provided, start pods based on annotation
-	outerloop:
-		for _, pod := range pods {
-			for _, container := range pod.Containers {
-				// inspect one of containers to get pod annotations
-				data, err := client.InspectContainer(container.Names)
-				if err != nil {
-					return podsToStart, fmt.Errorf("failed to inspect container %s: %w", container.Names, err)
-				}
-				annotations := data.Config.Annotations
-				if val, exists := annotations[constants.PodStartAnnotationkey]; exists && val == constants.PodStartOff {
-					continue outerloop
-				}
-			}
-			podsToStart = append(podsToStart, pod)
-		}
+		return filterPodsByName(pods, podNames)
 	}
 
-	return podsToStart, nil
+	// No pod names provided, start pods based on annotation
+	return filterPodsByAnnotation(client, pods)
 }
 
 func startPods(client *podman.PodmanClient, podsToStart []*types.ListPodsReport) error {
@@ -235,4 +198,52 @@ func printPodLogs(client *podman.PodmanClient, podsToStart []*types.ListPodsRepo
 	}
 
 	return nil
+}
+
+func filterPodsByName(pods []*types.ListPodsReport, podNames []string) ([]*types.ListPodsReport, error) {
+	// 1. Filter pods
+	podMap := make(map[string]*types.ListPodsReport)
+	for _, pod := range pods {
+		podMap[pod.Name] = pod
+	}
+
+	// maintain list of not found pod names
+	var notFound []string
+	var podsToStart []*types.ListPodsReport
+	for _, podName := range podNames {
+		if pod, exists := podMap[podName]; exists {
+			podsToStart = append(podsToStart, pod)
+		} else {
+			notFound = append(notFound, podName)
+		}
+	}
+
+	// 2. Warn if any provided pod names do not exist
+	if len(notFound) > 0 {
+		logger.Warningf("The following specified pods were not found and will be skipped: %s\n", strings.Join(notFound, ", "))
+	}
+
+	return podsToStart, nil
+}
+
+func filterPodsByAnnotation(client *podman.PodmanClient, pods []*types.ListPodsReport) ([]*types.ListPodsReport, error) {
+	var podsToStart []*types.ListPodsReport
+
+outerloop:
+	for _, pod := range pods {
+		for _, container := range pod.Containers {
+			// inspect one of containers to get pod annotations
+			data, err := client.InspectContainer(container.Names)
+			if err != nil {
+				return podsToStart, fmt.Errorf("failed to inspect container %s: %w", container.Names, err)
+			}
+			annotations := data.Config.Annotations
+			if val, exists := annotations[constants.PodStartAnnotationkey]; exists && val == constants.PodStartOff {
+				continue outerloop
+			}
+		}
+		podsToStart = append(podsToStart, pod)
+	}
+
+	return podsToStart, nil
 }
