@@ -185,7 +185,7 @@ func renderStepsMarkdown(runtime runtime.Runtime, appTemplate string, params map
 		return fmt.Errorf("failed to execute info.md: %w", err)
 	}
 
-	logger.Infoln("Info: ")
+	logger.Infoln(title + ":")
 	logger.Infoln("-------")
 	logger.Infoln(rendered.String())
 
