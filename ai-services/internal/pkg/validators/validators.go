@@ -37,13 +37,13 @@ type Rule interface {
 // DefaultRegistry is the default registry instance that holds all registered checks.
 var DefaultRegistry = NewValidationRegistry()
 
-// CheckRegistry holds the list of checks.
+// ValidationRegistry holds the list of checks.
 type ValidationRegistry struct {
 	mu    sync.RWMutex
 	rules []Rule
 }
 
-// NewCheckRegistry creates a new registry.
+// NewValidationRegistry creates a new registry.
 func NewValidationRegistry() *ValidationRegistry {
 	return &ValidationRegistry{
 		rules: make([]Rule, 0),
