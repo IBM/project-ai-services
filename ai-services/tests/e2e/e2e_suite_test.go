@@ -18,6 +18,7 @@ import (
 var (
 	cfg          *config.Config
 	runID        string
+	appName      string // ✅ shared across lifecycle tests
 	tempDir      string
 	tempBinDir   string
 	aiServiceBin string
@@ -109,10 +110,29 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 		})
 	})
 	Context("Application Lifecycle", func() {
-		It("creates an application", func() {
-			err := cli.CreateApp("test-app")
-			Expect(err).NotTo(HaveOccurred(), "create-app command failed")
-			fmt.Println("[TEST] Application created: test-app")
+		It("creates rag application, runs health checks, and validates RAG endpoints", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+			defer cancel()
+
+			appName = fmt.Sprintf("rag-app-%s", runID)
+			pods := []string{"backend", "ui", "db"} // replace with actual pod names
+
+			err := cli.CreateAppWithHealthAndRAG(
+				ctx,
+				cfg,
+				appName,
+				"rag",
+				"ui.port=3000,backend.port=5000",
+				"5000",
+				cli.CreateOptions{
+					SkipImageDownload: false,
+					SkipModelDownload: false,
+					Verbose:           true,
+				},
+				pods,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			fmt.Printf("[TEST] Application %s created, healthy, and RAG endpoints validated\n", appName)
 		})
 		It("starts the application", func() {
 			err := cli.StartApp("test-app")
