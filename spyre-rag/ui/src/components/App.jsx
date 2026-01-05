@@ -19,7 +19,7 @@ const messaging = {
 const header = {
   title: 'DigitalAssistant',
   hideMinimizeButton: true,
-  inimizeButtonIconType: undefined,
+  minimizeButtonIconType: undefined,
 };
 
 const layout = {
