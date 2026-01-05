@@ -224,7 +224,6 @@ func printPodLogs(client *podman.PodmanClient, podsToStart []*types.ListPodsRepo
 	logger.Infof("\n--- Following logs for pod: %s ---\n", podsToStart[0].Name)
 
 	if err := client.PodLogs(podsToStart[0].Name); err != nil {
-
 		// Check if error is due to interrupt signal (Ctrl+C)
 		if strings.Contains(err.Error(), "signal: interrupt") || strings.Contains(err.Error(), "context canceled") {
 			logger.Infoln("Log following stopped.")

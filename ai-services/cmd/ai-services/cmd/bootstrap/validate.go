@@ -64,7 +64,6 @@ func validateCmd() *cobra.Command {
 }
 
 func longDescription() string {
-
 	return `Validate that all prerequisites and configurations are correct for bootstrapping.
 
 	This command performs comprehensive validation checks including:
@@ -94,7 +93,6 @@ func longDescription() string {
 }
 
 func example() string {
-
 	return `  # Run all validation checks
   ai-services bootstrap validate
 

@@ -12,30 +12,23 @@ import { customSendMessage } from './customSendMessage.jsx';
 import HeaderNav from './Header.jsx';
 import { renderUserDefinedResponse } from './renderUserDefinedResponse.jsx';
 
-const config = {
-  messaging: {
-    customSendMessage,
-  },
-  headerConfig: {
-    hideMinimizeButton: true,
-    minimizeButtonIconType: undefined,
-  },
-  themeConfig: {
-    corners: CornersType.SQUARE,
-  },
-  layout: {
-    hasContentMaxWidth: false,
-  },
-  openChatByDefault: true,
+const messaging = {
+  customSendMessage,
+};
+
+const header = {
+  title: 'DigitalAssistant',
+  hideMinimizeButton: true,
+  minimizeButtonIconType: undefined,
+};
+
+const layout = {
+  corners: CornersType.SQUARE,
+  hasContentMaxWidth: false,
 };
 
 function App() {
   function onAfterRender(instance) {
-    instance.updateMainHeaderTitle('DigitalAssistant');
-    instance.updateLanguagePack({
-      ai_slug_title: undefined,
-      ai_slug_description: <AIExplanationCard />,
-    });
     instance.on({ type: BusEventType.FEEDBACK, handler: feedbackHandler });
 
     instance.messaging.addMessage({
@@ -83,10 +76,17 @@ function App() {
             <Column sm={4} md={8} lg={12}>
               <div className="chat-container">
                 <ChatCustomElement
-                  config={config}
                   className="fullScreen"
+                  messaging={messaging}
+                  header={header}
+                  layout={layout}
+                  openChatByDefault={true}
                   onAfterRender={onAfterRender}
                   renderUserDefinedResponse={renderUserDefinedResponse}
+                  strings={{
+                    ai_slug_title: undefined,
+                    ai_slug_description: <AIExplanationCard />,
+                  }}
                 />
               </div>
             </Column>

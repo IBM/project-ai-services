@@ -8,6 +8,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
+const (
+	columnPadding = 2
+)
+
 type Printer struct {
 	model table.Model
 }
@@ -92,7 +96,7 @@ func (p *Printer) CloseTableWriter() {
 			}
 		}
 
-		cols[colIdx].Width = maxLen + 2
+		cols[colIdx].Width = maxLen + columnPadding
 	}
 
 	p.model.SetColumns(cols)

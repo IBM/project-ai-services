@@ -55,7 +55,7 @@ function AIExplanationCard() {
 
       <div style={{}}>
         <p style={{ fontSize: '0.95rem', color: '#525252' }}>AI model</p>
-        <Link size="20" />{' '}
+        <Link size="md" />{' '}
         <a
           style={{
             color: 'rgb(13, 110, 253)',

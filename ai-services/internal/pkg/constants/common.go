@@ -13,7 +13,7 @@ const (
 	ValidationLevelError
 )
 
-// Container Health status checks
+// HealthStatus represents the type for Container Health status
 type HealthStatus string
 
 const (

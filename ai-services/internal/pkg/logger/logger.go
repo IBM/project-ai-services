@@ -6,6 +6,10 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const (
+	VerbosityLevelDebug = 2
+)
+
 func Init() {
 	klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
 	klog.InitFlags(klogFlags)

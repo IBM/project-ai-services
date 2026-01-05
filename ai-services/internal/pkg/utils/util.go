@@ -11,12 +11,16 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+const (
+	maxKeyValueParts = 2
+)
+
 // BoolPtr -> converts to bool ptr
 func BoolPtr(v bool) *bool {
 	return &v
 }
 
-// flattenArray takes a 2D slice and returns a 1D slice with all values
+// FlattenArray takes a 2D slice and returns a 1D slice with all values
 func FlattenArray[T comparable](arr [][]T) []T {
 	flatArr := []T{}
 
@@ -83,8 +87,8 @@ func ParseKeyValues(pairs []string) (map[string]string, error) {
 		if pair == "" {
 			continue
 		}
-		kv := strings.SplitN(pair, "=", 2)
-		if len(kv) != 2 {
+		kv := strings.SplitN(pair, "=", maxKeyValueParts)
+		if len(kv) != maxKeyValueParts {
 			return nil, fmt.Errorf("invalid format: %s (expected key=value)", pair)
 		}
 		out[kv[0]] = kv[1]
@@ -201,7 +205,7 @@ func FlattenNode(prefix string, n *yaml.Node, descMap map[string]string) {
 	}
 }
 
-// This function sets a nested value in a map based on a dotted key notation.
+// SetNestedValue function sets a nested value in a map based on a dotted key notation.
 // For example, converts ui.port = value to map["ui"]["port"] = value
 // It modifies the input map in place, no return value.
 func SetNestedValue(out map[string]any, dottedKey string, value any) {
