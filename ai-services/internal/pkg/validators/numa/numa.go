@@ -21,7 +21,7 @@ func (r *NumaRule) Name() string {
 }
 
 func (r *NumaRule) Verify() error {
-	logger.Infoln("Validating NUMA node alignment on LPAR", 2)
+	logger.Infoln("Validating NUMA node alignment on LPAR", logger.VerbosityLevelDebug)
 	cmd := `lscpu | grep -i "NUMA node(s)"`
 	out, err := exec.Command("bash", "-c", cmd).Output()
 	if err != nil {

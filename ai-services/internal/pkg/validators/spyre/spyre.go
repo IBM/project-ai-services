@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"k8s.io/klog/v2"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 type SpyreRule struct{}
@@ -20,7 +20,7 @@ func (r *SpyreRule) Name() string {
 }
 
 func (r *SpyreRule) Verify() error {
-	klog.V(2).Infoln("Validating Spyre attachment...")
+	logger.Infoln("Validating Spyre attachment...", logger.VerbosityLevelDebug)
 	out, err := exec.Command("lspci").Output()
 	if err != nil {
 		return fmt.Errorf("failed to execute lspci command: %w", err)

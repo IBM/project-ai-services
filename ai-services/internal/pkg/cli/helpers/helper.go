@@ -17,6 +17,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
+const (
+	inspectPollInterval = 10 * time.Second
+)
+
 func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string, timeout time.Duration) error {
 	var containerStatus *define.InspectContainerData
 	var err error
@@ -46,7 +50,7 @@ func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string
 		}
 
 		// every 10 seconds inspect the container
-		time.Sleep(10 * time.Second)
+		time.Sleep(inspectPollInterval)
 	}
 }
 
@@ -73,7 +77,7 @@ func WaitForContainersCreation(runtime runtime.Runtime, podID string, expectedCo
 		}
 
 		// every 10 seconds inspect the pod
-		time.Sleep(10 * time.Second)
+		time.Sleep(inspectPollInterval)
 	}
 }
 
