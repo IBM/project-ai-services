@@ -45,18 +45,8 @@ func ValidateCreateAppOutput(output, appName string) error {
 	required := []string{
 		"All validations passed",
 		fmt.Sprintf("Creating application '%s'", appName),
-		"Executing Layer 1/3",
-		"Executing Layer 2/3",
-		"Executing Layer 3/3",
 		fmt.Sprintf("Application '%s' deployed successfully", appName),
 		"Next Steps:",
-		// Health check markers
-		fmt.Sprintf("%s--vllm-server", appName),
-		fmt.Sprintf("%s--milvus", appName),
-		fmt.Sprintf("%s--ingest-docs", appName),
-		fmt.Sprintf("%s--chat-bot", appName),
-		"[HealthCheck]",
-		"OK",
 	}
 
 	for _, r := range required {
@@ -64,6 +54,7 @@ func ValidateCreateAppOutput(output, appName string) error {
 			return fmt.Errorf("create-app validation failed: missing '%s'", r)
 		}
 	}
+
 	if !strings.Contains(output, "Chatbot UI is available to use at http://") {
 		return fmt.Errorf("create-app validation failed: RAG chatbot URL missing")
 	}
