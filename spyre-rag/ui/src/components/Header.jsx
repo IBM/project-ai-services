@@ -1,15 +1,11 @@
-import {
-  Header,
-  HeaderName,
-} from "@carbon/react";
+import { Header, HeaderName } from '@carbon/react';
 
 const HeaderNav = () => {
-
   return (
     <Header aria-label="">
-    <HeaderName to="/" prefix="">
+      <HeaderName to="/" prefix="">
         DigitalAssistant
-    </HeaderName>
+      </HeaderName>
     </Header>
   );
 };

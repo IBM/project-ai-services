@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// bootstrapCmd represents the bootstrap command
+// BootstrapCmd represents the bootstrap command
 func BootstrapCmd() *cobra.Command {
 	bootstrapCmd := &cobra.Command{
 		Use:   "bootstrap",
@@ -45,7 +45,6 @@ Available subcommands:
 			return root.NewRootRule().Verify()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-
 			logger.Infof("Configuring the LPAR")
 			if configureErr := RunConfigureCmd(); configureErr != nil {
 				return fmt.Errorf("failed to bootstrap the LPAR: %w", configureErr)
@@ -61,6 +60,7 @@ Available subcommands:
 			style := lipgloss.NewStyle().Foreground(lipgloss.Color("#32BD27"))
 			message := style.Render("Re-login to the shell to reflect necessary permissions assigned to vfio cards")
 			logger.Infoln(message)
+
 			return nil
 		},
 	}

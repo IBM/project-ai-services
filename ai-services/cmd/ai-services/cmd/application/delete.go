@@ -59,7 +59,6 @@ func init() {
 }
 
 func deleteApplication(client *podman.PodmanClient, appName string) error {
-
 	appDir := filepath.Join(constants.ApplicationsPath, filepath.Base(appName))
 	appExists := false
 
@@ -93,6 +92,34 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 		logger.Infof("No pods found for application: %s\n", appName)
 	}
 
+	confirmDelete, err := deleteConfirmation(appName, podsExists, appExists)
+	if err != nil {
+		return err
+	}
+	if !confirmDelete {
+		logger.Infoln("Deletion cancelled")
+
+		return nil
+	}
+
+	logger.Infoln("Proceeding with deletion...")
+
+	if podsExists {
+		if err := podsDeletion(client, pods); err != nil {
+			return err
+		}
+	}
+
+	if appExists && !skipCleanup {
+		if err := appDataDeletion(appDir); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func deleteConfirmation(appName string, podsExists, appExists bool) (bool, error) {
 	var confirmActionPrompt string
 	if podsExists && appExists && !skipCleanup {
 		confirmActionPrompt = "Are you sure you want to delete the above pods and application data? "
@@ -102,31 +129,31 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 		confirmActionPrompt = "Are you sure you want to delete the application data? "
 	} else {
 		logger.Infof("Application %s does not exist", appName)
-		return nil
+
+		return false, nil
 	}
 
 	confirmDelete, err := utils.ConfirmAction(confirmActionPrompt)
 	if err != nil {
-		return fmt.Errorf("failed to take user input: %w", err)
+		return confirmDelete, fmt.Errorf("failed to take user input: %w", err)
 	}
 
-	if !confirmDelete {
-		logger.Infoln("Deletion cancelled")
-		return nil
-	}
+	return confirmDelete, nil
+}
 
-	logger.Infoln("Proceeding with deletion...")
-
+func podsDeletion(client *podman.PodmanClient, pods []*types.ListPodsReport) error {
 	var errors []string
-	if podsExists {
-		for _, pod := range pods {
-			logger.Infof("Deleting pod: %s\n", pod.Name)
-			if err := client.DeletePod(pod.Id, utils.BoolPtr(true)); err != nil {
-				errors = append(errors, fmt.Sprintf("pod %s: %v", pod.Name, err))
-				continue
-			}
-			logger.Infof("Successfully removed pod: %s\n", pod.Name)
+
+	for _, pod := range pods {
+		logger.Infof("Deleting pod: %s\n", pod.Name)
+
+		if err := client.DeletePod(pod.Id, utils.BoolPtr(true)); err != nil {
+			errors = append(errors, fmt.Sprintf("pod %s: %v", pod.Name, err))
+
+			continue
 		}
+
+		logger.Infof("Successfully removed pod: %s\n", pod.Name)
 	}
 
 	// Aggregate errors at the end
@@ -134,13 +161,17 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 		return fmt.Errorf("failed to remove pods: \n%s", strings.Join(errors, "\n"))
 	}
 
-	if appExists && !skipCleanup {
-		logger.Infoln("Cleaning up application data")
-		if err := os.RemoveAll(appDir); err != nil {
-			return fmt.Errorf("failed to delete application data: %w", err)
-		}
-		logger.Infoln("Application data cleaned up successfully")
+	return nil
+}
+
+func appDataDeletion(appDir string) error {
+	logger.Infoln("Cleaning up application data")
+
+	if err := os.RemoveAll(appDir); err != nil {
+		return fmt.Errorf("failed to delete application data: %w", err)
 	}
+
+	logger.Infoln("Application data cleaned up successfully")
 
 	return nil
 }

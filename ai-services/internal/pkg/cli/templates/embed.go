@@ -17,6 +17,15 @@ import (
 	k8syaml "sigs.k8s.io/yaml"
 )
 
+const (
+	/*
+		Templates Pattern :- "assets/applications/<AppName>/templates/*.yaml.tmpl"
+		After splitting, the application name is located at third part.
+		So we ensure the path contains enough segments which is appName index + 1
+	*/
+	minPathPartsForAppName = 4
+)
+
 type embedTemplateProvider struct {
 	fs   *embed.FS
 	root string
@@ -37,13 +46,14 @@ func (e *embedTemplateProvider) ListApplications() ([]string, error) {
 		// Templates Pattern :- "assets/applications/<AppName>/templates/*.yaml.tmpl"
 		parts := strings.Split(path, "/")
 
-		if len(parts) >= 4 {
+		if len(parts) >= minPathPartsForAppName {
 			appName := parts[1]
 			if slices.Contains(apps, appName) {
 				return nil
 			}
 			apps = append(apps, appName)
 		}
+
 		return nil
 	})
 	if err != nil {
@@ -94,8 +104,10 @@ func (e *embedTemplateProvider) LoadAllTemplates(path string) (map[string]*templ
 
 		// key should be just the template file name (Eg:- pod1.yaml.tmpl)
 		tmpls[strings.TrimPrefix(path, fmt.Sprintf("%s/", completePath))] = t
+
 		return nil
 	})
+
 	return tmpls, err
 }
 
@@ -136,6 +148,7 @@ func (e *embedTemplateProvider) LoadPodTemplateWithValues(app, file, appName str
 		"AppTemplateName": "",
 		"Version":         "",
 	}
+
 	return e.LoadPodTemplate(app, file, params)
 }
 
@@ -175,6 +188,7 @@ func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []str
 	for key, val := range cliOverrides {
 		utils.SetNestedValue(values, key, val)
 	}
+
 	return values, nil
 }
 
@@ -190,6 +204,7 @@ func (e *embedTemplateProvider) LoadMetadata(appTemplateName string) (*AppMetada
 	if err := yaml.Unmarshal(data, &appMetadata); err != nil {
 		return nil, err
 	}
+
 	return &appMetadata, nil
 }
 
@@ -212,8 +227,10 @@ func (e *embedTemplateProvider) LoadMdFiles(path string) (map[string]*template.T
 
 		// key should be just the template file name (Eg:- pod1.yaml.tmpl)
 		tmpls[strings.TrimPrefix(path, fmt.Sprintf("%s/", completePath))] = t
+
 		return nil
 	})
+
 	return tmpls, err
 }
 
@@ -264,5 +281,6 @@ func NewEmbedTemplateProvider(options EmbedOptions) Template {
 	} else {
 		t.root = "applications"
 	}
+
 	return t
 }

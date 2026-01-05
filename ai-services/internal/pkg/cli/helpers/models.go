@@ -27,6 +27,7 @@ func ListModels(template, appName string) ([]string, error) {
 				modelAnnotations = append(modelAnnotations, value)
 			}
 		}
+
 		return modelAnnotations
 	}
 
@@ -74,5 +75,6 @@ func DownloadModel(model, targetDir string) error {
 		return fmt.Errorf("failed to execute command: %w", err)
 	}
 	logger.Infoln("Model downloaded successfully")
+
 	return nil
 }

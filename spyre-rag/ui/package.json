@@ -4,7 +4,7 @@
     "private": true,
     "type": "module",
     "dependencies": {
-        "@carbon/ai-chat": "^0.5.1",
+        "@carbon/ai-chat": "^1.4.3",
         "@carbon/react": "^1.31.3",
         "@testing-library/jest-dom": "^5.16.5",
         "@testing-library/react": "^13.4.0",
@@ -20,10 +20,12 @@
         "web-vitals": "^2.1.4"
     },
     "devDependencies": {
+        "@ianvs/prettier-plugin-sort-imports": "^4.7.0",
         "@vitejs/plugin-react": "^5.1.0",
         "eslint": "^9.39.1",
         "eslint-plugin-react": "^7.37.5",
         "eslint-plugin-react-hooks": "^7.0.1",
+        "prettier": "^3.7.4",
         "typescript": "4.9.5",
         "vite": "^7.2.2"
     },
@@ -32,7 +34,9 @@
         "build": "vite build",
         "preview": "vite preview",
         "lint": "eslint .",
-        "lint:fix": "eslint . --fix"
+        "lint:fix": "eslint . --fix",
+        "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,json,css,scss,md}\"",
+        "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,json,css,scss,md}\""
     },
     "eslintConfig": {
         "extends": [

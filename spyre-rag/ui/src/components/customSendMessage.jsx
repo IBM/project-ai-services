@@ -1,10 +1,10 @@
-import axios from "axios";
-import { UserType } from "@carbon/ai-chat";
-import { OpenAI } from "openai";
+import { UserType } from '@carbon/ai-chat';
+import axios from 'axios';
+import { OpenAI } from 'openai';
 
 const client = new OpenAI({
-  baseURL: window.location.origin + "/v1",
-  apiKey: "not-needed",
+  baseURL: window.location.origin + '/v1',
+  apiKey: 'not-needed',
   dangerouslyAllowBrowser: true, // Required for browser-side use to allow api-key
 });
 
@@ -12,62 +12,66 @@ async function customSendMessage(request, _options, instance) {
   const userInput = request.input.text;
 
   try {
-      const res = await axios.get("/db-status");
-      if (res.data.ready === false) {
+    const res = await axios.get('/db-status');
+    if (res.data.ready === false) {
       await instance.messaging.addMessage({
         output: {
           generic: [
             {
-              response_type: "text",
-              text: "⚠️ The knowledge database is not ready. Please ingest documents first.",
+              response_type: 'text',
+              text: '⚠️ The knowledge database is not ready. Please ingest documents first.',
             },
           ],
         },
         message_options: {
           response_user_profile: {
-            id: "assistant",
-            nickname: "Assistant",
+            id: 'assistant',
+            nickname: 'Assistant',
             user_type: UserType.BOT,
           },
         },
       });
       return;
-      }
+    }
   } catch {
-      // No action needed
+    // No action needed
   }
 
   const ResponseUserProfile = {
-    id: "assistant",
-    nickname: "Assistant",
+    id: 'assistant',
+    nickname: 'Assistant',
     user_type: UserType.BOT,
-  }
+  };
 
   function finalizeResponse(fullText) {
     let trimmed = fullText.trim(); // to remove trailing white-space
     // Define acceptable sentence-ending punctuation (both Hindi + English)
-    const validEndings = ["।", ".", "?", "!", "…"]; // also includes ellipsis itself
+    const validEndings = ['।', '.', '?', '!', '…']; // also includes ellipsis itself
     const lastChar = trimmed.charAt(trimmed.length - 1);
     if (!validEndings.includes(lastChar)) {
-      trimmed += " ...";
+      trimmed += ' ...';
     }
     return trimmed;
   }
 
   if (userInput === '') {
-    if (instance.messaging && instance.messaging.addMessage && typeof instance.messaging.addMessage === 'function') {
+    if (
+      instance.messaging &&
+      instance.messaging.addMessage &&
+      typeof instance.messaging.addMessage === 'function'
+    ) {
       // sendWelcomeMessage(instance);
       return;
     }
   }
   const responseId = String(Date.now()); // or any unique ID
-  const itemId = "1"; // single item per response, or generate if multiple
+  const itemId = '1'; // single item per response, or generate if multiple
 
   //Adding initial partial chunk (this triggers the bubble with "stop streaming" button)
   await instance.messaging.addMessageChunk({
     partial_item: {
-      response_type: "text",
-      text: "", // start empty
+      response_type: 'text',
+      text: '', // start empty
       streaming_metadata: {
         id: itemId,
         cancellable: true,
@@ -84,40 +88,39 @@ async function customSendMessage(request, _options, instance) {
   });
 
   const payload = {
-    messages: [{ role: "user", content: userInput }],
-    model: "ibm-granite/granite-3.3-8b-instruct",
+    messages: [{ role: 'user', content: userInput }],
+    model: 'ibm-granite/granite-3.3-8b-instruct',
     temperature: 0.0,
     stream: true,
   };
 
   try {
+    instance.updateIsMessageLoadingCounter('increase');
 
-    instance.updateIsLoadingCounter('increase');
+    const stream = await client.chat.completions.create(payload);
 
-    const stream = await client.chat.completions.create(payload); 
-
-    const context_response = await axios.post('/reference',  {
+    const context_response = await axios.post('/reference', {
       prompt: userInput,
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
       },
     });
 
-    instance.updateIsLoadingCounter('decrease');
+    instance.updateIsMessageLoadingCounter('decrease');
 
-    let fullText = ""; // to accumulate final message
-    
+    let fullText = ''; // to accumulate final message
+
     for await (const chunk of stream) {
       // to extract the content from the parsed JSON chunk
-      const textChunk = chunk.choices[0]?.delta?.content || "";
+      const textChunk = chunk.choices[0]?.delta?.content || '';
 
       if (textChunk) {
         fullText += textChunk;
 
         await instance.messaging.addMessageChunk({
           partial_item: {
-            response_type: "text",
-            text: textChunk, 
+            response_type: 'text',
+            text: textChunk,
             streaming_metadata: {
               id: itemId,
               cancellable: true,
@@ -139,7 +142,7 @@ async function customSendMessage(request, _options, instance) {
     // Complete item chunk (used if we want to replace bubble content at end)
     await instance.messaging.addMessageChunk({
       complete_item: {
-        response_type: "text",
+        response_type: 'text',
         text: fullText,
         streaming_metadata: {
           id: itemId,
@@ -160,24 +163,24 @@ async function customSendMessage(request, _options, instance) {
     const docs = context_response.data?.documents || [];
 
     const responseBlocks = [
-            {
-              response_type: "text",
-              text: fullText,
-              streaming_metadata: {
-                id: itemId,
-                stream_stopped: false,
-              },
-            },
-          ]
+      {
+        response_type: 'text',
+        text: fullText,
+        streaming_metadata: {
+          id: itemId,
+          stream_stopped: false,
+        },
+      },
+    ];
 
     if (docs.length > 0) {
       responseBlocks.push({
-        response_type: "user_defined",
+        response_type: 'user_defined',
         user_defined: {
-          user_defined_type: "reference_docs_button",
+          user_defined_type: 'reference_docs_button',
           docs,
           original_text: fullText,
-          button_label: "Get reference documents",
+          button_label: 'Get reference documents',
         },
       });
     }
@@ -187,22 +190,20 @@ async function customSendMessage(request, _options, instance) {
       final_response: {
         id: responseId,
         output: {
-          generic: responseBlocks
+          generic: responseBlocks,
         },
         message_options: {
-          response_user_profile: ResponseUserProfile
+          response_user_profile: ResponseUserProfile,
         },
       },
     });
+  } catch (err) {
+    instance.updateIsMessageLoadingCounter('decrease');
 
-  } catch(err) {
-
-    instance.updateIsLoadingCounter('decrease');
-
-    let errorMessage = "Error occurred during active stream.";
+    let errorMessage = 'Error occurred during active stream.';
 
     if (err.status === 429) {
-      errorMessage = "⚠️ Server busy. Try again shortly.";
+      errorMessage = '⚠️ Server busy. Try again shortly.';
     }
 
     await instance.messaging.addMessageChunk({
@@ -211,7 +212,7 @@ async function customSendMessage(request, _options, instance) {
         output: {
           generic: [
             {
-              response_type: "text",
+              response_type: 'text',
               text: errorMessage,
               streaming_metadata: {
                 id: itemId,
@@ -221,11 +222,10 @@ async function customSendMessage(request, _options, instance) {
           ],
         },
         message_options: {
-          response_user_profile: ResponseUserProfile
+          response_user_profile: ResponseUserProfile,
         },
       },
     });
-
   }
 }
 

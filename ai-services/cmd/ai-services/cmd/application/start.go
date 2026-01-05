@@ -59,20 +59,13 @@ func init() {
 
 // startApplication starts all pods associated with the given application name
 func startApplication(client *podman.PodmanClient, appName string, podNames []string) error {
-	resp, err := client.ListPods(map[string][]string{
-		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
-	})
+	pods, err := fetchPodsFromRuntime(client, appName)
 	if err != nil {
-		return fmt.Errorf("failed to list pods: %w", err)
+		return err
 	}
-
-	var pods []*types.ListPodsReport
-	if val, ok := resp.([]*types.ListPodsReport); ok {
-		pods = val
-	}
-
 	if len(pods) == 0 {
 		logger.Infof("No pods found with given application: %s\n", appName)
+
 		return nil
 	}
 
@@ -83,9 +76,74 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 		4. However, if pod names are provided, ignore the "ai-services.io/start=off" annotation and attempt to start the specified pods.
 	*/
 
-	var podsToStart []*types.ListPodsReport
-	if len(podNames) > 0 {
+	// Do Step 1, Step 2 and Step 3
+	podsToStart, err := fetchPodsToStart(client, pods, podNames)
+	if err != nil {
+		return err
+	}
+	if len(podsToStart) == 0 {
+		logger.Infof("Invalid/No pods found to start for given application: %s\n", appName)
 
+		return nil
+	}
+
+	logger.Infof("Found %d pods for given applicationName: %s.\n", len(podsToStart), appName)
+	logger.Infoln("Below pods will be started:")
+	for _, pod := range podsToStart {
+		logger.Infof("\t-> %s\n", pod.Name)
+	}
+
+	printLogs := len(podsToStart) == 1 && !skipLogs
+	if printLogs {
+		logger.Infoln("Note: After starting the pod, logs will be displayed. Press Ctrl+C to exit the logs and return to the terminal.")
+	}
+
+	confirmStart, err := utils.ConfirmAction("Are you sure you want to start above pods? ")
+	if err != nil {
+		return fmt.Errorf("failed to take user input: %w", err)
+	}
+	if !confirmStart {
+		logger.Infoln("Skipping starting of pods")
+
+		return nil
+	}
+
+	logger.Infoln("Proceeding to start pods...")
+
+	// 3. Proceed to start only the valid pods
+	if err := startPods(client, podsToStart); err != nil {
+		return err
+	}
+
+	if printLogs {
+		if err := printPodLogs(client, podsToStart); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func fetchPodsFromRuntime(client *podman.PodmanClient, appName string) ([]*types.ListPodsReport, error) {
+	resp, err := client.ListPods(map[string][]string{
+		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods: %w", err)
+	}
+
+	var pods []*types.ListPodsReport
+	if val, ok := resp.([]*types.ListPodsReport); ok {
+		pods = val
+	}
+
+	return pods, err
+}
+
+func fetchPodsToStart(client *podman.PodmanClient, pods []*types.ListPodsReport, podNames []string) ([]*types.ListPodsReport, error) {
+	var podsToStart []*types.ListPodsReport
+
+	if len(podNames) > 0 {
 		// 1. Filter pods
 		podMap := make(map[string]*types.ListPodsReport)
 		for _, pod := range pods {
@@ -106,11 +164,6 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 		if len(notFound) > 0 {
 			logger.Warningf("The following specified pods were not found and will be skipped: %s\n", strings.Join(notFound, ", "))
 		}
-
-		if len(podsToStart) == 0 {
-			logger.Infof("No valid pods found to start for application: %s\n", appName)
-			return nil
-		}
 	} else {
 		// 3. No pod names provided, start pods based on annotation
 	outerloop:
@@ -119,7 +172,7 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 				// inspect one of containers to get pod annotations
 				data, err := client.InspectContainer(container.Names)
 				if err != nil {
-					return fmt.Errorf("failed to inspect container %s: %w", container.Names, err)
+					return podsToStart, fmt.Errorf("failed to inspect container %s: %w", container.Names, err)
 				}
 				annotations := data.Config.Annotations
 				if val, exists := annotations[constants.PodStartAnnotationkey]; exists && val == constants.PodStartOff {
@@ -130,35 +183,10 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 		}
 	}
 
-	if len(podsToStart) == 0 {
-		logger.Infoln("No pods available to start.")
-		return nil
-	}
+	return podsToStart, nil
+}
 
-	logger.Infof("Found %d pods for given applicationName: %s.\n", len(podsToStart), appName)
-	logger.Infoln("Below pods will be started:")
-	for _, pod := range podsToStart {
-		logger.Infof("\t-> %s\n", pod.Name)
-	}
-
-	printLogs := len(podsToStart) == 1 && !skipLogs
-	if printLogs {
-		logger.Infoln("Note: After starting the pod, logs will be displayed. Press Ctrl+C to exit the logs and return to the terminal.")
-	}
-
-	confirmStart, err := utils.ConfirmAction("Are you sure you want to start above pods? ")
-	if err != nil {
-		return fmt.Errorf("failed to take user input: %w", err)
-	}
-
-	if !confirmStart {
-		logger.Infoln("Skipping starting of pods")
-		return nil
-	}
-
-	logger.Infoln("Proceeding to start pods...")
-
-	// 3. Proceed to start only the valid pods
+func startPods(client *podman.PodmanClient, podsToStart []*types.ListPodsReport) error {
 	var errors []string
 	for _, pod := range podsToStart {
 		logger.Infof("Starting the pod: %s\n", pod.Name)
@@ -166,18 +194,22 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 		if err != nil {
 			errMsg := fmt.Sprintf("%s: %v", pod.Name, err)
 			errors = append(errors, errMsg)
+
 			continue
 		}
 
 		if podData.State == "Running" {
 			logger.Infof("Pod %s is already running. Skipping...\n", pod.Name)
+
 			continue
 		}
 		if err := client.StartPod(pod.Id); err != nil {
 			errMsg := fmt.Sprintf("%s: %v", pod.Name, err)
 			errors = append(errors, errMsg)
+
 			continue
 		}
+
 		logger.Infof("Successfully started the pod: %s\n", pod.Name)
 	}
 
@@ -185,16 +217,21 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 		return fmt.Errorf("failed to start pods: \n%s", strings.Join(errors, "\n"))
 	}
 
-	if printLogs {
-		logger.Infof("\n--- Following logs for pod: %s ---\n", podsToStart[0].Name)
-		if err := client.PodLogs(podsToStart[0].Name); err != nil {
-			// Check if error is due to interrupt signal (Ctrl+C)
-			if strings.Contains(err.Error(), "signal: interrupt") || strings.Contains(err.Error(), "context canceled") {
-				logger.Infoln("Log following stopped.")
-				return nil
-			}
-			return fmt.Errorf("failed to follow logs for pod %s: %w", podsToStart[0].Name, err)
+	return nil
+}
+
+func printPodLogs(client *podman.PodmanClient, podsToStart []*types.ListPodsReport) error {
+	logger.Infof("\n--- Following logs for pod: %s ---\n", podsToStart[0].Name)
+
+	if err := client.PodLogs(podsToStart[0].Name); err != nil {
+		// Check if error is due to interrupt signal (Ctrl+C)
+		if strings.Contains(err.Error(), "signal: interrupt") || strings.Contains(err.Error(), "context canceled") {
+			logger.Infoln("Log following stopped.")
+
+			return nil
 		}
+
+		return fmt.Errorf("failed to follow logs for pod %s: %w", podsToStart[0].Name, err)
 	}
 
 	return nil

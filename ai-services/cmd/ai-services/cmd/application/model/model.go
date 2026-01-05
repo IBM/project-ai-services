@@ -34,5 +34,6 @@ func models(template string) ([]string, error) {
 	if !slices.Contains(apps, template) {
 		return nil, fmt.Errorf("application template %s does not exist", template)
 	}
+
 	return helpers.ListModels(template, "")
 }

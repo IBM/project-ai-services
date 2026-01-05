@@ -1,0 +1,22 @@
+{
+  "printWidth": 80,
+  "tabWidth": 2,
+  "useTabs": false,
+  "semi": true,
+  "singleQuote": true,
+  "jsxSingleQuote": false,
+  "trailingComma": "all",
+  "bracketSpacing": true,
+  "arrowParens": "always",
+  "endOfLine": "lf",
+
+  "plugins": ["@ianvs/prettier-plugin-sort-imports"],
+  "importOrder": [
+    "^(react(.*))|^(react$)",
+    "^next(.*)$",
+    "<THIRD_PARTY_MODULES>",
+    "^(@/components/(.*)$)|^(@/hooks/(.*)$)",
+    "^[./]",
+    "\\.(css|scss)$"
+  ]
+}

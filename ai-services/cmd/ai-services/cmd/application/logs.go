@@ -21,6 +21,7 @@ var logsCmd = &cobra.Command{
 		if podName == "" {
 			return fmt.Errorf("pod name must be specified using --pod flag")
 		}
+
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {

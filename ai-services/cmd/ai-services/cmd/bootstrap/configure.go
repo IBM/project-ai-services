@@ -15,7 +15,11 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/root"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/spyre"
 	"github.com/spf13/cobra"
-	"k8s.io/klog/v2"
+)
+
+const (
+	podmanSocketWaitDuration = 2 * time.Second
+	contextTimeout           = 30 * time.Second
 )
 
 // validateCmd represents the validate subcommand of bootstrap
@@ -37,9 +41,11 @@ func configureCmd() *cobra.Command {
 			}
 
 			logger.Infof("Bootstrap configuration completed successfully.")
+
 			return nil
 		},
 	}
+
 	return cmd
 }
 
@@ -59,6 +65,7 @@ func RunConfigureCmd() error {
 		// setup podman socket and enable service
 		if err := installPodman(); err != nil {
 			s.Fail("failed to install podman")
+
 			return err
 		}
 		s.Stop("podman installed successfully")
@@ -73,6 +80,7 @@ func RunConfigureCmd() error {
 		s.UpdateMessage("Configuring podman")
 		if err := setupPodman(); err != nil {
 			s.Fail("failed to configure podman")
+
 			return err
 		}
 		s.Stop("podman configured successfully")
@@ -85,6 +93,7 @@ func RunConfigureCmd() error {
 	// 2. Spyre cards – run servicereport tool to validate and repair spyre configurations
 	if err := runServiceReport(); err != nil {
 		s.Fail("failed to configure spyre card")
+
 		return err
 	}
 	s.Stop("Spyre cards configuration validated successfully.")
@@ -115,7 +124,7 @@ func runServiceReport() error {
 	if err != nil {
 		return fmt.Errorf("❌ failed to load vfio kernel modules for spyre %w", err)
 	}
-	logger.Infoln("VFIO kernel modules loaded on the host", 2)
+	logger.Infoln("VFIO kernel modules loaded on the host", logger.VerbosityLevelDebug)
 
 	if err := helpers.RunServiceReportContainer("servicereport -r -p spyre", "configure"); err != nil {
 		return err
@@ -155,7 +164,7 @@ func runServiceReport() error {
 		if err != nil {
 			return fmt.Errorf("❌ failed to reload vfio kernel modules for spyre %w", err)
 		}
-		logger.Infoln("VFIO kernel modules reloaded on the host", 2)
+		logger.Infoln("VFIO kernel modules reloaded on the host", logger.VerbosityLevelDebug)
 	}
 
 	return nil
@@ -188,11 +197,11 @@ func installPodman() error {
 	if err != nil {
 		return fmt.Errorf("failed to install podman: %v, output: %s", err, string(out))
 	}
+
 	return nil
 }
 
 func setupPodman() error {
-
 	// start podman socket
 	if err := systemctl("start", "podman.socket"); err != nil {
 		return fmt.Errorf("failed to start podman socket: %w", err)
@@ -202,19 +211,20 @@ func setupPodman() error {
 		return fmt.Errorf("failed to enable podman socket: %w", err)
 	}
 
-	klog.V(2).Info("Waiting for podman socket to be ready...")
-	time.Sleep(2 * time.Second) // wait for socket to be ready
+	logger.Infoln("Waiting for podman socket to be ready...", logger.VerbosityLevelDebug)
+	time.Sleep(podmanSocketWaitDuration) // wait for socket to be ready
 
 	if err := validators.PodmanHealthCheck(); err != nil {
 		return fmt.Errorf("podman health check failed after configuration: %w", err)
 	}
 
 	logger.Infof("Podman configured successfully.")
+
 	return nil
 }
 
 func systemctl(action, unit string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "systemctl", action, unit)
@@ -222,5 +232,6 @@ func systemctl(action, unit string) error {
 	if err != nil {
 		return fmt.Errorf("failed to %s %s: %v, output: %s", action, unit, err, string(out))
 	}
+
 	return nil
 }
