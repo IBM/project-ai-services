@@ -114,24 +114,16 @@ func runPsCmd(runtimeClient *podman.PodmanClient, appName string) error {
 		if isOutputWide() {
 			podPorts, err := getPodPorts(pInfo)
 			if err != nil {
-				// if failed to fetch ports for pod, then set podPorts to none
-				podPorts = []string{"none"}
+				podPorts = []string{"none"} // set podPorts to none, if failed to fetch ports for a pod
 			}
 			containerNames := getContainerNames(runtimeClient, pod)
 			p.AppendRow(
-				fetchPodNameFromLabels(pod.Labels),
-				pod.Id[:12],
-				pod.Name,
-				getPodStatus(runtimeClient, pInfo),
-				utils.TimeAgo(pInfo.Created),
-				strings.Join(podPorts, ", "),
-				strings.Join(containerNames, ", "),
+				fetchPodNameFromLabels(pod.Labels), pod.Id[:12], pod.Name, getPodStatus(runtimeClient, pInfo), utils.TimeAgo(pInfo.Created),
+				strings.Join(podPorts, ", "), strings.Join(containerNames, ", "),
 			)
 		} else {
 			p.AppendRow(
-				fetchPodNameFromLabels(pod.Labels),
-				pod.Name,
-				getPodStatus(runtimeClient, pInfo),
+				fetchPodNameFromLabels(pod.Labels), pod.Name, getPodStatus(runtimeClient, pInfo),
 			)
 		}
 	}
