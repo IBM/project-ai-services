@@ -2,7 +2,7 @@ ui:
   # @description Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/rag-ui:v0.0.14
+  image: icr.io/ai-services-cicd/rag-ui:v0.0.15
 
 backend:
   # @description Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.
