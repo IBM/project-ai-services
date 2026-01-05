@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Validation check types
+// Validation check types.
 const (
 	CheckRoot   = "root"
 	CheckRHEL   = "rhel"
@@ -25,7 +25,7 @@ const (
 
 const troubleshootingGuide = "https://www.ibm.com/docs/aiservices?topic=services-troubleshooting"
 
-// validateCmd represents the validate subcommand of bootstrap
+// validateCmd represents the validate subcommand of bootstrap.
 func validateCmd() *cobra.Command {
 	var skipChecks []string
 
@@ -64,7 +64,6 @@ func validateCmd() *cobra.Command {
 }
 
 func longDescription() string {
-
 	return `Validate that all prerequisites and configurations are correct for bootstrapping.
 
 	This command performs comprehensive validation checks including:
@@ -94,7 +93,6 @@ func longDescription() string {
 }
 
 func example() string {
-
 	return `  # Run all validation checks
   ai-services bootstrap validate
 

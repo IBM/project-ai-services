@@ -57,7 +57,7 @@ func init() {
 	startCmd.Flags().BoolVar(&skipLogs, "skip-logs", false, "Skip displaying logs after starting the pod")
 }
 
-// startApplication starts all pods associated with the given application name
+// startApplication starts all pods associated with the given application name.
 func startApplication(client *podman.PodmanClient, appName string, podNames []string) error {
 	pods, err := fetchPodsFromRuntime(client, appName)
 	if err != nil {
@@ -224,7 +224,6 @@ func printPodLogs(client *podman.PodmanClient, podsToStart []*types.ListPodsRepo
 	logger.Infof("\n--- Following logs for pod: %s ---\n", podsToStart[0].Name)
 
 	if err := client.PodLogs(podsToStart[0].Name); err != nil {
-
 		// Check if error is due to interrupt signal (Ctrl+C)
 		if strings.Contains(err.Error(), "signal: interrupt") || strings.Contains(err.Error(), "context canceled") {
 			logger.Infoln("Log following stopped.")

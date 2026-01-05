@@ -38,7 +38,7 @@ var (
 	retryInterval                  = 5 * time.Second
 )
 
-// Variables for flags placeholder
+// Variables for flags placeholder.
 var (
 	templateName      string
 	skipModelDownload bool
@@ -48,6 +48,10 @@ var (
 	argParams         map[string]string
 	valuesFiles       []string
 	values            map[string]any
+)
+
+const (
+	containerCreationTimeout = 10 * time.Minute
 )
 
 var createCmd = &cobra.Command{
@@ -482,7 +486,6 @@ func verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *t
 
 func executePodTemplateLayer(runtime runtime.Runtime, tp templates.Template, tmpls map[string]*template.Template,
 	globalParams map[string]any, pciAddresses []string, existingPods []string, podTemplateName, appName string) error {
-
 	logger.Infof("'%s': Processing template...\n", podTemplateName)
 
 	// Shallow Copy globalParams Map
@@ -583,7 +586,6 @@ func doContainersCreationCheck(runtime runtime.Runtime, podSpec *models.PodSpec,
 	logger.Infof("'%s', '%s': Performing Containers Creation check for pod...\n", podTemplateName, podName)
 
 	expectedContainerCount := len(specs.FetchContainerNames(*podSpec))
-	containerCreationTimeout := 10 * time.Minute
 
 	logger.Infof("'%s', '%s': Waiting for Containers Creation... Timeout set: %s\n", podTemplateName, podName, containerCreationTimeout)
 	// wait for all containers for a given pod are created
@@ -611,7 +613,7 @@ func doContainerReadinessCheck(runtime runtime.Runtime, podTemplateName, contain
 	}
 
 	if startPeriod == -1 {
-		logger.Infof("No container health check is set for '%s'. Hence skipping readiness check\n", cInfo.Name, 2)
+		logger.Infof("No container health check is set for '%s'. Hence skipping readiness check\n", cInfo.Name, logger.VerbosityLevelDebug)
 
 		return nil
 	}
@@ -636,7 +638,7 @@ func deployPodAndReadinessCheck(runtime runtime.Runtime, podSpec *models.PodSpec
 		return fmt.Errorf("failed pod creation: %w", err)
 	}
 
-	logger.Infof("'%s': Successfully ran podman kube play\n", podTemplateName, 2)
+	logger.Infof("'%s': Successfully ran podman kube play\n", podTemplateName, logger.VerbosityLevelDebug)
 
 	// ---- Pod Readiness Checks ----
 	/*
@@ -701,7 +703,7 @@ func calculateReqSpyreCards(client *podman.PodmanClient, tp templates.Template, 
 		}
 
 		if exists {
-			logger.Infof("Pod %s already exists, skipping spyre cards calculation", podSpec.Name, 2)
+			logger.Infof("Pod %s already exists, skipping spyre cards calculation", podSpec.Name, logger.VerbosityLevelDebug)
 
 			continue
 		}

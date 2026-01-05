@@ -8,7 +8,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-// ApplicationCmd represents the application command
+// ApplicationCmd represents the application command.
 var ApplicationCmd = &cobra.Command{
 	Use:   "application",
 	Short: "Deploy and monitor the applications",

@@ -17,6 +17,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
+const (
+	inspectPollInterval = 10 * time.Second
+)
+
 func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string, timeout time.Duration) error {
 	var containerStatus *define.InspectContainerData
 	var err error
@@ -46,11 +50,11 @@ func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string
 		}
 
 		// every 10 seconds inspect the container
-		time.Sleep(10 * time.Second)
+		time.Sleep(inspectPollInterval)
 	}
 }
 
-// WaitForContainersCreation waits until all the containers in the provided podID are created within the specified timeout
+// WaitForContainersCreation waits until all the containers in the provided podID are created within the specified timeout.
 func WaitForContainersCreation(runtime runtime.Runtime, podID string, expectedContainerCount int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
@@ -73,7 +77,7 @@ func WaitForContainersCreation(runtime runtime.Runtime, podID string, expectedCo
 		}
 
 		// every 10 seconds inspect the pod
-		time.Sleep(10 * time.Second)
+		time.Sleep(inspectPollInterval)
 	}
 }
 
@@ -219,7 +223,7 @@ func ParseSkipChecks(skipChecks []string) map[string]bool {
 	return skipMap
 }
 
-// CheckExistingPodsForApplication checks if there are pods already existing for the given application name
+// CheckExistingPodsForApplication checks if there are pods already existing for the given application name.
 func CheckExistingPodsForApplication(runtime runtime.Runtime, appName string) ([]string, error) {
 	//nolint:prealloc // as capacity is unknown and depends on runtime.ListPods response
 	var podsToSkip []string

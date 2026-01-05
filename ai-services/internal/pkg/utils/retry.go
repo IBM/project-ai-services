@@ -7,12 +7,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// BackoffFunc type definition
+// BackoffFunc type definition.
 type BackoffFunc func(currentDelay time.Duration) time.Duration
 
 // Retry -> retries based on the retry attempts and initialDelay time set on failure.
-// Does exponentialBackOff based on the provided BackoffFunc
-// Set backoff func to nil, if exponentialBackoff is not required
+// Does exponentialBackOff based on the provided BackoffFunc.
+// Set backoff func to nil, if exponentialBackoff is not required.
 func Retry(
 	attempts int,
 	initialDelay time.Duration,
@@ -41,7 +41,7 @@ func Retry(
 		}
 
 		// Sleep till delay
-		logger.Infof("[Retry] Sleeping %v before retrying...\n", delay, 2)
+		logger.Infof("[Retry] Sleeping %v before retrying...\n", delay, logger.VerbosityLevelDebug)
 		time.Sleep(delay)
 
 		// Apply backoff if provided

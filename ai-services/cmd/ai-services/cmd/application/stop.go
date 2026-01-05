@@ -52,7 +52,7 @@ func init() {
 	stopCmd.Flags().StringSlice("pod", []string{}, "Specific pod name(s) to stop (optional)\nCan be specified multiple times: --pod pod1 --pod pod2\nOr comma-separated: --pod pod1,pod2")
 }
 
-// stopApplication stops all pods associated with the given application name
+// stopApplication stops all pods associated with the given application name.
 func stopApplication(client *podman.PodmanClient, appName string, podNames []string) error {
 	resp, err := client.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
