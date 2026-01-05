@@ -49,4 +49,4 @@ jobs:
     uses: ./.github/workflows/scanner.yml
     with:
       skip-cves-scan: true
-      is-image-scan: false
+      skip-image-license-scan: true
