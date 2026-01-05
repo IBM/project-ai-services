@@ -19,20 +19,11 @@ on:
         required: false
         type: boolean
         default: true
-    secrets:
-      ICR_USERNAME:
-        required: false
-      ICR_APIKEY:
-        required: false
       skip-cves-scan:
         required: false
         type: boolean
         default: false
       skip-license-scan:
-        required: false
-        type: boolean
-        default: false
-      skip-image-license-scan:
         required: false
         type: boolean
         default: false
@@ -87,7 +78,6 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: 1
           ignore-unfixed: ${{ inputs.ignore-unfixed }}
-          ignore-unfixed: true
 
   license:
     runs-on: ubuntu-24.04-ppc64le
@@ -97,13 +87,13 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Build image
-        if: ${{ inputs['skip-image-license-scan'] }}
+        if: ${{ !inputs.skip-image-build }}
         working-directory: ${{ inputs.path }}
         run: |
           make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
 
       - name: Save image in file
-        if: ${{ inputs['skip-image-license-scan'] }}
+        if: ${{ !inputs.skip-image-build }}
         run: |
           IMAGE_NAME=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}" | head -n 1)
           podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
@@ -111,8 +101,8 @@ jobs:
       - name: Generate trivy sbom scan report
         uses: aquasecurity/trivy-action@0.33.1
         with:
-          scan-type: ${{ inputs['skip-image-license-scan'] && 'image' || 'fs' }}
-          input: ${{ inputs['skip-image-license-scan'] && env.IMAGE_FILE_NAME || './ai-services' }}
+          scan-type: ${{ !inputs['skip-image-build'] && 'image' || 'fs' }}
+          input: ${{ !inputs['skip-image-build'] && env.IMAGE_FILE_NAME || './ai-services' }}
           format: cyclonedx
           output: ${{ env.TRIVY_SBOM_FILE }}
 
@@ -134,6 +124,6 @@ jobs:
           path: |
             ${{ env.TRIVY_SBOM_FILE }}
             ${{ env.PARLAY_SBOM_FILE }}
-            
+
       - name: Licenses scan
         run: python .github/scripts/license_scan.py ${{ env.TRIVY_SBOM_FILE }} ${{ env.PARLAY_SBOM_FILE }}

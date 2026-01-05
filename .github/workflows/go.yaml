@@ -13,7 +13,6 @@ on:
     branches:
       - main
 
-
 jobs:
   build:
     name: Build
@@ -49,4 +48,4 @@ jobs:
     uses: ./.github/workflows/scanner.yml
     with:
       skip-cves-scan: true
-      skip-image-license-scan: true
+      skip-image-build: true
