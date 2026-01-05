@@ -2,8 +2,3 @@ version: "2"
 run:
   build-tags:
     - exclude_graphdriver_btrfs containers_image_openpgp remote
-linters:
-  enable:
-    - misspell
-    - nlreturn
-    - mnd
