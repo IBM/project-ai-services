@@ -54,7 +54,7 @@ func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string
 	}
 }
 
-// WaitForContainersCreation waits until all the containers in the provided podID are created within the specified timeout
+// WaitForContainersCreation waits until all the containers in the provided podID are created within the specified timeout.
 func WaitForContainersCreation(runtime runtime.Runtime, podID string, expectedContainerCount int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
@@ -223,7 +223,7 @@ func ParseSkipChecks(skipChecks []string) map[string]bool {
 	return skipMap
 }
 
-// CheckExistingPodsForApplication checks if there are pods already existing for the given application name
+// CheckExistingPodsForApplication checks if there are pods already existing for the given application name.
 func CheckExistingPodsForApplication(runtime runtime.Runtime, appName string) ([]string, error) {
 	//nolint:prealloc // as capacity is unknown and depends on runtime.ListPods response
 	var podsToSkip []string

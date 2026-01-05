@@ -15,12 +15,12 @@ const (
 	maxKeyValueParts = 2
 )
 
-// BoolPtr -> converts to bool ptr
+// BoolPtr -> converts to bool ptr.
 func BoolPtr(v bool) *bool {
 	return &v
 }
 
-// FlattenArray takes a 2D slice and returns a 1D slice with all values
+// FlattenArray takes a 2D slice and returns a 1D slice with all values.
 func FlattenArray[T comparable](arr [][]T) []T {
 	flatArr := []T{}
 
@@ -31,7 +31,7 @@ func FlattenArray[T comparable](arr [][]T) []T {
 	return flatArr
 }
 
-// ExtractMapKeys returns a slice of map keys
+// ExtractMapKeys returns a slice of map keys.
 func ExtractMapKeys[K comparable, V any](m map[K]V) []K {
 	keys := make([]K, 0, len(m))
 	for k := range m {
@@ -41,8 +41,8 @@ func ExtractMapKeys[K comparable, V any](m map[K]V) []K {
 	return keys
 }
 
-// CopyMap - does a shallow copy of input map
-// Note -> this does a shallow copy works for only primitive types
+// CopyMap - does a shallow copy of input map.
+// Note -> this does a shallow copy works for only primitive types.
 func CopyMap[K comparable, V any](src map[K]V) map[K]V {
 	dst := make(map[K]V, len(src))
 	maps.Copy(dst, src)
@@ -127,7 +127,7 @@ func GetHostIP() (string, error) {
 	return "", nil
 }
 
-// Checks if a yaml.Node is marked as hidden via @hidden in the head comment
+// Checks if a yaml.Node is marked as hidden via @hidden in the head comment.
 func isHidden(n *yaml.Node) bool {
 	if n == nil {
 		return false
@@ -136,7 +136,7 @@ func isHidden(n *yaml.Node) bool {
 	return strings.Contains(n.HeadComment, "@hidden")
 }
 
-// Retrieves the description from a yaml.Node's head comment marked with @description
+// Retrieves the description from a yaml.Node's head comment marked with @description.
 func getDescription(n *yaml.Node) string {
 	if n == nil {
 		return ""

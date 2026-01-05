@@ -22,7 +22,7 @@ const (
 	contextTimeout           = 30 * time.Second
 )
 
-// validateCmd represents the validate subcommand of bootstrap
+// configureCmd represents the validate subcommand of bootstrap.
 func configureCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "configure",
