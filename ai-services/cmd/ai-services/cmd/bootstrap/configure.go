@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
@@ -19,8 +18,8 @@ import (
 )
 
 const (
-	sleepDuration  = 2 * time.Second
-	contextTimeout = 30 * time.Second
+	podmanSocketWaitDuration = 2 * time.Second
+	contextTimeout           = 30 * time.Second
 )
 
 // validateCmd represents the validate subcommand of bootstrap
@@ -125,7 +124,7 @@ func runServiceReport() error {
 	if err != nil {
 		return fmt.Errorf("❌ failed to load vfio kernel modules for spyre %w", err)
 	}
-	logger.Infoln("VFIO kernel modules loaded on the host", constants.VerbosityLevelDebug)
+	logger.Infoln("VFIO kernel modules loaded on the host", logger.VerbosityLevelDebug)
 
 	if err := helpers.RunServiceReportContainer("servicereport -r -p spyre", "configure"); err != nil {
 		return err
@@ -165,7 +164,7 @@ func runServiceReport() error {
 		if err != nil {
 			return fmt.Errorf("❌ failed to reload vfio kernel modules for spyre %w", err)
 		}
-		logger.Infoln("VFIO kernel modules reloaded on the host", constants.VerbosityLevelDebug)
+		logger.Infoln("VFIO kernel modules reloaded on the host", logger.VerbosityLevelDebug)
 	}
 
 	return nil
@@ -212,8 +211,8 @@ func setupPodman() error {
 		return fmt.Errorf("failed to enable podman socket: %w", err)
 	}
 
-	logger.Infoln("Waiting for podman socket to be ready...", constants.VerbosityLevelDebug)
-	time.Sleep(sleepDuration) // wait for socket to be ready
+	logger.Infoln("Waiting for podman socket to be ready...", logger.VerbosityLevelDebug)
+	time.Sleep(podmanSocketWaitDuration) // wait for socket to be ready
 
 	if err := validators.PodmanHealthCheck(); err != nil {
 		return fmt.Errorf("podman health check failed after configuration: %w", err)

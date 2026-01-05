@@ -21,7 +21,7 @@ func (r *PlatformRule) Name() string {
 }
 
 func (r *PlatformRule) Verify() error {
-	logger.Infoln("Validating operating system...", constants.VerbosityLevelDebug)
+	logger.Infoln("Validating operating system...", logger.VerbosityLevelDebug)
 
 	data, err := os.ReadFile("/etc/os-release")
 	if err != nil {

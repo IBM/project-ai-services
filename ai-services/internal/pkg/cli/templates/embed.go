@@ -18,6 +18,11 @@ import (
 )
 
 const (
+	/*
+		Templates Pattern :- "assets/applications/<AppName>/templates/*.yaml.tmpl"
+		After splitting, the application name is located at third part.
+		So we ensure the path contains enough segments which is appName index + 1
+	*/
 	minPathPartsForAppName = 4
 )
 

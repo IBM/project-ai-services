@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	width = 2
+	columnPadding = 2
 )
 
 type Printer struct {
@@ -96,7 +96,7 @@ func (p *Printer) CloseTableWriter() {
 			}
 		}
 
-		cols[colIdx].Width = maxLen + width
+		cols[colIdx].Width = maxLen + columnPadding
 	}
 
 	p.model.SetColumns(cols)

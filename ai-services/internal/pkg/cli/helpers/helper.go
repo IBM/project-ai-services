@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	sleepDuration = 10 * time.Second
+	inspectPollInterval = 10 * time.Second
 )
 
 func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string, timeout time.Duration) error {
@@ -50,7 +50,7 @@ func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string
 		}
 
 		// every 10 seconds inspect the container
-		time.Sleep(sleepDuration)
+		time.Sleep(inspectPollInterval)
 	}
 }
 
@@ -77,7 +77,7 @@ func WaitForContainersCreation(runtime runtime.Runtime, podID string, expectedCo
 		}
 
 		// every 10 seconds inspect the pod
-		time.Sleep(sleepDuration)
+		time.Sleep(inspectPollInterval)
 	}
 }
 

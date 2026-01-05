@@ -20,7 +20,7 @@ func (r *SpyreRule) Name() string {
 }
 
 func (r *SpyreRule) Verify() error {
-	logger.Infoln("Validating Spyre attachment...", constants.VerbosityLevelDebug)
+	logger.Infoln("Validating Spyre attachment...", logger.VerbosityLevelDebug)
 	out, err := exec.Command("lspci").Output()
 	if err != nil {
 		return fmt.Errorf("failed to execute lspci command: %w", err)

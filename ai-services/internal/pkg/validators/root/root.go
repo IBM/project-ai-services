@@ -21,7 +21,7 @@ func (r *RootRule) Name() string {
 func (r *RootRule) Verify() error {
 	euid := os.Geteuid()
 
-	logger.Infoln("Checking root privileges", constants.VerbosityLevelDebug)
+	logger.Infoln("Checking root privileges", logger.VerbosityLevelDebug)
 
 	if euid != 0 {
 		return fmt.Errorf("current user is not root (EUID: %d)", euid)

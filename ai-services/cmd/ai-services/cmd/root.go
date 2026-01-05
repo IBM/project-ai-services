@@ -9,7 +9,6 @@ import (
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/application"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -21,7 +20,7 @@ var RootCmd = &cobra.Command{
 	Version: version.GetVersion(),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Ensures logs flush after each command run
-		logger.Infoln("Logger initialized (PersistentPreRun)", constants.VerbosityLevelDebug)
+		logger.Infoln("Logger initialized (PersistentPreRun)", logger.VerbosityLevelDebug)
 	},
 }
 

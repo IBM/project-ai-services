@@ -614,7 +614,7 @@ func doContainerReadinessCheck(runtime runtime.Runtime, podTemplateName, contain
 	}
 
 	if startPeriod == -1 {
-		logger.Infof("No container health check is set for '%s'. Hence skipping readiness check\n", cInfo.Name, constants.VerbosityLevelDebug)
+		logger.Infof("No container health check is set for '%s'. Hence skipping readiness check\n", cInfo.Name, logger.VerbosityLevelDebug)
 
 		return nil
 	}
@@ -639,7 +639,7 @@ func deployPodAndReadinessCheck(runtime runtime.Runtime, podSpec *models.PodSpec
 		return fmt.Errorf("failed pod creation: %w", err)
 	}
 
-	logger.Infof("'%s': Successfully ran podman kube play\n", podTemplateName, constants.VerbosityLevelDebug)
+	logger.Infof("'%s': Successfully ran podman kube play\n", podTemplateName, logger.VerbosityLevelDebug)
 
 	// ---- Pod Readiness Checks ----
 	/*
@@ -704,7 +704,7 @@ func calculateReqSpyreCards(client *podman.PodmanClient, tp templates.Template, 
 		}
 
 		if exists {
-			logger.Infof("Pod %s already exists, skipping spyre cards calculation", podSpec.Name, constants.VerbosityLevelDebug)
+			logger.Infof("Pod %s already exists, skipping spyre cards calculation", podSpec.Name, logger.VerbosityLevelDebug)
 
 			continue
 		}
