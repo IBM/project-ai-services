@@ -179,10 +179,10 @@ def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_wor
         if e.response is not None:
             error_details += f", Response Text: {e.response.text}"
         logger.error(f"Error calling vLLM API: {error_details}")
-        return {"error": error_details}, 0.
+        return {"error": error_details}
     except Exception as e:
         logger.error(f"Error calling vLLM API: {e}")
-        return {"error": str(e)}, 0.
+        return {"error": str(e)}
     return response.json()
 
 def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
@@ -203,10 +203,10 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
         if e.response is not None:
             error_details += f", Response Text: {e.response.text}"
         logger.error(f"Error calling vLLM stream API: {error_details}")
-        return {"error": error_details}, 0.
+        return {"error": error_details}
     except Exception as e:
         logger.error(f"Error calling vLLM stream API: {e}")
-        return {"error": str(e)}, 0.
+        return {"error": str(e)}
 
 def tokenize_with_llm(prompt, emb_endpoint):
     payload = {
