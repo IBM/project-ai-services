@@ -186,13 +186,3 @@ func extractHostIP(output string) (string, error) {
 	}
 	return match[1], nil
 }
-
-// StartApp starts an application
-func StartApp(appName string) error {
-	fmt.Printf("[CLI] Running: ai-services start %s\n", appName)
-	output, err := common.RunCommand("ai-services", "start", appName)
-	if err != nil {
-		return fmt.Errorf("start-app failed: %v\n%s", err, output)
-	}
-	return nil
-}
