@@ -598,7 +598,7 @@ func doContainersCreationCheck(runtime runtime.Runtime, podSpec *models.PodSpec,
 	return nil
 }
 
-func doContainerReadinessCheck(runtime runtime.Runtime, podTemplateName, containerID string) error {
+func doContainerReadinessCheck(runtime runtime.Runtime, podTemplateName, podName, containerID string) error {
 	cInfo, err := runtime.InspectContainer(containerID)
 	if err != nil {
 		return fmt.Errorf("failed to do container inspect for containerID: '%s' with error: %w", containerID, err)
@@ -663,7 +663,7 @@ func deployPodAndReadinessCheck(runtime runtime.Runtime, podSpec *models.PodSpec
 
 		// Step2: ---- Containers Readiness Check ----
 		for _, container := range pInfo.Containers {
-			if err := doContainerReadinessCheck(runtime, podTemplateName, container.ID); err != nil {
+			if err := doContainerReadinessCheck(runtime, podTemplateName, pInfo.Name, container.ID); err != nil {
 				return err
 			}
 			logger.Infoln("-------")
