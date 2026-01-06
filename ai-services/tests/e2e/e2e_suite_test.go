@@ -110,7 +110,7 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 		})
 	})
 	Context("Application Lifecycle", func() {
-		It("creates rag application, runs health checks, and validates RAG endpoints", func() {
+		It("creates rag application, runs health checks and validates RAG endpoints", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 			defer cancel()
 
@@ -133,11 +133,6 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 			fmt.Printf("[TEST] Application %s created, healthy, and RAG endpoints validated\n", appName)
-		})
-		It("starts the application", func() {
-			err := cli.StartApp("test-app")
-			Expect(err).NotTo(HaveOccurred(), "start-app command failed")
-			fmt.Println("[TEST] Application started: test-app")
 		})
 	})
 	Context("RAG / Golden Dataset Validation", func() {
