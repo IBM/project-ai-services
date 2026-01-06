@@ -12,9 +12,17 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
+const (
+	nextStepsMDFile = "next.md"
+	nextStepsTitle  = "Next Steps"
+
+	infoMDFile = "info.md"
+	infoTitle  = "Info"
+)
+
 func PrintNextSteps(runtime runtime.Runtime, app, appTemplate string) error {
 	params := map[string]string{"AppName": app}
-	if err := renderStepsMarkdown(runtime, appTemplate, params, "next.md", "Next Steps"); err != nil {
+	if err := renderStepsMarkdown(runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
 		logger.Infof("Unable to load steps: %v\n", err)
 
 		return nil
@@ -25,7 +33,7 @@ func PrintNextSteps(runtime runtime.Runtime, app, appTemplate string) error {
 
 func PrintInfo(runtime runtime.Runtime, app, appTemplate string) error {
 	params := map[string]string{"AppName": app}
-	if err := renderStepsMarkdown(runtime, appTemplate, params, "info.md", "Info"); err != nil {
+	if err := renderStepsMarkdown(runtime, appTemplate, params, infoMDFile, infoTitle); err != nil {
 		logger.Infof("Unable to load steps: %v\n", err)
 
 		return nil
