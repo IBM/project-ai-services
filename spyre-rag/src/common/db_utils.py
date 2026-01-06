@@ -17,7 +17,6 @@ from common.misc_utils import LOCAL_CACHE_DIR, get_logger
 
 logger = get_logger("Milvus")
 
-
 def generate_chunk_id(filename: str, page_content: str, index: int) -> int:
     """
     Generate a unique, deterministic chunk ID based on filename, content, and index.

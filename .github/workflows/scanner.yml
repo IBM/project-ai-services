@@ -115,7 +115,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.33.1
         with:
           scan-type: image
-          input: env.IMAGE_FILE_NAME
+          input: ${{ env.IMAGE_FILE_NAME }}
           format: cyclonedx
           output: ${{ env.TRIVY_SBOM_FILE }}
       
