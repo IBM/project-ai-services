@@ -94,6 +94,13 @@ async function customSendMessage(request, _options, instance) {
     stream: true,
   };
 
+  let isCanceled = false;
+  const abortHandler = () => {
+    isCanceled = true;
+  };
+  // Listen to abort signal (handles stop button, restart/clear, and timeout)
+  _options.signal?.addEventListener('abort', abortHandler);
+
   try {
     instance.updateIsMessageLoadingCounter('increase');
 
@@ -111,6 +118,8 @@ async function customSendMessage(request, _options, instance) {
     let fullText = ''; // to accumulate final message
 
     for await (const chunk of stream) {
+      if (isCanceled) break;
+
       // to extract the content from the parsed JSON chunk
       const textChunk = chunk.choices[0]?.delta?.content || '';
 
@@ -226,6 +235,8 @@ async function customSendMessage(request, _options, instance) {
         },
       },
     });
+  } finally {
+    _options.signal?.removeEventListener('abort', abortHandler);
   }
 }
 

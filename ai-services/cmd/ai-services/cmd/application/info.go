@@ -3,7 +3,6 @@ package application
 import (
 	"fmt"
 
-	"github.com/containers/podman/v5/pkg/domain/entities/types"
 	"github.com/spf13/cobra"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -49,15 +48,9 @@ func runInfoCommamd(client *podman.PodmanClient, appName string) error {
 		listFilters["label"] = []string{fmt.Sprintf("ai-services.io/application=%s", appName)}
 	}
 
-	resp, err := client.ListPods(listFilters)
+	pods, err := client.ListPods(listFilters)
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
-	}
-
-	// TODO: Avoid doing the type assertion and importing types package from podman
-	var pods []*types.ListPodsReport
-	if val, ok := resp.([]*types.ListPodsReport); ok {
-		pods = val
 	}
 
 	// If there exists no pod for given application name, then fail saying application for given application name doesnt exist

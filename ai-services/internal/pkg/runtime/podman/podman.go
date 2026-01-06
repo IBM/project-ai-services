@@ -18,6 +18,7 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/pods"
 	"github.com/containers/podman/v5/pkg/domain/entities/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
@@ -62,7 +63,7 @@ func (pc *PodmanClient) PullImage(image string, options *images.PullOptions) err
 	return nil
 }
 
-func (pc *PodmanClient) ListPods(filters map[string][]string) (any, error) {
+func (pc *PodmanClient) ListPods(filters map[string][]string) ([]runtime.Pod, error) {
 	var listOpts pods.ListOptions
 
 	if len(filters) >= 1 {
@@ -74,7 +75,7 @@ func (pc *PodmanClient) ListPods(filters map[string][]string) (any, error) {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
 
-	return podList, nil
+	return toPodsList(podList), nil
 }
 
 func (pc *PodmanClient) CreatePod(body io.Reader) (*types.KubePlayReport, error) {
@@ -147,6 +148,7 @@ func (pc *PodmanClient) StopPod(id string) error {
 }
 
 func (pc *PodmanClient) StartPod(id string) error {
+	//nolint:godox
 	// TODO: perform pod start SDK way
 	cmdExec := exec.Command("podman", "pod", "start", id)
 	cmdExec.Stdout = os.Stdout
@@ -177,6 +179,7 @@ func (pc *PodmanClient) PodLogs(podNameOrID string) error {
 	ctx, cancel := context.WithCancel(pc.Context)
 	defer cancel()
 
+	//nolint:godox
 	// TODO: fetch pods logs via sdk way
 	cmdExec := exec.CommandContext(pc.Context, "podman", "pod", "logs", "-f", podNameOrID)
 	cmdExec.Stdout = os.Stdout

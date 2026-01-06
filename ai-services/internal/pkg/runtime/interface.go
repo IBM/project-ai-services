@@ -11,7 +11,7 @@ import (
 type Runtime interface {
 	ListImages() ([]*types.ImageSummary, error)
 	PullImage(image string, options *images.PullOptions) error
-	ListPods(filters map[string][]string) (any, error)
+	ListPods(filters map[string][]string) ([]Pod, error)
 	CreatePod(body io.Reader) (*types.KubePlayReport, error)
 	DeletePod(id string, force *bool) error
 	StopPod(id string) error
