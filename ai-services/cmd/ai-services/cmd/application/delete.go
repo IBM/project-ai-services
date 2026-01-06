@@ -56,6 +56,7 @@ Arguments
 
 func init() {
 	deleteCmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "Skip deleting application data (default=false)")
+	deleteCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Automatically accept all confirmation prompts (default=false)")
 }
 
 func deleteApplication(client *podman.PodmanClient, appName string) error {
@@ -85,14 +86,16 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 		logger.Infof("No pods found for application: %s\n", appName)
 	}
 
-	confirmDelete, err := deleteConfirmation(appName, podsExists, appExists)
-	if err != nil {
-		return err
-	}
-	if !confirmDelete {
-		logger.Infoln("Deletion cancelled")
+	if !autoYes {
+		confirmDelete, err := deleteConfirmation(appName, podsExists, appExists)
+		if err != nil {
+			return err
+		}
+		if !confirmDelete {
+			logger.Infoln("Deletion cancelled")
 
-		return nil
+			return nil
+		}
 	}
 
 	logger.Infoln("Proceeding with deletion...")

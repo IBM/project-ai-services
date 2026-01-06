@@ -15,6 +15,7 @@ import (
 var (
 	skipLogs      bool
 	startPodNames []string
+	autoYes       bool
 )
 
 var startCmd = &cobra.Command{
@@ -55,6 +56,7 @@ Note: Logs are streamed only when a single pod is specified, and only after the 
 func init() {
 	startCmd.Flags().StringSlice("pod", []string{}, "Specific pod name(s) to start (optional)\nCan be specified multiple times: --pod pod1 --pod pod2\nOr comma-separated: --pod pod1,pod2")
 	startCmd.Flags().BoolVar(&skipLogs, "skip-logs", false, "Skip displaying logs after starting the pod")
+	startCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Automatically accept all confirmation prompts (default=false)")
 }
 
 // startApplication starts all pods associated with the given application name.
@@ -98,14 +100,16 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 		logger.Infoln("Note: After starting the pod, logs will be displayed. Press Ctrl+C to exit the logs and return to the terminal.")
 	}
 
-	confirmStart, err := utils.ConfirmAction("Are you sure you want to start above pods? ")
-	if err != nil {
-		return fmt.Errorf("failed to take user input: %w", err)
-	}
-	if !confirmStart {
-		logger.Infoln("Skipping starting of pods")
+	if !autoYes {
+		confirmStart, err := utils.ConfirmAction("Are you sure you want to start above pods? ")
+		if err != nil {
+			return fmt.Errorf("failed to take user input: %w", err)
+		}
+		if !confirmStart {
+			logger.Infoln("Skipping starting of pods")
 
-		return nil
+			return nil
+		}
 	}
 
 	logger.Infoln("Proceeding to start pods...")
