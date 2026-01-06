@@ -50,6 +50,7 @@ Arguments
 
 func init() {
 	stopCmd.Flags().StringSlice("pod", []string{}, "Specific pod name(s) to stop (optional)\nCan be specified multiple times: --pod pod1 --pod pod2\nOr comma-separated: --pod pod1,pod2")
+	stopCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Automatically accept all confirmation prompts (default=false)")
 }
 
 // stopApplication stops all pods associated with the given application name.
@@ -91,15 +92,17 @@ func stopApplication(client *podman.PodmanClient, appName string, podNames []str
 		logger.Infof("\t-> %s\n", pod.Name)
 	}
 
-	confirmStop, err := utils.ConfirmAction("Are you sure you want to stop the above pods? ")
-	if err != nil {
-		return fmt.Errorf("failed to take user input: %w", err)
-	}
+	if !autoYes {
+		confirmStop, err := utils.ConfirmAction("Are you sure you want to stop the above pods? ")
+		if err != nil {
+			return fmt.Errorf("failed to take user input: %w", err)
+		}
 
-	if !confirmStop {
-		logger.Infof("Skipping stopping of pods\n")
+		if !confirmStop {
+			logger.Infof("Skipping stopping of pods\n")
 
-		return nil
+			return nil
+		}
 	}
 
 	logger.Infof("Proceeding to stop pods...\n")
