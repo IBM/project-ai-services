@@ -10,7 +10,6 @@ env:
   ICR_REGISTRY: icr.io
   ICR_NAMESPACE: ai-services-cicd
 
-
 jobs:
   build-publish-image:
     name: Build and Publish Image
