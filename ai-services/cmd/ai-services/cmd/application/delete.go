@@ -61,11 +61,7 @@ func init() {
 
 func deleteApplication(client *podman.PodmanClient, appName string) error {
 	appDir := filepath.Join(constants.ApplicationsPath, filepath.Base(appName))
-	appExists := false
-
-	if _, err := os.Stat(appDir); err == nil {
-		appExists = true
-	}
+	appExists := dirExists(appDir)
 
 	pods, err := client.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
@@ -76,15 +72,8 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 
 	podsExists := len(pods) != 0
 
-	if podsExists {
-		logger.Infof("Found %d pods for given applicationName: %s.\n", len(pods), appName)
-		logger.Infoln("Below are the list of pods to be deleted")
-		for _, pod := range pods {
-			logger.Infof("\t-> %s\n", pod.Name)
-		}
-	} else {
-		logger.Infof("No pods found for application: %s\n", appName)
-	}
+	// print relevant app status
+	logAppDeletionStatus(appName, pods, podsExists)
 
 	if !autoYes {
 		confirmDelete, err := deleteConfirmation(appName, podsExists, appExists)
@@ -113,6 +102,18 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 	}
 
 	return nil
+}
+
+func logAppDeletionStatus(appName string, pods []runtime.Pod, podsExists bool) {
+	if podsExists {
+		logger.Infof("Found %d pods for given applicationName: %s.\n", len(pods), appName)
+		logger.Infoln("Below are the list of pods to be deleted")
+		for _, pod := range pods {
+			logger.Infof("\t-> %s\n", pod.Name)
+		}
+	} else {
+		logger.Infof("No pods found for application: %s\n", appName)
+	}
 }
 
 func deleteConfirmation(appName string, podsExists, appExists bool) (bool, error) {
@@ -170,4 +171,10 @@ func appDataDeletion(appDir string) error {
 	logger.Infoln("Application data cleaned up successfully")
 
 	return nil
+}
+
+func dirExists(path string) bool {
+	_, err := os.Stat(path)
+
+	return err == nil
 }

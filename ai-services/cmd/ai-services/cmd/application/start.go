@@ -89,16 +89,16 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 		return nil
 	}
 
-	logger.Infof("Found %d pods for given applicationName: %s.\n", len(podsToStart), appName)
-	logger.Infoln("Below pods will be started:")
-	for _, pod := range podsToStart {
-		logger.Infof("\t-> %s\n", pod.Name)
+	if err := confirmAndStartPods(client, podsToStart); err != nil {
+		return err
 	}
 
-	printLogs := len(podsToStart) == 1 && !skipLogs
-	if printLogs {
-		logger.Infoln("Note: After starting the pod, logs will be displayed. Press Ctrl+C to exit the logs and return to the terminal.")
-	}
+	return nil
+}
+
+func confirmAndStartPods(client *podman.PodmanClient, podsToStart []runtime.Pod) error {
+	logPodsToStart(podsToStart)
+	printLogs := shouldPrintLogs(podsToStart)
 
 	if !autoYes {
 		confirmStart, err := utils.ConfirmAction("Are you sure you want to start above pods? ")
@@ -114,7 +114,6 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 
 	logger.Infoln("Proceeding to start pods...")
 
-	// 3. Proceed to start only the valid pods
 	if err := startPods(client, podsToStart); err != nil {
 		return err
 	}
@@ -126,6 +125,24 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 	}
 
 	return nil
+}
+
+func logPodsToStart(podsToStart []runtime.Pod) {
+	logger.Infof("Found %d pods for given applicationName.\n", len(podsToStart))
+	logger.Infoln("Below pods will be started:")
+	for _, pod := range podsToStart {
+		logger.Infof("\t-> %s\n", pod.Name)
+	}
+}
+
+func shouldPrintLogs(podsToStart []runtime.Pod) bool {
+	if len(podsToStart) == 1 && !skipLogs {
+		logger.Infoln("Note: After starting the pod, logs will be displayed. Press Ctrl+C to exit the logs and return to the terminal.")
+
+		return true
+	}
+
+	return false
 }
 
 func fetchPodsFromRuntime(client *podman.PodmanClient, appName string) ([]runtime.Pod, error) {

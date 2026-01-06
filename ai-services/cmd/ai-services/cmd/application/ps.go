@@ -84,45 +84,56 @@ func runPsCmd(runtimeClient *podman.PodmanClient, appName string) error {
 	p := utils.NewTableWriter()
 	defer p.CloseTableWriter()
 
+	setTableHeaders(p)
+
+	for _, pod := range pods {
+		appendPodRow(runtimeClient, p, pod)
+	}
+
+	return nil
+}
+
+func setTableHeaders(p *utils.Printer) {
 	if isOutputWide() {
 		p.SetHeaders("APPLICATION NAME", "POD ID", "POD NAME", "STATUS", "CREATED", "EXPOSED", "CONTAINERS")
 	} else {
 		p.SetHeaders("APPLICATION NAME", "POD NAME", "STATUS")
 	}
+}
 
-	for _, pod := range pods {
-		if fetchPodNameFromLabels(pod.Labels) == "" {
-			// skip pods which are not linked to ai-services
-			continue
-		}
-
-		// do pod inspect
-		pInfo, err := runtimeClient.InspectPod(pod.ID)
-		if err != nil {
-			// log and skip pod if inspect failed
-			logger.Errorf("Failed to do pod inspect: '%s' with error: %v", pod.ID, err)
-
-			continue
-		}
-
-		if isOutputWide() {
-			podPorts, err := getPodPorts(pInfo)
-			if err != nil {
-				podPorts = []string{"none"} // set podPorts to none, if failed to fetch ports for a pod
-			}
-			containerNames := getContainerNames(runtimeClient, pod)
-			p.AppendRow(
-				fetchPodNameFromLabels(pod.Labels), pod.ID[:12], pod.Name, getPodStatus(runtimeClient, pInfo), utils.TimeAgo(pInfo.Created),
-				strings.Join(podPorts, ", "), strings.Join(containerNames, ", "),
-			)
-		} else {
-			p.AppendRow(
-				fetchPodNameFromLabels(pod.Labels), pod.Name, getPodStatus(runtimeClient, pInfo),
-			)
-		}
+func appendPodRow(runtimeClient *podman.PodmanClient, p *utils.Printer, pod runtime.Pod) {
+	appName := fetchPodNameFromLabels(pod.Labels)
+	if appName == "" {
+		// skip pods which are not linked to ai-services
+		return
 	}
 
-	return nil
+	// do pod inspect
+	pInfo, err := runtimeClient.InspectPod(pod.ID)
+	if err != nil {
+		// log and skip pod if inspect failed
+		logger.Errorf("Failed to do pod inspect: '%s' with error: %v", pod.ID, err)
+
+		return
+	}
+
+	if isOutputWide() {
+		appendWideRow(runtimeClient, p, appName, pod, pInfo)
+	} else {
+		p.AppendRow(appName, pod.Name, getPodStatus(runtimeClient, pInfo))
+	}
+}
+
+func appendWideRow(runtimeClient *podman.PodmanClient, p *utils.Printer, appName string, pod runtime.Pod, pInfo *types.PodInspectReport) {
+	podPorts, err := getPodPorts(pInfo)
+	if err != nil {
+		podPorts = []string{"none"} // set podPorts to none, if failed to fetch ports for a pod
+	}
+	containerNames := getContainerNames(runtimeClient, pod)
+	p.AppendRow(
+		appName, pod.ID[:12], pod.Name, getPodStatus(runtimeClient, pInfo), utils.TimeAgo(pInfo.Created),
+		strings.Join(podPorts, ", "), strings.Join(containerNames, ", "),
+	)
 }
 
 func fetchPodNameFromLabels(labels map[string]string) string {
