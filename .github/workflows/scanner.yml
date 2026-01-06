@@ -140,7 +140,7 @@ jobs:
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.image || ai-services }}-sbom-json-artifact
+          name: ${{ inputs.image || 'ai-services' }}-sbom-json-artifact
           path: |
             ${{ env.TRIVY_SBOM_FILE }}
             ${{ env.PARLAY_SBOM_FILE }}
