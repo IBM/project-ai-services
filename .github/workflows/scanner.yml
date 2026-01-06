@@ -35,8 +35,7 @@ on:
       ICR_USERNAME:
         required: false
       ICR_APIKEY:
-        required: false
-      
+        required: false      
 
 env:
   IMAGE_FILE_NAME: image.tar
