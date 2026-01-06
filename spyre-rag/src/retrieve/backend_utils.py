@@ -2,18 +2,23 @@ from common.misc_utils import get_logger
 from common.settings import get_settings
 from retrieve.reranker_utils import rerank_documents
 from retrieve.retrieval_utils import retrieve_documents
-
+import time
 logger = get_logger("backend_utils")
 settings = get_settings()
 
 def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, reranker_endpoint, top_k, top_r, use_reranker, vectorstore):
     # Perform retrieval
-
+    start_time = time.time()
     retrieved_documents, retrieved_scores = retrieve_documents(question, emb_model, emb_endpoint, max_tokens,
                                                                vectorstore, top_k, 'hybrid')
+    request_time = time.time() - start_time
+    logger.info(f"Perf data: retrieve documents time = {request_time}")
 
     if use_reranker:
+        start_time = time.time()
         reranked = rerank_documents(question, retrieved_documents, reranker_model, reranker_endpoint)
+        request_time = time.time() - start_time
+        logger.info(f"Perf data: rerank documents time = {request_time}")
         ranked_documents = []
         ranked_scores = []
         for i, (doc, score) in enumerate(reranked, 1):

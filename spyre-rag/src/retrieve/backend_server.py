@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, Response, stream_with_context
 import json
 import logging
 import os
+import time
 from threading import BoundedSemaphore
 from functools import wraps
 
@@ -18,7 +19,8 @@ TRUNCATION  = True
 emb_model_dict = {}
 llm_model_dict = {}
 reranker_model_dict = {}
-
+from common.misc_utils import get_logger
+logger = get_logger("backend_server")
 settings = get_settings()
 concurrency_limiter = BoundedSemaphore(settings.max_concurrent_requests)
 
@@ -145,7 +147,10 @@ def chat_completion():
             return jsonify({"error": "Server busy. Try again shortly."}), 429
 
         try:
+            start_time = time.time()
             vllm_stream = query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, stream, dynamic_chunk_truncation=TRUNCATION)
+            request_time = time.time() - start_time
+            logger.info(f"Perf data: rag answer time = {request_time}")
         except Exception as e:
             concurrency_limiter.release()
             return jsonify({"error": repr(e)}), 500

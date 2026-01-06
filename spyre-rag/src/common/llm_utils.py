@@ -1,5 +1,6 @@
 import logging
 import requests
+import time
 from requests.adapters import HTTPAdapter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
@@ -169,12 +170,15 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
     try:
         # Use requests for synchronous HTTP requests
         logger.debug("STREAMING RESPONSE")
+        start_time = time.time()
         with SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=stream) as r:
             for raw_line in r.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
 
                 yield f"{raw_line}\n\n"
+        request_time = time.time() - start_time
+        logger.info(f"Perf data: llm inferencing time = {request_time}")
     except requests.exceptions.RequestException as e:
         error_details = str(e)
         if e.response is not None:
