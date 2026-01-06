@@ -18,7 +18,7 @@ import (
 var (
 	cfg          *config.Config
 	runID        string
-	appName      string // ✅ shared across lifecycle tests
+	appName      string
 	tempDir      string
 	tempBinDir   string
 	aiServiceBin string
@@ -123,11 +123,11 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 				appName,
 				"rag",
 				"ui.port=3000,backend.port=5000",
-				"5000",
+				"5000", // backend port
+				"3000", //ui port
 				cli.CreateOptions{
 					SkipImageDownload: false,
 					SkipModelDownload: false,
-					Verbose:           true,
 				},
 				pods,
 			)
