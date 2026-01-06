@@ -7,6 +7,7 @@ import (
 	"github.com/containers/podman/v5/libpod/define"
 	"github.com/containers/podman/v5/pkg/domain/entities/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/spf13/cobra"
 
@@ -69,16 +70,9 @@ func runPsCmd(runtimeClient *podman.PodmanClient, appName string) error {
 		listFilters["label"] = []string{fmt.Sprintf("ai-services.io/application=%s", appName)}
 	}
 
-	resp, err := runtimeClient.ListPods(listFilters)
+	pods, err := runtimeClient.ListPods(listFilters)
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
-	}
-
-	// TODO: Avoid doing the type assertion and importing types package from podman
-
-	var pods []*types.ListPodsReport
-	if val, ok := resp.([]*types.ListPodsReport); ok {
-		pods = val
 	}
 
 	if len(pods) == 0 && appName != "" {
@@ -103,10 +97,10 @@ func runPsCmd(runtimeClient *podman.PodmanClient, appName string) error {
 		}
 
 		// do pod inspect
-		pInfo, err := runtimeClient.InspectPod(pod.Id)
+		pInfo, err := runtimeClient.InspectPod(pod.ID)
 		if err != nil {
 			// log and skip pod if inspect failed
-			logger.Errorf("Failed to do pod inspect: '%s' with error: %v", pod.Id, err)
+			logger.Errorf("Failed to do pod inspect: '%s' with error: %v", pod.ID, err)
 
 			continue
 		}
@@ -118,7 +112,7 @@ func runPsCmd(runtimeClient *podman.PodmanClient, appName string) error {
 			}
 			containerNames := getContainerNames(runtimeClient, pod)
 			p.AppendRow(
-				fetchPodNameFromLabels(pod.Labels), pod.Id[:12], pod.Name, getPodStatus(runtimeClient, pInfo), utils.TimeAgo(pInfo.Created),
+				fetchPodNameFromLabels(pod.Labels), pod.ID[:12], pod.Name, getPodStatus(runtimeClient, pInfo), utils.TimeAgo(pInfo.Created),
 				strings.Join(podPorts, ", "), strings.Join(containerNames, ", "),
 			)
 		} else {
@@ -153,14 +147,14 @@ func getPodPorts(pInfo *types.PodInspectReport) ([]string, error) {
 	return podPorts, nil
 }
 
-func getContainerNames(runtimeClient *podman.PodmanClient, pod *types.ListPodsReport) []string {
+func getContainerNames(runtimeClient *podman.PodmanClient, pod runtime.Pod) []string {
 	containerNames := []string{}
 
 	for _, container := range pod.Containers {
-		cInfo, err := runtimeClient.InspectContainer(container.Id)
+		cInfo, err := runtimeClient.InspectContainer(container.ID)
 		if err != nil {
 			// skip container if inspect failed
-			logger.Infof("failed to do container inspect for pod: '%s', containerID: '%s' with error: %v", pod.Name, container.Id, err, logger.VerbosityLevelDebug)
+			logger.Infof("failed to do container inspect for pod: '%s', containerID: '%s' with error: %v", pod.Name, container.ID, err, logger.VerbosityLevelDebug)
 
 			continue
 		}

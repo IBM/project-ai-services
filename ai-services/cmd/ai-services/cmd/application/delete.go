@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/containers/podman/v5/pkg/domain/entities/types"
 	"github.com/spf13/cobra"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
@@ -66,18 +66,11 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 		appExists = true
 	}
 
-	resp, err := client.ListPods(map[string][]string{
+	pods, err := client.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
-	}
-
-	// TODO: Avoid doing the type assertion and importing types package from podman
-
-	var pods []*types.ListPodsReport
-	if val, ok := resp.([]*types.ListPodsReport); ok {
-		pods = val
 	}
 
 	podsExists := len(pods) != 0
@@ -141,13 +134,13 @@ func deleteConfirmation(appName string, podsExists, appExists bool) (bool, error
 	return confirmDelete, nil
 }
 
-func podsDeletion(client *podman.PodmanClient, pods []*types.ListPodsReport) error {
+func podsDeletion(client *podman.PodmanClient, pods []runtime.Pod) error {
 	var errors []string
 
 	for _, pod := range pods {
 		logger.Infof("Deleting pod: %s\n", pod.Name)
 
-		if err := client.DeletePod(pod.Id, utils.BoolPtr(true)); err != nil {
+		if err := client.DeletePod(pod.ID, utils.BoolPtr(true)); err != nil {
 			errors = append(errors, fmt.Sprintf("pod %s: %v", pod.Name, err))
 
 			continue

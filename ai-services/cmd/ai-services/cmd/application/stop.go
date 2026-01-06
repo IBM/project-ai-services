@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/containers/podman/v5/pkg/domain/entities/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/spf13/cobra"
@@ -54,16 +54,11 @@ func init() {
 
 // stopApplication stops all pods associated with the given application name.
 func stopApplication(client *podman.PodmanClient, appName string, podNames []string) error {
-	resp, err := client.ListPods(map[string][]string{
+	pods, err := client.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
-	}
-
-	var pods []*types.ListPodsReport
-	if val, ok := resp.([]*types.ListPodsReport); ok {
-		pods = val
 	}
 
 	if len(pods) == 0 {
@@ -113,11 +108,11 @@ func stopApplication(client *podman.PodmanClient, appName string, podNames []str
 	return stopPods(client, podsToStop)
 }
 
-func fetchPodsToStop(pods []*types.ListPodsReport, podNames []string, appName string) ([]*types.ListPodsReport, error) {
-	var podsToStop []*types.ListPodsReport
+func fetchPodsToStop(pods []runtime.Pod, podNames []string, appName string) ([]runtime.Pod, error) {
+	var podsToStop []runtime.Pod
 	if len(podNames) > 0 {
 		// 1. Filter pods
-		podMap := make(map[string]*types.ListPodsReport)
+		podMap := make(map[string]runtime.Pod)
 		for _, pod := range pods {
 			podMap[pod.Name] = pod
 		}
@@ -144,12 +139,12 @@ func fetchPodsToStop(pods []*types.ListPodsReport, podNames []string, appName st
 	return podsToStop, nil
 }
 
-func stopPods(client *podman.PodmanClient, podsToStop []*types.ListPodsReport) error {
+func stopPods(client *podman.PodmanClient, podsToStop []runtime.Pod) error {
 	var errors []string
 	for _, pod := range podsToStop {
 		logger.Infof("Stopping the pod: %s\n", pod.Name)
 
-		if err := client.StopPod(pod.Id); err != nil {
+		if err := client.StopPod(pod.ID); err != nil {
 			errMsg := fmt.Sprintf("%s: %v", pod.Name, err)
 			errors = append(errors, errMsg)
 

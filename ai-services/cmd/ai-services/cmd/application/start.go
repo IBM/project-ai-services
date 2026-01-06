@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/containers/podman/v5/pkg/domain/entities/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/spf13/cobra"
@@ -124,23 +124,18 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 	return nil
 }
 
-func fetchPodsFromRuntime(client *podman.PodmanClient, appName string) ([]*types.ListPodsReport, error) {
-	resp, err := client.ListPods(map[string][]string{
+func fetchPodsFromRuntime(client *podman.PodmanClient, appName string) ([]runtime.Pod, error) {
+	pods, err := client.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
 
-	var pods []*types.ListPodsReport
-	if val, ok := resp.([]*types.ListPodsReport); ok {
-		pods = val
-	}
-
 	return pods, err
 }
 
-func fetchPodsToStart(client *podman.PodmanClient, pods []*types.ListPodsReport, podNames []string) ([]*types.ListPodsReport, error) {
+func fetchPodsToStart(client *podman.PodmanClient, pods []runtime.Pod, podNames []string) ([]runtime.Pod, error) {
 	if len(podNames) > 0 {
 		return filterPodsByName(pods, podNames)
 	}
@@ -149,7 +144,7 @@ func fetchPodsToStart(client *podman.PodmanClient, pods []*types.ListPodsReport,
 	return filterPodsByAnnotation(client, pods)
 }
 
-func startPods(client *podman.PodmanClient, podsToStart []*types.ListPodsReport) error {
+func startPods(client *podman.PodmanClient, podsToStart []runtime.Pod) error {
 	var errors []string
 	for _, pod := range podsToStart {
 		logger.Infof("Starting the pod: %s\n", pod.Name)
@@ -166,7 +161,7 @@ func startPods(client *podman.PodmanClient, podsToStart []*types.ListPodsReport)
 
 			continue
 		}
-		if err := client.StartPod(pod.Id); err != nil {
+		if err := client.StartPod(pod.ID); err != nil {
 			errMsg := fmt.Sprintf("%s: %v", pod.Name, err)
 			errors = append(errors, errMsg)
 
@@ -183,7 +178,7 @@ func startPods(client *podman.PodmanClient, podsToStart []*types.ListPodsReport)
 	return nil
 }
 
-func printPodLogs(client *podman.PodmanClient, podsToStart []*types.ListPodsReport) error {
+func printPodLogs(client *podman.PodmanClient, podsToStart []runtime.Pod) error {
 	logger.Infof("\n--- Following logs for pod: %s ---\n", podsToStart[0].Name)
 
 	if err := client.PodLogs(podsToStart[0].Name); err != nil {
@@ -200,16 +195,16 @@ func printPodLogs(client *podman.PodmanClient, podsToStart []*types.ListPodsRepo
 	return nil
 }
 
-func filterPodsByName(pods []*types.ListPodsReport, podNames []string) ([]*types.ListPodsReport, error) {
+func filterPodsByName(pods []runtime.Pod, podNames []string) ([]runtime.Pod, error) {
 	// 1. Filter pods
-	podMap := make(map[string]*types.ListPodsReport)
+	podMap := make(map[string]runtime.Pod)
 	for _, pod := range pods {
 		podMap[pod.Name] = pod
 	}
 
 	// maintain list of not found pod names
 	var notFound []string
-	var podsToStart []*types.ListPodsReport
+	var podsToStart []runtime.Pod
 	for _, podName := range podNames {
 		if pod, exists := podMap[podName]; exists {
 			podsToStart = append(podsToStart, pod)
@@ -226,16 +221,16 @@ func filterPodsByName(pods []*types.ListPodsReport, podNames []string) ([]*types
 	return podsToStart, nil
 }
 
-func filterPodsByAnnotation(client *podman.PodmanClient, pods []*types.ListPodsReport) ([]*types.ListPodsReport, error) {
-	var podsToStart []*types.ListPodsReport
+func filterPodsByAnnotation(client *podman.PodmanClient, pods []runtime.Pod) ([]runtime.Pod, error) {
+	var podsToStart []runtime.Pod
 
 outerloop:
 	for _, pod := range pods {
 		for _, container := range pod.Containers {
 			// inspect one of containers to get pod annotations
-			data, err := client.InspectContainer(container.Names)
+			data, err := client.InspectContainer(container.Name)
 			if err != nil {
-				return podsToStart, fmt.Errorf("failed to inspect container %s: %w", container.Names, err)
+				return podsToStart, fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
 			}
 			annotations := data.Config.Annotations
 			if val, exists := annotations[constants.PodStartAnnotationkey]; exists && val == constants.PodStartOff {
