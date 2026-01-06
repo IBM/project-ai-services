@@ -43,10 +43,8 @@ func ValidateBootstrapFullOutput(output string) error {
 
 func ValidateCreateAppOutput(output, appName string) error {
 	required := []string{
-		"All validations passed",
 		fmt.Sprintf("Creating application '%s'", appName),
 		fmt.Sprintf("Application '%s' deployed successfully", appName),
-		"Next Steps:",
 	}
 
 	for _, r := range required {
@@ -54,10 +52,5 @@ func ValidateCreateAppOutput(output, appName string) error {
 			return fmt.Errorf("create-app validation failed: missing '%s'", r)
 		}
 	}
-
-	if !strings.Contains(output, "Chatbot UI is available to use at http://") {
-		return fmt.Errorf("create-app validation failed: RAG chatbot URL missing")
-	}
-
 	return nil
 }

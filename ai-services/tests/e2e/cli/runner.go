@@ -108,30 +108,36 @@ func CreateAppWithHealthAndRAG(
 	params string,
 	backendPort string,
 	opts CreateOptions,
-	_ []string, // kept for compatibility, unused
+	_ []string, // kept for compatibility, intentionally unused
 ) error {
 
-	// Create app
 	output, err := CreateApp(ctx, cfg, appName, template, params, opts)
 	if err != nil {
 		return err
 	}
+
 	if err := ValidateCreateAppOutput(output, appName); err != nil {
 		return err
 	}
-	fmt.Println("[CLI] Application created successfully!")
-	// Resolve backend URL (ALWAYS backend port)
-	backendURL := "http://localhost:" + backendPort
-	re := regexp.MustCompile(`(http[s]?://[0-9.:]+)`)
 
+	fmt.Println("[CLI] Application created successfully!")
+
+	// Extract deployed host IP (NOT UI port)
+	re := regexp.MustCompile(`http[s]?://([0-9.]+):[0-9]+`)
+	host := "localhost"
 	if match := re.FindStringSubmatch(output); len(match) > 1 {
-		backendURL = strings.TrimRight(match[1], ".")
+		host = match[1]
 	}
+
+	// Build BACKEND URL explicitly
+	backendURL := fmt.Sprintf("http://%s:%s", host, backendPort)
 	fmt.Println("[RAG] Using backend URL:", backendURL)
 
+	// Initialize HTTP client
 	client := httpclient.NewHTTPClient()
 	client.BaseURL = backendURL
-	// Health + RAG endpoints (STRICT)
+
+	// Validate backend RAG APIs (strict)
 	endpoints := []string{
 		"/health",
 		"/v1/models",
@@ -148,7 +154,7 @@ func CreateAppWithHealthAndRAG(
 		resp.Body.Close()
 		fmt.Printf("[RAG] GET %s -> %s\n", ep, resp.Status)
 	}
-	fmt.Println("[RAG] Backend health & RAG endpoints validated")
+	fmt.Println("[RAG] Backend health & RAG endpoints validated successfully")
 	return nil
 }
 
