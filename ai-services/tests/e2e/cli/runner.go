@@ -3,11 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"regexp"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/project-ai-services/ai-services/tests/e2e/bootstrap"
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
@@ -109,54 +108,30 @@ func CreateAppWithHealthAndRAG(
 	params string,
 	backendPort string,
 	opts CreateOptions,
-	pods []string,
+	_ []string, // kept for compatibility, unused
 ) error {
-	// Create application
+
+	// Create app
 	output, err := CreateApp(ctx, cfg, appName, template, params, opts)
 	if err != nil {
 		return err
 	}
-
 	if err := ValidateCreateAppOutput(output, appName); err != nil {
 		return err
 	}
 	fmt.Println("[CLI] Application created successfully!")
+	// Resolve backend URL (ALWAYS backend port)
+	backendURL := "http://localhost:" + backendPort
+	re := regexp.MustCompile(`(http[s]?://[0-9.:]+)`)
 
-	// Run parallel pod health checks
-	var wg sync.WaitGroup
-	fmt.Println("[HealthCheck] Running health checks in parallel for pods...")
-	for _, p := range pods {
-		wg.Add(1)
-		go func(podName string) {
-			defer wg.Done()
-			start := time.Now()
-			cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "pod", "health", podName)
-			out, err := cmd.CombinedOutput()
-			output := string(out)
-			if err != nil {
-				fmt.Printf("[HealthCheck] %s failed: %v\n%s\n", podName, err, output)
-				return
-			}
-			fmt.Printf("[HealthCheck] %s OK (took %v)\n%s\n", podName, time.Since(start), output)
-		}(p)
+	if match := re.FindStringSubmatch(output); len(match) > 1 {
+		backendURL = strings.TrimRight(match[1], ".")
 	}
-	wg.Wait()
-	fmt.Println("[HealthCheck] All pod health checks completed!")
+	fmt.Println("[RAG] Using backend URL:", backendURL)
 
-	// Extract backend URL from CLI output
-	re := regexp.MustCompile(`Chatbot UI is available to use at (http[s]?://[^\s]+)`)
-	match := re.FindStringSubmatch(output)
-	baseURL := "http://localhost:" + backendPort
-	if len(match) > 1 {
-		baseURL = match[1]
-	}
-	fmt.Println("[RAG] Using backend URL:", baseURL)
-
-	// Initialize HTTP client
 	client := httpclient.NewHTTPClient()
-	client.BaseURL = baseURL
-
-	// Test basic RAG endpoints
+	client.BaseURL = backendURL
+	// Health + RAG endpoints (STRICT)
 	endpoints := []string{
 		"/health",
 		"/v1/models",
@@ -165,14 +140,15 @@ func CreateAppWithHealthAndRAG(
 	for _, ep := range endpoints {
 		resp, err := client.Get(ep)
 		if err != nil {
-			fmt.Printf("[RAG] GET %s failed: %v\n", ep, err)
-			continue
+			return fmt.Errorf("[RAG] GET %s failed: %w", ep, err)
 		}
-		fmt.Printf("[RAG] GET %s -> %s\n", ep, resp.Status)
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("[RAG] GET %s returned %s", ep, resp.Status)
+		}
 		resp.Body.Close()
+		fmt.Printf("[RAG] GET %s -> %s\n", ep, resp.Status)
 	}
-
-	fmt.Println("[RAG] Basic RAG endpoints tested successfully!")
+	fmt.Println("[RAG] Backend health & RAG endpoints validated")
 	return nil
 }
 
