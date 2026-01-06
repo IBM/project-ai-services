@@ -27,6 +27,10 @@ on:
         required: false
         type: boolean
         default: false
+      skip-code-license-scan:
+        required: false
+        type: boolean
+        default: true
     secrets:
       ICR_USERNAME:
         required: false
@@ -90,19 +94,37 @@ jobs:
         if: ${{ !inputs.skip-image-build }}
         working-directory: ${{ inputs.path }}
         run: |
-          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
+          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+      
+      - name: Pull latest image tag
+        if: ${{ inputs.skip-image-build && skip-code-license-scan }}
+        working-directory: ${{ inputs.path }}
+        run: |
+          TAG_VALUE=$(make image-tag)
+          IMAGE_NAME=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}/${{ inputs.image }}:${TAG_VALUE}
+          podman pull --creds ${{ secrets.ICR_USERNAME }}:${{ secrets.ICR_APIKEY }} $IMAGE_NAME
 
       - name: Save image in file
-        if: ${{ !inputs.skip-image-build }}
+        if: ${{ skip-code-license-scan }}
         run: |
           IMAGE_NAME=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}" | head -n 1)
           podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
 
-      - name: Generate trivy sbom scan report
+      - name: Generate trivy sbom scan report for images
+        if: ${{ skip-code-license-scan }}
         uses: aquasecurity/trivy-action@0.33.1
         with:
-          scan-type: ${{ !inputs['skip-image-build'] && 'image' || 'fs' }}
-          input: ${{ !inputs['skip-image-build'] && env.IMAGE_FILE_NAME || './ai-services' }}
+          scan-type: image
+          input: env.IMAGE_FILE_NAME
+          format: cyclonedx
+          output: ${{ env.TRIVY_SBOM_FILE }}
+      
+      - name: Generate trivy sbom scan report for ai-services code
+        if: ${{ !skip-code-license-scan }}
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: 'fs'
+          input: './ai-services'
           format: cyclonedx
           output: ${{ env.TRIVY_SBOM_FILE }}
 

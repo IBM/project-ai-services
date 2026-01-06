@@ -49,3 +49,4 @@ jobs:
     with:
       skip-cves-scan: true
       skip-image-build: true
+      skip-code-license-scan: false
