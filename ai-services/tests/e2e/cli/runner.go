@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/project-ai-services/ai-services/tests/e2e/bootstrap"
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
@@ -108,9 +109,10 @@ func CreateAppWithHealthAndRAG(
 	params string,
 	backendPort string,
 	opts CreateOptions,
-	_ []string, // kept for compatibility, intentionally unused
+	_ []string,
 ) error {
 
+	// Create application
 	output, err := CreateApp(ctx, cfg, appName, template, params, opts)
 	if err != nil {
 		return err
@@ -122,40 +124,70 @@ func CreateAppWithHealthAndRAG(
 
 	fmt.Println("[CLI] Application created successfully!")
 
-	// Extract deployed host IP (NOT UI port)
-	re := regexp.MustCompile(`http[s]?://([0-9.]+):[0-9]+`)
-	host := "localhost"
-	if match := re.FindStringSubmatch(output); len(match) > 1 {
-		host = match[1]
+	// Resolve HOST IP from deployment output
+	hostIP, err := extractHostIP(output)
+	if err != nil {
+		return err
 	}
 
-	// Build BACKEND URL explicitly
-	backendURL := fmt.Sprintf("http://%s:%s", host, backendPort)
+	//  Backend base URL (ALWAYS backend.port)
+	backendURL := fmt.Sprintf("http://%s:%s", hostIP, backendPort)
 	fmt.Println("[RAG] Using backend URL:", backendURL)
 
-	// Initialize HTTP client
+	// HTTP client with timeout
 	client := httpclient.NewHTTPClient()
 	client.BaseURL = backendURL
 
-	// Validate backend RAG APIs (strict)
+	// Endpoints to validate (exact API spec)
 	endpoints := []string{
 		"/health",
 		"/v1/models",
 		"/db-status",
 	}
+
+	// Retry loop (startup delay safe)
+	const (
+		maxRetries = 10
+		waitTime   = 15 * time.Second
+	)
+
 	for _, ep := range endpoints {
-		resp, err := client.Get(ep)
-		if err != nil {
-			return fmt.Errorf("[RAG] GET %s failed: %w", ep, err)
+		var lastErr error
+
+		for i := 1; i <= maxRetries; i++ {
+			resp, err := client.Get(ep)
+			if err == nil && resp.StatusCode == http.StatusOK {
+				resp.Body.Close()
+				fmt.Printf("[RAG] GET %s -> 200 OK\n", ep)
+				lastErr = nil
+				break
+			}
+
+			if resp != nil {
+				resp.Body.Close()
+			}
+
+			lastErr = err
+			fmt.Printf("[RAG] Waiting for %s (attempt %d/%d)\n", ep, i, maxRetries)
+			time.Sleep(waitTime)
 		}
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("[RAG] GET %s returned %s", ep, resp.Status)
+
+		if lastErr != nil {
+			return fmt.Errorf("[RAG] endpoint %s failed after retries: %w", ep, lastErr)
 		}
-		resp.Body.Close()
-		fmt.Printf("[RAG] GET %s -> %s\n", ep, resp.Status)
 	}
-	fmt.Println("[RAG] Backend health & RAG endpoints validated successfully")
+
+	fmt.Println("[RAG] Backend health & RAG APIs validated successfully")
 	return nil
+}
+
+func extractHostIP(output string) (string, error) {
+	re := regexp.MustCompile(`http[s]?://([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)`)
+	match := re.FindStringSubmatch(output)
+	if len(match) < 2 {
+		return "", fmt.Errorf("unable to determine application host IP from CLI output")
+	}
+	return match[1], nil
 }
 
 // StartApp starts an application
