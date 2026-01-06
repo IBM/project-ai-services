@@ -11,7 +11,6 @@ on:
         required: false
         type: boolean
         default: false
-      # To pull image from the registry, specify image name when skip-image-build flag is set to true.
       image:
         required: false
         type: string
@@ -141,7 +140,7 @@ jobs:
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sbom-json-artifact
+          name: ${{ inputs.image || ai-services }}-sbom-json-artifact
           path: |
             ${{ env.TRIVY_SBOM_FILE }}
             ${{ env.PARLAY_SBOM_FILE }}
