@@ -186,3 +186,16 @@ func extractHostIP(output string) (string, error) {
 	}
 	return match[1], nil
 }
+
+// runs the 'help' command with or without arguments
+func HelpCommand(ctx context.Context, cfg *config.Config, args []string) (string, error) {
+	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("help command run failed: %w\n%s", err, output)
+	}
+	return output, nil
+}
