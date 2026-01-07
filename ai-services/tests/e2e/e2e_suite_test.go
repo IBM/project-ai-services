@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -92,6 +93,29 @@ var _ = AfterSuite(func() {
 })
 
 var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
+	Context("Help Command Tests", func() {
+		It("runs help command", func() {
+			args := []string{"help"}
+			output, err := cli.HelpCommand(ctx, cfg, args)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cli.ValidateHelpCommandOutput(output)).To(Succeed())
+		})
+		It("runs -h command", func() {
+			args := []string{"-h"}
+			output, err := cli.HelpCommand(ctx, cfg, args)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cli.ValidateHelpCommandOutput(output)).To(Succeed())
+		})
+		It("runs help for a given random command", func() {
+			possibleCommands := []string{"application", "bootstrap", "completion", "version"}
+			randomIndex := rand.Intn(len(possibleCommands))
+			randomCommand := possibleCommands[randomIndex]
+			args := []string{randomCommand, "-h"}
+			output, err := cli.HelpCommand(ctx, cfg, args)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cli.ValidateHelpRandomCommandOutput(randomCommand, output)).To(Succeed())
+		})
+	})
 	Context("Bootstrap Steps", func() {
 		It("runs bootstrap configure", func() {
 			output, err := cli.BootstrapConfigure(ctx)
