@@ -261,49 +261,18 @@ func downloadImagesForTemplate(runtime runtime.Runtime, templateName, appName st
 		return fmt.Errorf("failed to list container images: %w", err)
 	}
 
-	if !skipImageDownload {
-		// Download container images if flag is set to false (default: false)
-		logger.Infoln("Downloading container images required for application template " + templateName + ":")
-		for _, image := range images {
-			logger.Infoln("Downloading image: " + image + "...")
-			if err := utils.Retry(retryCount, retryInterval, nil, func() error {
-				return runtime.PullImage(image, nil)
-			}); err != nil {
-				return fmt.Errorf("failed to download image: %w", err)
-			}
-		}
-		logger.Infoln("Downloading container images completed.")
-	} else {
-		logger.Infoln("Skipping container image download as per the flag --skip-image-download=true")
-		// Verify that images exist locally
-		lImages, err := runtime.ListImages()
-		if err != nil {
-			return fmt.Errorf("failed to list local images: %w", err)
-		}
-		// Populate a map with all existing local images (tags and digests)
-		existingImages := make(map[string]bool)
-
-		for _, lImage := range lImages {
-			for _, tag := range lImage.RepoTags {
-				existingImages[tag] = true
-			}
-			for _, digest := range lImage.RepoDigests {
-				existingImages[digest] = true
-			}
-		}
-
-		// Filter the requested images against the map
-		var notfoundImages []string
-
-		for _, image := range images {
-			if !existingImages[image] {
-				notfoundImages = append(notfoundImages, image)
-			}
-		}
-		if len(notfoundImages) > 0 {
-			return fmt.Errorf("some required images are not present locally: %v. Either pull the image manually or rerun create command without --skip-image-download flag", notfoundImages)
+	if skipImageDownload {
+		if err = verifyImagesExistLocally(runtime, images); err != nil {
+			return err
 		}
 		logger.Infoln("All required container images are present locally.")
+
+		return nil
+	}
+
+	// Download container images if flag is set to false (default: false)
+	if err = downloadImages(runtime, images, templateName); err != nil {
+		return err
 	}
 
 	return nil
@@ -896,4 +865,53 @@ func constructPodDeployOptions(podAnnotations map[string]string) map[string]stri
 	}
 
 	return podDeployOptions
+}
+
+func downloadImages(runtime runtime.Runtime, images []string, templateName string) error {
+	logger.Infoln("Downloading container images required for application template " + templateName + ":")
+	for _, image := range images {
+		logger.Infoln("Downloading image: " + image + "...")
+		if err := utils.Retry(retryCount, retryInterval, nil, func() error {
+			return runtime.PullImage(image, nil)
+		}); err != nil {
+			return fmt.Errorf("failed to download image: %w", err)
+		}
+	}
+	logger.Infoln("Downloading container images completed.")
+
+	return nil
+}
+
+func verifyImagesExistLocally(runtime runtime.Runtime, images []string) error {
+	logger.Infoln("Skipping container image download as per the flag --skip-image-download=true")
+	// Verify that images exist locally
+	lImages, err := runtime.ListImages()
+	if err != nil {
+		return fmt.Errorf("failed to list local images: %w", err)
+	}
+	// Populate a map with all existing local images (tags and digests)
+	existingImages := make(map[string]bool)
+
+	for _, lImage := range lImages {
+		for _, tag := range lImage.RepoTags {
+			existingImages[tag] = true
+		}
+		for _, digest := range lImage.RepoDigests {
+			existingImages[digest] = true
+		}
+	}
+
+	// Filter the requested images against the map
+	var notfoundImages []string
+
+	for _, image := range images {
+		if !existingImages[image] {
+			notfoundImages = append(notfoundImages, image)
+		}
+	}
+	if len(notfoundImages) > 0 {
+		return fmt.Errorf("some required images are not present locally: %v. Either pull the image manually or rerun create command without --skip-image-download flag", notfoundImages)
+	}
+
+	return nil
 }
