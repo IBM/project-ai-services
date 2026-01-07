@@ -158,6 +158,36 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 			fmt.Printf("[TEST] Application %s created, healthy, and RAG endpoints validated\n", appName)
 		})
+		It("verifies application ps output", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+
+			psOutput, err := cli.ApplicationPS(ctx, cfg, appName)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cli.ValidateApplicationPS(psOutput)).To(Succeed())
+			fmt.Printf("[TEST] application ps output validated successfully for %s\n", appName)
+		})
+		It("stops the application", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+
+			output, err := cli.StopApp(ctx, cfg, appName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).NotTo(BeEmpty())
+
+			fmt.Printf("[TEST] Application %s stopped successfully\n", appName)
+		})
+		It("deletes the application", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+
+			output, err := cli.DeleteApp(ctx, cfg, appName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).NotTo(BeEmpty())
+
+			fmt.Printf("[TEST] Application %s deleted successfully\n", appName)
+		})
 	})
 	Context("RAG / Golden Dataset Validation", func() {
 		It("validates responses against golden dataset", func() {

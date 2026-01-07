@@ -107,3 +107,95 @@ func ValidateHelpRandomCommandOutput(command string, output string) error {
 	}
 	return nil
 }
+
+func ValidateApplicationPS(output string) error {
+	hasHeader :=
+		strings.Contains(output, "APPLICATION NAME") &&
+			strings.Contains(output, "POD NAME") &&
+			strings.Contains(output, "STATUS")
+
+	if !hasHeader {
+		return fmt.Errorf("invalid application ps output format")
+	}
+
+	return nil
+}
+
+func ValidateStopAppOutput(output string) error {
+	if !strings.Contains(output, "Proceeding to stop pods") {
+		return fmt.Errorf("stop app validation failed")
+	}
+	return nil
+}
+
+func ValidatePodsExitedAfterStop(psOutput, appName string) error {
+	mainPods := []string{
+		"vllm-server",
+		"milvus",
+		"chat-bot",
+	}
+
+	isMainPod := func(pod string) bool {
+		for _, m := range mainPods {
+			if strings.Contains(pod, m) {
+				return true
+			}
+		}
+		return false
+	}
+
+	for line := range strings.SplitSeq(psOutput, "\n") {
+		line = strings.TrimSpace(line)
+
+		if line == "" ||
+			strings.HasPrefix(line, "APPLICATION") ||
+			strings.HasPrefix(line, "──") {
+			continue
+		}
+
+		parts := strings.Fields(line)
+		podName := parts[len(parts)-2]
+		status := parts[len(parts)-1]
+
+		if isMainPod(podName) && status != "Exited" {
+			return fmt.Errorf(
+				"main pod %s not in Exited state for app %s",
+				podName,
+				appName,
+			)
+		}
+	}
+
+	fmt.Println("[TEST] Main pods are in Exited state")
+	return nil
+}
+
+func ValidateDeleteAppOutput(output, appName string) error {
+	for _, r := range []string{
+		"Proceeding with deletion",
+		"Application data cleaned up successfully",
+	} {
+		if !strings.Contains(output, r) {
+			return fmt.Errorf("delete app validation failed: missing '%s'", r)
+		}
+	}
+	return nil
+}
+
+func ValidateNoPodsAfterDelete(psOutput string) error {
+	for line := range strings.SplitSeq(psOutput, "\n") {
+		line = strings.TrimSpace(line)
+
+		if line == "" ||
+			strings.HasPrefix(line, "APPLICATION") ||
+			strings.HasPrefix(line, "──") ||
+			strings.HasPrefix(line, "No Pods found") {
+			continue
+		}
+
+		return fmt.Errorf("pods still exist after delete")
+	}
+
+	fmt.Println("[TEST] No pods present after delete")
+	return nil
+}

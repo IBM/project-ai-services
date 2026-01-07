@@ -199,3 +199,84 @@ func HelpCommand(ctx context.Context, cfg *config.Config, args []string) (string
 	}
 	return output, nil
 }
+
+// ApplicationPS runs the 'application ps' command to list application pods
+func ApplicationPS(ctx context.Context, cfg *config.Config, appName string) (string, error) {
+	args := []string{"application", "ps"}
+	if appName != "" {
+		args = append(args, appName)
+	}
+
+	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+	fmt.Println(output)
+
+	if err != nil {
+		return output, fmt.Errorf("application ps failed: %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// StopApp stops an application
+func StopApp(ctx context.Context, cfg *config.Config, appName string) (string, error) {
+	args := []string{"application", "stop", appName, "--yes"}
+
+	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+	fmt.Println(output)
+
+	if err != nil {
+		return output, fmt.Errorf("application stop failed: %w\n%s", err, output)
+	}
+
+	if err := ValidateStopAppOutput(output); err != nil {
+		return output, err
+	}
+
+	psOutput, err := ApplicationPS(ctx, cfg, appName)
+	if err != nil {
+		return output, err
+	}
+
+	if err := ValidatePodsExitedAfterStop(psOutput, appName); err != nil {
+		return output, err
+	}
+
+	return output, nil
+}
+
+// DeleteApp deletes an application
+func DeleteApp(ctx context.Context, cfg *config.Config, appName string,) (string, error) {
+	args := []string{"application", "delete", appName, "--yes"}
+
+	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+    fmt.Println(output)
+
+	if err != nil {
+		return output, fmt.Errorf("application delete failed: %w\n%s", err, output)
+	}
+
+	if err := ValidateDeleteAppOutput(output, appName); err != nil {
+		return output, err
+	}
+
+	psOutput, err := ApplicationPS(ctx, cfg, appName)
+	if err != nil {
+		return output, err
+	}
+
+	if err := ValidateNoPodsAfterDelete(psOutput); err != nil {
+		return output, err
+	}
+
+	return output, nil
+}
