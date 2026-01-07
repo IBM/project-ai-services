@@ -69,11 +69,16 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
-
 	podsExists := len(pods) != 0
 
-	// print relevant app status
-	logAppDeletionStatus(appName, pods, podsExists)
+	if !podsExists {
+		logger.Infof("No pods found for application: %s\n", appName)
+
+		return nil
+	}
+
+	// print relevant app pod status
+	logPodsToBeDeleted(appName, pods)
 
 	if !autoYes {
 		confirmDelete, err := deleteConfirmation(appName, podsExists, appExists)
@@ -89,10 +94,8 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 
 	logger.Infoln("Proceeding with deletion...")
 
-	if podsExists {
-		if err := podsDeletion(client, pods); err != nil {
-			return err
-		}
+	if err := podsDeletion(client, pods); err != nil {
+		return err
 	}
 
 	if appExists && !skipCleanup {
@@ -104,15 +107,11 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 	return nil
 }
 
-func logAppDeletionStatus(appName string, pods []runtime.Pod, podsExists bool) {
-	if podsExists {
-		logger.Infof("Found %d pods for given applicationName: %s.\n", len(pods), appName)
-		logger.Infoln("Below are the list of pods to be deleted")
-		for _, pod := range pods {
-			logger.Infof("\t-> %s\n", pod.Name)
-		}
-	} else {
-		logger.Infof("No pods found for application: %s\n", appName)
+func logPodsToBeDeleted(appName string, pods []runtime.Pod) {
+	logger.Infof("Found %d pods for given applicationName: %s.\n", len(pods), appName)
+	logger.Infoln("Below are the list of pods to be deleted")
+	for _, pod := range pods {
+		logger.Infof("\t-> %s\n", pod.Name)
 	}
 }
 

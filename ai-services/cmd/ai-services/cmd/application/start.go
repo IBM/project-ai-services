@@ -136,13 +136,14 @@ func logPodsToStart(podsToStart []runtime.Pod) {
 }
 
 func shouldPrintLogs(podsToStart []runtime.Pod) bool {
-	if len(podsToStart) == 1 && !skipLogs {
-		logger.Infoln("Note: After starting the pod, logs will be displayed. Press Ctrl+C to exit the logs and return to the terminal.")
-
-		return true
+	// if there are more than 1 pod to be started or if skip-logs flag is set, then skip printing logs
+	if len(podsToStart) != 1 || skipLogs {
+		return false
 	}
 
-	return false
+	logger.Infoln("Note: After starting the pod, logs will be displayed. Press Ctrl+C to exit the logs and return to the terminal.")
+
+	return true
 }
 
 func fetchPodsFromRuntime(client *podman.PodmanClient, appName string) ([]runtime.Pod, error) {
