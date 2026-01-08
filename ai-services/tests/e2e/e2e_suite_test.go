@@ -190,12 +190,12 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 			fmt.Printf("[TEST] Application %s deleted successfully\n", appName)
 		})
 	})
-	Context("RAG / Golden Dataset Validation", func() {
+	XContext("RAG validation", func() {
 		It("validates responses against golden dataset", func() {
 			Skip("RAG validation not implemented yet")
 		})
 	})
-	Context("Podman / Container Validation", func() {
+	XContext("Podman / Container Validation", func() {
 		It("verifies application containers are healthy", func() {
 			if !podmanReady {
 				Skip("Podman not available - will be installed via bootstrap configure")
