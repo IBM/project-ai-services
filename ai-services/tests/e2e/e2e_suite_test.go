@@ -27,6 +27,7 @@ var (
 	binVersion   string
 	ctx          context.Context
 	podmanReady  bool
+	templateName string
 )
 
 func TestE2E(t *testing.T) {
@@ -44,6 +45,9 @@ var _ = BeforeSuite(func() {
 
 	By("Generating unique run ID")
 	runID = fmt.Sprintf("%d", time.Now().Unix())
+
+	By("Setting template name")
+	templateName = "rag"
 
 	By("Preparing runtime environment")
 	tempDir = bootstrap.PrepareRuntime(runID)
@@ -159,7 +163,21 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 			fmt.Printf("[TEST] Application %s created, healthy, and RAG endpoints validated\n", appName)
 		})
-	
+		It("lists images for rag template", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			err := cli.ListImage(ctx, cfg, templateName)
+			Expect(err).NotTo(HaveOccurred())
+			fmt.Printf("[TEST] Images listed successfully for %s template\n", templateName)
+		})
+		It("pulls images for rag template", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			err := cli.PullImage(ctx, cfg, templateName)
+			Expect(err).NotTo(HaveOccurred())
+			fmt.Printf("[TEST] Images pulled successfully for %s template\n", templateName)
+		})
+
 	})
 	Context("Application Observability", func() {
 		It("verifies application ps output", func() {

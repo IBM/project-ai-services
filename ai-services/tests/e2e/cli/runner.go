@@ -220,6 +220,38 @@ func ApplicationPS(ctx context.Context, cfg *config.Config, appName string) (str
 	return output, nil
 }
 
+// List images from the given application template
+func ListImage(ctx context.Context, cfg *config.Config, templateName string) error {
+	args := []string{"application", "image", "list", "--template", templateName}
+	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+	if err != nil {
+		return fmt.Errorf("list images failed: %w\n%s", err, output)
+	}
+	if err := ValidateImageListOutput(output); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Pull images from the given application template
+func PullImage(ctx context.Context, cfg *config.Config, templateName string) error {
+	args := []string{"application", "image", "pull", "--template", templateName}
+	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+	if err != nil {
+		return fmt.Errorf("pull images failed: %w\n%s", err, output)
+	}
+	if err := ValidatePullImageOutput(output, templateName); err != nil {
+		return err
+	}
+	return nil
+}
+
 // StopApp stops an application
 func StopApp(ctx context.Context, cfg *config.Config, appName string) (string, error) {
 	args := []string{"application", "stop", appName, "--yes"}
@@ -251,7 +283,7 @@ func StopApp(ctx context.Context, cfg *config.Config, appName string) (string, e
 }
 
 // DeleteApp deletes an application
-func DeleteApp(ctx context.Context, cfg *config.Config, appName string,) (string, error) {
+func DeleteApp(ctx context.Context, cfg *config.Config, appName string) (string, error) {
 	args := []string{"application", "delete", appName, "--yes"}
 
 	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
@@ -259,7 +291,7 @@ func DeleteApp(ctx context.Context, cfg *config.Config, appName string,) (string
 
 	out, err := cmd.CombinedOutput()
 	output := string(out)
-    fmt.Println(output)
+	fmt.Println(output)
 
 	if err != nil {
 		return output, fmt.Errorf("application delete failed: %w\n%s", err, output)

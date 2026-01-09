@@ -121,6 +121,30 @@ func ValidateApplicationPS(output string) error {
 	return nil
 }
 
+func ValidateImageListOutput(output string) error {
+	required := []string{
+		"Container images for application template",
+	}
+	for _, r := range required {
+		if !strings.Contains(output, r) {
+			return fmt.Errorf("image list validation failed: missing '%s'", r)
+		}
+	}
+	return nil
+}
+
+func ValidatePullImageOutput(output, templateName string) error {
+	required := []string{
+		"Downloading the images for the application",
+	}
+	for _, r := range required {
+		if !strings.Contains(output, r) {
+			return fmt.Errorf("pull image validation failed: missing '%s'", r)
+		}
+	}
+	return nil
+}
+
 func ValidateStopAppOutput(output string) error {
 	if !strings.Contains(output, "Proceeding to stop pods") {
 		return fmt.Errorf("stop app validation failed")
