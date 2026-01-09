@@ -159,14 +159,14 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 			defer cancel()
 
-			appName = fmt.Sprintf("rag-app-%s", runID)
+			appName = fmt.Sprintf("%s-app-%s", templateName, runID)
 			pods := []string{"backend", "ui", "db"} // replace with actual pod names
 
 			err := cli.CreateAppWithHealthAndRAG(
 				ctx,
 				cfg,
 				appName,
-				"rag",
+				templateName,
 				"ui.port=3000,backend.port=5000",
 				"5000", // backend port
 				"3000", //ui port
@@ -200,11 +200,25 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
 
-			psOutput, err := cli.ApplicationPS(ctx, cfg, appName)
+			normalPsOutput, err := cli.ApplicationPS(ctx, cfg, appName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cli.ValidateApplicationPS(normalPsOutput)).To(Succeed())
+			fmt.Printf("[TEST] Application ps output validated successfully!\n")
+
+			widePsOutput, err := cli.ApplicationPSWide(ctx, cfg, appName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cli.ValidateApplicationPS(widePsOutput)).To(Succeed())
+			fmt.Printf("[TEST] Application ps wide output validated successfully!\n")
+		})
+		It("verifies application info output", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+
+			infoOutput, err := cli.ApplicationInfo(ctx, cfg, appName)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(cli.ValidateApplicationPS(psOutput)).To(Succeed())
-			fmt.Printf("[TEST] application ps output validated successfully for %s\n", appName)
+			Expect(cli.ValidateApplicationInfo(infoOutput, appName, templateName)).To(Succeed())
+			fmt.Printf("[TEST] Application info output validated successfully!\n")
 		})
 		It("verifies pods status and restart count", func() {
 			if !podmanReady {
@@ -220,21 +234,27 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
 
-			output, err := cli.StopApp(ctx, cfg, appName)
+			pods := []string{
+				fmt.Sprintf("%s--vllm-server", appName),
+				fmt.Sprintf("%s--milvus", appName),
+				fmt.Sprintf("%s--chat-bot", appName),
+			}
+
+			output, err := cli.StopAppWithPods(ctx, cfg, appName, templateName, pods)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).NotTo(BeEmpty())
 
-			fmt.Printf("[TEST] Application %s stopped successfully\n", appName)
+			fmt.Printf("[TEST] Application %s stopped successfully using --pod\n", appName)
 		})
-		It("deletes the application", func() {
+		It("deletes the application using --skip-cleanup", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
 
-			output, err := cli.DeleteApp(ctx, cfg, appName)
+			output, err := cli.DeleteAppSkipCleanup(ctx, cfg, appName)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).NotTo(BeEmpty())
 
-			fmt.Printf("[TEST] Application %s deleted successfully\n", appName)
+			fmt.Printf("[TEST] Application %s deleted successfully using --skip-cleanup\n", appName)
 		})
 	})
 	Context("RAG / Golden Dataset Validation", func() {

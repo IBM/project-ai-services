@@ -211,10 +211,29 @@ func ApplicationPS(ctx context.Context, cfg *config.Config, appName string) (str
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
-	fmt.Println(output)
 
 	if err != nil {
 		return output, fmt.Errorf("application ps failed: %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// ApplicationPSWide runs the 'application ps -o wide' command to list application pods with more details
+func ApplicationPSWide(ctx context.Context,cfg *config.Config,appName string) (string, error) {
+	args := []string{"application", "ps"}
+	if appName != "" {
+		args = append(args, appName)
+	}
+	args = append(args, "-o", "wide")
+
+	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("application ps -o wide failed: %w\n%s", err, output)
 	}
 
 	return output, nil
@@ -252,18 +271,22 @@ func PullImage(ctx context.Context, cfg *config.Config, templateName string) err
 	return nil
 }
 
-// StopApp stops an application
-func StopApp(ctx context.Context, cfg *config.Config, appName string) (string, error) {
-	args := []string{"application", "stop", appName, "--yes"}
+// StopAppWithPods stops an application specifying pods to stop
+func StopAppWithPods(ctx context.Context, cfg *config.Config, appName string, templateName string,pods []string) (string, error) {
+	podArg := strings.Join(pods, ",")
+	args := []string{
+		"application", "stop", appName,
+		"--pod", podArg,
+		"--yes",
+	}
 
 	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
-	fmt.Println(output)
 
 	if err != nil {
-		return output, fmt.Errorf("application stop failed: %w\n%s", err, output)
+		return output, fmt.Errorf("application stop --pod failed: %w\n%s", err, output)
 	}
 
 	if err := ValidateStopAppOutput(output); err != nil {
@@ -275,26 +298,35 @@ func StopApp(ctx context.Context, cfg *config.Config, appName string) (string, e
 		return output, err
 	}
 
-	if err := ValidatePodsExitedAfterStop(psOutput, appName); err != nil {
+	if err := ValidatePodsExitedAfterStop(psOutput, appName, templateName); err != nil {
 		return output, err
 	}
 
 	return output, nil
 }
 
-// DeleteApp deletes an application
-func DeleteApp(ctx context.Context, cfg *config.Config, appName string) (string, error) {
-	args := []string{"application", "delete", appName, "--yes"}
+
+// DeleteAppSkipCleanup deletes an application with --skip-cleanup flag
+func DeleteAppSkipCleanup(
+	ctx context.Context,
+	cfg *config.Config,
+	appName string,
+) (string, error) {
+
+	args := []string{
+		"application", "delete", appName,
+		"--skip-cleanup",
+		"--yes",
+	}
 
 	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 
 	out, err := cmd.CombinedOutput()
 	output := string(out)
-	fmt.Println(output)
 
 	if err != nil {
-		return output, fmt.Errorf("application delete failed: %w\n%s", err, output)
+		return output, fmt.Errorf("application delete --skip-cleanup failed: %w\n%s", err, output)
 	}
 
 	if err := ValidateDeleteAppOutput(output, appName); err != nil {
@@ -308,6 +340,28 @@ func DeleteApp(ctx context.Context, cfg *config.Config, appName string) (string,
 
 	if err := ValidateNoPodsAfterDelete(psOutput); err != nil {
 		return output, err
+	}
+
+	return output, nil
+}
+
+// ApplicationInfo runs the 'application info' command
+func ApplicationInfo(
+	ctx context.Context,
+	cfg *config.Config,
+	appName string,
+) (string, error) {
+
+	args := []string{"application", "info", appName}
+
+	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("application info failed: %w\n%s", err, output)
 	}
 
 	return output, nil

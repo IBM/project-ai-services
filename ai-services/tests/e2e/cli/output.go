@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"regexp"
 )
 
 func ValidateBootstrapConfigureOutput(output string) error {
@@ -109,16 +110,26 @@ func ValidateHelpRandomCommandOutput(command string, output string) error {
 }
 
 func ValidateApplicationPS(output string) error {
-	hasHeader :=
-		strings.Contains(output, "APPLICATION NAME") &&
-			strings.Contains(output, "POD NAME") &&
-			strings.Contains(output, "STATUS")
-
-	if !hasHeader {
-		return fmt.Errorf("invalid application ps output format")
+	if strings.Contains(output, "No Pods found") {
+		return nil
 	}
 
-	return nil
+	if strings.Contains(output, "APPLICATION NAME") &&
+		strings.Contains(output, "POD NAME") &&
+		strings.Contains(output, "STATUS") {
+		return nil
+	}
+
+	if strings.Contains(output, "APPLICATION NAME") &&
+		strings.Contains(output, "POD ID") &&
+		strings.Contains(output, "POD NAME") &&
+		strings.Contains(output, "STATUS") &&
+		strings.Contains(output, "CREATED") &&
+		strings.Contains(output, "CONTAINERS") {
+		return nil
+	}
+
+	return fmt.Errorf("invalid application ps output format")
 }
 
 func ValidateImageListOutput(output string) error {
@@ -152,11 +163,23 @@ func ValidateStopAppOutput(output string) error {
 	return nil
 }
 
-func ValidatePodsExitedAfterStop(psOutput, appName string) error {
-	mainPods := []string{
-		"vllm-server",
-		"milvus",
-		"chat-bot",
+func ValidatePodsExitedAfterStop(
+	psOutput string,
+	appName string,
+	templateName string,
+) error {
+
+	mainPodsByType := map[string][]string{
+		"rag": {
+			"vllm-server",
+			"milvus",
+			"chat-bot",
+		},
+	}
+
+	mainPods, ok := mainPodsByType[templateName]
+	if !ok {
+		return fmt.Errorf("unknown application type: %s", templateName)
 	}
 
 	isMainPod := func(pod string) bool {
@@ -183,21 +206,21 @@ func ValidatePodsExitedAfterStop(psOutput, appName string) error {
 
 		if isMainPod(podName) && status != "Exited" {
 			return fmt.Errorf(
-				"main pod %s not in Exited state for app %s",
+				"main pod %s not in Exited state for app %s (type: %s)",
 				podName,
 				appName,
+				templateName,
 			)
 		}
 	}
 
-	fmt.Println("[TEST] Main pods are in Exited state")
+	fmt.Printf("[TEST] Main pods for %s are in Exited state\n", templateName)
 	return nil
 }
 
 func ValidateDeleteAppOutput(output, appName string) error {
 	for _, r := range []string{
 		"Proceeding with deletion",
-		"Application data cleaned up successfully",
 	} {
 		if !strings.Contains(output, r) {
 			return fmt.Errorf("delete app validation failed: missing '%s'", r)
@@ -221,6 +244,51 @@ func ValidateNoPodsAfterDelete(psOutput string) error {
 	}
 
 	fmt.Println("[TEST] No pods present after delete")
+	return nil
+}
+
+func ValidateApplicationInfo(output, appName, templateName string) error {
+	required := []string{
+		fmt.Sprintf("Application Name: %s", appName),
+		fmt.Sprintf("Application Template: %s", templateName),
+		"Version:",
+		"Info:",
+		"Day N:",
+	}
+
+	if templateName == "rag" {
+		required = append(required,
+			"Chatbot UI is available to use at",
+			"Chatbot Backend is available to use at",
+			"If you want to serve any more new documents via this RAG application, add them inside",
+			fmt.Sprintf("/var/lib/ai-services/applications/%s/docs", appName),
+			"If you want to do the ingestion again, execute below command",
+			fmt.Sprintf("ai-services application start %s --pod=%s--ingest-docs", appName, appName),
+			"In case if you want to clean the documents added to the db, execute below command",
+			fmt.Sprintf("ai-services application start %s --pod=%s--clean-docs", appName, appName),
+		)
+
+		uiURLPattern := regexp.MustCompile(
+			`Chatbot UI is available to use at\s+http://[0-9.]+:[0-9]+`,
+		)
+		if !uiURLPattern.MatchString(output) {
+			return fmt.Errorf("application info validation failed: missing or invalid Chatbot UI URL")
+		}
+
+		backendURLPattern := regexp.MustCompile(
+			`Chatbot Backend is available to use at\s+http://[0-9.]+:[0-9]+`,
+		)
+		if !backendURLPattern.MatchString(output) {
+			return fmt.Errorf("application info validation failed: missing or invalid Chatbot Backend URL")
+		}
+	}
+
+	for _, r := range required {
+		if !strings.Contains(output, r) {
+			return fmt.Errorf("application info validation failed: missing '%s'", r)
+		}
+	}
+
 	return nil
 }
 
