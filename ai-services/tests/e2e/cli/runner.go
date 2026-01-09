@@ -312,3 +312,54 @@ func DeleteApp(ctx context.Context, cfg *config.Config, appName string) (string,
 
 	return output, nil
 }
+
+// runs the 'application template' command
+func TemplatesCommand(ctx context.Context, cfg *config.Config) (string, error) {
+	fmt.Printf("[CLI] Running: %s application templates\n", cfg.AIServiceBin)
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "application", "templates")
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("application templates command run failed: %w\n%s", err, output)
+	}
+	return output, nil
+}
+
+// runs the 'version' command
+func VersionCommand(ctx context.Context, cfg *config.Config, args []string) (string, error) {
+	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if err != nil {
+		return output, fmt.Errorf("version command run failed: %w\n%s", err, output)
+	}
+
+	return output, nil
+}
+
+// runs the git commands required for version check
+func GitVersionCommands(ctx context.Context) (string, string, error) {
+	versionCmd := "describe --tags --always"
+	commitCmd := "rev-parse --short HEAD"
+
+	fmt.Printf("[CLI] Running: git %s\n", strings.Split(versionCmd, " "))
+	vcmd := exec.CommandContext(ctx, "git", strings.Split(versionCmd, " ")...)
+	vout, err := vcmd.CombinedOutput()
+	voutput := string(vout)
+	if err != nil {
+		return voutput, "", fmt.Errorf("git version command run failed: %w\n%s", err, voutput)
+	}
+
+	fmt.Printf("[CLI] Running: git %s\n", strings.Split(commitCmd, " "))
+	ccmd := exec.CommandContext(ctx, "git", strings.Split(commitCmd, " ")...)
+	cout, err := ccmd.CombinedOutput()
+	coutput := string(cout)
+	if err != nil {
+		return voutput, coutput, fmt.Errorf("git commit command run failed: %w\n%s", err, coutput)
+	}
+
+	return voutput, coutput, nil
+}

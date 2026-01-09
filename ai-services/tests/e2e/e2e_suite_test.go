@@ -98,6 +98,15 @@ var _ = AfterSuite(func() {
 })
 
 var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
+	Context("Version Command Tests", func() {
+		It("runs application version command", func() {
+			args := []string{"version"}
+			output, err := cli.VersionCommand(ctx, cfg, args)
+			voutput, coutput, err := cli.GitVersionCommands(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cli.ValidateVersionCommandOutput(output, voutput, coutput)).To(Succeed())
+		})
+	})
 	Context("Help Command Tests", func() {
 		It("runs help command", func() {
 			args := []string{"help"}
@@ -119,6 +128,13 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 			output, err := cli.HelpCommand(ctx, cfg, args)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cli.ValidateHelpRandomCommandOutput(randomCommand, output)).To(Succeed())
+		})
+	})
+	Context("Application Template Command Tests", func() {
+		It("runs application template command", func() {
+			output, err := cli.TemplatesCommand(ctx, cfg)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cli.ValidateApplicationsTemplateCommandOutput(output)).To(Succeed())
 		})
 	})
 	Context("Bootstrap Steps", func() {

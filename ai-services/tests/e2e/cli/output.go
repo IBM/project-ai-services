@@ -223,3 +223,65 @@ func ValidateNoPodsAfterDelete(psOutput string) error {
 	fmt.Println("[TEST] No pods present after delete")
 	return nil
 }
+
+func getFirstWord(s string) string {
+	firstSpaceIndex := strings.Index(s, " ")
+	if firstSpaceIndex != -1 {
+		return s[:firstSpaceIndex]
+	}
+	// If no space is found, the string is a single word, so return an empty string
+	return s
+}
+
+func processTemplateOutput(output string) []string {
+	output = strings.ReplaceAll(output, "\nAvailable application templates:\n", "")
+	output = strings.ReplaceAll(output, "\n\n", "\n")
+	arrOutput := strings.Split(output, "- ")
+	arrOutput = arrOutput[1:]
+	return arrOutput
+}
+
+func ValidateApplicationsTemplateCommandOutput(output string) error {
+	type RequiredOutputs struct {
+		rag []string
+		ee  []string
+	}
+	requiredOutputs := RequiredOutputs{
+		rag: []string{
+			"Description: Retrieval Augmented Generation (RAG) application that combines a vector database, a large language model, and a retrieval mechanism to provide accurate and context-aware responses based on ingested documents.",
+			"ui.port:  Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
+			"backend.port:  Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.",
+			"milvus.memoryLimit:  Sets the memory limit for the Milvus service(Default: 4Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).",
+		},
+	}
+
+	arrOutput := processTemplateOutput(output)
+	for _, value := range arrOutput {
+		appName := getFirstWord(value)
+		appName = strings.TrimSpace(appName)
+		v := reflect.ValueOf(requiredOutputs)
+		required := v.FieldByName(appName)
+
+		for i := 0; i < required.Len(); i++ {
+			r := required.Index(i).String()
+			if !strings.Contains(output, r) {
+				return fmt.Errorf("application template command validation failed for app:%s missing '%s'", appName, r)
+			}
+		}
+	}
+	return nil
+}
+
+func ValidateVersionCommandOutput(output string, version string, commit string) error {
+	required := []string{
+		"Version: " + version,
+		"GitCommit: " + commit,
+		"BuildDate: ",
+	}
+	for _, r := range required {
+		if !strings.Contains(output, r) {
+			return fmt.Errorf("version command validation failed: missing '%s'", r)
+		}
+	}
+	return nil
+}
