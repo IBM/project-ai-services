@@ -20,6 +20,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -33,25 +34,22 @@ import (
 
 var (
 	extraContainerReadinessTimeout = 5 * time.Minute
+	containerCreationTimeout       = 10 * time.Minute
 	envMutex                       sync.Mutex
-	retryCount                     = 3
-	retryInterval                  = 5 * time.Second
 )
 
-// Variables for flags placeholder
+// Variables for flags placeholder.
 var (
-	templateName      string
-	skipModelDownload bool
-	skipImageDownload bool
-	skipChecks        []string
-	rawArgParams      []string
-	argParams         map[string]string
-	valuesFiles       []string
-	values            map[string]any
-)
-
-const (
-	containerCreationTimeout = 10 * time.Minute
+	templateName          string
+	skipModelDownload     bool
+	skipImageDownload     bool
+	skipChecks            []string
+	rawArgParams          []string
+	argParams             map[string]string
+	valuesFiles           []string
+	values                map[string]any
+	rawArgImagePullPolicy string
+	imagePullPolicy       image.ImagePullPolicy
 )
 
 var createCmd = &cobra.Command{
@@ -88,6 +86,15 @@ var createCmd = &cobra.Command{
 		values, err = tp.LoadValues(templateName, valuesFiles, argParams)
 		if err != nil {
 			return fmt.Errorf("failed to load params for application: %w", err)
+		}
+
+		// validate ImagePullPolicy
+		imagePullPolicy = image.ImagePullPolicy(rawArgImagePullPolicy)
+		if ok := imagePullPolicy.Valid(); !ok {
+			return fmt.Errorf(
+				"invalid --image-pull-policy %q: must be one of %q, %q, %q",
+				imagePullPolicy, image.PullAlways, image.PullNever, image.PullIfNotPresent,
+			)
 		}
 
 		appName := args[0]
@@ -215,7 +222,7 @@ var createCmd = &cobra.Command{
 			logger.Infoln("Downloading models required for application template " + templateName + ":")
 			for _, model := range models {
 				s.UpdateMessage("Downloading model: " + model + "...")
-				err = utils.Retry(retryCount, retryInterval, nil, func() error {
+				err = utils.Retry(vars.RetryCount, vars.RetryInterval, nil, func() error {
 					return helpers.DownloadModel(model, vars.ModelDirectory)
 				})
 				if err != nil {
@@ -255,58 +262,17 @@ var createCmd = &cobra.Command{
 }
 
 func downloadImagesForTemplate(runtime runtime.Runtime, templateName, appName string) error {
-	// Fetch all images required for a given template
-	images, err := helpers.ListImages(templateName, appName)
-	if err != nil {
-		return fmt.Errorf("failed to list container images: %w", err)
+	/// Deprecated: if skipImageDownload is passed, then consider it
+	if skipImageDownload {
+		// if skipImageDownload flag is set, then override the image pull policy to Never
+		imagePullPolicy = image.PullNever
 	}
 
-	if !skipImageDownload {
-		// Download container images if flag is set to false (default: false)
-		logger.Infoln("Downloading container images required for application template " + templateName + ":")
-		for _, image := range images {
-			logger.Infoln("Downloading image: " + image + "...")
-			if err := utils.Retry(retryCount, retryInterval, nil, func() error {
-				return runtime.PullImage(image, nil)
-			}); err != nil {
-				return fmt.Errorf("failed to download image: %w", err)
-			}
-		}
-		logger.Infoln("Downloading container images completed.")
-	} else {
-		logger.Infoln("Skipping container image download as per the flag --skip-image-download=true")
-		// Verify that images exist locally
-		lImages, err := runtime.ListImages()
-		if err != nil {
-			return fmt.Errorf("failed to list local images: %w", err)
-		}
-		// Populate a map with all existing local images (tags and digests)
-		existingImages := make(map[string]bool)
+	// create a new imagePull object based on imagePullPolicy
+	imagePull := image.NewImagePull(runtime, imagePullPolicy, appName, templateName)
 
-		for _, lImage := range lImages {
-			for _, tag := range lImage.RepoTags {
-				existingImages[tag] = true
-			}
-			for _, digest := range lImage.RepoDigests {
-				existingImages[digest] = true
-			}
-		}
-
-		// Filter the requested images against the map
-		var notfoundImages []string
-
-		for _, image := range images {
-			if !existingImages[image] {
-				notfoundImages = append(notfoundImages, image)
-			}
-		}
-		if len(notfoundImages) > 0 {
-			return fmt.Errorf("some required images are not present locally: %v. Either pull the image manually or rerun create command without --skip-image-download flag", notfoundImages)
-		}
-		logger.Infoln("All required container images are present locally.")
-	}
-
-	return nil
+	// based on the imagePullPolicy set, download the images
+	return imagePull.Run()
 }
 
 func init() {
@@ -363,6 +329,32 @@ func init() {
 			"Precedence:\n"+
 			"- When both --values and --params are provided, --params overrides --values\n",
 	)
+
+	initializeImagePullPolicyFlag()
+
+	// deprecated flags
+	deprecatedFlags()
+}
+
+func initializeImagePullPolicyFlag() {
+	createCmd.Flags().StringVar(
+		&rawArgImagePullPolicy,
+		"image-pull-policy",
+		string(image.PullIfNotPresent),
+		"Image pull policy for container images required for given application. Supported values: Always, Never, IfNotPresent.\n\n"+
+			"Determines when the container runtime should pull the image from the registry:\n"+
+			" - Always: pull the image every time from the registry before running\n"+
+			" - Never: never pull; use only local images\n"+
+			" - IfNotPresent: pull only if the image isn't already present locally \n\n"+
+			"Defaults to 'IfNotPresent' if not specified\n\n"+
+			"In air-gapped environments → specify 'Never'\n\n",
+	)
+}
+
+func deprecatedFlags() {
+	if err := createCmd.Flags().MarkDeprecated("skip-image-download", "use --image-pull-policy instead"); err != nil {
+		panic(fmt.Sprintf("Failed to mark 'skip-image-download' flag deprecated. Err: %v", err))
+	}
 }
 
 func getSMTLevel(output string) (int, error) {
@@ -598,7 +590,7 @@ func doContainersCreationCheck(runtime runtime.Runtime, podSpec *models.PodSpec,
 	return nil
 }
 
-func doContainerReadinessCheck(runtime runtime.Runtime, podTemplateName, containerID string) error {
+func doContainerReadinessCheck(runtime runtime.Runtime, podTemplateName, podName, containerID string) error {
 	cInfo, err := runtime.InspectContainer(containerID)
 	if err != nil {
 		return fmt.Errorf("failed to do container inspect for containerID: '%s' with error: %w", containerID, err)
@@ -663,7 +655,7 @@ func deployPodAndReadinessCheck(runtime runtime.Runtime, podSpec *models.PodSpec
 
 		// Step2: ---- Containers Readiness Check ----
 		for _, container := range pInfo.Containers {
-			if err := doContainerReadinessCheck(runtime, podTemplateName, container.ID); err != nil {
+			if err := doContainerReadinessCheck(runtime, podTemplateName, pInfo.Name, container.ID); err != nil {
 				return err
 			}
 			logger.Infoln("-------")

@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Validation check types
+// Validation check types.
 const (
 	CheckRoot   = "root"
 	CheckRHEL   = "rhel"
@@ -25,7 +25,7 @@ const (
 
 const troubleshootingGuide = "https://www.ibm.com/docs/aiservices?topic=services-troubleshooting"
 
-// validateCmd represents the validate subcommand of bootstrap
+// validateCmd represents the validate subcommand of bootstrap.
 func validateCmd() *cobra.Command {
 	var skipChecks []string
 

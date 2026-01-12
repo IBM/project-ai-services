@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/containers/podman/v5/libpod/define"
-	"github.com/containers/podman/v5/pkg/domain/entities/types"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -54,7 +53,7 @@ func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string
 	}
 }
 
-// WaitForContainersCreation waits until all the containers in the provided podID are created within the specified timeout
+// WaitForContainersCreation waits until all the containers in the provided podID are created within the specified timeout.
 func WaitForContainersCreation(runtime runtime.Runtime, podID string, expectedContainerCount int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
@@ -223,20 +222,15 @@ func ParseSkipChecks(skipChecks []string) map[string]bool {
 	return skipMap
 }
 
-// CheckExistingPodsForApplication checks if there are pods already existing for the given application name
+// CheckExistingPodsForApplication checks if there are pods already existing for the given application name.
 func CheckExistingPodsForApplication(runtime runtime.Runtime, appName string) ([]string, error) {
 	//nolint:prealloc // as capacity is unknown and depends on runtime.ListPods response
 	var podsToSkip []string
-	resp, err := runtime.ListPods(map[string][]string{
+	pods, err := runtime.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
-	}
-
-	var pods []*types.ListPodsReport
-	if val, ok := resp.([]*types.ListPodsReport); ok {
-		pods = val
 	}
 
 	if len(pods) == 0 {

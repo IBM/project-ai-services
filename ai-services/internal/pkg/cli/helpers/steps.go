@@ -12,48 +12,20 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
+const (
+	nextStepsMDFile = "next.md"
+	nextStepsTitle  = "Next Steps"
+
+	infoMDFile = "info.md"
+	infoTitle  = "Info"
+)
+
 func PrintNextSteps(runtime runtime.Runtime, app, appTemplate string) error {
 	params := map[string]string{"AppName": app}
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
-
-	stepsPath := appTemplate + "/steps"
-	tmpls, err := tp.LoadMdFiles(stepsPath)
-	if err != nil {
-		// just printing and returning if the steps folder doesnt exist do not do anything
+	if err := renderStepsMarkdown(runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
 		logger.Infof("Unable to load steps: %v\n", err)
 
 		return nil
-	}
-
-	if nextMd, ok := tmpls["next.md"]; ok {
-		varsData, err := tp.LoadVarsFile(appTemplate, params)
-		if err != nil {
-			return fmt.Errorf("failed to load vars file: %w", err)
-		}
-
-		// populate the host values set in vars file
-		if err := populateHostValues(params, varsData); err != nil {
-			return fmt.Errorf("failed to populate host values: %w", err)
-		}
-
-		// populate the pod info set in vars file
-		if err := populatePodInfo(runtime, params, varsData); err != nil {
-			return fmt.Errorf("failed to populate pod values: %w", err)
-		}
-
-		// populate the container info set in vars file
-		if err := populateContainerInfo(runtime, params, varsData); err != nil {
-			return fmt.Errorf("failed to populate container values: %w", err)
-		}
-
-		var rendered bytes.Buffer
-		if err := nextMd.Execute(&rendered, params); err != nil {
-			return fmt.Errorf("failed to execute next.md: %w", err)
-		}
-
-		logger.Infoln("Next Steps: ")
-		logger.Infoln("-------")
-		logger.Infoln(rendered.String())
 	}
 
 	return nil
@@ -61,50 +33,16 @@ func PrintNextSteps(runtime runtime.Runtime, app, appTemplate string) error {
 
 func PrintInfo(runtime runtime.Runtime, app, appTemplate string) error {
 	params := map[string]string{"AppName": app}
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+	if err := renderStepsMarkdown(runtime, appTemplate, params, infoMDFile, infoTitle); err != nil {
+		logger.Infof("Unable to load steps: %v\n", err)
 
-	stepsPath := appTemplate + "/steps"
-	tmpls, err := tp.LoadMdFiles(stepsPath)
-	if err != nil {
-		// Returning if the steps folder doesnt exist do not do anything
 		return nil
-	}
-
-	if nextMd, ok := tmpls["info.md"]; ok {
-		varsData, err := tp.LoadVarsFile(appTemplate, params)
-		if err != nil {
-			return fmt.Errorf("failed to load vars file: %w", err)
-		}
-
-		// populate the host values set in vars file
-		if err := populateHostValues(params, varsData); err != nil {
-			return fmt.Errorf("failed to populate host values: %w", err)
-		}
-
-		// populate the pod info set in vars file
-		if err := populatePodInfo(runtime, params, varsData); err != nil {
-			return fmt.Errorf("failed to populate pod values: %w", err)
-		}
-
-		// populate the container info set in vars file
-		if err := populateContainerInfo(runtime, params, varsData); err != nil {
-			return fmt.Errorf("failed to populate container values: %w", err)
-		}
-
-		var rendered bytes.Buffer
-		if err := nextMd.Execute(&rendered, params); err != nil {
-			return fmt.Errorf("failed to execute info.md: %w", err)
-		}
-
-		logger.Infoln("Info: ")
-		logger.Infoln("-------")
-		logger.Infoln(rendered.String())
 	}
 
 	return nil
 }
 
-// populatePodValues -> populates the host values within the params
+// populatePodValues -> populates the host values within the params.
 func populateHostValues(params map[string]string, varsData *templates.Vars) error {
 	for _, host := range varsData.Hosts {
 		if host.Type == "ip" {
@@ -188,9 +126,9 @@ func populateContainerInfo(runtime runtime.Runtime, params map[string]string, va
 	return nil
 }
 
-// fetchDataSpecificInfo fetches the value from pod/container info based on the provided format
-// data can be either the podInfo or the containerInfo
-// format passed should support the podman --format notation without using '{{}}'
+// fetchDataSpecificInfo fetches the value from pod/container info based on the provided format.
+// Data can be either the podInfo or the containerInfo.
+// Format passed should support the podman --format notation without using '{{}}'.
 func fetchDataSpecificInfo(data any, format string, defaultValue *string) (string, error) {
 	// Converting format to template literal
 	// Eg:- Template format: ".State" becomes "{{ .State }}"
@@ -214,4 +152,50 @@ func fetchDataSpecificInfo(data any, format string, defaultValue *string) (strin
 	}
 
 	return strings.TrimSpace(result.String()), nil
+}
+
+func renderStepsMarkdown(runtime runtime.Runtime, appTemplate string, params map[string]string, mdFile, title string) error {
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+	stepsPath := appTemplate + "/steps"
+
+	tmpls, err := tp.LoadMdFiles(stepsPath)
+	if err != nil {
+		return nil
+	}
+
+	tmpl, ok := tmpls[mdFile]
+	if !ok {
+		return nil
+	}
+
+	varsData, err := tp.LoadVarsFile(appTemplate, params)
+	if err != nil {
+		return fmt.Errorf("failed to load vars file: %w", err)
+	}
+
+	// populate the host values set in vars file
+	if err := populateHostValues(params, varsData); err != nil {
+		return fmt.Errorf("failed to populate host values: %w", err)
+	}
+
+	// populate the pod info set in vars file
+	if err := populatePodInfo(runtime, params, varsData); err != nil {
+		return fmt.Errorf("failed to populate pod values: %w", err)
+	}
+
+	// populate the container info set in vars file
+	if err := populateContainerInfo(runtime, params, varsData); err != nil {
+		return fmt.Errorf("failed to populate container values: %w", err)
+	}
+
+	var rendered bytes.Buffer
+	if err := tmpl.Execute(&rendered, params); err != nil {
+		return fmt.Errorf("failed to execute info.md: %w", err)
+	}
+
+	logger.Infoln(title + ":")
+	logger.Infoln("-------")
+	logger.Infoln(rendered.String())
+
+	return nil
 }

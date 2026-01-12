@@ -15,12 +15,12 @@ const (
 	maxKeyValueParts = 2
 )
 
-// BoolPtr -> converts to bool ptr
+// BoolPtr -> converts to bool ptr.
 func BoolPtr(v bool) *bool {
 	return &v
 }
 
-// FlattenArray takes a 2D slice and returns a 1D slice with all values
+// FlattenArray takes a 2D slice and returns a 1D slice with all values.
 func FlattenArray[T comparable](arr [][]T) []T {
 	flatArr := []T{}
 
@@ -31,7 +31,7 @@ func FlattenArray[T comparable](arr [][]T) []T {
 	return flatArr
 }
 
-// ExtractMapKeys returns a slice of map keys
+// ExtractMapKeys returns a slice of map keys.
 func ExtractMapKeys[K comparable, V any](m map[K]V) []K {
 	keys := make([]K, 0, len(m))
 	for k := range m {
@@ -41,8 +41,8 @@ func ExtractMapKeys[K comparable, V any](m map[K]V) []K {
 	return keys
 }
 
-// CopyMap - does a shallow copy of input map
-// Note -> this does a shallow copy works for only primitive types
+// CopyMap - does a shallow copy of input map.
+// Note -> this does a shallow copy works for only primitive types.
 func CopyMap[K comparable, V any](src map[K]V) map[K]V {
 	dst := make(map[K]V, len(src))
 	maps.Copy(dst, src)
@@ -127,7 +127,7 @@ func GetHostIP() (string, error) {
 	return "", nil
 }
 
-// Checks if a yaml.Node is marked as hidden via @hidden in the head comment
+// Checks if a yaml.Node is marked as hidden via @hidden in the head comment.
 func isHidden(n *yaml.Node) bool {
 	if n == nil {
 		return false
@@ -136,7 +136,7 @@ func isHidden(n *yaml.Node) bool {
 	return strings.Contains(n.HeadComment, "@hidden")
 }
 
-// Retrieves the description from a yaml.Node's head comment marked with @description
+// Retrieves the description from a yaml.Node's head comment marked with @description.
 func getDescription(n *yaml.Node) string {
 	if n == nil {
 		return ""
@@ -160,49 +160,54 @@ func FlattenNode(prefix string, n *yaml.Node, descMap map[string]string) {
 
 	switch n.Kind {
 	case yaml.MappingNode:
-		for i := 0; i+1 < len(n.Content); i += 2 {
-			keyNode := n.Content[i]
-			valNode := n.Content[i+1]
-
-			if isHidden(keyNode) {
-				continue
-			}
-
-			var newPrefix string
-			if prefix == "" {
-				newPrefix = keyNode.Value
-			} else {
-				newPrefix = prefix + "." + keyNode.Value
-			}
-
-			// description tied to key
-			if d := getDescription(keyNode); d != "" {
-				descMap[newPrefix] = d
-			}
-
-			FlattenNode(newPrefix, valNode, descMap)
-		}
-
+		flattenMapping(prefix, n, descMap)
 	case yaml.SequenceNode:
-		for i, el := range n.Content {
-			newPrefix := fmt.Sprintf("%s[%d]", prefix, i)
-
-			// sequences probably not commented, but if they are:
-			if d := getDescription(el); d != "" {
-				descMap[newPrefix] = d
-			}
-
-			FlattenNode(newPrefix, el, descMap)
-		}
-
+		flattenSequence(prefix, n, descMap)
 	default:
-		// Leaf values
-		if prefix != "" {
-			if d := getDescription(n); d != "" {
-				descMap[prefix] = d
-			}
-		}
+		storeDescription(prefix, n, descMap)
 	}
+}
+
+func flattenMapping(prefix string, n *yaml.Node, descMap map[string]string) {
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		keyNode := n.Content[i]
+		valNode := n.Content[i+1]
+
+		if isHidden(keyNode) {
+			continue
+		}
+
+		newPrefix := joinPrefix(prefix, keyNode.Value)
+		storeDescription(newPrefix, keyNode, descMap)
+
+		FlattenNode(newPrefix, valNode, descMap)
+	}
+}
+
+func flattenSequence(prefix string, n *yaml.Node, descMap map[string]string) {
+	for i, el := range n.Content {
+		newPrefix := fmt.Sprintf("%s[%d]", prefix, i)
+		storeDescription(newPrefix, el, descMap)
+
+		FlattenNode(newPrefix, el, descMap)
+	}
+}
+
+func storeDescription(prefix string, n *yaml.Node, descMap map[string]string) {
+	if prefix == "" {
+		return
+	}
+	if d := getDescription(n); d != "" {
+		descMap[prefix] = d
+	}
+}
+
+func joinPrefix(prefix, key string) string {
+	if prefix == "" {
+		return key
+	}
+
+	return prefix + "." + key
 }
 
 // SetNestedValue function sets a nested value in a map based on a dotted key notation.

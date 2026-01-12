@@ -13,7 +13,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/spyre"
 )
 
-// Initialize the default registry with built-in rules
+// Initialize the default registry with built-in rules.
 func init() {
 	// adding root rule on top to verify this check first
 	DefaultRegistry.Register(root.NewRootRule())
@@ -25,7 +25,7 @@ func init() {
 	DefaultRegistry.Register(servicereport.NewServiceReportRule())
 }
 
-// Rule defines the interface for validation rules
+// Rule defines the interface for validation rules.
 type Rule interface {
 	Verify() error
 	Message() string

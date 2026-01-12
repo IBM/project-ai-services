@@ -1,9 +1,12 @@
 package vars
 
-import "regexp"
+import (
+	"regexp"
+	"time"
+)
 
 var (
-	// SpyreCardAnnotationRegex -> ai-services.io/<containerName>--spyre-cards
+	// SpyreCardAnnotationRegex -> ai-services.io/<containerName>--spyre-cards.
 	SpyreCardAnnotationRegex = regexp.MustCompile(`^ai-services\.io\/([A-Za-z0-9][-A-Za-z0-9_.]*)--spyre-cards$`)
 	ToolImage                = "icr.io/ai-services/tools:0.5"
 	ModelDirectory           = "/var/lib/ai-services/models"
@@ -18,4 +21,9 @@ var (
 
 var (
 	LparAffinityThreshold = 70
+)
+
+var (
+	RetryCount    = 3
+	RetryInterval = 5 * time.Second
 )

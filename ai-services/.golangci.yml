@@ -2,3 +2,21 @@ version: "2"
 run:
   build-tags:
     - exclude_graphdriver_btrfs containers_image_openpgp remote
+linters:
+  enable:
+    - cyclop
+    - govet
+    - funlen
+    - gocognit
+    - godoclint
+    - godot
+    - godox
+    - misspell
+    - mnd
+    - nestif
+    - nlreturn
+    - prealloc
+    - whitespace
+  disable:
+    - wsl
+    - depguard

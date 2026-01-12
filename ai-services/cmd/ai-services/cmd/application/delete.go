@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/containers/podman/v5/pkg/domain/entities/types"
 	"github.com/spf13/cobra"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
@@ -56,58 +56,46 @@ Arguments
 
 func init() {
 	deleteCmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "Skip deleting application data (default=false)")
+	deleteCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Automatically accept all confirmation prompts (default=false)")
 }
 
 func deleteApplication(client *podman.PodmanClient, appName string) error {
 	appDir := filepath.Join(constants.ApplicationsPath, filepath.Base(appName))
-	appExists := false
+	appExists := dirExists(appDir)
 
-	if _, err := os.Stat(appDir); err == nil {
-		appExists = true
-	}
-
-	resp, err := client.ListPods(map[string][]string{
+	pods, err := client.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
-
-	// TODO: Avoid doing the type assertion and importing types package from podman
-
-	var pods []*types.ListPodsReport
-	if val, ok := resp.([]*types.ListPodsReport); ok {
-		pods = val
-	}
-
 	podsExists := len(pods) != 0
 
-	if podsExists {
-		logger.Infof("Found %d pods for given applicationName: %s.\n", len(pods), appName)
-		logger.Infoln("Below are the list of pods to be deleted")
-		for _, pod := range pods {
-			logger.Infof("\t-> %s\n", pod.Name)
-		}
-	} else {
+	if !podsExists {
 		logger.Infof("No pods found for application: %s\n", appName)
-	}
-
-	confirmDelete, err := deleteConfirmation(appName, podsExists, appExists)
-	if err != nil {
-		return err
-	}
-	if !confirmDelete {
-		logger.Infoln("Deletion cancelled")
 
 		return nil
 	}
 
-	logger.Infoln("Proceeding with deletion...")
+	// print relevant app pod status
+	logPodsToBeDeleted(appName, pods)
 
-	if podsExists {
-		if err := podsDeletion(client, pods); err != nil {
+	if !autoYes {
+		confirmDelete, err := deleteConfirmation(appName, podsExists, appExists)
+		if err != nil {
 			return err
 		}
+		if !confirmDelete {
+			logger.Infoln("Deletion cancelled")
+
+			return nil
+		}
+	}
+
+	logger.Infoln("Proceeding with deletion...")
+
+	if err := podsDeletion(client, pods); err != nil {
+		return err
 	}
 
 	if appExists && !skipCleanup {
@@ -117,6 +105,14 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 	}
 
 	return nil
+}
+
+func logPodsToBeDeleted(appName string, pods []runtime.Pod) {
+	logger.Infof("Found %d pods for given applicationName: %s.\n", len(pods), appName)
+	logger.Infoln("Below are the list of pods to be deleted")
+	for _, pod := range pods {
+		logger.Infof("\t-> %s\n", pod.Name)
+	}
 }
 
 func deleteConfirmation(appName string, podsExists, appExists bool) (bool, error) {
@@ -141,13 +137,13 @@ func deleteConfirmation(appName string, podsExists, appExists bool) (bool, error
 	return confirmDelete, nil
 }
 
-func podsDeletion(client *podman.PodmanClient, pods []*types.ListPodsReport) error {
+func podsDeletion(client *podman.PodmanClient, pods []runtime.Pod) error {
 	var errors []string
 
 	for _, pod := range pods {
 		logger.Infof("Deleting pod: %s\n", pod.Name)
 
-		if err := client.DeletePod(pod.Id, utils.BoolPtr(true)); err != nil {
+		if err := client.DeletePod(pod.ID, utils.BoolPtr(true)); err != nil {
 			errors = append(errors, fmt.Sprintf("pod %s: %v", pod.Name, err))
 
 			continue
@@ -174,4 +170,10 @@ func appDataDeletion(appDir string) error {
 	logger.Infoln("Application data cleaned up successfully")
 
 	return nil
+}
+
+func dirExists(path string) bool {
+	_, err := os.Stat(path)
+
+	return err == nil
 }

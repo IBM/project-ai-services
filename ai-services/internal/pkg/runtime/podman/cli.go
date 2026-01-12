@@ -64,7 +64,7 @@ func RunPodmanKubePlay(body io.Reader, opts map[string]string) (*KubePlayOutput,
 	return &result, nil
 }
 
-// Helper function to extract podIds from RunKubePlay stdout
+// Helper function to extract podIds from RunKubePlay stdout.
 func extractPodIDsFromOutput(output string) []string {
 	lines := strings.Split(output, "\n")
 	ids := make([]string, 0, len(lines))

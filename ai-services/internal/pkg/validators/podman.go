@@ -8,7 +8,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 )
 
-// Podman checks if podman is installed and available in PATH
+// Podman checks if podman is installed and available in PATH.
 func Podman() (string, error) {
 	path, err := exec.LookPath("podman")
 	if err != nil {
@@ -18,7 +18,7 @@ func Podman() (string, error) {
 	return path, nil
 }
 
-// PodmanHealthCheck verifies podman is working
+// PodmanHealthCheck verifies podman is working.
 func PodmanHealthCheck() error {
 	client, err := podman.NewPodmanClient()
 	if err != nil {

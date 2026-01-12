@@ -3,7 +3,7 @@ package image
 import (
 	"fmt"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/spf13/cobra"
@@ -23,7 +23,7 @@ var pullCmd = &cobra.Command{
 }
 
 func pull(template string) error {
-	images, err := helpers.ListImages(template, "")
+	images, err := image.ListImages(template, "")
 	if err != nil {
 		return fmt.Errorf("error listing images: %w", err)
 	}

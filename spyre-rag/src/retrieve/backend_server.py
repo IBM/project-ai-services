@@ -17,10 +17,11 @@ import json
 from threading import BoundedSemaphore
 from functools import wraps
 from common.db_utils import MilvusVectorStore, MilvusNotReadyError
-from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_models
+from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_non_stream, query_vllm_models
 from common.misc_utils import get_model_endpoints, set_log_level
 from common.settings import get_settings
 from retrieve.backend_utils import search_only
+
 
 vectorstore = None
 TRUNCATION  = True
@@ -156,23 +157,36 @@ def chat_completion():
             return jsonify({"error": "Server busy. Try again shortly."}), 429
 
         try:
-            vllm_stream = query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, stream, dynamic_chunk_truncation=TRUNCATION)
+            if stream:
+                vllm_stream = query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, dynamic_chunk_truncation=TRUNCATION)
+                resp_text = stream_with_context(locked_stream(vllm_stream))           
+            else:
+                vllm_non_stream = query_vllm_non_stream(prompt, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, dynamic_chunk_truncation=TRUNCATION)
+                resp_text = json.dumps(vllm_non_stream, indent=None, separators=(',', ':'))
+                # release semaphore lock because its non-stream request
+                concurrency_limiter.release()
         except Exception as e:
             concurrency_limiter.release()
             return jsonify({"error": repr(e)}), 500
 
-        resp_text = stream_with_context(locked_stream(vllm_stream))
     else:
         resp_text = stream_with_context(stream_docs_not_found())
 
+    if stream:
+        return Response(resp_text,
+                content_type='text/event-stream',
+                mimetype='text/event-stream', headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Headers': 'Content-Type'
+            })
     return Response(resp_text,
-                    content_type='text/event-stream',
-                    mimetype='text/event-stream', headers={
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'Access-Control-Allow-Headers': 'Content-Type'
-        })
-
+                content_type='application/json',
+                mimetype='application/json', headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Headers': 'Content-Type'
+                })
 
 @app.get("/db-status")
 def db_status():

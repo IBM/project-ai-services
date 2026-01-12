@@ -87,3 +87,5 @@ jobs:
     uses: ./.github/workflows/scanner.yml
     with:
       path: 'spyre-rag/ui'
+      image: 'rag-ui'
+
