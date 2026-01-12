@@ -1,9 +1,10 @@
 package httpclient
 
 import (
+	"fmt"
 	"io"
-	"net/http/httptest"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
@@ -17,28 +18,29 @@ func TestHTTPClient(t *testing.T) {
 }
 
 var _ = Describe("HTTP Client", func() {
-
-	// Declare BEFORE using it
 	var testServer *httptest.Server
-
 	BeforeEach(func() {
-
-		// Create mock HTTP test server
 		testServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			var err error
 			switch r.Method {
-			case "GET":
-				w.Write([]byte(`{"status":"ok"}`))
-			case "POST":
-				w.Write([]byte(`{"created":true}`))
-			case "PUT":
-				w.Write([]byte(`{"updated":true}`))
-			case "DELETE":
-				w.Write([]byte(`{"deleted":true}`))
-			}
-		}))
+			case http.MethodGet:
+				_, err = w.Write([]byte(`{"status":"ok"}`))
+			case http.MethodPost:
+				_, err = w.Write([]byte(`{"created":true}`))
+			case http.MethodPut:
+				_, err = w.Write([]byte(`{"updated":true}`))
+			case http.MethodDelete:
+				_, err = w.Write([]byte(`{"deleted":true}`))
+			default:
+				w.WriteHeader(http.StatusMethodNotAllowed)
 
-		// Set BaseURL to test server URL
-		os.Setenv("AI_SERVICES_BASE_URL", testServer.URL)
+				return
+			}
+			Expect(err).NotTo(HaveOccurred())
+		}))
+		err := os.Setenv("AI_SERVICES_BASE_URL", testServer.URL)
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	AfterEach(func() {
@@ -48,36 +50,56 @@ var _ = Describe("HTTP Client", func() {
 	It("GET works", func() {
 		client := NewHTTPClient()
 		resp, err := client.Get("/test")
-		Expect(err).To(BeNil())
-
-		body, _ := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+		defer func() {
+			if cerr := resp.Body.Close(); cerr != nil {
+				fmt.Printf("[WARNING] failed to close response body: %v\n", cerr)
+			}
+		}()
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(string(body)).To(ContainSubstring("ok"))
 	})
 
 	It("POST works", func() {
 		client := NewHTTPClient()
 		resp, err := client.Post("/test", map[string]string{"a": "b"})
-		Expect(err).To(BeNil())
-
-		body, _ := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+		defer func() {
+			if cerr := resp.Body.Close(); cerr != nil {
+				fmt.Printf("[WARNING] failed to close response body: %v\n", cerr)
+			}
+		}()
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(string(body)).To(ContainSubstring("created"))
 	})
 
 	It("PUT works", func() {
 		client := NewHTTPClient()
 		resp, err := client.Put("/test", map[string]string{"x": "y"})
-		Expect(err).To(BeNil())
-
-		body, _ := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+		defer func() {
+			if cerr := resp.Body.Close(); cerr != nil {
+				fmt.Printf("[WARNING] failed to close response body: %v\n", cerr)
+			}
+		}()
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(string(body)).To(ContainSubstring("updated"))
 	})
 
 	It("DELETE works", func() {
 		client := NewHTTPClient()
 		resp, err := client.Delete("/test")
-		Expect(err).To(BeNil())
-
-		body, _ := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+		defer func() {
+			if cerr := resp.Body.Close(); cerr != nil {
+				fmt.Printf("[WARNING] failed to close response body: %v\n", cerr)
+			}
+		}()
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(string(body)).To(ContainSubstring("deleted"))
 	})
 })

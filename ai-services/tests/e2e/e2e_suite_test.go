@@ -89,7 +89,9 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	fmt.Println("[TEARDOWN] AI Services E2E teardown")
 	By("Cleaning up E2E environment")
-	cleanup.CleanupTemp(tempDir)
+	if err := cleanup.CleanupTemp(tempDir); err != nil {
+		fmt.Printf("[TEARDOWN] cleanup failed: %v\n", err)
+	}
 	By("Cleanup completed")
 })
 

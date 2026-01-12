@@ -16,7 +16,7 @@ type Config struct {
 	LogProbeWords []string
 }
 
-// Default values
+// Default values.
 const (
 	defaultServiceURL  = "http://localhost:8080"
 	defaultHealthPath  = "/health"
@@ -32,7 +32,7 @@ func LoadFromEnv() *Config {
 		Timeout:      time.Duration(defaultTimeoutSecs) * time.Second,
 		Retries:      defaultRetries,
 		AIServiceBin: os.Getenv("AI_SERVICES_BIN"),
-		// case-insensitive keywords to look for in logs to indicate readiness
+		// case-insensitive keywords to look for in logs to indicate readiness.
 		LogProbeWords: []string{"ready", "healthy", "started", "serving"},
 	}
 
@@ -52,10 +52,11 @@ func LoadFromEnv() *Config {
 			cfg.Retries = n
 		}
 	}
-	// Ensure there is a bin set (empty means rely on PATH)
+	// Ensure there is a bin set (empty means rely on PATH).
 	if cfg.AIServiceBin == "" {
 		cfg.AIServiceBin = os.Getenv("AI_SERVICES_BIN") // keep empty if not set
 	}
+
 	return cfg
 }
 
@@ -66,5 +67,6 @@ func (c *Config) HealthURL() string {
 	if path == "" {
 		return base
 	}
+
 	return base + "/" + path
 }

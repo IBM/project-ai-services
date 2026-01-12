@@ -16,6 +16,7 @@ func ValidateBootstrapConfigureOutput(output string) error {
 			return fmt.Errorf("bootstrap configure validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 func ValidateBootstrapValidateOutput(output string) error {
@@ -27,6 +28,7 @@ func ValidateBootstrapValidateOutput(output string) error {
 			return fmt.Errorf("bootstrap validate validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 func ValidateBootstrapFullOutput(output string) error {
@@ -39,6 +41,7 @@ func ValidateBootstrapFullOutput(output string) error {
 			return fmt.Errorf("full bootstrap validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 
@@ -53,6 +56,7 @@ func ValidateCreateAppOutput(output, appName string) error {
 			return fmt.Errorf("create-app validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 
@@ -66,6 +70,7 @@ func ValidateHelpCommandOutput(output string) error {
 			return fmt.Errorf("help command validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 
@@ -105,6 +110,7 @@ func ValidateHelpRandomCommandOutput(command string, output string) error {
 			return fmt.Errorf("help random command validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 
@@ -125,6 +131,7 @@ func ValidateStopAppOutput(output string) error {
 	if !strings.Contains(output, "Proceeding to stop pods") {
 		return fmt.Errorf("stop app validation failed")
 	}
+
 	return nil
 }
 
@@ -141,6 +148,7 @@ func ValidatePodsExitedAfterStop(psOutput, appName string) error {
 				return true
 			}
 		}
+
 		return false
 	}
 
@@ -167,6 +175,7 @@ func ValidatePodsExitedAfterStop(psOutput, appName string) error {
 	}
 
 	fmt.Println("[TEST] Main pods are in Exited state")
+
 	return nil
 }
 
@@ -179,13 +188,13 @@ func ValidateDeleteAppOutput(output, appName string) error {
 			return fmt.Errorf("delete app validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 
 func ValidateNoPodsAfterDelete(psOutput string) error {
 	for line := range strings.SplitSeq(psOutput, "\n") {
 		line = strings.TrimSpace(line)
-
 		if line == "" ||
 			strings.HasPrefix(line, "APPLICATION") ||
 			strings.HasPrefix(line, "──") ||
@@ -195,7 +204,7 @@ func ValidateNoPodsAfterDelete(psOutput string) error {
 
 		return fmt.Errorf("pods still exist after delete")
 	}
-
 	fmt.Println("[TEST] No pods present after delete")
+
 	return nil
 }
