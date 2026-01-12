@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"syscall"
 
 	"github.com/containers/podman/v5/libpod/define"
@@ -35,10 +36,27 @@ func NewPodmanClient() (*PodmanClient, error) {
 	// MacOS instructions running in a remote VM:
 	// export CONTAINER_HOST=ssh://root@127.0.0.1:62904/run/podman/podman.sock
 	// export CONTAINER_SSHKEY=/Users/manjunath/.local/share/containers/podman/machine/machine
-	uri := "unix:///run/podman/podman.sock"
+	var uri string
 	if v, found := os.LookupEnv("CONTAINER_HOST"); found {
 		uri = v
+	} else {
+		euid := os.Geteuid()
+		sudoUser := os.Getenv("SUDO_USER")
+		if euid == 0 && sudoUser == "" {
+			uri = "unix:///run/podman/podman.sock"
+		} else if euid == 0 && sudoUser != "" {
+			u, err := user.Lookup(sudoUser)
+			if err != nil {
+				return nil, fmt.Errorf("failed to lookup user %s: %w", sudoUser, err)
+			}
+
+			uri = fmt.Sprintf("unix:///run/user/%s/podman/podman.sock", u.Uid)
+		} else {
+			uid := os.Getuid()
+			uri = fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", uid)
+		}
 	}
+
 	ctx, err := bindings.NewConnection(context.Background(), uri)
 	if err != nil {
 		return nil, err
