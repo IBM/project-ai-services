@@ -6,5 +6,11 @@
   },
 
   "score_threshold": 0.5, 
-  "max_concurrent_requests": 32
+  "max_concurrent_requests": 32,
+  "num_chunks_post_search": 10,
+  "num_chunks_post_reranker": 3,
+  "llm_max_tokens": 512,
+  "temperature": 0.0,
+  "max_input_length": 6000,
+  "prompt_template_token_count": 250
 }
