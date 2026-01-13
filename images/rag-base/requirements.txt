@@ -40,6 +40,7 @@ tqdm==4.67.1
 transformers==4.57.1
 tree_sitter_c==0.23.2
 tree_sitter_python==0.23.2
+urllib3==2.6.3
 uvicorn==0.38.0
 uvloop==0.22.1
 ujson==5.10.0
