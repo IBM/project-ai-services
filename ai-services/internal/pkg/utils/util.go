@@ -160,49 +160,54 @@ func FlattenNode(prefix string, n *yaml.Node, descMap map[string]string) {
 
 	switch n.Kind {
 	case yaml.MappingNode:
-		for i := 0; i+1 < len(n.Content); i += 2 {
-			keyNode := n.Content[i]
-			valNode := n.Content[i+1]
-
-			if isHidden(keyNode) {
-				continue
-			}
-
-			var newPrefix string
-			if prefix == "" {
-				newPrefix = keyNode.Value
-			} else {
-				newPrefix = prefix + "." + keyNode.Value
-			}
-
-			// description tied to key
-			if d := getDescription(keyNode); d != "" {
-				descMap[newPrefix] = d
-			}
-
-			FlattenNode(newPrefix, valNode, descMap)
-		}
-
+		flattenMapping(prefix, n, descMap)
 	case yaml.SequenceNode:
-		for i, el := range n.Content {
-			newPrefix := fmt.Sprintf("%s[%d]", prefix, i)
-
-			// sequences probably not commented, but if they are:
-			if d := getDescription(el); d != "" {
-				descMap[newPrefix] = d
-			}
-
-			FlattenNode(newPrefix, el, descMap)
-		}
-
+		flattenSequence(prefix, n, descMap)
 	default:
-		// Leaf values
-		if prefix != "" {
-			if d := getDescription(n); d != "" {
-				descMap[prefix] = d
-			}
-		}
+		storeDescription(prefix, n, descMap)
 	}
+}
+
+func flattenMapping(prefix string, n *yaml.Node, descMap map[string]string) {
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		keyNode := n.Content[i]
+		valNode := n.Content[i+1]
+
+		if isHidden(keyNode) {
+			continue
+		}
+
+		newPrefix := joinPrefix(prefix, keyNode.Value)
+		storeDescription(newPrefix, keyNode, descMap)
+
+		FlattenNode(newPrefix, valNode, descMap)
+	}
+}
+
+func flattenSequence(prefix string, n *yaml.Node, descMap map[string]string) {
+	for i, el := range n.Content {
+		newPrefix := fmt.Sprintf("%s[%d]", prefix, i)
+		storeDescription(newPrefix, el, descMap)
+
+		FlattenNode(newPrefix, el, descMap)
+	}
+}
+
+func storeDescription(prefix string, n *yaml.Node, descMap map[string]string) {
+	if prefix == "" {
+		return
+	}
+	if d := getDescription(n); d != "" {
+		descMap[prefix] = d
+	}
+}
+
+func joinPrefix(prefix, key string) string {
+	if prefix == "" {
+		return key
+	}
+
+	return prefix + "." + key
 }
 
 // SetNestedValue function sets a nested value in a map based on a dotted key notation.

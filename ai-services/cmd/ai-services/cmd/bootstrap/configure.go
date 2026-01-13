@@ -145,26 +145,8 @@ func runServiceReport() error {
 	num_spyre_cards := len(cards)
 
 	// check if kernel modules for vfio are loaded
-	vfio_cmd := `lspci -k -d 1014:06a7 | grep "Kernel driver in use: vfio-pci" | wc -l`
-	out, err := exec.Command("bash", "-c", vfio_cmd).Output()
-	if err != nil {
-		return fmt.Errorf("❌ failed to check vfio cards with kernel modules loaded %w", err)
-	}
-
-	num_vf_cards, err := strconv.Atoi(strings.TrimSuffix(string(out), "\n"))
-	if err != nil {
-		return fmt.Errorf("❌ failed to convert number of virtual spyre cards count from string to integer %w", err)
-	}
-
-	if num_vf_cards != num_spyre_cards {
-		logger.Infof("failed to detect vfio cards, reloading vfio kernel modules..")
-		// reload vfio kernel modules
-		cmd = `rmmod vfio_pci; modprobe vfio_pci`
-		_, err = exec.Command("bash", "-c", cmd).Output()
-		if err != nil {
-			return fmt.Errorf("❌ failed to reload vfio kernel modules for spyre %w", err)
-		}
-		logger.Infoln("VFIO kernel modules reloaded on the host", logger.VerbosityLevelDebug)
+	if err := checkKernelModulesLoaded(num_spyre_cards); err != nil {
+		return err
 	}
 
 	return nil
@@ -186,6 +168,32 @@ func reloadUdevRules() error {
 	_, err := exec.Command("bash", "-c", cmd).Output()
 	if err != nil {
 		return fmt.Errorf("failed to reload udev rules. Error: %w", err)
+	}
+
+	return nil
+}
+
+func checkKernelModulesLoaded(num_spyre_cards int) error {
+	vfio_cmd := `lspci -k -d 1014:06a7 | grep "Kernel driver in use: vfio-pci" | wc -l`
+	out, err := exec.Command("bash", "-c", vfio_cmd).Output()
+	if err != nil {
+		return fmt.Errorf("❌ failed to check vfio cards with kernel modules loaded %w", err)
+	}
+
+	num_vf_cards, err := strconv.Atoi(strings.TrimSuffix(string(out), "\n"))
+	if err != nil {
+		return fmt.Errorf("❌ failed to convert number of virtual spyre cards count from string to integer %w", err)
+	}
+
+	if num_vf_cards != num_spyre_cards {
+		logger.Infof("failed to detect vfio cards, reloading vfio kernel modules..")
+		// reload vfio kernel modules
+		cmd := `rmmod vfio_pci; modprobe vfio_pci`
+		_, err = exec.Command("bash", "-c", cmd).Output()
+		if err != nil {
+			return fmt.Errorf("❌ failed to reload vfio kernel modules for spyre %w", err)
+		}
+		logger.Infoln("VFIO kernel modules reloaded on the host", logger.VerbosityLevelDebug)
 	}
 
 	return nil

@@ -9,8 +9,10 @@ on:
   pull_request:
     paths:
       - 'ai-services/**'
+      - .github/workflows/go.yaml
     branches:
       - main
+
 
 jobs:
   build:
@@ -36,10 +38,16 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.6
+          version: v2.7
           working-directory: ai-services
 
       - name: Build Go binary
         working-directory: ai-services
         run: |
           GOOS=linux GOARCH=ppc64le make build
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      skip-cves-scan: true
+      skip-image-build: true
+      skip-code-license-scan: false

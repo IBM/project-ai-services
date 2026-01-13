@@ -6,13 +6,13 @@ from threading import BoundedSemaphore
 from functools import wraps
 
 from common.db_utils import MilvusVectorStore, MilvusNotReadyError
-from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_models
+from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_non_stream, query_vllm_models
 from common.misc_utils import get_model_endpoints, set_log_level
 from common.settings import get_settings
 from retrieve.backend_utils import search_only
 
+
 vectorstore = None
-TRUNCATION  = True
 
 # Globals to be set dynamically
 emb_model_dict = {}
@@ -52,10 +52,7 @@ def limit_concurrency(f):
 @app.post("/reference")
 def get_reference_docs():
     data = request.get_json()
-    prompt = data.get("prompt", "")
-    num_chunks_post_rrf = data.get("num_chunks_post_rrf", 10)
-    num_docs_reranker = data.get("num_docs_reranker", 3)
-    use_reranker = data.get("use_reranker", True)
+    query = data.get("prompt", "")
     try:
         emb_model = emb_model_dict['emb_model']
         emb_endpoint = emb_model_dict['emb_endpoint']
@@ -64,13 +61,12 @@ def get_reference_docs():
         reranker_endpoint = reranker_model_dict['reranker_endpoint']
 
         docs = search_only(
-            prompt,
+            query,
             emb_model, emb_endpoint, emb_max_tokens,
             reranker_model,
             reranker_endpoint,
-            num_chunks_post_rrf,
-            num_docs_reranker,
-            use_reranker,
+            settings.num_chunks_post_search,
+            settings.num_chunks_post_reranker,
             vectorstore=vectorstore
         )
     except MilvusNotReadyError as e:
@@ -107,14 +103,11 @@ def chat_completion():
     if data and len(data.get("messages", [])) == 0:
         return jsonify({"error": "messages can't be empty"})
     msgs = data.get("messages")[0]
-    prompt = msgs.get("content")
-    num_chunks_post_rrf = data.get("num_chunks_post_rrf", 10)
-    num_docs_reranker = data.get("num_docs_reranker", 3)
-    use_reranker = data.get("use_reranker", True)
-    max_tokens = data.get("max_tokens", 512)
-    temperature = data.get("temperature", 0.0)
+    query = msgs.get("content")
+    max_tokens = data.get("max_tokens", settings.llm_max_tokens)
+    temperature = data.get("temperature", settings.temperature)
     stop_words = data.get("stop")
-    stream = data.get("stream")
+    stream = data.get("stream", False)
     try:
         emb_model = emb_model_dict['emb_model']
         emb_endpoint = emb_model_dict['emb_endpoint']
@@ -124,13 +117,12 @@ def chat_completion():
         reranker_model = reranker_model_dict['reranker_model']
         reranker_endpoint = reranker_model_dict['reranker_endpoint']
         docs = search_only(
-            prompt,
+            query,
             emb_model, emb_endpoint, emb_max_tokens,
             reranker_model,
             reranker_endpoint,
-            num_chunks_post_rrf,
-            num_docs_reranker,
-            use_reranker,
+            settings.num_chunks_post_search,
+            settings.num_chunks_post_reranker,
             vectorstore=vectorstore
         )
     except MilvusNotReadyError as e:
@@ -145,23 +137,36 @@ def chat_completion():
             return jsonify({"error": "Server busy. Try again shortly."}), 429
 
         try:
-            vllm_stream = query_vllm_stream(prompt, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, stream, dynamic_chunk_truncation=TRUNCATION)
+            if stream:
+                vllm_stream = query_vllm_stream(query, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature )
+                resp_text = stream_with_context(locked_stream(vllm_stream))           
+            else:
+                vllm_non_stream = query_vllm_non_stream(query, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature )
+                resp_text = json.dumps(vllm_non_stream, indent=None, separators=(',', ':'))
+                # release semaphore lock because its non-stream request
+                concurrency_limiter.release()
         except Exception as e:
             concurrency_limiter.release()
             return jsonify({"error": repr(e)}), 500
 
-        resp_text = stream_with_context(locked_stream(vllm_stream))
     else:
         resp_text = stream_with_context(stream_docs_not_found())
 
+    if stream:
+        return Response(resp_text,
+                content_type='text/event-stream',
+                mimetype='text/event-stream', headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Headers': 'Content-Type'
+            })
     return Response(resp_text,
-                    content_type='text/event-stream',
-                    mimetype='text/event-stream', headers={
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'Access-Control-Allow-Headers': 'Content-Type'
-        })
-
+                content_type='application/json',
+                mimetype='application/json', headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Headers': 'Content-Type'
+                })
 
 @app.get("/db-status")
 def db_status():
