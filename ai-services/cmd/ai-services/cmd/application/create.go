@@ -625,7 +625,7 @@ func doContainerReadinessCheck(runtime runtime.Runtime, podTemplateName, podName
 
 func deployPodAndReadinessCheck(runtime runtime.Runtime, podSpec *models.PodSpec,
 	podTemplateName string, body io.Reader, opts map[string]string) error {
-	kubeReport, err := podman.RunPodmanKubePlay(body, opts)
+	pods, err := podman.RunPodmanKubePlay(body, opts)
 	if err != nil {
 		return fmt.Errorf("failed pod creation: %w", err)
 	}
@@ -638,7 +638,7 @@ func deployPodAndReadinessCheck(runtime runtime.Runtime, podSpec *models.PodSpec
 		Step2: Perform Containers Readiness Check
 	*/
 
-	for _, pod := range kubeReport.Pods {
+	for _, pod := range pods {
 		pInfo, err := runtime.InspectPod(pod.ID)
 		if err != nil {
 			return fmt.Errorf("failed to do pod inspect for podID: '%s' with error: %w", pod.ID, err)

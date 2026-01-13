@@ -48,13 +48,18 @@ func NewPodmanClient() (*PodmanClient, error) {
 }
 
 // ListImages function to list images (you can expand with more Podman functionalities).
-func (pc *PodmanClient) ListImages() ([]*types.ImageSummary, error) {
-	return images.List(pc.Context, nil)
+func (pc *PodmanClient) ListImages() ([]runtime.Image, error) {
+	images, err := images.List(pc.Context, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return toImageList(images), nil
 }
 
-func (pc *PodmanClient) PullImage(image string, options *images.PullOptions) error {
+func (pc *PodmanClient) PullImage(image string) error {
 	logger.Infof("Pulling image %s...\n", image)
-	_, err := images.Pull(pc.Context, image, options)
+	_, err := images.Pull(pc.Context, image, nil)
 	if err != nil {
 		return fmt.Errorf("failed to pull image %s: %w", image, err)
 	}
@@ -78,13 +83,13 @@ func (pc *PodmanClient) ListPods(filters map[string][]string) ([]runtime.Pod, er
 	return toPodsList(podList), nil
 }
 
-func (pc *PodmanClient) CreatePod(body io.Reader) (*types.KubePlayReport, error) {
+func (pc *PodmanClient) CreatePod(body io.Reader) ([]runtime.Pod, error) {
 	kubeReport, err := kube.PlayWithBody(pc.Context, body, nil)
 	if err != nil {
-		return kubeReport, fmt.Errorf("failed to execute podman kube play: %w", err)
+		return nil, fmt.Errorf("failed to execute podman kube play: %w", err)
 	}
 
-	return kubeReport, nil
+	return toPodsList(kubeReport), nil
 }
 
 func (pc *PodmanClient) DeletePod(id string, force *bool) error {
@@ -109,7 +114,7 @@ func (pc *PodmanClient) InspectContainer(nameOrId string) (*define.InspectContai
 	return stats, nil
 }
 
-func (pc *PodmanClient) ListContainers(filters map[string][]string) (any, error) {
+func (pc *PodmanClient) ListContainers(filters map[string][]string) ([]runtime.Container, error) {
 	var listOpts containers.ListOptions
 
 	if len(filters) >= 1 {
@@ -121,7 +126,7 @@ func (pc *PodmanClient) ListContainers(filters map[string][]string) (any, error)
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
 
-	return containerlist, nil
+	return toContainerList(containerlist), nil
 }
 
 func (pc *PodmanClient) StopPod(id string) error {
