@@ -86,6 +86,7 @@ var _ = BeforeSuite(func() {
 	fmt.Printf("[SETUP] ================================================\n\n")
 })
 
+// Teardown after all tests have run.
 var _ = AfterSuite(func() {
 	fmt.Println("[TEARDOWN] AI Services E2E teardown")
 	By("Cleaning up E2E environment")
