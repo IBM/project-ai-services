@@ -361,7 +361,6 @@ func processTemplateOutput(output string) []string {
 func ValidateApplicationsTemplateCommandOutput(output string) error {
 	type RequiredOutputs struct {
 		rag []string
-		ee  []string
 	}
 	requiredOutputs := RequiredOutputs{
 		rag: []string{
