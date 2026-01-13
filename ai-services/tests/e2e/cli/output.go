@@ -17,6 +17,7 @@ func ValidateBootstrapConfigureOutput(output string) error {
 			return fmt.Errorf("bootstrap configure validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 func ValidateBootstrapValidateOutput(output string) error {
@@ -28,6 +29,7 @@ func ValidateBootstrapValidateOutput(output string) error {
 			return fmt.Errorf("bootstrap validate validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 func ValidateBootstrapFullOutput(output string) error {
@@ -40,6 +42,7 @@ func ValidateBootstrapFullOutput(output string) error {
 			return fmt.Errorf("full bootstrap validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 
@@ -54,6 +57,7 @@ func ValidateCreateAppOutput(output, appName string) error {
 			return fmt.Errorf("create-app validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 
@@ -67,6 +71,7 @@ func ValidateHelpCommandOutput(output string) error {
 			return fmt.Errorf("help command validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 
@@ -106,6 +111,7 @@ func ValidateHelpRandomCommandOutput(command string, output string) error {
 			return fmt.Errorf("help random command validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 
@@ -141,6 +147,7 @@ func ValidateImageListOutput(output string) error {
 			return fmt.Errorf("image list validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 
@@ -157,6 +164,7 @@ func ValidateModelListOutput(output string, templateName string) error {
 		l = strings.TrimSpace(l)
 		if strings.HasPrefix(l, "- ") {
 			found = true
+
 			break
 		}
 	}
@@ -189,6 +197,7 @@ func ValidatePullImageOutput(output, templateName string) error {
 			return fmt.Errorf("pull image validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 
@@ -196,6 +205,7 @@ func ValidateStopAppOutput(output string) error {
 	if !strings.Contains(output, "Proceeding to stop pods") {
 		return fmt.Errorf("stop app validation failed")
 	}
+
 	return nil
 }
 
@@ -204,7 +214,6 @@ func ValidatePodsExitedAfterStop(
 	appName string,
 	templateName string,
 ) error {
-
 	mainPodsByType := map[string][]string{
 		"rag": {
 			"vllm-server",
@@ -224,6 +233,7 @@ func ValidatePodsExitedAfterStop(
 				return true
 			}
 		}
+
 		return false
 	}
 
@@ -251,6 +261,7 @@ func ValidatePodsExitedAfterStop(
 	}
 
 	fmt.Printf("[TEST] Main pods for %s are in Exited state\n", templateName)
+
 	return nil
 }
 
@@ -262,6 +273,7 @@ func ValidateDeleteAppOutput(output, appName string) error {
 			return fmt.Errorf("delete app validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }
 
@@ -279,6 +291,7 @@ func ValidateNoPodsAfterDelete(psOutput string) error {
 	}
 
 	fmt.Println("[TEST] No pods present after delete")
+
 	return nil
 }
 
@@ -341,6 +354,7 @@ func processTemplateOutput(output string) []string {
 	output = strings.ReplaceAll(output, "\n\n", "\n")
 	arrOutput := strings.Split(output, "- ")
 	arrOutput = arrOutput[1:]
+
 	return arrOutput
 }
 
@@ -372,6 +386,7 @@ func ValidateApplicationsTemplateCommandOutput(output string) error {
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -386,5 +401,6 @@ func ValidateVersionCommandOutput(output string, version string, commit string) 
 			return fmt.Errorf("version command validation failed: missing '%s'", r)
 		}
 	}
+
 	return nil
 }

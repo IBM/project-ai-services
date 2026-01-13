@@ -202,7 +202,6 @@ func HelpCommand(ctx context.Context, cfg *config.Config, args []string) (string
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
-
 	if err != nil {
 		return output, fmt.Errorf("help command run failed: %w\n%s", err, output)
 	}
@@ -229,7 +228,7 @@ func ApplicationPS(ctx context.Context, cfg *config.Config, appName string) (str
 	return output, nil
 }
 
-// ApplicationPSWide runs the 'application ps -o wide' command to list application pods with more details
+// ApplicationPSWide runs the 'application ps -o wide' command to list application pods with more details.
 func ApplicationPSWide(ctx context.Context, cfg *config.Config, appName string) (string, error) {
 	args := []string{"application", "ps"}
 	if appName != "" {
@@ -249,7 +248,7 @@ func ApplicationPSWide(ctx context.Context, cfg *config.Config, appName string) 
 	return output, nil
 }
 
-// List images from the given application template
+// ListImage from the given application template.
 func ListImage(ctx context.Context, cfg *config.Config, templateName string) error {
 	args := []string{"application", "image", "list", "--template", templateName}
 	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
@@ -262,10 +261,11 @@ func ListImage(ctx context.Context, cfg *config.Config, templateName string) err
 	if err := ValidateImageListOutput(output); err != nil {
 		return err
 	}
+
 	return nil
 }
 
-// ModelList lists models for a given application template
+// ModelList lists models for a given application template.
 func ModelList(ctx context.Context, cfg *config.Config, templateName string) (string, error) {
 	args := []string{"application", "model", "list", "--template", templateName}
 	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
@@ -275,10 +275,11 @@ func ModelList(ctx context.Context, cfg *config.Config, templateName string) (st
 	if err != nil {
 		return output, fmt.Errorf("application model list failed: %w\n%s", err, output)
 	}
+
 	return output, nil
 }
 
-// Pull images from the given application template
+// PullImage from the given application template.
 func PullImage(ctx context.Context, cfg *config.Config, templateName string) error {
 	args := []string{"application", "image", "pull", "--template", templateName}
 	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
@@ -291,10 +292,11 @@ func PullImage(ctx context.Context, cfg *config.Config, templateName string) err
 	if err := ValidatePullImageOutput(output, templateName); err != nil {
 		return err
 	}
+
 	return nil
 }
 
-// StopAppWithPods stops an application specifying pods to stop
+// StopAppWithPods stops an application specifying pods to stop.
 func StopAppWithPods(ctx context.Context, cfg *config.Config, appName string, templateName string, pods []string) (string, error) {
 	podArg := strings.Join(pods, ",")
 	args := []string{
@@ -328,13 +330,12 @@ func StopAppWithPods(ctx context.Context, cfg *config.Config, appName string, te
 	return output, nil
 }
 
-// DeleteAppSkipCleanup deletes an application with --skip-cleanup flag
+// DeleteAppSkipCleanup deletes an application with --skip-cleanup flag.
 func DeleteAppSkipCleanup(
 	ctx context.Context,
 	cfg *config.Config,
 	appName string,
 ) (string, error) {
-
 	args := []string{
 		"application", "delete", appName,
 		"--skip-cleanup",
@@ -366,13 +367,12 @@ func DeleteAppSkipCleanup(
 	return output, nil
 }
 
-// ApplicationInfo runs the 'application info' command
+// ApplicationInfo runs the 'application info' command.
 func ApplicationInfo(
 	ctx context.Context,
 	cfg *config.Config,
 	appName string,
 ) (string, error) {
-
 	args := []string{"application", "info", appName}
 
 	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
@@ -388,7 +388,7 @@ func ApplicationInfo(
 	return output, nil
 }
 
-// runs the 'application template' command
+// TemplatesCommand runs the 'application template' command.
 func TemplatesCommand(ctx context.Context, cfg *config.Config) (string, error) {
 	fmt.Printf("[CLI] Running: %s application templates\n", cfg.AIServiceBin)
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "application", "templates")
@@ -398,10 +398,11 @@ func TemplatesCommand(ctx context.Context, cfg *config.Config) (string, error) {
 	if err != nil {
 		return output, fmt.Errorf("application templates command run failed: %w\n%s", err, output)
 	}
+
 	return output, nil
 }
 
-// runs the 'version' command
+// VersionCommand runs the 'version' command.
 func VersionCommand(ctx context.Context, cfg *config.Config, args []string) (string, error) {
 	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
@@ -415,7 +416,7 @@ func VersionCommand(ctx context.Context, cfg *config.Config, args []string) (str
 	return output, nil
 }
 
-// runs the git commands required for version check
+// GitVersionCommands runs the git commands required for version check.
 func GitVersionCommands(ctx context.Context) (string, string, error) {
 	versionCmd := "describe --tags --always"
 	commitCmd := "rev-parse --short HEAD"

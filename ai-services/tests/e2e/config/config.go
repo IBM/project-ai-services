@@ -67,5 +67,6 @@ func (c *Config) HealthURL() string {
 	if path == "" {
 		return base
 	}
+
 	return base + "/" + path
 }

@@ -104,8 +104,9 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 		It("runs application version command", func() {
 			args := []string{"version"}
 			output, err := cli.VersionCommand(ctx, cfg, args)
-			voutput, coutput, err := cli.GitVersionCommands(ctx)
+			voutput, coutput, gerr := cli.GitVersionCommands(ctx)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(gerr).NotTo(HaveOccurred())
 			Expect(cli.ValidateVersionCommandOutput(output, voutput, coutput)).To(Succeed())
 		})
 	})
