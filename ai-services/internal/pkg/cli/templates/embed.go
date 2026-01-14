@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"slices"
+	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -19,11 +19,11 @@ import (
 
 const (
 	/*
-		Templates Pattern :- "assets/applications/<AppName>/templates/*.yaml.tmpl"
-		After splitting, the application name is located at third part.
+		Templates Pattern :- "applications/<AppName>/metadata.yaml"
+		After splitting, the application name is located at second part.
 		So we ensure the path contains enough segments which is appName index + 1.
 	*/
-	minPathPartsForAppName = 4
+	minPathPartsForAppName = 3
 )
 
 type embedTemplateProvider struct {
@@ -32,7 +32,7 @@ type embedTemplateProvider struct {
 }
 
 // ListApplications lists all available application templates.
-func (e *embedTemplateProvider) ListApplications() ([]string, error) {
+func (e *embedTemplateProvider) ListApplications(hidden bool) ([]string, error) {
 	apps := []string{}
 
 	err := fs.WalkDir(e.fs, e.root, func(path string, d fs.DirEntry, err error) error {
@@ -43,15 +43,19 @@ func (e *embedTemplateProvider) ListApplications() ([]string, error) {
 			return nil
 		}
 
-		// Templates Pattern :- "assets/applications/<AppName>/templates/*.yaml.tmpl"
-		parts := strings.Split(path, "/")
-
-		if len(parts) >= minPathPartsForAppName {
+		// Templates Pattern :- "applications/<AppName>/metadata.yaml"
+		parts := strings.Split(filepath.ToSlash(path), "/")
+		if len(parts) == minPathPartsForAppName && filepath.Base(path) == "metadata.yaml" {
 			appName := parts[1]
-			if slices.Contains(apps, appName) {
-				return nil
+			md, err := e.LoadMetadata(appName)
+			if err != nil {
+				return err
 			}
-			apps = append(apps, appName)
+			if !md.Hidden || hidden {
+				apps = append(apps, appName)
+			}
+
+			return fs.SkipDir
 		}
 
 		return nil
