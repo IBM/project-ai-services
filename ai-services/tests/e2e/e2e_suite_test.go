@@ -18,16 +18,16 @@ import (
 )
 
 var (
-	cfg          *config.Config
-	runID        string
-	appName      string
-	tempDir      string
-	tempBinDir   string
-	aiServiceBin string
-	binVersion   string
-	ctx          context.Context
-	podmanReady  bool
-	templateName string
+	cfg                *config.Config
+	runID              string
+	appName            string
+	tempDir            string
+	tempBinDir         string
+	aiServiceBin       string
+	binVersion         string
+	ctx                context.Context
+	podmanReady        bool
+	templateName       string
 	mainPodsByTemplate map[string][]string
 )
 
@@ -52,12 +52,12 @@ var _ = BeforeSuite(func() {
 
 	By("Setting main pods by template")
 	mainPodsByTemplate = map[string][]string{
-	"rag": {
-		"vllm-server",
-		"milvus",
-		"chat-bot",
-	},
-}
+		"rag": {
+			"vllm-server",
+			"milvus",
+			"chat-bot",
+		},
+	}
 
 	By("Preparing runtime environment")
 	tempDir = bootstrap.PrepareRuntime(runID)
@@ -185,6 +185,22 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 			Expect(cli.ValidateBootstrapFullOutput(output)).To(Succeed())
 		})
 	})
+	Context("Application Image Command Tests", func() {
+		It("lists images for rag template", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			err := cli.ListImage(ctx, cfg, templateName)
+			Expect(err).NotTo(HaveOccurred())
+			fmt.Printf("[TEST] Images listed successfully for %s template\n", templateName)
+		})
+		It("pulls images for rag template", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			err := cli.PullImage(ctx, cfg, templateName)
+			Expect(err).NotTo(HaveOccurred())
+			fmt.Printf("[TEST] Images pulled successfully for %s template\n", templateName)
+		})
+	})
 	Context("Application Lifecycle", func() {
 		It("creates rag application, runs health checks and validates RAG endpoints", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
@@ -209,20 +225,6 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 			fmt.Printf("[TEST] Application %s created, healthy, and RAG endpoints validated\n", appName)
-		})
-		It("lists images for rag template", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-			err := cli.ListImage(ctx, cfg, templateName)
-			Expect(err).NotTo(HaveOccurred())
-			fmt.Printf("[TEST] Images listed successfully for %s template\n", templateName)
-		})
-		It("pulls images for rag template", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			defer cancel()
-			err := cli.PullImage(ctx, cfg, templateName)
-			Expect(err).NotTo(HaveOccurred())
-			fmt.Printf("[TEST] Images pulled successfully for %s template\n", templateName)
 		})
 	})
 	Context("Application Observability", func() {

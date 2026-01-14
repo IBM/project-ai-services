@@ -31,3 +31,8 @@ func PrepareRuntime(runID string) string {
 func GetRuntimeDir() string {
 	return os.Getenv("AI_SERVICES_HOME")
 }
+
+// GetPodManCreds returns the registry details.
+func GetPodManCreds() (registry string, username string, password string) {
+	return os.Getenv("REGISTRY_URL"), os.Getenv("REGISTRY_USER_NAME"), os.Getenv("REGISTRY_PASSWORD")
+}

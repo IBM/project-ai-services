@@ -266,6 +266,13 @@ func ListImage(ctx context.Context, cfg *config.Config, templateName string) err
 
 // PullImage from the given application template.
 func PullImage(ctx context.Context, cfg *config.Config, templateName string) error {
+	//perform registry login
+	url, uname, pswd := bootstrap.GetPodManCreds()
+	loginErr := bootstrap.PodmanRegistryLogin(url, uname, pswd)
+	if loginErr != nil {
+		return fmt.Errorf("pull images failed due to podman login err: %w", loginErr)
+	}
+
 	args := []string{"application", "image", "pull", "--template", templateName}
 	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)

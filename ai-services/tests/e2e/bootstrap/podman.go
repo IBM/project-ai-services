@@ -33,3 +33,25 @@ func CheckPodman() error {
 
 	return nil
 }
+
+// PodmanRegistryLogin performs login to the required registry.
+func PodmanRegistryLogin(url string, username string, password string) error {
+	// Check if podman is available.
+	podmanPath, err := exec.LookPath("podman")
+	if err != nil {
+		return fmt.Errorf("podman not found in PATH: %w", err)
+	}
+	fmt.Printf("Podman found at: %s\n", podmanPath)
+
+	cmd := exec.Command("podman", "login", url, "--username", username, "--password", password)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("Registry login failed. Error: %v\n", err)
+
+		return err
+	}
+
+	fmt.Printf("Registry login successful. Output: %s", string(output))
+
+	return nil
+}
