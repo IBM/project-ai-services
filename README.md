@@ -2,6 +2,12 @@
 
 AI Services, part of the IBM Open-Source AI Foundation for Power, deliver pre-built AI capabilities and integration with inferencing solutions like Red Hat AI Inference Server. Optimized for IBM Spyre™ on Power, they enable fast deployment and support models such as LLMs, embeddings, and re-rankers—helping enterprises scale AI efficiently.
 
+## 📺 Demo
+
+<video src="https://github.com/user-attachments/assets/958980a7-f653-4474-84a7-28d657b5f7d1" controls="controls" style="max-width: 100%;">
+  Your browser does not support the video tag.
+</video>
+
 ## 📘 Table of Contents
 
 - [**🗃️ Repository Structure**](#repository-structure)

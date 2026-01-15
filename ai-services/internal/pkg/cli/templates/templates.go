@@ -9,6 +9,7 @@ import (
 type AppMetadata struct {
 	Name                  string     `yaml:"name,omitempty"`
 	Description           string     `yaml:"description,omitempty"`
+	Hidden                bool       `yaml:"hidden,omitempty"`
 	Version               string     `yaml:"version,omitempty"`
 	SMTLevel              *int       `yaml:"smtLevel,omitempty"`
 	PodTemplateExecutions [][]string `yaml:"podTemplateExecutions"`
@@ -41,7 +42,7 @@ type HostVar struct {
 
 type Template interface {
 	// ListApplications lists all available application templates
-	ListApplications() ([]string, error)
+	ListApplications(hidden bool) ([]string, error)
 	// ListApplicationTemplateValues lists all available template parameters with description for a single application.
 	ListApplicationTemplateValues(app string) (map[string]string, error)
 	// LoadAllTemplates loads all templates for a given application

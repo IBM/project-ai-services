@@ -9,7 +9,7 @@ import (
 
 func ValidateAppTemplateExist(tp templates.Template, templateName string) error {
 	// Fetch all the application Template names
-	appTemplateNames, err := tp.ListApplications()
+	appTemplateNames, err := tp.ListApplications(true)
 	if err != nil {
 		return fmt.Errorf("failed to list templates: %w", err)
 	}
