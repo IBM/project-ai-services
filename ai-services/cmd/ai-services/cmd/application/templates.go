@@ -26,7 +26,7 @@ var templatesCmd = &cobra.Command{
 
 		tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
 
-		appTemplateNames, err := tp.ListApplications()
+		appTemplateNames, err := tp.ListApplications(hiddenTemplates)
 		if err != nil {
 			return fmt.Errorf("failed to list application templates: %w", err)
 		}

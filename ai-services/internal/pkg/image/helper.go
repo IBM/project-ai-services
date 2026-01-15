@@ -16,7 +16,7 @@ func ListImages(template, appName string) ([]string, error) {
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
 
 	// fetch list of app templates
-	apps, err := tp.ListApplications()
+	apps, err := tp.ListApplications(true)
 	if err != nil {
 		return nil, fmt.Errorf("error listing templates: %w", err)
 	}
