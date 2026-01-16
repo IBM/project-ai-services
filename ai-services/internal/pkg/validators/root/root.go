@@ -33,7 +33,9 @@ func (r *RootRule) Verify() error {
 	if euid != 0 && os.Getenv("XDG_RUNTIME_DIR") == "" {
 		uid := os.Getuid()
 		logger.Infoln("running command as %s", uid, logger.VerbosityLevelDebug)
-		os.Setenv("XDG_RUNTIME_DIR", fmt.Sprintf("/run/user/%d", uid))
+		if err := os.Setenv("XDG_RUNTIME_DIR", fmt.Sprintf("/run/user/%d", uid)); err != nil {
+			return fmt.Errorf("failed to set XDG_RUNTIME_DIR: %w", err)
+		}
 	}
 
 	return nil
