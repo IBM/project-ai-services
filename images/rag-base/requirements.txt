@@ -22,7 +22,7 @@ Pillow==10.3.0
 psutil==7.0.0
 pyclipper==1.4.0
 pylatexenc==2.10
-pymilvus==2.6.2
+opensearch-py>=3.0.0
 pywavelets==1.8.0
 pyyaml==6.0.2
 rapidfuzz==3.13.0
