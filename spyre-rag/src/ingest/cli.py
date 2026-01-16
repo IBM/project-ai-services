@@ -7,7 +7,7 @@ import argparse
 from common.misc_utils import *
 
 def reset_db():
-    vector_store = MilvusVectorStore()
+    vector_store = OpensearchVectorStore()
     vector_store.reset_collection()
     logger.info(f"✅ DB Cleaned successfully!")
 
@@ -45,7 +45,7 @@ def ingest(directory_path):
 
     emb_model_dict, llm_model_dict, _ = get_model_endpoints()
     # Initialize/reset the database before processing any files
-    vector_store = MilvusVectorStore()
+    vector_store = OpensearchVectorStore()
     collection_name = vector_store._generate_collection_name()
     
     out_path = setup_cache_dir(collection_name)
@@ -81,7 +81,7 @@ def ingest(directory_path):
         return
 
     logger.info("Loading converted documents into DB")
-    # Insert data into Milvus
+    # Insert data into Opensearch
     vector_store.insert_chunks(
         emb_model=emb_model_dict['emb_model'],
         emb_endpoint=emb_model_dict['emb_endpoint'],
@@ -130,10 +130,10 @@ common_parser.add_argument("--debug", action="store_true", help="Enable debug lo
 parser = argparse.ArgumentParser(description="Data Ingestion CLI", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
 command_parser = parser.add_subparsers(dest="command", required=True)
 
-ingest_parser = command_parser.add_parser("ingest", help="Ingest the DOCs", description="Ingest the DOCs into Milvus after all the processing\n", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
+ingest_parser = command_parser.add_parser("ingest", help="Ingest the DOCs", description="Ingest the DOCs into Opensearch after all the processing\n", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
 ingest_parser.add_argument("--path", type=str, default="/var/docs", help="Path to the documents that needs to be ingested into the RAG")
 
-command_parser.add_parser("clean-db", help="Clean the DB", description="Clean the Milvus DB\n", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
+command_parser.add_parser("clean-db", help="Clean the DB", description="Clean the Opensearch DB\n", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
 
 # Setting log level, 1st priority is to the flag received via cli, 2nd priority to the LOG_LEVEL env var.
 log_level = logging.INFO
@@ -148,7 +148,7 @@ if command_args.debug:
 
 set_log_level(log_level)
 
-from common.db_utils import MilvusVectorStore
+from common.db_utils import OpensearchVectorStore
 from ingest.doc_utils import extract_document_data, hierarchical_chunk_with_token_split, create_chunk_documents
 
 logger = get_logger("Ingest")
