@@ -22,6 +22,12 @@ type CreateOptions struct {
 	Verbose           bool
 }
 
+type StartOptions struct {
+	Pod      string
+	SkipLogs bool
+	//IngestDocs bool
+}
+
 // Bootstrap runs the full bootstrap (configure + validate).
 func Bootstrap(ctx context.Context) (string, error) {
 	binPath, err := bootstrap.BuildOrVerifyCLIBinary(ctx)
@@ -321,6 +327,51 @@ func StopAppWithPods(
 	}
 
 	if err := ValidatePodsExitedAfterStop(psOutput, appName, pods); err != nil {
+		return output, err
+	}
+
+	return output, nil
+}
+
+func StartApplication(
+	ctx context.Context,
+	cfg *config.Config,
+	appName string,
+	opts StartOptions,
+) (string, error) {
+
+	args := []string{"application", "start", appName, "--yes"}
+
+	if opts.Pod != "" {
+		args = append(args, "--pod="+opts.Pod)
+	}
+	if opts.SkipLogs {
+		args = append(args, "--skip-logs")
+	}
+
+	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+	fmt.Println(output)
+
+	if err != nil {
+		return output, fmt.Errorf("application start failed: %w\n%s", err, output)
+	}
+
+	// Validate output.
+	if err := ValidateStartAppOutput(output); err != nil {
+		return output, err
+	}
+
+	// Verify pods are running again.
+	psOutput, err := ApplicationPS(ctx, cfg, appName)
+	if err != nil {
+		return output, err
+	}
+
+	if err := ValidatePodsRunningAfterStart(psOutput, appName); err != nil {
 		return output, err
 	}
 

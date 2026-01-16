@@ -280,6 +280,23 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 
 			fmt.Printf("[TEST] Application %s stopped successfully using --pod\n", appName)
 		})
+		It("starts application pods", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+
+			output, err := cli.StartApplication(
+				ctx,
+				cfg,
+				appName,
+				cli.StartOptions{
+					SkipLogs: false,
+				},
+			)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).NotTo(BeEmpty())
+			fmt.Printf("[TEST] Application %s started successfully\n", appName)
+		})
 		It("deletes the application using --skip-cleanup", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()

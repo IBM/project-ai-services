@@ -431,3 +431,53 @@ func ValidateVersionCommandOutput(output string, version string, commit string) 
 
 	return nil
 }
+
+func ValidatePodsRunningAfterStart(psOutput, appName string) error {
+	mainPods := []string{
+		"vllm-server",
+		"milvus",
+		"chat-bot",
+	}
+
+	isMainPod := func(pod string) bool {
+		for _, m := range mainPods {
+			if strings.Contains(pod, m) {
+				return true
+			}
+		}
+		return false
+	}
+
+	for line := range strings.SplitSeq(psOutput, "\n") {
+		line = strings.TrimSpace(line)
+
+		if line == "" ||
+			strings.HasPrefix(line, "APPLICATION") ||
+			strings.HasPrefix(line, "──") {
+			continue
+		}
+
+		parts := strings.Fields(line)
+		podName := parts[len(parts)-2]
+		status := parts[len(parts)-1]
+
+		if isMainPod(podName) && !strings.Contains(status, "Running") {
+			return fmt.Errorf(
+				"main pod %s not running after start for app %s",
+				podName,
+				appName,
+			)
+		}
+	}
+
+	fmt.Println("[TEST] Main pods are running after start")
+	return nil
+}
+
+func ValidateStartAppOutput(output string) error {
+	if !strings.Contains(output, "Proceeding to start pods") &&
+		!strings.Contains(output, "started successfully") {
+		return fmt.Errorf("start app validation failed")
+	}
+	return nil
+}
