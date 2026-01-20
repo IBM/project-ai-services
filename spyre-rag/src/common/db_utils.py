@@ -56,13 +56,17 @@ class OpensearchVectorStore:
         self.metadata_map = []
         self.vectorizer = None
         self.sparse_matrix = None
+        self.index_name = None
 
         auth = (self.uname, self.password)
         self.client = OpenSearch(
             hosts=[{'host': self.host, 'port': self.port}],
             http_compress=True, # Recommended to reduce latency for large vector payloads
+            use_ssl=True,
             http_auth=auth,
             verify_certs=False, # Set to True in production with valid certificates
+            ssl_assert_hostname=False,
+            ssl_show_warn=False
         )
         # Test connection
         if self.client.ping():
@@ -77,13 +81,23 @@ class OpensearchVectorStore:
                     "normalization-processor": {
                         "normalization": {"technique": "min_max"},
                         "combination": {
-                            "technique": "rrf",
-                            "parameters": {"rank_constant": 60}
+                            "technique": "arithmetic_mean",
+                            "parameters": {
+                                # Removed "rank_constant" as it caused the 400 error
+                                # Optional: "weights": [0.5, 0.5] 
+                            }
                         }
                     }
                 }
             ]
         }
+        # Delete the old failed attempt first to be safe
+        try:
+            self.client.search_pipeline.delete(id="hybrid_rrf_pipeline")
+        except:
+            pass
+
+        # Create the corrected pipeline
         self.client.search_pipeline.put(id="hybrid_rrf_pipeline", body=pipeline_body)
 
     def _generate_collection_name(self):
@@ -136,6 +150,8 @@ class OpensearchVectorStore:
     
     def _setup_index(self, name, dim):
         if self.client.indices.exists(index=name):
+            logger.info(f"Index {name} already present in vectorstore")
+            self.index_name = name
             return name
 
         # index body: setting and mappings
@@ -179,7 +195,7 @@ class OpensearchVectorStore:
         # Create the Index (or collection)
         self.client.indices.create(index=name, body=index_body)
         self.index_name = name
-        return name
+        return self.index_name
 
 
     def _ensure_embedder(self, emb_model, emb_endpoint, max_tokens):
@@ -227,8 +243,8 @@ class OpensearchVectorStore:
         sample_embedding = self._embedder.embed_documents([chunks[0]["page_content"]])[0]
         dim = len(sample_embedding)
 
-        self.collection = self._setup_index(self.collection_name, dim)
-        self.collection.load()
+        self.collection = self._setup_index(self.collection_name.lower(), dim)
+        #self.collection.load()
 
         logger.debug(f"Inserting {len(chunks)} chunks into Milvus...")
 
@@ -337,14 +353,14 @@ class OpensearchVectorStore:
     def search(self, query, emb_model, emb_endpoint, max_tokens, top_k=5, deployment_type='cpu', mode="hybrid", language='en'):
         self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
         self.collection_name = self._generate_collection_name()
-
-        if not self.client.indices.exists(index=self.index_name):
+        index_name = self.collection_name.lower()
+        if not self.client.indices.exists(index=index_name):
             raise OpensearchNotReadyError(
                     f"Opensearch database is empty. Ingest documents first."
                 )
 
         query_vector = self._embedder.embed_query(query)
-        self.collection.load()
+        #self.collection.load()
 
         # if mode == "dense":
         #     results = self.collection.search(
@@ -381,7 +397,7 @@ class OpensearchVectorStore:
 
 
 
-        limit=top_k * 3,  # retrieve more for filtering
+        limit=top_k * 3  # retrieve more for filtering
 
         if mode == "dense":
             # 1. Define the k-NN search body
@@ -402,7 +418,7 @@ class OpensearchVectorStore:
                 }
             }
             
-            response = self.client.search(index=self.index_name, body=search_body)
+            response = self.client.search(index=index_name, body=search_body)
             
             # Format results to match Milvus entity output
             dense_results = [hit["_source"] for hit in response["hits"]["hits"]]
@@ -431,7 +447,7 @@ class OpensearchVectorStore:
                 }
             }
 
-            response = self.client.search(index=self.index_name, body=search_body)
+            response = self.client.search(index=index_name, body=search_body)
             
             # Format results
             sparse_results = []
@@ -479,6 +495,7 @@ class OpensearchVectorStore:
 
 
         elif mode == "hybrid":
+            logger.info(f"Hybrid search => value of k: {limit}")
             # OpenSearch Hybrid Query combines Dense (k-NN) and Sparse (Match)
             search_body = {
                 "size": top_k, # Final number of results after fusion
@@ -510,7 +527,7 @@ class OpensearchVectorStore:
 
             # Execute search using the RRF pipeline
             response = self.client.search(
-                index=self.index_name,
+                index=index_name,
                 body=search_body,
                 search_pipeline="hybrid_rrf_pipeline" # This triggers the server-side RRF
             )

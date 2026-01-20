@@ -16,7 +16,8 @@ spec:
         - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
           value: ai-services@1234
         
-      ports: os-client-port
+      ports: 
+        - name: os-client-port
           containerPort: 9200
           # hostPort: 9200
         - name: os-metrics-port
