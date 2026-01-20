@@ -41,7 +41,7 @@ func RunPodmanKubePlay(body io.Reader, opts map[string]string) ([]runtime.Pod, e
 	//  Extract ALL Pod IDs from the output
 	podIDs := extractPodIDsFromOutput(stdout.String())
 
-	var result []runtime.Pod
+	result := make([]runtime.Pod, 0, len(podIDs))
 
 	// Iterate over ALL extracted Pod IDs to get container information
 	for _, podID := range podIDs {
