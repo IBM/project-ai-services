@@ -16,6 +16,10 @@ func (r *ServiceReportRule) Name() string {
 	return "servicereport"
 }
 
+func (r *ServiceReportRule) Description() string {
+	return "Validates if the ServiceReport tool has been run on the LPAR."
+}
+
 func (r *ServiceReportRule) Verify() error {
 	logger.Infoln("Validating if ServiceReport tool has run on LPAR", logger.VerbosityLevelDebug)
 	if err := helpers.RunServiceReportContainer("servicereport -v -p spyre", "validate"); err != nil {
