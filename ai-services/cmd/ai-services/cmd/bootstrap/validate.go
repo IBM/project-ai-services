@@ -82,7 +82,6 @@ func longDescription() string {
 	All checks must pass for successful bootstrap configuration.
 
 
-	//TODO: generate this via some program
 	Available checks to skip:
 	root            - Root privileges check
 	rhel            - RHEL OS and version check

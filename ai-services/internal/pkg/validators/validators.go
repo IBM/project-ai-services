@@ -7,6 +7,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/numa"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/platform"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/power"
+	"github.com/project-ai-services/ai-services/internal/pkg/validators/rhaiis"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/rhn"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/root"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/servicereport"
@@ -21,6 +22,7 @@ func init() {
 	DefaultRegistry.Register(platform.NewPlatformRule())
 	DefaultRegistry.Register(power.NewPowerRule())
 	DefaultRegistry.Register(rhn.NewRHNRule())
+	DefaultRegistry.Register(rhaiis.NewRHAIISRule())
 	DefaultRegistry.Register(spyre.NewSpyreRule())
 	DefaultRegistry.Register(servicereport.NewServiceReportRule())
 }
