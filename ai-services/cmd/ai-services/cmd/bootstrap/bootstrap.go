@@ -14,8 +14,7 @@ func BootstrapCmd() *cobra.Command {
 	bootstrapCmd := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Initializes AI Services infrastructure",
-		Long: `Bootstrap and configure the infrastructure required for AI Services.
-
+		Long: `
 The bootstrap command configures and validates the environment needed
 to run AI Services on Power11 systems, ensuring prerequisites are met
 and initial configuration is completed.

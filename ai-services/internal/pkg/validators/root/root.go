@@ -18,6 +18,10 @@ func (r *RootRule) Name() string {
 	return "root"
 }
 
+func (r *RootRule) Description() string {
+	return "Validates that the current user has root privileges."
+}
+
 func (r *RootRule) Verify() error {
 	euid := os.Geteuid()
 

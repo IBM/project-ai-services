@@ -20,6 +20,10 @@ func (r *PlatformRule) Name() string {
 	return "rhel"
 }
 
+func (r *PlatformRule) Description() string {
+	return "Validates that the operating system is RHEL version 9.6 or higher."
+}
+
 func (r *PlatformRule) Verify() error {
 	logger.Infoln("Validating operating system...", logger.VerbosityLevelDebug)
 
