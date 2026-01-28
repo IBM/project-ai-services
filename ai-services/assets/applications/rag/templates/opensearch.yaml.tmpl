@@ -11,10 +11,10 @@ spec:
     - name: opensearch
       image: "{{ .Values.opensearch.image }}"
       env:
-        - name: discovery.type
-          value: single-node
+        - name: "discovery.type"
+          value: "single-node"
         - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
-          value: ai-services@1234
+          value: "AiServices@1234"
         
       ports: 
         - name: os-client-port
