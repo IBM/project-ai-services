@@ -11,6 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/cleanup"
 	"github.com/project-ai-services/ai-services/tests/e2e/cli"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
+	"github.com/project-ai-services/ai-services/tests/e2e/ingestion"
 	"github.com/project-ai-services/ai-services/tests/e2e/podman"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -264,7 +265,7 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 			if !podmanReady {
 				Skip("Podman not available - will be installed via bootstrap configure")
 			}
-			expected := []int{3000,5000} // UI and backend ports
+			expected := []int{3000, 5000} // UI and backend ports
 			err := podman.VerifyExposedPorts(appName, expected)
 			Expect(err).NotTo(HaveOccurred(), "ports verification failed")
 			fmt.Printf("[TEST] Pod Exposed Ports verified")
@@ -306,8 +307,25 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 			Expect(output).NotTo(BeEmpty())
 			fmt.Printf("[TEST] Application %s started successfully\n", appName)
 		})
+		It("starts document ingestion pod and validates ingestion completion", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
+			defer cancel()
+
+			Expect(appName).NotTo(BeEmpty())
+
+			Expect(ingestion.PrepareDocs(appName)).To(Succeed())
+
+			Expect(ingestion.StartIngestion(ctx, cfg, appName)).To(Succeed())
+
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(logs).To(ContainSubstring("Ingestion started"))
+			Expect(logs).To(ContainSubstring("Processed '/var/docs/test_doc.pdf'"))
+
+			fmt.Printf("[TEST] Ingestion completed successfully for application %s\n", appName)
+		})
 		It("deletes the application using --skip-cleanup", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 			defer cancel()
 
 			output, err := cli.DeleteAppSkipCleanup(ctx, cfg, appName)
@@ -322,5 +340,4 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 			Skip("RAG validation not implemented yet")
 		})
 	})
-
 })

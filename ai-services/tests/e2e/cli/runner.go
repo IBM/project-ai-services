@@ -23,9 +23,15 @@ type CreateOptions struct {
 }
 
 type StartOptions struct {
+<<<<<<< Updated upstream
         Pod      string
         SkipLogs bool
         //IngestDocs bool
+=======
+	Pod        string
+	SkipLogs   bool
+	IngestDocs bool
+>>>>>>> Stashed changes
 }
 
 // Bootstrap runs the full bootstrap (configure + validate).
