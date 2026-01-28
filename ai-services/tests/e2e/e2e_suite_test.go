@@ -265,10 +265,9 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 			if !podmanReady {
 				Skip("Podman not available - will be installed via bootstrap configure")
 			}
-			expected := []int{3000, 5000} // UI and backend ports
-			err := podman.VerifyExposedPorts(appName, expected)
-			Expect(err).NotTo(HaveOccurred(), "ports verification failed")
-			fmt.Printf("[TEST] Pod Exposed Ports verified")
+			err := podman.VerifyExposedPorts(appName)
+			Expect(err).NotTo(HaveOccurred(), "Verify exposed ports failed")
+			fmt.Println("[TEST] Exposed ports verified")
 		})
 	})
 	Context("Application Teardown", func() {
