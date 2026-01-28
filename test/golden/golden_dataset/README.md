@@ -1,0 +1,1 @@
+This data was generated manually from the IBM Redbook `IBM Power11 E1150 Introduction and Technical Overview` located at https://www.redbooks.ibm.com/redbooks/pdfs/sg248589.pdf
