@@ -57,7 +57,7 @@ import "github.com/project-ai-services/ai-services/cmd/ai-services/cmd"
 // ai-services application create application it-desk --template-name "RAG"
 // application create workflow
 // deploy vllm
-// deploy milvus
+// deploy opensearch
 // deploy ui
 // deploy ....
 // deploy ingest job

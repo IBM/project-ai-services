@@ -32,13 +32,17 @@ spec:
         - mountPath: /var/lib/opensearch
           name: opensearch-data
       livenessProbe:
-        httpGet:
-          path: /healthz
-          port: 9091
+        exec:
+          command:
+          - curl
+          - -fk
+          - -u
+          - admin:AiServices@1234
+          - https://localhost:9200/_cluster/health
         initialDelaySeconds: 90
         periodSeconds: 30
         timeoutSeconds: 20
-        failureThreshold: 3
+        failureThreshold: 5
 
   volumes:
     - name: opensearch-data

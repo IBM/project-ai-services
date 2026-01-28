@@ -63,7 +63,7 @@ def retrieve_documents(query, emb_model, emb_endpoint, max_tokens, vectorstore, 
         }
         retrieved_documents.append(doc)
 
-        # For dense hits from Milvus, we expect `.score` or `.distance`.
+        # For dense hits from Opensearch, we expect `.score` or `.distance`.
         score = hit.get("rrf_score") or hit.get("score") or hit.get("distance") or 0.0
         scores.append(score)
 
