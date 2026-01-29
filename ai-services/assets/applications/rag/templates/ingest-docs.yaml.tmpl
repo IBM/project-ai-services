@@ -34,13 +34,13 @@ spec:
         - name: LLM_MODEL
           value: "ibm-granite/granite-3.3-8b-instruct"
         - name: OPENSEARCH_HOST
-          value: "maac-opensearch--opensearch"
+          value: "{{ .AppName  }}--opensearch"
         - name: OPENSEARCH_PORT
           value: "9200"
         - name: OPENSEARCH_DB_PREFIX
           value: "RAG_DB"
         - name: OPENSEARCH_COLLECTION_NAME
-          value: "maac-opensearch"
+          value: "{{ .AppName  }}"
         - name: OPENSEARCH_USERNAME
           value: "admin"
         - name: OPENSEARCH_PASSWORD
