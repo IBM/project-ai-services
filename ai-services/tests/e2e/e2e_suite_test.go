@@ -13,8 +13,8 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
 	"github.com/project-ai-services/ai-services/tests/e2e/podman"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	ginkgo "github.com/onsi/ginkgo/v2"
+	gomega "github.com/onsi/gomega"
 )
 
 var (
@@ -30,43 +30,43 @@ var (
 )
 
 func TestE2E(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "AI Services E2E Suite")
+	gomega.RegisterFailHandler(ginkgo.Fail)
+	ginkgo.RunSpecs(t, "AI Services E2E Suite")
 }
 
-var _ = BeforeSuite(func() {
+var _ = ginkgo.BeforeSuite(func() {
 	fmt.Println("[SETUP] Starting AI Services E2E setup")
 
 	ctx = context.Background()
 
-	By("Loading E2E configuration")
+	ginkgo.By("Loading E2E configuration")
 	cfg = &config.Config{}
 
-	By("Generating unique run ID")
+	ginkgo.By("Generating unique run ID")
 	runID = fmt.Sprintf("%d", time.Now().Unix())
 
-	By("Preparing runtime environment")
+	ginkgo.By("Preparing runtime environment")
 	tempDir = bootstrap.PrepareRuntime(runID)
-	Expect(tempDir).NotTo(BeEmpty())
+	gomega.Expect(tempDir).NotTo(gomega.BeEmpty())
 
-	By("Preparing temp bin directory for test binaries")
+	ginkgo.By("Preparing temp bin directory for test binaries")
 	tempBinDir = fmt.Sprintf("%s/bin", tempDir)
 	bootstrap.SetTestBinDir(tempBinDir)
 	fmt.Printf("[SETUP] Test binary directory: %s\n", tempBinDir)
 
-	By("Building or verifying ai-services CLI")
+	ginkgo.By("Building or verifying ai-services CLI")
 	var err error
 	aiServiceBin, err = bootstrap.BuildOrVerifyCLIBinary(ctx)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(aiServiceBin).NotTo(BeEmpty())
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	gomega.Expect(aiServiceBin).NotTo(gomega.BeEmpty())
 	cfg.AIServiceBin = aiServiceBin
 
-	By("Getting ai-services version")
+	ginkgo.By("Getting ai-services version")
 	binVersion, err = bootstrap.CheckBinaryVersion(aiServiceBin)
-	Expect(err).NotTo(HaveOccurred())
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	fmt.Printf("[SETUP] ai-services version: %s\n", binVersion)
 
-	By("Checking Podman environment (non-blocking)")
+	ginkgo.By("Checking Podman environment (non-blocking)")
 	err = bootstrap.CheckPodman()
 	if err != nil {
 		podmanReady = false
@@ -87,58 +87,58 @@ var _ = BeforeSuite(func() {
 })
 
 // Teardown after all tests have run.
-var _ = AfterSuite(func() {
+var _ = ginkgo.AfterSuite(func() {
 	fmt.Println("[TEARDOWN] AI Services E2E teardown")
-	By("Cleaning up E2E environment")
+	ginkgo.By("Cleaning up E2E environment")
 	if err := cleanup.CleanupTemp(tempDir); err != nil {
 		fmt.Printf("[TEARDOWN] cleanup failed: %v\n", err)
 	}
-	By("Cleanup completed")
+	ginkgo.By("Cleanup completed")
 })
 
-var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
-	Context("Help Command Tests", func() {
-		It("runs help command", func() {
+var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
+	ginkgo.Context("Help Command Tests", func() {
+		ginkgo.It("runs help command", func() {
 			args := []string{"help"}
 			output, err := cli.HelpCommand(ctx, cfg, args)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(cli.ValidateHelpCommandOutput(output)).To(Succeed())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(cli.ValidateHelpCommandOutput(output)).To(gomega.Succeed())
 		})
-		It("runs -h command", func() {
+		ginkgo.It("runs -h command", func() {
 			args := []string{"-h"}
 			output, err := cli.HelpCommand(ctx, cfg, args)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(cli.ValidateHelpCommandOutput(output)).To(Succeed())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(cli.ValidateHelpCommandOutput(output)).To(gomega.Succeed())
 		})
-		It("runs help for a given random command", func() {
+		ginkgo.It("runs help for a given random command", func() {
 			possibleCommands := []string{"application", "bootstrap", "completion", "version"}
 			randomIndex := rand.Intn(len(possibleCommands))
 			randomCommand := possibleCommands[randomIndex]
 			args := []string{randomCommand, "-h"}
 			output, err := cli.HelpCommand(ctx, cfg, args)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(cli.ValidateHelpRandomCommandOutput(randomCommand, output)).To(Succeed())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(cli.ValidateHelpRandomCommandOutput(randomCommand, output)).To(gomega.Succeed())
 		})
 	})
-	Context("Bootstrap Steps", func() {
-		It("runs bootstrap configure", func() {
+	ginkgo.Context("Bootstrap Steps", func() {
+		ginkgo.It("runs bootstrap configure", func() {
 			output, err := cli.BootstrapConfigure(ctx)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(cli.ValidateBootstrapConfigureOutput(output)).To(Succeed())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(cli.ValidateBootstrapConfigureOutput(output)).To(gomega.Succeed())
 		})
-		It("runs bootstrap validate", func() {
+		ginkgo.It("runs bootstrap validate", func() {
 			output, err := cli.BootstrapValidate(ctx)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(cli.ValidateBootstrapValidateOutput(output)).To(Succeed())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(cli.ValidateBootstrapValidateOutput(output)).To(gomega.Succeed())
 		})
-		It("runs full bootstrap", func() {
+		ginkgo.It("runs full bootstrap", func() {
 			output, err := cli.Bootstrap(ctx)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(cli.ValidateBootstrapFullOutput(output)).To(Succeed())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(cli.ValidateBootstrapFullOutput(output)).To(gomega.Succeed())
 		})
 	})
-	Context("Application Lifecycle", func() {
-		It("creates rag application, runs health checks and validates RAG endpoints", func() {
+	ginkgo.Context("Application Lifecycle", func() {
+		ginkgo.It("creates rag application, runs health checks and validates RAG endpoints", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 			defer cancel()
 
@@ -159,52 +159,52 @@ var _ = Describe("AI Services End-to-End Tests", Ordered, func() {
 				},
 				pods,
 			)
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			fmt.Printf("[TEST] Application %s created, healthy, and RAG endpoints validated\n", appName)
 		})
-		It("verifies application ps output", func() {
+		ginkgo.It("verifies application ps output", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
 
 			psOutput, err := cli.ApplicationPS(ctx, cfg, appName)
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			Expect(cli.ValidateApplicationPS(psOutput)).To(Succeed())
+			gomega.Expect(cli.ValidateApplicationPS(psOutput)).To(gomega.Succeed())
 			fmt.Printf("[TEST] application ps output validated successfully for %s\n", appName)
 		})
-		It("stops the application", func() {
+		ginkgo.It("stops the application", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
 
 			output, err := cli.StopApp(ctx, cfg, appName)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(output).NotTo(BeEmpty())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(output).NotTo(gomega.BeEmpty())
 
 			fmt.Printf("[TEST] Application %s stopped successfully\n", appName)
 		})
-		It("deletes the application", func() {
+		ginkgo.It("deletes the application", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
 
 			output, err := cli.DeleteApp(ctx, cfg, appName)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(output).NotTo(BeEmpty())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(output).NotTo(gomega.BeEmpty())
 
 			fmt.Printf("[TEST] Application %s deleted successfully\n", appName)
 		})
 	})
-	XContext("RAG validation", func() {
-		It("validates responses against golden dataset", func() {
-			Skip("RAG validation not implemented yet")
+	ginkgo.XContext("RAG validation", func() {
+		ginkgo.It("validates responses against golden dataset", func() {
+			ginkgo.Skip("RAG response validation not implemented yet")
 		})
 	})
-	XContext("Podman / Container Validation", func() {
-		It("verifies application containers are healthy", func() {
+	ginkgo.XContext("Podman / Container Validation", func() {
+		ginkgo.It("verifies application containers are healthy", func() {
 			if !podmanReady {
-				Skip("Podman not available - will be installed via bootstrap configure")
+				ginkgo.Skip("Podman not available - will be installed via bootstrap configure")
 			}
 			err := podman.VerifyContainers(appName)
-			Expect(err).NotTo(HaveOccurred(), "verify containers failed")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "verify containers failed")
 			fmt.Println("[TEST] Containers verified")
 		})
 	})
