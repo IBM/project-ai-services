@@ -189,19 +189,6 @@ func waitForEndpointOK(
 	return fmt.Errorf("endpoint %s failed after retries: %w", endpoint, lastErr)
 }
 
-// extractHostIP extracts the host IP from the CLI output using regex.
-// func extractHostIP(output string) (string, error) {
-// 	const minMatchGroups = 2
-// 	re := regexp.MustCompile(`http[s]?://([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)`)
-// 	match := re.FindStringSubmatch(output)
-// 	if len(match) < minMatchGroups {
-// 		return "", fmt.Errorf("unable to determine application host IP from CLI output")
-// 	}
-
-// 	return match[1], nil
-// }
-
-// extractHostIP extracts the host IP from the CLI output using regex.
 func extractHostIP(output string) (string, error) {
 	const minMatchGroups = 2
 

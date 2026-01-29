@@ -7,7 +7,6 @@ import (
 )
 
 // ParseJSON parses JSON data into a struct.
-// ParseJSON parses JSON data into a struct.
 func ParseJSON(data []byte, v interface{}) error {
 	if err := json.Unmarshal(data, v); err != nil {
 		// Use shared klog-based logger instead of std log
