@@ -36,3 +36,18 @@ func GetRuntimeDir() string {
 func GetPodManCreds() (registry string, username string, password string) {
 	return os.Getenv("REGISTRY_URL"), os.Getenv("REGISTRY_USER_NAME"), os.Getenv("REGISTRY_PASSWORD")
 }
+
+// GetRHRegistryCreds returns the RedHat registry details.
+func GetRHRegistryCreds() (registry string, username string, password string) {
+	return os.Getenv("RH_REGISTRY_URL"), os.Getenv("RH_REGISTRY_USER_NAME"), os.Getenv("RH_REGISTRY_PASSWORD")
+}
+
+// GetLLMasJudgeModelDetails returns the registry details.
+func GetLLMasJudgeModelDetails() (downloadPath string, modelName string) {
+	return os.Getenv("LLM_JUDGE_MODEL_PATH"), os.Getenv("LLM_JUDGE_MODEL")
+}
+
+// GetLLMasJudgePodDetails returns the registry details.
+func GetLLMasJudgePodDetails() (portNumber string, llmImage string) {
+	return os.Getenv("LLM_JUDGE_PORT"), os.Getenv("LLM_JUDGE_IMAGE")
+}
