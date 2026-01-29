@@ -42,6 +42,7 @@ Available subcommands:
   ai-services bootstrap validate --help`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+
 			return root.NewRootRule().Verify()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
