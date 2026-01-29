@@ -8,6 +8,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
+var hiddenTemplates bool
+
 // ApplicationCmd represents the application command.
 var ApplicationCmd = &cobra.Command{
 	Use:   "application",
@@ -27,5 +29,7 @@ func init() {
 	ApplicationCmd.AddCommand(logsCmd)
 	ApplicationCmd.AddCommand(model.ModelCmd)
 	ApplicationCmd.PersistentFlags().StringVar(&vars.ToolImage, "tool-image", vars.ToolImage, "Tool image to use for downloading the model(only for the development purpose)")
+	ApplicationCmd.PersistentFlags().BoolVar(&hiddenTemplates, "hidden", false, "Show hidden templates")
 	_ = ApplicationCmd.PersistentFlags().MarkHidden("tool-image")
+	_ = ApplicationCmd.PersistentFlags().MarkHidden("hidden")
 }

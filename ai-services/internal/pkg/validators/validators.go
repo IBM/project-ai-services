@@ -32,6 +32,7 @@ type Rule interface {
 	Name() string
 	Level() constants.ValidationLevel
 	Hint() string
+	Description() string
 }
 
 // DefaultRegistry is the default registry instance that holds all registered checks.

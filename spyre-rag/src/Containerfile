@@ -1,4 +1,4 @@
-FROM icr.io/ai-services-cicd/rag-base:v0.0.12
+FROM icr.io/ai-services-cicd/rag-base:v0.0.14
 
 WORKDIR /opt/rag
 

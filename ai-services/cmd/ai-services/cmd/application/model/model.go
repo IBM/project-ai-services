@@ -19,6 +19,8 @@ var ModelCmd = &cobra.Command{
 	},
 }
 
+var hiddenTemplates bool
+
 func init() {
 	ModelCmd.AddCommand(listCmd)
 	ModelCmd.AddCommand(downloadCmd)
@@ -26,7 +28,7 @@ func init() {
 
 func models(template string) ([]string, error) {
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
-	apps, err := tp.ListApplications()
+	apps, err := tp.ListApplications(hiddenTemplates)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list the applications, err: %w", err)
 	}

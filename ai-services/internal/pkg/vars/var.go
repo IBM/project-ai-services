@@ -1,6 +1,9 @@
 package vars
 
-import "regexp"
+import (
+	"regexp"
+	"time"
+)
 
 var (
 	// SpyreCardAnnotationRegex -> ai-services.io/<containerName>--spyre-cards.
@@ -18,4 +21,9 @@ var (
 
 var (
 	LparAffinityThreshold = 70
+)
+
+var (
+	RetryCount    = 3
+	RetryInterval = 5 * time.Second
 )

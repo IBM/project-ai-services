@@ -138,16 +138,16 @@ def query_vllm_models(llm_endpoint):
     return resp_json
 
 def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
-                stream, max_input_length=6000, dynamic_chunk_truncation=True):
-    template_token_count = 250
+                stream):
     context = "\n\n".join([doc.get("page_content") for doc in documents])
 
     logger.debug(f'Original Context: {context}')
-    if dynamic_chunk_truncation:
-        question_token_count = len(tokenize_with_llm(question, llm_endpoint))
-        reamining_tokens = max_input_length - (template_token_count + question_token_count)
-        context = detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:reamining_tokens], llm_endpoint)
-        logger.debug(f"Truncated Context: {context}")
+
+    # dynamic chunk truncation: truncates the context, if doesn't fit in the sequence length
+    question_token_count = len(tokenize_with_llm(question, llm_endpoint))
+    reamining_tokens = settings.max_input_length - (settings.prompt_template_token_count + question_token_count)
+    context = detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:reamining_tokens], llm_endpoint)
+    logger.debug(f"Truncated Context: {context}")
 
     prompt = settings.prompts.query_vllm_stream.format(context=context, question=question)
     logger.debug("PROMPT:  ", prompt)
@@ -166,10 +166,8 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     }
     return headers, payload
 
-def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
-                max_input_length=6000, dynamic_chunk_truncation=True):
-    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False,
-                                  max_input_length=6000, dynamic_chunk_truncation=True)
+def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature):
+    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False )
     try:
         # Use requests for synchronous HTTP requests
         response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=False)
@@ -185,10 +183,8 @@ def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_wor
         return {"error": str(e)}
     return response.json()
 
-def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
-                max_input_length=6000, dynamic_chunk_truncation=True):
-    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, True,
-                                  max_input_length=6000, dynamic_chunk_truncation=True)
+def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature):
+    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, True )
     try:
         # Use requests for synchronous HTTP requests
         logger.debug("STREAMING RESPONSE")

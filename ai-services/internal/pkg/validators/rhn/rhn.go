@@ -19,6 +19,10 @@ func (r *RHNRule) Name() string {
 	return "rhn"
 }
 
+func (r *RHNRule) Description() string {
+	return "Validates that the system is registered with Red Hat Network (RHN)."
+}
+
 func (r *RHNRule) Verify() error {
 	logger.Infoln("Validating RHN registration...", logger.VerbosityLevelDebug)
 	cmd := exec.Command("dnf", "repolist")
