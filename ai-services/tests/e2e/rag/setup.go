@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -73,7 +74,15 @@ func hasLLMServerStarted(podName string) (isStarted bool) {
 
 	// Run and get the output of grep.
 	out, err := grep.Output()
-	if err != nil {
+	if exitError, ok := err.(*exec.ExitError); ok {
+		// The command failed, check the exit code
+		if status, ok := exitError.Sys().(syscall.WaitStatus); ok {
+			if status.ExitStatus() == 1 {
+				logger.Infof("LLM server not started yet")
+
+				return false
+			}
+		}
 		logger.Errorf("Error fetching vllm judge pod logs %v", err)
 
 		return false
