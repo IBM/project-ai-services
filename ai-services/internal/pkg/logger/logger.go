@@ -3,6 +3,7 @@ package logger
 import (
 	"flag"
 
+	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 )
 
@@ -11,12 +12,17 @@ const (
 )
 
 func Init() {
+	klog.InitFlags(flag.CommandLine)
+	_ = flag.CommandLine.Set("alsologtostderr", "true")
+	_ = flag.CommandLine.Set("skip_headers", "true")
+	_ = flag.CommandLine.Set("skip_log_headers", "true")
+}
+
+func InitFlags(cmd *cobra.Command) {
 	klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
 	klog.InitFlags(klogFlags)
-	_ = klogFlags.Set("alsologtostderr", "true")
-	_ = klogFlags.Set("skip_headers", "true")
-	_ = klogFlags.Set("skip_log_headers", "true")
-	_ = klogFlags.Parse([]string{})
+
+	cmd.PersistentFlags().AddGoFlagSet(klogFlags)
 }
 
 func Flush() {

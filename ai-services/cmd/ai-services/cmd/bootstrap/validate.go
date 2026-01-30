@@ -33,7 +33,7 @@ func validateCmd() *cobra.Command {
 		Use:     "validate",
 		Short:   "Validates the environment",
 		Long:    longDescription(),
-		Example: example(),
+		Example: validateExample(),
 		Hidden:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Once precheck passes, silence usage for any *later* internal errors.
@@ -72,7 +72,7 @@ Following scenarios are validated and are available for skipping using --skip-va
 %s`, validationList)
 }
 
-func example() string {
+func validateExample() string {
 	return `  # Run all validation checks
   ai-services bootstrap validate
 
