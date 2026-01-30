@@ -1,0 +1,69 @@
+- role: user
+  content: |
+    Respond with YES if the user’s query can be answered using the information in the technical document. Respond with NO if the document does not contain the information needed to answer the query. Do not use the word "partially." If there is any reasonable basis that the document answers the query, respond with YES.
+
+    Guidelines:
+    - Answer YES if the user’s query can be answered using the information provided in the technical document.
+    - Answer NO if the document does not contain the information needed to answer the query, or if the query clearly falls outside the scope of the document.
+    - Avoid using "partially" in the response. If there is any reasonable basis that the document can answer the query, answer YES.
+
+    Strictly answer in this format:
+    [Start of Document]
+    ...
+    [End of Document]
+    [Start of Question]
+    ...
+    [End of Question]
+    [Start of Explanation]
+    ...
+    [End of Explanation]
+    [Start of Answer]
+    ...
+    [End of Answer]
+
+    Example 1:
+    [Start of Document]
+    Chapter: Architecture and technical overview Subsubsection: On-chip L3 cache and intelligent caching \n\uf0b7 The Power10 processor includes a large on-chip L3 cache of up to 120 MB with a NUCA architecture that provides mechanisms to distribute and share cache footprints across a set of L3 cache regions. Each processor core can access an associated local 8 MB of L3 cache. It can also access the data in the other L3 cache regions on the chip and throughout the system. Each L3 region serves as a victim cache for its associated L2 cache and can provide aggregate storage for the on-chip cache footprint. Intelligent L3 cache management enables the Power10 processor to optimize the access to L3 cache lines and minimize cache latencies. The L3 includes a replacement algorithm with data type and reuse awareness. It also supports an array of prefetch requests from the core, including instruction and data, and works cooperatively with the core, memory controller, and SMP interconnection fabric to manage prefetch traffic, which optimizes system throughput and data latency.
+    [End of Document]
+    [Start of Question]
+    What kinda caching mechanism does the Power10 processor have?
+    [End of Question]
+    [Start of Explanation]
+    The text talks about the various caching mechanisms present in Power10 processor. Since the answer can be identified from the text, the correct response is YES.
+    [End of Explanation]
+    [Start of Answer]
+    Yes
+    [End of Answer]
+
+    Example 2:
+    [Start of Document]
+    Chapter: Architecture and technical overview Subsubsection: On-chip L3 cache and intelligent caching \n\uf0b7 The Power10 processor includes a large on-chip L3 cache of up to 120 MB with a NUCA architecture that provides mechanisms to distribute and share cache footprints across a set of L3 cache regions. Each processor core can access an associated local 8 MB of L3 cache. It can also access the data in the other L3 cache regions on the chip and throughout the system. Each L3 region serves as a victim cache for its associated L2 cache and can provide aggregate storage for the on-chip cache footprint. Intelligent L3 cache management enables the Power10 processor to optimize the access to L3 cache lines and minimize cache latencies. The L3 includes a replacement algorithm with data type and reuse awareness. It also supports an array of prefetch requests from the core, including instruction and data, and works cooperatively with the core, memory controller, and SMP interconnection fabric to manage prefetch traffic, which optimizes system throughput and data latency.
+    [End of Document]
+    [Start of Question]
+    Tell me about the nest accelerator present in Power10.
+    [End of Question]
+    [Start of Explanation]
+    The document only describes the caching mechanisms present in Power10. It does not provide any information about nest accelerator. Therefore, this query cannot be answered from the document.
+    [End of Explanation]
+    [Start of Answer]
+    NO
+    [End of Answer]
+
+    Now, based on the above examples and guidelines, determine if the query is answerable from the provided document.
+    * Return the explanation within the [Start of Explanation] and [End of Explanation] tags.
+    * Return the answer between [Start of Answer] and [End of Answer] tags.
+
+    [Start of Document]
+    {{document}}
+    [End of Document]
+    [Start of Question]
+    {{question}}
+    [End of Question]
+    
+    Your response MUST be in the following format:
+    [Start of Explanation]
+    Explain why the question is or isn't answerable...
+    [End of Explanation]
+    [Start of Answer]
+    YES or NO
+    [End of Answer]
