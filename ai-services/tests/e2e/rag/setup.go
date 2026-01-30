@@ -14,7 +14,6 @@ import (
 )
 
 func startVLLMContainer(podName string, modelPath string) (err error) {
-
 	logger.Infof("Starting the VLLM Container")
 
 	llmJudgePort, llmImage := bootstrap.GetLLMasJudgePodDetails()
@@ -89,7 +88,6 @@ func hasLLMServerStarted(podName string) (isStarted bool) {
 }
 
 func SetupLLMAsJudge(ctx context.Context, cfg *config.Config, runID string) (err error) {
-
 	logger.Infof("Setting up LLM as Judge")
 
 	// podman login using RH registry creds
