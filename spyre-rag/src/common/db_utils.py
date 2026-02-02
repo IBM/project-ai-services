@@ -6,11 +6,6 @@ import hashlib
 import joblib
 from tqdm import tqdm
 from scipy import sparse
-from collections import defaultdict
-# from pymilvus import (
-#     connections, utility, Collection, CollectionSchema,
-#     FieldSchema, DataType
-# )
 from opensearchpy import OpenSearch, helpers
 
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -54,7 +49,7 @@ class OpensearchVectorStore:
         self._embedder_config = {}
         self.page_content_corpus = []
         self.metadata_map = []
-        self.vectorizer = None
+        # self.vectorizer = None
         self.sparse_matrix = None
         self.index_name = None
 
@@ -104,49 +99,25 @@ class OpensearchVectorStore:
         hash_part = hashlib.md5(self.c_name.encode()).hexdigest()
         return f"{self.db_prefix}_{hash_part}"
 
-    def _get_index_paths(self):
-        base_path = os.path.join(LOCAL_CACHE_DIR, f"{self.collection_name}_sparse_index")
-        return f"{base_path}_vectorizer.joblib", f"{base_path}_matrix.npz", f"{base_path}_metadata.joblib"
+    # def _get_index_paths(self):
+    #     base_path = os.path.join(LOCAL_CACHE_DIR, f"{self.collection_name}_sparse_index")
+    #     return f"{base_path}_vectorizer.joblib", f"{base_path}_matrix.npz", f"{base_path}_metadata.joblib"
 
-    def _save_sparse_index(self):
-        vectorizer_path, matrix_path, metadata_path = self._get_index_paths()
-        joblib.dump(self.vectorizer, vectorizer_path)
-        sparse.save_npz(matrix_path, self.sparse_matrix)
-        joblib.dump(self.metadata_map, metadata_path)
+    # def _save_sparse_index(self):
+    #     vectorizer_path, matrix_path, metadata_path = self._get_index_paths()
+    #     joblib.dump(self.vectorizer, vectorizer_path)
+    #     sparse.save_npz(matrix_path, self.sparse_matrix)
+    #     joblib.dump(self.metadata_map, metadata_path)
 
-    def _load_sparse_index(self):
-        vectorizer_path, matrix_path, metadata_path = self._get_index_paths()
-        if os.path.exists(vectorizer_path) and os.path.exists(matrix_path) and os.path.exists(metadata_path):
-            self.vectorizer = joblib.load(vectorizer_path)
-            self.sparse_matrix = sparse.load_npz(matrix_path)
-            self.metadata_map = joblib.load(metadata_path)
-            logger.info(f"✅ Loaded sparse index for collection '{self.collection_name}'.")
-            return True
-        return False
-
-    # def _setup_collection(self, name, dim):
-    #     if utility.has_collection(name):
-    #         return Collection(name=name)
-
-    #     fields = [
-    #         FieldSchema(name="chunk_id", dtype=DataType.INT64, is_primary=True, auto_id=False),
-    #         FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim),
-    #         FieldSchema(name="page_content", dtype=DataType.VARCHAR, max_length=32768, enable_analyzer=True),
-    #         FieldSchema(name="filename", dtype=DataType.VARCHAR, max_length=512),
-    #         FieldSchema(name="type", dtype=DataType.VARCHAR, max_length=32),
-    #         FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=32768),
-    #         FieldSchema(name="language", dtype=DataType.VARCHAR, max_length=8),
-    #     ]
-
-    #     schema = CollectionSchema(fields=fields, description="RAG chunk storage (dense only)")
-    #     collection = Collection(name=name, schema=schema)
-
-    #     collection.create_index(
-    #         field_name="embedding",
-    #         index_params={"metric_type": "L2", "index_type": "IVF_FLAT", "params": {"nlist": 128}}
-    #     )
-
-    #     return collection
+    # def _load_sparse_index(self):
+    #     vectorizer_path, matrix_path, metadata_path = self._get_index_paths()
+    #     if os.path.exists(vectorizer_path) and os.path.exists(matrix_path) and os.path.exists(metadata_path):
+    #         self.vectorizer = joblib.load(vectorizer_path)
+    #         self.sparse_matrix = sparse.load_npz(matrix_path)
+    #         self.metadata_map = joblib.load(metadata_path)
+    #         logger.info(f"✅ Loaded sparse index for collection '{self.collection_name}'.")
+    #         return True
+    #     return False
     
     def _setup_index(self, name, dim):
         if self.client.indices.exists(index=name):
@@ -229,7 +200,7 @@ class OpensearchVectorStore:
 
         self.page_content_corpus = []
         self.metadata_map = []
-        self.vectorizer = None
+        # self.vectorizer = None
         self.sparse_matrix = None
 
     def insert_chunks(self, emb_model, emb_endpoint, max_tokens, chunks, batch_size=10):
@@ -244,9 +215,8 @@ class OpensearchVectorStore:
         dim = len(sample_embedding)
 
         self.collection = self._setup_index(self.collection_name.lower(), dim)
-        #self.collection.load()
 
-        logger.debug(f"Inserting {len(chunks)} chunks into Milvus...")
+        logger.debug(f"Inserting {len(chunks)} chunks into Opensearch...")
 
         for i in tqdm(range(0, len(chunks), batch_size)):
             batch = chunks[i:i + batch_size]
@@ -260,17 +230,7 @@ class OpensearchVectorStore:
 
             chunk_ids = [generate_chunk_id(fn, pc, i+j) for j, (fn, pc) in enumerate(zip(filenames, page_contents))]
 
-            # self.collection.upsert([
-            #     chunk_ids,
-            #     embeddings,
-            #     page_contents,
-            #     filenames,
-            #     types,
-            #     sources,
-            #     languages
-            # ])
-
-            # 1. Transform Milvus columnar format to OpenSearch document format
+            # 1. Transform columnar format to OpenSearch document format
             actions = []
             for i in range(len(chunk_ids)):
                 doc = {
@@ -302,45 +262,12 @@ class OpensearchVectorStore:
                 for cid, fn, t, s, pc, l in zip(chunk_ids, filenames, types, sources, page_contents, languages)
             ])
 
-        logger.debug("Fitting external TF-IDF vectorizer")
-        self.vectorizer = TfidfVectorizer()
-        self.sparse_matrix = self.vectorizer.fit_transform(self.page_content_corpus)
+        # logger.debug("Fitting external TF-IDF vectorizer")
+        # self.vectorizer = TfidfVectorizer()
+        # self.sparse_matrix = self.vectorizer.fit_transform(self.page_content_corpus)
 
-        self._save_sparse_index()
+        # self._save_sparse_index()
         logger.debug(f"Inserted the chunks into collection.")
-
-    def _rrf_fusion(self, dense_results, sparse_results, top_k):
-        """
-        Perform Reciprocal Rank Fusion (RRF) on dense and sparse results.
-        Each result should be a list of dicts with at least 'chunk_id' field.
-        """
-        rrf_k = 60  # RRF constant to dampen higher ranks
-        score_map = defaultdict(float)
-        doc_map = {}
-
-        # Process dense results
-        for rank, doc in enumerate(dense_results):
-            cid = doc["chunk_id"]
-            score_map[cid] += 1 / (rank + 1 + rrf_k)
-            doc_map[cid] = doc  # Store full metadata
-
-        # Process sparse results
-        for rank, doc in enumerate(sparse_results):
-            cid = doc["chunk_id"]
-            score_map[cid] += 1 / (rank + 1 + rrf_k)
-            doc_map[cid] = doc  # Will overwrite if duplicate, but that's fine
-
-        # Sort by combined RRF score
-        sorted_items = sorted(score_map.items(), key=lambda x: x[1], reverse=True)[:top_k]
-
-        # Assemble final results
-        final_results = []
-        for cid, score in sorted_items:
-            result = doc_map[cid].copy()
-            result["rrf_score"] = score
-            final_results.append(result)
-
-        return final_results
     
     def check_db_populated(self, emb_model, emb_endpoint, max_tokens):
         self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
@@ -360,42 +287,6 @@ class OpensearchVectorStore:
                 )
 
         query_vector = self._embedder.embed_query(query)
-        #self.collection.load()
-
-        # if mode == "dense":
-        #     results = self.collection.search(
-        #         data=[query_vector],
-        #         anns_field="embedding",
-        #         param={"metric_type": "L2", "params": {"nprobe": 10}},
-        #         limit=top_k * 3,  # retrieve more for filtering
-        #         output_fields=["chunk_id", "page_content", "filename", "type", "source", "language"],
-        #         expr=f"language == \"{language}\"" if language else None
-        #     )
-        #     dense_results = [hit.get('entity') for hit in results[0]]
-        #     dense_results = dense_results[:top_k]
-            
-        #     return dense_results
-
-        # elif mode == "sparse":
-        #     if self.vectorizer is None or self.sparse_matrix is None:
-        #         loaded = self._load_sparse_index()
-        #         if not loaded:
-        #             raise RuntimeError("Sparse search index not initialized.")
-
-        #     query_vec = self.vectorizer.transform([query])
-        #     scores = (self.sparse_matrix @ query_vec.T).toarray().ravel()
-        #     ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:3*top_k] # retrieve more for filtering
-        #     sparse_results = []
-        #     for idx, score in ranked:
-        #         metadata = self.metadata_map[idx]
-        #         if language is None or metadata.get("language") == language:
-        #             sparse_results.append({**metadata, "score": score})
-        #         if len(sparse_results) >= top_k:
-        #             break
-            
-        #     return sparse_results
-
-
 
         limit=top_k * 3  # retrieve more for filtering
 
@@ -425,10 +316,10 @@ class OpensearchVectorStore:
             return dense_results[:top_k]
 
         elif mode == "sparse":
-            if self.vectorizer is None or self.sparse_matrix is None:
-                loaded = self._load_sparse_index()
-                if not loaded:
-                    raise RuntimeError("Sparse search index not initialized.")
+            # if self.vectorizer is None or self.sparse_matrix is None:
+            #     loaded = self._load_sparse_index()
+            #     if not loaded:
+            #         raise RuntimeError("Sparse search index not initialized.")
 
             # 2. OpenSearch native Sparse Search (BM25 or Neural Sparse)
             # In 2026, we use a standard full-text match for sparse/keyword logic
@@ -457,42 +348,6 @@ class OpensearchVectorStore:
                 sparse_results.append(metadata)
                 
             return sparse_results[:top_k]
-
-
-        # elif mode == "hybrid":
-        #     if self.vectorizer is None or self.sparse_matrix is None:
-        #         loaded = self._load_sparse_index()
-        #         if not loaded:
-        #             raise RuntimeError("Sparse index missing for hybrid search.")
-
-        #     dense_results = self.collection.search(
-        #         data=[query_vector],
-        #         anns_field="embedding",
-        #         param={"metric_type": "L2", "params": {"nprobe": 10}},
-        #         limit=top_k * 3,  # retrieve more for filtering
-        #         output_fields=["chunk_id", "page_content", "filename", "type", "source", "language"],
-        #         expr=f"language == \"{language}\"" if language else None
-        #     )
-        #     dense_results = [hit.get('entity') for hit in dense_results[0]]
-        #     dense_results = dense_results[:top_k]
-
-        #     query_vec = self.vectorizer.transform([query])
-        #     scores = (self.sparse_matrix @ query_vec.T).toarray().ravel()
-        #     sparse_ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:3*top_k] # retrieve more for filtering
-
-        #     sparse_results = []
-        #     for idx, score in sparse_ranked:
-        #         metadata = self.metadata_map[idx]
-        #         if language is None or metadata.get("language") == language:
-        #             sparse_results.append({**metadata, "score": score})
-        #         if len(sparse_results) >= top_k:
-        #             break
-
-        #     return self._rrf_fusion(dense_results, sparse_results, top_k)
-
-        # else:
-        #     raise ValueError("Invalid search mode. Choose from ['dense', 'sparse', 'hybrid'].")
-
 
         elif mode == "hybrid":
             logger.info(f"Hybrid search => value of k: {limit}")
