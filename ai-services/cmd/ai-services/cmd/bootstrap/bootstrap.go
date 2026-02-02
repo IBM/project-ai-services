@@ -11,39 +11,33 @@ import (
 
 // BootstrapCmd represents the bootstrap command.
 func BootstrapCmd() *cobra.Command {
+	validationList := generateValidationList()
 	bootstrapCmd := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Initializes AI Services infrastructure",
-		Long: `
+		Long: fmt.Sprintf(`
 The bootstrap command configures and validates the environment needed
 to run AI Services on Power11 systems, ensuring prerequisites are met
 and initial configuration is completed.
 
 Available subcommands:
-  configure - Configure performs below actions
-  • Installs podman on host if not installed
-  • Runs servicereport tool to configure required spyre cards
-  • Initializes the AI Services infrastructure
 
-  validate - Checks below system prerequisites
-  • Root user
-  • Power11 server
-  • RHEL OS
-  • LPAR affinity
-  • Spyre cards availability
-  • ServiceReport validation`,
-		Example: `  # Validate the environment
-  ai-services bootstrap validate
+Configure - Configure performs below actions
+ - Installs podman on host if not installed
+ - Runs servicereport tool to configure required spyre cards
+ - Initializes the AI Services infrastructure
 
-  # Configure the infrastructure
-  ai-services bootstrap configure
-
-  # Get help on a specific subcommand
-  ai-services bootstrap validate --help`,
+Validate - Checks below system prerequisites: 
+%s`, validationList),
+		Example: bootstrapExample(),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
+
 			return root.NewRootRule().Verify()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
+
 			logger.Infof("Configuring the LPAR")
 			if configureErr := RunConfigureCmd(); configureErr != nil {
 				return fmt.Errorf("failed to bootstrap the LPAR: %w", configureErr)
@@ -54,7 +48,7 @@ Available subcommands:
 				return fmt.Errorf("failed to bootstrap the LPAR: %w", validateErr)
 			}
 
-			logger.Infoln("LPAR boostrapped successfully")
+			logger.Infoln("LPAR bootstrapped successfully")
 			logger.Infoln("----------------------------------------------------------------------------")
 			style := lipgloss.NewStyle().Foreground(lipgloss.Color("#32BD27"))
 			message := style.Render("Re-login to the shell to reflect necessary permissions assigned to vfio cards")
@@ -69,4 +63,15 @@ Available subcommands:
 	bootstrapCmd.AddCommand(configureCmd())
 
 	return bootstrapCmd
+}
+
+func bootstrapExample() string {
+	return `  # Validate the environment
+  ai-services bootstrap validate
+
+  # Configure the infrastructure
+  ai-services bootstrap configure
+
+  # Get help on a specific subcommand
+  ai-services bootstrap validate --help`
 }

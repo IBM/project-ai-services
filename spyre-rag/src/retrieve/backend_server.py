@@ -6,7 +6,7 @@ log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
 if level != "":
     if "debug" in level:
-        log_level == logging.DEBUG
+        log_level = logging.DEBUG
     elif not "info" in level:
         raise Exception(f"Unknown LOG_LEVEL passed: '{level}'")
 set_log_level(log_level)
