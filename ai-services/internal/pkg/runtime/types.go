@@ -9,7 +9,12 @@ type Pod struct {
 }
 
 type Container struct {
-	ID     string
+	ID     string `json:"ID"`
 	Name   string
 	Status string
+}
+
+type Image struct {
+	RepoTags    []string
+	RepoDigests []string
 }

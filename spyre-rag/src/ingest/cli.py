@@ -19,11 +19,23 @@ def ingest(directory_path):
     logger.info(f"Ingestion started from dir '{directory_path}'")
 
     # Process each document in the directory
-    allowed_file_types = ['pdf']
+    allowed_file_types = {'pdf': b'%PDF'}
     input_file_paths = []
-    for f_type in allowed_file_types:
-        input_file_paths.extend(glob(f'{directory_path}/**/*.{f_type}', recursive=True))
+    total_pdfs = 0
 
+    for path in glob(f'{directory_path}/**/*', recursive=True):
+        if not has_allowed_extension(path, allowed_file_types):
+            continue
+
+        total_pdfs += 1 
+
+        if is_supported_file(path,allowed_file_types):
+            input_file_paths.append(path)
+        else:
+            logger.warning(
+                f"Skipping file with .pdf extension but unsupported format: {path}"
+            )
+    
     file_cnt = len(input_file_paths)
     if not file_cnt > 0:
         logger.info(f"No documents found to process in '{directory_path}'")
@@ -87,9 +99,16 @@ def ingest(directory_path):
         logger.info(f"Ingestion completed partially, please re-run the ingestion again to ingest the following files.\n{"\n".join(unprocessed_files)}\nIf the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
     else:
         logger.info(f"✅ Ingestion completed successfully, Time taken: {file_processing_time:.2f} seconds. You can query your documents via chatbot")
+    
+    ingested = file_cnt - len(unprocessed_files)
+    percentage = (ingested / total_pdfs * 100) if total_pdfs else 0.0
+    logger.info(
+        f"Ingestion summary: {ingested}/{total_pdfs} files ingested "
+        f"({percentage:.2f}% of total PDF files)"
+    )
+
     if not converted_pdf_stats:
         return
-    
     logger.info(f"Stats of processed PDFs:")
     max_file_len = max(len(key) for key in converted_pdf_stats.keys())
     total_pages = sum(converted_pdf_stats[file]["page_count"] for file in converted_pdf_stats)

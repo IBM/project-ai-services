@@ -54,7 +54,7 @@ func pullImageFromRegistry(runtime runtime.Runtime, images []string) error {
 	for _, image := range images {
 		logger.Infoln("Downloading image: " + image + "...")
 		if err := utils.Retry(vars.RetryCount, vars.RetryInterval, nil, func() error {
-			return runtime.PullImage(image, nil)
+			return runtime.PullImage(image)
 		}); err != nil {
 			return fmt.Errorf("failed to download image: %w", err)
 		}

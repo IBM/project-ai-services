@@ -35,7 +35,7 @@ func pull(template string) error {
 	}
 
 	for _, image := range images {
-		if err := runtimeClient.PullImage(image, nil); err != nil {
+		if err := runtimeClient.PullImage(image); err != nil {
 			return fmt.Errorf("failed to pull the image: %w", err)
 		}
 	}
