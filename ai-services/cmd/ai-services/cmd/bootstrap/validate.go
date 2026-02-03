@@ -33,7 +33,7 @@ func validateCmd() *cobra.Command {
 		Use:     "validate",
 		Short:   "Validates the environment",
 		Long:    longDescription(),
-		Example: example(),
+		Example: validateExample(),
 		Hidden:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Once precheck passes, silence usage for any *later* internal errors.
@@ -57,42 +57,22 @@ func validateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{},
-		"Skip specific validation checks (comma-separated: root,rhel,rhn,power,numa)")
+	skipCheckDesc := BuildSkipFlagDescription()
+	cmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
 
 	return cmd
 }
 
 func longDescription() string {
-	return `Validate that all prerequisites and configurations are correct for bootstrapping.
+	validationList := generateValidationList()
 
-	This command performs comprehensive validation checks including:
+	return fmt.Sprintf(`Validates all prerequisites and configurations are correct for bootstrapping. 
 
-	System Checks:
-	• Root privileges verification
-	• RHEL distribution verification
-	• RHEL version validation (9.6 or higher)
-	• Power architecture validation
-	• RHN registration status
-	• LPAR affinity score check
-
-	License:
-	• RHAIIS license
-
-	All checks must pass for successful bootstrap configuration.
-
-
-	//TODO: generate this via some program
-	Available checks to skip:
-	root            - Root privileges check
-	rhel            - RHEL OS and version check
-	rhn             - Red Hat Network registration check
-	power           - Power architecture check
-	rhaiis          - RHAIIS license check
-	numa            - Numa node alignment`
+Following scenarios are validated and are available for skipping using --skip-validation flag:
+%s`, validationList)
 }
 
-func example() string {
+func validateExample() string {
 	return `  # Run all validation checks
   ai-services bootstrap validate
 
@@ -149,4 +129,39 @@ func RunValidateCmd(skip map[string]bool) error {
 	logger.Infoln("All validations passed")
 
 	return nil
+}
+
+func generateValidationList() string {
+	var b strings.Builder
+
+	maxLen := 0
+	rules := validators.DefaultRegistry.Rules()
+	for _, rule := range rules {
+		if len(rule.Name()) > maxLen {
+			maxLen = len(rule.Name())
+		}
+	}
+
+	for i, rule := range rules {
+		ruleName := rule.Name()
+		description := rule.Description()
+		padding := strings.Repeat(" ", maxLen-len(ruleName))
+		fmt.Fprintf(&b, " - %s:%s %s", rule.Name(), padding, description)
+
+		if i < len(rules)-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	return b.String()
+}
+
+func BuildSkipFlagDescription() string {
+	rules := validators.DefaultRegistry.Rules()
+	ruleName := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		ruleName = append(ruleName, rule.Name())
+	}
+
+	return fmt.Sprintf("Skip specific validation checks (comma-separated: %s)", strings.Join(ruleName, ","))
 }

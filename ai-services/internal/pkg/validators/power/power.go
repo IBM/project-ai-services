@@ -20,6 +20,10 @@ func (r *PowerRule) Name() string {
 	return "power"
 }
 
+func (r *PowerRule) Description() string {
+	return "Validates that the system is running on IBM Power11 (ppc64le)"
+}
+
 func (r *PowerRule) Verify() error {
 	logger.Infoln("Validating IBM Power version...", logger.VerbosityLevelDebug)
 

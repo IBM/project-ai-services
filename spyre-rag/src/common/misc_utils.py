@@ -95,3 +95,19 @@ def get_unprocessed_files(original_files, processed_chunk_files):
         original_file_names.append(file)
 
     return set(original_file_names).difference(set(processed_pdfs))
+
+def has_allowed_extension(path, allowed_file_types):
+    return path.lower().split('.')[-1] in allowed_file_types
+
+def is_supported_file(path,allowed_file_types):
+    try:
+        with open(path, "rb") as f:
+            header = f.read(8)
+        for signature in allowed_file_types.values():
+            if header.startswith(signature):
+                return True
+        return False
+    except Exception as e:
+        logger.warning(f"Could not read file {path}: {e}")
+        return False
+

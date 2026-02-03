@@ -20,6 +20,10 @@ func (r *NumaRule) Name() string {
 	return "numa"
 }
 
+func (r *NumaRule) Description() string {
+	return "Validates that the NUMA node alignment on LPAR is set to 1 for optimal performance."
+}
+
 func (r *NumaRule) Verify() error {
 	logger.Infoln("Validating NUMA node alignment on LPAR", logger.VerbosityLevelDebug)
 	cmd := `lscpu | grep -i "NUMA node(s)"`

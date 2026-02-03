@@ -20,6 +20,10 @@ func (r *SpyreRule) Name() string {
 	return "spyre"
 }
 
+func (r *SpyreRule) Description() string {
+	return "Validates that the IBM Spyre Accelerator is attached to the LPAR."
+}
+
 func (r *SpyreRule) Verify() error {
 	logger.Infoln("Validating Spyre attachment...", logger.VerbosityLevelDebug)
 	cmd := `lspci -k -d 1014:06a7 | wc -l`
