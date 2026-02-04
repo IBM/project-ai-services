@@ -3,12 +3,9 @@ import os
 import shutil
 import numpy as np
 import hashlib
-import joblib
 from tqdm import tqdm
-from scipy import sparse
 from opensearchpy import OpenSearch, helpers
 
-from sklearn.feature_extraction.text import TfidfVectorizer
 from common.emb_utils import Embedding
 from common.misc_utils import LOCAL_CACHE_DIR, get_logger
 
@@ -49,8 +46,6 @@ class OpensearchVectorStore:
         self._embedder_config = {}
         self.page_content_corpus = []
         self.metadata_map = []
-        # self.vectorizer = None
-        self.sparse_matrix = None
         self.index_name = None
 
         auth = (self.uname, self.password)
@@ -99,26 +94,6 @@ class OpensearchVectorStore:
         hash_part = hashlib.md5(self.c_name.encode()).hexdigest()
         return f"{self.db_prefix}_{hash_part}"
 
-    # def _get_index_paths(self):
-    #     base_path = os.path.join(LOCAL_CACHE_DIR, f"{self.collection_name}_sparse_index")
-    #     return f"{base_path}_vectorizer.joblib", f"{base_path}_matrix.npz", f"{base_path}_metadata.joblib"
-
-    # def _save_sparse_index(self):
-    #     vectorizer_path, matrix_path, metadata_path = self._get_index_paths()
-    #     joblib.dump(self.vectorizer, vectorizer_path)
-    #     sparse.save_npz(matrix_path, self.sparse_matrix)
-    #     joblib.dump(self.metadata_map, metadata_path)
-
-    # def _load_sparse_index(self):
-    #     vectorizer_path, matrix_path, metadata_path = self._get_index_paths()
-    #     if os.path.exists(vectorizer_path) and os.path.exists(matrix_path) and os.path.exists(metadata_path):
-    #         self.vectorizer = joblib.load(vectorizer_path)
-    #         self.sparse_matrix = sparse.load_npz(matrix_path)
-    #         self.metadata_map = joblib.load(metadata_path)
-    #         logger.info(f"✅ Loaded sparse index for collection '{self.collection_name}'.")
-    #         return True
-    #     return False
-    
     def _setup_index(self, name, dim):
         if self.client.indices.exists(index=name):
             logger.info(f"Index {name} already present in vectorstore")
@@ -200,8 +175,7 @@ class OpensearchVectorStore:
 
         self.page_content_corpus = []
         self.metadata_map = []
-        # self.vectorizer = None
-        self.sparse_matrix = None
+
 
     def insert_chunks(self, emb_model, emb_endpoint, max_tokens, chunks, batch_size=10):
         if not chunks:
@@ -262,11 +236,6 @@ class OpensearchVectorStore:
                 for cid, fn, t, s, pc, l in zip(chunk_ids, filenames, types, sources, page_contents, languages)
             ])
 
-        # logger.debug("Fitting external TF-IDF vectorizer")
-        # self.vectorizer = TfidfVectorizer()
-        # self.sparse_matrix = self.vectorizer.fit_transform(self.page_content_corpus)
-
-        # self._save_sparse_index()
         logger.debug(f"Inserted the chunks into collection.")
     
     def check_db_populated(self, emb_model, emb_endpoint, max_tokens):
@@ -316,11 +285,6 @@ class OpensearchVectorStore:
             return dense_results[:top_k]
 
         elif mode == "sparse":
-            # if self.vectorizer is None or self.sparse_matrix is None:
-            #     loaded = self._load_sparse_index()
-            #     if not loaded:
-            #         raise RuntimeError("Sparse search index not initialized.")
-
             # 2. OpenSearch native Sparse Search (BM25 or Neural Sparse)
             # In 2026, we use a standard full-text match for sparse/keyword logic
             search_body = {
