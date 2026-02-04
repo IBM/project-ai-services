@@ -37,9 +37,10 @@ manifest:
 	@echo "Creating manifest $(MANIFEST_TAG) for architectures: $(ARCHES)"
 	-$(CONTAINER_BUILDER) manifest rm $(MANIFEST_TAG)
 	$(CONTAINER_BUILDER) manifest create $(MANIFEST_TAG)
-	@for arch in $(ARCHES); do \
+	@set -e; \
+	for arch in $(ARCHES); do \
 		echo "Adding $(BASE_REF):$(TAG)-$$arch to manifest..."; \
-		$(CONTAINER_BUILDER) manifest add $(MANIFEST_TAG) docker://$(BASE_REF):$(TAG)-$$arch; \
+		$(CONTAINER_BUILDER) manifest add $(CREDS_ARG) $(MANIFEST_TAG) docker://$(BASE_REF):$(TAG)-$$arch; \
 	done
 	$(CONTAINER_BUILDER) manifest push $(CREDS_ARG) --all $(MANIFEST_TAG) docker://$(MANIFEST_TAG)
 .PHONY: manifest
