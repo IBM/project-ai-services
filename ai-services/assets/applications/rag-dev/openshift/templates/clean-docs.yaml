@@ -35,9 +35,15 @@ spec:
           - name: OPENSEARCH_COLLECTION_NAME
             value: "{{ .Release.Name }}"
           - name: OPENSEARCH_USERNAME
-            value: "admin"
+            valueFrom:
+              secretKeyRef:
+                name: "{{ .Release.Name }}--opensearch-auth"
+                key: username
           - name: OPENSEARCH_PASSWORD
-            value: "AiServices@1234"
+            valueFrom:
+              secretKeyRef:
+                name: "{{ .Release.Name }}--opensearch-auth"
+                key: password
           volumeMounts:
             - mountPath: /var/cache:z
               name: cache

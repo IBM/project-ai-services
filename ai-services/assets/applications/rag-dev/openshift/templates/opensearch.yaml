@@ -14,7 +14,10 @@ spec:
         - name: "discovery.type"
           value: "single-node"
         - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
-          value: "AiServices@1234"
+          valueFrom:
+            secretKeyRef:
+              name: "{{ .Release.Name }}--opensearch-auth"
+              key: password
         
       ports: 
         - name: os-client-port

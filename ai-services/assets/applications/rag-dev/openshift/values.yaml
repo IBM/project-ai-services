@@ -23,6 +23,9 @@ opensearch:
   image: image-registry.openshift-image-registry.svc.cluster.local:5000/default/opensearch:3.3.0-ppc64le
   # @description Sets the memory limit for the Opensearch service(Default: 4Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
   memoryLimit: 4Gi
+  auth:
+    username: "admin"
+    password: "AiServices@1234"
 
 instruct:
   # @hidden

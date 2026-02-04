@@ -54,9 +54,15 @@ spec:
             - name: OPENSEARCH_COLLECTION_NAME
               value: "{{ .Release.Name }}"
             - name: OPENSEARCH_USERNAME
-              value: "admin"
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Release.Name }}--opensearch-auth"
+                  key: username
             - name: OPENSEARCH_PASSWORD
-              value: "AiServices@1234"
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Release.Name }}--opensearch-auth"
+                  key: password
             - name: LOG_LEVEL
               value: "{{ .Values.backend.log_level}}"
           ports:
