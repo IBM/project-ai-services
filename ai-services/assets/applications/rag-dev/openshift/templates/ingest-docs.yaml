@@ -1,0 +1,68 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "{{ .Release.Name }}--ingest-docs"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
+spec:
+  suspend: true
+  backoffLimit: 0
+  template:
+    spec:
+      containers:
+        - name: ingest-docs
+          image: "{{ .Values.backend.image }}"
+          imagePullPolicy: "{{ .Values.imagePullPolicy }}"
+          command:
+            - "/var/venv/bin/python"
+            - "-m"
+            - "ingest.cli"
+            - "ingest"
+          resources:
+            requests:
+              memory: "50Gi"
+            limits:
+              memory: "50Gi"
+          env:
+            - name: EMB_ENDPOINT
+              value: "http://{{ .Release.Name }}--vllm-server:8001"
+            - name: EMB_MODEL
+              value: "ibm-granite/granite-embedding-278m-multilingual"
+            - name: EMB_MAX_TOKENS
+              value: "512"
+            - name: LLM_ENDPOINT
+              value: "http://{{ .Release.Name }}--vllm-server:8000"
+            - name: LLM_MODEL
+              value: "ibm-granite/granite-3.3-8b-instruct"
+            - name: OPENSEARCH_HOST
+              value: "{{ .Release.Name }}--opensearch"
+            - name: OPENSEARCH_PORT
+              value: "9200"
+            - name: OPENSEARCH_DB_PREFIX
+              value: "RAG_DB"
+            - name: OPENSEARCH_COLLECTION_NAME
+              value: "{{ .Release.Name }}"
+            - name: OPENSEARCH_USERNAME
+              value: "admin"
+            - name: OPENSEARCH_PASSWORD
+              value: "AiServices@1234"
+            - name: LOG_LEVEL
+              value: "{{ .Values.ingest.log_level}}"
+          volumeMounts:
+            - mountPath: /var/docs:z
+              name: docs
+              readOnly: true
+            - mountPath: /var/cache:z
+              name: cache
+      restartPolicy: Never
+      volumes:
+        - name: docs
+          hostPath:
+            path: "/var/lib/ai-services/applications/{{ .Release.Name }}/docs"
+            type: DirectoryOrCreate
+        - name: cache
+          hostPath:
+            path: "/var/lib/ai-services/applications/{{ .Release.Name }}/cache"
+            type: DirectoryOrCreate
