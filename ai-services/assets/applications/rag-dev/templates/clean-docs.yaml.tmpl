@@ -23,14 +23,18 @@ spec:
         limits:
           memory: "1Gi"
       env:
-        - name: MILVUS_HOST
-          value: "{{ .AppName  }}--milvus"
-        - name: MILVUS_PORT
-          value: "19530"
-        - name: MILVUS_DB_PREFIX
+        - name: OPENSEARCH_HOST
+          value: "{{ .AppName  }}--opensearch"
+        - name: OPENSEARCH_PORT
+          value: "9200"
+        - name: OPENSEARCH_DB_PREFIX
           value: "RAG_DB"
-        - name: MILVUS_COLLECTION_NAME
+        - name: OPENSEARCH_COLLECTION_NAME
           value: "{{ .AppName  }}"
+        - name: OPENSEARCH_USERNAME
+          value: "admin"
+        - name: OPENSEARCH_PASSWORD
+          value: "AiServices@1234"
       volumeMounts:
         - mountPath: /var/cache:z
           name: cache
