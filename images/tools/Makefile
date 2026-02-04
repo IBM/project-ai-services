@@ -5,7 +5,7 @@ SR_VERSION=2.2.5-2
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
 # Fix: Execute shell command to get the architecture
-# We map 'x86_64' to 'amd64' to match standard OCI platform naming
+# We map 'x86_64' to 'amd64' and 'aarch64' to 'arm64' to match standard OCI platform naming
 UNAME_M := $(shell uname -m)
 ifeq ($(UNAME_M),x86_64)
     PLATFORM ?= amd64
