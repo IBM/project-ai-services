@@ -10,8 +10,8 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
@@ -107,7 +107,7 @@ func deleteApplication(client *podman.PodmanClient, appName string) error {
 	return nil
 }
 
-func logPodsToBeDeleted(appName string, pods []runtime.Pod) {
+func logPodsToBeDeleted(appName string, pods []types.Pod) {
 	logger.Infof("Found %d pods for given applicationName: %s.\n", len(pods), appName)
 	logger.Infoln("Below are the list of pods to be deleted")
 	for _, pod := range pods {
@@ -137,7 +137,7 @@ func deleteConfirmation(appName string, podsExists, appExists bool) (bool, error
 	return confirmDelete, nil
 }
 
-func podsDeletion(client *podman.PodmanClient, pods []runtime.Pod) error {
+func podsDeletion(client *podman.PodmanClient, pods []types.Pod) error {
 	var errors []string
 
 	for _, pod := range pods {
