@@ -8,7 +8,7 @@ import (
 var (
 	// SpyreCardAnnotationRegex -> ai-services.io/<containerName>--spyre-cards.
 	SpyreCardAnnotationRegex = regexp.MustCompile(`^ai-services\.io\/([A-Za-z0-9][-A-Za-z0-9_.]*)--spyre-cards$`)
-	ToolImage                = "icr.io/ai-services/tools:0.5"
+	ToolImage                = "icr.io/ai-services/tools:0.6"
 	ModelDirectory           = "/var/lib/ai-services/models"
 )
 
