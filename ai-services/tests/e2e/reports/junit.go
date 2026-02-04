@@ -1,8 +1,8 @@
 package reports
 
-import "log"
+import "github.com/project-ai-services/ai-services/internal/pkg/logger"
 
 // GenerateJUnitReport generates a JUnit XML report.
 func GenerateJUnitReport() {
-	log.Println("[Reports] Placeholder for generating JUnit XML report")
+	logger.Infoln("[Reports] Placeholder for generating JUnit XML report")
 }

@@ -12,7 +12,6 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/bootstrap"
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
-	"github.com/project-ai-services/ai-services/tests/e2e/httpclient"
 )
 
 type CreateOptions struct {
@@ -20,6 +19,7 @@ type CreateOptions struct {
 	SkipModelDownload bool
 	SkipValidation    string
 	Verbose           bool
+	ImagePullPolicy   string
 }
 
 type StartOptions struct {
@@ -98,6 +98,9 @@ func CreateApp(
 	if opts.SkipValidation != "" {
 		args = append(args, "--skip-validation", opts.SkipValidation)
 	}
+	if opts.ImagePullPolicy != "" {
+		args = append(args, "--image-pull-policy", opts.ImagePullPolicy)
+	}
 	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
@@ -110,8 +113,9 @@ func CreateApp(
 	return output, nil
 }
 
-// CreateAppWithHealthAndRAG creates an application, waits for health checks, and validates RAG endpoints.
-func CreateAppWithHealthAndRAG(
+// CreateRAGAppAndValidate creates an application, waits for health checks, and validates RAG endpoints.
+// NOTE: This is intentionally RAG-specific and used only by RAG E2E tests.
+func CreateRAGAppAndValidate(
 	ctx context.Context,
 	cfg *config.Config,
 	appName string,
@@ -120,45 +124,48 @@ func CreateAppWithHealthAndRAG(
 	backendPort string,
 	uiPort string,
 	opts CreateOptions,
-	_ []string,
-) (string, error) {
+	pods []string,
+) error {
+	const (
+		maxRetries            = 10
+		waitTime              = 15 * time.Second
+		defaultCommandTimeout = 10 * time.Second
+	)
 	output, err := CreateApp(ctx, cfg, appName, template, params, opts)
 	if err != nil {
-		return output, err
+		return err
 	}
 	if err := ValidateCreateAppOutput(output, appName); err != nil {
-		return output, err
+		return err
 	}
 	hostIP, err := extractHostIP(output)
 	if err != nil {
-		return output, err
+		return err
 	}
 	backendURL := fmt.Sprintf("http://%s:%s", hostIP, backendPort)
-	client := httpclient.NewHTTPClient()
-	client.BaseURL = backendURL
+	httpClient := &http.Client{
+		Timeout: defaultCommandTimeout,
+	}
 	endpoints := []string{
 		"/health",
 		"/v1/models",
 		"/db-status",
 	}
-	const (
-		maxRetries = 10
-		waitTime   = 15 * time.Second
-	)
 	for _, ep := range endpoints {
-		if err := waitForEndpointOK(client, ep, maxRetries, waitTime); err != nil {
-			return output, err
+		fullURL := backendURL + ep
+		if err := waitForEndpointOK(httpClient, fullURL, maxRetries, waitTime); err != nil {
+			return err
 		}
 	}
 	uiURL := fmt.Sprintf("http://%s:%s", hostIP, uiPort)
 	fmt.Println("[UI] Chatbot UI available at:", uiURL)
 
-	return output, nil
+	return nil
 }
 
 // waitForEndpointOK polls the given endpoint until it returns HTTP 200 OK or exhausts retries.
 func waitForEndpointOK(
-	client *httpclient.HTTPClient,
+	client *http.Client,
 	endpoint string,
 	maxRetries int,
 	waitTime time.Duration,
@@ -225,22 +232,17 @@ func HelpCommand(ctx context.Context, cfg *config.Config, args []string) (string
 	return output, nil
 }
 
-// ApplicationPS runs the 'application ps' command with optional flags.
-func ApplicationPS(ctx context.Context, cfg *config.Config, appName string, flags ...string,
-) (string, error) {
+// ApplicationPS runs the 'application ps' command to list application pods.
+func ApplicationPS(ctx context.Context, cfg *config.Config, appName string) (string, error) {
 	args := []string{"application", "ps"}
-
 	if appName != "" {
 		args = append(args, appName)
 	}
-
-	args = append(args, flags...)
-
 	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
-
 	out, err := cmd.CombinedOutput()
 	output := string(out)
+	fmt.Println(output)
 
 	if err != nil {
 		return output, fmt.Errorf("application ps failed: %w\n%s", err, output)

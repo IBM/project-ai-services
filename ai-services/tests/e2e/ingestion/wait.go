@@ -157,4 +157,3 @@ func WaitForIngestionLogs(
 		}
 	}
 }
-

@@ -1,15 +1,24 @@
 package common
 
 import (
-	"log"
 	"time"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 // Retry runs a function multiple times with delay.
 func Retry(attempts int, delay time.Duration, fn func() error) error {
-	for i := 0; i < attempts; i++ {
+	var lastErr error
+
+	for i := range attempts {
 		if err := fn(); err != nil {
-			log.Println("Retry attempt", i+1, "failed:", err)
+			lastErr = err
+			logger.Warningf(
+				"Retry attempt %d/%d failed: %v",
+				i+1,
+				attempts,
+				err,
+			)
 			time.Sleep(delay)
 
 			continue
@@ -18,5 +27,5 @@ func Retry(attempts int, delay time.Duration, fn func() error) error {
 		return nil
 	}
 
-	return nil
+	return lastErr
 }
