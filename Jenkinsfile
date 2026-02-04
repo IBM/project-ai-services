@@ -6,6 +6,10 @@ pipeline {
             name: 'PR_NUMBER',
             description: 'Pull request number to build'
         )
+        string(
+            name: 'Applications',
+            description: 'Name of application to be deployed'
+        )
         stashedFile 'INGEST_DOC_FILE'
     }
 
@@ -17,7 +21,11 @@ pipeline {
                     if (!params.PR_NUMBER?.trim()) {
                         error('PR_NUMBER must be provided')
                     }
+                    if (!params.Applications?.trim()) {
+                        error('Application must be provided')
+                    }
                 }
+                sh "echo ${Applications}"
             }
         }
 
