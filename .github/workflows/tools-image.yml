@@ -49,6 +49,9 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
       - name: Create and Push Manifest
         working-directory: images/tools
         run: |
