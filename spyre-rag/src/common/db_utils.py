@@ -30,23 +30,18 @@ class OpensearchVectorStore:
         host=os.getenv("OPENSEARCH_HOST"),
         port=os.getenv("OPENSEARCH_PORT"),
         db_prefix=os.getenv("OPENSEARCH_DB_PREFIX"),
-        c_name=os.getenv("OPENSEARCH_COLLECTION_NAME"),
+        i_name=os.getenv("OPENSEARCH_INDEX_NAME"),
         uname=os.getenv("OPENSEARCH_USERNAME"),
         password=os.getenv("OPENSEARCH_PASSWORD")
     ):
         self.host = host
         self.port = port
         self.db_prefix = db_prefix
-        self.c_name = c_name
+        self.index_name = i_name.lower()
         self.uname = uname
         self.password = password
-        self.collection = None
-        self.collection_name = None
         self._embedder = None
         self._embedder_config = {}
-        self.page_content_corpus = []
-        self.metadata_map = []
-        self.index_name = None
 
         auth = (self.uname, self.password)
         self.client = OpenSearch(
@@ -58,9 +53,6 @@ class OpensearchVectorStore:
             ssl_assert_hostname=False,
             ssl_show_warn=False
         )
-        # Test connection
-        if self.client.ping():
-            print("Successfully connected to OpenSearch!")
         self.create_pipeline()
 
     def create_pipeline(self):
@@ -81,7 +73,7 @@ class OpensearchVectorStore:
                 }
             ]
         }
-        # Delete the old failed attempt first to be safe
+
         try:
             self.client.search_pipeline.delete(id="hybrid_rrf_pipeline")
         except:
@@ -90,15 +82,15 @@ class OpensearchVectorStore:
         # Create the corrected pipeline
         self.client.search_pipeline.put(id="hybrid_rrf_pipeline", body=pipeline_body)
 
-    def _generate_collection_name(self):
-        hash_part = hashlib.md5(self.c_name.encode()).hexdigest()
+    def _generate_index_name(self):
+        hash_part = hashlib.md5(self.index_name.encode()).hexdigest()
         return f"{self.db_prefix}_{hash_part}"
 
     def _setup_index(self, name, dim):
         if self.client.indices.exists(index=name):
             logger.info(f"Index {name} already present in vectorstore")
             self.index_name = name
-            return name
+            return
 
         # index body: setting and mappings
         index_body = {
@@ -116,7 +108,7 @@ class OpensearchVectorStore:
                         "dimension": dim,
                         "method": {
                             "name": "hnsw",       # HNSW is standard for high performance
-                            "space_type": "l2",
+                            "space_type": "cosinesimil",
                             "engine": "lucene",
                             "parameters": {
                                 "ef_construction": 128,
@@ -140,8 +132,7 @@ class OpensearchVectorStore:
 
         # Create the Index (or collection)
         self.client.indices.create(index=name, body=index_body)
-        self.index_name = name
-        return self.index_name
+        return
 
 
     def _ensure_embedder(self, emb_model, emb_endpoint, max_tokens):
@@ -152,7 +143,7 @@ class OpensearchVectorStore:
             self._embedder_config = config
 
     def reset_collection(self):
-        name = self._generate_collection_name()
+        name = self._generate_index_name()
         if self.client.indices.exists(index=name):
             self.client.indices.delete(index=name)
             logger.info(f"Collection {name} deleted.")
@@ -173,9 +164,6 @@ class OpensearchVectorStore:
         else:
             logger.info("Local cache cleaned up already!")
 
-        self.page_content_corpus = []
-        self.metadata_map = []
-
 
     def insert_chunks(self, emb_model, emb_endpoint, max_tokens, chunks, batch_size=10):
         if not chunks:
@@ -183,12 +171,12 @@ class OpensearchVectorStore:
             return
 
         self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
-        self.collection_name = self._generate_collection_name()
+        self.index_name = self._generate_index_name()
 
         sample_embedding = self._embedder.embed_documents([chunks[0]["page_content"]])[0]
         dim = len(sample_embedding)
 
-        self.collection = self._setup_index(self.collection_name.lower(), dim)
+        self._setup_index(self.index_name, dim)
 
         logger.debug(f"Inserting {len(chunks)} chunks into Opensearch...")
 
@@ -230,17 +218,11 @@ class OpensearchVectorStore:
 
             print(f"Successfully indexed {success} chunks. Failed: {failed}")
 
-            self.page_content_corpus.extend(page_contents)
-            self.metadata_map.extend([
-                {"chunk_id": cid, "filename": fn, "type": t, "source": s, "page_content": pc, "language": l}
-                for cid, fn, t, s, pc, l in zip(chunk_ids, filenames, types, sources, page_contents, languages)
-            ])
-
         logger.debug(f"Inserted the chunks into collection.")
     
     def check_db_populated(self, emb_model, emb_endpoint, max_tokens):
         self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
-        self.collection_name = self._generate_collection_name()
+        self.index_name = self._generate_index_name()
 
         if not self.client.indices.exists(index=self.index_name):
             return False
@@ -248,9 +230,8 @@ class OpensearchVectorStore:
 
     def search(self, query, emb_model, emb_endpoint, max_tokens, top_k=5, deployment_type='cpu', mode="hybrid", language='en'):
         self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
-        self.collection_name = self._generate_collection_name()
-        index_name = self.collection_name.lower()
-        if not self.client.indices.exists(index=index_name):
+        self.index_name = self._generate_index_name()
+        if not self.client.indices.exists(index=self.index_name):
             raise OpensearchNotReadyError(
                     f"Opensearch database is empty. Ingest documents first."
                 )
@@ -278,7 +259,7 @@ class OpensearchVectorStore:
                 }
             }
             
-            response = self.client.search(index=index_name, body=search_body)
+            response = self.client.search(index=self.index_name, body=search_body)
             
             # Format results to match Milvus entity output
             dense_results = [hit["_source"] for hit in response["hits"]["hits"]]
@@ -302,7 +283,7 @@ class OpensearchVectorStore:
                 }
             }
 
-            response = self.client.search(index=index_name, body=search_body)
+            response = self.client.search(index=self.index_name, body=search_body)
             
             # Format results
             sparse_results = []
@@ -346,7 +327,7 @@ class OpensearchVectorStore:
 
             # Execute search using the RRF pipeline
             response = self.client.search(
-                index=index_name,
+                index=self.index_name,
                 body=search_body,
                 search_pipeline="hybrid_rrf_pipeline" # This triggers the server-side RRF
             )

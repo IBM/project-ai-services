@@ -19,10 +19,8 @@ spec:
       ports: 
         - name: os-client-port
           containerPort: 9200
-          # hostPort: 9200
         - name: os-metrics-port
           containerPort: 9600
-          # hostPort: 9600
       resources:
         requests:
           memory: "{{ .Values.opensearch.memoryLimit }}"
