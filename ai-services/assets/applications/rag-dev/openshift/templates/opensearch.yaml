@@ -6,6 +6,7 @@ metadata:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
     ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
+    ai-services.io/component: db
 spec:
   containers:
     - name: opensearch
@@ -37,11 +38,9 @@ spec:
       livenessProbe:
         exec:
           command:
-          - curl
-          - -fk
-          - -u
-          - admin:AiServices@1234
-          - https://localhost:9200/_cluster/health
+          - sh
+          - -c
+          - 'curl -fk -u "admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" https://localhost:9200/_cluster/health'
         initialDelaySeconds: 90
         periodSeconds: 30
         timeoutSeconds: 20
@@ -50,11 +49,9 @@ spec:
       readinessProbe:
         exec:
           command:
-          - curl
-          - -fk
-          - -u
-          - admin:AiServices@1234
-          - https://localhost:9200/_cluster/health
+          - sh
+          - -c
+          - 'curl -fk -u "admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" https://localhost:9200/_cluster/health'
         initialDelaySeconds: 30
         periodSeconds: 10
         timeoutSeconds: 5

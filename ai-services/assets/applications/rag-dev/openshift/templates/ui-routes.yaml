@@ -1,0 +1,10 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: "{{ .Release.Name }}--ui-route"
+spec:
+  port:
+    targetPort: 3000
+  to:
+    kind: Service
+    name: "{{ .Release.Name }}--ui"

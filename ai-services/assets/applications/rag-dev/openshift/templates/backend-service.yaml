@@ -9,6 +9,7 @@ metadata:
 spec:
   selector:
     ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/component: backend
   ports:
     - name: backend
       port: 5000

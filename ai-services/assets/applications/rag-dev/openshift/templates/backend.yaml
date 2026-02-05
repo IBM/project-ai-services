@@ -6,8 +6,6 @@ metadata:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
     ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
-  annotations:
-    ai-services.io/ports: "{{ .Values.backend.port }}:5000"
 spec:
   replicas: 1
   selector:
