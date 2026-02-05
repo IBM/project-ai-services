@@ -8,15 +8,13 @@ logger = get_logger("settings")
 
 @dataclass(frozen = True)
 class Prompts:
-    llm_classify: str
-    table_summary: str
     query_vllm_stream: str
+    table_summary_and_classify: str
 
     def __post_init__(self):
         if any(prompt in (None, "") for prompt in (
-            self.llm_classify,
-            self.table_summary,
             self.query_vllm_stream,
+            self.table_summary_and_classify,
         )):
             raise ValueError(f"One or more prompt variables are missing or empty.")
 
@@ -26,9 +24,8 @@ class Prompts:
             raise ValueError("Prompts element missing or malformed in the settings")
 
         return cls(
-            llm_classify = data.get("llm_classify"),
-            table_summary = data.get("table_summary"),
-            query_vllm_stream = data.get("query_vllm_stream")
+            query_vllm_stream = data.get("query_vllm_stream"),
+            table_summary_and_classify = data.get("table_summary_and_classify")
         )
 
 @dataclass(frozen=True)

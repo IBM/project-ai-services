@@ -40,85 +40,66 @@ def create_llm_session(pool_maxsize, pool_connections: int = 2, pool_block: bool
 
         SESSION = session
 
-def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, pdf_path, batch_size=32):
-    all_prompts = [settings.prompts.llm_classify.format(text=item.strip()) for item in text_blocks]
-    
-    decisions = []
-    for i in tqdm_wrapper(range(0, len(all_prompts), batch_size), desc=f"Classifying table summaries of '{pdf_path}'"):
-        batch_prompts = all_prompts[i:i + batch_size]
-
-        payload = {
-            "model": gen_model,
-            "prompt": batch_prompts,
-            "temperature": 0,
-            "max_tokens": 3,
-        }
-        try:
-            response = SESSION.post(f"{llm_endpoint}/v1/completions", json=payload)
-            response.raise_for_status()
-            result = response.json()
-            choices = result.get("choices", [])
-            for choice in choices:
-                reply = choice.get("text", "").strip().lower()
-                decisions.append("yes" in reply)
-        except requests.exceptions.RequestException as e:
-            error_details = str(e)
-            if e.response is not None:
-                error_details += f", Response Text: {e.response.text}"
-            logger.error(f"Error while classifying text with vLLM: {error_details}")
-            decisions.append(True)
-        except Exception as e:
-            logger.error(f"Error while classifying text with vLLM: {e}")
-            decisions.append(True)
-    return decisions
-
-
-def summarize_single_table(prompt, gen_model, llm_endpoint):
+def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
     payload = {
         "model": gen_model,
-        "prompt": prompt,
+        "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
-        "repetition_penalty": 1.1,
         "max_tokens": 512,
         "stream": False,
     }
+
     try:
-        response = SESSION.post(f"{llm_endpoint}/v1/completions", json=payload)
+        response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
         response.raise_for_status()
-        result = response.json()
-        reply = result.get("choices", [{}])[0].get("text", "").strip()
-        return reply
-    except requests.exceptions.RequestException as e:
-        error_details = str(e)
-        if e.response is not None:
-            error_details += f", Response Text: {e.response.text}"
-        logger.error(f"Error summarizing table: {error_details}")
-        return "No summary."
+        data = response.json() or {}
+        choices = data.get("choices", [])
+        text = ""
+        if choices:
+            text = (choices[0].get("message", {}).get("content") or "").strip()
+        summary = ""
+        decision = True
+        for line in text.splitlines():
+            if line.lower().startswith("summary:"):
+                summary = line[len("summary:"):].strip()
+            elif line.lower().startswith("decision:"):
+                decision = "yes" in line.lower()
+
+        return summary or "No summary.", decision
+
     except Exception as e:
-        logger.error(f"Error summarizing table: {e}")
-        return "No summary."
+        logger.error(f"Error summarizing/classifying table: {e}")
+        return "No summary.", True
 
+def summarize_and_classify_tables(table_htmls, gen_model, llm_endpoint, pdf_path, max_workers=32):
+    prompts = [
+        settings.prompts.table_summary_and_classify.format(content=html)
+        for html in table_htmls
+    ]
 
-def summarize_table(table_html, gen_model, llm_endpoint, pdf_path, max_workers=32):
-    all_prompts = [settings.prompts.table_summary.format(content=html) for html in table_html]
+    summaries = [None] * len(prompts)
+    decisions = [True] * len(prompts)
 
-    summaries = [None] * len(all_prompts)
-
-    with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(all_prompts)))) as executor:
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(prompts))) as executor:
         futures = {
-            executor.submit(summarize_single_table, prompt, gen_model, llm_endpoint): idx
-            for idx, prompt in enumerate(all_prompts)
+            executor.submit(
+                summarize_and_classify_single_table,
+                prompt,
+                gen_model,
+                llm_endpoint
+            ): idx
+            for idx, prompt in enumerate(prompts)
         }
 
-        for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts), desc=f"Summarizing tables of '{pdf_path}'"):
+        for future in tqdm_wrapper(
+            as_completed(futures),
+            total=len(prompts),
+            desc=f"Summarizing & classifying tables of '{pdf_path}'"
+        ):
             idx = futures[future]
-            try:
-                summaries[idx] = future.result()
-            except Exception as e:
-                logger.error(f"Thread failed at index {idx}: {e}")
-                summaries[idx] = "No summary."
+            summaries[idx], decisions[idx] = future.result()
 
-    return summaries
+    return summaries, decisions
 
 def query_vllm_models(llm_endpoint):
     logger.debug('Querying VLLM models')
