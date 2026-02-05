@@ -50,21 +50,23 @@ The test suite reads several environment variables. Many have sensible defaults,
 
 ```bash
 # Container registry credentials (used for pulling images)
-export REGISTRY_URL=registry.example.com
+export REGISTRY_URL="icr.io"
 export REGISTRY_USER_NAME=myuser
 export REGISTRY_PASSWORD=mypassword
 
 # Red Hat registry credentials (used when pulling RH images)
-export RH_REGISTRY_URL=registry.redhat.io
+export RH_REGISTRY_URL="registry.redhat.io"
 export RH_REGISTRY_USER_NAME=myrhuser
 export RH_REGISTRY_PASSWORD=myrhpassword
 
-export LLM_JUDGE_MODEL_PATH=/path/to/models           # where to download/store judge model
-export LLM_JUDGE_MODEL=my-judge-model.bin             # model filename
-export LLM_JUDGE_PORT=5000                           
-export LLM_JUDGE_IMAGE=registry.io/example/vllm-judge:latest
-export LLM_CONTAINER_POLLING_INTERVAL=30s             # polling interval used when waiting for LLM server to start
-export SLEEP_INTERVAL=30s
+export RAG_BACKEND_PORT=5100
+export RAG_UI_PORT=3100
+export LLM_JUDGE_MODEL_PATH="/root/models/"
+export LLM_JUDGE_MODEL="Qwen/Qwen2.5-7B-Instruct"         # model name
+export LLM_JUDGE_PORT=8000       
+export RAG_ACCURACY_THRESHOLD=0.70                    
+export LLM_JUDGE_IMAGE="registry.io/example/vllm-judge:latest"
+export LLM_CONTAINER_POLLING_INTERVAL=30s           # polling interval used when waiting for LLM server to start
 ```
 
 Adding new E2E tests
