@@ -3,6 +3,8 @@ package cleanup
 import (
 	"fmt"
 	"os"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 // dirPerm defines default directory permissions.
@@ -15,12 +17,12 @@ func CleanupTemp(tempDir string) error {
 	}
 
 	if err := os.RemoveAll(tempDir); err != nil {
-		fmt.Printf("[CLEANUP] Failed to remove temp directory %s: %v\n", tempDir, err)
+		logger.Errorf("[CLEANUP] Failed to remove temp directory %s: %v", tempDir, err)
 
 		return err
 	}
 
-	fmt.Printf("[CLEANUP] Removed temp directory: %s\n", tempDir)
+	logger.Infof("[CLEANUP] Removed temp directory: %s", tempDir)
 
 	return nil
 }
@@ -36,7 +38,7 @@ func CollectArtifacts(tempDir, artifactDir string) error {
 	}
 
 	// Copy relevant files from tempDir to artifactDir.
-	fmt.Printf("[CLEANUP] Artifacts collected to: %s\n", artifactDir)
+	logger.Infof("[CLEANUP] Artifacts collected to: %s", artifactDir)
 
 	return nil
 }

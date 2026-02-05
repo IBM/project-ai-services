@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 const (
@@ -121,7 +123,7 @@ func AskJudge(
 	userPrompt := buildJudgeUserPrompt(question, goldenAns, ragAns)
 
 	req := map[string]interface{}{
-		"model": "qwen/qwen2.5-7b-instruct",
+		"model": Model,
 		"messages": []map[string]string{
 			{"role": "system", "content": judgeSystemPrompt},
 			{"role": "user", "content": userPrompt},
@@ -220,15 +222,16 @@ func extractAssistantContent(raw string) (string, error) {
 
 // PrintValidationSummary prints a summary of validation results.
 func PrintValidationSummary(results []EvalResult, accuracy float64) {
-	fmt.Println("RAG Golden Dataset Validation Results")
-	fmt.Println("------------------------------")
-	fmt.Printf("Total Prompts: %d\n", len(results))
-	fmt.Printf("Accuracy: %.2f%%\n", accuracy*percentMultiplier)
+	logger.Infof("-------------------------------------------")
+	logger.Infof("RAG Golden Dataset Validation Results")
+	logger.Infof("-------------------------------------------")
+	logger.Infof("Total Prompts: %d", len(results))
+	logger.Infof("Accuracy: %.2f%%", accuracy*percentMultiplier)
 
 	for _, r := range results {
 		if !r.Passed {
-			fmt.Printf(
-				"[FAIL] %s | %s\n",
+			logger.Infof(
+				"[FAIL] %s | %s",
 				r.Question,
 				r.Details,
 			)

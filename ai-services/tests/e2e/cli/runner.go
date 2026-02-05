@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/tests/e2e/bootstrap"
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
@@ -34,7 +35,7 @@ func Bootstrap(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fmt.Println("[CLI] Running:", binPath, "bootstrap")
+	logger.Infof("[CLI] Running: %s bootstrap", binPath)
 	output, err := common.RunCommand(binPath, "bootstrap")
 	if err != nil {
 		return output, err
@@ -49,7 +50,7 @@ func BootstrapConfigure(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fmt.Println("[CLI] Running:", binPath, "bootstrap configure")
+	logger.Infof("[CLI] Running: %s bootstrap configure", binPath)
 	output, err := common.RunCommand(binPath, "bootstrap", "configure")
 	if err != nil {
 		return output, err
@@ -64,7 +65,7 @@ func BootstrapValidate(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fmt.Println("[CLI] Running:", binPath, "bootstrap validate")
+	logger.Infof("[CLI] Running: %s bootstrap validate", binPath)
 	output, err := common.RunCommand(binPath, "bootstrap", "validate")
 	if err != nil {
 		return output, err
@@ -101,7 +102,7 @@ func CreateApp(
 	if opts.ImagePullPolicy != "" {
 		args = append(args, "--image-pull-policy", opts.ImagePullPolicy)
 	}
-	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
@@ -158,7 +159,7 @@ func CreateRAGAppAndValidate(
 		}
 	}
 	uiURL := fmt.Sprintf("http://%s:%s", hostIP, uiPort)
-	fmt.Println("[UI] Chatbot UI available at:", uiURL)
+	logger.Infof("[UI] Chatbot UI available at: %s", uiURL)
 
 	return output, nil
 }
@@ -175,20 +176,20 @@ func waitForEndpointOK(
 		resp, err := client.Get(endpoint)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			if cerr := resp.Body.Close(); cerr != nil {
-				fmt.Printf("[WARNING] failed to close response body for %s: %v\n", endpoint, cerr)
+				logger.Warningf("[WARNING] failed to close response body for %s: %v", endpoint, cerr)
 			}
-			fmt.Printf("[RAG] GET %s -> 200 OK\n", endpoint)
+			logger.Infof("[RAG] GET %s -> 200 OK", endpoint)
 
 			return nil
 		}
 		if resp != nil {
 			if cerr := resp.Body.Close(); cerr != nil {
-				fmt.Printf("[WARNING] failed to close response body for %s: %v\n", endpoint, cerr)
+				logger.Warningf("[WARNING] failed to close response body for %s: %v", endpoint, cerr)
 			}
 		}
 		lastErr = err
-		fmt.Printf(
-			"[RAG] Waiting for %s (attempt %d/%d)\n",
+		logger.Infof(
+			"[RAG] Waiting for %s (attempt %d/%d)",
 			endpoint, i, maxRetries,
 		)
 		time.Sleep(waitTime)
@@ -221,7 +222,7 @@ func GetBaseURL(createOutput string, backendPort string) (string, error) {
 
 // HelpCommand runs the 'help' command with or without arguments.
 func HelpCommand(ctx context.Context, cfg *config.Config, args []string) (string, error) {
-	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
@@ -261,7 +262,7 @@ func ApplicationPS(
 // ListImage from the given application template.
 func ListImage(ctx context.Context, cfg *config.Config, templateName string) error {
 	args := []string{"application", "image", "list", "--template", templateName}
-	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
@@ -277,15 +278,22 @@ func ListImage(ctx context.Context, cfg *config.Config, templateName string) err
 
 // PullImage from the given application template.
 func PullImage(ctx context.Context, cfg *config.Config, templateName string) error {
-	//perform registry login
+	//perform ICR login
 	url, uname, pswd := bootstrap.GetPodManCreds()
 	loginErr := bootstrap.PodmanRegistryLogin(url, uname, pswd)
 	if loginErr != nil {
 		return fmt.Errorf("pull images failed due to podman login err: %w", loginErr)
 	}
 
+	//perform RH registry login
+	url, uname, pswd = bootstrap.GetRHRegistryCreds()
+	loginErr = bootstrap.PodmanRegistryLogin(url, uname, pswd)
+	if loginErr != nil {
+		return fmt.Errorf("pull images failed due to podman login err: %w", loginErr)
+	}
+
 	args := []string{"application", "image", "pull", "--template", templateName}
-	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
@@ -313,7 +321,7 @@ func StopAppWithPods(
 		"--yes",
 	}
 
-	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 
 	out, err := cmd.CombinedOutput()
@@ -353,12 +361,12 @@ func StartApplication(
 		args = append(args, "--skip-logs")
 	}
 
-	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
-	fmt.Println(output)
+	logger.Infof("[CLI] Output: %s", output)
 
 	if err != nil {
 		return output, fmt.Errorf("application start failed: %w\n%s", err, output)
@@ -394,7 +402,7 @@ func DeleteAppSkipCleanup(
 		"--yes",
 	}
 
-	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 
 	out, err := cmd.CombinedOutput()
@@ -427,7 +435,7 @@ func ApplicationInfo(
 ) (string, error) {
 	args := []string{"application", "info", appName}
 
-	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 
 	out, err := cmd.CombinedOutput()
@@ -443,7 +451,7 @@ func ApplicationInfo(
 // ModelList lists models for a given application template.
 func ModelList(ctx context.Context, cfg *config.Config, templateName string) (string, error) {
 	args := []string{"application", "model", "list", "--template", templateName}
-	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
@@ -457,7 +465,7 @@ func ModelList(ctx context.Context, cfg *config.Config, templateName string) (st
 // ModelDownload downloads a model for a given application template.
 func ModelDownload(ctx context.Context, cfg *config.Config, templateName string) (string, error) {
 	args := []string{"application", "model", "download", "--template", templateName}
-	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
@@ -470,7 +478,7 @@ func ModelDownload(ctx context.Context, cfg *config.Config, templateName string)
 
 // TemplatesCommand runs the 'application template' command.
 func TemplatesCommand(ctx context.Context, cfg *config.Config) (string, error) {
-	fmt.Printf("[CLI] Running: %s application templates\n", cfg.AIServiceBin)
+	logger.Infof("[CLI] Running: %s application templates", cfg.AIServiceBin)
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "application", "templates")
 	out, err := cmd.CombinedOutput()
 	output := string(out)
@@ -484,7 +492,7 @@ func TemplatesCommand(ctx context.Context, cfg *config.Config) (string, error) {
 
 // VersionCommand runs the 'version' command.
 func VersionCommand(ctx context.Context, cfg *config.Config, args []string) (string, error) {
-	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
@@ -501,7 +509,7 @@ func GitVersionCommands(ctx context.Context) (string, string, error) {
 	versionCmd := "describe --tags --always"
 	commitCmd := "rev-parse --short HEAD"
 
-	fmt.Printf("[CLI] Running: git %s\n", strings.Split(versionCmd, " "))
+	logger.Infof("[CLI] Running: git %s", strings.Split(versionCmd, " "))
 	vcmd := exec.CommandContext(ctx, "git", strings.Split(versionCmd, " ")...)
 	vout, err := vcmd.CombinedOutput()
 	voutput := string(vout)
@@ -509,7 +517,7 @@ func GitVersionCommands(ctx context.Context) (string, string, error) {
 		return voutput, "", fmt.Errorf("git version command run failed: %w\n%s", err, voutput)
 	}
 
-	fmt.Printf("[CLI] Running: git %s\n", strings.Split(commitCmd, " "))
+	logger.Infof("[CLI] Running: git %s", strings.Split(commitCmd, " "))
 	ccmd := exec.CommandContext(ctx, "git", strings.Split(commitCmd, " ")...)
 	cout, err := ccmd.CombinedOutput()
 	coutput := string(cout)

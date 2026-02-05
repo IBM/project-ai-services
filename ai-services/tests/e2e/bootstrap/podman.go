@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 // CheckPodman validates Podman installation & rootless support.
@@ -13,7 +15,7 @@ func CheckPodman() error {
 	if err != nil {
 		return fmt.Errorf("podman not found in PATH: %w", err)
 	}
-	fmt.Printf("[BOOTSTRAP] Podman found at: %s\n", podmanPath)
+	logger.Infof("[BOOTSTRAP] Podman found at: %s", podmanPath)
 
 	// Check Podman version.
 	cmd := exec.Command("podman", "--version")
@@ -21,14 +23,14 @@ func CheckPodman() error {
 	if err != nil {
 		return fmt.Errorf("failed to get podman version: %w", err)
 	}
-	fmt.Printf("[BOOTSTRAP] %s", string(output))
+	logger.Infof("[BOOTSTRAP] Podman version output: %s", string(output))
 
 	// Check rootless support (optional - doesn't fail if not rootless).
 	cmd = exec.Command("podman", "info", "--format", "{{.Host.Security.RootlessMode}}")
 	output, err = cmd.CombinedOutput()
 	if err == nil {
 		rootless := strings.TrimSpace(string(output))
-		fmt.Printf("[BOOTSTRAP] Rootless mode: %s\n", rootless)
+		logger.Infof("[BOOTSTRAP] Rootless mode: %s", rootless)
 	}
 
 	return nil
@@ -41,17 +43,17 @@ func PodmanRegistryLogin(url string, username string, password string) error {
 	if err != nil {
 		return fmt.Errorf("podman not found in PATH: %w", err)
 	}
-	fmt.Printf("Podman found at: %s\n", podmanPath)
+	logger.Infof("[BOOTSTRAP] Podman found at: %s", podmanPath)
 
 	cmd := exec.Command("podman", "login", url, "--username", username, "--password", password)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		fmt.Printf("Registry login failed. Error: %v\n", err)
+		logger.Errorf("[BOOTSTRAP] Registry login failed. Error: %v", err)
 
 		return err
 	}
 
-	fmt.Printf("Registry login successful. Output: %s", string(output))
+	logger.Infof("[BOOTSTRAP] Registry login successful. Output: %s", string(output))
 
 	return nil
 }

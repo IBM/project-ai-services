@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 const (
@@ -29,7 +31,7 @@ func LoadGoldenCSV(path string) ([]GoldenCase, error) {
 
 	defer func() {
 		if err := csvFile.Close(); err != nil {
-			fmt.Printf("failed to close csv file: %v\n", err)
+			logger.Errorf("failed to close csv file: %v", err)
 		}
 	}()
 

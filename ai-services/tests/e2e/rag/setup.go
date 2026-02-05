@@ -14,6 +14,15 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
 )
 
+var (
+	ModelPath string
+	Model     string
+)
+
+func init() {
+	ModelPath, Model = bootstrap.GetLLMasJudgeModelDetails()
+}
+
 func startVLLMContainer(podName string, modelPath string) (err error) {
 	logger.Infof("Starting the VLLM Container")
 
@@ -29,7 +38,7 @@ func startVLLMContainer(podName string, modelPath string) (err error) {
 		"-p",
 		llmJudgePort + ":" + llmJudgePort,
 		"-v",
-		modelPath + ":/model:ro",
+		modelPath + ":/model:Z",
 		"-e",
 		"TORCHINDUCTOR_DISABLE=1",
 		"-e",
@@ -47,7 +56,7 @@ func startVLLMContainer(podName string, modelPath string) (err error) {
 		"--max-num-batched-tokens",
 		"4096",
 		"--served-model-name",
-		"qwen/qwen2.5-7b-instruct",
+		Model,
 	}
 
 	cmd := exec.Command(command, args...)
@@ -115,8 +124,7 @@ func SetupLLMAsJudge(ctx context.Context, cfg *config.Config, runID string) (err
 	logger.Infof("RH Registry login completed")
 
 	// download the model using ai services helper
-	modelPath, model := bootstrap.GetLLMasJudgeModelDetails()
-	modelErr := helpers.DownloadModel(model, modelPath)
+	modelErr := helpers.DownloadModel(Model, ModelPath)
 
 	if modelErr != nil {
 		logger.Errorf("error downloading LLM as Judge model %v", modelErr)
@@ -127,7 +135,7 @@ func SetupLLMAsJudge(ctx context.Context, cfg *config.Config, runID string) (err
 
 	// start podman container
 	podName := "vllm-judge-" + runID
-	runErr := startVLLMContainer(podName, modelPath+"/"+model)
+	runErr := startVLLMContainer(podName, ModelPath+"/"+Model)
 	if runErr != nil {
 		logger.Errorf("error running LLM as Judge container %v", runErr)
 

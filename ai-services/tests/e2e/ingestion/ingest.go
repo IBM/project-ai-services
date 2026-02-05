@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
 )
@@ -58,12 +59,12 @@ func StartIngestion(
 		"--yes",
 	}
 
-	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
-	fmt.Println(output)
+	logger.Infof("[CLI] Output: %s", output)
 
 	if err != nil {
 		return fmt.Errorf("failed to start ingestion pod: %w\n%s", err, output)

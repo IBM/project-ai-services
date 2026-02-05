@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
 )
 
@@ -35,7 +36,7 @@ func WaitForAllPodsHealthy(
 	ticker := time.NewTicker(waitTickerInterval)
 	defer ticker.Stop()
 
-	fmt.Println("[WAIT] Waiting for core pods to be Running and Healthy")
+	logger.Infof("[WAIT] Waiting for core pods to be Running and Healthy")
 
 	for {
 		select {
@@ -49,7 +50,7 @@ func WaitForAllPodsHealthy(
 			}
 
 			if areRequiredPodsHealthy(output, appName, requiredPods) {
-				fmt.Println("[WAIT] All core pods are healthy")
+				logger.Infof("[WAIT] All core pods are healthy")
 
 				return nil
 			}
@@ -124,7 +125,7 @@ func WaitForIngestionLogs(
 	ticker := time.NewTicker(waitTickerInterval)
 	defer ticker.Stop()
 
-	fmt.Println("[WAIT] Waiting for ingestion completion logs")
+	logger.Infof("[WAIT] Waiting for ingestion completion logs")
 
 	for {
 		select {
@@ -150,7 +151,7 @@ func WaitForIngestionLogs(
 			logs := string(out)
 
 			if strings.Contains(logs, "Ingestion completed successfully") {
-				fmt.Println("[WAIT] Ingestion completed successfully")
+				logger.Infof("[WAIT] Ingestion completed successfully")
 
 				return logs, nil
 			}

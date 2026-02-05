@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 func ValidateBootstrapConfigureOutput(output string) error {
@@ -76,6 +78,12 @@ func ValidateHelpCommandOutput(output string) error {
 }
 
 func ValidateHelpRandomCommandOutput(command string, output string) error {
+	normalize := func(s string) string {
+		return strings.Join(strings.Fields(s), " ")
+	}
+
+	output = normalize(output)
+
 	type RequiredOutputs struct {
 		application []string
 		bootstrap   []string
@@ -89,7 +97,7 @@ func ValidateHelpRandomCommandOutput(command string, output string) error {
 			"ai-services application [command]",
 		},
 		bootstrap: []string{
-			"Bootstrap and configure the infrastructure required for AI Services.",
+			"The bootstrap command configures and validates the environment needed to run AI Services on Power11 systems, ensuring prerequisites are met and initial configuration is completed.",
 			"ai-services bootstrap [flags]",
 		},
 		completion: []string{
@@ -106,7 +114,7 @@ func ValidateHelpRandomCommandOutput(command string, output string) error {
 	required := v.FieldByName(command)
 
 	for i := 0; i < required.Len(); i++ {
-		r := required.Index(i).String()
+		r := normalize(required.Index(i).String())
 		if !strings.Contains(output, r) {
 			return fmt.Errorf("help random command validation failed: missing '%s'", r)
 		}
@@ -235,7 +243,7 @@ func ValidatePodsExitedAfterStop(
 		}
 	}
 
-	fmt.Println("[TEST] Main pods are in Exited state")
+	logger.Infof("[TEST] Main pods are in Exited state")
 
 	return nil
 }
@@ -264,7 +272,7 @@ func ValidateNoPodsAfterDelete(psOutput string) error {
 
 		return fmt.Errorf("pods still exist after delete")
 	}
-	fmt.Println("[TEST] No pods present after delete")
+	logger.Infof("[TEST] No pods present after delete")
 
 	return nil
 }
@@ -471,7 +479,7 @@ func ValidatePodsRunningAfterStart(psOutput, appName string) error {
 		}
 	}
 
-	fmt.Println("[TEST] Main pods are running after start")
+	logger.Infof("[TEST] Main pods are running after start")
 
 	return nil
 }

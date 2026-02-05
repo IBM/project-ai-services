@@ -1,9 +1,10 @@
 package bootstrap
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 // dirPerm defines the default permission for created directories.
@@ -13,17 +14,17 @@ const dirPerm = 0o755 // standard read/write/execute for owner, read/execute for
 func PrepareRuntime(runID string) string {
 	tempDir := filepath.Join("/tmp/ais-e2e", runID)
 	if err := os.MkdirAll(tempDir, dirPerm); err != nil {
-		fmt.Printf("[BOOTSTRAP] Failed to create temp directory: %v\n", err)
+		logger.Errorf("[BOOTSTRAP] Failed to create temp directory: %v", err)
 
 		return ""
 	}
 
 	if err := os.Setenv("AI_SERVICES_HOME", tempDir); err != nil {
-		fmt.Printf("[BOOTSTRAP] Failed to set AI_SERVICES_HOME: %v\n", err)
+		logger.Errorf("[BOOTSTRAP] Failed to set AI_SERVICES_HOME: %v", err)
 	}
 
-	fmt.Printf("[BOOTSTRAP] Temp runtime environment created at: %s\n", tempDir)
-
+	logger.Infof("[BOOTSTRAP] Temp runtime environment created at: %s", tempDir)
+	
 	return tempDir
 }
 
