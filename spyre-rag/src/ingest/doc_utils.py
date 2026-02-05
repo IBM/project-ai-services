@@ -15,7 +15,7 @@ from concurrent.futures import as_completed, ProcessPoolExecutor
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from sentence_splitter import SentenceSplitter
 
-from common.llm_utils import create_llm_session, classify_text_with_llm, summarize_table, tokenize_with_llm
+from common.llm_utils import create_llm_session, summarize_and_classify_tables
 from common.misc_utils import get_logger, generate_file_checksum, text_suffix, table_suffix
 from ingest.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size
 
@@ -160,11 +160,10 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
         timings['extract_tables'] = time.time() - t0
 
         t0 = time.time()
-        table_summaries = summarize_table(table_htmls, gen_model, gen_endpoint, pdf_path)
-        timings['summarize_tables'] = time.time() - t0
-
-        t0 = time.time()
-        decisions = classify_text_with_llm(table_summaries, gen_model, gen_endpoint, pdf_path)
+        table_summaries, decisions = summarize_and_classify_tables(
+            table_htmls, gen_model, gen_endpoint, pdf_path
+        )
+        timings['summarize_and_classify_tables'] = time.time() - t0
         filtered_table_dicts = {
             idx: {
                 'html': html,
@@ -177,12 +176,15 @@ def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint,
         timings['filter_tables'] = time.time() - t0
     else:
         (Path(out_path) / f"{stem}{table_suffix}").write_text(json.dumps([], indent=2), encoding="utf-8")
+    
+    for i, (h, s, d) in enumerate(zip(table_htmls, table_summaries, decisions)):
+        logger.info("Table %d | Decision=%s\nSummary: %s\n", i, d, s)
 
     total_time = time.time() - start_time
     logger.debug(f"Timing for {stem} Total: {total_time:.2f}s")
     for k, v in timings.items():
         logger.debug(f"  {k:<30}: {v:.2f}s")
-    return page_count, table_count
+    return page_count, len(filtered_table_dicts)
 
 def convert_and_process(path, doc_converter, out_path, llm_model, llm_endpoint):
     try:
