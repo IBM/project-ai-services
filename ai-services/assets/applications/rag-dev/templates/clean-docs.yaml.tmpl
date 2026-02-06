@@ -32,9 +32,9 @@ spec:
         - name: OPENSEARCH_INDEX_NAME
           value: "RAG_INDEX"
         - name: OPENSEARCH_USERNAME
-          value: "admin"
+          value: "{{ .Values.opensearch.username }}"
         - name: OPENSEARCH_PASSWORD
-          value: "AiServices@1234"
+          value: "{{ .Values.opensearch.password }}"
       volumeMounts:
         - mountPath: /var/cache:z
           name: cache
