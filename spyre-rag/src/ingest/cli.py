@@ -4,11 +4,12 @@ import time
 from glob import glob
 import argparse
 
+import common.db_utils as db
 from common.misc_utils import *
 
 def reset_db():
-    vector_store = OpensearchVectorStore()
-    vector_store.reset_collection()
+    vector_store = db.get_vector_store()
+    vector_store.reset_index()
     logger.info(f"✅ DB Cleaned successfully!")
 
 def ingest(directory_path):
@@ -45,7 +46,7 @@ def ingest(directory_path):
 
     emb_model_dict, llm_model_dict, _ = get_model_endpoints()
     # Initialize/reset the database before processing any files
-    vector_store = OpensearchVectorStore()
+    vector_store = db.get_vector_store()
     index_name = vector_store.index_name
     
     out_path = setup_cache_dir(index_name)
@@ -127,10 +128,10 @@ common_parser.add_argument("--debug", action="store_true", help="Enable debug lo
 parser = argparse.ArgumentParser(description="Data Ingestion CLI", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
 command_parser = parser.add_subparsers(dest="command", required=True)
 
-ingest_parser = command_parser.add_parser("ingest", help="Ingest the DOCs", description="Ingest the DOCs into Opensearch after all the processing\n", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
+ingest_parser = command_parser.add_parser("ingest", help="Ingest the DOCs", description="Ingest the DOCs into OpenSearch after all the processing\n", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
 ingest_parser.add_argument("--path", type=str, default="/var/docs", help="Path to the documents that needs to be ingested into the RAG")
 
-command_parser.add_parser("clean-db", help="Clean the DB", description="Clean the Opensearch DB\n", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
+command_parser.add_parser("clean-db", help="Clean the DB", description="Clean the OpenSearch DB\n", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
 
 # Setting log level, 1st priority is to the flag received via cli, 2nd priority to the LOG_LEVEL env var.
 log_level = logging.INFO
@@ -145,8 +146,13 @@ if command_args.debug:
 
 set_log_level(log_level)
 
+<<<<<<< HEAD
 from ingest.doc_utils import process_documents
 from common.db_utils import OpensearchVectorStore
+=======
+from common.vector_db import VectorStore
+from ingest.doc_utils import extract_document_data, hierarchical_chunk_with_token_split, create_chunk_documents
+>>>>>>> 35af6ea (Introduce VectorStore abstract class and implement Opensearch)
 
 logger = get_logger("Ingest")
 
