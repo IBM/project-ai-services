@@ -9,8 +9,8 @@ on:
   #   paths:
   #     - 'images/etcd/**'
   #     - .github/workflows/etcd-image.yml
-    branches:
-      - main
+    # branches:
+    #   - main
 
 env:
   ICR_REGISTRY: icr.io

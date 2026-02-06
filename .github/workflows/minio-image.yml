@@ -9,8 +9,8 @@ on:
   #   paths:
   #     - 'images/minio/**'
   #     - .github/workflows/minio-image.yml
-    branches:
-      - main
+    # branches:
+    #   - main
 
 env:
   ICR_REGISTRY: icr.io
