@@ -29,6 +29,7 @@ rapidocr==3.4.2
 regex==2025.10.23
 rtree==1.4.1
 Requests==2.32.5
+scipy==1.16.0
 sentence-splitter==1.4
 shapely==2.1.0
 tesserocr==2.9.1

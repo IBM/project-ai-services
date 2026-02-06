@@ -46,9 +46,9 @@ def ingest(directory_path):
     emb_model_dict, llm_model_dict, _ = get_model_endpoints()
     # Initialize/reset the database before processing any files
     vector_store = OpensearchVectorStore()
-    collection_name = vector_store._generate_collection_name()
+    index_name = vector_store.index_name
     
-    out_path = setup_cache_dir(collection_name)
+    out_path = setup_cache_dir(index_name)
 
     start_time = time.time()
     combined_chunks, converted_pdf_stats = process_documents(

@@ -36,8 +36,8 @@ class OpensearchVectorStore:
     ):
         self.host = host
         self.port = port
-        self.db_prefix = db_prefix
-        self.index_name = i_name.lower()
+        self.db_prefix = db_prefix.lower()
+        self.index_name = self._generate_index_name(i_name.lower())
         self.uname = uname
         self.password = password
         self._embedder = None
@@ -65,8 +65,7 @@ class OpensearchVectorStore:
                         "combination": {
                             "technique": "arithmetic_mean",
                             "parameters": {
-                                # Removed "rank_constant" as it caused the 400 error
-                                # Optional: "weights": [0.5, 0.5] 
+                                "weights": [0.3, 0.7]    # Semantic heavy weights
                             }
                         }
                     }
@@ -82,8 +81,8 @@ class OpensearchVectorStore:
         # Create the corrected pipeline
         self.client.search_pipeline.put(id="hybrid_rrf_pipeline", body=pipeline_body)
 
-    def _generate_index_name(self):
-        hash_part = hashlib.md5(self.index_name.encode()).hexdigest()
+    def _generate_index_name(self, index_name):
+        hash_part = hashlib.md5(index_name.encode()).hexdigest()
         return f"{self.db_prefix}_{hash_part}"
 
     def _setup_index(self, name, dim):
@@ -131,7 +130,7 @@ class OpensearchVectorStore:
         }
 
         # Create the Index (or collection)
-        self.client.indices.create(index=name, body=index_body)
+        self.client.indices.create(index=name.lower(), body=index_body)
         return
 
 
@@ -143,7 +142,7 @@ class OpensearchVectorStore:
             self._embedder_config = config
 
     def reset_collection(self):
-        name = self._generate_index_name()
+        name = self.index_name
         if self.client.indices.exists(index=name):
             self.client.indices.delete(index=name)
             logger.info(f"Collection {name} deleted.")
@@ -171,7 +170,6 @@ class OpensearchVectorStore:
             return
 
         self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
-        self.index_name = self._generate_index_name()
 
         sample_embedding = self._embedder.embed_documents([chunks[0]["page_content"]])[0]
         dim = len(sample_embedding)
@@ -222,7 +220,6 @@ class OpensearchVectorStore:
     
     def check_db_populated(self, emb_model, emb_endpoint, max_tokens):
         self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
-        self.index_name = self._generate_index_name()
 
         if not self.client.indices.exists(index=self.index_name):
             return False
@@ -230,7 +227,6 @@ class OpensearchVectorStore:
 
     def search(self, query, emb_model, emb_endpoint, max_tokens, top_k=5, deployment_type='cpu', mode="hybrid", language='en'):
         self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
-        self.index_name = self._generate_index_name()
         if not self.client.indices.exists(index=self.index_name):
             raise OpensearchNotReadyError(
                     f"Opensearch database is empty. Ingest documents first."
