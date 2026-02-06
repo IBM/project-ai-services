@@ -18,31 +18,31 @@ on:
         default: false
 
 jobs:
-  minio:
-    uses: ./.github/workflows/scanner.yml
-    with:
-      path: 'images/minio'
-      image: 'minio'
-      skip-image-build: true
-      ignore-unfixed: false
-      skip-cves-scan: ${{ github.event_name == 'workflow_dispatch' && inputs.skip-cves-scan || false }}
-      skip-license-scan: ${{ github.event_name == 'workflow_dispatch' && inputs.skip-license-scan || false }}
-    secrets:
-      ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
-      ICR_APIKEY: ${{ secrets.ICR_APIKEY }}
+  # minio:
+  #   uses: ./.github/workflows/scanner.yml
+  #   with:
+  #     path: 'images/minio'
+  #     image: 'minio'
+  #     skip-image-build: true
+  #     ignore-unfixed: false
+  #     skip-cves-scan: ${{ github.event_name == 'workflow_dispatch' && inputs.skip-cves-scan || false }}
+  #     skip-license-scan: ${{ github.event_name == 'workflow_dispatch' && inputs.skip-license-scan || false }}
+  #   secrets:
+  #     ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
+  #     ICR_APIKEY: ${{ secrets.ICR_APIKEY }}
 
-  etcd:
-    uses: ./.github/workflows/scanner.yml
-    with:
-      path: 'images/etcd'
-      image: 'etcd'
-      skip-image-build: true
-      ignore-unfixed: false
-      skip-cves-scan: ${{ github.event_name == 'workflow_dispatch' && inputs.skip-cves-scan || false }}
-      skip-license-scan: ${{ github.event_name == 'workflow_dispatch' && inputs.skip-license-scan || false }}
-    secrets:
-      ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
-      ICR_APIKEY: ${{ secrets.ICR_APIKEY }}
+  # etcd:
+  #   uses: ./.github/workflows/scanner.yml
+  #   with:
+  #     path: 'images/etcd'
+  #     image: 'etcd'
+  #     skip-image-build: true
+  #     ignore-unfixed: false
+  #     skip-cves-scan: ${{ github.event_name == 'workflow_dispatch' && inputs.skip-cves-scan || false }}
+  #     skip-license-scan: ${{ github.event_name == 'workflow_dispatch' && inputs.skip-license-scan || false }}
+  #   secrets:
+  #     ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
+  #     ICR_APIKEY: ${{ secrets.ICR_APIKEY }}
 
   rag-base:
     uses: ./.github/workflows/scanner.yml

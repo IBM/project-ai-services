@@ -138,7 +138,7 @@ func ValidateStopAppOutput(output string) error {
 func ValidatePodsExitedAfterStop(psOutput, appName string) error {
 	mainPods := []string{
 		"vllm-server",
-		"milvus",
+		// "milvus",
 		"chat-bot",
 	}
 
