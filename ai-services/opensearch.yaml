@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "new--opensearch"
+spec:
+  containers:
+    - name: opensearch
+      image: icr.io/ai-services-private/opensearch:3.3.0-ppc64le
+      env:
+        - name: "discovery.type"
+          value: "single-node"
+        - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+          value: "AiServices@1234"
+        
+      ports: 
+        - name: os-client-port
+          containerPort: 9200
+        - name: os-metrics-port
+          containerPort: 9600
+      resources:
+        requests:
+          memory: "4Gi"
+        limits:
+          memory: "4Gi"
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 1000
+      volumeMounts:
+        - mountPath: /usr/share/opensearch/data:Z
+          subpath:
+          name: opensearch-data
+      livenessProbe:
+        exec:
+          command:
+          - curl
+          - -fk
+          - -u
+          - admin:AiServices@1234
+          - https://localhost:9200/_cluster/health
+        initialDelaySeconds: 90
+        periodSeconds: 30
+        timeoutSeconds: 20
+        failureThreshold: 5
+
+  volumes:
+    - name: opensearch-data
+      persistentVolumeClaim:
+        claimName: "test-mc--opensearch"

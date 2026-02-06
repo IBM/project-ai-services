@@ -88,11 +88,10 @@ spec:
             limits:
               memory: "1Gi"
           volumeMounts:
-            - mountPath: /var/cache:z
-              name: cache
+            - name: cache
+              mountPath: /var/cache
               readOnly: true
       volumes:
         - name: cache
-          hostPath:
-            path: "/var/lib/ai-services/applications/{{ .Release.Name }}/cache"
-            type: DirectoryOrCreate
+          persistentVolumeClaim:
+            claimName: "{{ .Release.Name }}--cache"

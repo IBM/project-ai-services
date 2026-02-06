@@ -32,8 +32,11 @@ spec:
           memory: "{{ .Values.opensearch.memoryLimit }}"
         limits:
           memory: "{{ .Values.opensearch.memoryLimit }}"
+      securityContext:
+        runAsUser: 1000
       volumeMounts:
-        - mountPath: /var/lib/opensearch
+        - mountPath: /usr/share/opensearch/data
+          subpath:
           name: opensearch-data
       livenessProbe:
         exec:
@@ -59,4 +62,5 @@ spec:
 
   volumes:
     - name: opensearch-data
-      emptyDir: {}
+      persistentVolumeClaim:
+        claimName: "{{ .Release.Name }}--opensearch"
