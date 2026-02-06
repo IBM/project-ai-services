@@ -2,8 +2,8 @@
 
 ## Ingest
 Ingest pipeline requires following components to be up and running.
-- **Opensearch Vectorstore**
-    - Opensearch
+- **OpenSearch Vectorstore**
+    - OpenSearch
 
 - **LLM Serving**
     - vLLM serving an embedding model, preferably `ibm-granite/granite-embedding-278m-multilingual`
@@ -36,7 +36,7 @@ export SETTINGS_PATH=/var/settings.json
 export CACHE_DIR=/var/rag_cache
 ```
 
-Ingest pipeline currently exposes cli containing following commands to ingest your docs as embeddings into Opensearch DB as well as cleaning the ingested docs.
+Ingest pipeline currently exposes cli containing following commands to ingest your docs as embeddings into OpenSearch DB as well as cleaning the ingested docs.
 ```
 python -m ingest.cli  -h      
 usage: cli.py [-h] {ingest,clean-db} ...
