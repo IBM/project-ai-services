@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: "test-mc--opensearch"
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-storage-provisioner
+  resources:
+    requests:
+      storage: "10Gi"

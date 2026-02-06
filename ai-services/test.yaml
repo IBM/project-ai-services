@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "{{ .Release.Name }}--opensearch"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
+    ai-services.io/component: db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: db
+  template:
+    metadata:
+      labels:
+        ai-services.io/application: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
+        ai-services.io/component: db
+    spec:
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: "OnRootMismatch"
+      containers:
+        - name: opensearch
+          image: "{{ .Values.opensearch.image }}"
+          command: ["/bin/bash"]
+          args: ["-c", "bash /usr/share/opensearch/opensearch-docker-entrypoint.sh"]
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+          env:
+            - name: "discovery.type"
+              value: "single-node"
+            - name: DISABLE_CHOWN
+              value: "true"
+            - name: OPENSEARCH_PATH_DATA
+              value: "/var/lib/opensearch"
+            - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Release.Name }}--opensearch-auth"
+                  key: password
+          ports: 
+            - name: os-client-port
+              containerPort: 9200
+            - name: os-metrics-port
+              containerPort: 9600
+          resources:
+            requests:
+              memory: "{{ .Values.opensearch.memoryLimit }}"
+            limits:
+              memory: "{{ .Values.opensearch.memoryLimit }}"
+          volumeMounts:
+            - name: opensearch-data
+              mountPath: /var/lib/opensearch
+          livenessProbe:
+            exec:
+              command:
+              - sh
+              - -c
+              - 'curl -fk -u "admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" https://localhost:9200/_cluster/health'
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 20
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command:
+              - sh
+              - -c
+              - 'curl -fk -u "admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" https://localhost:9200/_cluster/health'
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+      volumes:
+        - name: opensearch-data
+          emptyDir: {}
+      # To use persistent storage instead of emptyDir, uncomment below:
+      # volumes:
+      #   - name: opensearch-data
+      #     persistentVolumeClaim:
+      #       claimName: "{{ .Release.Name }}--opensearch"
