@@ -5,10 +5,10 @@ on:
       - 'images/etcd/**'
     branches:
       - main
-  pull_request:
-    paths:
-      - 'images/etcd/**'
-      - .github/workflows/etcd-image.yml
+  # pull_request:
+  #   paths:
+  #     - 'images/etcd/**'
+  #     - .github/workflows/etcd-image.yml
     branches:
       - main
 

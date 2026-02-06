@@ -5,10 +5,10 @@ on:
       - 'images/minio/**'
     branches:
       - main
-  pull_request:
-    paths:
-      - 'images/minio/**'
-      - .github/workflows/minio-image.yml
+  # pull_request:
+  #   paths:
+  #     - 'images/minio/**'
+  #     - .github/workflows/minio-image.yml
     branches:
       - main
 
