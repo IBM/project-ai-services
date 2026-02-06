@@ -11,7 +11,7 @@ class VectorStore(ABC):
         pass
 
     @abstractmethod
-    def reset_collection(self):
+    def reset_index(self):
         pass
 
 class VectorStoreNotReadyError():

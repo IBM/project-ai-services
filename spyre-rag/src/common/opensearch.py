@@ -8,7 +8,7 @@ from opensearchpy import OpenSearch, helpers
 
 from common.emb_utils import Embedding
 from common.misc_utils import LOCAL_CACHE_DIR, get_logger
-from vector_db import VectorStore
+from common.vector_db import VectorStore
 
 
 logger = get_logger("OpenSearch")
@@ -134,7 +134,7 @@ class OpensearchVectorStore(VectorStore):
         sample_embedding = self._embedder.embed_documents([chunks[0]["page_content"]])[0]
         dim = len(sample_embedding)
 
-        self._setup_index(self.index_name, dim)
+        self._setup_index(dim)
 
         logger.debug(f"Inserting {len(chunks)} chunks into OpenSearch...")
 

@@ -1,5 +1,5 @@
 import os
-from vector_db import VectorStore, VectorStoreNotReadyError
+from common.vector_db import VectorStore, VectorStoreNotReadyError
 
 def get_vector_store() -> VectorStore:
     """
@@ -12,7 +12,7 @@ def get_vector_store() -> VectorStore:
         from common.opensearch import OpensearchVectorStore
         return OpensearchVectorStore()
     else:
-        raise ValueError(f"Unsupported VectorStore type: {v_store_type}")
+        raise VectorStoreNotReadyError(f"Unsupported VectorStore type: {v_store_type}")
 
 def get_vector_store_not_ready() -> VectorStoreNotReadyError:
     """
@@ -25,4 +25,4 @@ def get_vector_store_not_ready() -> VectorStoreNotReadyError:
         from common.opensearch import OpensearchNotReadyError
         return OpensearchNotReadyError()
     else:
-        raise ValueError(f"Unsupported VectorStore type: {v_store_type}")
+        raise VectorStoreNotReadyError(f"Unsupported VectorStore type: {v_store_type}")
