@@ -38,7 +38,7 @@ spec:
           - curl
           - -fk
           - -u
-          - admin:AiServices@1234
+          - {{ .Values.opensearch.username }}:{{ .Values.opensearch.password }}
           - https://localhost:9200/_cluster/health
         initialDelaySeconds: 90
         periodSeconds: 30
