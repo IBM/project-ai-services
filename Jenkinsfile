@@ -48,12 +48,9 @@ pipeline {
                 '''
             }
         }
-        
-        // Working on adding a poller to verify that no application is deployed on the machine.
-        // The user must trigger a cleaner job, which removes the application from the machine.
-        // Once the cleaner job completes, the poller stage will also complete.
-        // After that, deployment of the new application can start from the "Deploy" stage.
-        stage('Verify no app deployed') {
+
+        // Check if there is an existing application
+        stage('Machine Status') {
             steps{
                 sh "./bin/ai-services application ps"
             }
@@ -63,7 +60,7 @@ pipeline {
             steps {
                 sh '''
                 cd /root/adarsh/project-ai-services/ai-services
-                    ./bin/ai-services application create rag-test -t rag-dev
+                    ./bin/ai-services application create cicd-rag-test -t rag-dev
                     podman pod ps
                 '''
             }
