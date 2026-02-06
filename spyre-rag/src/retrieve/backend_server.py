@@ -16,7 +16,8 @@ from flask import Flask, request, jsonify, Response, stream_with_context
 import json
 from threading import BoundedSemaphore
 from functools import wraps
-from common.db_utils import MilvusVectorStore, MilvusNotReadyError
+
+import common.db_utils as db
 from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_non_stream, query_vllm_models
 from common.misc_utils import get_model_endpoints, set_log_level
 from common.settings import get_settings
@@ -39,7 +40,7 @@ def initialize_models():
 
 def initialize_vectorstore():
     global vectorstore
-    vectorstore = MilvusVectorStore()
+    vectorstore = db.get_vector_store()
 
 app = Flask(__name__)
 
@@ -80,7 +81,7 @@ def get_reference_docs():
             settings.num_chunks_post_reranker,
             vectorstore=vectorstore
         )
-    except MilvusNotReadyError as e:
+    except db.get_vector_store_not_ready() as e:
         return jsonify({"error": str(e)}), 503   # Service unavailable
     except Exception as e:
         return jsonify({"error": repr(e)})
@@ -136,7 +137,7 @@ def chat_completion():
             settings.num_chunks_post_reranker,
             vectorstore=vectorstore
         )
-    except MilvusNotReadyError as e:
+    except db.get_vector_store_not_ready() as e:
         return jsonify({"error": str(e)}), 503   # Service unavailable
     except Exception as e:
         return jsonify({"error": repr(e)})

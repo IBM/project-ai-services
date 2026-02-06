@@ -33,14 +33,18 @@ spec:
           value: "http://{{ .AppName  }}--vllm-server:8000"
         - name: LLM_MODEL
           value: "ibm-granite/granite-3.3-8b-instruct"
-        - name: MILVUS_HOST
-          value: "{{ .AppName  }}--milvus"
-        - name: MILVUS_PORT
-          value: "19530"
-        - name: MILVUS_DB_PREFIX
+        - name: OPENSEARCH_HOST
+          value: "{{ .AppName  }}--opensearch"
+        - name: OPENSEARCH_PORT
+          value: "9200"
+        - name: OPENSEARCH_DB_PREFIX
           value: "RAG_DB"
-        - name: MILVUS_COLLECTION_NAME
-          value: "{{ .AppName  }}"
+        - name: OPENSEARCH_INDEX_NAME
+          value: "RAG_INDEX"
+        - name: OPENSEARCH_USERNAME
+          value: "{{ .Values.opensearch.username }}"
+        - name: OPENSEARCH_PASSWORD
+          value: "{{ .Values.opensearch.password }}"
         - name: LOG_LEVEL
           value: "{{ .Values.ingest.log_level}}"
       volumeMounts:

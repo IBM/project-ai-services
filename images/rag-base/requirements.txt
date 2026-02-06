@@ -9,7 +9,6 @@ grpcio==1.67.1
 hf-xet==1.1.1
 huggingface-hub==0.36.0
 httptools==0.6.4
-joblib==1.5.2
 lxml==5.4.0
 markupsafe==3.0.2
 numpy==2.3.1
@@ -22,7 +21,7 @@ Pillow==10.3.0
 psutil==7.0.0
 pyclipper==1.4.0
 pylatexenc==2.10
-pymilvus==2.6.2
+opensearch-py>=3.0.0
 pywavelets==1.8.0
 pyyaml==6.0.2
 rapidfuzz==3.13.0
@@ -30,10 +29,8 @@ rapidocr==3.4.2
 regex==2025.10.23
 rtree==1.4.1
 Requests==2.32.5
-sentence-splitter==1.4
-scikit-image==0.25.2
-scikit_learn==1.6.1
 scipy==1.16.0
+sentence-splitter==1.4
 shapely==2.1.0
 tesserocr==2.9.1
 tqdm==4.67.1
