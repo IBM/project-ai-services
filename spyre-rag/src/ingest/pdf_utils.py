@@ -6,6 +6,7 @@ from collections import defaultdict, Counter
 from pdfminer.pdfdocument import PDFDocument, PDFNoOutlines
 from pdfminer.pdfparser import PDFParser, PDFSyntaxError
 from pdfminer.pdfpage import PDFPage
+import pypdfium2 as pdfium
 
 from common.misc_utils import get_logger
 
@@ -14,6 +15,15 @@ logging.propagate = False
 logging.getLogger().setLevel(logging.ERROR)
 
 logger = get_logger("PDF")
+
+def get_pdf_page_count(file_path):
+    try:
+        pdf = pdfium.PdfDocument(file_path)
+        count = len(pdf)
+        pdf.close()
+        return count
+    except Exception as e:
+        return 0
 
 def get_matching_header_lvl(toc, title, threshold=80):
     title_l = title.lower()

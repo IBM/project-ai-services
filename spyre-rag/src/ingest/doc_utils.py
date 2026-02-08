@@ -8,20 +8,23 @@ os.environ['GRPC_VERBOSITY'] = 'ERROR'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 from pathlib import Path
-from docling.datamodel.base_models import InputFormat
-from docling.datamodel.document import DoclingDocument
-from docling.datamodel.pipeline_options import PdfPipelineOptions
-from concurrent.futures import as_completed, ProcessPoolExecutor
-from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.datamodel.document import DoclingDocument, TextItem
+from concurrent.futures import as_completed, ProcessPoolExecutor, ThreadPoolExecutor
 from sentence_splitter import SentenceSplitter
 
 from common.llm_utils import create_llm_session, classify_text_with_llm, summarize_table, tokenize_with_llm
 from common.misc_utils import get_logger, generate_file_checksum, text_suffix, table_suffix
-from ingest.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size
+from common.misc_utils import get_logger, generate_file_checksum, text_suffix, table_suffix, chunk_suffix
+from ingest.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count
 
 logging.getLogger('docling').setLevel(logging.CRITICAL)
 
 logger = get_logger("Docling")
+
+LIGHT_PDF_POOL_SIZE = 4
+HEAVY_PDF_POOL_SIZE = 2
+
+HEAVY_PDF_PAGE_THRESHOLD = 500
 
 is_debug = logger.isEnabledFor(logging.DEBUG) 
 tqdm_wrapper = None
@@ -34,183 +37,15 @@ excluded_labels = {
     'page_header', 'page_footer', 'caption', 'reference', 'footnote'
 }
 
-# Per processor pool 8 requests are getting spawned, since we are creating 4 processor pools, used 8 to match the vLLM's Max Batch Size 32
-POOL_SIZE = 8
+POOL_SIZE = 32
 
 create_llm_session(pool_maxsize=POOL_SIZE)
 
-def process_converted_document(res, pdf_path, out_path, gen_model, gen_endpoint, start_time, timings):    
-    doc_json = res.export_to_dict()
-    stem = Path(pdf_path).stem
+def get_doc_converter():
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.document_converter import DocumentConverter, PdfFormatOption
 
-    # Initialize TocHeaders to get the Table of Contents (TOC)
-    toc_headers = None
-    page_count = 0
-    try:
-        toc_headers, page_count = get_toc(pdf_path)
-    except Exception as e:
-        logger.debug(f"No TOC found or failed to load TOC: {e}")
-
-    # Load pdf pages one time when TOC headers not found for retrieving the font size of header texts
-    pdf_pages = None
-    if not toc_headers:
-        pdf_pages = load_pdf_pages(pdf_path)
-        page_count = len(pdf_pages)
-
-    # --- Text Extraction ---
-    t0 = time.time()
-    filtered_blocks, table_captions = [], []
-    for block in doc_json.get('texts', []):
-        block_type = block.get('label', '')
-        if block_type not in excluded_labels:
-            filtered_blocks.append(block)
-        if block_type == 'caption':
-            block_parent = block.get('parent', {}).get('$ref', '')
-            if 'tables' in block_parent:
-                table_captions.append(block)
-    timings['extract_text_blocks'] = time.time() - t0
-
-    if len(filtered_blocks):
-
-        filtered_text_dicts = filtered_blocks
-
-        structured_output = []
-        last_header_level = 0
-        t0 = time.time()
-        for text_obj in tqdm_wrapper(filtered_text_dicts, desc=f"Processing text content of '{pdf_path}'"):
-            label = text_obj.get("label", "")
-
-            # Check if it's a section header and process TOC or fallback to font size extraction
-            if label == "section_header":
-                prov_list = text_obj.get("prov", [])
-
-                for prov in prov_list:
-                    page_no = prov.get("page_no")
-                    bbox_dict = prov.get("bbox")
-
-                    if page_no is None or bbox_dict is None:
-                        continue
-
-                    if toc_headers:
-                        header_prefix = get_matching_header_lvl(toc_headers, text_obj.get("text", ""))
-                        if header_prefix:
-                            # If TOC matches, use the level from TOC
-                            structured_output.append({
-                                "label": label,
-                                "text": f"{header_prefix} {text_obj.get('text', '')}",
-                                "page": page_no,
-                                "font_size": None,  # Font size isn't necessary if TOC matches
-                            })
-                            last_header_level = len(header_prefix.strip())  # Update last header level
-                        else:
-                            # If no match, use the previous header level + 1
-                            new_header_level = last_header_level + 1
-                            structured_output.append({
-                                "label": label,
-                                "text": f"{'#' * new_header_level} {text_obj.get('text', '')}",
-                                "page": page_no,
-                                "font_size": None,  # Font size isn't necessary if TOC matches
-                            })
-                    else:
-                        matches = find_text_font_size(pdf_pages, text_obj.get("text", ""), page_no - 1)
-                        if len(matches):
-                            font_size = 0
-                            count = 0
-                            for match in matches:
-                                font_size += match["font_size"] if match["match_score"] == 100 else 0
-                                count += 1 if match["match_score"] == 100 else 0
-                            font_size = font_size / count if count else None
-
-                            structured_output.append({
-                                "label": label,
-                                "text": text_obj.get("text", ""),
-                                "page": page_no,
-                                "font_size": round(font_size, 2) if font_size else None
-                            })
-            else:
-                structured_output.append({
-                    "label": label,
-                    "text": text_obj.get("text", ""),
-                    "page": text_obj.get("prov")[0].get("page_no"),
-                    "font_size": None
-                })
-
-        timings["font_size_extraction"] = time.time() - t0
-
-        (Path(out_path) / f"{stem}{text_suffix}").write_text(json.dumps(structured_output, indent=2), encoding="utf-8")
-        
-    else:
-        (Path(out_path) / f"{stem}{text_suffix}").write_text(json.dumps(filtered_blocks, indent=2), encoding="utf-8")
-
-    # --- Table Extraction ---
-    table_count = len(res.tables)
-    if table_count:
-        t0 = time.time()
-        table_htmls_dict = {}
-        table_captions_dict = {i: None for i in range(len(res.tables))}
-        for table_ix, table in enumerate(tqdm_wrapper(res.tables, desc=f"Processing table content of '{pdf_path}'")):
-            table_htmls_dict[table_ix] = table.export_to_html(doc=res)
-            for caption_idx, block in enumerate(table_captions):
-                if block.get('parent')['$ref'] == f'#/tables/{table_ix}':
-                    table_captions_dict[table_ix] = block.get('text', '')
-                    table_captions.pop(caption_idx)
-                    break
-        table_htmls = [table_htmls_dict[key] for key in sorted(table_htmls_dict)]
-        table_captions_list = [table_captions_dict[key] for key in sorted(table_captions_dict)]
-        timings['extract_tables'] = time.time() - t0
-
-        t0 = time.time()
-        table_summaries = summarize_table(table_htmls, gen_model, gen_endpoint, pdf_path)
-        timings['summarize_tables'] = time.time() - t0
-
-        t0 = time.time()
-        decisions = classify_text_with_llm(table_summaries, gen_model, gen_endpoint, pdf_path)
-        filtered_table_dicts = {
-            idx: {
-                'html': html,
-                'caption': caption,
-                'summary': summary
-            }
-            for idx, (keep, html, caption, summary) in enumerate(zip(decisions, table_htmls, table_captions_list, table_summaries)) if keep
-        }
-        (Path(out_path) / f"{stem}{table_suffix}").write_text(json.dumps(filtered_table_dicts, indent=2), encoding="utf-8")
-        timings['filter_tables'] = time.time() - t0
-    else:
-        (Path(out_path) / f"{stem}{table_suffix}").write_text(json.dumps([], indent=2), encoding="utf-8")
-
-    total_time = time.time() - start_time
-    logger.debug(f"Timing for {stem} Total: {total_time:.2f}s")
-    for k, v in timings.items():
-        logger.debug(f"  {k:<30}: {v:.2f}s")
-    return page_count, table_count
-
-def convert_and_process(path, doc_converter, out_path, llm_model, llm_endpoint):
-    try:
-        logger.info(f"Processing '{path}'")
-        timings = {}
-        start_time = time.time()
-        f = (Path(out_path) / f"{Path(path).stem}_converted.json")
-        logger.debug(f"Checking {str(f)}")
-        converted_doc = None
-        if f.exists():
-            logger.debug("Loading from converted json")
-            with Path(str(f)).open("r") as fp:
-                doc_dict = json.load(fp)
-                converted_doc = DoclingDocument.model_validate(doc_dict)
-        else:
-            logger.debug(f"Not exist, converting '{path}'")
-            start_time = time.time()
-            t0 = time.time()
-            converted_doc = doc_converter.convert(path).document
-            timings['conversion_time'] = time.time() - t0
-            logger.debug(f"'{path}' converted")
-            converted_doc.save_as_json(str(f))
-        page_count, table_count = process_converted_document(converted_doc, path, out_path, llm_model, llm_endpoint, start_time, timings)
-        return path, {"page_count": page_count, "table_count": table_count}
-    except Exception as e:
-        raise Exception(f"Error converting and processing '{path}': {e}")
-
-def extract_document_data(input_paths, out_path, llm_model, llm_endpoint, force=False):
     # Accelerator & pipeline options
     pipeline_options = PdfPipelineOptions()
     # Docling model files are getting downloaded to this /var/docling-models dir by this project-ai-services/images/rag-base/download_docling_models.py script in project-ai-services/images/rag-base/Containerfile
@@ -221,54 +56,336 @@ def extract_document_data(input_paths, out_path, llm_model, llm_endpoint, force=
     pipeline_options.table_structure_options.do_cell_matching = True
     pipeline_options.do_ocr = False
 
-
-    # Skip files that already exist by matching the cached checksum of the pdf
-    # if there is no difference in checksum and processed text & table json also exist, would skip for convert and process list
-    # else add the file to convert and process list(filtered_input_paths) 
-    filtered_input_paths = []
-    converted_paths = []
-    for path in input_paths:
-        f = (Path(out_path) / f"{Path(path).stem}.checksum")
-        if f.exists():
-            checksum = f.read_text()
-            if checksum != generate_file_checksum(path) \
-                or not (Path(out_path) / f"{Path(path).stem}{text_suffix}").exists() \
-                or not (Path(out_path) / f"{Path(path).stem}{table_suffix}").exists():
-                filtered_input_paths.append(path)
-            else:
-                converted_paths.append(path)
-        else:
-            filtered_input_paths.append(path)
-
-    for path in filtered_input_paths:
-        checksum = generate_file_checksum(path)
-        (Path(out_path) / f"{Path(path).stem}.checksum").write_text(checksum, encoding='utf-8')
-
     doc_converter = DocumentConverter(
         allowed_formats=[
             InputFormat.PDF
         ],
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
     )
-    converted_pdf_stats = {}
-    if filtered_input_paths:
-        with ProcessPoolExecutor(max_workers=max(1, min(4, len(filtered_input_paths)))) as executor:
-            futures = [
-                executor.submit(convert_and_process, path, doc_converter, out_path, llm_model, llm_endpoint)
-                for path in filtered_input_paths
-            ]
-            for future in as_completed(futures):
-                try:
-                    path, pdf_stats = future.result()
-                    converted_paths.append(path)
-                    converted_pdf_stats[path] = pdf_stats
-                    logger.info(f"Processed '{path}'")
-                except Exception as e:
-                    logger.error(f"{e}")
-    else:
-        logger.debug("No files to convert and process")
 
-    return converted_paths, converted_pdf_stats
+    return doc_converter
+
+def process_converted_document(converted_json_path, pdf_path, out_path, conversion_stats, gen_model, gen_endpoint, emb_endpoint, max_tokens):    
+    stem = Path(pdf_path).stem
+    processed_text_json_path = (Path(out_path) / f"{stem}{text_suffix}")
+    processed_table_json_path = (Path(out_path) / f"{stem}{table_suffix}")
+
+    if conversion_stats["text_processed"] and conversion_stats["table_processed"]:
+        logger.debug(f"Text & Table of {pdf_path} is processed already!")
+        page_count = get_pdf_page_count(pdf_path)
+        table_count = processed_table_json_path.exists() and len(json.load(processed_table_json_path.open())) or 0
+        return pdf_path, processed_text_json_path, processed_table_json_path, page_count, table_count, {}
+
+    try:
+        timings = {}
+        converted_doc = None
+        page_count = 0
+        table_count = 0
+
+        logger.debug("Loading from converted json")
+
+        converted_doc = DoclingDocument.load_from_json(Path(converted_json_path))
+        if not converted_doc:
+            raise Exception(f"failed to load converted json into Docling Document")
+
+        if not conversion_stats["text_processed"]:
+
+            # Initialize TocHeaders to get the Table of Contents (TOC)
+            t0 = time.time()
+            toc_headers = None
+            try:
+                toc_headers, page_count = get_toc(pdf_path)
+            except Exception as e:
+                logger.debug(f"No TOC found or failed to load TOC: {e}")
+
+            # Load pdf pages one time when TOC headers not found for retrieving the font size of header texts
+            pdf_pages = None
+            if not toc_headers:
+                pdf_pages = load_pdf_pages(pdf_path)
+                page_count = len(pdf_pages)
+
+            # --- Text Extraction ---
+            structured_output = []
+            last_header_level = 0
+            for text_obj in tqdm_wrapper(converted_doc.texts, desc=f"Processing text content of '{pdf_path}'"):
+                label = text_obj.label
+                if label in excluded_labels:
+                    continue
+
+                # Check if it's a section header and process TOC or fallback to font size extraction
+                if label == "section_header":
+                    prov_list = text_obj.prov
+
+                    for prov in prov_list:
+                        page_no = prov.page_no
+
+                        if toc_headers:
+                            header_prefix = get_matching_header_lvl(toc_headers, text_obj.text)
+                            if header_prefix:
+                                # If TOC matches, use the level from TOC
+                                structured_output.append({
+                                    "label": label,
+                                    "text": f"{header_prefix} {text_obj.text}",
+                                    "page": page_no,
+                                    "font_size": None,  # Font size isn't necessary if TOC matches
+                                })
+                                last_header_level = len(header_prefix.strip())  # Update last header level
+                            else:
+                                # If no match, use the previous header level + 1
+                                new_header_level = last_header_level + 1
+                                structured_output.append({
+                                    "label": label,
+                                    "text": f"{'#' * new_header_level} {text_obj.text}",
+                                    "page": page_no,
+                                    "font_size": None,  # Font size isn't necessary if TOC matches
+                                })
+                        else:
+                            matches = find_text_font_size(pdf_pages, text_obj.text, page_no - 1)
+                            if len(matches):
+                                font_size = 0
+                                count = 0
+                                for match in matches:
+                                    font_size += match["font_size"] if match["match_score"] == 100 else 0
+                                    count += 1 if match["match_score"] == 100 else 0
+                                font_size = font_size / count if count else None
+
+                                structured_output.append({
+                                    "label": label,
+                                    "text": text_obj.text,
+                                    "page": page_no,
+                                    "font_size": round(font_size, 2) if font_size else None
+                                })
+                else:
+                    structured_output.append({
+                        "label": label,
+                        "text": text_obj.text,
+                        "page": text_obj.prov[0].page_no,
+                        "font_size": None
+                    })
+
+            timings["process_text"] = time.time() - t0
+
+            processed_text_json_path.write_text(json.dumps(structured_output, indent=2), encoding="utf-8")
+            
+        if not conversion_stats["table_processed"]:
+            filtered_table_dicts = {}
+            t0 = time.time()
+            # --- Table Extraction ---
+            if converted_doc.tables:
+                table_dict = {}
+                for table_ix, table in enumerate(tqdm_wrapper(converted_doc.tables, desc=f"Processing table content of '{pdf_path}'")):
+                    table_dict[table_ix] = {}
+                    table_dict[table_ix]["html"] = table.export_to_html(doc=converted_doc)
+                    table_dict[table_ix]["caption"] = table.caption_text(doc=converted_doc)
+
+                table_htmls = [table_dict[key]["html"] for key in sorted(table_dict)]
+                table_captions_list = [table_dict[key]["caption"] for key in sorted(table_dict)]
+
+                table_summaries = summarize_table(table_htmls, gen_model, gen_endpoint, pdf_path)
+
+                decisions = classify_text_with_llm(table_summaries, gen_model, gen_endpoint, pdf_path)
+                filtered_table_dicts = {
+                    idx: {
+                        'html': html,
+                        'caption': caption,
+                        'summary': summary
+                    }
+                    for idx, (keep, html, caption, summary) in enumerate(zip(decisions, table_htmls, table_captions_list, table_summaries)) if keep
+                }
+                table_count = len(filtered_table_dicts)
+                processed_table_json_path.write_text(json.dumps(filtered_table_dicts, indent=2), encoding="utf-8")
+                timings['process_tables'] = time.time() - t0
+
+        return pdf_path, processed_text_json_path, processed_table_json_path, page_count, table_count, timings
+    except Exception as e:
+        logger.error(f"Error processing converted document for PDF: {pdf_path}. Details: {e}", exc_info=True)
+
+        return None, None, None, None, None, None
+
+def convert_document(pdf_path, conversion_stats, out_path):
+    try:
+        logger.info(f"Processing '{pdf_path}'")
+        converted_json = (Path(out_path) / f"{Path(pdf_path).stem}.json")
+        converted_json_f = str(converted_json)
+        if not conversion_stats["convert"]:
+            return pdf_path, converted_json_f, 0.0
+
+        logger.debug(f"Converting '{pdf_path}'")
+        t0 = time.time()
+
+        doc_converter = get_doc_converter()
+        converted_doc = doc_converter.convert(pdf_path).document
+        converted_doc.save_as_json(str(converted_json_f))
+
+        conversion_time = time.time() - t0
+        logger.debug(f"'{pdf_path}' converted")
+        return pdf_path, converted_json_f, conversion_time
+    except Exception as e:
+        logger.error(f"Error converting '{pdf_path}': {e}")
+    return None, None, None
+
+def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoint, max_tokens):
+    # Skip files that already exist by matching the cached checksum of the pdf
+    # if there is no difference in checksum and processed text & table json also exist, would skip for convert and process list
+    # if checksum is matching but either processed text or table json not exist, process the file, but don't convert
+    # else add the file to convert and process list(filtered_input_paths) 
+    filtered_input_paths = {}
+    converted_paths = []
+
+    for path in input_paths:
+        stem = Path(path).stem
+        checksum_path = Path(out_path) / f"{stem}.checksum"
+        filtered_input_paths[path] = {}
+        filtered_input_paths[path]["text_processed"] = False
+        filtered_input_paths[path]["table_processed"] = False
+        filtered_input_paths[path]["chunked"] = False
+
+        if not checksum_path.exists():
+            filtered_input_paths[path]["convert"] = True
+        else:
+            cached_checksum = checksum_path.read_text().strip()
+            new_checksum = generate_file_checksum(path)
+
+            if cached_checksum != new_checksum:
+                filtered_input_paths[path]["convert"] = True
+            else:
+                filtered_input_paths[path]["convert"] = not (Path(out_path) / f"{stem}.json").exists()
+                filtered_input_paths[path]["text_processed"] = (Path(out_path) / f"{stem}{text_suffix}").exists()
+                filtered_input_paths[path]["table_processed"] = (Path(out_path) / f"{stem}{table_suffix}").exists()
+                filtered_input_paths[path]["chunked"] = (Path(out_path) / f"{stem}{chunk_suffix}").exists()
+
+    for path in filtered_input_paths:
+        if filtered_input_paths[path]["convert"]:
+            checksum = generate_file_checksum(path)
+            (Path(out_path) / f"{Path(path).stem}.checksum").write_text(checksum, encoding='utf-8')
+
+    light_files = {}
+    heavy_files = {}
+
+    for path, meta in filtered_input_paths.items():
+        pg_count = get_pdf_page_count(path)
+        if pg_count >= HEAVY_PDF_PAGE_THRESHOLD:
+            heavy_files[path] = meta
+        else:
+            light_files[path] = meta
+
+    logger.debug(f"Light files: {len(light_files)}, Heavy files: {len(heavy_files)}")
+
+    def _run_batch(batch_paths, convert_worker, max_worker):
+        batch_stats = {}
+        batch_chunk_paths = []
+        batch_table_paths = []
+        
+        if not batch_paths:
+            return batch_stats, batch_chunk_paths, batch_table_paths
+
+        with ProcessPoolExecutor(max_workers=convert_worker) as converter_executor, \
+             ThreadPoolExecutor(max_workers=max_worker) as processor_executor, \
+             ThreadPoolExecutor(max_workers=max_worker) as chunker_executor:
+
+            # A. Submit Conversions
+            conversion_futures = [
+                converter_executor.submit(convert_document, path, batch_paths[path], out_path)
+                for path in batch_paths
+            ]
+            
+            process_futures = []
+            chunk_futures = []
+
+            # B. Handle Conversions -> Submit Processing
+            for conversion_future in as_completed(conversion_futures):
+                try:
+                    path, converted_json, conversion_time = conversion_future.result()
+                except Exception as e:
+                    logger.error(f"Error from conversion: {e}")
+                    continue
+                
+                if not converted_json:
+                    continue
+                
+                converted_paths.append(path)
+                batch_stats[path] = {"timings": {"conversion": conversion_time}}
+
+                process_future = processor_executor.submit(
+                    process_converted_document, converted_json, path, out_path, batch_paths[path], 
+                    llm_model, llm_endpoint, emb_endpoint, max_tokens
+                )
+                process_futures.append(process_future)
+
+            # C. Handle Processing -> Submit Chunking
+            for process_future in as_completed(process_futures):
+                try:
+                    path, processed_text_json_path, processed_table_json_path, page_count, table_count, timings = process_future.result()
+                except Exception as e:
+                    logger.error(f"Error from processing: {e}")
+                    continue
+
+                if not processed_table_json_path:
+                    continue
+
+                batch_stats[path]["timings"].update(timings)
+                batch_stats[path]["page_count"] = page_count
+                batch_stats[path]["table_count"] = table_count
+                batch_table_paths.append(processed_table_json_path)
+
+                chunk_future = chunker_executor.submit(
+                    chunk_single_file, processed_text_json_path, path, out_path, batch_paths[path], emb_endpoint, max_tokens
+                )
+                chunk_futures.append(chunk_future)
+
+            # D. Handle Chunking
+            for chunk_future in as_completed(chunk_futures):
+                try:
+                    processed_chunk_json_path, path, chunking_time = chunk_future.result()
+                    batch_stats[path]["timings"]["chunking"] = chunking_time
+                except Exception as e:
+                    logger.error(f"Error from chunking: {e}")
+                    continue
+
+                if processed_chunk_json_path:
+                    batch_chunk_paths.append(processed_chunk_json_path)
+                    logger.info(f"Completed '{path}'")
+
+        return batch_stats, batch_chunk_paths, batch_table_paths
+
+    try:
+        # Light files can be processed in parallel with worker_size
+        worker_size = min(LIGHT_PDF_POOL_SIZE, len(light_files))
+        l_stats, l_chunks, l_tables = _run_batch(
+            light_files,
+            convert_worker=worker_size,
+            max_worker=worker_size,
+        )
+
+        convert_worker_size = min(HEAVY_PDF_POOL_SIZE, len(heavy_files))
+        h_stats, h_chunks, h_tables = _run_batch(
+            heavy_files,
+            convert_worker=convert_worker_size, # Heavy files conversion should happen with less workers compared to light files conversion
+            max_worker=worker_size, # Other processing steps can be parallelized with more workers as they are not CPU intensive
+        )
+
+        # Combine stats from both batches
+        converted_pdf_stats = {**l_stats, **h_stats}
+        all_chunk_json_paths = l_chunks + h_chunks
+        all_table_json_paths = l_tables + h_tables
+
+        combined_chunks = []
+        succeeded_files = {**l_stats, **h_stats}.keys()
+        
+        for path in succeeded_files:
+            stem = Path(path).stem
+            c_path = Path(out_path) / f"{stem}{chunk_suffix}"
+            t_path = Path(out_path) / f"{stem}{table_suffix}"
+            
+            if c_path in all_chunk_json_paths and t_path in all_table_json_paths:
+                filtered_chunks = create_chunk_documents(c_path, t_path, path)
+                combined_chunks.extend(filtered_chunks)
+
+        return combined_chunks, converted_pdf_stats
+
+    except Exception as e:
+        logger.error(f"Pipeline Error: {e}")
+        return None, None
 
 def collect_header_font_sizes(elements):
     """
@@ -372,117 +489,107 @@ def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens):
     current_chunk["source_nodes"] = []
 
 
-def chunk_single_file(input_path, output_path, emb_endpoint, max_tokens=512):    
-    if not Path(output_path).exists():
-        with open(input_path, "r") as f:
-            data = json.load(f)
-        
-        font_size_levels = collect_header_font_sizes(data)
+def chunk_single_file(input_path, pdf_path, out_path, conversion_stats, emb_endpoint, max_tokens=512):
+    t0 = time.time()
+    stem = Path(pdf_path).stem
+    processed_chunk_json_path = (Path(out_path) / f"{stem}{chunk_suffix}")
 
-        chunks = []
-        current_chunk = {
-            "chapter_title": None,
-            "section_title": None,
-            "subsection_title": None,
-            "subsubsection_title": None,
-            "content": "",
-            "page_range": [],
-            "source_nodes": []
-        }
+    if conversion_stats["chunked"]:
+        logger.debug(f"{pdf_path} already chunked!")
+        return processed_chunk_json_path, pdf_path, 0.0
 
-        current_chapter = None
-        current_section = None
-        current_subsection = None
-        current_subsubsection = None
+    try:
+        if not Path(processed_chunk_json_path).exists():
+            with open(input_path, "r") as f:
+                data = json.load(f)
+            
+            font_size_levels = collect_header_font_sizes(data)
 
-        for idx, block in enumerate(tqdm_wrapper(data, desc=f"Chunking {input_path}")):
-            label = block.get("label")
-            text = block.get("text", "").strip()
-            try:
-                page_no = block.get("prov", {})[0].get("page_no")
-            except:
-                page_no = 0
-            ref = f"#texts/{idx}"
+            chunks = []
+            current_chunk = {
+                "chapter_title": None,
+                "section_title": None,
+                "subsection_title": None,
+                "subsubsection_title": None,
+                "content": "",
+                "page_range": [],
+                "source_nodes": []
+            }
 
-            if label == "section_header":
-                level, full_title = get_header_level(text, block.get("font_size"), font_size_levels)
-                if level == 1:
-                    current_chapter = full_title
-                    current_section = None
-                    current_subsection = None
-                    current_subsubsection = None
-                elif level == 2:
-                    current_section = full_title
-                    current_subsection = None
-                    current_subsubsection = None
-                elif level == 3:
-                    current_subsection = full_title
-                    current_subsubsection = None
-                else:
-                    current_subsubsection = full_title
+            current_chapter = None
+            current_section = None
+            current_subsection = None
+            current_subsubsection = None
 
-                # Flush current chunk and update
-                flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens)
-                current_chunk["chapter_title"] = current_chapter
-                current_chunk["section_title"] = current_section
-                current_chunk["subsection_title"] = current_subsection
-                current_chunk["subsubsection_title"] = current_subsubsection
+            for idx, block in enumerate(tqdm_wrapper(data, desc=f"Chunking {input_path}")):
+                label = block.get("label")
+                text = block.get("text", "").strip()
+                try:
+                    page_no = block.get("prov", {})[0].get("page_no")
+                except:
+                    page_no = 0
+                ref = f"#texts/{idx}"
 
-            elif label in {"text", "list_item", "code", "formula"}:
-                if current_chunk["chapter_title"] is None:
+                if label == "section_header":
+                    level, full_title = get_header_level(text, block.get("font_size"), font_size_levels)
+                    if level == 1:
+                        current_chapter = full_title
+                        current_section = None
+                        current_subsection = None
+                        current_subsubsection = None
+                    elif level == 2:
+                        current_section = full_title
+                        current_subsection = None
+                        current_subsubsection = None
+                    elif level == 3:
+                        current_subsection = full_title
+                        current_subsubsection = None
+                    else:
+                        current_subsubsection = full_title
+
+                    # Flush current chunk and update
+                    flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens)
                     current_chunk["chapter_title"] = current_chapter
-                if current_chunk["section_title"] is None:
                     current_chunk["section_title"] = current_section
-                if current_chunk["subsection_title"] is None:
                     current_chunk["subsection_title"] = current_subsection
-                if current_chunk["subsubsection_title"] is None:
                     current_chunk["subsubsection_title"] = current_subsubsection
 
-                if label == 'code':
-                    current_chunk["content"] += f"```\n{text}\n``` "
-                elif label == 'formula':
-                    current_chunk["content"] += f"${text}$ "
+                elif label in {"text", "list_item", "code", "formula"}:
+                    if current_chunk["chapter_title"] is None:
+                        current_chunk["chapter_title"] = current_chapter
+                    if current_chunk["section_title"] is None:
+                        current_chunk["section_title"] = current_section
+                    if current_chunk["subsection_title"] is None:
+                        current_chunk["subsection_title"] = current_subsection
+                    if current_chunk["subsubsection_title"] is None:
+                        current_chunk["subsubsection_title"] = current_subsubsection
+
+                    if label == 'code':
+                        current_chunk["content"] += f"```\n{text}\n``` "
+                    elif label == 'formula':
+                        current_chunk["content"] += f"${text}$ "
+                    else:
+                        current_chunk["content"] += f"{text} "
+                    if page_no is not None:
+                        current_chunk["page_range"].append(page_no)
+                    current_chunk["source_nodes"].append(ref)
                 else:
-                    current_chunk["content"] += f"{text} "
-                if page_no is not None:
-                    current_chunk["page_range"].append(page_no)
-                current_chunk["source_nodes"].append(ref)
-            else:
-                logger.debug(f'Skipping adding "{label}".')
+                    logger.debug(f'Skipping adding "{label}".')
 
-        # Flush any remaining content
-        flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens)
+            # Flush any remaining content
+            flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens)
 
-        # Save the processed chunks to the output file
-        with open(output_path, "w") as f:
-            json.dump(chunks, f, indent=2)
+            # Save the processed chunks to the output file
+            with open(processed_chunk_json_path, "w") as f:
+                json.dump(chunks, f, indent=2)
 
-        logger.debug(f"{len(chunks)} RAG chunks saved to {output_path}")
-    else:
-        logger.debug(f"{output_path} already exists.")
-
-    return output_path
-
-def hierarchical_chunk_with_token_split(input_paths, output_paths, emb_endpoint, max_tokens=512):
-    if len(input_paths) != len(output_paths):
-        raise ValueError("`input_paths` and `output_paths` must have the same length")
-
-    # Process each input-output file pair in parallel using ProcessPoolExecutor
-    with ProcessPoolExecutor(max_workers=8) as executor:
-        futures = []
-        for input_path, output_path in zip(input_paths, output_paths):
-            logger.debug(f"Submitting '{input_path}' for chunking")
-            futures.append(executor.submit(chunk_single_file, input_path, output_path, emb_endpoint, max_tokens))
-
-        chunked_files = []
-        # Wait for all futures to finish and handle exceptions
-        for future in tqdm_wrapper(futures, desc="Creating chunks from processed documents"):
-            try:
-                chunked_files.append(future.result())  # Capture exceptions if any
-            except Exception as e:
-                logger.error(f"Error occurred while chunking: {e}")
-    logger.debug("Chunks creation completed")
-    return chunked_files
+            logger.debug(f"{len(chunks)} RAG chunks saved to {processed_chunk_json_path}")
+        else:
+            logger.debug(f"{processed_chunk_json_path} already exists.")
+        return processed_chunk_json_path, pdf_path, time.time() - t0
+    except Exception as e:
+        logger.error(f"error chunking file '{input_path}': {e}")
+    return None, None, None
 
 def create_chunk_documents(in_txt_f, in_tab_f, orig_fn):
     logger.debug(f"Creating combined chunk documents from '{in_txt_f}' & '{in_tab_f}'")
