@@ -206,11 +206,13 @@ func ValidateStopAppOutput(output string) error {
 	return nil
 }
 
-func ValidatePodsExitedAfterStop(
-	psOutput string,
-	appName string,
-	mainPods []string,
-) error {
+func ValidatePodsExitedAfterStop(psOutput, appName string) error {
+	mainPods := []string{
+		"vllm-server",
+		// "milvus",
+		"chat-bot",
+	}
+
 	isMainPod := func(pod string) bool {
 		for _, p := range mainPods {
 			if pod == p {
