@@ -1,0 +1,56 @@
+pipeline {
+    // Pipeline to cleanup up deployed application
+    // once Deployed application gets cleaned up next PR code will be ready to deployed
+    agent { label 'ai-services' }
+
+    parameters {
+        string(
+            name: 'PR_NUMBER',
+            description: 'Pull request number to build'
+        )
+        stashedFile 'INGEST_DOC_FILE'
+    }
+
+    // To disable concurrent build
+    options {
+        disableConcurrentBuilds()
+    }
+
+    stages {
+
+        stage('Validate parameters') {
+            steps {
+                script {
+                    if (!params.PR_NUMBER?.trim()) {
+                        error('PR_NUMBER must be provided')
+                    }
+                }
+            }
+        }
+
+        stage('Checkout PR') {
+            steps {
+                sh '''
+                cd /root/adarsh
+                    rm -rf project-ai-services
+                    git clone https://github.com/IBM/project-ai-services.git
+                    cd project-ai-services/ai-services
+                    git fetch origin pull/${PR_NUMBER}/head
+                    git checkout FETCH_HEAD
+                '''
+            }
+        }
+
+        stage('Cleanup') {
+            steps {
+                sh '''
+                cd /root/adarsh/project-ai-services/ai-services
+                ./bin/ai-services application stop rag-test -y
+                ./bin/ai-services application delete rag-test -y
+                
+                podman pod ps
+                '''
+            }
+        }
+    }
+}
