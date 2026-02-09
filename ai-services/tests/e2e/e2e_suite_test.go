@@ -365,7 +365,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
-			gomega.Expect(logs).To(gomega.ContainSubstring("Processed '/var/docs/test_doc.pdf'"))
+			gomega.Expect(logs).To(gomega.ContainSubstring("Completed '/var/docs/test_doc.pdf'"))
 
 			logger.Infof("[TEST] Ingestion completed successfully for application %s", appName)
 		})
