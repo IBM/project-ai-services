@@ -162,20 +162,20 @@ var _ = ginkgo.AfterSuite(func() {
 })
 
 var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
-	ginkgo.Context("Environment & CLI Sanity Tests", ginkgo.Label("spyre-independent"), func() {
-		ginkgo.It("runs help command", func() {
+	ginkgo.Context("Environment & CLI Sanity Tests", func() {
+		ginkgo.It("runs help command", ginkgo.Label("spyre-independent"), func() {
 			args := []string{"help"}
 			output, err := cli.HelpCommand(ctx, cfg, args)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateHelpCommandOutput(output)).To(gomega.Succeed())
 		})
-		ginkgo.It("runs -h command", func() {
+		ginkgo.It("runs -h command", ginkgo.Label("spyre-independent"), func() {
 			args := []string{"-h"}
 			output, err := cli.HelpCommand(ctx, cfg, args)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateHelpCommandOutput(output)).To(gomega.Succeed())
 		})
-		ginkgo.It("runs help for a given random command", func() {
+		ginkgo.It("runs help for a given random command", ginkgo.Label("spyre-independent"), func() {
 			possibleCommands := []string{"application", "bootstrap", "completion", "version"}
 			randomIndex := rand.Intn(len(possibleCommands))
 			randomCommand := possibleCommands[randomIndex]
@@ -184,12 +184,12 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateHelpRandomCommandOutput(randomCommand, output)).To(gomega.Succeed())
 		})
-		ginkgo.It("runs application template command", func() {
+		ginkgo.It("runs application template command", ginkgo.Label("spyre-independent"), func() {
 			output, err := cli.TemplatesCommand(ctx, cfg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateApplicationsTemplateCommandOutput(output)).To(gomega.Succeed())
 		})
-		ginkgo.It("verifies application model list command", func() {
+		ginkgo.It("verifies application model list command", ginkgo.Label("spyre-independent"), func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 			defer cancel()
 			output, err := cli.ModelList(ctx, cfg, templateName)
@@ -197,7 +197,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(cli.ValidateModelListOutput(output, templateName)).To(gomega.Succeed())
 			logger.Infoln("[TEST] Application model list validated successfully!")
 		})
-		ginkgo.It("verifies application model download command", func() {
+		ginkgo.It("verifies application model download command", ginkgo.Label("spyre-independent"), func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 			defer cancel()
 			output, err := cli.ModelDownload(ctx, cfg, templateName)
@@ -240,7 +240,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	ginkgo.Context("Application Creation", func() {
-		ginkgo.It("creates rag application, runs health checks and validates RAG endpoints", func() {
+		ginkgo.It("creates rag application, runs health checks and validates RAG endpoints", ginkgo.Label("spyre-dependent"), func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 			defer cancel()
 
@@ -370,7 +370,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] Ingestion completed successfully for application %s", appName)
 		})
 	})
-	ginkgo.Context("RAG Golden Dataset Validation", ginkgo.Label("spyre-dependent"), func() {
+	ginkgo.Context("RAG Golden Dataset Validation", func() {
 		ginkgo.BeforeAll(func() {
 			logger.Infof("[RAG] Setting up LLM-as-Judge")
 
@@ -384,7 +384,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				logger.Warningf("[RAG][WARN] Judge cleanup failed: %v", err)
 			}
 		})
-		ginkgo.It("validates RAG answers against golden dataset", func() {
+		ginkgo.It("validates RAG answers against golden dataset", ginkgo.Label("spyre-dependent"), func() {
 			logger.Infof("[RAG] Starting golden dataset validation")
 			cases, err := rag.LoadGoldenCSV(goldenPath)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
