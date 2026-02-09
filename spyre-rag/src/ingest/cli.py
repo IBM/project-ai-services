@@ -5,6 +5,7 @@ from glob import glob
 import argparse
 
 import common.db_utils as db
+from common.emb_utils import get_embedder
 from common.misc_utils import *
 
 def reset_db():
@@ -62,12 +63,11 @@ def ingest(directory_path):
 
     if combined_chunks:
         logger.info("Loading processed documents into DB")
+        embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
         # Insert data into Opensearch
         vector_store.insert_chunks(
-            emb_model=emb_model_dict['emb_model'],
-            emb_endpoint=emb_model_dict['emb_endpoint'],
-            max_tokens=emb_model_dict['max_tokens'],
-            chunks=combined_chunks
+            combined_chunks,
+            embedder=embedder
         )
         logger.info("Processed documents loaded into DB")
     logger.info("Loading converted documents into DB")
@@ -146,13 +146,8 @@ if command_args.debug:
 
 set_log_level(log_level)
 
-<<<<<<< HEAD
 from ingest.doc_utils import process_documents
-from common.db_utils import OpensearchVectorStore
-=======
 from common.vector_db import VectorStore
-from ingest.doc_utils import extract_document_data, hierarchical_chunk_with_token_split, create_chunk_documents
->>>>>>> 35af6ea (Introduce VectorStore abstract class and implement Opensearch)
 
 logger = get_logger("Ingest")
 

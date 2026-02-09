@@ -6,10 +6,8 @@ import hashlib
 from tqdm import tqdm
 from opensearchpy import OpenSearch, helpers
 
-from common.emb_utils import Embedding
 from common.misc_utils import LOCAL_CACHE_DIR, get_logger
 from common.vector_db import VectorStore
-
 
 logger = get_logger("OpenSearch")
 
@@ -42,8 +40,6 @@ class OpensearchVectorStore(VectorStore):
             verify_certs=False,
             ssl_show_warn=False
         )
-        self._embedder = None
-        self._embedder_config = {}
         self._create_pipeline()
 
     def _generate_index_name(self, name):
@@ -67,10 +63,8 @@ class OpensearchVectorStore(VectorStore):
                 }
             ]
         }
-
         try:
-            self.client.search_pipeline.delete(id="hybrid_rrf_pipeline")
-            self.client.search_pipeline.put(id="hybrid_rrf_pipeline", body=pipeline_body)
+            self.client.search_pipeline.put(id="hybrid_pipeline", body=pipeline_body)
         except Exception as e:
             logger.error(f"Failed to create hybrid rrf search pipeline: {e}")
 
@@ -94,7 +88,7 @@ class OpensearchVectorStore(VectorStore):
                         "type": "knn_vector",
                         "dimension": dim,
                         "method": {
-                           "name": "hnsw",    # HNSW is standard for high performance
+                            "name": "hnsw",    # HNSW is standard for high performance
                             "space_type": "cosinesimil",
                             "engine": "lucene",
                             "parameters": {
@@ -103,7 +97,7 @@ class OpensearchVectorStore(VectorStore):
                             }
                         }
                     },
-                    "page_content": {
+                     "page_content": {
                         "type": "text", 
                         "analyzer": "standard"
                     },
@@ -117,80 +111,79 @@ class OpensearchVectorStore(VectorStore):
         # Create the Index
         self.client.indices.create(index=self.index_name, body=index_body)
 
-    def _ensure_embedder(self, emb_model, emb_endpoint, max_tokens):
-        config = {"model": emb_model, "endpoint": emb_endpoint, "max_tokens": max_tokens}
-        if self._embedder is None or self._embedder_config != config:
-            logger.debug(f"⚙️ Initializing embedder: {emb_model}")
-            self._embedder = Embedding(emb_model, emb_endpoint, max_tokens)
-            self._embedder_config = config
-
-    def insert_chunks(self, emb_model, emb_endpoint, max_tokens, chunks, batch_size=10):
+    def insert_chunks(self, chunks, vectors=None, embedder=None, batch_size=10):
+        """
+        Supports 2 modes of insertion
+        1. Pure embedding: pass 'chunks' and 'vectors'
+        2. Text chunks: pass 'chunks' and 'embedder' (class instance)
+        """
         if not chunks:
-            logger.debug("Nothing to chunk!")
             return
 
-        self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
+        # 1. Determine Embeddings
+        if vectors is not None:
+            final_embeddings = vectors
+        elif embedder is not None:
+            page_contents = [doc.get("page_content") for doc in chunks]
+            final_embeddings = embedder.embed_documents(page_contents)
+        else:
+            raise ValueError("Provide either pre-computed 'vectors' or an 'embedder' instance.")
 
-        sample_embedding = self._embedder.embed_documents([chunks[0]["page_content"]])[0]
-        dim = len(sample_embedding)
-
+        # 2. Setup Index
+        dim = len(final_embeddings[0])
         self._setup_index(dim)
 
         logger.debug(f"Inserting {len(chunks)} chunks into OpenSearch...")
 
+        # 3. Batch Processing for Bulk Ingest
         for i in tqdm(range(0, len(chunks), batch_size)):
-            batch = chunks[i:i + batch_size]
-            page_contents = [doc.get("page_content") for doc in batch]
-            embeddings = self._embedder.embed_documents(page_contents)
+            batch_chunks = chunks[i : i + batch_size]
+            batch_embeddings = final_embeddings[i : i + batch_size]
 
-            filenames = [doc.get("filename", "") for doc in batch]
-            types = [doc.get("type", "") for doc in batch]
-            sources = [doc.get("source", "") for doc in batch]
-            languages = [doc.get("language", "") for doc in batch]
-
-            chunk_ids = [generate_chunk_id(fn, pc, i+j) for j, (fn, pc) in enumerate(zip(filenames, page_contents))]
-
-            # 1. Transform to OpenSearch document format
             actions = []
-            for i in range(len(chunk_ids)):
-                doc = {
-                    "_index": self.index_name,  # The name of your index
-                    "_id": str(chunk_ids[i]),   # Use chunk_id as the OpenSearch document ID for upsert logic
-                    "_source": {
-                        "chunk_id": chunk_ids[i],
-                        "embedding": embeddings[i],
-                        "page_content": page_contents[i],
-                        "filename": filenames[i],
-                        "type": types[i],
-                        "source": sources[i],
-                        "language": languages[i]
-                    }
-                }
-                actions.append(doc)
+            for j, (doc, emb) in enumerate(zip(batch_chunks, batch_embeddings)):
+                fn = doc.get("filename", "")
+                pc = doc.get("page_content", "")
+                cid = generate_chunk_id(fn, pc, i + j)
 
-            # 2. Use the Bulk helper to insert all documents
-            # 'stats_only=True' returns a simple count of success/failure
+                actions.append({
+                    "_index": self.index_name,
+                    "_id": str(cid),
+                    "_source": {
+                        "chunk_id": cid,
+                        "embedding": emb.tolist() if isinstance(emb, np.ndarray) else emb,
+                        "page_content": pc,
+                        "filename": fn,
+                        "type": doc.get("type", ""),
+                        "source": doc.get("source", ""),
+                        "language": doc.get("language", "")
+                    }
+                })
+
             success, failed = helpers.bulk(self.client, actions, stats_only=True)
             if failed:
-                logger.error("failed to insert chunks to OpenSearch vectorstore")
-
+                logger.error(f"Failed to insert {failed} chunks to OpenSearch")
             logger.debug(f"Successfully indexed {success} chunks. Failed: {failed}")
 
-        logger.debug(f"Inserted the chunks into collection.")
+            logger.debug(f"Inserted the {len(chunks)} into index.")
 
-    def check_db_populated(self, emb_model, emb_endpoint, max_tokens):
-        self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
+    def search(self, query, vector=None, embedder=None, top_k=5, mode="hybrid", language='en'):
+        """
+        Supported search modes: dense(semantic search), sparse(keyword match) and hybrid(combination of dense and sparse).
+        Accepts either a pre-computed 'vector' OR an 'embedder' instance.
+        """
         if not self.client.indices.exists(index=self.index_name):
-            return False
-        return True
+            raise OpensearchNotReadyError("Index is empty. Ingest documents first.")
 
-    def search(self, query, emb_model, emb_endpoint, max_tokens, top_k=5, deployment_type='cpu', mode="hybrid", language='en'):
-        if not self.check_db_populated(emb_model, emb_endpoint, max_tokens):
-            raise OpensearchNotReadyError(f"Opensearch database is empty. Ingest documents first.")
+        if vector is not None:
+            query_vector = vector
+        elif embedder is not None:
+            query_vector = embedder.embed_query(query)
+        else:
+            raise ValueError("Provide 'vector' or 'embedder' to perform search.")
 
-        query_vector = self._embedder.embed_query(query)
-
-        limit=top_k * 3  # retrieve more for filtering
+        limit = top_k * 3
+        params = {}
 
         if mode == "dense":
             # 1. Define the k-NN search body
@@ -200,7 +193,7 @@ class OpensearchVectorStore(VectorStore):
                 "query": {
                     "knn": {
                         "embedding": {
-                            "vector": query_vector,
+                            "vector": query_vector.tolist() if isinstance(query_vector, np.ndarray) else query_vector,
                             "k": limit,
                             # Efficient pre-filtering
                             "filter": {
@@ -210,12 +203,6 @@ class OpensearchVectorStore(VectorStore):
                     }
                 }
             }
-            response = self.client.search(index=self.index_name, body=search_body)
-
-            # Format results
-            dense_results = [hit["_source"] for hit in response["hits"]["hits"]]
-            return dense_results[:top_k]
-
         elif mode == "sparse":
             # OpenSearch native Sparse Search (BM25 or Neural Sparse)
             # Standard full-text match for sparse/keyword logic
@@ -233,18 +220,6 @@ class OpensearchVectorStore(VectorStore):
                     }
                 }
             }
-
-            response = self.client.search(index=self.index_name, body=search_body)
-
-            # Format results
-            sparse_results = []
-            for hit in response["hits"]["hits"]:
-                metadata = hit["_source"]
-                metadata["score"] = hit["_score"]
-                sparse_results.append(metadata)
-                
-            return sparse_results[:top_k]
-
         elif mode == "hybrid":
             # OpenSearch Hybrid Query combines Dense (k-NN) and Sparse (Match)
             search_body = {
@@ -257,7 +232,7 @@ class OpensearchVectorStore(VectorStore):
                             {
                                 "knn": {
                                     "embedding": {
-                                        "vector": query_vector,
+                                        "vector": query_vector.tolist() if isinstance(query_vector, np.ndarray) else query_vector,
                                         "k": limit,
                                         "filter": {"term": {"language": language}} if language else None
                                     }
@@ -275,21 +250,22 @@ class OpensearchVectorStore(VectorStore):
                 }
             }
 
-            # Execute search using the RRF pipeline
-            response = self.client.search(
-                index=self.index_name,
-                body=search_body,
-                search_pipeline="hybrid_rrf_pipeline" # This triggers the server-side RRF
-            )
+        params = {"search_pipeline": "hybrid_rrf_pipeline"}
+        response = self.client.search(index=self.index_name, body=search_body, params=params)
 
-            # Format results
-            hybrid_results = []
-            for hit in response["hits"]["hits"]:
-                metadata = hit["_source"]
-                metadata["score"] = hit["_score"] # unified RRF score
-                hybrid_results.append(metadata)
+        # Format results
+        results = []
+        for hit in response["hits"]["hits"]:
+            metadata = hit["_source"]
+            metadata["score"] = hit["_score"] # unified RRF score
+            results.append(metadata)
 
-            return hybrid_results
+        return results
+
+    def check_db_populated(self, emb_model, emb_endpoint, max_tokens):
+        if not self.client.indices.exists(index=self.index_name):
+            return False
+        return True
 
     def reset_index(self):
         if self.client.indices.exists(index=self.index_name):

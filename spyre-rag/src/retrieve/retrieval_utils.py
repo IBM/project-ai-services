@@ -1,5 +1,6 @@
 import base64
 
+from common.emb_utils import get_embedder
 
 def format_table_html(table_html):
     """
@@ -48,7 +49,8 @@ def show_document_content(retrieved_documents, scores):
 
 
 def retrieve_documents(query, emb_model, emb_endpoint, max_tokens, vectorstore, top_k, mode="hybrid", language='en'):
-    results = vectorstore.search(query, emb_model, emb_endpoint, max_tokens, top_k, mode=mode, language=language)
+    embedding = get_embedder(emb_model, emb_endpoint, max_tokens)
+    results = vectorstore.search(query, embedder=embedding, top_k=top_k, mode=mode, language=language)
 
     retrieved_documents = []
     scores = []
