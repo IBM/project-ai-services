@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 const execPerm = 0o755
@@ -26,7 +28,7 @@ func GetTestBinDir() string {
 
 // BuildOrVerifyCLIBinary ensures the ai-services binary is available.
 func BuildOrVerifyCLIBinary(ctx context.Context) (string, error) {
-	fmt.Println("[BOOTSTRAP] Starting BuildOrVerifyCLIBinary...")
+	logger.Infof("[BOOTSTRAP] Starting BuildOrVerifyCLIBinary...")
 
 	if bin, ok, err := fromEnvBinary(); ok {
 		return bin, err
@@ -46,7 +48,7 @@ func fromEnvBinary() (string, bool, error) {
 		return "", false, nil
 	}
 
-	fmt.Printf("[BOOTSTRAP] AI_SERVICES_BIN is set: %s (validating)\n", bin)
+	logger.Infof("[BOOTSTRAP] AI_SERVICES_BIN is set: %s (validating)", bin)
 
 	if _, err := CheckBinaryVersion(bin); err != nil {
 		return "", true, fmt.Errorf(
@@ -56,7 +58,7 @@ func fromEnvBinary() (string, bool, error) {
 		)
 	}
 
-	fmt.Printf("[BOOTSTRAP] Using AI_SERVICES_BIN: %s\n", bin)
+	logger.Infof("[BOOTSTRAP] Using AI_SERVICES_BIN: %s", bin)
 
 	return bin, true, nil
 }
@@ -68,21 +70,15 @@ func fromTempDirBinary() (string, bool) {
 	}
 
 	binPath := filepath.Join(testBinDir, "ai-services")
-	fmt.Printf(
-		"[BOOTSTRAP] Checking for existing binary in temp dir: %s\n",
-		binPath,
-	)
+	logger.Infof("[BOOTSTRAP] Checking for existing binary in temp dir: %s", binPath)
 
 	if _, err := CheckBinaryVersion(binPath); err == nil {
-		fmt.Printf(
-			"[BOOTSTRAP] Found and verified binary at: %s\n",
-			binPath,
-		)
+		logger.Infof("[BOOTSTRAP] Found and verified binary at: %s", binPath)
 
 		return binPath, true
 	}
 
-	fmt.Println("[BOOTSTRAP] Binary not found or invalid in temp dir")
+	logger.Infof("[BOOTSTRAP] Binary not found or invalid in temp dir")
 
 	return "", false
 }
@@ -95,22 +91,19 @@ func buildAndVerifyBinary(ctx context.Context) (string, error) {
 		)
 	}
 
-	fmt.Println("[BOOTSTRAP] Building ai-services...")
+	logger.Infof("[BOOTSTRAP] Building ai-services...")
 
 	binPath, err := buildBinary(ctx, testBinDir)
 	if err != nil {
-		fmt.Printf("[BOOTSTRAP] Build failed: %v\n", err)
+		logger.Errorf("[BOOTSTRAP] Build failed: %v", err)
 
 		return "", err
 	}
 
-	fmt.Printf("[BOOTSTRAP] Verifying built binary at: %s\n", binPath)
+	logger.Infof("[BOOTSTRAP] Verifying built binary at: %s", binPath)
 
 	if _, err := CheckBinaryVersion(binPath); err != nil {
-		fmt.Printf(
-			"[BOOTSTRAP] Verification failed, removing invalid binary: %s\n",
-			binPath,
-		)
+		logger.Errorf("[BOOTSTRAP] Verification failed, removing invalid binary: %s", binPath)
 		_ = os.Remove(binPath)
 
 		return "", fmt.Errorf(
@@ -119,10 +112,7 @@ func buildAndVerifyBinary(ctx context.Context) (string, error) {
 		)
 	}
 
-	fmt.Printf(
-		"[BOOTSTRAP] Successfully built and verified binary: %s\n",
-		binPath,
-	)
+	logger.Infof("[BOOTSTRAP] Successfully built and verified binary: %s", binPath)
 
 	return binPath, nil
 }
