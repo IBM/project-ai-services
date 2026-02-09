@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/containers/podman/v5/libpod/define"
-	"github.com/containers/podman/v5/pkg/domain/entities/types"
+	podmanTypes "github.com/containers/podman/v5/pkg/domain/entities/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/spf13/cobra"
 
@@ -91,7 +91,7 @@ func runPsCmd(runtimeClient *podman.PodmanClient, appName string) error {
 	return nil
 }
 
-func fetchFilteredPods(client *podman.PodmanClient, appName string) ([]runtime.Pod, error) {
+func fetchFilteredPods(client *podman.PodmanClient, appName string) ([]types.Pod, error) {
 	listFilters := map[string][]string{}
 	if appName != "" {
 		listFilters["label"] = []string{fmt.Sprintf("ai-services.io/application=%s", appName)}
@@ -115,7 +115,7 @@ func setTableHeaders(p *utils.Printer) {
 }
 
 // renderPodRows - renders each pod rows on the table.
-func renderPodRows(runtimeClient *podman.PodmanClient, p *utils.Printer, pods []runtime.Pod) {
+func renderPodRows(runtimeClient *podman.PodmanClient, p *utils.Printer, pods []types.Pod) {
 	for _, pod := range pods {
 		processAndAppendPodRow(runtimeClient, p, pod)
 	}
@@ -123,7 +123,7 @@ func renderPodRows(runtimeClient *podman.PodmanClient, p *utils.Printer, pods []
 
 // processAndAppendPodRow - processes the pod to get the required info.
 // Builds and appends the row containing pod info on to the table.
-func processAndAppendPodRow(runtimeClient *podman.PodmanClient, p *utils.Printer, pod runtime.Pod) {
+func processAndAppendPodRow(runtimeClient *podman.PodmanClient, p *utils.Printer, pod types.Pod) {
 	appName := fetchPodNameFromLabels(pod.Labels)
 	if appName == "" {
 		// skip pods which are not linked to ai-services
@@ -146,7 +146,7 @@ func processAndAppendPodRow(runtimeClient *podman.PodmanClient, p *utils.Printer
 }
 
 // buildPodRow - builds the row using the pod info based on the wide options flag set (-o wide).
-func buildPodRow(runtimeClient *podman.PodmanClient, appName string, pod runtime.Pod, pInfo *types.PodInspectReport) []string {
+func buildPodRow(runtimeClient *podman.PodmanClient, appName string, pod types.Pod, pInfo *podmanTypes.PodInspectReport) []string {
 	status := getPodStatus(runtimeClient, pInfo)
 
 	// if wide option flag is not set, then return appName, podName and status only
@@ -176,7 +176,7 @@ func fetchPodNameFromLabels(labels map[string]string) string {
 	return labels[constants.ApplicationAnnotationKey]
 }
 
-func getPodPorts(pInfo *types.PodInspectReport) ([]string, error) {
+func getPodPorts(pInfo *podmanTypes.PodInspectReport) ([]string, error) {
 	podPorts := []string{}
 
 	if pInfo.InfraConfig != nil && pInfo.InfraConfig.PortBindings != nil {
@@ -194,7 +194,7 @@ func getPodPorts(pInfo *types.PodInspectReport) ([]string, error) {
 	return podPorts, nil
 }
 
-func getContainerNames(runtimeClient *podman.PodmanClient, pod runtime.Pod) []string {
+func getContainerNames(runtimeClient *podman.PodmanClient, pod types.Pod) []string {
 	containerNames := []string{}
 
 	for _, container := range pod.Containers {
@@ -220,7 +220,7 @@ func getContainerNames(runtimeClient *podman.PodmanClient, pod runtime.Pod) []st
 	return containerNames
 }
 
-func getPodStatus(runtimeClient *podman.PodmanClient, pInfo *types.PodInspectReport) string {
+func getPodStatus(runtimeClient *podman.PodmanClient, pInfo *podmanTypes.PodInspectReport) string {
 	// if the pod Status is running, make sure to check if its healthy or not, otherwise fallback to default pod state
 	if pInfo.State == "Running" {
 		healthyContainers := 0

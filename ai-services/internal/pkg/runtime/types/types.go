@@ -1,0 +1,43 @@
+package types
+
+// RuntimeType represents the type of container runtime.
+type RuntimeType string
+
+const (
+	RuntimeTypePodman    RuntimeType = "podman"
+	RuntimeTypeOpenshift RuntimeType = "openshift"
+)
+
+// String returns the string representation of RuntimeType.
+func (r RuntimeType) String() string {
+	return string(r)
+}
+
+// Valid checks if the runtime type is valid.
+func (r RuntimeType) Valid() bool {
+	switch r {
+	case RuntimeTypePodman, RuntimeTypeOpenshift:
+		return true
+	default:
+		return false
+	}
+}
+
+type Pod struct {
+	ID         string
+	Name       string
+	Status     string
+	Labels     map[string]string
+	Containers []Container
+}
+
+type Container struct {
+	ID     string `json:"ID"`
+	Name   string
+	Status string
+}
+
+type Image struct {
+	RepoTags    []string
+	RepoDigests []string
+}
