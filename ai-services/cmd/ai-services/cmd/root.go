@@ -37,6 +37,7 @@ func Execute() {
 func init() {
 	logger.Init()
 	RootCmd.PersistentFlags().AddGoFlagSet(flag.CommandLine)
+
 	RootCmd.AddCommand(version.VersionCmd)
 	RootCmd.AddCommand(bootstrap.BootstrapCmd())
 	RootCmd.AddCommand(application.ApplicationCmd)

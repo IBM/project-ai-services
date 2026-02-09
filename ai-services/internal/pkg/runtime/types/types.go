@@ -1,4 +1,4 @@
-package runtime
+package types
 
 type Pod struct {
 	ID         string

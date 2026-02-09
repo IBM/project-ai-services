@@ -16,9 +16,9 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/images"
 	"github.com/containers/podman/v5/pkg/bindings/kube"
 	"github.com/containers/podman/v5/pkg/bindings/pods"
-	"github.com/containers/podman/v5/pkg/domain/entities/types"
+	podmanTypes "github.com/containers/podman/v5/pkg/domain/entities/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
@@ -48,7 +48,7 @@ func NewPodmanClient() (*PodmanClient, error) {
 }
 
 // ListImages function to list images (you can expand with more Podman functionalities).
-func (pc *PodmanClient) ListImages() ([]runtime.Image, error) {
+func (pc *PodmanClient) ListImages() ([]types.Image, error) {
 	images, err := images.List(pc.Context, nil)
 	if err != nil {
 		return nil, err
@@ -68,7 +68,7 @@ func (pc *PodmanClient) PullImage(image string) error {
 	return nil
 }
 
-func (pc *PodmanClient) ListPods(filters map[string][]string) ([]runtime.Pod, error) {
+func (pc *PodmanClient) ListPods(filters map[string][]string) ([]types.Pod, error) {
 	var listOpts pods.ListOptions
 
 	if len(filters) >= 1 {
@@ -83,7 +83,7 @@ func (pc *PodmanClient) ListPods(filters map[string][]string) ([]runtime.Pod, er
 	return toPodsList(podList), nil
 }
 
-func (pc *PodmanClient) CreatePod(body io.Reader) ([]runtime.Pod, error) {
+func (pc *PodmanClient) CreatePod(body io.Reader) ([]types.Pod, error) {
 	kubeReport, err := kube.PlayWithBody(pc.Context, body, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute podman kube play: %w", err)
@@ -114,7 +114,7 @@ func (pc *PodmanClient) InspectContainer(nameOrId string) (*define.InspectContai
 	return stats, nil
 }
 
-func (pc *PodmanClient) ListContainers(filters map[string][]string) ([]runtime.Container, error) {
+func (pc *PodmanClient) ListContainers(filters map[string][]string) ([]types.Container, error) {
 	var listOpts containers.ListOptions
 
 	if len(filters) >= 1 {
@@ -167,7 +167,7 @@ func (pc *PodmanClient) StartPod(id string) error {
 	return nil
 }
 
-func (pc *PodmanClient) InspectPod(nameOrID string) (*types.PodInspectReport, error) {
+func (pc *PodmanClient) InspectPod(nameOrID string) (*podmanTypes.PodInspectReport, error) {
 	podInspectReport, err := pods.Inspect(pc.Context, nameOrID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect the pod: %w", err)
