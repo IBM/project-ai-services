@@ -1,0 +1,76 @@
+- role: user
+  content: |
+    You are given a document, a question, and an answer. Your task is to check whether the answer is faithful to the information in the provided document. If the answer relies only on the content of the document and does not contradict it, then it is faithful. If the answer includes information not present in the document, omits key facts needed for correctness, or contradicts the document, then it is not faithful.
+
+    Guidelines:
+    - Provide an explanation describing why the answer is or is not faithful to the document.
+    - The explanation should compare the content of the answer against the document and highlight matches, omissions, or contradictions.
+    - If the answer uses only information present in the document and does not contradict it, mark it as faithful.
+    - If the answer introduces new information, leaves out key details needed for correctness, or contradicts the document, mark it as not faithful.
+    - After the explanation, clearly provide the label: FAITHFUL or NOT FAITHFUL.
+
+    Strictly format your output as follows:
+
+    [Start of Explanation]
+    ...
+    [End of Explanation]
+
+    [Start of Label]
+    ...
+    [End of Label]
+
+    Example 1:
+    [Start of Document]
+    The Power10 processor features an on-chip accelerator that is called the nest accelerator unit (NX unit). The coprocessor features that are available on the Power10 processor are similar to the features of the Power9 processor. These coprocessors provide specialized functions, such as the following examples: IBM proprietary data compression and decompression, Industry-standard Gzip compression and decompression,AES and Secure Hash Algorithm (SHA) cryptography, Random number generation. Each one of the AES/SHA engines, data compression, and Gzip units consist of a coprocessor type and the NX unit features three coprocessor types. The NX unit also
+    includes more support hardware to support coprocessor invocation by user code, use of effective addresses, high-bandwidth storage access, and interrupt notification of job completion. The direct memory access (DMA) controller of the NX unit helps to start the coprocessors and move data on behalf of coprocessors. SMP interconnect unit (SIU) provides the interface between the Power10 SMP interconnect and the DMA controller.
+    [End of Document]
+    [Start of Question]
+    The operating system kernel of Power10 will start the NX coprocessors transparently to speed up which types of operations?
+    [Start of Answer]
+    The Power10 processor will start the coprocessors transparently to speed up the following types of operations: Data compression, Live partition mobility migration, IPsec, JFS2 encrypted file systems, PKCS11 encryption, Random number generation, the most recently announced logical volume encryption.    
+    [End of Answer]
+
+    [Start of Explanation]
+    The document only describes the nest accelerator, its features and the NX coprocessors but doesn't mention when the NX units are started transparently by the operating system.
+    Since the answer introduces new information not supported by the text, it is not fully faithful to the document.
+    [End of Explanation]
+
+    [Start of Label]
+    NOT FAITHFUL
+    [End of Label]
+
+    Example 2:
+    [Start of Document]
+    Chapter: Architecture and technical overview Subsubsection: On-chip L3 cache and intelligent caching \n\uf0b7 The Power10 processor includes a large on-chip L3 cache of up to 120 MB with a NUCA architecture that provides mechanisms to distribute and share cache footprints across a set of L3 cache regions. Each processor core can access an associated local 8 MB of L3 cache. It can also access the data in the other L3 cache regions on the chip and throughout the system. Each L3 region serves as a victim cache for its associated L2 cache and can provide aggregate storage for the on-chip cache footprint. Intelligent L3 cache management enables the Power10 processor to optimize the access to L3 cache lines and minimize cache latencies. The L3 includes a replacement algorithm with data type and reuse awareness. It also supports an array of prefetch requests from the core, including instruction and data, and works cooperatively with the core, memory controller, and SMP interconnection fabric to manage prefetch traffic, which optimizes system throughput and data latency.
+    [End of Document]
+    [Start of Question]
+    What kinda caching mechanism does the Power10 processor have?
+    [End of Question]
+    [Start of Answer]
+    The Power10 processor uses a large on-chip L3 cache of up to 120 MB based on a NUCA (Non-Uniform Cache Access) architecture that distributes cache regions across the chip. Each core has fast access to a local 8 MB slice of the L3 cache while still being able to access other L3 regions on the processor and across the system. The L3 cache regions act as victim caches for their associated L2 caches, improving effective cache capacity and data reuse. Intelligent cache management optimizes cache line placement and access by using replacement policies that are aware of data type and reuse behavior. The caching mechanism also includes coordinated instruction and data prefetching that works with the core, memory controller, and SMP interconnect to reduce latency and improve overall throughput.
+    [End of Answer]
+
+    [Start of Explanation]
+    The document describes L3 cache and the intelligent caching implemented by Power10 processors. The answer restates these exact points without introducing new features or details. Therefore, the answer is fully consistent with and faithful to the document.
+    [End of Explanation]
+
+    [Start of Label]
+    FAITHFUL
+    [End of Label]
+
+    [Start of Document]
+    {{document}}
+    [End of Document]
+    [Start of Question]
+    {{question}}
+    [End of Question]
+    [Start of Answer]
+    {{answer}}
+    [End of Answer]
+    Your response MUST be in the following format:
+    [Start of Explanation]
+    Explain why the answer is faithful or not...
+    [End of Explanation]
+    [Start of Label]
+    FAITHFUL or NOT_FAITHFUL
+    [End of Label]

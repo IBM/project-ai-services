@@ -81,20 +81,6 @@ def verify_checksum(file, checksum_file):
         return True
     return False
 
-def get_unprocessed_files(original_files, processed_chunk_files):
-    processed_pdfs = []
-    for file in processed_chunk_files:
-        path = Path(file)
-        file = path.name
-        processed_pdfs.append(file.replace(chunk_suffix, ".pdf"))
-
-    original_file_names = []
-    for file in original_files:
-        path = Path(file)
-        file = path.name
-        original_file_names.append(file)
-
-    return set(original_file_names).difference(set(processed_pdfs))
 
 def has_allowed_extension(path, allowed_file_types):
     return path.lower().split('.')[-1] in allowed_file_types
@@ -108,6 +94,7 @@ def is_supported_file(path,allowed_file_types):
                 return True
         return False
     except Exception as e:
-        logger.warning(f"Could not read file {path}: {e}")
         return False
 
+def get_unprocessed_files(original_files, processed_pdfs):
+    return set(original_files).difference(set(processed_pdfs))

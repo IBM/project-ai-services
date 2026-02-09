@@ -44,4 +44,4 @@ urllib3==2.6.3
 uvicorn==0.38.0
 uvloop==0.22.1
 ujson==5.10.0
-wheel==0.45.1
+wheel==0.46.2
