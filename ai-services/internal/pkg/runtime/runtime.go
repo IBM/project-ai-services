@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
@@ -65,17 +66,35 @@ func CreateRuntime(runtimeType types.RuntimeType) (Runtime, error) {
 
 		return client, nil
 
+	case types.RuntimeTypeOpenshift:
+		logger.Infof("Initializing Openshift runtime\n", logger.VerbosityLevelDebug)
+		client, err := openshift.NewOpenshiftClient()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Openshift client: %w", err)
+		}
+
+		return client, nil
+
 	default:
 		return nil, fmt.Errorf("unsupported runtime type: %s", runtimeType)
 	}
 }
 
-// CreateRuntimeWithNamespace creates a runtime with a specific namespace (for openshift).
+// CreateRuntimeWithNamespace creates a runtime with a specific namespace (for Openshift).
 func CreateRuntimeWithNamespace(runtimeType types.RuntimeType, namespace string) (Runtime, error) {
 	switch runtimeType {
 	case types.RuntimeTypePodman:
 		// Podman doesn't use namespaces in the same way
 		return CreateRuntime(runtimeType)
+
+	case types.RuntimeTypeOpenshift:
+		logger.Infof("Initializing Openshift runtime with namespace: %s\n", namespace, logger.VerbosityLevelDebug)
+		client, err := openshift.NewOpenshiftClientWithNamespace(namespace)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Openshift client: %w", err)
+		}
+
+		return client, nil
 
 	default:
 		return nil, fmt.Errorf("unsupported runtime type: %s", runtimeType)
