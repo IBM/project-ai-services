@@ -106,7 +106,7 @@ async function customSendMessage(request, _options, instance) {
 
     const stream = await client.chat.completions.create(payload);
 
-    const context_response = await axios.post('/reference', {
+    const referencePromise = axios.post('/reference', {
       prompt: userInput,
       headers: {
         'Content-Type': 'application/json',
@@ -168,6 +168,8 @@ async function customSendMessage(request, _options, instance) {
       },
     });
 
+    // await for the reference promise to finish
+    const context_response = await referencePromise;
     // get docs out of context_response
     const docs = context_response.data?.documents || [];
 
