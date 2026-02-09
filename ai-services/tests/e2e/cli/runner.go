@@ -339,7 +339,7 @@ func StopAppWithPods(
 		return output, err
 	}
 
-	if err := ValidatePodsExitedAfterStop(psOutput, appName, pods); err != nil {
+	if err := ValidatePodsExitedAfterStop(psOutput, appName); err != nil {
 		return output, err
 	}
 
