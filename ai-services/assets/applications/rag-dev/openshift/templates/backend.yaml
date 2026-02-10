@@ -30,19 +30,19 @@ spec:
             - "retrieve.backend_server"
           env:
             - name: EMB_ENDPOINT
-              value: {{ .Values.embedding.endpoint }}
+              value: http://embedding-predictor:8080
             - name: EMB_MODEL
-              value: {{ .Values.embedding.model }}
+              value: embedding
             - name: EMB_MAX_TOKENS
               value: "512"
             - name: LLM_ENDPOINT
-              value: {{ .Values.instruct.endpoint }}
+              value: http://instruct-predictor:8000
             - name: LLM_MODEL
-              value: {{ .Values.instruct.model }}
+              value: instruct
             - name: RERANKER_ENDPOINT
-              value: {{ .Values.reranker.endpoint }}
+              value: http://reranker-predictor:8080
             - name: RERANKER_MODEL
-              value: {{ .Values.reranker.model }}
+              value: reranker
             - name: OPENSEARCH_HOST
               value: "{{ .Release.Name }}--opensearch"
             - name: OPENSEARCH_PORT

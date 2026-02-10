@@ -26,25 +26,3 @@ opensearch:
   auth:
     username: "admin"
     password: "AiServices@1234"
-
-instruct:
-  # @hidden
-  endpoint: http://instruct-predictor:8000
-  # @hidden
-  model: instruct
-
-embedding:
-  # @hidden
-  endpoint: http://embedding-predictor:8080
-  # @hidden
-  model: embedding
-
-reranker:
-  # @hidden
-  endpoint: http://reranker-predictor:8080
-  # @hidden
-  model: reranker
-
-app:
-  # @hidden
-  version: ""

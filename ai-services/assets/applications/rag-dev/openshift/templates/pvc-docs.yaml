@@ -2,10 +2,14 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: "{{ .Release.Name }}--docs"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: nfs-storage-provisioner
+  # storageClassName: nfs-storage-provisioner
   resources:
     requests:
       storage: "10Gi"
