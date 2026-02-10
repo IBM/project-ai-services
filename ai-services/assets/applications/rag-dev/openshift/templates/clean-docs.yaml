@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: "{{ .Release.Name }}--clean-docs"
+  name: "clean-docs"
   labels:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
@@ -30,7 +30,7 @@ spec:
                   memory: "1Gi"
               env:
               - name: OPENSEARCH_HOST
-                value: "{{ .Release.Name }}--opensearch"
+                value: "opensearch"
               - name: OPENSEARCH_PORT
                 value: "9200"
               - name: OPENSEARCH_DB_PREFIX
@@ -40,12 +40,12 @@ spec:
               - name: OPENSEARCH_USERNAME
                 valueFrom:
                   secretKeyRef:
-                    name: "{{ .Release.Name }}--opensearch-auth"
+                    name: "opensearch-auth"
                     key: username
               - name: OPENSEARCH_PASSWORD
                 valueFrom:
                   secretKeyRef:
-                    name: "{{ .Release.Name }}--opensearch-auth"
+                    name: "opensearch-auth"
                     key: password
               volumeMounts:
                 - name: cache
@@ -54,4 +54,4 @@ spec:
           volumes:
             - name: cache
               persistentVolumeClaim:
-                claimName: "{{ .Release.Name }}--cache"
+                claimName: "cache"
