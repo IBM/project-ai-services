@@ -32,7 +32,8 @@ class VectorStore(ABC):
         query_text: str,
         vector: Optional[List[float]] = None,
         embedding: Optional[Any] = None,
-        top_k: int = 5
+        top_k: int = 5,
+        mode: Optional[str] = ""
     ) -> List[Dict]:
         """
         Retrieves the top-k most relevant documents from the vector database.

@@ -48,7 +48,7 @@ class OpensearchVectorStore(VectorStore):
 
     def _create_pipeline(self):
         pipeline_body = {
-            "description": "Post-processor for hybrid search using RRF",
+            "description": "Post-processor for hybrid search",
             "phase_results_processors": [
                 {
                     "normalization-processor": {
@@ -66,7 +66,7 @@ class OpensearchVectorStore(VectorStore):
         try:
             self.client.search_pipeline.put(id="hybrid_pipeline", body=pipeline_body)
         except Exception as e:
-            logger.error(f"Failed to create hybrid rrf search pipeline: {e}")
+            logger.error(f"Failed to create hybrid search pipeline: {e}")
 
     def _setup_index(self, dim):
         if self.client.indices.exists(index=self.index_name):
@@ -117,33 +117,43 @@ class OpensearchVectorStore(VectorStore):
         1. Pure embedding: pass 'chunks' and 'vectors'
         2. Text chunks: pass 'chunks' and 'embedder' (class instance)
         """
+
         if not chunks:
+            logger.debug("Nothing to chunk!")
             return
 
-        # 1. Determine Embeddings
+        # Handle Pre-computed Vectors if provided
         if vectors is not None:
             final_embeddings = vectors
-        elif embedder is not None:
-            page_contents = [doc.get("page_content") for doc in chunks]
-            final_embeddings = embedder.embed_documents(page_contents)
-        else:
-            raise ValueError("Provide either pre-computed 'vectors' or an 'embedder' instance.")
-
-        # 2. Setup Index
-        dim = len(final_embeddings[0])
-        self._setup_index(dim)
+            # Initialize index using pre-computed vector dimension
+            self._setup_index(len(final_embeddings[0]))
 
         logger.debug(f"Inserting {len(chunks)} chunks into OpenSearch...")
 
-        # 3. Batch Processing for Bulk Ingest
+        # Iterate through chunks in batches and insert in bulk
         for i in tqdm(range(0, len(chunks), batch_size)):
-            batch_chunks = chunks[i : i + batch_size]
-            batch_embeddings = final_embeddings[i : i + batch_size]
+            batch = chunks[i:i + batch_size]
+            page_contents = [doc.get("page_content") for doc in batch]
 
+            # Generate embeddings only for this specific batch
+            if vectors is None and embedder is not None:
+                current_batch_embeddings = embedder.embed_documents(page_contents)
+
+                # Initialize index on the first batch if not already done
+                if i == 0:
+                    dim = len(current_batch_embeddings[0])
+                    self._setup_index(dim)
+            else:
+                # Use the relevant slice from pre-computed vectors
+                current_batch_embeddings = final_embeddings[i:i + batch_size]
+
+            # 3. Transform batch to OpenSearch document format
             actions = []
-            for j, (doc, emb) in enumerate(zip(batch_chunks, batch_embeddings)):
+            for j, (doc, emb) in enumerate(zip(batch, current_batch_embeddings)):
                 fn = doc.get("filename", "")
                 pc = doc.get("page_content", "")
+
+                # Generate chunk ID
                 cid = generate_chunk_id(fn, pc, i + j)
 
                 actions.append({
@@ -160,12 +170,15 @@ class OpensearchVectorStore(VectorStore):
                     }
                 })
 
+            # Bulk insert the current batch
             success, failed = helpers.bulk(self.client, actions, stats_only=True)
             if failed:
-                logger.error(f"Failed to insert {failed} chunks to OpenSearch")
+                logger.error(f"Failed to insert {failed} chunks in batch starting at {i}")
+                return
             logger.debug(f"Successfully indexed {success} chunks. Failed: {failed}")
 
-            logger.debug(f"Inserted the {len(chunks)} into index.")
+        logger.debug(f"Inserted the {len(chunks)} into index.")
+
 
     def search(self, query, vector=None, embedder=None, top_k=5, mode="hybrid", language='en'):
         """
@@ -250,14 +263,14 @@ class OpensearchVectorStore(VectorStore):
                 }
             }
 
-        params = {"search_pipeline": "hybrid_rrf_pipeline"}
+        params = {"search_pipeline": "hybrid_pipeline"}
         response = self.client.search(index=self.index_name, body=search_body, params=params)
 
         # Format results
         results = []
         for hit in response["hits"]["hits"]:
             metadata = hit["_source"]
-            metadata["score"] = hit["_score"] # unified RRF score
+            metadata["score"] = hit["_score"] # unified search score
             results.append(metadata)
 
         return results

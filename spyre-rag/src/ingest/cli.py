@@ -70,7 +70,6 @@ def ingest(directory_path):
             embedder=embedder
         )
         logger.info("Processed documents loaded into DB")
-    logger.info("Loading converted documents into DB")
 
     # Log time taken for the file
     end_time = time.time()  # End the timer for the current file
