@@ -254,7 +254,7 @@ outerloop:
 			if err != nil {
 				return podsToStart, fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
 			}
-			annotations := data.Config.Annotations
+			annotations := data.Annotations
 			if val, exists := annotations[constants.PodStartAnnotationkey]; exists && val == constants.PodStartOff {
 				continue outerloop
 			}

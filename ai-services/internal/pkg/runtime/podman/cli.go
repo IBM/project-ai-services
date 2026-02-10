@@ -55,7 +55,7 @@ func RunPodmanKubePlay(body io.Reader, opts map[string]string) ([]types.Pod, err
 		// Parse the JSON output
 		var containers []types.Container
 		if err := json.Unmarshal(outputPs, &containers); err != nil {
-			return nil, fmt.Errorf("error executing podman ps for pod %s: %v", podID, errPs)
+			return nil, fmt.Errorf("error executing podman ps for pod %s: %v", podID, err)
 		}
 
 		pod := types.Pod{ID: podID, Containers: containers}

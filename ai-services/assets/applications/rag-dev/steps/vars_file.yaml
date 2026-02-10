@@ -1,21 +1,21 @@
 pods:
   - name: "{{ .AppName }}--chat-bot"
-    format: "(index (index .InfraConfig.PortBindings \"3000/tcp\") 0).HostPort"
+    format: "index .Ports \"3000/tcp\" 0"
     default: ""
     alias: UI_PORT
 
   - name: "{{ .AppName }}--chat-bot"
-    format: "(index (index .InfraConfig.PortBindings \"5000/tcp\") 0).HostPort"
+    format: "index .Ports \"5000/tcp\" 0"
     default: ""
     alias: BACKEND_PORT
 
 containers:
   - name: "{{ .AppName }}--chat-bot-ui"
-    format: ".State.Status"
+    format: ".Status"
     alias: UI_STATUS
 
   - name: "{{ .AppName }}--chat-bot-backend-server"
-    format: ".State.Status"
+    format: ".Status"
     alias: BACKEND_STATUS
 
 hosts:
