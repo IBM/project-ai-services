@@ -30,23 +30,23 @@ spec:
                   memory: "50Gi"
               env:
                 - name: EMB_ENDPOINT
-                  value: "http://{{ .Release.Name }}--vllm-server:8001"
+                  value: {{ .Values.embedding.endpoint }}
                 - name: EMB_MODEL
-                  value: "ibm-granite/granite-embedding-278m-multilingual"
+                  value: {{ .Values.embedding.model }}
                 - name: EMB_MAX_TOKENS
                   value: "512"
                 - name: LLM_ENDPOINT
-                  value: "http://{{ .Release.Name }}--vllm-server:8000"
+                  value: {{ .Values.instruct.endpoint }}
                 - name: LLM_MODEL
-                  value: "ibm-granite/granite-3.3-8b-instruct"
+                  value: {{ .Values.instruct.model }}
                 - name: OPENSEARCH_HOST
                   value: "{{ .Release.Name }}--opensearch"
                 - name: OPENSEARCH_PORT
                   value: "9200"
                 - name: OPENSEARCH_DB_PREFIX
                   value: "RAG_DB"
-                - name: OPENSEARCH_COLLECTION_NAME
-                  value: "{{ .Release.Name }}"
+                - name: OPENSEARCH_INDEX_NAME
+                  value: "RAG_INDEX"
                 - name: OPENSEARCH_USERNAME
                   valueFrom:
                     secretKeyRef:
