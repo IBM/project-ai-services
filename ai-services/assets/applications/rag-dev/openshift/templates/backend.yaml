@@ -84,8 +84,10 @@ spec:
             failureThreshold: 3
           resources:
             requests:
+              cpu: "1"
               memory: "1Gi"
             limits:
+              cpu: "1"
               memory: "1Gi"
           volumeMounts:
             - name: cache

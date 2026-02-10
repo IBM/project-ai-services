@@ -26,8 +26,10 @@ spec:
           imagePullPolicy: "{{ .Values.imagePullPolicy }}"
           resources:
             requests:
+              cpu: "50m"
               memory: "512Mi"
             limits:
+              cpu: "50m"
               memory: "512Mi"
           env:
             - name: BACKEND_HOST
