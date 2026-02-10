@@ -15,7 +15,7 @@ minimum number of Spyre cards installed, amongst other pre-flight checks.
 - Git (to checkout branches or test fixtures).
 - Podman (preferred runtime) — the suite checks for Podman and may install or skip some tests when Podman is not available. See `tests/e2e/bootstrap` for details.
 - Set your environment Variables values 
-- (Optional) Ginkgo CLI — tests can be run with `go test` or `ginkgo`.
+- Ginkgo CLI — tests can be run with `go test` or `ginkgo`.
 
 How to run tests locally
 ------------------------
@@ -24,24 +24,41 @@ How to run tests locally
 
    cd ai-services
 
-2. Run the E2E suite with Go (recommended):
+2. To run the E2E suite follow either of the options below:
 
-   go test ./tests/e2e -v
+   1. Run using `go test`
 
-   Notes:
-   - The suite is implemented using Ginkgo v2 but is runnable via `go test` because the suite registers with the testing package.
-   - Many E2E tests perform long-running operations (image pulls, application startup, ingestion). Expect tests to take many minutes (or longer) depending on environment and flags.
+      ```bash 
+      go test ./tests/e2e -v
+      ```
 
-3. Run using the Ginkgo CLI (optional):
+      Notes:
+      - The suite is implemented using Ginkgo v2 but is runnable via `go test` because the suite registers with the testing package.
+      - Many E2E tests perform long-running operations (image pulls, application startup, ingestion). Expect tests to take many minutes (or longer) depending on environment and flags.
 
-   ### install ginkgo 
-   go install github.com/onsi/ginkgo/v2/ginkgo@latest
+   2. Run using `make` (which uses `ginkgo cli` under the hood)
+      
+      ```bash 
+      make test
+      ```
 
-   ### run the whole suite
-   ginkgo -r ./tests/e2e
+      Notes:
+      - This target runs all tests under `tests/e2e` using `ginkgo -r ./tests/e2e`
+      - It can be customized by setting environment variables `TEST_ARGS` for example `make test TEST_ARGS="-v"`.
 
-   ### to run a single spec file or focus pattern:
-   ginkgo ./tests/e2e --focus "Application Lifecycle" --skipPackage build
+
+   3. Run using the Ginkgo CLI 
+      ```bash
+      ### install ginkgo 
+      go install github.com/onsi/ginkgo/v2/ginkgo@latest
+
+      ### run the whole suite
+      ginkgo -r ./tests/e2e
+
+      ### to run a single spec file or focus pattern:
+      ginkgo ./tests/e2e --focus "Application Lifecycle" --skipPackage build
+      ```
+
 
 Environment variables to set before running tests
 -------------------------------------------------
@@ -54,19 +71,24 @@ export REGISTRY_URL="icr.io"
 export REGISTRY_USER_NAME=myuser
 export REGISTRY_PASSWORD=mypassword
 
-# Red Hat registry credentials (used when pulling RH images)
+# Used to download vllm image 
 export RH_REGISTRY_URL="registry.redhat.io"
-export RH_REGISTRY_USER_NAME=myrhuser
-export RH_REGISTRY_PASSWORD=myrhpassword
+export RH_REGISTRY_USER_NAME=<your redhat acc username>
+export RH_REGISTRY_PASSWORD=<your redhat acc password>
+export LLM_JUDGE_IMAGE="registry.io/example/vllm-judge:latest"
+export LLM_CONTAINER_POLLING_INTERVAL=30s
 
+# Exposed Ports
 export RAG_BACKEND_PORT=5100
 export RAG_UI_PORT=3100
-export LLM_JUDGE_MODEL_PATH="/root/models/"
-export LLM_JUDGE_MODEL="Qwen/Qwen2.5-7B-Instruct"         # model name
-export LLM_JUDGE_PORT=8000       
-export RAG_ACCURACY_THRESHOLD=0.70                    
-export LLM_JUDGE_IMAGE="registry.io/example/vllm-judge:latest"
-export LLM_CONTAINER_POLLING_INTERVAL=30s           # polling interval used when waiting for LLM server to start
+export LLM_JUDGE_PORT=8000
+
+# LLM as a judge model details
+export LLM_JUDGE_MODEL_PATH="/var/lib/ai-services/models/"
+export LLM_JUDGE_MODEL="Qwen/Qwen2.5-7B-Instruct"
+
+# Expected Golden Dataset accuracy 
+export RAG_ACCURACY_THRESHOLD=0.70 
 ```
 
 Adding new E2E tests
@@ -146,13 +168,10 @@ ai-services/tests/e2e/
    ├─ podman/                     # Podman verification helpers (containers, ports, etc.)
    │   └─ containers.go
    ├─ rag/                        # RAG-related test helpers (embeddings, setup, validate)
-   │   ├─ embeddings.go
    |   ├─ evaluator.go
    |   ├─ golden.go
    |   ├─ judge.go
    │   ├─ setup.go
-   │   ├─ similarity.go
-   │   └─ validate.go
    ├─ reports/                    # reporting helpers (JUnit formatter, artifacts)
    │   └─ junit.go
    ├─ utils/                      # small additional utilities used by tests
