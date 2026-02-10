@@ -84,12 +84,3 @@ spec:
           memory: "1Gi"
         limits:
           memory: "1Gi"
-      volumeMounts:
-        - mountPath: /var/cache:z
-          name: cache
-          readOnly: true
-  volumes:
-    - name: cache
-      hostPath:
-        path: "/var/lib/ai-services/applications/{{ .AppName }}/cache"
-        type: DirectoryOrCreate
