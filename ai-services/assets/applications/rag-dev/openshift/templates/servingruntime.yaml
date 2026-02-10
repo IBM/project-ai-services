@@ -11,7 +11,7 @@ spec:
     prometheus.io/path: /metrics
     prometheus.io/port: "8080"
   imagePullSecrets:
-    - name: {{ .Values.vllm.instruct.imagePullSecret }}
+    - name: {{ .Values.instruct.imagePullSecret }}
   containers:
   - args:
     - --model=/mnt/models
@@ -20,7 +20,7 @@ spec:
     env:
     - name: HF_HOME
       value: /tmp/hf_home
-    image: {{ .Values.vllm.instruct.image }}
+    image: {{ .Values.instruct.image }}
     imagePullPolicy: {{ .Values.imagePullPolicy }}
     name: kserve-container
     ports:
@@ -52,7 +52,7 @@ spec:
     prometheus.io/path: /metrics
     prometheus.io/port: "8080"
   imagePullSecrets:
-    - name: {{ .Values.vllm.embedding.imagePullSecret }}
+    - name: {{ .Values.embedding.imagePullSecret }}
   containers:
   - args:
     - --port=8080
@@ -65,7 +65,7 @@ spec:
     env:
     - name: HF_HOME
       value: /tmp/hf_home
-    image: {{ .Values.vllm.embedding.image }}
+    image: {{ .Values.embedding.image }}
     imagePullPolicy: {{ .Values.imagePullPolicy }}
     name: kserve-container
     ports:
@@ -89,7 +89,7 @@ spec:
     prometheus.io/path: /metrics
     prometheus.io/port: "8080"
   imagePullSecrets:
-    - name: {{ .Values.vllm.reranker.imagePullSecret }}
+    - name: {{ .Values.reranker.imagePullSecret }}
   containers:
   - args:
     - --port=8080
@@ -102,7 +102,7 @@ spec:
     env:
     - name: HF_HOME
       value: /tmp/hf_home
-    image: {{ .Values.vllm.reranker.image }}
+    image: {{ .Values.reranker.image }}
     imagePullPolicy: {{ .Values.imagePullPolicy }}
     name: kserve-container
     ports:
