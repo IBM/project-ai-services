@@ -2,7 +2,10 @@ apiVersion: serving.kserve.io/v1alpha1
 kind: ServingRuntime
 metadata:
   name: instruct
-  namespace: {{ .Release.Namespace }}
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
   annotations:
     opendatahub.io/apiProtocol: REST
 spec:
@@ -42,7 +45,10 @@ apiVersion: serving.kserve.io/v1alpha1
 kind: ServingRuntime
 metadata:
   name: embedding
-  namespace: {{ .Release.Namespace }}
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
   annotations:
     opendatahub.io/apiProtocol: REST
 spec:
@@ -78,7 +84,10 @@ apiVersion: serving.kserve.io/v1alpha1
 kind: ServingRuntime
 metadata:
   name: reranker
-  namespace: {{ .Release.Namespace }}
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
   annotations:
     opendatahub.io/apiProtocol: REST
 spec:

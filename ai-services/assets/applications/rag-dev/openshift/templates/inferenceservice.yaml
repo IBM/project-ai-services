@@ -2,12 +2,14 @@ apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
   name: granite-3.3-8b-instruct
-  namespace: {{ .Release.Namespace }}
   annotations:
     security.opendatahub.io/enable-auth: "false"
     serving.kserve.io/deploymentMode: RawDeployment
   labels:
-    networking.kserve.io/visibility: exposed
+    networking.kserve.io/visibility: cluster-local
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
 spec:
   predictor:
     automountServiceAccountToken: false
@@ -39,12 +41,14 @@ apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
   name: granite-embedding-278m-multilingual
-  namespace: {{ .Release.Namespace }}
   annotations:
     security.opendatahub.io/enable-auth: "false"
     serving.kserve.io/deploymentMode: RawDeployment
   labels:
-    networking.kserve.io/visibility: exposed
+    networking.kserve.io/visibility: cluster-local
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
 spec:
   predictor:
     automountServiceAccountToken: false
@@ -70,12 +74,14 @@ apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
   name: bge-reranker-v2-m3
-  namespace: {{ .Release.Namespace }}
   annotations:
     security.opendatahub.io/enable-auth: "false"
     serving.kserve.io/deploymentMode: RawDeployment
   labels:
-    networking.kserve.io/visibility: exposed
+    networking.kserve.io/visibility: cluster-local
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
 spec:
   predictor:
     automountServiceAccountToken: false
