@@ -21,7 +21,6 @@ spec:
     - name: HF_HOME
       value: /tmp/hf_home
     image: {{ .Values.instruct.image }}
-    imagePullPolicy: {{ .Values.imagePullPolicy }}
     name: kserve-container
     ports:
     - containerPort: 8000
@@ -66,7 +65,6 @@ spec:
     - name: HF_HOME
       value: /tmp/hf_home
     image: {{ .Values.embedding.image }}
-    imagePullPolicy: {{ .Values.imagePullPolicy }}
     name: kserve-container
     ports:
     - containerPort: 8080
@@ -103,7 +101,6 @@ spec:
     - name: HF_HOME
       value: /tmp/hf_home
     image: {{ .Values.reranker.image }}
-    imagePullPolicy: {{ .Values.imagePullPolicy }}
     name: kserve-container
     ports:
     - containerPort: 8080
