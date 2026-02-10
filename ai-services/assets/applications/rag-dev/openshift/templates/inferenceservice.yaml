@@ -1,0 +1,96 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: instruct
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    security.opendatahub.io/enable-auth: "false"
+    serving.kserve.io/deploymentMode: RawDeployment
+  labels:
+    networking.kserve.io/visibility: exposed
+spec:
+  predictor:
+    automountServiceAccountToken: false
+    deploymentStrategy:
+      type: Recreate
+    maxReplicas: 1
+    minReplicas: 1
+    model:
+      args:
+      - '--tensor-parallel-size=4 '
+      - '--max-model-len=32768 '
+      - --max-num-seqs=32
+      modelFormat:
+        name: vLLM
+      name: ""
+      resources:
+        limits:
+          cpu: "140"
+          memory: 900Gi
+        requests:
+          cpu: "140"
+          memory: 900Gi
+      runtime: instruct
+      storageUri: hf://ibm-granite/granite-3.3-8b-instruct
+---
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: embedding
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    security.opendatahub.io/enable-auth: "false"
+    serving.kserve.io/deploymentMode: RawDeployment
+  labels:
+    networking.kserve.io/visibility: exposed
+spec:
+  predictor:
+    automountServiceAccountToken: false
+    deploymentStrategy:
+      type: Recreate
+    maxReplicas: 1
+    minReplicas: 1
+    model:
+      modelFormat:
+        name: vLLM
+      name: ""
+      resources:
+        limits:
+          cpu: "2"
+          memory: 4Gi
+        requests:
+          cpu: "2"
+          memory: 4Gi
+      runtime: embedding
+      storageUri: hf://ibm-granite/granite-embedding-278m-multilingual
+---
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: reranker
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    security.opendatahub.io/enable-auth: "false"
+    serving.kserve.io/deploymentMode: RawDeployment
+  labels:
+    networking.kserve.io/visibility: exposed
+spec:
+  predictor:
+    automountServiceAccountToken: false
+    deploymentStrategy:
+      type: Recreate
+    maxReplicas: 1
+    minReplicas: 1
+    model:
+      modelFormat:
+        name: vLLM
+      name: ""
+      resources:
+        limits:
+          cpu: "20"
+          memory: 8Gi
+        requests:
+          cpu: "20"
+          memory: 8Gi
+      runtime: reranker
+      storageUri: hf://BAAI/bge-reranker-v2-m3

@@ -6,6 +6,17 @@ ui:
 
 imagePullPolicy: IfNotPresent
 
+vllm:
+  instruct:
+    image: registry.redhat.io/rhaiis/vllm-spyre-rhel9:3.2.5
+    imagePullSecret: "redhat-registry-secret"
+  embedding:
+    image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
+    imagePullSecret: "icr-secret"
+  reranker:
+    image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
+    imagePullSecret: "icr-secret"
+
 backend:
   # @description Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.
   port: "0"
@@ -26,3 +37,6 @@ opensearch:
   auth:
     username: "admin"
     password: "AiServices@1234"
+
+app:
+  version: ""
