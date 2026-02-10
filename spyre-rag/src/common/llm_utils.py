@@ -204,6 +204,31 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
         logger.error(f"Error calling vLLM stream API: {e}")
         return {"error": str(e)}
 
+
+def query_vllm_completions(llm_endpoint, prompt, model, max_tokens, temperature):
+    # this method should be called in a try catch block as it might raise exceptions
+    headers = {
+        "accept": "application/json",
+        "Content-type": "application/json"
+    }
+    logger.debug(f"Calling vLLM with prompt: {prompt}")
+    payload = {
+        "prompt": prompt,
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stop": settings.summarization_stop_words.split(",")
+    }
+
+    response = SESSION.post(f"{llm_endpoint}/v1/completions", json=payload, headers=headers, stream=False)
+    response.raise_for_status()
+
+    result = response.json()
+    logger.info(f"vLLM response: {result}")
+    if "choices" in result and len(result["choices"]) > 0:
+        return result["choices"][0].get("text", "").strip()
+    return ""
+
 def tokenize_with_llm(prompt, emb_endpoint):
     payload = {
         "prompt": prompt

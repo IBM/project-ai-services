@@ -11,12 +11,14 @@ class Prompts:
     llm_classify: str
     table_summary: str
     query_vllm_stream: str
+    query_vllm_summarize: str
 
     def __post_init__(self):
         if any(prompt in (None, "") for prompt in (
             self.llm_classify,
             self.table_summary,
             self.query_vllm_stream,
+            self.query_vllm_summarize
         )):
             raise ValueError(f"One or more prompt variables are missing or empty.")
 
@@ -28,7 +30,8 @@ class Prompts:
         return cls(
             llm_classify = data.get("llm_classify"),
             table_summary = data.get("table_summary"),
-            query_vllm_stream = data.get("query_vllm_stream")
+            query_vllm_stream = data.get("query_vllm_stream"),
+            query_vllm_summarize = data.get("query_vllm_summarize")
         )
 
 @dataclass(frozen=True)
@@ -42,6 +45,10 @@ class Settings:
     temperature: float
     max_input_length: int
     prompt_template_token_count: int
+    max_summary_length: int
+    max_file_size_mb: float
+    summarization_temperature: float
+    summarization_stop_words: str
 
     def __post_init__(self):
         default_score_threshold = 0.4
@@ -52,6 +59,10 @@ class Settings:
         default_temperature = 0.0
         default_max_input_length = 6000
         default_prompt_template_token_count = 250
+        default_max_summary_length = 1000
+        default_max_file_size_mb = 10
+        default_summarization_temperature = 0.3
+        default_summarization_stop_words = "\n\n,Note,Word Count,Revised Summary"
 
         if not (isinstance(self.score_threshold, float) and 0 < self.score_threshold < 1):
             object.__setattr__(self, "score_threshold", default_score_threshold)
@@ -89,6 +100,23 @@ class Settings:
             object.__setattr__(self, "prompt_template_token_count", default_prompt_template_token_count)
             logger.warning(f"Setting prompt_template_token_count to default '{default_prompt_template_token_count}' as it is missing in the settings")
 
+        if not isinstance(self.max_summary_length, int):
+            object.__setattr__(self, "max_summary_length", default_max_summary_length)
+            logger.warning(f"Setting max_summary_length to default '{default_max_summary_length}' as it is missing in the settings")
+
+        if not isinstance(self.max_file_size_mb, float):
+            object.__setattr__(self, "max_file_size_mb", default_max_file_size_mb)
+            logger.warning(f"Setting max_file_size_mb to default '{default_max_file_size_mb}' as it is missing in the settings")
+
+        if not isinstance(self.summarization_temperature, float):
+            object.__setattr__(self, "summarization_temperature", default_summarization_temperature)
+            logger.warning(f"Setting summarization_temperature to default '{default_summarization_temperature}' as it is missing in the settings")
+
+        if not isinstance(self.summarization_stop_words, float):
+            object.__setattr__(self, "summarization_stop_words", default_summarization_stop_words)
+            logger.warning(f"Setting summarization_stop_words to default '{default_summarization_stop_words}' as it is missing in the settings")
+
+
     @classmethod
     def from_dict(cls, data: dict):
         return cls(
@@ -100,7 +128,10 @@ class Settings:
             llm_max_tokens = data.get("llm_max_tokens"),
             temperature = data.get("temperature"),
             max_input_length = data.get ("max_input_length"),
-            prompt_template_token_count = data.get("prompt_template_token_count")
+            prompt_template_token_count = data.get("prompt_template_token_count"),
+            max_summary_length = data.get("max_summary_length"),
+            max_file_size_mb = data.get("max_file_size_mb"),
+            summarization_temperature = data.get("summarization_temperature")
         )
 
     @classmethod
