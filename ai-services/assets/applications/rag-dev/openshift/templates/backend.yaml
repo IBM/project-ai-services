@@ -1,11 +1,11 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: "{{ .Release.Name }}--backend"
+  name: "backend"
   labels:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
-    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   replicas: 1
   selector:
@@ -18,7 +18,7 @@ spec:
         ai-services.io/application: {{ .Release.Name }}
         ai-services.io/template: {{ .Chart.Name }}
         ai-services.io/component: backend
-        ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
       containers:
         - name: backend-server
@@ -44,7 +44,7 @@ spec:
             - name: RERANKER_MODEL
               value: bge-reranker-v2-m3
             - name: OPENSEARCH_HOST
-              value: "{{ .Release.Name }}--opensearch"
+              value: "opensearch"
             - name: OPENSEARCH_PORT
               value: "9200"
             - name: OPENSEARCH_DB_PREFIX
@@ -54,12 +54,12 @@ spec:
             - name: OPENSEARCH_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: "{{ .Release.Name }}--opensearch-auth"
+                  name: "opensearch-auth"
                   key: username
             - name: OPENSEARCH_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "{{ .Release.Name }}--opensearch-auth"
+                  name: "opensearch-auth"
                   key: password
             - name: LOG_LEVEL
               value: "{{ .Values.backend.log_level}}"
@@ -94,4 +94,4 @@ spec:
       volumes:
         - name: cache
           persistentVolumeClaim:
-            claimName: "{{ .Release.Name }}--cache"
+            claimName: "cache"

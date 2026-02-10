@@ -1,7 +1,7 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: "{{ .Release.Name }}--ui-route"
+  name: "ui-route"
   labels:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
@@ -14,4 +14,4 @@ spec:
     targetPort: 3000
   to:
     kind: Service
-    name: "{{ .Release.Name }}--ui"
+    name: "ui"
