@@ -7,6 +7,15 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
 spec:
+  initContainers:
+    - name: fix-permissions
+      image: "{{ .Values.opensearch.image }}"
+      command: ["sh", "-c", "chown -R 1000:1000 /usr/share/opensearch/data"]
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - name: opensearch-data
+          mountPath: /usr/share/opensearch/data
   containers:
     - name: opensearch
       image: "{{ .Values.opensearch.image }}"
@@ -30,7 +39,7 @@ spec:
         runAsUser: 1000
         fsGroup: 1000
       volumeMounts:
-        - mountPath: /usr/share/opensearch/data:Z
+        - mountPath: /usr/share/opensearch/data:z
           name: opensearch-data
       livenessProbe:
         exec:
