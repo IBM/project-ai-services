@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/spf13/cobra"
 )
@@ -111,11 +111,11 @@ func stopApplication(client *podman.PodmanClient, appName string, podNames []str
 	return stopPods(client, podsToStop)
 }
 
-func fetchPodsToStop(pods []runtime.Pod, podNames []string, appName string) ([]runtime.Pod, error) {
-	var podsToStop []runtime.Pod
+func fetchPodsToStop(pods []types.Pod, podNames []string, appName string) ([]types.Pod, error) {
+	var podsToStop []types.Pod
 	if len(podNames) > 0 {
 		// 1. Filter pods
-		podMap := make(map[string]runtime.Pod)
+		podMap := make(map[string]types.Pod)
 		for _, pod := range pods {
 			podMap[pod.Name] = pod
 		}
@@ -142,7 +142,7 @@ func fetchPodsToStop(pods []runtime.Pod, podNames []string, appName string) ([]r
 	return podsToStop, nil
 }
 
-func stopPods(client *podman.PodmanClient, podsToStop []runtime.Pod) error {
+func stopPods(client *podman.PodmanClient, podsToStop []types.Pod) error {
 	var errors []string
 	for _, pod := range podsToStop {
 		logger.Infof("Stopping the pod: %s\n", pod.Name)
