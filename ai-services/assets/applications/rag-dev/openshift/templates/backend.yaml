@@ -21,9 +21,8 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
       containers:
-        - name: backend-server
+        - name: server
           image: "{{ .Values.backend.image }}"
-          imagePullPolicy: "{{ .Values.imagePullPolicy }}"
           command:
             - "/var/venv/bin/python"
             - "-m"

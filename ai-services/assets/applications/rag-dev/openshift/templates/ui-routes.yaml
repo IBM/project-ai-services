@@ -1,7 +1,7 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: "ui-route"
+  name: "ui"
   labels:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}

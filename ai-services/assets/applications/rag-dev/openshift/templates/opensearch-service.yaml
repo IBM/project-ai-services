@@ -6,10 +6,10 @@ metadata:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
-    ai-services.io/component: db
 spec:
   selector:
     ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/component: vectordb
   ports:
     - name: os-client-port
       port: 9200
@@ -19,4 +19,3 @@ spec:
       port: 9600
       targetPort: 9600
       protocol: TCP
-  type: ClusterIP

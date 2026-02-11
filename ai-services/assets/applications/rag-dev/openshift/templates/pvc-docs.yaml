@@ -9,7 +9,6 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  # storageClassName: nfs-storage-provisioner
   resources:
     requests:
       storage: "1Gi"

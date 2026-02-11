@@ -6,20 +6,20 @@ metadata:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
-    ai-services.io/component: db
+    ai-services.io/component: vectordb
 spec:
   replicas: 1
   selector:
     matchLabels:
       ai-services.io/application: {{ .Release.Name }}
-      ai-services.io/component: db
+      ai-services.io/component: vectordb
   template:
     metadata:
       labels:
         ai-services.io/application: {{ .Release.Name }}
         ai-services.io/template: {{ .Chart.Name }}
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
-        ai-services.io/component: db
+        ai-services.io/component: vectordb
     spec:
       serviceAccountName: opensearch-sa 
       containers:

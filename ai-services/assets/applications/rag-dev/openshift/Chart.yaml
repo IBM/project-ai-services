@@ -1,5 +1,5 @@
 apiVersion: v2
-name: rag-test
+name: rag-dev
 description: A Helm chart for deployment on Openshift
 type: application
 
