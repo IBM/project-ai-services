@@ -22,6 +22,9 @@ spec:
       - '--tensor-parallel-size=4 '
       - '--max-model-len=32768 '
       - --max-num-seqs=32
+      env:
+      - name: VLLM_SPYRE_USE_CB
+        value: "1"
       modelFormat:
         name: vLLM
       name: ""
@@ -62,10 +65,10 @@ spec:
       name: ""
       resources:
         limits:
-          cpu: "20"
+          cpu: "4"
           memory: 8Gi
         requests:
-          cpu: "20"
+          cpu: "4"
           memory: 8Gi
       runtime: embedding
       storageUri: hf://ibm-granite/granite-embedding-278m-multilingual
@@ -97,10 +100,8 @@ spec:
         limits:
           cpu: "4"
           memory: 8Gi
-          ibm.com/spyre_pf: "1"
         requests:
           cpu: "4"
           memory: 8Gi
-          ibm.com/spyre_pf: "1"
       runtime: reranker
       storageUri: hf://BAAI/bge-reranker-v2-m3
