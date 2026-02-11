@@ -57,12 +57,6 @@ spec:
     model:
       modelFormat:
         name: vLLM
-      resources:
-        limits:
-          cpu: "10"
-          memory: 8Gi
-        requests:
-          cpu: "10"
-          memory: 8Gi
+      resources: {}
       runtime: reranker
       storageUri: {{ .Values.reranker.storageUri }}

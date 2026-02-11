@@ -71,12 +71,8 @@ spec:
         name: vLLM
       resources:
         limits:
-          cpu: "140"
-          memory: 900Gi
           ibm.com/spyre_pf: "4"
         requests:
-          cpu: "140"
-          memory: 900Gi
           ibm.com/spyre_pf: "4"
       runtime: instruct
       storageUri: {{ .Values.instruct.storageUri }}
