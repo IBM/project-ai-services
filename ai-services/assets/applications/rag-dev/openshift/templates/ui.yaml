@@ -23,7 +23,6 @@ spec:
       containers:
         - name: ui
           image: "{{ .Values.ui.image }}"
-          imagePullPolicy: "{{ .Values.imagePullPolicy }}"
           resources:
             requests:
               cpu: "50m"
