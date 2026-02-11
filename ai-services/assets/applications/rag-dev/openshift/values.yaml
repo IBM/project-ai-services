@@ -9,12 +9,10 @@ instruct:
 
 embedding:
   image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
-  imagePullSecret: "icr-secret"
   storageUri: hf://ibm-granite/granite-embedding-278m-multilingual
 
 reranker:
   image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
-  imagePullSecret: "icr-secret"
   storageUri: hf://BAAI/bge-reranker-v2-m3
 
 backend:
