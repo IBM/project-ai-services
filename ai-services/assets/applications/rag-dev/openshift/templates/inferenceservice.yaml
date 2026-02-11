@@ -98,10 +98,10 @@ spec:
       name: ""
       resources:
         limits:
-          cpu: "4"
+          cpu: "10"
           memory: 8Gi
         requests:
-          cpu: "4"
+          cpu: "10"
           memory: 8Gi
       runtime: reranker
       storageUri: hf://BAAI/bge-reranker-v2-m3
