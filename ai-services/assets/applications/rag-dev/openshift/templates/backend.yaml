@@ -36,9 +36,9 @@ spec:
             - name: EMB_MAX_TOKENS
               value: "512"
             - name: LLM_ENDPOINT
-              value: http://granite-3.3-8b-instruct-predictor:8000
+              value: http://granite-3-3-8b-instruct-predictor:8000
             - name: LLM_MODEL
-              value: granite-3.3-8b-instruct
+              value: granite-3-3-8b-instruct
             - name: RERANKER_ENDPOINT
               value: http://bge-reranker-v2-m3-predictor:8080
             - name: RERANKER_MODEL
