@@ -31,7 +31,7 @@ spec:
             - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "opensearch-auth"
+                  name: "opensearch-credentials"
                   key: password
           ports: 
             - name: os-client-port

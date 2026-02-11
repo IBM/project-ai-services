@@ -31,17 +31,17 @@ spec:
             - name: EMB_ENDPOINT
               value: http://embedding-predictor:8080
             - name: EMB_MODEL
-              value: granite-embedding-278m-multilingual
+              value: ibm-granite/granite-embedding-278m-multilingual
             - name: EMB_MAX_TOKENS
               value: "512"
             - name: LLM_ENDPOINT
               value: http://instruct-predictor:8000
             - name: LLM_MODEL
-              value: granite-3-3-8b-instruct
+              value: ibm-granite/granite-3.3-8b-instruct
             - name: RERANKER_ENDPOINT
               value: http://reranker-predictor:8080
             - name: RERANKER_MODEL
-              value: bge-reranker-v2-m3
+              value: BAAI/bge-reranker-v2-m3
             - name: OPENSEARCH_HOST
               value: "opensearch"
             - name: OPENSEARCH_PORT
@@ -53,12 +53,12 @@ spec:
             - name: OPENSEARCH_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: "opensearch-auth"
+                  name: "opensearch-credentials"
                   key: username
             - name: OPENSEARCH_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: "opensearch-auth"
+                  name: "opensearch-credentials"
                   key: password
             - name: LOG_LEVEL
               value: "{{ .Values.backend.log_level }}"

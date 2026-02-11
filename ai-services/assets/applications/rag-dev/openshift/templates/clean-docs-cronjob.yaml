@@ -17,7 +17,6 @@ spec:
           containers:
             - name: docs
               image: "{{ .Values.backend.image }}"
-              imagePullPolicy: "{{ .Values.imagePullPolicy }}"
               command:
                 - "/var/venv/bin/python"
                 - "-m"
@@ -42,12 +41,12 @@ spec:
               - name: OPENSEARCH_USERNAME
                 valueFrom:
                   secretKeyRef:
-                    name: "opensearch-auth"
+                    name: "opensearch-credentials"
                     key: username
               - name: OPENSEARCH_PASSWORD
                 valueFrom:
                   secretKeyRef:
-                    name: "opensearch-auth"
+                    name: "opensearch-credentials"
                     key: password
               volumeMounts:
                 - name: cache

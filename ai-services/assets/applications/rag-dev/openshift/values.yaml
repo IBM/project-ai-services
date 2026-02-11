@@ -4,6 +4,12 @@ ui:
   # @hidden
   image: icr.io/ai-services-cicd/rag-ui:v0.0.17
 
+backend:
+  # @hidden
+  image: icr.io/ai-services-cicd/rag:v0.0.27
+  # @hidden
+  log_level: "INFO"
+
 instruct:
   image: registry.redhat.io/rhaiis/vllm-spyre-rhel9:3.2.5
   imagePullSecret: "redhat-registry-secret"
@@ -17,11 +23,6 @@ reranker:
   image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
   storageUri: hf://BAAI/bge-reranker-v2-m3
 
-backend:
-  # @hidden
-  image: icr.io/ai-services-private/rag:v0.0.27
-  # @hidden
-  log_level: "INFO"
 
 ingest:
   # @hidden
