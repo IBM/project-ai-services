@@ -7,7 +7,7 @@ pipeline {
         AI_SERVICES_BINARY = './bin/ai-services'
 
         // Holding pipeline for configured minutes, to allow user to complete testing
-        MAX_APP_RUN_TIME_IN_MINS = '120'
+        MAX_APP_RUN_TIME_IN_MINS = '20'
     }
 
     // Using options to allow one deployment at any given point of time.
@@ -47,13 +47,10 @@ pipeline {
         }
 
         // Delete app deployed by cicd pipeline
-        stage('Delete App') {
+        stage('Delete CICD App') {
             steps{
                 script {
-                    // Check if there is an existing application running
-                    checkMachineStatus()
-
-                    cleanupMachine()
+                    deleteCicdApp()
                 }
             }
         }
@@ -87,7 +84,7 @@ pipeline {
                     mv INGEST_DOC_FILE /var/lib/ai-services/applications/${APP}-cicd/docs/doc.pdf
                     echo "ingest DOC"
                     cd ${PROJECT_NAME}/${AI_SERVICES_DIR}
-                    ${AI_SERVICES_BINARY} application start rag-test --pod=${APP}-cicd--ingest-docs -y
+                    ${AI_SERVICES_BINARY} application start ${APP}-cicd --pod=${APP}-cicd--ingest-docs -y
                 '''
                 }
                 
@@ -146,35 +143,14 @@ def repoCheckout(String branch) {
     }
 }
 
-// Check if machine is free or not for deployment of application
-def checkMachineStatus() {
-    String appName = runningAppName()
-    dir("${env.PROJECT_NAME}/${env.AI_SERVICES_DIR}") {
-        if (appName == "") {
-            println 'No applications running in the machine.'
-            println 'Machine is in ready state for deployment.'
-        } else {
-            if (!appName.contains('cicd')) {
-                println "Please delete ${appName} to proceed for deployment"
-                error("Please delete ${appName} to proceed for deployment")
-            }
-        }
-    }
-}
 
 // Delete application deployed via CI/CD pipeline
-def cleanupMachine() {
+def deleteCicdApp() {
     String appName = runningAppName()
-    if (appName.isEmpty()) {
-        return
-    }
     dir("${env.PROJECT_NAME}/${env.AI_SERVICES_DIR}") {
         if (appName.contains('cicd')) {
             println "Cleaning up ${appName} which is deployed by pipelines."
             sh "./bin/ai-services application delete ${appName} -y"
-        } else {
-            println "Please delete ${appName} from the machine."
-            error("Please delete ${appName} to proceed for deployment")
         }
     }
 }
