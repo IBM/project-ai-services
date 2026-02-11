@@ -5,14 +5,17 @@ ui:
 instruct:
   image: registry.redhat.io/rhaiis/vllm-spyre-rhel9:3.2.5
   imagePullSecret: "redhat-registry-secret"
+  storageUri: hf://ibm-granite/granite-3.3-8b-instruct
 
 embedding:
   image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
   imagePullSecret: "icr-secret"
+  storageUri: hf://ibm-granite/granite-embedding-278m-multilingual
 
 reranker:
   image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
   imagePullSecret: "icr-secret"
+  storageUri: hf://BAAI/bge-reranker-v2-m3
 
 backend:
   # @hidden

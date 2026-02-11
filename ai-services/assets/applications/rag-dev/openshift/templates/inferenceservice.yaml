@@ -38,7 +38,7 @@ spec:
           memory: 900Gi
           ibm.com/spyre_pf: "4"
       runtime: instruct
-      storageUri: hf://ibm-granite/granite-3.3-8b-instruct
+      storageUri: {{ .Values.instruct.storageUri }}
 ---
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
@@ -71,7 +71,7 @@ spec:
           cpu: "4"
           memory: 8Gi
       runtime: embedding
-      storageUri: hf://ibm-granite/granite-embedding-278m-multilingual
+      storageUri: {{ .Values.embedding.storageUri }}
 ---
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
@@ -104,4 +104,4 @@ spec:
           cpu: "10"
           memory: 8Gi
       runtime: reranker
-      storageUri: hf://BAAI/bge-reranker-v2-m3
+      storageUri: {{ .Values.reranker.storageUri }}
