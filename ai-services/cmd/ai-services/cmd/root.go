@@ -36,7 +36,7 @@ var RootCmd = &cobra.Command{
 		// Initialize runtime factory based on flag or environment
 		rt := types.RuntimeType(runtimeType)
 		if !rt.Valid() {
-			return fmt.Errorf("invalid runtime type: %s (must be 'podman')", runtimeType)
+			return fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift')", runtimeType)
 		}
 
 		RuntimeFactory = runtime.NewRuntimeFactory(rt)
@@ -65,7 +65,7 @@ func init() {
 		&runtimeType,
 		"runtime",
 		string(types.RuntimeTypePodman),
-		fmt.Sprintf("Container runtime to use (options: %s).", types.RuntimeTypePodman),
+		fmt.Sprintf("Container runtime to use (options: %s, %s).", types.RuntimeTypePodman, types.RuntimeTypeOpenShift),
 	)
 
 	RootCmd.AddCommand(version.VersionCmd)

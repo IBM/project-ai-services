@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
@@ -61,6 +62,15 @@ func CreateRuntime(runtimeType types.RuntimeType) (Runtime, error) {
 		client, err := podman.NewPodmanClient()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Podman client: %w", err)
+		}
+
+		return client, nil
+
+	case types.RuntimeTypeOpenShift:
+		logger.Infof("Initializing OpenShift runtime\n", logger.VerbosityLevelDebug)
+		client, err := openshift.NewOpenshiftClient()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create OpenShift client: %w", err)
 		}
 
 		return client, nil
