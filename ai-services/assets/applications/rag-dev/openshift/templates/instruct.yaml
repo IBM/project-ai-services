@@ -23,6 +23,8 @@ spec:
     env:
     - name: HF_HOME
       value: /tmp/hf_home
+    - name: VLLM_SPYRE_USE_CB
+      value: "1"
     image: {{ .Values.instruct.image }}
     name: kserve-container
     ports:
@@ -65,9 +67,6 @@ spec:
       - '--tensor-parallel-size=4 '
       - '--max-model-len=32768 '
       - --max-num-seqs=32
-      env:
-      - name: VLLM_SPYRE_USE_CB
-        value: "1"
       modelFormat:
         name: vLLM
       resources:
