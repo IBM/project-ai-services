@@ -29,17 +29,17 @@ spec:
             - "retrieve.backend_server"
           env:
             - name: EMB_ENDPOINT
-              value: http://granite-embedding-278m-multilingual-predictor:8080
+              value: http://embedding-predictor:8080
             - name: EMB_MODEL
               value: granite-embedding-278m-multilingual
             - name: EMB_MAX_TOKENS
               value: "512"
             - name: LLM_ENDPOINT
-              value: http://granite-3-3-8b-instruct-predictor:8000
+              value: http://instruct-predictor:8000
             - name: LLM_MODEL
               value: granite-3-3-8b-instruct
             - name: RERANKER_ENDPOINT
-              value: http://bge-reranker-v2-m3-predictor:8080
+              value: http://reranker-predictor:8080
             - name: RERANKER_MODEL
               value: bge-reranker-v2-m3
             - name: OPENSEARCH_HOST

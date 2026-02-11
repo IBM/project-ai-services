@@ -38,7 +38,7 @@ spec:
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
-  name: bge-reranker-v2-m3
+  name: reranker
   annotations:
     security.opendatahub.io/enable-auth: "false"
     serving.kserve.io/deploymentMode: RawDeployment
@@ -60,3 +60,5 @@ spec:
       resources: {}
       runtime: reranker
       storageUri: {{ .Values.reranker.storageUri }}
+      args:
+      - --served-model-name=BAAI/bge-reranker-v2-m3

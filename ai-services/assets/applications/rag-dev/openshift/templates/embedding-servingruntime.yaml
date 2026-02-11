@@ -38,7 +38,7 @@ spec:
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
-  name: granite-embedding-278m-multilingual
+  name: embedding
   annotations:
     security.opendatahub.io/enable-auth: "false"
     serving.kserve.io/deploymentMode: RawDeployment
@@ -60,3 +60,5 @@ spec:
       resources: {}
       runtime: embedding
       storageUri: {{ .Values.embedding.storageUri }}
+      args:
+      - --served-model-name=ibm-granite/granite-embedding-278m-multilingual

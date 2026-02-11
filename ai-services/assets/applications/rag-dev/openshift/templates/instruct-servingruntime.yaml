@@ -46,7 +46,7 @@ spec:
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
-  name: granite-3-3-8b-instruct
+  name: instruct
   annotations:
     security.opendatahub.io/enable-auth: "false"
     serving.kserve.io/deploymentMode: RawDeployment
@@ -67,6 +67,7 @@ spec:
       - '--tensor-parallel-size=4 '
       - '--max-model-len=32768 '
       - --max-num-seqs=32
+      - --served-model-name=ibm-granite/granite-3.3-8b-instruct
       modelFormat:
         name: vLLM
       resources:
