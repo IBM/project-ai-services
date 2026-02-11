@@ -18,9 +18,17 @@ env:
 
 jobs:
   build-publish-image:
-    name: Build and Publish Image
-    runs-on: ubuntu-24.04-ppc64le
-
+    name: Build Arch Specific Image
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04-ppc64le
+            arch: ppc64le
+          - os: ubuntu-24.04  # Standard amd64
+            arch: amd64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -35,7 +43,19 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+  create-manifest:
+    name: Create Multi-Arch Manifest
+    needs: build-publish-image
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
 
+      - name: Create and Push Manifest
+        working-directory: images/tools
+        run: |
+          make manifest REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
   scan:
     uses: ./.github/workflows/scanner.yml
     with:

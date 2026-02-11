@@ -9,6 +9,8 @@ from common.misc_utils import get_logger
 
 logger = get_logger("Embedding")
 
+_embedder_instance = None
+
 class Embedding:
     def __init__(self, emb_model, emb_endpoint, max_tokens):
         self.emb_model = emb_model
@@ -50,3 +52,12 @@ class Embedding:
         except Exception as e:
             logger.error(f"Error calling embedding API: {e}")
             raise e
+
+def get_embedder(emb_model, emb_endpoint, max_tokens) -> Embedding:
+    """
+    Returns an instance of the Embedding class.
+    """
+    global _embedder_instance
+    if _embedder_instance is None:
+        _embedder_instance = Embedding(emb_model, emb_endpoint, max_tokens)
+    return _embedder_instance

@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
 const (
@@ -21,7 +21,7 @@ var (
 	publishFlag = "--publish=%s"
 )
 
-func RunPodmanKubePlay(body io.Reader, opts map[string]string) ([]runtime.Pod, error) {
+func RunPodmanKubePlay(body io.Reader, opts map[string]string) ([]types.Pod, error) {
 	cmdName := "podman"
 
 	cmd := exec.Command(cmdName, buildCmdArgs(opts)...)
@@ -41,7 +41,7 @@ func RunPodmanKubePlay(body io.Reader, opts map[string]string) ([]runtime.Pod, e
 	//  Extract ALL Pod IDs from the output
 	podIDs := extractPodIDsFromOutput(stdout.String())
 
-	result := make([]runtime.Pod, 0, len(podIDs))
+	result := make([]types.Pod, 0, len(podIDs))
 
 	// Iterate over ALL extracted Pod IDs to get container information
 	for _, podID := range podIDs {
@@ -53,12 +53,12 @@ func RunPodmanKubePlay(body io.Reader, opts map[string]string) ([]runtime.Pod, e
 		}
 
 		// Parse the JSON output
-		var containers []runtime.Container
+		var containers []types.Container
 		if err := json.Unmarshal(outputPs, &containers); err != nil {
-			return nil, fmt.Errorf("error executing podman ps for pod %s: %v", podID, errPs)
+			return nil, fmt.Errorf("error executing podman ps for pod %s: %v", podID, err)
 		}
 
-		pod := runtime.Pod{ID: podID, Containers: containers}
+		pod := types.Pod{ID: podID, Containers: containers}
 		result = append(result, pod)
 	}
 
