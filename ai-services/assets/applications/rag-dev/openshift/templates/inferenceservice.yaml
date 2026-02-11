@@ -9,7 +9,7 @@ metadata:
     networking.kserve.io/visibility: cluster-local
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
-    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   predictor:
     automountServiceAccountToken: false
@@ -51,7 +51,7 @@ metadata:
     networking.kserve.io/visibility: cluster-local
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
-    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   predictor:
     automountServiceAccountToken: false
@@ -84,7 +84,7 @@ metadata:
     networking.kserve.io/visibility: cluster-local
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
-    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   predictor:
     automountServiceAccountToken: false

@@ -25,10 +25,10 @@ spec:
                 - "clean-db"
               resources:
                 requests:
-                  cpu: "500m"
+                  cpu: "20m"
                   memory: "1Gi"
                 limits:
-                  cpu: "500m"
+                  cpu: "20m"
                   memory: "1Gi"
               env:
               - name: OPENSEARCH_HOST

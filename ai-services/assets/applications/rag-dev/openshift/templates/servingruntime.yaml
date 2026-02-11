@@ -5,7 +5,7 @@ metadata:
   labels:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
-    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
   annotations:
     opendatahub.io/apiProtocol: REST
 spec:
@@ -48,7 +48,7 @@ metadata:
   labels:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
-    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
   annotations:
     opendatahub.io/apiProtocol: REST
 spec:
@@ -87,7 +87,7 @@ metadata:
   labels:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
-    ai-services.io/version: {{ .Values.app.version | default .Chart.AppVersion | quote }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
   annotations:
     opendatahub.io/apiProtocol: REST
 spec:

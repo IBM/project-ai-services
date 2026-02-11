@@ -40,10 +40,10 @@ spec:
               containerPort: 9600
           resources:
             requests:
-              cpu: "8"
+              cpu: "2"
               memory: "{{ .Values.opensearch.memoryLimit }}"
             limits:
-              cpu: "8"
+              cpu: "2"
               memory: "{{ .Values.opensearch.memoryLimit }}"
           securityContext:
             runAsUser: 1000
