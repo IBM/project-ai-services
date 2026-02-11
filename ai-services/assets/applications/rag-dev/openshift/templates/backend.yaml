@@ -89,11 +89,3 @@ spec:
             limits:
               cpu: "1"
               memory: "1Gi"
-          volumeMounts:
-            - name: cache
-              mountPath: /var/cache
-              readOnly: true
-      volumes:
-        - name: cache
-          persistentVolumeClaim:
-            claimName: "cache"
