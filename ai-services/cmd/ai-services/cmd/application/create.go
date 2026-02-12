@@ -147,13 +147,13 @@ var createCmd = &cobra.Command{
 			return err
 		}
 
-		tmpls, err := tp.LoadAllTemplates(templateName + "/templates")
+		tmpls, err := tp.LoadAllTemplates(templateName)
 		if err != nil {
 			return fmt.Errorf("failed to parse the templates: %w", err)
 		}
 
 		// load metadata.yml to read the app metadata
-		appMetadata, err := tp.LoadMetadata(templateName)
+		appMetadata, err := tp.LoadMetadata(templateName, true)
 		if err != nil {
 			return fmt.Errorf("failed to read the app metadata: %w", err)
 		}
@@ -451,7 +451,7 @@ func getTargetSMTLevel() (*int, error) {
 	}
 
 	// load metadata.yml to read the app metadata
-	appMetadata, err := tp.LoadMetadata(templateName)
+	appMetadata, err := tp.LoadMetadata(templateName, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the app metadata: %w", err)
 	}

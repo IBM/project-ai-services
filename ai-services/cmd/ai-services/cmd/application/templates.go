@@ -47,7 +47,7 @@ var templatesCmd = &cobra.Command{
 				return fmt.Errorf("failed to list application template values: %w", err)
 			}
 			logger.Infof("- %s\n", name)
-			metadata, err := tp.LoadMetadata(name)
+			metadata, err := tp.LoadMetadata(name, false)
 			if err != nil {
 				return fmt.Errorf("failed to load application metadata: %w", err)
 			}
