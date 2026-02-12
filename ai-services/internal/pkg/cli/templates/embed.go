@@ -204,8 +204,8 @@ func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []str
 }
 
 // LoadMetadata loads the metadata for a given application template.
-// if runtime is empty then it loads the app Metadata
-// if set it loads the runtime specific metadata
+// if runtime is empty then it loads the app Metadata.
+// if set it loads the runtime specific metadata.
 func (e *embedTemplateProvider) LoadMetadata(app string, isRuntime bool) (*AppMetadata, error) {
 	// construct metadata.yaml path
 	p := path.Join(e.root, app)
