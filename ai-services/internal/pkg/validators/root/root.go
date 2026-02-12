@@ -24,11 +24,18 @@ func (r *RootRule) Description() string {
 
 func (r *RootRule) Verify() error {
 	euid := os.Geteuid()
+	if euid == 0 {
+		logger.Infoln("running command as root", logger.VerbosityLevelDebug)
 
-	logger.Infoln("Checking root privileges", logger.VerbosityLevelDebug)
+		return nil
+	}
 
-	if euid != 0 {
-		return fmt.Errorf("current user is not root (EUID: %d)", euid)
+	if euid != 0 && os.Getenv("XDG_RUNTIME_DIR") == "" {
+		uid := os.Getuid()
+		logger.Infoln("running command as %s", uid, logger.VerbosityLevelDebug)
+		if err := os.Setenv("XDG_RUNTIME_DIR", fmt.Sprintf("/run/user/%d", uid)); err != nil {
+			return fmt.Errorf("failed to set XDG_RUNTIME_DIR: %w", err)
+		}
 	}
 
 	return nil
