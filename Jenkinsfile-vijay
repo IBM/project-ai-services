@@ -1,0 +1,117 @@
+pipeline {
+    agent { label 'ai-services-4-spyre-card-1' }
+    environment {
+        // Secret text PAT (create separately in Jenkins credentials)
+        GITHUB_TOKEN  = credentials('github-pat-vj-abc123')
+        REPO_FULL  = 'vijay-vin/mytest_repo'
+        JENKINS_DEPLOY_JOB = 'deploy-ai-services'
+    }
+//    options {
+        // Keep the last 5 builds OR builds from the last 7 days (whichever is reached first)
+//       buildDiscarder(logRotator(numToKeepStr: '5', daysToKeepStr: '7'))
+//        timestamps()
+//        ansiColor('xterm')
+//    }
+    stages {
+        stage('VVVV Environment variables') {
+            when {not { changeRequest() } }  // Skip PR branches
+            steps {
+                script {
+                    def branch = env.BRANCH_NAME
+                    echo "VVVV branch name: ${branch}"
+                    echo "VVVV ENV_BRANCH_NAME: ${env.BRANCH_NAME}"
+                    echo "VVVV GIT_COMMIT: ${env.GIT_COMMIT}"
+                    def enc_BRANCH_NAME = java.net.URLEncoder.encode(env.BRANCH_NAME, 'UTF-8')
+                    echo "VVVV enc_BRANCH_NAME: ${enc_BRANCH_NAME}"
+                }
+            }
+       }
+        stage('VVVV: PR context Only') {
+            // VVVV when { changeRequest() }  // Skip for non-PR branches
+            when { changeRequest() }  // Testing. Skip non-PR branches
+            steps {
+                echo "Running for PR #${env.CHANGE_ID}"
+                echo "Running for PR #${env.BRANCH_NAME}"   // VVVV: will print null?
+            }
+        }
+        stage('VVVV: Branch context Only') {
+            // VVVV when { changeRequest() }  // Skip for non-PR branches
+            when {not { changeRequest() } }  // Skip PR branches
+            steps {
+                echo "Running for PR #${env.CHANGE_ID}"  // VVVV: will print null
+                echo "Running for PR #${env.BRANCH_NAME}"
+            }
+        }
+        stage('Checkout & SHA') {
+            // VVVV when { changeRequest() }
+            when { not { changeRequest() } }
+            steps {
+                // Uses Branch Source SCM config (respecting PR strategy = HEAD)
+                checkout scm
+                script {
+                    env.GIT_SHA = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    echo "Head SHA: ${env.GIT_SHA}"
+                }
+            }
+        }
+        stage('Post Manual Deployment Status') {
+            // VVVV when { changeRequest() }
+            when { not { changeRequest() } }
+            steps {
+                script {
+                    // Prefer JENKINS_URL configured in: Manage Jenkins → System → Jenkins Location
+                    echo "JENKINS_URL: ${env.JENKINS_URL}"
+                    // VVVV def base = (env.JENKINS_URL ?: '').replaceAll('/+{{referencesBody}}', '')
+                    def base = (env.JENKINS_URL ?: '').replaceAll('/+$', '')
+                    if (!base) {
+                        error 'JENKINS_URL not set. Configure it under Manage Jenkins → System → Jenkins Location.'
+                    }
+                    def enc_branchName = java.net.URLEncoder.encode(env.BRANCH_NAME, 'UTF-8')
+                    def commit = env.GIT_COMMIT
+                    // VVVV def deployUrl = "${base}/job/${env.JENKINS_DEPLOY_JOB}/buildWithParameters?PR=${env.CHANGE_ID}"
+                    def deployUrl = "${base}/job/${env.JENKINS_DEPLOY_JOB}/buildWithParameters?PR=${enc_branchName}&COMMIT=${commit}"
+                    echo "Target URL: ${deployUrl}"
+                    sh """#!/usr/bin/env bash
+                    // prevents errors in a pipeline from being masked. If any command in a pipeline fails, use that return code
+                    set -euo pipefail
+                    RESP_CODE=\$(curl -sS -o resp.json -w "%{http_code}" \\
+                        -H "Authorization: Bearer ${GITHUB_TOKEN}" \\
+                        -H "Accept: application/vnd.github+json" \\
+                        -H "X-GitHub-Api-Version: 2022-11-28" \\
+                        -X POST \\
+                        -d '{
+                            "state": "pending",
+                            "target_url": "${deployUrl}",
+                            "description": "Click to open Jenkins → Build with Parameters",
+                            "context": "Manual Deployment"
+                        }' \\
+                        "https://api.github.com/repos/${REPO_FULL}/statuses/${GIT_SHA}"
+                        )
+                    echo "HTTP: \$RESP_CODE"
+                    cat resp.json
+                    if [ "\$RESP_CODE" -lt 200 ] || [ "\$RESP_CODE" -ge 300 ]; then
+                    echo "ERROR: GitHub Status API POST failed"
+                    exit 1
+                    fi
+                    """
+                }
+            }
+        }
+    }
+    post {
+        success {
+            script {
+                if (env.CHANGE_ID) {
+                    echo "Posted 'Manual Deployment' pending status for PR #${env.CHANGE_ID}"
+                }
+            }
+        }
+        failure {
+            script {
+                if (env.CHANGE_ID) {
+                    echo "Failed to post status for PR #${env.CHANGE_ID}"
+                }
+            }
+        }
+    }
+}
