@@ -156,9 +156,8 @@ func fetchDataSpecificInfo(data any, format string, defaultValue *string) (strin
 
 func renderStepsMarkdown(runtime runtime.Runtime, appTemplate string, params map[string]string, mdFile, title string) error {
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
-	stepsPath := appTemplate + "/steps"
 
-	tmpls, err := tp.LoadMdFiles(stepsPath)
+	tmpls, err := tp.LoadMdFiles(appTemplate)
 	if err != nil {
 		return nil
 	}

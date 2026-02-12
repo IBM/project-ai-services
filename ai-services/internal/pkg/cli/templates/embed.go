@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"text/template"
 
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"go.yaml.in/yaml/v3"
 	k8syaml "sigs.k8s.io/yaml"
@@ -27,8 +29,13 @@ const (
 )
 
 type embedTemplateProvider struct {
-	fs   *embed.FS
-	root string
+	fs      *embed.FS
+	root    string
+	runtime types.RuntimeType
+}
+
+func (e *embedTemplateProvider) Runtime() string {
+	return e.runtime.String()
 }
 
 // ListApplications lists all available application templates.
@@ -43,11 +50,11 @@ func (e *embedTemplateProvider) ListApplications(hidden bool) ([]string, error) 
 			return nil
 		}
 
-		// Templates Pattern :- "applications/<AppName>/metadata.yaml"
+		// Templates Pattern :- "applications/<AppName>/metadata.yaml" (Top level metadata file)
 		parts := strings.Split(filepath.ToSlash(path), "/")
 		if len(parts) == minPathPartsForAppName && filepath.Base(path) == "metadata.yaml" {
 			appName := parts[1]
-			md, err := e.LoadMetadata(appName)
+			md, err := e.LoadMetadata(appName, false)
 			if err != nil {
 				return err
 			}
@@ -69,7 +76,7 @@ func (e *embedTemplateProvider) ListApplications(hidden bool) ([]string, error) 
 
 // ListApplicationTemplateValues lists all available template value keys for a single application.
 func (e *embedTemplateProvider) ListApplicationTemplateValues(app string) (map[string]string, error) {
-	valuesPath := fmt.Sprintf("%s/%s/values.yaml", e.root, app)
+	valuesPath := fmt.Sprintf("%s/%s/%s/values.yaml", e.root, app, e.Runtime())
 	valuesData, err := e.fs.ReadFile(valuesPath)
 	if err != nil {
 		return nil, fmt.Errorf("read values.yaml: %w", err)
@@ -90,9 +97,9 @@ func (e *embedTemplateProvider) ListApplicationTemplateValues(app string) (map[s
 }
 
 // LoadAllTemplates loads all templates for a given application.
-func (e *embedTemplateProvider) LoadAllTemplates(path string) (map[string]*template.Template, error) {
+func (e *embedTemplateProvider) LoadAllTemplates(app string) (map[string]*template.Template, error) {
 	tmpls := make(map[string]*template.Template)
-	completePath := fmt.Sprintf("%s/%s", e.root, path)
+	completePath := fmt.Sprintf("%s/%s/%s/templates", e.root, app, e.Runtime())
 	err := fs.WalkDir(e.fs, completePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -117,7 +124,7 @@ func (e *embedTemplateProvider) LoadAllTemplates(path string) (map[string]*templ
 
 // LoadPodTemplate loads and renders a pod template with the given parameters.
 func (e *embedTemplateProvider) LoadPodTemplate(app, file string, params any) (*models.PodSpec, error) {
-	path := fmt.Sprintf("%s/%s/templates/%s", e.root, app, file)
+	path := fmt.Sprintf("%s/%s/%s/templates/%s", e.root, app, e.Runtime(), file)
 	data, err := e.fs.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read metadata: %w", err)
@@ -158,7 +165,7 @@ func (e *embedTemplateProvider) LoadPodTemplateWithValues(app, file, appName str
 
 func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []string, cliOverrides map[string]string) (map[string]interface{}, error) {
 	// Load the default values.yaml
-	valuesPath := fmt.Sprintf("%s/%s/values.yaml", e.root, app)
+	valuesPath := fmt.Sprintf("%s/%s/%s/values.yaml", e.root, app, e.Runtime())
 	valuesData, err := e.fs.ReadFile(valuesPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read values.yaml: %w", err)
@@ -197,9 +204,17 @@ func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []str
 }
 
 // LoadMetadata loads the metadata for a given application template.
-func (e *embedTemplateProvider) LoadMetadata(appTemplateName string) (*AppMetadata, error) {
-	path := fmt.Sprintf("%s/%s/metadata.yaml", e.root, appTemplateName)
-	data, err := e.fs.ReadFile(path)
+// if runtime is empty then it loads the app Metadata.
+// if set it loads the runtime specific metadata.
+func (e *embedTemplateProvider) LoadMetadata(app string, isRuntime bool) (*AppMetadata, error) {
+	// construct metadata.yaml path
+	p := path.Join(e.root, app)
+	if isRuntime {
+		p = path.Join(p, e.Runtime())
+	}
+	p = path.Join(p, "metadata.yaml")
+
+	data, err := e.fs.ReadFile(p)
 	if err != nil {
 		return nil, fmt.Errorf("read metadata: %w", err)
 	}
@@ -213,9 +228,9 @@ func (e *embedTemplateProvider) LoadMetadata(appTemplateName string) (*AppMetada
 }
 
 // LoadMdFiles loads all md files for a given application.
-func (e *embedTemplateProvider) LoadMdFiles(path string) (map[string]*template.Template, error) {
+func (e *embedTemplateProvider) LoadMdFiles(app string) (map[string]*template.Template, error) {
 	tmpls := make(map[string]*template.Template)
-	completePath := fmt.Sprintf("%s/%s", e.root, path)
+	completePath := fmt.Sprintf("%s/%s/%s/steps", e.root, app, e.Runtime())
 	err := fs.WalkDir(e.fs, completePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -239,7 +254,7 @@ func (e *embedTemplateProvider) LoadMdFiles(path string) (map[string]*template.T
 }
 
 func (e *embedTemplateProvider) LoadVarsFile(app string, params map[string]string) (*Vars, error) {
-	path := fmt.Sprintf("%s/%s/steps/vars_file.yaml", e.root, app)
+	path := fmt.Sprintf("%s/%s/%s/steps/vars_file.yaml", e.root, app, e.Runtime())
 
 	data, err := e.fs.ReadFile(path)
 	if err != nil {
@@ -268,8 +283,9 @@ func (e *embedTemplateProvider) LoadVarsFile(app string, params map[string]strin
 }
 
 type EmbedOptions struct {
-	FS   *embed.FS
-	Root string
+	FS      *embed.FS
+	Root    string
+	runtime types.RuntimeType
 }
 
 // NewEmbedTemplateProvider creates a new instance of embedTemplateProvider.
@@ -280,10 +296,17 @@ func NewEmbedTemplateProvider(options EmbedOptions) Template {
 	} else {
 		t.fs = &assets.ApplicationFS
 	}
+
 	if options.Root != "" {
 		t.root = options.Root
 	} else {
 		t.root = "applications"
+	}
+
+	// Use Podman runtime if not set by default
+	t.runtime = types.RuntimeTypePodman
+	if options.runtime != "" {
+		t.runtime = options.runtime
 	}
 
 	return t
