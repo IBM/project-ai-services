@@ -6,8 +6,9 @@ pipeline {
         AI_SERVICES_DIR = 'ai-services'
         AI_SERVICES_BINARY = './bin/ai-services'
 
+        RAG_APP_NAME = 'rag-dev'
         // Holding pipeline for configured minutes, to allow user to complete testing
-        MAX_APP_RUN_TIME_IN_MINS = '20'
+        MAX_APP_RUN_TIME_IN_MINS = '2'
     }
 
     // Using options to allow one deployment at any given point of time.
@@ -30,8 +31,26 @@ pipeline {
             steps {
                 script {
                     deleteDir()
-                    sh "pwd"
                     repoCheckout(params.CHECKOUT)
+                }
+            }
+        }
+
+        stage('Detect Changes') {
+            steps {
+                script {
+                    def ragAPP = isFileUpdated('spyre').toBoolean()
+                    if (ragAPP) {
+                        env.DEPLOY_APP = "${env.RAG_APP_NAME}"
+                        println 'There is an update in RAG app'
+                    } else {
+                        println 'No updates found in the supported apps'
+
+                        // Setting default values, will remove it
+                        env.DEPLOY_APP = "${env.RAG_APP_NAME}"
+                    }
+                    env.APP_NAME = "${env.DEPLOY_APP}-cicd"
+                    println "App going to deploy ${env.APP_NAME}"
                 }
             }
         }
@@ -56,10 +75,15 @@ pipeline {
         }
 
         // Build image locally, based on selection made by user
-        stage('Build Selected Image') {
+        stage('Build Images') {
             steps {
                 script {
-                    buildAppImage(params.APP)
+                    if (env.DEPLOY_APP == env.RAG_APP_NAME) {
+                        buildAppImage(env.RAG_APP_NAME)
+                    } else {
+                        println 'Skip image build'
+                    }
+                    
                 }
             }
         }
@@ -69,7 +93,7 @@ pipeline {
             steps {
                 sh '''
                     cd ${PROJECT_NAME}/${AI_SERVICES_DIR}
-                    ${AI_SERVICES_BINARY} application create ${APP}-cicd -t ${APP}
+                    ${AI_SERVICES_BINARY} application create ${APP_NAME} -t ${DEPLOY_APP}
                 '''
             }
         }
@@ -81,10 +105,10 @@ pipeline {
                 unstash 'INGEST_DOC_FILE'
                     
                 sh '''
-                    mv INGEST_DOC_FILE /var/lib/ai-services/applications/${APP}-cicd/docs/doc.pdf
+                    mv INGEST_DOC_FILE /var/lib/ai-services/applications/${APP_NAME}/docs/doc.pdf
                     echo "ingest DOC"
                     cd ${PROJECT_NAME}/${AI_SERVICES_DIR}
-                    ${AI_SERVICES_BINARY} application start ${APP}-cicd --pod=${APP}-cicd--ingest-docs -y
+                    ${AI_SERVICES_BINARY} application start ${APP_NAME} --pod=${APP_NAME}--ingest-docs -y
                 '''
                 }
                 
@@ -143,7 +167,6 @@ def repoCheckout(String branch) {
     }
 }
 
-
 // Delete application deployed via CI/CD pipeline
 def deleteCicdApp() {
     String appName = runningAppName()
@@ -155,33 +178,36 @@ def deleteCicdApp() {
     }
 }
 
+def isFileUpdated(String path) {
+    dir("${PROJECT_NAME}") {
+        sh 'git fetch origin main'
+        def changedFiles = sh(
+            script: 'git diff --name-only origin/main',
+            returnStdout: true
+        ).trim().split('\n')
+        println "${changedFiles}"
+        return changedFiles.any{ it.startsWith(path)}
+    }
+    return false
+}
+
 // Build image for app, as per user selection
 def buildAppImage(String appName) {
-    String imageName = ""
-    String containerFilePath = ""
-    String jsonPath = ""
-    
-    if (appName == 'rag-dev') {
-        String images = params.BUILD_IMAGE
-        println "Params: ${params.BUILD_IMAGE}"
-        if (images) {
-            String[] selectedImage = params.BUILD_IMAGE.split(',')
-            for (image in selectedImage) {
-                if (image == 'BUILD_RAG_UI') {
-                    imageName = 'rag-ui'
-                    containerFilePath = 'spyre-rag/ui'
-                    jsonPath = '.ui.image'
-                }
-                if (image == 'BUILD_RAG_BACKEND') {
-                    imageName = 'rag'
-                    containerFilePath = 'spyre-rag/src'
-                    jsonPath = '.backend.image'
-                }
-                String imageVal = buildImage(imageName, containerFilePath)
-                updateYamlFile(params.APP, imageVal, jsonPath)
+    if (appName == env.RAG_APP_NAME) {
+        def imageMap = [
+            [imageName: "rag-ui", filePath: "spyre-rag/ui", jsonPath: ".ui.image"],
+            [imageName: "rag", filePath: "spyre-rag/src", jsonPath: ".backend.image"]
+        ]
+
+        for (imageInfo in imageMap) {
+            def isChanged = isFileUpdated(imageInfo.filePath).toBoolean()
+            if (isChanged) {
+                println "Rebuilding ${imageMap.imageName} for deployment"
+                String imageVal = buildImage(imageMap.imageName, imageMap.filePath)
+                updateYamlFile(env.RAG_APP_NAME, imageVal, imageMap.jsonPath)
+            }else {
+                println "No changes in ${imageInfo.imageName} image"
             }
-        } else {
-            println 'Images are not built locally for deployment.'
         }
     } else {
         error("Selected ${appName} not supported.")
@@ -194,13 +220,11 @@ def buildImage(String imageName, String containerFilePath) {
     dir(env.PROJECT_NAME) {
         sh 'git rev-parse --short HEAD'
         dir(containerFilePath) {
-            // Build image
             sh "make build REGISTRY=${localRegistry}"
 
-            // Get the tag from Makefile
             def tag = sh(script: "make image-tag REGISTRY=${localRegistry}", returnStdout: true).trim()
             imagePath = "${localRegistry}/${imageName}:${tag}"
-            echo "Backend image set to ${imagePath}"
+            println "Successfully built ${imagePath} on the machine"
         }
     }
     return imagePath
