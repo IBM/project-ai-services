@@ -119,7 +119,7 @@ def query_vllm_models(llm_endpoint):
     return resp_json
 
 def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
-                stream):
+                stream, lang):
     context = "\n\n".join([doc.get("page_content") for doc in documents])
 
     logger.debug(f'Original Context: {context}')
@@ -130,7 +130,11 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     context = detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:reamining_tokens], llm_endpoint)
     logger.debug(f"Truncated Context: {context}")
 
-    prompt = settings.prompts.query_vllm_stream.format(context=context, question=question)
+    # Choose prompt based on detected language. Default is English prompt.
+    if lang == 'de':
+        prompt = settings.prompts.query_vllm_de.format(context=context, question=question)
+    else:
+        prompt = settings.prompts.query_vllm_en.format(context=context, question=question)
     logger.debug("PROMPT:  ", prompt)
     headers = {
         "accept": "application/json",
@@ -147,8 +151,8 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     }
     return headers, payload
 
-def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature):
-    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False )
+def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, lang):
+    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False, lang )
     try:
         # Use requests for synchronous HTTP requests
         response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=False)
@@ -164,8 +168,8 @@ def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_wor
         return {"error": str(e)}
     return response.json()
 
-def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature):
-    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, True )
+def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, lang):
+    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, True, lang )
     try:
         # Use requests for synchronous HTTP requests
         logger.debug("STREAMING RESPONSE")
