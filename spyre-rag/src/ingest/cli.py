@@ -8,6 +8,7 @@ import common.db_utils as db
 from common.emb_utils import get_embedder
 from common.misc_utils import *
 
+
 def reset_db():
     vector_store = db.get_vector_store()
     vector_store.reset_index()
