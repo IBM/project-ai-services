@@ -16,7 +16,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
+	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
+	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -25,6 +27,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -115,8 +118,22 @@ var createCmd = &cobra.Command{
 
 		// Validate the LPAR before creating the application
 		logger.Infof("Validating the LPAR environment before creating application '%s'...\n", appName)
-		err := bootstrap.RunValidateCmd(skip)
+
+		// Create bootstrap instance and validate
+		runtimeType, err := cmd.Flags().GetString("runtime")
 		if err != nil {
+			return fmt.Errorf("failed to get runtime flag: %w", err)
+		}
+		rt := types.RuntimeType(runtimeType)
+
+		// Create bootstrap instance based on runtime
+		factory := bootstrap.NewBootstrapFactory(rt)
+		bootstrapInstance, err := factory.Create()
+		if err != nil {
+			return fmt.Errorf("failed to create bootstrap instance: %w", err)
+		}
+
+		if err := bootstrapInstance.Validate(skip); err != nil {
 			return fmt.Errorf("bootstrap validation failed: %w", err)
 		}
 
@@ -276,7 +293,7 @@ func downloadImagesForTemplate(runtime runtime.Runtime, templateName, appName st
 }
 
 func init() {
-	skipCheckDesc := bootstrap.BuildSkipFlagDescription()
+	skipCheckDesc := appBootstrap.BuildSkipFlagDescription()
 	createCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
 	createCmd.Flags().StringVarP(&templateName, "template", "t", "", "Application template to use (required)")
 	_ = createCmd.MarkFlagRequired("template")

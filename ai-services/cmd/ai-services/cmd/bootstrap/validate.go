@@ -1,14 +1,13 @@
 package bootstrap
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/spf13/cobra"
 )
@@ -46,8 +45,20 @@ func validateCmd() *cobra.Command {
 				logger.Warningln("Skipping validation checks: " + strings.Join(skipChecks, ", "))
 			}
 
-			err := RunValidateCmd(skip)
+			runtimeType, err := cmd.Flags().GetString("runtime")
 			if err != nil {
+				return fmt.Errorf("failed to get runtime flag: %w", err)
+			}
+			rt := types.RuntimeType(runtimeType)
+
+			// Create bootstrap instance based on runtime
+			factory := bootstrap.NewBootstrapFactory(rt)
+			bootstrapInstance, err := factory.Create()
+			if err != nil {
+				return fmt.Errorf("failed to create bootstrap instance: %w", err)
+			}
+
+			if err := bootstrapInstance.Validate(skip); err != nil {
 				logger.Infof("Please refer to troubleshooting guide for more information: %s", troubleshootingGuide)
 
 				return fmt.Errorf("bootstrap validation failed: %w", err)
@@ -84,51 +95,6 @@ func validateExample() string {
   
   # Run with verbose output
   ai-services bootstrap validate --verbose`
-}
-
-func RunValidateCmd(skip map[string]bool) error {
-	var validationErrors []error
-	ctx := context.Background()
-
-	for _, rule := range validators.DefaultRegistry.Rules() {
-		ruleName := rule.Name()
-		if skip[ruleName] {
-			logger.Warningf("%s check skipped; Proceeding without validation may result in deployment failure.", ruleName)
-
-			continue
-		}
-
-		s := spinner.New("Validating " + ruleName + " ...")
-		s.Start(ctx)
-		err := rule.Verify()
-
-		if err != nil {
-			s.Fail(err.Error())
-			s.StopWithHint(err.Error(), rule.Hint())
-
-			// exit right away if user is not root as other checks require root privileges
-			if ruleName == CheckRoot {
-				return fmt.Errorf("root privileges are required for validation")
-			}
-			switch rule.Level() {
-			case constants.ValidationLevelError:
-				s.Fail(err.Error())
-				validationErrors = append(validationErrors, fmt.Errorf("%s: %w", ruleName, err))
-			case constants.ValidationLevelWarning:
-				s.Stop("Warning: " + err.Error())
-			}
-		} else {
-			s.Stop(rule.Message())
-		}
-	}
-
-	if len(validationErrors) > 0 {
-		return fmt.Errorf("%d validation check(s) failed", len(validationErrors))
-	}
-
-	logger.Infoln("All validations passed")
-
-	return nil
 }
 
 func generateValidationList() string {
