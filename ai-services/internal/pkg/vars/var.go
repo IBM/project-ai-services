@@ -3,6 +3,13 @@ package vars
 import (
 	"regexp"
 	"time"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+)
+
+var (
+	// RuntimeFactory defines Global runtime factory.
+	RuntimeFactory *runtime.RuntimeFactory
 )
 
 var (

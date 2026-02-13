@@ -285,7 +285,7 @@ func (e *embedTemplateProvider) LoadVarsFile(app string, params map[string]strin
 type EmbedOptions struct {
 	FS      *embed.FS
 	Root    string
-	runtime types.RuntimeType
+	Runtime types.RuntimeType
 }
 
 // NewEmbedTemplateProvider creates a new instance of embedTemplateProvider.
@@ -305,8 +305,8 @@ func NewEmbedTemplateProvider(options EmbedOptions) Template {
 
 	// Use Podman runtime if not set by default
 	t.runtime = types.RuntimeTypePodman
-	if options.runtime != "" {
-		t.runtime = options.runtime
+	if options.Runtime != "" {
+		t.runtime = options.Runtime
 	}
 
 	return t
