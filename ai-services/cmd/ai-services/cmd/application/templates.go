@@ -40,6 +40,7 @@ var templatesCmd = &cobra.Command{
 			appTemplatesParametersWithDescription, err := tp.ListApplicationTemplateValues(name)
 			if err != nil {
 				logger.Errorf("failed to list application template values: %v", err)
+
 				continue
 			}
 
@@ -47,6 +48,7 @@ var templatesCmd = &cobra.Command{
 			metadata, err := tp.LoadMetadata(name, false)
 			if err != nil {
 				logger.Errorf("failed to load application metadata: %v", err)
+
 				continue
 			}
 			if metadata.Description != "" {
