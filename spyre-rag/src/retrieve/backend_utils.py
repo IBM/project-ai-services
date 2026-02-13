@@ -1,10 +1,34 @@
 from common.misc_utils import get_logger
 from common.settings import get_settings
+from common.emb_utils import get_embedder
 from retrieve.reranker_utils import rerank_documents
 from retrieve.retrieval_utils import retrieve_documents
+import numpy as np
 
 logger = get_logger("backend_utils")
 settings = get_settings()
+
+def cosine(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+def detect_language(query, emb_model, emb_endpoint, max_tokens):
+    embedder = get_embedder(emb_model, emb_endpoint, max_tokens)
+    user_emb = embedder.embed_query(query)
+    ref_texts = {
+        "en": "This is an English sentence.",
+        "de": "Dies ist ein deutscher Satz."
+    }
+    ref_embeddings = {
+        lang: embedder.embed_query(text)
+        for lang, text in ref_texts.items()
+    }
+    
+    scores = {
+        lang: cosine(user_emb, ref_emb)
+        for lang, ref_emb in ref_embeddings.items()
+    }
+    logger.debug(f"Language detection scores: {scores}")
+    return max(scores, key=scores.get)
 
 def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, reranker_endpoint, top_k, top_r, vectorstore):
     # Perform retrieval

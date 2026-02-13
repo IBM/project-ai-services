@@ -1,6 +1,6 @@
 import os
 import logging
-from common.misc_utils import set_log_level
+from common.misc_utils import set_log_level, get_logger
 
 log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
@@ -21,7 +21,7 @@ import common.db_utils as db
 from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_non_stream, query_vllm_models
 from common.misc_utils import get_model_endpoints, set_log_level
 from common.settings import get_settings
-from retrieve.backend_utils import search_only
+from retrieve.backend_utils import search_only, detect_language
 
 
 vectorstore = None
@@ -31,6 +31,7 @@ emb_model_dict = {}
 llm_model_dict = {}
 reranker_model_dict = {}
 
+logger = get_logger("backend_server")
 settings = get_settings()
 concurrency_limiter = BoundedSemaphore(settings.max_concurrent_requests)
 
@@ -145,15 +146,20 @@ def chat_completion():
     resp_text = None
 
     if docs:
+        lang = detect_language(
+            query,
+            emb_model, emb_endpoint, emb_max_tokens
+        )
+        logger.debug(f"Detected language: {lang} for query: {query}")
         if not concurrency_limiter.acquire(blocking=False):
             return jsonify({"error": "Server busy. Try again shortly."}), 429
 
         try:
             if stream:
-                vllm_stream = query_vllm_stream(query, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature )
+                vllm_stream = query_vllm_stream(query, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, lang )
                 resp_text = stream_with_context(locked_stream(vllm_stream))           
             else:
-                vllm_non_stream = query_vllm_non_stream(query, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature )
+                vllm_non_stream = query_vllm_non_stream(query, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, lang )
                 resp_text = json.dumps(vllm_non_stream, indent=None, separators=(',', ':'))
                 # release semaphore lock because its non-stream request
                 concurrency_limiter.release()
