@@ -300,3 +300,11 @@ func checkParamsInValues(param string, values map[string]any) bool {
 
 	return false
 }
+
+func RequiredDirs() []string {
+	return []string{
+		"/var/lib/ai-services",
+		"/var/lib/ai-services/models",
+		"/var/lib/ai-services/applications",
+	}
+}

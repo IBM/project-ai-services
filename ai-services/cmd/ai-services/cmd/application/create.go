@@ -14,6 +14,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
@@ -102,6 +103,12 @@ var createCmd = &cobra.Command{
 		return utils.VerifyAppName(appName)
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB86C"))
+		msg := style.Render("Changing SMT level requires sudo privileges and hence you will be prompted for your password") + "\n" +
+			style.Render("Alternatively, you can set SMT level manually beforehand using: sudo ppc64_cpu --smt=<smtLevel>\n")
+
+		logger.Infoln(msg)
+
 		appName := args[0]
 		ctx := context.Background()
 
@@ -130,15 +137,11 @@ var createCmd = &cobra.Command{
 		logger.Infof("Creating application '%s' using template '%s'\n", appName, templateName)
 
 		// set SMT level to target value, assuming it is running with root privileges (part of validation in bootstrap)
-		s := spinner.New("Checking SMT level")
-		s.Start(ctx)
 		err = setSMTLevel()
 		if err != nil {
-			s.Fail("failed to set SMT level")
 
 			return fmt.Errorf("failed to set SMT level: %w", err)
 		}
-		s.Stop("SMT level configured successfully")
 
 		tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
 
@@ -211,7 +214,7 @@ var createCmd = &cobra.Command{
 
 		// Download models if flag is set to true(default: true)
 		if !skipModelDownload {
-			s = spinner.New("Downloading models as part of application creation...")
+			s := spinner.New("Downloading models as part of application creation...")
 			s.Start(ctx)
 			models, err := helpers.ListModels(templateName, appName)
 			if err != nil {
@@ -239,7 +242,7 @@ var createCmd = &cobra.Command{
 		// Loop through all pod templates, render and run kube play
 		logger.Infof("Total Pod Templates to be processed: %d\n", len(tmpls))
 
-		s = spinner.New("Deploying application '" + appName + "'...")
+		s := spinner.New("Deploying application '" + appName + "'...")
 		s.Start(ctx)
 		// execute the pod Templates
 		if err := executePodTemplates(runtime, tp, appName, appMetadata, tmpls, pciAddresses, existingPods); err != nil {
@@ -375,14 +378,27 @@ func getSMTLevel(output string) (int, error) {
 
 func setSMTLevel() error {
 	/*
-		1. Fetch current SMT level
-		2. Fetch the target SMT level
+		1. Fetch the target SMT level
+		2. Fetch current SMT level
 		3. Check if SMT level is already set to target value
 		4. If not, set it to target value
 		5. Verify again
 	*/
 
-	// 1. Fetch Current SMT level
+	// 1. Fetch the target SMT level
+	targetSMTLevel, err := getTargetSMTLevel()
+	if err != nil {
+		return fmt.Errorf("failed to get target SMT level: %w", err)
+	}
+
+	if targetSMTLevel == nil {
+		// No SMT level specified in metadata.yaml
+		logger.Infof("No SMT level specified in metadata.yaml. Keeping it to current level")
+
+		return nil
+	}
+
+	// 2. Fetch Current SMT level
 	cmd := exec.Command("ppc64_cpu", "--smt")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -392,19 +408,6 @@ func setSMTLevel() error {
 	currentSMTlevel, err := getSMTLevel(string(out))
 	if err != nil {
 		return fmt.Errorf("failed to get current SMT level: %w", err)
-	}
-
-	// 2. Fetch the target SMT level
-	targetSMTLevel, err := getTargetSMTLevel()
-	if err != nil {
-		return fmt.Errorf("failed to get target SMT level: %w", err)
-	}
-
-	if targetSMTLevel == nil {
-		// No SMT level specified in metadata.yaml
-		logger.Infof("No SMT level specified in metadata.yaml. Keeping it to current level: %d\n", currentSMTlevel)
-
-		return nil
 	}
 
 	// 3. Check if SMT level is already set to target value
@@ -417,7 +420,7 @@ func setSMTLevel() error {
 
 	// 4. Set SMT level to target value
 	arg := "--smt=" + strconv.Itoa(*targetSMTLevel)
-	cmd = exec.Command("ppc64_cpu", arg)
+	cmd = exec.Command("sudo", "ppc64_cpu", arg)
 	out, err = cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to set SMT level: %v, output: %s", err, string(out))

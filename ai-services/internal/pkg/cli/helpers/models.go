@@ -46,10 +46,7 @@ func ListModels(template, appName string) ([]string, error) {
 func DownloadModel(model, targetDir string) error {
 	// check for target model directory, if not present create it
 	if _, err := os.Stat(targetDir); os.IsNotExist(err) {
-		err := os.MkdirAll(targetDir, os.ModePerm)
-		if err != nil {
-			return fmt.Errorf("failed to create target model directory: %w", err)
-		}
+		return fmt.Errorf("failed to validate model path, please run `ai-services bootstrap` command to setup directories: %w", err)
 	}
 	logger.Infof("Downloading model %s to %s\n", model, targetDir)
 	command := "podman"

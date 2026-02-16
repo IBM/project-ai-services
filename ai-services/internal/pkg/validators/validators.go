@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/validators/directory"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/numa"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/platform"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/power"
@@ -23,6 +24,7 @@ func init() {
 	DefaultRegistry.Register(rhn.NewRHNRule())
 	DefaultRegistry.Register(spyre.NewSpyreRule())
 	DefaultRegistry.Register(servicereport.NewServiceReportRule())
+	DefaultRegistry.Register(directory.NewDirectoryRule())
 }
 
 // Rule defines the interface for validation rules.
