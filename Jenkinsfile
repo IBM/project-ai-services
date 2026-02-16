@@ -102,11 +102,10 @@ pipeline {
         stage('Ingest DOC') {
             steps {
                 script {
-                unstash 'INGEST_DOC_FILE'
                     
                 sh '''
-                    mv INGEST_DOC_FILE /var/lib/ai-services/applications/${APP_NAME}/docs/doc.pdf
-                    echo "ingest DOC"
+                    cp -r /root/cicd-app-doc/${APP_NAME}/* /var/lib/ai-services/applications/${APP_NAME}/docs/
+                    echo "Ingest DOC"
                     cd ${PROJECT_NAME}/${AI_SERVICES_DIR}
                     ${AI_SERVICES_BINARY} application start ${APP_NAME} --pod=${APP_NAME}--ingest-docs -y
                 '''
