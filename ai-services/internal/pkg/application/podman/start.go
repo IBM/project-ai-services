@@ -19,6 +19,7 @@ func (p *PodmanApplication) Start(opts appTypes.StartOptions) error {
 	}
 	if len(pods) == 0 {
 		logger.Infof("No pods found with given application: %s\n", opts.Name)
+
 		return nil
 	}
 
@@ -29,13 +30,14 @@ func (p *PodmanApplication) Start(opts appTypes.StartOptions) error {
 	}
 	if len(podsToStart) == 0 {
 		logger.Infof("Invalid/No pods found to start for given application: %s\n", opts.Name)
+
 		return nil
 	}
 
 	return p.confirmAndStartPods(podsToStart, opts.AutoYes, opts.SkipLogs)
 }
 
-// Start implementation helper methods
+// Start implementation helper methods.
 func (p *PodmanApplication) fetchPodsFromRuntime(appName string) ([]types.Pod, error) {
 	pods, err := p.runtime.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
@@ -43,6 +45,7 @@ func (p *PodmanApplication) fetchPodsFromRuntime(appName string) ([]types.Pod, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
+
 	return pods, nil
 }
 
@@ -65,6 +68,7 @@ func (p *PodmanApplication) confirmAndStartPods(podsToStart []types.Pod, autoYes
 		}
 		if !confirmStart {
 			logger.Infoln("Skipping starting of pods")
+
 			return nil
 		}
 	}
@@ -97,6 +101,7 @@ func (p *PodmanApplication) shouldPrintLogs(podsToStart []types.Pod, skipLogs bo
 		return false
 	}
 	logger.Infoln("Note: After starting the pod, logs will be displayed. Press Ctrl+C to exit the logs and return to the terminal.")
+
 	return true
 }
 
@@ -108,16 +113,19 @@ func (p *PodmanApplication) startPods(podsToStart []types.Pod) error {
 		if err != nil {
 			errMsg := fmt.Sprintf("%s: %v", pod.Name, err)
 			errors = append(errors, errMsg)
+
 			continue
 		}
 
 		if podData.State == "Running" {
 			logger.Infof("Pod %s is already running. Skipping...\n", pod.Name)
+
 			continue
 		}
 		if err := p.runtime.StartPod(pod.ID); err != nil {
 			errMsg := fmt.Sprintf("%s: %v", pod.Name, err)
 			errors = append(errors, errMsg)
+
 			continue
 		}
 
@@ -137,8 +145,10 @@ func (p *PodmanApplication) printPodLogs(podsToStart []types.Pod) error {
 	if err := p.runtime.PodLogs(podsToStart[0].Name); err != nil {
 		if strings.Contains(err.Error(), "signal: interrupt") || strings.Contains(err.Error(), "context canceled") {
 			logger.Infoln("Log following stopped.")
+
 			return nil
 		}
+
 		return fmt.Errorf("failed to follow logs for pod %s: %w", podsToStart[0].Name, err)
 	}
 

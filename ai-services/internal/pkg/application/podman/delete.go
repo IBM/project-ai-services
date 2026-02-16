@@ -60,7 +60,6 @@ func (p *PodmanApplication) Delete(opts appTypes.DeleteOptions) error {
 	}
 
 	return nil
-
 }
 
 func (p *PodmanApplication) logPodsToBeDeleted(appName string, pods []types.Pod) {
@@ -81,6 +80,7 @@ func (p *PodmanApplication) deleteConfirmation(appName string, podsExists, appEx
 		confirmActionPrompt = "Are you sure you want to delete the application data? "
 	} else {
 		logger.Infof("Application %s does not exist", appName)
+
 		return false, nil
 	}
 
@@ -100,6 +100,7 @@ func (p *PodmanApplication) podsDeletion(pods []types.Pod) error {
 
 		if err := p.runtime.DeletePod(pod.ID, utils.BoolPtr(true)); err != nil {
 			errors = append(errors, fmt.Sprintf("pod %s: %v", pod.Name, err))
+
 			continue
 		}
 
@@ -128,5 +129,6 @@ func (p *PodmanApplication) appDataDeletion(appDir string) error {
 
 func dirExists(path string) bool {
 	_, err := os.Stat(path)
+
 	return err == nil
 }
