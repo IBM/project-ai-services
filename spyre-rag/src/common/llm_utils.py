@@ -185,6 +185,53 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
         logger.error(f"Error calling vLLM stream API: {e}")
         return {"error": str(e)}
 
+def query_vllm_summarize(
+    llm_endpoint: str,
+    messages: list,
+    model: str,
+    max_tokens: int,
+    temperature: float,
+):
+    headers = {
+        "accept": "application/json",
+        "Content-type": "application/json",
+    }
+    logger.info(f"Calling vLLM with prompt: {messages}")
+    stop_words = [w for w in settings.summarization_stop_words.split(",") if w]
+    payload = {
+        "messages": messages,
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    if stop_words:
+        payload["stop"] = stop_words
+
+    try:
+        response = SESSION.post(
+            f"{llm_endpoint}/v1/chat/completions",
+            json=payload,
+            headers=headers,
+            stream=False,
+        )
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        error_details = str(e)
+        if e.response is not None:
+            error_details += f", Response Text: {e.response.text}"
+        logger.error(f"Error calling vLLM API: {error_details}")
+        return {"error": error_details}
+    except Exception as e:
+        logger.error(f"Error calling vLLM API: {e}")
+        return {"error": str(e)}
+
+    result = response.json()
+    logger.info(f"vLLM response: {result}")
+    content = ""
+    if "choices" in result and len(result["choices"]) > 0:
+        content = result["choices"][0].get("message", {}).get("content", "") or ""
+    return content.strip()
+
 def tokenize_with_llm(prompt, emb_endpoint):
     payload = {
         "prompt": prompt
