@@ -2,7 +2,7 @@
  
 ## Current Design: 
 
-User can interact with document ingestion pipeline via cli commands and can run the below command to run the ingestion(convert/process/chunk/index) after placing the documents in the expected directory of the host i.e. /var/lib/ai-services/applications/<app-name>/docs. 
+User can interact with document ingestion pipeline via cli commands and can run the below command to run the ingestion(convert/process/chunk/index) after placing the documents in the expected directory of the host i.e. `/var/lib/ai-services/applications/<app-name>/docs`.
 ```
 ai-services application start <app-name> --pod=<app-name>--ingest-docs 
 ```
@@ -14,60 +14,89 @@ There is no option to just convert and not ingest the converted content into the
  
 ## Proposal: 
  
-As per the requirement from PM, need to convert cli into microservice which expose REST endpoints to do the digitize document service’s tasks, which are to
-- Convert the file from source format pdf to output format and return the result
-- Ingest the document after the conversion by going through following tasks 
-    - process text & table 
-    - chunking 
-    - create embeddings & index it to vdb. 
-- Also need to expose the service to the outside world for the end user consumption. Port 4000 can be considered
+Recognizing the need for a more scalable and accessible architecture, we are moving to convert the current CLI into a microservice that offers REST endpoints for digitize‑document tasks. The microservice will support the following capabilities:
+
+### File Conversion
+
+- Convert the source file (e.g., PDF) into the required output format.
+- Return the converted result through the API.
+
+### Document Ingestion Workflow
+After conversion, the document will be ingested via a structured processing pipeline that includes:
+
+- Extracting and processing text and tables.
+- Chunking the extracted content.
+- Generating embeddings and indexing them into the vector database (VDB).
+
+### External Service Exposure
+
+- The microservice will be made accessible for external, end‑user consumption.
+- Port 4000 may be used for hosting and exposure.
  
 ## Endpoints: 
 
-| Method | Endpoint | Description | Content-Type | Expected Success |
-| :--- | :--- | :--- | :--- | :--- |
-| **POST** | `/v1/digitizations` | Synchronous PDF conversion. | `multipart/form-data` | `200 OK` |
-| **POST** | `/v1/ingestions` | Asynchronous document ingestion on a background process. | `multipart/form-data` | `202 Accepted` |
-| **GET** | `/v1/ingestions` | Retrieve the status of currently ingested documents. | `application/json` | `200 OK` |
-| **GET** | `/v1/documents` | Retrieve the list of currently ingested documents with its metadata. | `application/json` | `200 OK` |
-| **GET** | `/v1/documents/{document_id}` | Retrieve metadata of a specific ingested document. | `application/json` | `200 OK` |
-| **DELETE** | `/v1/documents/{document_id}` | Remove a specific document from vdb & clear its cache | N/A | `204 No Content` |
-| **DELETE** | `/v1/documents` | Bulk delete all documents from vdb & cache. | N/A | `204 No Content` |
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| **POST** | `/v1/documents` | Uploads files for async processing. Ingestion by default. Accepts `operation` and `output_format` as optional flags. Returns `job_id` to track the processing. |
+| **GET** | `/v1/documents/jobs` | Retrieves information about all the jobs. |
+| **GET** | `/v1/documents/jobs/{job_id}` | Retrieves information about `job_id`. |
+| **GET** | `/v1/documents` | Retrieves all the documents with its metadata. |
+| **GET** | `/v1/documents/{id}` | Retrieves metadata of a specific document. |
+| **GET** | `/v1/documents/{id}/content` | Retrieves digitized content of the specific document. |
+| **DELETE** | `/v1/documents/{id}` | Removes a specific document from vdb & clear its cache. |
+| **DELETE** | `/v1/documents` | Bulk deletes all documents from vdb & cache. Required param `confirm=True` to proceed the deletion. |
 
 ---
 
-### POST /v1/digitizations - Synchronous conversion
+### POST /v1/documents - Async Ingestions/Digitizations
 
 **Content Type:** multipart/form-data 
  
 **Query Params:**
-- output_format - str  - Optional param to mention the required output format of the pdf, Options: 'md/text/json', Default: 'json'
+- **operation**     - str  - Optional param to mention the operation to do on the attached files. Options: 'ingestion/digitization', Default: 'ingestion'
+- **output_format** - str  - Optional param to mention the required output format of the pdf, Options: 'md/text/json', Default: 'json'
 
 **Description:**
-- User can pass the pdf directly as a byte stream and API server should convert the file into output_format(default: json) and return the result. 
-- User should pass only one file at a time for conversion and it should not exceed 100 pages, since it would take lot of time to convert and cannot be done on a sync network call. 
-- Why 100 pages?
-    - This is something we need to assess and get feedback from PM to decide the number of pages to be supported. To get started on a number I mentioned 100 since that is not too much and not too small as well. 
-    - The docling serve API project https://github.com/docling-project/docling-serve currently returns the result irrespective of the number of pages for the sync conversion requests. So we can also follow similar fashion to return the results.
-    - Also from our experience 100 page pdf can be converted within couple of mins. Hence the size.
-- Rate limiter would be added around conversion job to limit the number of conversion happen in parallel
+- User can pass one or more pdfs directly as a byte stream with the optional query params.
+- API Server should do following
+- Validate params to identiy whether its a digitization or ingestion operation.
+- Validate no `<INGEST/DIGITIZE>.LOCK` file exist to ensure there is no existing process in progress.
+- Create `<INGEST/DIGITIZE>.LOCK` file in `/var/lib/ai-services/applications/<app-name>/cache/`.
+- Start the ingestion/digitization in a background process.
+- Generate a UUID as job_id.
+- End the request with returning job_id as response and 202 Accepted status.
 
-**Sample curl:**
+- Background ingestion/digitization process should do following in common
+    - Start the process pipeline.
+    - Atomically write status into `<job_id>_status.json` from main process to avoid race issues 
+    - Once done with ingestion, should remove the INGEST.LOCK file and conclude the job.
+    - Keep `<job_id>_status.json` for preserving the history.
+
+**Sample curl for ingestion:**
 ```
 > curl -X 'POST' \ 
-  'http://localhost:4000/v1/digitizations?output_format=md' \
-  -F 'file=@/path/to/file.pdf'
+  'http://localhost:4000/v1/documents' \
+  -F 'files=@/path/to/file1.pdf'
+  -F 'files=@/path/to/file2.pdf'
 > 
 ``` 
+**Sample curl for digitization:**
+```
+> curl -X 'POST' \ 
+  'http://localhost:4000/v1/documents?digitize_only=True&output_format=md' \
+  -F 'files=@/path/to/file3.pdf'
+  -F 'files=@/path/to/file4.pdf'
+> 
+``` 
+
 **Response codes:** 
 
 | Status Code | Description | Details |
 | :--- | :--- | :--- |
-| **200 OK** | Success | Request successful. Returns `{ "result": ... }`. |
+| **202 Accepted** | Success | Request accepted. |
 | **400 Bad Request** | Missing File | No file was attached to the request. |
-| **400 Bad Request** | Multiple Files | Only one file is permitted per request. |
+| **400 Bad Request** | Duplicate Files | Request contains files with duplicate names. |
 | **415 Unsupported Media Type** | Invalid Format | File must be a valid, non-corrupt PDF. |
-| **413 Payload Too Large** | Page Limit Exceeded | The number of pages exceeds the maximum allowed limit. |
 | **429 Too Many Requests** | Rate Limit | Request denied due to high volume (throttling). |
 | **500 Internal Server Error** | Server Error | An unexpected error occurred on the server side. | 
 
@@ -75,56 +104,18 @@ As per the requirement from PM, need to convert cli into microservice which expo
 
 ```
 {
-    "result": ... // str/dict - str in case of md/text output_format & dict in case of json output format.
+    "job_id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623"
 }
 ```
 
----
-
-### POST /v1/ingestions - Asynchronous ingestion
-
-**Content Type:** multipart/form-data 
-
-**Description:**
-- User can send single or multiple files on the request and the ingestion will happen in a background process
-- Only one ingestion will be allowed at a time
-- App server should do following things on receiving the request: 
-    - Validate no lock file exist already to ensure there is no ingestion in progress. 
-    - Start the ingestion process in a background process  
-    - Create a LOCK file in /var/lib/ai-services/applications/<app-name>/cache/
-    - Create /var/lib/ai-services/applications/<app-name>/cache/status.json to manage/view the status of ingestion 
-    - End the request 202 Accepted response
-- Background ingestion process should write the status into status.json like following information 
-    - Current stage(conversion/processing/chunking/indexing) 
-    - Stats of current stage (timings, number of pages, tables …) 
-    - Once done with all the stages, it should remove the LOCK file and conclude the job. 
-
-**Sample curl:**
-```
-> # Ingest the attached files 
-> curl -X 'POST' \ 
-  'http://localhost:4000/v1/ingestions' \
-  -F 'file=@/path/to/file1.pdf' \ 
-  -F 'file=@/path/to/file2.pdf' \ 
-> 
-```
-**Response codes:** 
-
-| Status Code | Description | Details |
-| :--- | :--- | :--- |
-| **202 Accepted** | Success | Request accepted. |
-| **400 Bad Request** | Missing File | No files were attached to the request. |
-| **400 Bad Request** | Duplicate Files | Request contains files with duplicate names. |
-| **415 Unsupported Media Type** | Invalid Format | File must be a valid, non-corrupt PDF. |
-| **409 Conflict** | Ingestion Busy | Request conflicts with an ingestion process already in progress. |
-| **429 Too Many Requests** | Rate Limit | Request denied due to rate limiting. |
-| **500 Internal Server Error** | Server Error | An unexpected error occurred on the server side. |
+**Note:**
+- `output_format` passed will be ignored in case of ingestion, .
+- Users can submit digitized documents for ingestion; if the file hasn't been cleared, the pipeline will use its cached version.
 
 ---
 
-### GET /v1/ingestions
-- Returns status of submitted ingestions
-- If there are more than one submissions available, will return all
+### GET /v1/documents/jobs
+- Returns status of all the submitted jobs(ingestion/digitization)
 
 **Query Params:**
 - latest - bool  - Optional param to return the latest ingestion status
@@ -132,22 +123,23 @@ As per the requirement from PM, need to convert cli into microservice which expo
 **Sample curl:**
 ```
 > curl \ 
-  'http://localhost:4000/v1/ingestions
+  'http://localhost:4000/v1/document/jobs
 >  
 ```
 
 **Response codes:** 
 | Status Code | Description | Details |
 | :--- | :--- | :--- |
-| **200 OK** | Success | Returns current/last ingestion status, stats, and individual doc states. |
-| **404 Not Found** | No Job Found | No ingestion found. |
-| **500 Internal Server Error** | Server Error | Internal failure while retrieving ingestion metrics. |
+| **200 OK** | Success | Returns current/last job status, stats, and individual doc states. |
+| **500 Internal Server Error** | Server Error | Internal failure while retrieving job information. |
 
 **Sample response:**
 
 ```
 [
     {
+        "job_id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
+        "operation": "ingestion",
         "status": "completed",
         "created_at": "2025-12-10T16:40:00Z",
         "total_pages": 123,
@@ -157,10 +149,12 @@ As per the requirement from PM, need to convert cli into microservice which expo
         }
     },
     {
-        "status": "partial",
+        "job_id": "stb34e21-9865-5d93-ccc2-8gcea2ea23456",
+        "operation": "digitization",
+        "status": "in_progress",
         "created_at": "2026-01-10T10:00:00Z",
-        "total_pages": 10,
-        "total_tables": 5,
+        "total_pages": 343,
+        "total_tables": 57,
         "documents": {
             "pdf1": {...}
         }
@@ -170,41 +164,105 @@ As per the requirement from PM, need to convert cli into microservice which expo
 
 **With latest=True**
 ```
-{
-    "status": "partial",
-    "created_at": "2026-01-10T10:00:00Z",
-    "total_pages": 10,
-    "total_tables": 5,
-    "documents": {
-        "pdf1": { 
-            "status": "chunking", // possible values: conversion, processing, chunking, indexing  
-            "stats": { 
-                "num_pages": 10,
-                "num_tables": 5,
-                "num_chunks": 25, 
-                "timings": { 
-                    "conversion": 12.5, 
-                    "processing": 30.2, 
-                    "chunking": 15.0, 
-                    "indexing": 20.3 
-                } 
-            } 
-        }, 
-        "pdf2": { 
-            "status": "error", 
-            "stats": { 
-                "num_pages": 0, 
-                "timings": {} 
-            } 
-        } 
+[
+    {
+        "job_id": "stb34e21-9865-5d93-ccc2-8gcea2ea23456",
+        "operation": "digitization",
+        "status": "in_progress",
+        "created_at": "2026-01-10T10:00:00Z",
+        "total_pages": 343,
+        "total_tables": 57,
+        "documents": [
+            {
+                "id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
+                "name": "file1.pdf",
+                "type": "digitization",
+                "status": "completed",
+                "digitizing_time": 120,
+                "processing_time": N/A,
+                "chunking_time": N/A,
+                "indexing_time": N/A,
+                "pages": 210,
+                "tables": 10
+            },
+            {
+                "id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
+                "name": "file2.pdf",
+                "type": "digitization",
+                "status": "in_progress",
+                "digitizing_time": 0,
+                "processing_time": N/A,
+                "chunking_time": N/A,
+                "indexing_time": N/A,
+                "pages": 0,
+                "tables": 0
+            }
+        ]
     }
-} 
+] 
+```
+
+---
+
+### GET /v1/documents/jobs/{job_id}
+- Returns status of job_id specified.
+
+**Sample curl:**
+```
+> curl \ 
+  'http://localhost:4000/v1/document/jobs/stb34e21-9865-5d93-ccc2-8gcea2ea23456
+>  
+```
+
+**Response codes:** 
+| Status Code | Description | Details |
+| :--- | :--- | :--- |
+| **200 OK** | Success | Returns current/last job status, stats, and individual doc states. |
+| **404 Not Found** | No Job Found | No job Found |
+| **500 Internal Server Error** | Server Error | Internal failure while retrieving job information. |
+
+**Sample response:**
+```
+{
+    "job_id": "stb34e21-9865-5d93-ccc2-8gcea2ea23456",
+    "operation": "digitization",
+    "status": "in_progress",
+    "created_at": "2026-01-10T10:00:00Z",
+    "total_pages": 343,
+    "total_tables": 57,
+    "documents": [
+        {
+            "id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
+            "name": "file1.pdf",
+            "type": "digitization",
+            "status": "completed",
+            "digitizing_time": 120,
+            "processing_time": N/A,
+            "chunking_time": N/A,
+            "indexing_time": N/A,
+            "pages": 210,
+            "tables": 10
+        },
+        {
+            "id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
+            "name": "file2.pdf",
+            "type": "digitization",
+            "status": "in_progress",
+            "digitizing_time": 0,
+            "processing_time": N/A,
+            "chunking_time": N/A,
+            "indexing_time": N/A,
+            "pages": 0,
+            "tables": 0
+        }
+    ]
+}
 ```
 
 ---
 
 ### GET /v1/documents
-- Returns the pdf documents currently ingested into the vector db
+- Returns all the pdf documents processed(ingested/digitized)
 
 **Sample curl:**
 ```
@@ -216,33 +274,54 @@ As per the requirement from PM, need to convert cli into microservice which expo
 | Status Code | Description | Details |
 | :--- | :--- | :--- |
 | **200 OK** | Success | Returns a JSON list of all ingested documents and their metadata. |
-| **400 Bad Request** | No Data | No ingested documents are currently available in the system. |
 | **500 Internal Error** | Server Failure | Failure to query the Vector Database or access the local storage record. |
 
 **Sample response:**
 ```
-{
-    "documents": [ 
-        {
-            "name": "file1.pdf",
-            "id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
-            "pages": 120,
-            "tables": 5
-        },
-        {
-            "name": "file2.pdf",
-            "id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
-            "pages": 554,
-            "tables": 47
-        }
-    ]
-}
+[
+    {
+        "id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
+        "name": "file1.pdf",
+        "type": "digitization",
+        "status": "completed",
+        "digitizing_time": 120,
+        "processing_time": N/A,
+        "chunking_time": N/A,
+        "indexing_time": N/A,
+        "pages": 210,
+        "tables": 10
+    },
+    {
+        "id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
+        "name": "file2.pdf",
+        "type": "digitization",
+        "status": "in_progress",
+        "digitizing_time": 0,
+        "processing_time": N/A,
+        "chunking_time": N/A,
+        "indexing_time": N/A,
+        "pages": 0,
+        "tables": 0
+    },
+    {
+        "id": "4365eifa-dd7e-8cd5-572e-5f950d96fa54",
+        "name": "file2.pdf",
+        "type": "ingestion",
+        "status": "completed",
+        "digitizing_time": 120,
+        "processing_time": 300,
+        "chunking_time": 10,
+        "indexing_time": N/A,
+        "pages": 200,
+        "tables": 20
+    }
+]
 ```
 
 ---
 
-### GET /v1/documents/{document_id}
-- Returns the metadata of the pdf document's id specified in the request if it is ingested into the vector db
+### GET /v1/documents/{id}
+- Returns specific document's information 
 
 **Sample curl:**
 ```
@@ -260,18 +339,50 @@ As per the requirement from PM, need to convert cli into microservice which expo
 **Sample response:**
 ```
 {
+    "id": "4365eifa-dd7e-8cd5-572e-5f950d96fa54",
     "name": "file2.pdf",
-    "id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
-    "pages": 554,
-    "tables": 47
+    "type": "ingestion",
+    "status": "completed",
+    "digitizing_time": 120,
+    "processing_time": 300,
+    "chunking_time": 10,
+    "indexing_time": N/A,
+    "pages": 200,
+    "tables": 20
 }
 ```
 
 ---
 
-### DELETE /v1/documents/{document_id}
-- Ensure there is no ingestion happening currently by checking the LOCK file
-- Remove the vectors of a specific document in vdb and clean up the local cache generated for the document
+### GET /v1/documents/{id}/content
+- Returns specific document's digitized content
+
+**Sample curl:**
+```
+> curl \ 
+  'http://localhost:4000/v1/documents/6083ecba-dd7e-572e-8cd5-5f950d96fa54
+>  
+```
+
+**Response codes:**
+| Status Code | Description | Details |
+| :--- | :--- | :--- |
+| **200 OK** | Success | Returns digitized content of requested docuemnt. |
+| **202 Accepted** | Success | Digitization is in progress |
+| **400 Bad Request** | No Data | No documents matching the id. |
+| **500 Internal Error** | Server Failure | Failure to query the Vector Database or access the local storage record. |
+
+**Sample response:**
+```
+{
+    "result": ... // Based on output_format request, result will contain str in case of md/text, dict in case of json output format.
+}
+```
+---
+
+### DELETE /v1/documents/{id}
+- Ensure the document is not part of an active job
+- Remove the vectors of a specific document in vdb if it is ingested and clean up the local cache generated for the document
 
 **Sample curl:**
 ```
@@ -285,13 +396,13 @@ As per the requirement from PM, need to convert cli into microservice which expo
 | :--- | :--- | :--- |
 | **204 No Content** | Success | File successfully purged from VDB and local cache. |
 | **404 Not Found** | Missing Resource | The specified `{document_id}` does not exist in the system. |
-| **409 Conflict** | Resource Locked | Action denied; an ingestion job is currently active (Lock detected). |
+| **409 Conflict** | Resource Locked | Action denied; document is part of an active job. |
 | **500 Internal Error** | Server Failure | Error occurred while communicating with VDB or deleting cache files. |
 
 ---
 
 ### DELETE /v1/documents
-- Ensure there is no ingestion happening currently by checking the lock file
+- Ensure there is active job.
 - Equivalent to clean-db command, will clean up the vdb and remove the local cache.
 
 **Query Params:**
@@ -308,7 +419,7 @@ As per the requirement from PM, need to convert cli into microservice which expo
 | Status Code | Description | Details |
 | :--- | :--- | :--- |
 | **204 No Content** | Success | Full cleanup completed; VDB and local cache are now empty. |
-| **409 Conflict** | Resource Locked | Action denied; an ingestion job is currently active (Lock detected). |
+| **409 Conflict** | Resource Locked | Action denied; an job is currently active. |
 | **500 Internal Error** | Server Failure | Failure occurred during VDB truncation or recursive file deletion. |
 
 ---
@@ -319,107 +430,3 @@ As per the requirement from PM, need to convert cli into microservice which expo
 - During ingestion
     - User should pass files with unique names
     - In case user pass same file again, vdb will be upserted
-
-## Stretch/Future:
-
-### To support asynchronous multiple files conversion:
-**POST /v1/digitizations/async**
-**Content Type:** multipart/form-data 
- 
-**Query Params:**
-- output_format - str  - Optional param to mention the required output format of the pdf, Options: 'md/text/json', Default: 'json'
-
-**Description:**
-- To run the conversion job asynchronously over multiple files and the results can be collected using result endpoints described below.
-
-**Sample curl:**
-```
-> curl -X 'POST' \ 
-  'http://localhost:4000/v1/digitizations/async?output_format=text' \ 
-  -F 'file=@/path/to/file1.pdf' \ 
-  -F 'file=@/path/to/file2.pdf' \ 
-> 
-```
-**Response codes:**
-
-| Status Code | Description | Details |
-| :--- | :--- | :--- |
-| **202 Accepted** | Success | Request accepted. |
-| **400 Bad Request** | Missing File | No files were attached to the request. |
-| **400 Bad Request** | Duplicate Files | Request contains files with duplicate names. |
-| **415 Unsupported Media Type** | Invalid Format | File must be a valid, non-corrupt PDF. |
-| **429 Too Many Requests** | Rate Limit | Request denied due to rate limiting. |
-| **500 Internal Server Error** | Server Error | An unexpected error occurred on the server side. |
-
-**Sample response:**
-```
-{
-    "job_id": "ba1e0105-15d7-5c41-8474-d87b8540c1d9"
-}
-```
----
-
-**GET /v1/digitizations/async/{job_id}**
-- To retrieve current status of the given job id 
-
-**Sample curl:**
-```
-> curl \ 
-  'http://localhost:4000/v1/digitizations/async/4ae018be-9674-4bf9-be8b-af311a5d4d92
-> 
-```
-**Response codes:** 
-| Status Code | Description | Details |
-| :--- | :--- | :--- |
-| **200 OK** | Success| Returns conversion status, stats, and individual doc states. |
-| **404 Not Found** | No Job Found | Conversion might not be submitted or invalid job id is used |
-| **500 Internal Server Error** | Server Error | Internal failure while retrieving conversion results |
-
-**Sample response:**
-TBD
-
----
-
-**GET /v1/digitizations/async/{job_id}/result**
-- To retrieve results from a particular job 
-- If there are multiple files submitted in the request, result should contain key value pairs of file names and the result
-
-**Sample curl:**
-```
-> curl \ 
-  'http://localhost:4000/v1/digitizations/async/4ae018be-9674-4bf9-be8b-af311a5d4d92/result
-> 
-```
-**Response codes:** 
-| Status Code | Description | Payload / Scenario |
-| :--- | :--- | :--- |
-| **200 OK** | Success | Job is still in progress / Returns results of files submitted for conversion if it is completed |
-| **404 Not Found** | No Job Found | Conversion might not be submitted or invalid job id is used |
-| **500 Internal Server Error** | Server Error | Internal failure while retrieving conversion results |
-
-**Sample response:**
-TBD
-
----
-
-**GET /v1/digitizations/{job_id}/result/{document_id}**
-- To retrieve results of a particular document in a submitted job
-
-**Sample curl:**
-```
-> curl \ 
-  'http://localhost:4000/v1/digitizations/async/4ae018be-9674-4bf9-be8b-af311a5d4d92/result/
-> 
-```
-**Response codes:** 
-| Status Code | Description | Payload / Scenario |
-| :--- | :--- | :--- |
-| **200 OK** | InProgress/Success | Job is still in progress / Returns results of file name specified in the request if it is converted |
-| **404 Not Found** | No Job Found | Conversion might not be submitted or invalid job id is used |
-| **404 Not Found** | No File Found | File name passed might not belong to the job id mentioned |
-| **500 Internal Server Error** | Server Error | Internal failure while retrieving conversion results |
-
-**Sample response:**
-TBD
-
----
