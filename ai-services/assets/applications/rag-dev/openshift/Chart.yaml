@@ -1,0 +1,9 @@
+apiVersion: v2
+name: rag-dev
+description: A Helm chart for deployment on Openshift
+type: application
+
+# Below are chart and app version numbers.
+# Both needs to be incremented each time when we make a new AI Services binary releases
+version: 0.0.1
+appVersion: "0.0.1"

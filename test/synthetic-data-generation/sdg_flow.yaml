@@ -1,0 +1,184 @@
+metadata:
+  name: Synthetic Query Generation Pipeline
+  description: Processes documents to generate synthetic queries and answers for RAG
+  version: 1.0.0
+  author: Manali Latkar
+  recommended_models:
+    default: meta-llama/llama-3-3-70b-instruct
+    compatible:
+    - meta-llama/llama-3-3-70b-instruct
+  tags:
+  - question-generation
+  dataset_requirements:
+    required_columns:
+    - document
+    description: Input documents for processing
+  id: exact-colt-111
+
+blocks:
+# Build Query Prompt
+- block_type: PromptBuilderBlock
+  block_config:
+    block_name: build_query_prompt
+    input_cols:
+    - document
+    output_cols:
+    - query_prompt
+    prompt_config_path: prompts/prompt_query.yaml
+    format_as_messages: true
+# Generate Scenario
+- block_type: LLMChatBlock
+  block_config:
+    block_name: generate_query
+    input_cols:
+    - query_prompt
+    output_cols:
+    - raw_query
+    max_tokens: 4000
+    temperature: 0.8
+    top_p: 1.0
+    async_mode: false
+    n: 10
+    return_text_only: true
+    stop_sequences: #  Force LLM to stop after [End of Answer]
+      - "[End of Question]"
+# Extract text content
+- block_type: LLMResponseExtractorBlock
+  block_config:
+    block_name: extract_query_text
+    input_cols:
+    - raw_query   # Takes the raw dict
+    output_cols:
+    - query_text  # Outputs clean text
+- block_type: TextParserBlock
+  block_config:
+    block_name: parse_generated_queries
+    input_cols: extract_query_text_content
+    output_cols: question
+    start_tags: ["[Start of Question]"]
+    end_tags: ["[End of Question]"]
+
+# Build Answer Prompt
+- block_type: PromptBuilderBlock
+  block_config:
+    block_name: build_answer_prompt
+    input_cols:
+    - document
+    - question
+    output_cols:
+    - answer_prompt
+    prompt_config_path: prompts/prompt_answer.yaml
+    format_as_messages: true
+# Generate Answer
+- block_type: "LLMChatBlock"
+  block_config:
+    block_name: "generate_answer"
+    input_cols:
+    - answer_prompt
+    output_cols:
+    - answer
+    max_tokens: 4000
+    temperature: 0.8
+    async_mode: false
+    stop_sequences: #  Force LLM to stop after [End of Answer]
+      - "[End of Answer]"
+
+## Is Query Answerable
+# Build Query Answerable Prompt
+- block_type: PromptBuilderBlock
+  block_config:
+    block_name: build_query_answerable_prompt
+    input_cols:
+    - document
+    - question
+    output_cols:
+    - question_answerable_prompt
+    prompt_config_path: prompts/prompt_question_answerable.yaml
+    format_as_messages: true
+- block_type: "LLMChatBlock"
+  block_config:
+    block_name: "generate_question_answerable"
+    input_cols:
+    - question_answerable_prompt
+    output_cols:
+    - raw_question_answerable
+    max_tokens: 4000
+    temperature: 0.8
+    async_mode: false
+    stop_sequences: #  Force LLM to stop after [End of Answer]
+      - "[End of Answer]"
+# Extract answerable response
+- block_type: LLMResponseExtractorBlock
+  block_config:
+    block_name: "extract_question_answerable_text"
+    input_cols:
+    - raw_question_answerable
+    output_cols:
+    - question_answerable
+# Text Parser Block
+- block_type: "TextParserBlock"
+  block_config:
+    block_name: "extract_question_answerable"
+    input_cols: extract_question_answerable_text_content
+    output_cols:
+    - question_answerable_explanation
+    - question_answerable_score
+    start_tags: ["[Start of Explanation]", "[Start of Answer]"]
+    end_tags: ["[End of Explanation]", "[End of Answer]"]
+# Filter Irrelevant Scenarios
+- block_type: ColumnValueFilterBlock
+  block_config:
+    block_name: drop_question_unanswerable
+    input_cols: question_answerable_score
+    operation: eq
+    filter_value: "YES"
+
+
+## Is Answer Faithful
+# Build Answer Faithful Prompt
+- block_type: PromptBuilderBlock
+  block_config:
+    block_name: build_answer_faithful_prompt
+    input_cols:
+    - document
+    - question
+    - answer
+    output_cols:
+    - answer_faithful_prompt
+    prompt_config_path: prompts/prompt_answer_faithful.yaml
+    format_as_messages: true
+- block_type: "LLMChatBlock"
+  block_config:
+    block_name: "generate_answer_faithful"
+    input_cols:
+    - answer_faithful_prompt
+    output_cols:
+    - answer_faithful
+    max_tokens: 4000
+    temperature: 0.8
+    async_mode: false
+# Extract faithful answer  response
+- block_type: LLMResponseExtractorBlock
+  block_config:
+    block_name: "extract_answer_faithful_text"
+    input_cols:
+    - answer_faithful
+    output_cols:
+    - extract_answer_faithful_text_content
+# Text Parser Block
+- block_type: "TextParserBlock"
+  block_config:
+    block_name: "extract_answer_faithful"
+    input_cols: extract_answer_faithful_text_content
+    output_cols:
+    - answer_faithful_explanation
+    - answer_faithful_score
+    start_tags: ["[Start of Explanation]", "[Start of Label]"]
+    end_tags: ["[End of Explanation]", "[End of Label]"]
+# Filter Irrelevant Scenarios
+- block_type: ColumnValueFilterBlock
+  block_config:
+    block_name: drop_answer_unfaithful
+    input_cols: answer_faithful_score
+    operation: eq
+    filter_value: "FAITHFUL"

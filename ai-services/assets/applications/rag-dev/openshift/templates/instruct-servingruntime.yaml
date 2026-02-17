@@ -1,0 +1,79 @@
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: instruct
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+  annotations:
+    opendatahub.io/apiProtocol: REST
+spec:
+  annotations:
+    opendatahub.io/kserve-runtime: vllm
+    prometheus.io/path: /metrics
+    prometheus.io/port: "8080"
+  imagePullSecrets:
+    - name: {{ .Values.instruct.imagePullSecret }}
+  containers:
+  - args:
+    - --model=/mnt/models
+    - --port=8000
+    - --served-model-name={{ "{{.Name}}" }}
+    env:
+    - name: HF_HOME
+      value: /tmp/hf_home
+    - name: VLLM_SPYRE_USE_CB
+      value: "1"
+    image: {{ .Values.instruct.image }}
+    name: kserve-container
+    ports:
+    - containerPort: 8000
+      protocol: TCP
+    volumeMounts:
+    - mountPath: /dev/shm
+      name: shm
+  multiModel: false
+  supportedModelFormats:
+  - autoSelect: true
+    name: vLLM
+  volumes:
+  - emptyDir:
+      medium: Memory
+      sizeLimit: 2Gi
+    name: shm
+---
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: instruct
+  annotations:
+    security.opendatahub.io/enable-auth: "false"
+    serving.kserve.io/deploymentMode: RawDeployment
+  labels:
+    networking.kserve.io/visibility: cluster-local
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  predictor:
+    automountServiceAccountToken: false
+    deploymentStrategy:
+      type: Recreate
+    maxReplicas: 1
+    minReplicas: 1
+    model:
+      args:
+      - '--tensor-parallel-size=4 '
+      - '--max-model-len=32768 '
+      - --max-num-seqs=32
+      - --served-model-name=ibm-granite/granite-3.3-8b-instruct
+      modelFormat:
+        name: vLLM
+      resources:
+        limits:
+          ibm.com/spyre_pf: "4"
+        requests:
+          ibm.com/spyre_pf: "4"
+      runtime: instruct
+      storageUri: {{ .Values.instruct.storageUri }}

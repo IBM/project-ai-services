@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .AppName }}--clean-docs"
+  labels:
+    ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
+  annotations:
+    ai-services.io/start: "off"
+spec:
+  containers:
+    - name: clean-docs
+      image: "{{ .Values.backend.image }}"
+      command:
+        - "/var/venv/bin/python"
+        - "-m"
+        - "ingest.cli"
+        - "clean-db"
+      resources:
+        requests:
+          memory: "1Gi"
+        limits:
+          memory: "1Gi"
+      env:
+        - name: OPENSEARCH_HOST
+          value: "{{ .AppName  }}--opensearch"
+        - name: OPENSEARCH_PORT
+          value: "9200"
+        - name: OPENSEARCH_DB_PREFIX
+          value: "RAG_DB"
+        - name: OPENSEARCH_INDEX_NAME
+          value: "RAG_INDEX"
+        - name: OPENSEARCH_USERNAME
+          value: "{{ .Values.opensearch.username }}"
+        - name: OPENSEARCH_PASSWORD
+          value: "{{ .Values.opensearch.password }}"
+      volumeMounts:
+        - mountPath: /var/cache:z
+          name: cache
+  restartPolicy: Never
+  volumes:
+    - name: cache
+      hostPath:
+        path: "/var/lib/ai-services/applications/{{ .AppName }}/cache"
+        type: DirectoryOrCreate

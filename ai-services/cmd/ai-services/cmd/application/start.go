@@ -6,8 +6,8 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/spf13/cobra"
 )
@@ -96,7 +96,7 @@ func startApplication(client *podman.PodmanClient, appName string, podNames []st
 	return nil
 }
 
-func confirmAndStartPods(client *podman.PodmanClient, podsToStart []runtime.Pod) error {
+func confirmAndStartPods(client *podman.PodmanClient, podsToStart []types.Pod) error {
 	logPodsToStart(podsToStart)
 	printLogs := shouldPrintLogs(podsToStart)
 
@@ -127,7 +127,7 @@ func confirmAndStartPods(client *podman.PodmanClient, podsToStart []runtime.Pod)
 	return nil
 }
 
-func logPodsToStart(podsToStart []runtime.Pod) {
+func logPodsToStart(podsToStart []types.Pod) {
 	logger.Infof("Found %d pods for given applicationName.\n", len(podsToStart))
 	logger.Infoln("Below pods will be started:")
 	for _, pod := range podsToStart {
@@ -135,7 +135,7 @@ func logPodsToStart(podsToStart []runtime.Pod) {
 	}
 }
 
-func shouldPrintLogs(podsToStart []runtime.Pod) bool {
+func shouldPrintLogs(podsToStart []types.Pod) bool {
 	// if there are more than 1 pod to be started or if skip-logs flag is set, then skip printing logs
 	if len(podsToStart) != 1 || skipLogs {
 		return false
@@ -146,7 +146,7 @@ func shouldPrintLogs(podsToStart []runtime.Pod) bool {
 	return true
 }
 
-func fetchPodsFromRuntime(client *podman.PodmanClient, appName string) ([]runtime.Pod, error) {
+func fetchPodsFromRuntime(client *podman.PodmanClient, appName string) ([]types.Pod, error) {
 	pods, err := client.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
 	})
@@ -157,7 +157,7 @@ func fetchPodsFromRuntime(client *podman.PodmanClient, appName string) ([]runtim
 	return pods, err
 }
 
-func fetchPodsToStart(client *podman.PodmanClient, pods []runtime.Pod, podNames []string) ([]runtime.Pod, error) {
+func fetchPodsToStart(client *podman.PodmanClient, pods []types.Pod, podNames []string) ([]types.Pod, error) {
 	if len(podNames) > 0 {
 		return filterPodsByName(pods, podNames)
 	}
@@ -166,7 +166,7 @@ func fetchPodsToStart(client *podman.PodmanClient, pods []runtime.Pod, podNames 
 	return filterPodsByAnnotation(client, pods)
 }
 
-func startPods(client *podman.PodmanClient, podsToStart []runtime.Pod) error {
+func startPods(client *podman.PodmanClient, podsToStart []types.Pod) error {
 	var errors []string
 	for _, pod := range podsToStart {
 		logger.Infof("Starting the pod: %s\n", pod.Name)
@@ -200,7 +200,7 @@ func startPods(client *podman.PodmanClient, podsToStart []runtime.Pod) error {
 	return nil
 }
 
-func printPodLogs(client *podman.PodmanClient, podsToStart []runtime.Pod) error {
+func printPodLogs(client *podman.PodmanClient, podsToStart []types.Pod) error {
 	logger.Infof("\n--- Following logs for pod: %s ---\n", podsToStart[0].Name)
 
 	if err := client.PodLogs(podsToStart[0].Name); err != nil {
@@ -217,16 +217,16 @@ func printPodLogs(client *podman.PodmanClient, podsToStart []runtime.Pod) error 
 	return nil
 }
 
-func filterPodsByName(pods []runtime.Pod, podNames []string) ([]runtime.Pod, error) {
+func filterPodsByName(pods []types.Pod, podNames []string) ([]types.Pod, error) {
 	// 1. Filter pods
-	podMap := make(map[string]runtime.Pod)
+	podMap := make(map[string]types.Pod)
 	for _, pod := range pods {
 		podMap[pod.Name] = pod
 	}
 
 	// maintain list of not found pod names
 	var notFound []string
-	var podsToStart []runtime.Pod
+	var podsToStart []types.Pod
 	for _, podName := range podNames {
 		if pod, exists := podMap[podName]; exists {
 			podsToStart = append(podsToStart, pod)
@@ -243,8 +243,8 @@ func filterPodsByName(pods []runtime.Pod, podNames []string) ([]runtime.Pod, err
 	return podsToStart, nil
 }
 
-func filterPodsByAnnotation(client *podman.PodmanClient, pods []runtime.Pod) ([]runtime.Pod, error) {
-	var podsToStart []runtime.Pod
+func filterPodsByAnnotation(client *podman.PodmanClient, pods []types.Pod) ([]types.Pod, error) {
+	var podsToStart []types.Pod
 
 outerloop:
 	for _, pod := range pods {
@@ -254,7 +254,7 @@ outerloop:
 			if err != nil {
 				return podsToStart, fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
 			}
-			annotations := data.Config.Annotations
+			annotations := data.Annotations
 			if val, exists := annotations[constants.PodStartAnnotationkey]; exists && val == constants.PodStartOff {
 				continue outerloop
 			}

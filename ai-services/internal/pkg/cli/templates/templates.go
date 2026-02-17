@@ -46,16 +46,16 @@ type Template interface {
 	// ListApplicationTemplateValues lists all available template parameters with description for a single application.
 	ListApplicationTemplateValues(app string) (map[string]string, error)
 	// LoadAllTemplates loads all templates for a given application
-	LoadAllTemplates(path string) (map[string]*template.Template, error)
+	LoadAllTemplates(app string) (map[string]*template.Template, error)
 	// LoadPodTemplate loads and renders a pod template with the given parameters
 	LoadPodTemplate(app, file string, params any) (*models.PodSpec, error)
 	// LoadPodTemplateWithValues loads and renders a pod template with values from application
 	LoadPodTemplateWithValues(app, file, appName string, valuesFileOverrides []string, cliOverrides map[string]string) (*models.PodSpec, error)
 	LoadValues(app string, valuesFileOverrides []string, cliOverrides map[string]string) (map[string]interface{}, error)
 	// LoadMetadata loads the metadata for a given application template
-	LoadMetadata(app string) (*AppMetadata, error)
+	LoadMetadata(app string, isRuntime bool) (*AppMetadata, error)
 	// LoadMdFiles loads all md files for a given application
-	LoadMdFiles(path string) (map[string]*template.Template, error)
+	LoadMdFiles(app string) (map[string]*template.Template, error)
 	// LoadVarsFile loads the var template file
 	LoadVarsFile(app string, params map[string]string) (*Vars, error)
 }

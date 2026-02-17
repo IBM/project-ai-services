@@ -11,7 +11,6 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
 
     retrieved_documents, retrieved_scores = retrieve_documents(question, emb_model, emb_endpoint, max_tokens,
                                                                vectorstore, top_k, 'hybrid')
-
     reranked = rerank_documents(question, retrieved_documents, reranker_model, reranker_endpoint)
     ranked_documents = []
     ranked_scores = []

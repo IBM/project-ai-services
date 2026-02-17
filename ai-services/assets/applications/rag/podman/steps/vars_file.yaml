@@ -1,0 +1,23 @@
+pods:
+  - name: "{{ .AppName }}--chat-bot"
+    format: "index .Ports \"3000/tcp\" 0"
+    default: ""
+    alias: UI_PORT
+
+  - name: "{{ .AppName }}--chat-bot"
+    format: "index .Ports \"5000/tcp\" 0"
+    default: ""
+    alias: BACKEND_PORT
+
+containers:
+  - name: "{{ .AppName }}--chat-bot-ui"
+    format: ".Status"
+    alias: UI_STATUS
+
+  - name: "{{ .AppName }}--chat-bot-backend-server"
+    format: ".Status"
+    alias: BACKEND_STATUS
+
+hosts:
+  - fetch: HOST_IP
+    type: ip

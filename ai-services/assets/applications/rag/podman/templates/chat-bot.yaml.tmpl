@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .AppName }}--chat-bot"
+  labels:
+    ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
+  annotations:
+    ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"
+spec:
+  containers:
+    - name: ui
+      image: "{{ .Values.ui.image }}"
+      resources:
+        requests:
+          memory: "512Mi"
+        limits:
+          memory: "512Mi"
+      env:
+        - name: BACKEND_HOST
+          value: "{{ .AppName  }}--chat-bot"
+        - name: BACKEND_PORT
+          value: "5000" 
+      ports:
+        - containerPort: 3000
+          protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /
+          port: 3000
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+    - name: backend-server
+      image: "{{ .Values.backend.image }}"
+      command:
+        - "/var/venv/bin/python"
+        - "-m"
+        - "retrieve.backend_server"
+      env:
+        - name: EMB_ENDPOINT
+          value: "http://{{ .AppName  }}--vllm-server:8001"
+        - name: EMB_MODEL
+          value: "ibm-granite/granite-embedding-278m-multilingual"
+        - name: EMB_MAX_TOKENS
+          value: "512"
+        - name: LLM_ENDPOINT
+          value: "http://{{ .AppName  }}--vllm-server:8000"
+        - name: LLM_MODEL
+          value: "ibm-granite/granite-3.3-8b-instruct"
+        - name: RERANKER_ENDPOINT
+          value: "http://{{ .AppName  }}--vllm-server:8002"
+        - name: RERANKER_MODEL
+          value: "BAAI/bge-reranker-v2-m3"
+        - name: OPENSEARCH_HOST
+          value: "{{ .AppName  }}--opensearch"
+        - name: OPENSEARCH_PORT
+          value: "9200"
+        - name: OPENSEARCH_DB_PREFIX
+          value: "RAG_DB"
+        - name: OPENSEARCH_INDEX_NAME
+          value: "RAG_INDEX"
+        - name: OPENSEARCH_USERNAME
+          value: "{{ .Values.opensearch.username }}"
+        - name: OPENSEARCH_PASSWORD
+          value: "{{ .Values.opensearch.password }}"
+        - name: LOG_LEVEL
+          value: "{{ .Values.backend.log_level}}"
+      ports:
+        - containerPort: 5000
+          protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 5000
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+      resources:
+        requests:
+          memory: "1Gi"
+        limits:
+          memory: "1Gi"

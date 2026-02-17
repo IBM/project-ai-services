@@ -1,0 +1,38 @@
+ui:
+  # @description Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
+  port: ""
+  # @hidden
+  image: icr.io/ai-services-cicd/rag-ui:v0.0.17
+
+backend:
+  # @description Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.
+  port: "0"
+  # @hidden
+  image: icr.io/ai-services-cicd/rag:v0.0.30
+  # @hidden
+  log_level: "INFO"
+
+ingest:
+  # @hidden
+  log_level: "INFO"
+
+opensearch:
+  # @hidden
+  image: icr.io/ai-services-private/opensearch:3.3.0-ppc64le
+  # @description Sets the memory limit for the Opensearch service(Default: 4Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
+  memoryLimit: 4Gi
+  # authentication credentials, can be overridden by the deployer
+  username: "admin"
+  password: "AiServices@1234"
+
+instruct:
+  # @hidden
+  image: registry.redhat.io/rhaiis/vllm-spyre-rhel9:3.2.5
+
+embedding:
+  # @hidden
+  image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
+
+reranker:
+  # @hidden
+  image: registry.redhat.io/rhaiis/vllm-spyre-rhel9:3.2.5

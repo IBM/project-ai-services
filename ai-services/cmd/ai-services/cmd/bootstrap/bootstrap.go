@@ -4,7 +4,9 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/root"
 	"github.com/spf13/cobra"
 )
@@ -37,14 +39,24 @@ Validate - Checks below system prerequisites:
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+			runtimeType, err := cmd.Flags().GetString("runtime")
+			if err != nil {
+				return fmt.Errorf("failed to get runtime flag: %w", err)
+			}
+			rt := types.RuntimeType(runtimeType)
 
-			logger.Infof("Configuring the LPAR")
-			if configureErr := RunConfigureCmd(); configureErr != nil {
+			// Create bootstrap instance based on runtime
+			factory := bootstrap.NewBootstrapFactory(rt)
+			bootstrapInstance, err := factory.Create()
+			if err != nil {
+				return fmt.Errorf("failed to create bootstrap instance: %w", err)
+			}
+
+			if configureErr := bootstrapInstance.Configure(); configureErr != nil {
 				return fmt.Errorf("failed to bootstrap the LPAR: %w", configureErr)
 			}
 
-			logger.Infof("Validating LPAR")
-			if validateErr := RunValidateCmd(nil); validateErr != nil {
+			if validateErr := bootstrapInstance.Validate(nil); validateErr != nil {
 				return fmt.Errorf("failed to bootstrap the LPAR: %w", validateErr)
 			}
 
