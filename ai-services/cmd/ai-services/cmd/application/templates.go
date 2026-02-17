@@ -63,7 +63,7 @@ var templatesCmd = &cobra.Command{
 			for k, v := range appTemplatesParametersWithDescription {
 				logger.Infoln("\t" + k + ":  " + v)
 			}
-			fmt.Println()
+			cmd.Println()
 		}
 
 		return nil
