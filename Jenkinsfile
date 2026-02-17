@@ -93,10 +93,13 @@ pipeline {
         // Deploy selected application
         stage('Deployment') {
             steps {
-                sh '''
-                    cd ${PROJECT_NAME}/${AI_SERVICES_DIR}
-                    ${AI_SERVICES_BINARY} application create ${APP_NAME} -t ${DEPLOY_APP} --params ui.port=${RAG_CHAT_BOT_PORT} --skip-validation numa
-                '''
+                script {
+                    dir("${env.PROJECT_NAME}/${env.AI_SERVICES_DIR}") {
+                        sh "${env.AI_SERVICES_BINARY} application ps"
+                        sh "${env.AI_SERVICES_BINARY} application create ${env.APP_NAME} -t ${env.DEPLOY_APP} --params ui.port=${env.RAG_CHAT_BOT_PORT} --skip-validation numa"
+
+                    }
+                }
             }
         }
 
