@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
@@ -36,10 +37,10 @@ func (p *PodmanBootstrap) Validate(skip map[string]bool) error {
 			}
 
 			switch rule.Level() {
-			case 0: // ValidationLevelError
+			case constants.ValidationLevelError:
 				s.Fail(err.Error())
 				validationErrors = append(validationErrors, fmt.Errorf("%s: %w", ruleName, err))
-			case 1: // ValidationLevelWarning
+			case constants.ValidationLevelWarning:
 				s.Stop("Warning: " + err.Error())
 			}
 		} else {
