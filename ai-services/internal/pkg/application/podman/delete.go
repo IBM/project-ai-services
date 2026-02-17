@@ -16,7 +16,7 @@ import (
 // Delete removes an application and its associated resources.
 func (p *PodmanApplication) Delete(opts appTypes.DeleteOptions) error {
 	appDir := filepath.Join(constants.ApplicationsPath, filepath.Base(opts.Name))
-	appExists := dirExists(appDir)
+	appExists := utils.FileExists(appDir)
 
 	pods, err := p.runtime.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", opts.Name)},
@@ -125,10 +125,4 @@ func (p *PodmanApplication) appDataDeletion(appDir string) error {
 	logger.Infoln("Application data cleaned up successfully")
 
 	return nil
-}
-
-func dirExists(path string) bool {
-	_, err := os.Stat(path)
-
-	return err == nil
 }
