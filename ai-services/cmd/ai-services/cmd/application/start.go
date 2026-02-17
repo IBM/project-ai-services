@@ -5,7 +5,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
 
@@ -41,11 +41,7 @@ Note: Logs are streamed only when a single pod is specified, and only after the 
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		runtimeType, err := cmd.Flags().GetString("runtime")
-		if err != nil {
-			return fmt.Errorf("failed to get runtime flag: %w", err)
-		}
-		rt := types.RuntimeType(runtimeType)
+		rt := vars.RuntimeFactory.GetRuntimeType()
 
 		// Create application instance using factory
 		factory := application.NewFactory(rt)
@@ -67,6 +63,8 @@ Note: Logs are streamed only when a single pod is specified, and only after the 
 }
 
 func init() {
+	//nolint:godox
+	// TODO: revisit --pod flag to consider openshift as well
 	startCmd.Flags().StringSlice("pod", []string{}, "Specific pod name(s) to start (optional)\nCan be specified multiple times: --pod pod1 --pod pod2\nOr comma-separated: --pod pod1,pod2")
 	startCmd.Flags().BoolVar(&skipLogs, "skip-logs", false, "Skip displaying logs after starting the pod")
 	startCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Automatically accept all confirmation prompts (default=false)")
