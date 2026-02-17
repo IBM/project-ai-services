@@ -141,23 +141,25 @@ After conversion, the document will be ingested via a structured processing pipe
         "job_id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
         "operation": "ingestion",
         "status": "completed",
-        "created_at": "2025-12-10T16:40:00Z",
+        "submitted_at": "2025-12-10T16:40:00Z",
         "total_pages": 123,
         "total_tables": 20,
         "documents": {
             "pdf11": {...}
-        }
+        },
+        "error": ""
     },
     {
         "job_id": "stb34e21-9865-5d93-ccc2-8gcea2ea23456",
         "operation": "digitization",
         "status": "in_progress",
-        "created_at": "2026-01-10T10:00:00Z",
+        "submitted_at": "2026-01-10T10:00:00Z",
         "total_pages": 343,
         "total_tables": 57,
         "documents": {
             "pdf1": {...}
-        }
+        },
+        "error": ""
     }
 ]
 ```
@@ -169,7 +171,7 @@ After conversion, the document will be ingested via a structured processing pipe
         "job_id": "stb34e21-9865-5d93-ccc2-8gcea2ea23456",
         "operation": "digitization",
         "status": "in_progress",
-        "created_at": "2026-01-10T10:00:00Z",
+        "submitted_at": "2026-01-10T10:00:00Z",
         "total_pages": 343,
         "total_tables": 57,
         "documents": [
@@ -178,10 +180,10 @@ After conversion, the document will be ingested via a structured processing pipe
                 "name": "file1.pdf",
                 "type": "digitization",
                 "status": "completed",
-                "digitizing_time": 120,
-                "processing_time": N/A,
-                "chunking_time": N/A,
-                "indexing_time": N/A,
+                "digitizing_time_in_secs": 120,
+                "processing_time_in_secs": N/A,
+                "chunking_time_in_secs": N/A,
+                "indexing_time_in_secs": N/A,
                 "pages": 210,
                 "tables": 10
             },
@@ -190,14 +192,15 @@ After conversion, the document will be ingested via a structured processing pipe
                 "name": "file2.pdf",
                 "type": "digitization",
                 "status": "in_progress",
-                "digitizing_time": 0,
-                "processing_time": N/A,
-                "chunking_time": N/A,
-                "indexing_time": N/A,
+                "digitizing_time_in_secs": 0,
+                "processing_time_in_secs": N/A,
+                "chunking_time_in_secs": N/A,
+                "indexing_time_in_secs": N/A,
                 "pages": 0,
                 "tables": 0
             }
-        ]
+        ],
+        "error": ""
     }
 ] 
 ```
@@ -227,7 +230,7 @@ After conversion, the document will be ingested via a structured processing pipe
     "job_id": "stb34e21-9865-5d93-ccc2-8gcea2ea23456",
     "operation": "digitization",
     "status": "in_progress",
-    "created_at": "2026-01-10T10:00:00Z",
+    "submitted_at": "2026-01-10T10:00:00Z",
     "total_pages": 343,
     "total_tables": 57,
     "documents": [
@@ -236,10 +239,10 @@ After conversion, the document will be ingested via a structured processing pipe
             "name": "file1.pdf",
             "type": "digitization",
             "status": "completed",
-            "digitizing_time": 120,
-            "processing_time": N/A,
-            "chunking_time": N/A,
-            "indexing_time": N/A,
+            "digitizing_time_in_secs": 120,
+            "processing_time_in_secs": N/A,
+            "chunking_time_in_secs": N/A,
+            "indexing_time_in_secs": N/A,
             "pages": 210,
             "tables": 10
         },
@@ -248,10 +251,10 @@ After conversion, the document will be ingested via a structured processing pipe
             "name": "file2.pdf",
             "type": "digitization",
             "status": "in_progress",
-            "digitizing_time": 0,
-            "processing_time": N/A,
-            "chunking_time": N/A,
-            "indexing_time": N/A,
+            "digitizing_time_in_secs": 0,
+            "processing_time_in_secs": N/A,
+            "chunking_time_in_secs": N/A,
+            "indexing_time_in_secs": N/A,
             "pages": 0,
             "tables": 0
         }
@@ -262,18 +265,25 @@ After conversion, the document will be ingested via a structured processing pipe
 ---
 
 ### GET /v1/documents
-- Returns all the pdf documents processed(ingested/digitized)
+- Returns all the pdf documents processed(ingested/digitized) sorted by submitted_time.
+
+**Query Params:**
+- limit  - int - Optional. Number of records to return per page. Default: 20.
+- offset - int - Optional. Number of records to skip. Default: 0.
+- status - str - Optional. Filter based on status, possible values: accepted/in_progress/completed/failed
+- name   - str - Optional. Filter based on document name.
 
 **Sample curl:**
 ```
 > curl \ 
-  'http://localhost:4000/v1/documents
+  'http://localhost:4000/v1/documents?limit=20
 >  
 ```
 **Response codes:**
 | Status Code | Description | Details |
 | :--- | :--- | :--- |
-| **200 OK** | Success | Returns a JSON list of all ingested documents and their metadata. |
+| **200 OK** | Success | Returns paginated documents list and their metadata. |
+| **400 Bad Request** | Invalid/Missing values on Filter | Filter contains invalid or missing values |
 | **500 Internal Error** | Server Failure | Failure to query the Vector Database or access the local storage record. |
 
 **Sample response:**
@@ -283,11 +293,12 @@ After conversion, the document will be ingested via a structured processing pipe
         "id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
         "name": "file1.pdf",
         "type": "digitization",
+        "submitted_at": "2026-01-10T10:00:00Z",
         "status": "completed",
-        "digitizing_time": 120,
-        "processing_time": N/A,
-        "chunking_time": N/A,
-        "indexing_time": N/A,
+        "digitizing_time_in_secs": 120,
+        "processing_time_in_secs": N/A,
+        "chunking_time_in_secs": N/A,
+        "indexing_time_in_secs": N/A,
         "pages": 210,
         "tables": 10
     },
@@ -295,11 +306,12 @@ After conversion, the document will be ingested via a structured processing pipe
         "id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
         "name": "file2.pdf",
         "type": "digitization",
+        "submitted_at": "2026-01-10T10:00:00Z",
         "status": "in_progress",
-        "digitizing_time": 0,
-        "processing_time": N/A,
-        "chunking_time": N/A,
-        "indexing_time": N/A,
+        "digitizing_time_in_secs": 0,
+        "processing_time_in_secs": N/A,
+        "chunking_time_in_secs": N/A,
+        "indexing_time_in_secs": N/A,
         "pages": 0,
         "tables": 0
     },
@@ -307,11 +319,12 @@ After conversion, the document will be ingested via a structured processing pipe
         "id": "4365eifa-dd7e-8cd5-572e-5f950d96fa54",
         "name": "file2.pdf",
         "type": "ingestion",
+        "submitted_at": "2026-01-10T10:00:00Z",
         "status": "completed",
-        "digitizing_time": 120,
-        "processing_time": 300,
-        "chunking_time": 10,
-        "indexing_time": N/A,
+        "digitizing_time_in_secs": 120,
+        "processing_time_in_secs": 300,
+        "chunking_time_in_secs": 10,
+        "indexing_time_in_secs": N/A,
         "pages": 200,
         "tables": 20
     }
@@ -342,11 +355,12 @@ After conversion, the document will be ingested via a structured processing pipe
     "id": "4365eifa-dd7e-8cd5-572e-5f950d96fa54",
     "name": "file2.pdf",
     "type": "ingestion",
+    "submitted_at": "2026-01-10T10:00:00Z",
     "status": "completed",
-    "digitizing_time": 120,
-    "processing_time": 300,
-    "chunking_time": 10,
-    "indexing_time": N/A,
+    "digitizing_time_in_secs": 120,
+    "processing_time_in_secs": 300,
+    "chunking_time_in_secs": 10,
+    "indexing_time_in_secs": N/A,
     "pages": 200,
     "tables": 20
 }
