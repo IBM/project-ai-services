@@ -49,3 +49,4 @@ test:
 test-generate-report:
 	@echo "Using RUN_ID=$(RUN_ID)"
 	$(TEST_BASE) $(TEST_ARGS) $(JUNIT_FLAG) $(TEST_PKG)
+    

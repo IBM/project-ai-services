@@ -56,10 +56,10 @@ How to run tests locally
       go install github.com/onsi/ginkgo/v2/ginkgo@latest
 
       ### run the whole suite
-      ginkgo -r --timeout=2hr ./tests/e2e
+      ginkgo -r --timeout=2h ./tests/e2e
 
       ### to generate a junit report with ginkgo 
-      ginkgo  -r --timeout=2hr --junit-report=e2e-report.xml --output-dir=tests/e2e/reports ./tests/e2e/... 
+      ginkgo  -r --timeout=2h --junit-report=e2e-report.xml --output-dir=tests/e2e/reports ./tests/e2e/... 
       ```
 
 
