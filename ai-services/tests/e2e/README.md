@@ -15,7 +15,8 @@ minimum number of Spyre cards installed, amongst other pre-flight checks.
 - Go toolchain (the repository uses Go modules). Use the Go version listed in `ai-services/go.mod`.
 - Git (to checkout branches or test fixtures).
 - Podman (preferred runtime) — the suite checks for Podman and may install or skip some tests when Podman is not available. See `tests/e2e/bootstrap` for details.
-- Set your environment Variables values 
+- Set your environment variables values.
+- The golden dataset CSV file must be placed inside the `project-ai-services/test/golden/` directory. The filename should match the value provided in the `GOLDEN_DATASET_FILE` environment variable.
 - Ginkgo CLI — tests can be run with `go test` or `ginkgo`.
 
 How to run tests locally
@@ -86,12 +87,66 @@ export RAG_BACKEND_PORT=5100
 export RAG_UI_PORT=3100
 export LLM_JUDGE_PORT=8000
 
+# Golden dataset filename
+export GOLDEN_DATASET_FILE="filename.csv"
+
 # LLM as a judge model details
 export LLM_JUDGE_MODEL_PATH="/var/lib/ai-services/models/"
 export LLM_JUDGE_MODEL="Qwen/Qwen2.5-7B-Instruct"
 
 # Expected Golden Dataset accuracy 
 export RAG_ACCURACY_THRESHOLD=0.70 
+```
+
+Running Golden Dataset Validation Independently
+------------------------------------------------
+The RAG Golden Dataset Validation can be executed independently from the full E2E lifecycle. This allows validating an already running RAG application without creating or deleting an application during the test run.
+
+This mode is useful when:
+- A RAG application is already deployed.
+- You only want to validate model accuracy.
+- You want to avoid image pulls, bootstrap, or provisioning steps.
+
+Prerequisites
+--------------
+- A RAG application must already be running.
+- The application must be healthy.
+- The application must expose an accessible endpoint.
+- The golden dataset CSV file must be placed inside the `project-ai-services/test/golden/` directory. The filename should match the value provided in the `GOLDEN_DATASET_FILE` environment variable.
+- The following environment variables must be set
+```
+export GOLDEN_DATASET_FILE="filename.csv"
+
+export RAG_ACCURACY_THRESHOLD=0.70
+export RAG_BACKEND_PORT=5100
+
+export RH_REGISTRY_URL="registry.redhat.io"
+export RH_REGISTRY_USER_NAME=<your redhat acc username>
+export RH_REGISTRY_PASSWORD=<your redhat acc password>
+
+export LLM_JUDGE_IMAGE="registry.io/example/vllm-judge:latest"
+export LLM_JUDGE_MODEL_PATH="/var/lib/ai-services/models/"
+export LLM_JUDGE_MODEL="Qwen/Qwen2.5-7B-Instruct"
+export LLM_JUDGE_PORT=8000
+export LLM_CONTAINER_POLLING_INTERVAL=30s
+```
+- Verify the application exists:
+```
+ai-services application info <app-name>
+```
+If this command fails, golden dataset validation will fail.
+
+Command to Run Golden Validation Only
+--------------------------------------
+```
+make test TEST_ARGS="--label-filter=golden-dataset-validation" APP_NAME=<existing-app-name>
+```
+OR
+```
+ginkgo -r ./tests/e2e \
+  --label-filter=golden-dataset-validation \
+  -- \
+  --app-name=<existing-app-name>
 ```
 
 Adding new E2E tests

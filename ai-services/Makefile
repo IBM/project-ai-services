@@ -17,7 +17,6 @@ BUILD_CMD = CGO_ENABLED=0 $(GO) build $(BUILDFLAGS) \
      " \
      ./cmd/ai-services
 
-TEST_CMD = ginkgo $(TEST_ARGS) -r ./tests/e2e
 REPORT_DIR := tests/e2e/reports
 RUN_ID := $(shell date +%s)
 export RUN_ID
@@ -27,12 +26,13 @@ TEST_PKG = ./tests/e2e
 TEST_ARGS ?=
 JUNIT_FLAG = --junit-report=report-$(RUN_ID).xml --output-dir=$(REPORT_DIR)
 
-
+TEST_CMD = $(TEST_BASE) $(TEST_ARGS) $(TEST_PKG) \
+	-- $(if $(APP_NAME),--app-name=$(APP_NAME),)
 
 .PHONY: default
 default:
 ifdef TEST
-    $(TEST_CMD)
+	$(TEST_CMD)
 else
 	$(BUILD_CMD)
 endif
@@ -41,11 +41,9 @@ endif
 build:
 	$(BUILD_CMD)
 
-.PHONY: test
 test:
-	$(TEST_BASE) $(TEST_ARGS) $(TEST_PKG)
+	$(TEST_CMD)
 
-.PHONY: test-generate-report
 test-generate-report:
 	@echo "Using RUN_ID=$(RUN_ID)"
 	$(TEST_BASE) $(TEST_ARGS) $(JUNIT_FLAG) $(TEST_PKG)
