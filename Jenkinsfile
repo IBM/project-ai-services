@@ -5,10 +5,12 @@ pipeline {
         PROJECT_NAME = 'project-ai-services'
         AI_SERVICES_DIR = 'ai-services'
         AI_SERVICES_BINARY = './bin/ai-services'
+        SLACK_NOTIFICATION_CHANNEL = '#jenkins-pr-preview'
+        RAG_CHAT_BOT_PORT = '4000'
 
         RAG_APP_NAME = 'rag-dev'
         // Holding pipeline for configured minutes, to allow user to complete testing
-        MAX_APP_RUN_TIME_IN_MINS = '2'
+        MAX_APP_RUN_TIME_IN_MINS = '120'
     }
 
     // Using options to allow one deployment at any given point of time.
@@ -93,7 +95,7 @@ pipeline {
             steps {
                 sh '''
                     cd ${PROJECT_NAME}/${AI_SERVICES_DIR}
-                    ${AI_SERVICES_BINARY} application create ${APP_NAME} -t ${DEPLOY_APP}
+                    ${AI_SERVICES_BINARY} application create ${APP_NAME} -t ${DEPLOY_APP} --params ui.port=${RAG_CHAT_BOT_PORT} --skip-validation numa
                 '''
             }
         }
@@ -110,7 +112,22 @@ pipeline {
                     ${AI_SERVICES_BINARY} application start ${APP_NAME} --pod=${APP_NAME}--ingest-docs -y
                 '''
                 }
-                
+            }
+            post {
+                success {
+                    slackSend(
+                        channel: "${env.SLACK_NOTIFICATION_CHANNEL}",
+                        color: 'good',
+                        message: """
+                            Application is deployed and document is ingested.
+                            Please start using chat bot from: <http://10.20.185.122:${env.RAG_CHAT_BOT_PORT}|here>
+                                *Job Name.    :* ${env.JOB_NAME}
+                                *Build Number :* ${env.BUILD_NUMBER}
+                                *Build URL.   :* ${env.BUILD_URL}
+                                *IP           :* 10.20.185.122
+                        """.stripIndent()
+                    )
+                }
             }
         }
 
@@ -128,6 +145,44 @@ pipeline {
                     }
                 }
             }
+        }
+    }
+    post {
+        failure {
+            slackSend(
+                channel: "${env.SLACK_NOTIFICATION_CHANNEL}",
+                color: 'danger',
+                message: """
+                Deployment of application failed with error.
+                    *Job Name     :* ${env.JOB_NAME}
+                    *Build Number :* ${env.BUILD_NUMBER}
+                    *Build URL.   :* ${env.BUILD_URL}
+                """.stripIndent()
+            )
+        }
+        success {
+            slackSend(
+                channel: "${env.SLACK_NOTIFICATION_CHANNEL}",
+                color: 'good',
+                message: """
+                Deployment and testing of application completed.
+                    *Job Name.    :* ${env.JOB_NAME}
+                    *Build Number :* ${env.BUILD_NUMBER}
+                    *Build URL.   :* ${env.BUILD_URL}
+                """.stripIndent()
+            )
+        }
+        aborted {
+            slackSend(
+                channel: "${env.SLACK_NOTIFICATION_CHANNEL}",
+                color: 'warning',
+                message: """
+                Deployment of application aborted.
+                    *Job Name     :* ${env.JOB_NAME}
+                    *Build Number :* ${env.BUILD_NUMBER}
+                    *Build URL.   :* ${env.BUILD_URL}
+                """.stripIndent()
+            )
         }
     }
 }
