@@ -147,8 +147,8 @@ def process_text(converted_doc, pdf_path, out_path):
                 "font_size": None
             })
 
-        process_time = time.time() - t0
-        out_path.write_text(json.dumps(structured_output, indent=2), encoding="utf-8")
+    process_time = time.time() - t0
+    out_path.write_text(json.dumps(structured_output, indent=2), encoding="utf-8")
         
     return page_count, process_time
 

@@ -13,13 +13,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 var (
 	// Global runtime type flag.
 	runtimeType string
-	// RuntimeFactory defines Global runtime factory.
-	RuntimeFactory *runtime.RuntimeFactory
 )
 
 // RootCmd represents the base command when called without any subcommands.
@@ -39,7 +38,7 @@ var RootCmd = &cobra.Command{
 			return fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift')", runtimeType)
 		}
 
-		RuntimeFactory = runtime.NewRuntimeFactory(rt)
+		vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
 		logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
 
 		return nil
