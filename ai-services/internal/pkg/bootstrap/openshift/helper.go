@@ -2,15 +2,15 @@ package openshift
 
 import (
 	"context"
+	"fmt"
 	"time"
 
-	kubeconfig "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
 )
 
 const (
@@ -18,29 +18,22 @@ const (
 )
 
 type OCPHelper struct {
-	KubeClient    *kubernetes.Clientset
-	DynamicClient dynamic.Interface
+	dynamicClient dynamic.Interface
 }
 
 func NewOCPHelper() (*OCPHelper, error) {
-	cfg, err := kubeconfig.GetKubeConfig()
+	cfg, err := openshift.GetKubeConfig()
 	if err != nil {
-		return nil, err
-	}
-
-	kc, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get kube config: %w", err)
 	}
 
 	dc, err := dynamic.NewForConfig(cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 
 	return &OCPHelper{
-		KubeClient:    kc,
-		DynamicClient: dc,
+		dynamicClient: dc,
 	}, nil
 }
 
@@ -64,7 +57,7 @@ func (h *OCPHelper) WaitForSpyreClusterPolicyReady(
 		timeout,
 		true,
 		func(ctx context.Context) (bool, error) {
-			obj, err := h.DynamicClient.Resource(gvr).Get(ctx, name, v1.GetOptions{})
+			obj, err := h.dynamicClient.Resource(gvr).Get(ctx, name, v1.GetOptions{})
 			if err != nil {
 				// Resource might not be created yet
 				return false, nil
