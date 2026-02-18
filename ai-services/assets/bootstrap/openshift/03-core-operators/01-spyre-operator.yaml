@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    kubernetes.io/metadata.name: spyre-operator
+    openshift.io/cluster-monitoring: "true"
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/warn-version: latest
+  name: spyre-operator
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: spyre-operator-group
+  namespace: spyre-operator
+spec:
+  upgradeStrategy: Default
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: spyre-operator
+  namespace: spyre-operator
+spec:
+  channel: stable-v1.1
+  installPlanApproval: Automatic
+  name: spyre-operator
+  source: certified-operators
+  sourceNamespace: openshift-marketplace
+  startingCSV: spyre-operator.v1.1.1
+

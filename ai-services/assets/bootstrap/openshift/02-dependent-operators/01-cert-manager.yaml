@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager-operator
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: cert-manager-operator
+  namespace: cert-manager-operator
+spec: {}
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: openshift-cert-manager-operator
+  namespace: cert-manager-operator
+spec:
+  channel: stable-v1
+  installPlanApproval: Automatic
+  name: openshift-cert-manager-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: spyre-selfsigned-issuer
+  namespace: spyre-operator
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: spyre-ca-cert
+  namespace: spyre-operator
+spec:
+  isCA: true
+  commonName: spyre-ca
+  secretName: spyre-ca-secret
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    name: spyre-selfsigned-issuer
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: spyre-ca-issuer
+  namespace: spyre-operator
+spec:
+  ca:
+    secretName: spyre-ca-secret
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: spyre-webhook-cert
+  namespace: spyre-operator
+spec:
+  dnsNames:
+  - spyre-webhook-validator.spyre-operator.svc
+  - spyre-webhook-validator.spyre-operator.svc.cluster.local
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    kind: Issuer
+    name: spyre-ca-issuer
+  secretName: spyre-webhook-validator-certs

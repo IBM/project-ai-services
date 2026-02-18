@@ -1,0 +1,39 @@
+apiVersion: machineconfiguration.openshift.io/v1
+kind: MachineConfig
+metadata:
+  labels:
+    kubernetes.io/arch: ppc64le
+    machineconfiguration.openshift.io/role: spyre
+  name: 99-vhostuser-bind
+spec:
+  config:
+    ignition:
+      version: 3.4.0
+    systemd:
+      units:
+      - name: vhostuser-bind.service
+        enabled: true
+        contents: |
+          [Unit]
+          Description=Vhostuser Interface vfio-pci Bind
+          Wants=network-online.target
+          After=network-online.target ignition-firstboot-complete.service
+          ConditionPathExists=/etc/modprobe.d/vfio.conf
+          [Service]
+          Type=oneshot
+          TimeoutSec=900
+          ExecStart=/usr/local/bin/vhostuser
+          [Install]
+          WantedBy=multi-user.target
+    storage:
+      files:
+      - contents:
+          inline: vfio-pci
+        filesystem: root
+        mode: 0644
+        path: /etc/modules-load.d/vfio-pci.conf
+      - contents:
+          source: data:text/plain;charset=utf-8;base64,IyEvYmluL2Jhc2gKc2V0IC1lCgpQQ0lfREVWSUNFUz0kKGxzcGNpIC1uIC1kIDEwMTQ6MDZhNyB8IGN1dCAtZCAiICIgLWYxIHwgcGFzdGUgLXNkICIsIiAtKQoKZWNobyAiJFBDSV9ERVZJQ0VTIgpJRlM9JywnIHJlYWQgLXJhIERFVklDRVMgPDw8ICIkUENJX0RFVklDRVMiCgpmb3IgVkZJT0RFVklDRSBpbiAiJHtERVZJQ0VTW0BdfSI7IGRvCiAgICBjZCAvc3lzL2J1cy9wY2kvZGV2aWNlcy8iJHtWRklPREVWSUNFfSIgfHwgY29udGludWUKCiAgICBpZiBbICEgLWYgImRyaXZlci91bmJpbmQiIF07IHRoZW4KICAgICAgICBlY2hvICJGaWxlIGRyaXZlci91bmJpbmQgbm90IGZvdW5kIGZvciAke1ZGSU9ERVZJQ0V9IgogICAgICAgIGV4aXQgMQogICAgZmkKCiAgICBpZiAhIGVjaG8gLW4gInZmaW8tcGNpIiA+IGRyaXZlcl9vdmVycmlkZTsgdGhlbgogICAgICAgIGVjaG8gIkNvdWxkIG5vdCB3cml0ZSB2ZmlvLXBjaSB0byBkcml2ZXJfb3ZlcnJpZGUiCiAgICAgICAgZXhpdCAxCiAgICBmaQoKICAgIGlmICEgWyAtZiBkcml2ZXIvdW5iaW5kIF0gJiYgZWNobyAtbiAiJFZGSU9ERVZJQ0UiID4gZHJpdmVyL3VuYmluZDsgdGhlbgogICAgICAgIGVjaG8gIkNvdWxkIG5vdCB3cml0ZSB0aGUgVkZJT0RFVklDRTogJHtWRklPREVWSUNFfSB0byBkcml2ZXIvdW5iaW5kIgogICAgICAgIGV4aXQgMQogICAgZmkKCmRvbmUK
+        filesystem: root
+        mode: 0744
+        path: /usr/local/bin/vhostuser
