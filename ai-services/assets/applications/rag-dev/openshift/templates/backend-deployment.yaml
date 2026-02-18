@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "backend"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: backend
+  template:
+    metadata:
+      labels:
+        ai-services.io/application: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/component: backend
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    spec:
+      containers:
+        - name: server
+          image: "{{ .Values.backend.image }}"
+          command:
+            - "/var/venv/bin/python"
+            - "-m"
+            - "retrieve.backend_server"
+          env:
+            - name: EMB_ENDPOINT
+              value: http://embedding-predictor:8080
+            - name: EMB_MODEL
+              value: ibm-granite/granite-embedding-278m-multilingual
+            - name: EMB_MAX_TOKENS
+              value: "512"
+            - name: LLM_ENDPOINT
+              value: http://instruct-predictor:8000
+            - name: LLM_MODEL
+              value: ibm-granite/granite-3.3-8b-instruct
+            - name: RERANKER_ENDPOINT
+              value: http://reranker-predictor:8080
+            - name: RERANKER_MODEL
+              value: BAAI/bge-reranker-v2-m3
+            - name: OPENSEARCH_HOST
+              value: "opensearch"
+            - name: OPENSEARCH_PORT
+              value: "9200"
+            - name: OPENSEARCH_DB_PREFIX
+              value: "RAG_DB"
+            - name: OPENSEARCH_INDEX_NAME
+              value: "RAG_INDEX"
+            - name: OPENSEARCH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: "opensearch-credentials"
+                  key: username
+            - name: OPENSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "opensearch-credentials"
+                  key: password
+            - name: LOG_LEVEL
+              value: "{{ .Values.backend.log_level }}"
+          ports:
+            - containerPort: 5000
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "1"
+              memory: "1Gi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"

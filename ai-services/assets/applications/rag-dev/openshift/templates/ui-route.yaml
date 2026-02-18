@@ -1,0 +1,17 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: "ui"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+  annotations:
+    haproxy.router.openshift.io/set-forwarded-for: "true"
+    haproxy.router.openshift.io/rewrite-target: "http-response set-header X-Accel-Buffering no"
+spec:
+  port:
+    targetPort: 3000
+  to:
+    kind: Service
+    name: "ui"

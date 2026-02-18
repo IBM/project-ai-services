@@ -6,7 +6,8 @@ import "time"
 type RuntimeType string
 
 const (
-	RuntimeTypePodman RuntimeType = "podman"
+	RuntimeTypePodman    RuntimeType = "podman"
+	RuntimeTypeOpenShift RuntimeType = "openshift"
 )
 
 // String returns the string representation of RuntimeType.
@@ -17,7 +18,7 @@ func (r RuntimeType) String() string {
 // Valid checks if the runtime type is valid.
 func (r RuntimeType) Valid() bool {
 	switch r {
-	case RuntimeTypePodman:
+	case RuntimeTypePodman, RuntimeTypeOpenShift:
 		return true
 	default:
 		return false
