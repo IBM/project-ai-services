@@ -2,5 +2,5 @@ package assets
 
 import "embed"
 
-//go:embed applications
+//go:embed applications bootstrap/openshift
 var ApplicationFS embed.FS
