@@ -314,6 +314,7 @@ func (e *embedTemplateProvider) LoadChart(app string) (chart.Charter, error) {
 			Name: rel,
 			Data: data,
 		})
+
 		return nil
 	})
 	if err != nil {

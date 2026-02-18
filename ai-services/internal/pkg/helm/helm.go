@@ -13,7 +13,6 @@ import (
 type Helm struct {
 	namespace    string
 	actionConfig *action.Configuration
-	chart        chart.Charter
 }
 
 func NewHelm(namespace string) (*Helm, error) {
@@ -80,6 +79,7 @@ func (h *Helm) IsReleaseExist(release string) (bool, error) {
 		if errors.Is(err, driver.ErrReleaseNotFound) {
 			return false, nil
 		}
+
 		return false, err
 	}
 
