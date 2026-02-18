@@ -38,7 +38,6 @@ func (o *OCPBootstrap) Validate(skip map[string]bool) error {
 	ctx := context.Background()
 	var validationErrors []error
 
-	// AISERVICES-621 logic is triggered here
 	checks := []struct {
 		name  string
 		check func(context.Context) error
