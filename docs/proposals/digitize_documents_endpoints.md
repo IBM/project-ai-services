@@ -60,17 +60,33 @@ After conversion, the document will be ingested via a structured processing pipe
 - User can pass one or more pdfs directly as a byte stream with the optional query params.
 - API Server should do following
 - Validate params to identiy whether its a digitization or ingestion operation.
-- Validate no `<INGEST/DIGITIZE>.LOCK` file exist to ensure there is no existing process in progress.
-- Create `<INGEST/DIGITIZE>.LOCK` file in `/var/lib/ai-services/applications/<app-name>/cache/`.
-- Start the ingestion/digitization in a background process.
-- Generate a UUID as job_id.
-- End the request with returning job_id as response and 202 Accepted status.
 
-- Background ingestion/digitization process should do following in common
-    - Start the process pipeline.
-    - Atomically write status into `<job_id>_status.json` from main process to avoid race issues 
-    - Once done with ingestion, should remove the INGEST.LOCK file and conclude the job.
-    - Keep `<job_id>_status.json` for preserving the history.
+- **In case of ingestion:**
+    - Validate no `LOCK` file exist to ensure there is no existing process in progress.
+    - Create `LOCK` file in `/var/lib/ai-services/applications/<app-name>/cache/`.
+    - Start the ingestion in a background process.
+    - Generate a UUID as job_id.
+    - End the request with returning job_id as response and 202 Accepted status.
+
+    - Background ingestion process should do following in common
+        - Start the process pipeline.
+        - Atomically write status into `<job_id>_status.json` from main process to avoid race issues.
+        - Once done with ingestion, should remove the `LOCK` file and conclude the job.
+        - Keep `<job_id>_status.json` for preserving the history.
+
+- **In case of digitization**
+- API Server would initiate a queue(max_size=10) and start a background thread that look for elements in the queue.
+- Whenever a new reuqest received, API server would do following
+    - Check queue is not full, if it is full reject the request with 429.
+    - Do validation on the files submitted to avoid over loading server and starve the subseqent requests
+        - Number files should not exceed 4 in a batch
+        - Number of pages should not exceed 500
+    - Generate a UUID as `job_id` to identify the digitization task.
+    - Write the pdfs in a staging directory `/var/lib/ai-services/applications/<app-name>/cache/staging/<job_id>`
+    - Add the digitization task into the queue.
+- When background thread reads the task from the queue it submits the digitization request to a background process pool.
+- Once all the documents are digitized in a particular task, background thread would update the status, cleanup the staging content, enqueue the next task and process it.
+- *Note:* Digitization tasks run in an isolated worker pool and are not shared with the Ingestion worker pools.
 
 **Sample curl for ingestion:**
 ```
@@ -119,6 +135,9 @@ After conversion, the document will be ingested via a structured processing pipe
 
 **Query Params:**
 - latest - bool  - Optional param to return the latest ingestion status
+- limit  - int - Optional. Number of records to return per page. Default: 20.
+- offset - int - Optional. Number of records to skip. Default: 0.
+- status - str - Optional. Filter based on status, possible values: accepted/in_progress/completed/failed.
 
 **Sample curl:**
 ```
@@ -130,79 +149,101 @@ After conversion, the document will be ingested via a structured processing pipe
 **Response codes:** 
 | Status Code | Description | Details |
 | :--- | :--- | :--- |
-| **200 OK** | Success | Returns current/last job status, stats, and individual doc states. |
+| **200 OK** | Success | Returns paginated job list with its status, stats, and individual doc states. |
 | **500 Internal Server Error** | Server Error | Internal failure while retrieving job information. |
 
 **Sample response:**
 
 ```
-[
-    {
-        "job_id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
-        "operation": "ingestion",
-        "status": "completed",
-        "submitted_at": "2025-12-10T16:40:00Z",
-        "total_pages": 123,
-        "total_tables": 20,
-        "documents": {
-            "pdf11": {...}
-        },
-        "error": ""
+{
+    "pagination": {
+        "total": 145,
+        "limit": 20,
+        "offset": 0
     },
-    {
-        "job_id": "stb34e21-9865-5d93-ccc2-8gcea2ea23456",
-        "operation": "digitization",
-        "status": "in_progress",
-        "submitted_at": "2026-01-10T10:00:00Z",
-        "total_pages": 343,
-        "total_tables": 57,
-        "documents": {
-            "pdf1": {...}
+    "data": [
+        {
+            "job_id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
+            "operation": "ingestion",
+            "status": "completed",
+            "submitted_at": "2025-12-10T16:40:00Z",
+            "total_pages": 123,
+            "total_tables": 20,
+            "documents": [
+                {...}
+            ],
+            "error": ""
         },
-        "error": ""
-    }
-]
+        {
+            "job_id": "stb34e21-9865-5d93-ccc2-8gcea2ea23456",
+            "operation": "digitization",
+            "status": "in_progress",
+            "submitted_at": "2026-01-10T10:00:00Z",
+            "total_pages": 343,
+            "total_tables": 57,
+            "documents": [
+                {...}
+            ],
+            "error": ""
+        }
+    ]
+}
 ```
 
 **With latest=True**
 ```
-[
-    {
-        "job_id": "stb34e21-9865-5d93-ccc2-8gcea2ea23456",
-        "operation": "digitization",
-        "status": "in_progress",
-        "submitted_at": "2026-01-10T10:00:00Z",
-        "total_pages": 343,
-        "total_tables": 57,
-        "documents": [
-            {
-                "id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
-                "name": "file1.pdf",
-                "type": "digitization",
-                "status": "completed",
-                "digitizing_time_in_secs": 120,
-                "processing_time_in_secs": N/A,
-                "chunking_time_in_secs": N/A,
-                "indexing_time_in_secs": N/A,
-                "pages": 210,
-                "tables": 10
-            },
-            {
-                "id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
-                "name": "file2.pdf",
-                "type": "digitization",
-                "status": "in_progress",
-                "digitizing_time_in_secs": 0,
-                "processing_time_in_secs": N/A,
-                "chunking_time_in_secs": N/A,
-                "indexing_time_in_secs": N/A,
-                "pages": 0,
-                "tables": 0
-            }
-        ],
-        "error": ""
-    }
-] 
+{
+    "pagination": {
+        "total": 1,
+        "limit": 20,
+        "offset": 0
+    },
+    "data": [
+        {
+            "job_id": "stb34e21-9865-5d93-ccc2-8gcea2ea23456",
+            "operation": "digitization",
+            "status": "in_progress",
+            "submitted_at": "2026-01-10T10:00:00Z",
+            "total_pages": 343,
+            "total_tables": 57,
+            "documents": [
+                {
+                    "id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
+                    "name": "file1.pdf",
+                    "type": "digitization",
+                    "output_format": "md",
+                    "status": "completed",
+                    "digitized_at": "2026-01-10T10:02:00Z",
+                    "timing_in_secs": {
+                        "digitizing": 120,
+                        "processing": null,
+                        "chunking": null,
+                        "indexing": null
+                    },
+                    "pages": 210,
+                    "tables": 10
+                },
+                {
+                    "id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
+                    "name": "file2.pdf",
+                    "type": "digitization",
+                    "output_format": "text",
+                    "status": "in_progress",
+                    "digitized_at": null,
+                    "timing_in_secs": {
+                        "digitizing": 0,
+                        "processing": null,
+                        "chunking": null,
+                        "indexing": null
+                    },
+                    "pages": 0,
+                    "tables": 0
+                }
+            ],
+            "error": ""
+        }
+    ]
+}
 ```
 
 ---
@@ -238,11 +279,15 @@ After conversion, the document will be ingested via a structured processing pipe
             "id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
             "name": "file1.pdf",
             "type": "digitization",
+            "output_format": "md",
             "status": "completed",
-            "digitizing_time_in_secs": 120,
-            "processing_time_in_secs": N/A,
-            "chunking_time_in_secs": N/A,
-            "indexing_time_in_secs": N/A,
+            "digitized_at": "2026-01-10T10:02:00Z",
+            "timing_in_secs": {
+                "digitizing": 120,
+                "processing": null,
+                "chunking": null,
+                "indexing": null
+            },
             "pages": 210,
             "tables": 10
         },
@@ -250,11 +295,15 @@ After conversion, the document will be ingested via a structured processing pipe
             "id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
             "name": "file2.pdf",
             "type": "digitization",
+            "output_format": "md",
             "status": "in_progress",
-            "digitizing_time_in_secs": 0,
-            "processing_time_in_secs": N/A,
-            "chunking_time_in_secs": N/A,
-            "indexing_time_in_secs": N/A,
+            "digitized_at": null,
+            "timing_in_secs": {
+                "digitizing": 0,
+                "processing": null,
+                "chunking": null,
+                "indexing": null
+            },
             "pages": 0,
             "tables": 0
         }
@@ -270,7 +319,7 @@ After conversion, the document will be ingested via a structured processing pipe
 **Query Params:**
 - limit  - int - Optional. Number of records to return per page. Default: 20.
 - offset - int - Optional. Number of records to skip. Default: 0.
-- status - str - Optional. Filter based on status, possible values: accepted/in_progress/completed/failed
+- status - str - Optional. Filter based on status, possible values: accepted/in_progress/completed/failed.
 - name   - str - Optional. Filter based on document name.
 
 **Sample curl:**
@@ -288,47 +337,63 @@ After conversion, the document will be ingested via a structured processing pipe
 
 **Sample response:**
 ```
-[
-    {
-        "id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
-        "name": "file1.pdf",
-        "type": "digitization",
-        "submitted_at": "2026-01-10T10:00:00Z",
-        "status": "completed",
-        "digitizing_time_in_secs": 120,
-        "processing_time_in_secs": N/A,
-        "chunking_time_in_secs": N/A,
-        "indexing_time_in_secs": N/A,
-        "pages": 210,
-        "tables": 10
+{
+    "pagination": {
+        "total": 145,
+        "limit": 20,
+        "offset": 0
     },
-    {
-        "id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
-        "name": "file2.pdf",
-        "type": "digitization",
-        "submitted_at": "2026-01-10T10:00:00Z",
-        "status": "in_progress",
-        "digitizing_time_in_secs": 0,
-        "processing_time_in_secs": N/A,
-        "chunking_time_in_secs": N/A,
-        "indexing_time_in_secs": N/A,
-        "pages": 0,
-        "tables": 0
-    },
-    {
-        "id": "4365eifa-dd7e-8cd5-572e-5f950d96fa54",
-        "name": "file2.pdf",
-        "type": "ingestion",
-        "submitted_at": "2026-01-10T10:00:00Z",
-        "status": "completed",
-        "digitizing_time_in_secs": 120,
-        "processing_time_in_secs": 300,
-        "chunking_time_in_secs": 10,
-        "indexing_time_in_secs": N/A,
-        "pages": 200,
-        "tables": 20
-    }
-]
+    "data": [
+        {
+            "id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
+            "name": "file1.pdf",
+            "type": "digitization",
+            "output_format": "md",
+            "digitized_at": "2026-01-10T10:00:00Z",
+            "status": "completed",
+            "timing_in_secs": {
+                "digitizing": 120,
+                "processing": null,
+                "chunking": null,
+                "indexing": null
+            },
+            "pages": 210,
+            "tables": 10
+        },
+        {
+            "id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
+            "name": "file2.pdf",
+            "type": "digitization",
+            "output_format": "md",
+            "digitized_at": "2026-01-10T10:00:00Z",
+            "status": "in_progress",
+            "timing_in_secs": {
+                "digitizing": 0,
+                "processing": null,
+                "chunking": null,
+                "indexing": null
+            },
+            "pages": 0,
+            "tables": 0
+        },
+        {
+            "id": "4365eifa-dd7e-8cd5-572e-5f950d96fa54",
+            "name": "file2.pdf",
+            "type": "ingestion",
+            "output_format": "json",
+            "digitized_at": "2026-01-10T10:00:00Z",
+            "status": "completed",
+            "timing_in_secs": {
+                "digitizing": 120,
+                "processing": 300,
+                "chunking": 10,
+                "indexing": null
+            },
+            "pages": 200,
+            "tables": 20
+        }
+    ]
+}
 ```
 
 ---
@@ -346,7 +411,7 @@ After conversion, the document will be ingested via a structured processing pipe
 | Status Code | Description | Details |
 | :--- | :--- | :--- |
 | **200 OK** | Success | Returns metadata of the pdf's id requested. |
-| **400 Bad Request** | No Data | No ingested documents matching the id. |
+| **404 Not Found** | No Data | No ingested documents matching the id. |
 | **500 Internal Error** | Server Failure | Failure to query the Vector Database or access the local storage record. |
 
 **Sample response:**
@@ -355,12 +420,15 @@ After conversion, the document will be ingested via a structured processing pipe
     "id": "4365eifa-dd7e-8cd5-572e-5f950d96fa54",
     "name": "file2.pdf",
     "type": "ingestion",
-    "submitted_at": "2026-01-10T10:00:00Z",
+    "output_format": "json",
+    "digitized_at": "2026-01-10T10:00:00Z",
     "status": "completed",
-    "digitizing_time_in_secs": 120,
-    "processing_time_in_secs": 300,
-    "chunking_time_in_secs": 10,
-    "indexing_time_in_secs": N/A,
+    "timing_in_secs": {
+        "digitizing": 120,
+        "processing": 300,
+        "chunking": 10,
+        "indexing": null
+    },
     "pages": 200,
     "tables": 20
 }
@@ -369,7 +437,10 @@ After conversion, the document will be ingested via a structured processing pipe
 ---
 
 ### GET /v1/documents/{id}/content
-- Returns specific document's digitized content
+**Description:**
+- Returns the digitized content of the requested document. 
+- For documents submitted via `digitization`, this returns the format requested during POST (md/text/json).
+- For documents submitted via `ingestion`, this defaults to returning the extracted `json` representation of the document stored in the local cache.
 
 **Sample curl:**
 ```
@@ -383,7 +454,7 @@ After conversion, the document will be ingested via a structured processing pipe
 | :--- | :--- | :--- |
 | **200 OK** | Success | Returns digitized content of requested docuemnt. |
 | **202 Accepted** | Success | Digitization is in progress |
-| **400 Bad Request** | No Data | No documents matching the id. |
+| **404 Not Found** | No Data | No documents matching the id. |
 | **500 Internal Error** | Server Failure | Failure to query the Vector Database or access the local storage record. |
 
 **Sample response:**
@@ -416,7 +487,7 @@ After conversion, the document will be ingested via a structured processing pipe
 ---
 
 ### DELETE /v1/documents
-- Ensure there is active job.
+- Ensure there is no active job.
 - Equivalent to clean-db command, will clean up the vdb and remove the local cache.
 
 **Query Params:**
