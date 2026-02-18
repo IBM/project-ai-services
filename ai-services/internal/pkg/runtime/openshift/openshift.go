@@ -48,7 +48,7 @@ func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error)
 	}, nil
 }
 
-// getKubeConfig attempts to get openshift config from in-cluster or kubeconfig file.
+// GetKubeConfig attempts to get openshift config from in-cluster or kubeconfig file.
 func GetKubeConfig() (*rest.Config, error) {
 	// Try in-cluster config first
 	config, err := rest.InClusterConfig()
