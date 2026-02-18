@@ -6,42 +6,25 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	validatorsOpenshift "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift"
 )
 
 const (
-	spyreTimeout = 5 * time.Minute
+	spyreTimeout = 10 * time.Minute
 )
 
-type OCPBootstrap struct {
-	Helper *OCPHelper
-}
+// OCPBootstrap implements the Bootstrap interface for OpenShift.
+type OCPBootstrap struct{}
 
 func NewOCPBootstrap() (*OCPBootstrap, error) {
-	return &OCPBootstrap{Helper: nil}, nil
+	return &OCPBootstrap{}, nil
 }
 
-func (o *OCPBootstrap) getHelper() (*OCPHelper, error) {
-	if o.Helper == nil {
-		helper, err := NewOCPHelper()
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize OpenShift helper: %w", err)
-		}
-
-		o.Helper = helper
-	}
-
-	return o.Helper, nil
-}
-
-// Validate only Spyre Cluster Policy for now.
+// Validate validates OpenShift environment, specifically Spyre Cluster Policy.
 func (o *OCPBootstrap) Validate(skip map[string]bool) error {
-	_, err := o.getHelper()
-	if err != nil {
-		return err
-	}
-
 	ctx := context.Background()
 	var validationErrors []error
 
@@ -52,7 +35,9 @@ func (o *OCPBootstrap) Validate(skip map[string]bool) error {
 	}{
 		{
 			"Spyre Cluster Policy is ready",
-			o.validateSpyrePolicy,
+			func(ctx context.Context) error {
+				return validatorsOpenshift.ValidateSpyreClusterPolicy(ctx, spyreTimeout)
+			},
 			"Spyre cluster policy must be in ready state. Run 'oc get spyreclusterpolicy' to check status.",
 		},
 	}
@@ -84,18 +69,12 @@ func (o *OCPBootstrap) Validate(skip map[string]bool) error {
 	return nil
 }
 
-func (o *OCPBootstrap) validateSpyrePolicy(ctx context.Context) error {
-	return o.Helper.WaitForSpyreClusterPolicyReady(
-		ctx,
-		"spyreclusterpolicy",
-		spyreTimeout,
-	)
-}
-
+// Type returns the runtime type.
 func (o *OCPBootstrap) Type() types.RuntimeType {
 	return types.RuntimeTypeOpenShift
 }
 
+// Configure is a no-op for OpenShift as it's pre-configured.
 func (o *OCPBootstrap) Configure() error {
 	logger.Infoln("OpenShift environment is pre-configured. Skipping configuration.")
 

@@ -2,18 +2,15 @@ package openshift
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"time"
 
+	kubeconfig "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 const (
@@ -26,7 +23,7 @@ type OCPHelper struct {
 }
 
 func NewOCPHelper() (*OCPHelper, error) {
-	cfg, err := getKubeConfig()
+	cfg, err := kubeconfig.GetKubeConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -49,6 +46,7 @@ func NewOCPHelper() (*OCPHelper, error) {
 
 /* -------- SpyreClusterPolicy -------- */
 
+// WaitForSpyreClusterPolicyReady waits until the Spyre Cluster Policy is in ready state or timeout occurs.
 func (h *OCPHelper) WaitForSpyreClusterPolicyReady(
 	ctx context.Context,
 	name string,
@@ -80,17 +78,4 @@ func (h *OCPHelper) WaitForSpyreClusterPolicyReady(
 			return found && state == "ready", nil
 		},
 	)
-}
-
-func getKubeConfig() (*rest.Config, error) {
-	if cfg, err := rest.InClusterConfig(); err == nil {
-		return cfg, nil
-	}
-
-	kubeconfig := os.Getenv("KUBECONFIG")
-	if kubeconfig == "" {
-		kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
-	}
-
-	return clientcmd.BuildConfigFromFlags("", kubeconfig)
 }
