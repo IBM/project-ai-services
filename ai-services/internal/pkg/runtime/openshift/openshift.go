@@ -130,7 +130,7 @@ func (kc *OpenshiftClient) DeletePod(id string, force *bool) error {
 
 // InspectPod inspects a pod and returns detailed information.
 func (kc *OpenshiftClient) InspectPod(nameOrID string) (*types.Pod, error) {
-	podName, err := GetPodNameWithPrefix(kc, nameOrID)
+	podName, err := getPodNameWithPrefix(kc, nameOrID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect the pod: %w", err)
 	}
@@ -146,7 +146,7 @@ func (kc *OpenshiftClient) InspectPod(nameOrID string) (*types.Pod, error) {
 // PodExists checks if a pod exists.
 func (kc *OpenshiftClient) PodExists(nameOrID string) (bool, error) {
 	// Since OpenShift pod names have a random string added to it we cannot use Get() here.
-	_, err := GetPodNameWithPrefix(kc, nameOrID)
+	_, err := getPodNameWithPrefix(kc, nameOrID)
 	if err != nil {
 		return false, fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -229,7 +229,7 @@ func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
 func (kc *OpenshiftClient) GetRoute(nameOrID string) (*types.Route, error) {
 	r, err := kc.routeClient.RouteV1().Routes(kc.namespace).Get(kc.ctx, nameOrID, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("cannot find route: %s", nameOrID)
+		return nil, fmt.Errorf("cannot find route: %w", err)
 	}
 
 	return toOpenShiftRoute(r), nil
@@ -240,7 +240,7 @@ func (kc *OpenshiftClient) Type() types.RuntimeType {
 	return types.RuntimeTypeOpenShift
 }
 
-func GetPodNameWithPrefix(kc *OpenshiftClient, nameOrID string) (string, error) {
+func getPodNameWithPrefix(kc *OpenshiftClient, nameOrID string) (string, error) {
 	podName := ""
 	pods, err := kc.ListPods(nil)
 	if err != nil {

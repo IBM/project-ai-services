@@ -3,7 +3,7 @@ package openshift
 import (
 	"time"
 
-	v1 "github.com/openshift/api/route/v1"
+	routev1 "github.com/openshift/api/route/v1"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -89,7 +89,7 @@ func toOpenShiftContainer(cs *corev1.ContainerStatus, pod *corev1.Pod) *types.Co
 	return container
 }
 
-func toOpenShiftRoute(r *v1.Route) *types.Route {
+func toOpenShiftRoute(r *routev1.Route) *types.Route {
 	return &types.Route{
 		Name:       r.Name,
 		HostPort:   r.Spec.Host,
