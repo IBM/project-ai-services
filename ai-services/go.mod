@@ -9,6 +9,8 @@ require (
 	github.com/containers/podman/v5 v5.6.2
 	github.com/onsi/ginkgo/v2 v2.27.2
 	github.com/onsi/gomega v1.38.2
+	github.com/openshift/api v0.0.0-20260213123447-0246c0ac1a77
+	github.com/openshift/client-go v0.0.0-20260213141500-06efc6dce93b
 	github.com/spf13/cobra v1.10.2
 	github.com/yarlson/pin v0.9.1
 	go.yaml.in/yaml/v3 v3.0.4

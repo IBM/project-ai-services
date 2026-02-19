@@ -22,10 +22,13 @@ type Runtime interface {
 	PodLogs(nameOrID string) error
 
 	// Container operations
-	ListContainers(filters map[string][]string) ([]types.Container, error)
+	// ListContainers(filters map[string][]string) ([]types.Container, error)
 	InspectContainer(nameOrId string) (*types.Container, error)
 	ContainerExists(nameOrID string) (bool, error)
 	ContainerLogs(containerNameOrID string) error
+
+	// Network operations
+	GetRoute(nameOrID string) (*types.Route, error)
 
 	// Runtime type identification
 	Type() types.RuntimeType

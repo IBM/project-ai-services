@@ -1,8 +1,6 @@
 package podman
 
 import (
-	"strings"
-
 	"github.com/containers/podman/v5/libpod/define"
 	podmanTypes "github.com/containers/podman/v5/pkg/domain/entities/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -73,18 +71,18 @@ func toPodContainerList(input any) []types.Container {
 }
 
 // toContainerList - convert podman containers to desired type.
-func toContainerList(input []podmanTypes.ListContainer) []types.Container {
-	out := make([]types.Container, 0, len(input))
-	for _, r := range input {
-		out = append(out, types.Container{
-			ID:     r.ID,
-			Name:   strings.Join(r.Names, ","),
-			Status: r.Status,
-		})
-	}
+// func toContainerList(input []podmanTypes.ListContainer) []types.Container {
+// 	out := make([]types.Container, 0, len(input))
+// 	for _, r := range input {
+// 		out = append(out, types.Container{
+// 			ID:     r.ID,
+// 			Name:   strings.Join(r.Names, ","),
+// 			Status: r.Status,
+// 		})
+// 	}
 
-	return out
-}
+// 	return out
+// }
 
 // toImageList - convert podman image type to desired type.
 func toImageList(input []*podmanTypes.ImageSummary) []types.Image {
