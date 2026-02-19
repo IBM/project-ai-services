@@ -40,6 +40,8 @@ func (h *Helm) Install(release string, chart chart.Charter, values map[string]in
 	installClient.ReleaseName = release
 	installClient.Namespace = h.namespace
 	installClient.CreateNamespace = true
+	//nolint:godox
+	// TODO: Replace the WaitStrategy to watcher and also add timeout
 	installClient.WaitStrategy = "hookOnly"
 
 	// Perform helm install
@@ -56,6 +58,8 @@ func (h *Helm) Upgrade(release string, chart chart.Charter, values map[string]in
 	upgradeClient := action.NewUpgrade(h.actionConfig)
 	upgradeClient.Namespace = h.namespace
 	upgradeClient.ServerSideApply = "true"
+	//nolint:godox
+	// TODO: Replace the WaitStrategy to watcher and also add timeout
 	upgradeClient.WaitStrategy = "hookOnly"
 
 	// Perform helm upgrade

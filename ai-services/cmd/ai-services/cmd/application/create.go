@@ -89,8 +89,14 @@ var createCmd = &cobra.Command{
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		if err := doBootstrapValidate(); err != nil {
-			return err
+		//nolint:godox
+		// TODO: Integrate Bootstrap validate for Openshift in create flow once ready. For now skipping it for Openshift runtime.
+		if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypeOpenShift {
+			return nil
+		} else {
+			if err := doBootstrapValidate(); err != nil {
+				return err
+			}
 		}
 
 		// Create application instance using factory
@@ -115,12 +121,6 @@ var createCmd = &cobra.Command{
 }
 
 func doBootstrapValidate() error {
-	//nolint:godox
-	// TODO: Integrate Bootstrap validate for Openshift in create flow once ready. For now skipping it for Openshift runtime.
-	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypeOpenShift {
-		return nil
-	}
-
 	skip := helpers.ParseSkipChecks(skipChecks)
 	if len(skip) > 0 {
 		logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
