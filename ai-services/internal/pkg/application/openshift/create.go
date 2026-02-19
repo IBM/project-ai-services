@@ -9,11 +9,11 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-// Create deploys a new application based on a template.
-func (o *OpenshiftApplication) Create(_ context.Context, opts types.CreateOptions) error {
+func (o *OpenshiftApplication) Create(ctx context.Context, opts types.CreateOptions) error {
 	// fetch app, namespace and timeout from opts
 	app := opts.Name
 	namespace := app
@@ -21,6 +21,8 @@ func (o *OpenshiftApplication) Create(_ context.Context, opts types.CreateOption
 
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{Runtime: vars.RuntimeFactory.GetRuntimeType()})
 
+	s := spinner.New("Setting the operation timeout...")
+	s.Start(ctx)
 	// populate the operation timeout
 	if timeout == 0 {
 		// load metadata.yml to read the app metadata
@@ -36,13 +38,19 @@ func (o *OpenshiftApplication) Create(_ context.Context, opts types.CreateOption
 			}
 		}
 	}
+	s.Stop("Successfully set the operation timeout: " + timeout.String())
 
 	// Load the Chart from assets
+	s = spinner.New("Loading the Chart '" + opts.TemplateName + "'...")
+	s.Start(ctx)
 	chart, err := tp.LoadChart(opts.TemplateName)
 	if err != nil {
 		return fmt.Errorf("failed to load chart: %w", err)
 	}
+	s.Stop("Loaded the Chart '" + opts.TemplateName + "' successfully")
 
+	s = spinner.New("Deploying application '" + app + "'...")
+	s.Start(ctx)
 	// create a new Helm client
 	helmClient, err := helm.NewHelm(namespace)
 	if err != nil {
@@ -57,9 +65,11 @@ func (o *OpenshiftApplication) Create(_ context.Context, opts types.CreateOption
 
 	if !isAppExist {
 		// if App does not exist then perform install
+		logger.Infof("App: %s does not exist, proceeding with install...")
 		err = helmClient.Install(app, chart, &helm.InstallOpts{Timeout: timeout})
 	} else {
 		// if App exists, perform upgrade
+		logger.Infof("App: %s already exist, proceeding with reconciling...")
 		err = helmClient.Upgrade(app, chart, &helm.UpgradeOpts{Timeout: timeout})
 	}
 
@@ -67,7 +77,7 @@ func (o *OpenshiftApplication) Create(_ context.Context, opts types.CreateOption
 		return fmt.Errorf("failed to perform app installation: %w", err)
 	}
 
-	logger.Infof("Successfully deployed the App: %s", app)
+	s.Stop("Application '" + opts.Name + "' deployed successfully")
 
 	return nil
 }
