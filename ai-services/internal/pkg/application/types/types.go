@@ -1,19 +1,29 @@
 package types
 
-import "github.com/project-ai-services/ai-services/internal/pkg/image"
+import (
+	"time"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/image"
+)
 
 // CreateOptions contains parameters for creating an application.
 type CreateOptions struct {
-	Name              string
-	TemplateName      string
+	// Common
+	Name         string
+	TemplateName string
+	SkipChecks   []string
+	ArgParams    map[string]string
+
+	// Podman
 	SkipModelDownload bool
 	SkipImageDownload bool
-	SkipChecks        []string
-	ArgParams         map[string]string
 	ValuesFiles       []string
 	Values            map[string]any
 	ImagePullPolicy   image.ImagePullPolicy
 	AutoYes           bool
+
+	// Openshift
+	Timeout time.Duration
 }
 
 // DeleteOptions contains parameters for deleting an application.
