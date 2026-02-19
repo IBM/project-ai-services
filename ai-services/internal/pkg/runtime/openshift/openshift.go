@@ -31,7 +31,7 @@ func NewOpenshiftClient() (*OpenshiftClient, error) {
 
 // NewOpenshiftClientWithNamespace creates a OpenshiftClient with a specific namespace.
 func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error) {
-	config, err := getKubeConfig()
+	config, err := GetKubeConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get openshift config: %w", err)
 	}
@@ -48,8 +48,8 @@ func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error)
 	}, nil
 }
 
-// getKubeConfig attempts to get openshift config from in-cluster or kubeconfig file.
-func getKubeConfig() (*rest.Config, error) {
+// GetKubeConfig attempts to get openshift config from in-cluster or kubeconfig file.
+func GetKubeConfig() (*rest.Config, error) {
 	// Try in-cluster config first
 	config, err := rest.InClusterConfig()
 	if err == nil {
