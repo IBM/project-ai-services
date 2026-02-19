@@ -1,15 +1,727 @@
 package podman
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os/exec"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"text/template"
+	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/specs"
+	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/validators"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+)
+
+var (
+	extraContainerReadinessTimeout = 5 * time.Minute
+	containerCreationTimeout       = 10 * time.Minute
+	envMutex                       sync.Mutex
 )
 
 // Create deploys a new application based on a template.
 func (p *PodmanApplication) Create(ctx context.Context, opts types.CreateOptions) error {
-	logger.Warningln("yet to implement")
+	// Proceed to create application
+	logger.Infof("Creating application '%s' using template '%s'\n", opts.Name, opts.TemplateName)
+
+	// set SMT level to target value
+	s := spinner.New("Checking SMT level")
+	s.Start(ctx)
+	err := p.setSMTLevel(opts.TemplateName)
+	if err != nil {
+		s.Fail("failed to set SMT level")
+
+		return fmt.Errorf("failed to set SMT level: %w", err)
+	}
+	s.Stop("SMT level configured successfully")
+
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+
+	// validate whether the provided template name is correct
+	if err := validators.ValidateAppTemplateExist(tp, opts.TemplateName); err != nil {
+		return err
+	}
+
+	tmpls, err := tp.LoadAllTemplates(opts.TemplateName)
+	if err != nil {
+		return fmt.Errorf("failed to parse the templates: %w", err)
+	}
+
+	// load metadata.yml to read the app metadata
+	appMetadata, err := tp.LoadMetadata(opts.TemplateName, true)
+	if err != nil {
+		return fmt.Errorf("failed to read the app metadata: %w", err)
+	}
+
+	if err := p.verifyPodTemplateExists(tmpls, appMetadata); err != nil {
+		return fmt.Errorf("failed to verify pod template: %w", err)
+	}
+
+	// Check if pods already exists with the given application name
+	existingPods, err := helpers.CheckExistingPodsForApplication(p.runtime, opts.Name)
+	if err != nil {
+		return fmt.Errorf("failed while checking existing pods for application: %w", err)
+	}
+
+	// if all the pods for given application are already deployed, just log and do not proceed further
+	if len(existingPods) == len(tmpls) {
+		logger.Infof("Pods for given app: %s are already deployed. Please use 'ai-services application ps %s' to see the pods deployed\n", opts.Name, opts.Name)
+
+		return nil
+	}
+
+	// ---- Validate Spyre card Requirements ----
+	pciAddresses, err := p.validateAndAllocateSpyreCards(opts.TemplateName, opts.Name, tmpls)
+	if err != nil {
+		return err
+	}
+
+	if err := p.prepareApplicationArtifacts(ctx, opts); err != nil {
+		return err
+	}
+
+	// Loop through all pod templates, render and run kube play
+	logger.Infof("Total Pod Templates to be processed: %d\n", len(tmpls))
+
+	return p.deployApplication(ctx, opts, tmpls, appMetadata, pciAddresses)
+}
+
+func (p *PodmanApplication) validateAndAllocateSpyreCards(templateName, appName string, tmpls map[string]*template.Template) ([]string, error) {
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+
+	reqSpyreCardsCount, err := p.calculateReqSpyreCards(tp, utils.ExtractMapKeys(tmpls), templateName, appName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculateReqSpyreCards: %w", err)
+	}
+
+	if reqSpyreCardsCount == 0 {
+		return nil, nil
+	}
+
+	// calculate the actual available spyre cards
+	pciAddresses, err := helpers.FindFreeSpyreCards()
+	if err != nil {
+		return nil, fmt.Errorf("failed to find free Spyre Cards: %w", err)
+	}
+
+	actualSpyreCardsCount := len(pciAddresses)
+
+	// validate spyre card requirements
+	if err := p.validateSpyreCardRequirements(reqSpyreCardsCount, actualSpyreCardsCount); err != nil {
+		return nil, err
+	}
+
+	return pciAddresses, nil
+}
+
+func (p *PodmanApplication) prepareApplicationArtifacts(ctx context.Context, opts types.CreateOptions) error {
+	// Download Container Images
+	if err := p.downloadImagesForTemplate(opts.TemplateName, opts.Name, opts.ImagePullPolicy); err != nil {
+		return err
+	}
+
+	// Download models if flag is set to true(default: true)
+	if !opts.SkipModelDownload {
+		if err := p.downloadModels(ctx, opts.TemplateName, opts.Name); err != nil {
+			return err
+		}
+	}
 
 	return nil
+}
+
+func (p *PodmanApplication) deployApplication(ctx context.Context, opts types.CreateOptions, tmpls map[string]*template.Template, appMetadata *templates.AppMetadata, pciAddresses []string) error {
+	logger.Infof("Total Pod Templates to be processed: %d\n", len(tmpls))
+
+	s := spinner.New("Deploying application '" + opts.Name + "'...")
+	s.Start(ctx)
+
+	existingPods, err := helpers.CheckExistingPodsForApplication(p.runtime, opts.Name)
+	if err != nil {
+		return fmt.Errorf("failed while checking existing pods for application: %w", err)
+	}
+
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+
+	// execute the pod Templates
+	if err := p.executePodTemplates(tp, opts.Name, appMetadata, tmpls, pciAddresses, existingPods, opts.ValuesFiles, opts.ArgParams); err != nil {
+		return err
+	}
+
+	s.Stop("Application '" + opts.Name + "' deployed successfully")
+
+	logger.Infoln("-------")
+
+	// print the next steps to be performed at the end of create
+	if err := helpers.PrintNextSteps(p.runtime, opts.Name, opts.TemplateName); err != nil {
+		// do not want to fail the overall create if we cannot print next steps
+		logger.Infof("failed to display next steps: %v\n", err)
+
+		return nil //nolint:nilerr // intentionally swallow error for non-critical step
+	}
+
+	return nil
+}
+
+func (p *PodmanApplication) downloadModels(ctx context.Context, templateName, appName string) error {
+	s := spinner.New("Downloading models as part of application creation...")
+	s.Start(ctx)
+
+	models, err := helpers.ListModels(templateName, appName)
+	if err != nil {
+		s.Fail("failed to list models")
+
+		return err
+	}
+
+	logger.Infoln("Downloading models required for application template " + templateName + ":")
+
+	for _, model := range models {
+		s.UpdateMessage("Downloading model: " + model + "...")
+		err = utils.Retry(vars.RetryCount, vars.RetryInterval, nil, func() error {
+			return helpers.DownloadModel(model, vars.ModelDirectory)
+		})
+		if err != nil {
+			s.Fail("failed to download model: " + model)
+
+			return fmt.Errorf("failed to download model: %w", err)
+		}
+	}
+
+	s.Stop("Model download completed.")
+
+	return nil
+}
+
+func (p *PodmanApplication) setSMTLevel(templateName string) error {
+	// 1. Fetch Current SMT level
+	cmd := exec.Command("ppc64_cpu", "--smt")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to check current SMT level: %v, output: %s", err, string(out))
+	}
+
+	currentSMTlevel, err := p.getSMTLevel(string(out))
+	if err != nil {
+		return fmt.Errorf("failed to get current SMT level: %w", err)
+	}
+
+	// 2. Fetch the target SMT level
+	targetSMTLevel, err := p.getTargetSMTLevel(templateName)
+	if err != nil {
+		return fmt.Errorf("failed to get target SMT level: %w", err)
+	}
+
+	if targetSMTLevel == nil {
+		// No SMT level specified in metadata.yaml
+		logger.Infof("No SMT level specified in metadata.yaml. Keeping it to current level: %d\n", currentSMTlevel)
+
+		return nil
+	}
+
+	// 3. Check if SMT level is already set to target value
+	if currentSMTlevel == *targetSMTLevel {
+		// already set
+		logger.Infof("SMT level is already set to %d\n", *targetSMTLevel)
+
+		return nil
+	}
+
+	// 4. Set SMT level to target value
+	arg := "--smt=" + strconv.Itoa(*targetSMTLevel)
+	cmd = exec.Command("ppc64_cpu", arg)
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to set SMT level: %v, output: %s", err, string(out))
+	}
+
+	// 5. Verify again
+	cmd = exec.Command("ppc64_cpu", "--smt")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to verify SMT level: %v, output: %s", err, string(out))
+	}
+
+	currentSMTlevel, err = p.getSMTLevel(string(out))
+	if err != nil {
+		return fmt.Errorf("failed to get SMT level after updating: %w", err)
+	}
+
+	if currentSMTlevel != *targetSMTLevel {
+		return fmt.Errorf("SMT level verification failed: expected %d, got %d", targetSMTLevel, currentSMTlevel)
+	}
+
+	return nil
+}
+
+func (p *PodmanApplication) getSMTLevel(output string) (int, error) {
+	out := strings.TrimSpace(output)
+
+	if !strings.HasPrefix(out, "SMT=") {
+		return 0, fmt.Errorf("unexpected output: %s", out)
+	}
+
+	SMTLevelStr := strings.TrimPrefix(out, "SMT=")
+	SMTlevel, err := strconv.Atoi(SMTLevelStr)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse SMT level: %w", err)
+	}
+
+	return SMTlevel, nil
+}
+
+func (p *PodmanApplication) getTargetSMTLevel(templateName string) (*int, error) {
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+
+	// validate whether the provided template name is correct
+	if err := validators.ValidateAppTemplateExist(tp, templateName); err != nil {
+		return nil, err
+	}
+
+	// load metadata.yml to read the app metadata
+	appMetadata, err := tp.LoadMetadata(templateName, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the app metadata: %w", err)
+	}
+
+	return appMetadata.SMTLevel, nil
+}
+
+func (p *PodmanApplication) verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *templates.AppMetadata) error {
+	flattenPodTemplateExecutions := utils.FlattenArray(appMetadata.PodTemplateExecutions)
+
+	if len(flattenPodTemplateExecutions) != len(tmpls) {
+		return errors.New("number of values specified in podTemplateExecutions under metadata.yml is mismatched. Please ensure all the pod template file names are specified")
+	}
+
+	// Make sure the podTemplateExecution mentioned in metadata.yaml is valid (corresponding pod template is present)
+	for _, podTemplate := range flattenPodTemplateExecutions {
+		if _, ok := tmpls[podTemplate]; !ok {
+			return fmt.Errorf("value: %s specified in podTemplateExecutions under metadata.yml is invalid. Please ensure corresponding template file exists", podTemplate)
+		}
+	}
+
+	return nil
+}
+
+func (p *PodmanApplication) validateSpyreCardRequirements(req int, actual int) error {
+	if actual < req {
+		return fmt.Errorf("insufficient spyre cards. Require: %d spyre cards to proceed", req)
+	}
+
+	return nil
+}
+
+func (p *PodmanApplication) calculateReqSpyreCards(tp templates.Template, podTemplateFileNames []string, appTemplateName, appName string) (int, error) {
+	totalReqSpyreCounts := 0
+
+	// Calculate Req Spyre Counts
+	for _, podTemplateFileName := range podTemplateFileNames {
+		// fetch pod spec
+		podSpec, err := p.fetchPodSpec(tp, appTemplateName, podTemplateFileName, appName, nil, nil)
+		if err != nil {
+			return totalReqSpyreCounts, fmt.Errorf("failed to load pod Template: '%s' for appTemplate: '%s' with error: %w", podTemplateFileName, appTemplateName, err)
+		}
+
+		// check if pod already exists and skip counting if it does exists
+		exists, err := p.runtime.PodExists(podSpec.Name)
+		if err != nil {
+			return totalReqSpyreCounts, fmt.Errorf("failed to check pod status: %w", err)
+		}
+
+		if exists {
+			logger.Infof("Pod %s already exists, skipping spyre cards calculation", podSpec.Name, logger.VerbosityLevelDebug)
+
+			continue
+		}
+
+		// fetch the spyreCount for all containers from the annotations
+		spyreCount, _, err := p.fetchSpyreCardsFromPodAnnotations(podSpec.Annotations)
+		if err != nil {
+			return totalReqSpyreCounts, err
+		}
+
+		totalReqSpyreCounts += spyreCount
+	}
+
+	return totalReqSpyreCounts, nil
+}
+
+func (p *PodmanApplication) fetchPodSpec(tp templates.Template, appTemplateName, podTemplateFileName, appName string, valuesFiles []string, argParams map[string]string) (*models.PodSpec, error) {
+	podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, podTemplateFileName, appName, valuesFiles, argParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load pod Template: '%s' for appTemplate: '%s' with error: %w", podTemplateFileName, appTemplateName, err)
+	}
+
+	return podSpec, nil
+}
+
+func (p *PodmanApplication) fetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[string]int, error) {
+	var spyreCards int
+	// spyreCardContainerMap: Key -> containerName, Value -> SpyreCardCounts
+	spyreCardContainerMap := map[string]int{}
+
+	isSpyreCardAnnotation := func(annotation string) (string, bool) {
+		matches := vars.SpyreCardAnnotationRegex.FindStringSubmatch(annotation)
+		if matches == nil {
+			return "", false
+		}
+
+		return matches[1], true
+	}
+
+	for annotationKey, val := range annotations {
+		if containerName, ok := isSpyreCardAnnotation(annotationKey); ok {
+			valInt, err := strconv.Atoi(val)
+			if err != nil {
+				return 0, spyreCardContainerMap, fmt.Errorf("failed to convert to int. Provided val: %s is not of int type", val)
+			}
+			// Replace with container name
+			spyreCardContainerMap[containerName] = valInt
+			spyreCards += valInt
+		}
+	}
+
+	return spyreCards, spyreCardContainerMap, nil
+}
+
+func (p *PodmanApplication) downloadImagesForTemplate(templateName, appName string, imagePullPolicy image.ImagePullPolicy) error {
+	// create a new imagePull object based on imagePullPolicy
+	imagePull := image.NewImagePull(p.runtime, imagePullPolicy, appName, templateName)
+
+	// based on the imagePullPolicy set, download the images
+	return imagePull.Run()
+}
+
+func (p *PodmanApplication) executePodTemplates(tp templates.Template,
+	appName string, appMetadata *templates.AppMetadata,
+	tmpls map[string]*template.Template, pciAddresses []string, existingPods []string,
+	valuesFiles []string, argParams map[string]string) error {
+	// Load values for template rendering
+	values, err := tp.LoadValues(appMetadata.Name, valuesFiles, argParams)
+	if err != nil {
+		return fmt.Errorf("failed to load params for application: %w", err)
+	}
+
+	globalParams := map[string]any{
+		"AppName":         appName,
+		"AppTemplateName": appMetadata.Name,
+		"Version":         appMetadata.Version,
+		"Values":          values,
+		// Key -> container name
+		// Value -> range of key-value env pairs
+		"env": map[string]map[string]string{},
+	}
+
+	// looping over each layer of podTemplateExecutions
+	for i, layer := range appMetadata.PodTemplateExecutions {
+		logger.Infof("\n Executing Layer %d/%d: %v\n", i+1, len(appMetadata.PodTemplateExecutions), layer)
+		logger.Infoln("-------")
+		var wg sync.WaitGroup
+		errCh := make(chan error, len(layer))
+
+		// for each layer, fetch all the pod Template Names and do the pod deploy
+		for _, podTemplateName := range layer {
+			wg.Add(1)
+			go func(t string) {
+				defer wg.Done()
+				if err := p.executePodTemplateLayer(tp, tmpls, globalParams, pciAddresses, existingPods, podTemplateName, appName, valuesFiles, argParams); err != nil {
+					errCh <- err
+				}
+			}(podTemplateName)
+		}
+
+		wg.Wait()
+		close(errCh)
+
+		// collect all errors for this layer
+		var errs []error
+		for e := range errCh {
+			errs = append(errs, fmt.Errorf("layer %d: %w", i+1, e))
+		}
+
+		// If an error exist for a given layer, then return (do not process further layers)
+		if len(errs) > 0 {
+			return errors.Join(errs...)
+		}
+
+		logger.Infof("Layer %d completed\n", i+1)
+	}
+
+	return nil
+}
+
+func (p *PodmanApplication) executePodTemplateLayer(tp templates.Template, tmpls map[string]*template.Template,
+	globalParams map[string]any, pciAddresses []string, existingPods []string, podTemplateName, appName string,
+	valuesFiles []string, argParams map[string]string) error {
+	logger.Infof("'%s': Processing template...\n", podTemplateName)
+
+	// Shallow Copy globalParams Map
+	params := utils.CopyMap(globalParams)
+
+	// fetch pod Spec
+	podSpec, err := p.fetchPodSpec(tp, globalParams["AppTemplateName"].(string), podTemplateName, appName, valuesFiles, argParams)
+	if err != nil {
+		return err
+	}
+
+	if slices.Contains(existingPods, podSpec.Name) {
+		logger.Infof("%s: Skipping pod deploy as '%s' it already exists", podTemplateName, podSpec.Name)
+
+		return nil
+	}
+
+	// fetch annotations from pod Spec
+	podAnnotations := p.fetchPodAnnotations(podSpec)
+
+	// get the env params for a given pod
+	env, err := p.returnEnvParamsForPod(podSpec, podAnnotations, &pciAddresses)
+	if err != nil {
+		return fmt.Errorf("'%s': Failed to fetch env params: %w", podTemplateName, err)
+	}
+	params["env"] = env
+
+	podTemplate := tmpls[podTemplateName]
+
+	var rendered bytes.Buffer
+	if err := podTemplate.Execute(&rendered, params); err != nil {
+		return fmt.Errorf("'%s': Failed to parse pod template: %w", podTemplateName, err)
+	}
+
+	// Wrap the bytes in a bytes.Reader
+	reader := bytes.NewReader(rendered.Bytes())
+
+	// Deploy the Pod and do Readiness check
+	if err := p.deployPodAndReadinessCheck(podSpec, podTemplateName, reader, p.constructPodDeployOptions(podAnnotations)); err != nil {
+		return fmt.Errorf("'%s': Failed to deploy pod and do readiness check: %w", podTemplateName, err)
+	}
+
+	return nil
+}
+
+func (p *PodmanApplication) fetchPodAnnotations(podSpec *models.PodSpec) map[string]string {
+	return specs.FetchPodAnnotations(*podSpec)
+}
+
+func (p *PodmanApplication) returnEnvParamsForPod(podSpec *models.PodSpec, podAnnotations map[string]string, pciAddresses *[]string) (map[string]map[string]string, error) {
+	env := map[string]map[string]string{}
+	podContainerNames := specs.FetchContainerNames(*podSpec)
+
+	// populate env with empty map
+	for _, containerName := range podContainerNames {
+		env[containerName] = map[string]string{}
+	}
+
+	// fetch the spyre cards and spyre card count required for each container in a pod
+	spyreCards, spyreCardContainerMap, err := p.fetchSpyreCardsFromPodAnnotations(podAnnotations)
+	if err != nil {
+		return env, err
+	}
+
+	if spyreCards == 0 {
+		// The pod doesn't require any spyre cards. // populate the given container with empty map
+		return env, nil
+	}
+
+	// Construct env for a given pod
+	// Since this is a critical section as both requires pciAddresses and modifies -> wrap it in mutex
+	envMutex.Lock()
+	for container, spyreCount := range spyreCardContainerMap {
+		if spyreCount != 0 {
+			env[container] = map[string]string{string(constants.PCIAddressKey): utils.JoinAndRemove(pciAddresses, spyreCount, " ")}
+		}
+	}
+	envMutex.Unlock()
+
+	return env, nil
+}
+
+func (p *PodmanApplication) deployPodAndReadinessCheck(podSpec *models.PodSpec,
+	podTemplateName string, body io.Reader, opts map[string]string) error {
+	pods, err := podman.RunPodmanKubePlay(body, opts)
+	if err != nil {
+		return fmt.Errorf("failed pod creation: %w", err)
+	}
+
+	logger.Infof("'%s': Successfully ran podman kube play\n", podTemplateName, logger.VerbosityLevelDebug)
+
+	// ---- Pod Readiness Checks ----
+	for _, pod := range pods {
+		pInfo, err := p.runtime.InspectPod(pod.ID)
+		if err != nil {
+			return fmt.Errorf("failed to do pod inspect for podID: '%s' with error: %w", pod.ID, err)
+		}
+
+		podName := pInfo.Name
+
+		logger.Infof("'%s', '%s': Starting Pod Readiness check...\n", podTemplateName, podName)
+
+		// Step1: ---- Containers Creation Check ----
+		if err := p.doContainersCreationCheck(podSpec, podTemplateName, pInfo.Name, pInfo.ID); err != nil {
+			return err
+		}
+
+		// Step2: ---- Containers Readiness Check ----
+		for _, container := range pInfo.Containers {
+			if err := p.doContainerReadinessCheck(podTemplateName, pInfo.Name, container.ID); err != nil {
+				return err
+			}
+			logger.Infoln("-------")
+		}
+		logger.Infof("'%s', '%s': Pod has been successfully deployed and ready!\n", podTemplateName, podName)
+		logger.Infoln("-------")
+	}
+
+	logger.Infoln("-------\n-------")
+
+	return nil
+}
+
+func (p *PodmanApplication) doContainersCreationCheck(podSpec *models.PodSpec, podTemplateName, podName, podID string) error {
+	logger.Infof("'%s', '%s': Performing Containers Creation check for pod...\n", podTemplateName, podName)
+
+	expectedContainerCount := len(specs.FetchContainerNames(*podSpec))
+
+	logger.Infof("'%s', '%s': Waiting for Containers Creation... Timeout set: %s\n", podTemplateName, podName, containerCreationTimeout)
+	// wait for all containers for a given pod are created
+	if err := helpers.WaitForContainersCreation(p.runtime, podID, expectedContainerCount, containerCreationTimeout); err != nil {
+		return fmt.Errorf("containers creation check failed for pod: '%s' with error: %w", podName, err)
+	}
+
+	logger.Infof("'%s', '%s': Containers creation check for pod is completed\n", podTemplateName, podName)
+
+	return nil
+}
+
+func (p *PodmanApplication) doContainerReadinessCheck(podTemplateName, podName, containerID string) error {
+	cInfo, err := p.runtime.InspectContainer(containerID)
+	if err != nil {
+		return fmt.Errorf("failed to do container inspect for containerID: '%s' with error: %w", containerID, err)
+	}
+
+	logger.Infof("'%s', '%s', '%s': Performing Container Readiness check...\n", podTemplateName, podName, cInfo.Name)
+
+	// getting the Start Period set for a container
+	startPeriod, err := helpers.FetchContainerStartPeriod(p.runtime, containerID)
+	if err != nil {
+		return fmt.Errorf("fetching container: '%s' start period failed: %w", cInfo.Name, err)
+	}
+
+	if startPeriod == -1 {
+		logger.Infof("No container health check is set for '%s'. Hence skipping readiness check\n", cInfo.Name, logger.VerbosityLevelDebug)
+
+		return nil
+	}
+
+	// configure readiness timeout by appending start period with additional extra timeout
+	readinessTimeout := startPeriod + extraContainerReadinessTimeout
+
+	logger.Infof("'%s', '%s', '%s': Waiting for Container Readiness... Timeout set: %s\n", podTemplateName, podName, cInfo.Name, readinessTimeout)
+
+	if err := helpers.WaitForContainerReadiness(p.runtime, containerID, readinessTimeout); err != nil {
+		return fmt.Errorf("readiness check failed for container: '%s'!: %w", cInfo.Name, err)
+	}
+	logger.Infof("'%s', '%s', '%s': Readiness Check for the container is completed!\n", podTemplateName, podName, cInfo.Name)
+
+	return nil
+}
+
+func (p *PodmanApplication) constructPodDeployOptions(podAnnotations map[string]string) map[string]string {
+	podStart := p.checkForPodStartAnnotation(podAnnotations)
+
+	// construct start option
+	podDeployOptions := map[string]string{}
+	if podStart != "" {
+		podDeployOptions["start"] = podStart
+	}
+
+	// construct publish option
+	hostPortMappings := p.fetchHostPortMappingFromAnnotation(podAnnotations)
+	podDeployOptions["publish"] = ""
+
+	// loop over each of the hostPortMappings to construct the 'publish' option
+	for containerPort, hostPort := range hostPortMappings {
+		if hostPort == "0" {
+			// if the host port is set to 0, then do not expose the particular containerPort
+			continue
+		}
+		if hostPort != "" {
+			// if the host port is present
+			podDeployOptions["publish"] += hostPort + ":" + containerPort
+		} else {
+			// else just populate the containerPort, so that dynamically podman will populate
+			podDeployOptions["publish"] += containerPort
+		}
+		podDeployOptions["publish"] += ","
+	}
+
+	return podDeployOptions
+}
+
+func (p *PodmanApplication) checkForPodStartAnnotation(podAnnotations map[string]string) string {
+	if val, ok := podAnnotations[constants.PodStartAnnotationkey]; ok {
+		if val == constants.PodStartOff || val == constants.PodStartOn {
+			return val
+		}
+	}
+
+	return ""
+}
+
+func (p *PodmanApplication) fetchHostPortMappingFromAnnotation(podAnnotations map[string]string) map[string]string {
+	// key -> containerPort and value -> hostPort
+	hostPortMapping := map[string]string{}
+
+	portMappings, ok := podAnnotations[constants.PodPortsAnnotationKey]
+	if !ok {
+		// return empty map if port annotation is not present
+		return hostPortMapping
+	}
+
+	portMapping := strings.SplitSeq(portMappings, ",")
+	for p := range portMapping {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+
+		// Find colon
+		i := strings.Index(p, ":")
+		if i == -1 {
+			// No colon → whole thing is the containerPort
+			hostPortMapping[p] = ""
+
+			continue
+		}
+
+		// Before colon string is hostPort
+		hostPort := strings.TrimSpace(p[:i])
+		// After colon string is containerPort
+		containerPort := strings.TrimSpace(p[i+1:])
+
+		// If colon exists but NO value after the colon (containerPort) → then skip
+		if containerPort == "" {
+			continue
+		}
+
+		hostPortMapping[containerPort] = hostPort
+	}
+
+	return hostPortMapping
 }

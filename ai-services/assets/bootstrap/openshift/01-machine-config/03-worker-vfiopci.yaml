@@ -1,0 +1,38 @@
+apiVersion: machineconfiguration.openshift.io/v1
+kind: MachineConfig
+metadata:
+  labels:
+    kubernetes.io/arch: ppc64le
+    machineconfiguration.openshift.io/role: spyre
+  name: 99-worker-vfiopci
+spec:
+  config:
+    ignition:
+      version: 3.4.0
+    storage:
+      files:
+      - contents:
+          compression: ""
+          source: data:,options%20vfio-pci%20ids%3D1014%3A06a7%2C1014%3A06a8%0Aoptions%20vfio-pci%20disable_idle_d3%3Dyes%0A
+        mode: 420
+        path: /etc/modprobe.d/vfio-pci.conf
+      - contents:
+          compression: ""
+          source: data:,vfio-pci%0Avfio_iommu_spapr_tce%0A
+        mode: 420
+        path: /etc/modules-load.d/vfio-pci.conf
+      - contents:
+          compression: ""
+          source: data:;base64,W2NyaW8ucnVudGltZV0KZGVmYXVsdF91bGltaXRzID0gWwogICJtZW1sb2NrPS0xOi0xIgpdCg==
+        mode: 420
+        path: /etc/crio/crio.conf.d/10-custom
+      - contents:
+          compression: ""
+          source: data:,SUBSYSTEM%3D%3D%22vfio%22%2C%20MODE%3D%220666%22%0A
+        mode: 420
+        path: /etc/udev/rules.d/90-vfio-3.rules
+      - contents:
+          compression: ""
+          source: data:,%40sentient%20-%20memlock%20134217728%0A
+        mode: 420
+        path: /etc/security/limits.d/memlock.conf
