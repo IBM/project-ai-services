@@ -11,6 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
+// Create deploys a new application based on a template.
 func (o *OpenshiftApplication) Create(_ context.Context, opts types.CreateOptions) error {
 	// fetch app and namespace from opts
 	app := opts.Name
