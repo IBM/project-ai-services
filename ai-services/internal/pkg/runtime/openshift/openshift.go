@@ -17,6 +17,10 @@ import (
 	"k8s.io/client-go/util/homedir"
 )
 
+const (
+	ExpectedParts = 2
+)
+
 // OpenshiftClient implements the Runtime interface for Openshift.
 type OpenshiftClient struct {
 	clientset *kubernetes.Clientset
@@ -92,8 +96,8 @@ func (kc *OpenshiftClient) ListPods(filters map[string][]string) ([]types.Pod, e
 
 	if labelFilters, exists := filters["label"]; exists {
 		for _, lf := range labelFilters {
-			parts := strings.SplitN(lf, "=", 2)
-			if len(parts) == 2 {
+			parts := strings.SplitN(lf, "=", ExpectedParts)
+			if len(parts) == ExpectedParts {
 				labels[parts[0]] = parts[1]
 			}
 		}
@@ -136,9 +140,17 @@ func (kc *OpenshiftClient) InspectPod(nameOrID string) (*types.Pod, error) {
 
 // PodExists checks if a pod exists.
 func (kc *OpenshiftClient) PodExists(nameOrID string) (bool, error) {
-	_, err := kc.clientset.CoreV1().Pods(kc.namespace).Get(kc.ctx, nameOrID, metav1.GetOptions{})
+	pod := &corev1.Pod{}
+	err := kc.client.Get(
+		kc.ctx,
+		client.ObjectKey{
+			Namespace: kc.namespace,
+			Name:      nameOrID,
+		},
+		pod,
+	)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.IsNotFound(err) {
 			return false, nil
 		}
 

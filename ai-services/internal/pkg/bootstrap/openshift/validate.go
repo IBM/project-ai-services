@@ -81,6 +81,7 @@ func (o *OCPBootstrap) Validate(skip map[string]bool) error {
 	}
 
 	logger.Infoln("All validations passed")
+
 	return nil
 }
 
@@ -110,5 +111,6 @@ func (o *OCPBootstrap) Type() types.RuntimeType {
 
 func (o *OCPBootstrap) Configure() error {
 	logger.Infoln("OpenShift environment is pre-configured. Skipping configuration.")
+
 	return nil
 }
