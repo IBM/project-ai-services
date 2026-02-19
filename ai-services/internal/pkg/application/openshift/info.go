@@ -10,7 +10,7 @@ import (
 )
 
 // Info displays detailed information about an application.
-func (p *OpenShiftApplication) Info(opts types.InfoOptions) error {
+func (o *OpenshiftApplication) Info(opts types.InfoOptions) error {
 	// Step1: Do List pods and filter for given application name
 
 	listFilters := map[string][]string{}
@@ -18,7 +18,7 @@ func (p *OpenShiftApplication) Info(opts types.InfoOptions) error {
 		listFilters["label"] = []string{fmt.Sprintf("ai-services.io/application=%s", opts.Name)}
 	}
 
-	pods, err := p.runtime.ListPods(listFilters)
+	pods, err := o.runtime.ListPods(listFilters)
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -42,7 +42,7 @@ func (p *OpenShiftApplication) Info(opts types.InfoOptions) error {
 
 	// Step3: Read and print the info.md file
 
-	if err := helpers.PrintInfo(p.runtime, opts.Name, appTemplate); err != nil {
+	if err := helpers.PrintInfo(o.runtime, opts.Name, appTemplate); err != nil {
 		// not failing if overall info command, if we cannot display Info
 		logger.Errorf("failed to display info: %v\n", err)
 

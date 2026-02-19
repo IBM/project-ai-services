@@ -34,9 +34,6 @@ func (f *Factory) Create(namespace string) (Application, error) {
 	case types.RuntimeTypePodman:
 		return podman.NewPodmanApplication(runtimeClient), err
 	case types.RuntimeTypeOpenShift:
-		return openshift.NewOpenShiftApplication(runtimeClient), err
-
-	case types.RuntimeTypeOpenShift:
 		return openshift.NewOpenshiftApplication(runtimeClient), err
 
 	default:

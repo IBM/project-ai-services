@@ -18,6 +18,6 @@ func NewOpenshiftApplication(runtimeClient runtime.Runtime) *OpenshiftApplicatio
 }
 
 // Type returns the runtime type.
-func (p *OpenshiftApplication) Type() types.RuntimeType {
+func (o *OpenshiftApplication) Type() types.RuntimeType {
 	return types.RuntimeTypeOpenShift
 }
