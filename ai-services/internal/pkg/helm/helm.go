@@ -63,7 +63,7 @@ func (h *Helm) Install(release string, chart chart.Charter, opts *InstallOpts) e
 
 	installClient.Timeout = opts.Timeout
 	if installClient.Timeout == 0 {
-		// use 30 minutes as default timeout if not set
+		// use default timeout if not set
 		installClient.Timeout = defaultWaitingTimeout
 	}
 
@@ -90,7 +90,7 @@ func (h *Helm) Upgrade(release string, chart chart.Charter, opts *UpgradeOpts) e
 
 	upgradeClient.Timeout = opts.Timeout
 	if upgradeClient.Timeout == 0 {
-		// use 30 minutes as default timeout if not set
+		// use default timeout if not set
 		upgradeClient.Timeout = defaultWaitingTimeout
 	}
 
