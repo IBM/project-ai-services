@@ -1,55 +1,139 @@
+import asyncio
+import uuid
+import time
 from enum import Enum
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
-import os
-from pydantic import BaseModel, ValidationError
 from typing import List, Optional
+import uvicorn
 
-app = FastAPI(title="Digitize documents API")
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status
+from common.misc_utils import get_logger
+
+logger = None
+
+app = FastAPI(title="Digitize Documents Service")
+
+# Semaphores for concurrency limiting
+digitization_semaphore = asyncio.Semaphore(2)
+ingestion_semaphore = asyncio.Semaphore(1)
 
 class OutputFormat(str, Enum):
     TEXT = "text"
     MD = "md"
     JSON = "json"
 
-class DigitizeRequest(BaseModel):
-    ingest: bool
-    output_format: OutputFormat = OutputFormat.JSON
+class OperationType(str, Enum):
+    INGESTION = "ingestion"
+    DIGITIZATION = "digitization"
 
-def get_payload(payload: str = Form(None)) -> Optional[DigitizeRequest]:
-    if payload is None:
-        return None
+class JobStatus(str, Enum):
+    ACCEPTED = "accepted"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+async def digitize_documents(job_id: str, filenames: List[str], output_format: OutputFormat):
     try:
-        return DigitizeRequest.model_validate_json(payload)
-    except (ValueError, ValidationError) as e:
-        raise HTTPException(status_code=422, detail=f"Invalid JSON payload: {str(e)}")
+        # Business logic for document conversion.
+        pass
+    except Exception as e:
+        logger.error(f"Error in job {job_id}: {e}")
+    finally:
+        # Crucial: Always release the semaphore slot back to the API
+        digitization_semaphore.release()
+        logger.debug(f"Semaphore slot released from digitization job {job_id}")
 
-@app.post("/v1/digitize")
+
+async def ingest_documents(job_id: str, filenames: List[str]):
+    try:
+        # Business logic for document conversion.
+        pass
+    except Exception as e:
+        logger.error(f"Error in job {job_id}: {e}")
+    finally:
+        # Crucial: Always release the semaphore slot back to the API
+        digitization_semaphore.release()
+        logger.debug(f"Semaphore slot released from ingestionjob {job_id}")
+
+@app.post("/v1/documents", status_code=status.HTTP_202_ACCEPTED)
 async def digitize_document(
-    payload: Optional[DigitizeRequest] = Depends(get_payload),
-    files: List[UploadFile] = File(default=[])
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(...),
+    operation: OperationType = Query(OperationType.INGESTION),
+    output_format: OutputFormat = Query(OutputFormat.JSON)
 ):
-    try:
-        if payload.ingest:
-            # Handle the ingestion logic here
-            return {"job_id": "UUID of the ingest digitization job"}
-        else:
-            # Handle the logic to return the digitized document in the requested format
-            return {"document": {}}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    sem = ingestion_semaphore if operation == OperationType.INGESTION else digitization_semaphore
+    
+    # 1. Fail fast if limit reached
+    if sem.locked():
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many concurrent {operation} requests."
+        )
 
-@app.get("/v1/digitize/{job_id}")
-def get_digitization_status(job_id: str):
-    try:
-        # Placeholder for actual status retrieval logic
-        return {"job_id": job_id, "status": "In Progress"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # 2. Validation
+    if operation == OperationType.DIGITIZATION and len(files) > 1:
+        raise HTTPException(status_code=400, detail="Only 1 file allowed for digitization.")
 
-@app.get("/v1/health")
-def health_check():
-    return {"status": "ok"}
+    # 3. Reserve the slot
+    await sem.acquire()
+
+    job_id = str(uuid.uuid4())
+    filenames = [f.filename for f in files]
+
+    # 4. Schedule the background pipeline
+    if operation == OperationType.INGESTION:
+        background_tasks.add_task(ingest_documents, job_id, filenames)
+    else:
+        background_tasks.add_task(digitize_documents, job_id, filenames, output_format)
+    
+    return {"job_id": job_id}
+
+@app.get("/v1/documents/jobs")
+async def get_all_jobs(
+    latest: bool = False,
+    limit: int = 20,
+    offset: int = 0,
+    status: Optional[JobStatus] = None
+):
+    return {"pagination": {"total": 0, "limit": limit, "offset": offset}, "data": []}
+
+@app.get("/v1/documents/jobs/{job_id}")
+async def get_job_by_id(job_id: str):
+    # Logic to read /var/cache/{job_id}_status.json
+    return {}
+
+@app.get("/v1/documents")
+async def list_documents(
+    limit: int = 20,
+    offset: int = 0,
+    status: Optional[JobStatus] = None,
+    name: Optional[str] = None
+):
+    return {"pagination": {"total": 0, "limit": limit, "offset": offset}, "data": []}
+
+@app.get("/v1/documents/{doc_id}")
+async def get_document_metadata(doc_id: str, details: bool = False):
+    return {"id": doc_id, "status": "completed"}
+
+@app.get("/v1/documents/{doc_id}/content")
+async def get_document_content(doc_id: str):
+    # Logic to fetch from local cache (json/md/text)
+    return {"result": "Digitized content placeholder"}
+
+@app.delete("/v1/documents/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(doc_id: str):
+    # 1. Check if part of active job (409 Conflict)
+    # 2. Remove from VDB and local cache
+    return
+
+@app.delete("/v1/documents", status_code=status.HTTP_204_NO_CONTENT)
+async def bulk_delete_documents(confirm: bool = Query(...)):
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Confirm parameter required.")
+    # 1. Check for active jobs
+    # 2. Truncate VDB and wipe cache
+    return
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=os.getenv("PORT", 4000))
+    logger = get_logger("app")
+    uvicorn.run(app, host="0.0.0.0", port=4000)
