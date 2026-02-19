@@ -14,6 +14,10 @@ import (
 	"helm.sh/helm/v4/pkg/storage/driver"
 )
 
+var (
+	defaultWaitingTimeout = 10 * time.Minute
+)
+
 type Helm struct {
 	namespace    string
 	actionConfig *action.Configuration
@@ -60,7 +64,7 @@ func (h *Helm) Install(release string, chart chart.Charter, opts *InstallOpts) e
 	installClient.Timeout = opts.Timeout
 	if installClient.Timeout == 0 {
 		// use 30 minutes as default timeout if not set
-		installClient.Timeout = 30 * time.Minute
+		installClient.Timeout = defaultWaitingTimeout
 	}
 
 	// Perform helm install
@@ -87,7 +91,7 @@ func (h *Helm) Upgrade(release string, chart chart.Charter, opts *UpgradeOpts) e
 	upgradeClient.Timeout = opts.Timeout
 	if upgradeClient.Timeout == 0 {
 		// use 30 minutes as default timeout if not set
-		upgradeClient.Timeout = 30 * time.Minute
+		upgradeClient.Timeout = defaultWaitingTimeout
 	}
 
 	// Perform helm upgrade

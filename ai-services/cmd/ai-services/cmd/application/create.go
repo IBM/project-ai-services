@@ -23,12 +23,12 @@ import (
 
 // Variables for flags placeholder.
 var (
-	// common flags
+	// common flags.
 	templateName string
 	rawArgParams []string
 	argParams    map[string]string
 
-	// podman flags
+	// podman flags.
 	skipModelDownload     bool
 	skipImageDownload     bool
 	skipChecks            []string
@@ -36,7 +36,7 @@ var (
 	rawArgImagePullPolicy string
 	imagePullPolicy       image.ImagePullPolicy
 
-	// openshift flags
+	// openshift flags.
 	timeout time.Duration
 )
 

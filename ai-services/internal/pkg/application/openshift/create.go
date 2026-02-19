@@ -65,11 +65,11 @@ func (o *OpenshiftApplication) Create(ctx context.Context, opts types.CreateOpti
 
 	if !isAppExist {
 		// if App does not exist then perform install
-		logger.Infof("App: %s does not exist, proceeding with install...")
+		logger.Infof("App: %s does not exist, proceeding with install...", app)
 		err = helmClient.Install(app, chart, &helm.InstallOpts{Timeout: timeout})
 	} else {
 		// if App exists, perform upgrade
-		logger.Infof("App: %s already exist, proceeding with reconciling...")
+		logger.Infof("App: %s already exist, proceeding with reconciling...", app)
 		err = helmClient.Upgrade(app, chart, &helm.UpgradeOpts{Timeout: timeout})
 	}
 
