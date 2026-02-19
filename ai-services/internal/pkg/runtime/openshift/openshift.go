@@ -197,7 +197,7 @@ func (kc *OpenshiftClient) InspectContainer(nameOrID string) (*types.Container, 
 		}
 	}
 
-	return nil, fmt.Errorf("Cannot find container: %s", nameOrID)
+	return nil, fmt.Errorf("cannot find container: %s", nameOrID)
 }
 
 // ContainerExists checks if a container exists.
@@ -229,8 +229,9 @@ func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
 func (kc *OpenshiftClient) GetRoute(nameOrID string) (*types.Route, error) {
 	r, err := kc.routeClient.RouteV1().Routes(kc.namespace).Get(kc.ctx, nameOrID, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("Cannot find route: %s", nameOrID)
+		return nil, fmt.Errorf("cannot find route: %s", nameOrID)
 	}
+
 	return toOpenShiftRoute(r), nil
 }
 
@@ -252,7 +253,8 @@ func GetPodNameWithPrefix(kc *OpenshiftClient, nameOrID string) (string, error) 
 		}
 	}
 	if podName == "" {
-		return "", fmt.Errorf("Cannot find pod: %s", nameOrID)
+		return "", fmt.Errorf("cannot find pod: %s", nameOrID)
 	}
+
 	return podName, nil
 }
