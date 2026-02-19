@@ -73,7 +73,7 @@ jobs:
           podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
 
       - name: Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@0.34.0
         with:
           input: ${{ env.IMAGE_FILE_NAME }}
           format: table
@@ -110,7 +110,7 @@ jobs:
 
       - name: Generate trivy sbom scan report for images
         if: ${{ inputs.skip-code-license-scan }}
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@0.34.0
         with:
           scan-type: image
           input: ${{ env.IMAGE_FILE_NAME }}
@@ -119,7 +119,7 @@ jobs:
       
       - name: Generate trivy sbom scan report for ai-services code
         if: ${{ !inputs.skip-code-license-scan }}
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@0.34.0
         with:
           scan-type: 'fs'
           input: './ai-services'
