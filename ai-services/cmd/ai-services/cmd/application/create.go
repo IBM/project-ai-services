@@ -14,6 +14,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -88,20 +89,14 @@ var createCmd = &cobra.Command{
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		skip := helpers.ParseSkipChecks(skipChecks)
-		if len(skip) > 0 {
-			logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
-		}
-
-		// Create bootstrap instance based on runtime
-		factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
-		bootstrapInstance, err := factory.Create()
-		if err != nil {
-			return fmt.Errorf("failed to create bootstrap instance: %w", err)
-		}
-
-		if err := bootstrapInstance.Validate(skip); err != nil {
-			return fmt.Errorf("bootstrap validation failed: %w", err)
+		//nolint:godox
+		// TODO: Integrate Bootstrap validate for Openshift in create flow once ready. For now skipping it for Openshift runtime.
+		if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypeOpenShift {
+			return nil
+		} else {
+			if err := doBootstrapValidate(); err != nil {
+				return err
+			}
 		}
 
 		// Create application instance using factory
@@ -123,6 +118,26 @@ var createCmd = &cobra.Command{
 
 		return app.Create(ctx, opts)
 	},
+}
+
+func doBootstrapValidate() error {
+	skip := helpers.ParseSkipChecks(skipChecks)
+	if len(skip) > 0 {
+		logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
+	}
+
+	// Create bootstrap instance based on runtime
+	factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
+	bootstrapInstance, err := factory.Create()
+	if err != nil {
+		return fmt.Errorf("failed to create bootstrap instance: %w", err)
+	}
+
+	if err := bootstrapInstance.Validate(skip); err != nil {
+		return fmt.Errorf("bootstrap validation failed: %w", err)
+	}
+
+	return nil
 }
 
 func init() {

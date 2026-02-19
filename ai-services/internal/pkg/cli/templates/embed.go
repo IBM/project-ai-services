@@ -3,6 +3,7 @@ package templates
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -15,7 +16,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+
 	"go.yaml.in/yaml/v3"
+	"helm.sh/helm/v4/pkg/chart"
+	"helm.sh/helm/v4/pkg/chart/loader/archive"
+	"helm.sh/helm/v4/pkg/chart/v2/loader"
+
 	k8syaml "sigs.k8s.io/yaml"
 )
 
@@ -280,6 +286,42 @@ func (e *embedTemplateProvider) LoadVarsFile(app string, params map[string]strin
 	}
 
 	return &vars, nil
+}
+
+func (e *embedTemplateProvider) LoadChart(app string) (chart.Charter, error) {
+	if e.Runtime() != string(types.RuntimeTypeOpenShift) {
+		return nil, errors.New("unsupported runtime type")
+	}
+
+	// construct chart path
+	chartPath := path.Join(e.root, app, e.Runtime())
+
+	var files []*archive.BufferedFile
+	err := fs.WalkDir(e.fs, chartPath, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+
+		data, err := e.fs.ReadFile(p)
+		if err != nil {
+			return err
+		}
+
+		// Make file name relative to chart root for helm loader
+		rel := strings.TrimPrefix(filepath.ToSlash(p), filepath.ToSlash(chartPath)+"/")
+
+		files = append(files, &archive.BufferedFile{
+			Name: rel,
+			Data: data,
+		})
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return loader.LoadFiles(files)
 }
 
 type EmbedOptions struct {

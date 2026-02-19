@@ -3,6 +3,8 @@ package templates
 import (
 	"text/template"
 
+	"helm.sh/helm/v4/pkg/chart"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 )
 
@@ -58,4 +60,6 @@ type Template interface {
 	LoadMdFiles(app string) (map[string]*template.Template, error)
 	// LoadVarsFile loads the var template file
 	LoadVarsFile(app string, params map[string]string) (*Vars, error)
+	// LoadVarsFile loads the Chart
+	LoadChart(app string) (chart.Charter, error)
 }
