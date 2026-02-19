@@ -257,9 +257,9 @@ func (pc *PodmanClient) ContainerExists(nameOrID string) (bool, error) {
 }
 
 func (pc *PodmanClient) GetRoute(nameOrID string) (*types.Route, error) {
-	logger.Errorf("Unsupported method called!")
+	logger.Errorf("unsupported method called!")
 
-	return nil, fmt.Errorf("Unsupported method")
+	return nil, fmt.Errorf("unsupported method")
 }
 
 // Type returns the runtime type for PodmanClient.
