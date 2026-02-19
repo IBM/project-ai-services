@@ -22,8 +22,8 @@ func NewRuntimeFactory(runtimeType types.RuntimeType) *RuntimeFactory {
 }
 
 // Create creates a runtime instance based on the factory configuration.
-func (f *RuntimeFactory) Create() (Runtime, error) {
-	return CreateRuntime(f.runtimeType)
+func (f *RuntimeFactory) Create(namespace string) (Runtime, error) {
+	return CreateRuntime(f.runtimeType, namespace)
 }
 
 // GetRuntimeType returns the configured runtime type.
@@ -32,7 +32,7 @@ func (f *RuntimeFactory) GetRuntimeType() types.RuntimeType {
 }
 
 // CreateRuntime creates a runtime instance based on the specified type.
-func CreateRuntime(runtimeType types.RuntimeType) (Runtime, error) {
+func CreateRuntime(runtimeType types.RuntimeType, namespace string) (Runtime, error) {
 	switch runtimeType {
 	case types.RuntimeTypePodman:
 		logger.Infof("Initializing Podman runtime\n", logger.VerbosityLevelDebug)
@@ -45,7 +45,7 @@ func CreateRuntime(runtimeType types.RuntimeType) (Runtime, error) {
 
 	case types.RuntimeTypeOpenShift:
 		logger.Infof("Initializing OpenShift runtime\n", logger.VerbosityLevelDebug)
-		client, err := openshift.NewOpenshiftClient()
+		client, err := openshift.NewOpenshiftClientWithNamespace(namespace)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OpenShift client: %w", err)
 		}

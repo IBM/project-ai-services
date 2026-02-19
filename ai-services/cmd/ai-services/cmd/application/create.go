@@ -101,7 +101,7 @@ var createCmd = &cobra.Command{
 
 		// Create application instance using factory
 		appFactory := application.NewFactory(vars.RuntimeFactory.GetRuntimeType())
-		app, err := appFactory.Create()
+		app, err := appFactory.Create(appName)
 		if err != nil {
 			return fmt.Errorf("failed to create application instance: %w", err)
 		}
