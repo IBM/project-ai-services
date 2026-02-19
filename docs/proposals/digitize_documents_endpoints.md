@@ -87,8 +87,7 @@ After conversion, the document will be ingested via a structured processing pipe
     - `output_format` passed will be ignored in case of ingestion, .
     - Users can submit digitized documents for ingestion; if the file is not cleaned using DELETE, the pipeline will use its cached version.
     - `/var/cache` is the persistent volume mounted by the runtime(Podman/OpenShift) inside the digitize document service container. 
-    - In case of ingestion, fastapi's `BackgroundTasks` can be used to run the process pipeline. Since the pipeline itself will offload the heavy tasks to child process pools.
-    - In case of digitization, docling conversion needs a separate process, since its a CPU heavy task.
+    - In both ingestion/digitization, fastapi's `BackgroundTasks` can be used to run the process pipeline. Internally it can offload the tasks to child process pools. This would help in accessing the semaphore in API server's process for concurrency limiting.
     
 **Sample curl for ingestion:**
 ```
