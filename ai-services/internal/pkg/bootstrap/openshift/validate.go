@@ -6,8 +6,22 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
+
+func NewOCPBootstrap() (*OCPHelper, error) {
+	// 1. Actually create the client
+	client, err := openshift.NewOpenshiftClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize openshift client: %w", err)
+	}
+
+	// 2. Inject the client into the helper
+	return &OCPHelper{
+		client: client,
+	}, nil
+}
 
 // Validate validates OpenShift environment.
 func (o *OCPHelper) Validate(skip map[string]bool) error {

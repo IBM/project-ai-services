@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -27,6 +28,11 @@ func (f *BootstrapFactory) Create() (Bootstrap, error) {
 		logger.Infof("Initializing Podman bootstrap\n", logger.VerbosityLevelDebug)
 
 		return podman.NewPodmanBootstrap(), nil
+
+	case types.RuntimeTypeOpenShift:
+		logger.Infof("Initializing OpenShift bootstrap", logger.VerbosityLevelDebug)
+
+		return openshift.NewOCPBootstrap()
 
 	default:
 		return nil, fmt.Errorf("unsupported runtime type: %s", f.runtimeType)
