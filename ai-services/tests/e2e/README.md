@@ -1,3 +1,4 @@
+
 ## AI Services — E2E Test Suite
 
 Purpose
@@ -40,12 +41,14 @@ How to run tests locally
       
       ```bash 
       make test
+
+      make test-generate-report TEST_ARGS="--timeout=2h"
       ```
 
       Notes:
       - This target runs all tests under `tests/e2e` using `ginkgo -r ./tests/e2e`
       - It can be customized by setting environment variables `TEST_ARGS` for example `make test TEST_ARGS="-v"`.
-
+      - The `test-generate-report`  runs the entire test and stores a JUnit XML report in `tests/e2e/reports/report-$(RUN_ID).xml` 
 
    3. Run using the Ginkgo CLI 
       ```bash
@@ -53,10 +56,10 @@ How to run tests locally
       go install github.com/onsi/ginkgo/v2/ginkgo@latest
 
       ### run the whole suite
-      ginkgo -r ./tests/e2e
+      ginkgo -r --timeout=2h ./tests/e2e
 
-      ### to run a single spec file or focus pattern:
-      ginkgo ./tests/e2e --focus "Application Lifecycle" --skipPackage build
+      ### to generate a junit report with ginkgo 
+      ginkgo  -r --timeout=2h --junit-report=e2e-report.xml --output-dir=tests/e2e/reports ./tests/e2e/... 
       ```
 
 
@@ -172,8 +175,7 @@ ai-services/tests/e2e/
    |   ├─ golden.go
    |   ├─ judge.go
    │   ├─ setup.go
-   ├─ reports/                    # reporting helpers (JUnit formatter, artifacts)
-   │   └─ junit.go
+   ├─ reports/                   # generated test reports (JUnit XML, etc.) are stored here
    ├─ utils/                      # small additional utilities used by tests
    │   └─ json.go
    └─ <other_test_files>          # add your `_test.go` files here (package `e2e`)

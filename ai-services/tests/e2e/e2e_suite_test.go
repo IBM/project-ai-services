@@ -68,8 +68,12 @@ var _ = ginkgo.BeforeSuite(func() {
 	cfg = &config.Config{}
 
 	ginkgo.By("Generating unique run ID")
-	runID = fmt.Sprintf("%d", time.Now().Unix())
-
+	if runIDEnv := os.Getenv("RUN_ID"); runIDEnv != "" {
+		runID = runIDEnv
+	} else {
+		runID = fmt.Sprintf("%d", time.Now().Unix())
+	}
+	
 	ginkgo.By("Preparing runtime environment")
 	tempDir = bootstrap.PrepareRuntime(runID)
 	gomega.Expect(tempDir).NotTo(gomega.BeEmpty())
