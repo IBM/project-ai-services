@@ -1,0 +1,74 @@
+apiVersion: machineconfiguration.openshift.io/v1
+kind: MachineConfig
+metadata:
+  labels:
+    kubernetes.io/arch: ppc64le
+    machineconfiguration.openshift.io/role: spyre
+  name: 50-spyre-device-plugin-selinux-minimal
+spec:
+  config:
+    ignition:
+      version: 3.2.0
+    storage:
+      files:
+      - contents:
+          source: data:text/plain;charset=utf-8;base64,bW9kdWxlIHNweXJlX2RldmljZV9wbHVnaW5fbWluaW1hbCAxLjA7CgpyZXF1aXJlIHsKICAgIHR5cGUgY29udGFpbmVyX3Q7CiAgICB0eXBlIGNvbnRhaW5lcl9ydW50aW1lX3Q7CiAgICB0eXBlIGNvbnRhaW5lcl92YXJfcnVuX3Q7CiAgICBjbGFzcyB1bml4X3N0cmVhbV9zb2NrZXQgY29ubmVjdHRvOwogICAgY2xhc3Mgc29ja19maWxlIHdyaXRlOwp9CgojIEdyYW50IE9OTFkgdGhlIHNwZWNpZmljIHBlcm1pc3Npb25zIG5lZWRlZCBmb3IgQ1JJLU8gY29tbXVuaWNhdGlvbgphbGxvdyBjb250YWluZXJfdCBjb250YWluZXJfcnVudGltZV90OnVuaXhfc3RyZWFtX3NvY2tldCBjb25uZWN0dG87CmFsbG93IGNvbnRhaW5lcl90IGNvbnRhaW5lcl92YXJfcnVuX3Q6c29ja19maWxlIHdyaXRlOwo=
+        mode: 0644
+        path: /etc/selinux/spyre_device_plugin_minimal.te
+    systemd:
+      units:
+      - contents: |
+          [Unit]
+          Description=Install minimal SELinux policy for spyre device plugin
+          After=multi-user.target
+
+          [Service]
+          Type=oneshot
+          ExecStartPre=/bin/bash -c 'if [ ! -f /etc/selinux/spyre_device_plugin_minimal.pp ]; then checkmodule -M -m -o /etc/selinux/spyre_device_plugin_minimal.mod /etc/selinux/spyre_device_plugin_minimal.te && semodule_package -o /etc/selinux/spyre_device_plugin_minimal.pp -m /etc/selinux/spyre_device_plugin_minimal.mod; fi'
+          ExecStart=/bin/bash -c 'semodule -i /etc/selinux/spyre_device_plugin_minimal.pp || true'
+          RemainAfterExit=true
+
+          [Install]
+          WantedBy=multi-user.target
+        enabled: true
+        name: install-spyre-selinux-minimal-policy.service
+      - contents: |
+          [Unit]
+          Description=Setup device plugin directories with permissions and SELinux context
+          After=network-online.target
+          Before=kubelet.service
+
+          [Service]
+          Type=oneshot
+          # Fix kubelet directory permissions for device plugin socket operations
+          ExecStart=/usr/bin/chmod 770 /var/lib/kubelet/plugins_registry
+          ExecStart=/usr/bin/chmod 770 /var/lib/kubelet/device-plugins
+
+          # delete device plugin directories before creating it
+          ExecStart=/usr/bin/rm -f /usr/local/etc/device-plugins/complete
+          ExecStart=/usr/bin/rm -rf /usr/local/etc/device-plugins/spyre-config
+          ExecStart=/usr/bin/rm -rf /usr/local/etc/device-plugins/spyre-metrics
+          ExecStart=/usr/bin/rm -rf /usr/local/etc/device-plugins/metadata
+
+          # Create device plugin directories
+          ExecStart=/usr/bin/mkdir -p /usr/local/etc/device-plugins/spyre-config
+          ExecStart=/usr/bin/mkdir -p /usr/local/etc/device-plugins/spyre-metrics
+          ExecStart=/usr/bin/mkdir -p /usr/local/etc/device-plugins/metadata
+
+          # Set permissions for group write access (device plugin runs as UID 1001, GID 0)
+          ExecStart=/usr/bin/chmod 770 /usr/local/etc/device-plugins
+          ExecStart=/usr/bin/chmod 770 /usr/local/etc/device-plugins/spyre-config
+          ExecStart=/usr/bin/chmod 770 /usr/local/etc/device-plugins/spyre-metrics
+          ExecStart=/usr/bin/chmod 770 /usr/local/etc/device-plugins/metadata
+
+          # Fix SELinux context for container access
+          ExecStart=/usr/bin/chcon -R -t container_file_t /usr/local/etc/device-plugins
+          ExecStart=/usr/bin/chcon -R -t container_file_t /usr/local/etc/device-plugins/spyre-config
+          ExecStart=/usr/bin/chcon -R -t container_file_t /usr/local/etc/device-plugins/spyre-metrics
+          ExecStart=/usr/bin/chcon -R -t container_file_t /usr/local/etc/device-plugins/metadata
+          RemainAfterExit=true
+
+          [Install]
+          WantedBy=multi-user.target
+        enabled: true
+        name: setup-device-plugin-directories.service

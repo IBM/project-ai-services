@@ -7,9 +7,7 @@ VERSION ?= $(shell git describe --tags --always)
 GITCOMMIT ?= $(shell git rev-parse --short HEAD)
 BUILDDATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-.PHONY: build
-build:
-	CGO_ENABLED=0 $(GO) build $(BUILDFLAGS) \
+BUILD_CMD = CGO_ENABLED=0 $(GO) build $(BUILDFLAGS) \
 	-o $(BIN)/ai-services \
 	-tags $(BUILDTAGS) \
 	-ldflags " \
@@ -18,3 +16,21 @@ build:
     -X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.BuildDate=$(BUILDDATE)' \
   	" \
 	./cmd/ai-services
+
+TEST_CMD = ginkgo $(TEST_ARGS) -r ./tests/e2e 
+
+.PHONY: default
+default:
+ifdef TEST
+	$(TEST_CMD)
+else
+	$(BUILD_CMD)
+endif
+
+.PHONY: build
+build:
+	$(BUILD_CMD)
+
+.PHONY: test
+test:
+	$(TEST_CMD)

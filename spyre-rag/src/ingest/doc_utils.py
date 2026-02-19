@@ -12,7 +12,7 @@ from docling.datamodel.document import DoclingDocument, TextItem
 from concurrent.futures import as_completed, ProcessPoolExecutor, ThreadPoolExecutor
 from sentence_splitter import SentenceSplitter
 
-from common.llm_utils import create_llm_session, classify_text_with_llm, summarize_table, tokenize_with_llm
+from common.llm_utils import create_llm_session, summarize_and_classify_tables, tokenize_with_llm
 from common.misc_utils import get_logger, generate_file_checksum, text_suffix, table_suffix
 from common.misc_utils import get_logger, generate_file_checksum, text_suffix, table_suffix, chunk_suffix
 from ingest.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count
@@ -21,8 +21,8 @@ logging.getLogger('docling').setLevel(logging.CRITICAL)
 
 logger = get_logger("Docling")
 
-LIGHT_PDF_POOL_SIZE = 4
-HEAVY_PDF_POOL_SIZE = 2
+WORKER_SIZE = 4
+HEAVY_PDF_CONVERT_WORKER_SIZE = 2
 
 HEAVY_PDF_PAGE_THRESHOLD = 500
 
@@ -65,6 +65,128 @@ def get_doc_converter():
 
     return doc_converter
 
+def process_text(converted_doc, pdf_path, out_path):
+    page_count = 0
+    process_time = 0.0
+
+    # Initialize TocHeaders to get the Table of Contents (TOC)
+    t0 = time.time()
+    toc_headers = None
+    try:
+        toc_headers, page_count = get_toc(pdf_path)
+    except Exception as e:
+        logger.debug(f"No TOC found or failed to load TOC: {e}")
+
+    # Load pdf pages one time when TOC headers not found for retrieving the font size of header texts
+    pdf_pages = None
+    if not toc_headers:
+        pdf_pages = load_pdf_pages(pdf_path)
+        page_count = len(pdf_pages)
+
+    # --- Text Extraction ---
+    if not converted_doc.texts:
+        logger.debug(f"No text content found in '{pdf_path}'")
+        out_path.write_text(json.dumps([], indent=2), encoding="utf-8")
+        return page_count, process_time
+
+    structured_output = []
+    last_header_level = 0
+    for text_obj in tqdm_wrapper(converted_doc.texts, desc=f"Processing text content of '{pdf_path}'"):
+        label = text_obj.label
+        if label in excluded_labels:
+            continue
+
+        # Check if it's a section header and process TOC or fallback to font size extraction
+        if label == "section_header":
+            prov_list = text_obj.prov
+
+            for prov in prov_list:
+                page_no = prov.page_no
+
+                if toc_headers:
+                    header_prefix = get_matching_header_lvl(toc_headers, text_obj.text)
+                    if header_prefix:
+                        # If TOC matches, use the level from TOC
+                        structured_output.append({
+                            "label": label,
+                            "text": f"{header_prefix} {text_obj.text}",
+                            "page": page_no,
+                            "font_size": None,  # Font size isn't necessary if TOC matches
+                        })
+                        last_header_level = len(header_prefix.strip())  # Update last header level
+                    else:
+                        # If no match, use the previous header level + 1
+                        new_header_level = last_header_level + 1
+                        structured_output.append({
+                            "label": label,
+                            "text": f"{'#' * new_header_level} {text_obj.text}",
+                            "page": page_no,
+                            "font_size": None,  # Font size isn't necessary if TOC matches
+                        })
+                else:
+                    matches = find_text_font_size(pdf_pages, text_obj.text, page_no - 1)
+                    if len(matches):
+                        font_size = 0
+                        count = 0
+                        for match in matches:
+                            font_size += match["font_size"] if match["match_score"] == 100 else 0
+                            count += 1 if match["match_score"] == 100 else 0
+                        font_size = font_size / count if count else None
+
+                        structured_output.append({
+                            "label": label,
+                            "text": text_obj.text,
+                            "page": page_no,
+                            "font_size": round(font_size, 2) if font_size else None
+                        })
+        else:
+            structured_output.append({
+                "label": label,
+                "text": text_obj.text,
+                "page": text_obj.prov[0].page_no,
+                "font_size": None
+            })
+
+    process_time = time.time() - t0
+    out_path.write_text(json.dumps(structured_output, indent=2), encoding="utf-8")
+        
+    return page_count, process_time
+
+def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
+    table_count = 0
+    process_time = 0.0
+    filtered_table_dicts = {}
+    t0 = time.time()
+    # --- Table Extraction ---
+    if not converted_doc.tables:
+        logger.debug(f"No tables found in '{pdf_path}'")
+        out_path.write_text(json.dumps({}, indent=2), encoding="utf-8")
+        return table_count, process_time
+    
+    table_dict = {}
+    for table_ix, table in enumerate(tqdm_wrapper(converted_doc.tables, desc=f"Processing table content of '{pdf_path}'")):
+        table_dict[table_ix] = {}
+        table_dict[table_ix]["html"] = table.export_to_html(doc=converted_doc)
+        table_dict[table_ix]["caption"] = table.caption_text(doc=converted_doc)
+
+    table_htmls = [table_dict[key]["html"] for key in sorted(table_dict)]
+    table_captions_list = [table_dict[key]["caption"] for key in sorted(table_dict)]
+
+    table_summaries, decisions = summarize_and_classify_tables(table_htmls, gen_model, gen_endpoint, pdf_path)
+    filtered_table_dicts = {
+        idx: {
+            'html': html,
+            'caption': caption,
+            'summary': summary
+        }
+        for idx, (keep, html, caption, summary) in enumerate(zip(decisions, table_htmls, table_captions_list, table_summaries)) if keep
+    }
+    table_count = len(filtered_table_dicts)
+    out_path.write_text(json.dumps(filtered_table_dicts, indent=2), encoding="utf-8")
+    process_time = time.time() - t0
+
+    return table_count, process_time
+
 def process_converted_document(converted_json_path, pdf_path, out_path, conversion_stats, gen_model, gen_endpoint, emb_endpoint, max_tokens):    
     stem = Path(pdf_path).stem
     processed_text_json_path = (Path(out_path) / f"{stem}{text_suffix}")
@@ -89,112 +211,12 @@ def process_converted_document(converted_json_path, pdf_path, out_path, conversi
             raise Exception(f"failed to load converted json into Docling Document")
 
         if not conversion_stats["text_processed"]:
+            page_count, process_time = process_text(converted_doc, pdf_path, processed_text_json_path)
+            timings["process_text"] = process_time
 
-            # Initialize TocHeaders to get the Table of Contents (TOC)
-            t0 = time.time()
-            toc_headers = None
-            try:
-                toc_headers, page_count = get_toc(pdf_path)
-            except Exception as e:
-                logger.debug(f"No TOC found or failed to load TOC: {e}")
-
-            # Load pdf pages one time when TOC headers not found for retrieving the font size of header texts
-            pdf_pages = None
-            if not toc_headers:
-                pdf_pages = load_pdf_pages(pdf_path)
-                page_count = len(pdf_pages)
-
-            # --- Text Extraction ---
-            structured_output = []
-            last_header_level = 0
-            for text_obj in tqdm_wrapper(converted_doc.texts, desc=f"Processing text content of '{pdf_path}'"):
-                label = text_obj.label
-                if label in excluded_labels:
-                    continue
-
-                # Check if it's a section header and process TOC or fallback to font size extraction
-                if label == "section_header":
-                    prov_list = text_obj.prov
-
-                    for prov in prov_list:
-                        page_no = prov.page_no
-
-                        if toc_headers:
-                            header_prefix = get_matching_header_lvl(toc_headers, text_obj.text)
-                            if header_prefix:
-                                # If TOC matches, use the level from TOC
-                                structured_output.append({
-                                    "label": label,
-                                    "text": f"{header_prefix} {text_obj.text}",
-                                    "page": page_no,
-                                    "font_size": None,  # Font size isn't necessary if TOC matches
-                                })
-                                last_header_level = len(header_prefix.strip())  # Update last header level
-                            else:
-                                # If no match, use the previous header level + 1
-                                new_header_level = last_header_level + 1
-                                structured_output.append({
-                                    "label": label,
-                                    "text": f"{'#' * new_header_level} {text_obj.text}",
-                                    "page": page_no,
-                                    "font_size": None,  # Font size isn't necessary if TOC matches
-                                })
-                        else:
-                            matches = find_text_font_size(pdf_pages, text_obj.text, page_no - 1)
-                            if len(matches):
-                                font_size = 0
-                                count = 0
-                                for match in matches:
-                                    font_size += match["font_size"] if match["match_score"] == 100 else 0
-                                    count += 1 if match["match_score"] == 100 else 0
-                                font_size = font_size / count if count else None
-
-                                structured_output.append({
-                                    "label": label,
-                                    "text": text_obj.text,
-                                    "page": page_no,
-                                    "font_size": round(font_size, 2) if font_size else None
-                                })
-                else:
-                    structured_output.append({
-                        "label": label,
-                        "text": text_obj.text,
-                        "page": text_obj.prov[0].page_no,
-                        "font_size": None
-                    })
-
-            timings["process_text"] = time.time() - t0
-
-            processed_text_json_path.write_text(json.dumps(structured_output, indent=2), encoding="utf-8")
-            
         if not conversion_stats["table_processed"]:
-            filtered_table_dicts = {}
-            t0 = time.time()
-            # --- Table Extraction ---
-            if converted_doc.tables:
-                table_dict = {}
-                for table_ix, table in enumerate(tqdm_wrapper(converted_doc.tables, desc=f"Processing table content of '{pdf_path}'")):
-                    table_dict[table_ix] = {}
-                    table_dict[table_ix]["html"] = table.export_to_html(doc=converted_doc)
-                    table_dict[table_ix]["caption"] = table.caption_text(doc=converted_doc)
-
-                table_htmls = [table_dict[key]["html"] for key in sorted(table_dict)]
-                table_captions_list = [table_dict[key]["caption"] for key in sorted(table_dict)]
-
-                table_summaries = summarize_table(table_htmls, gen_model, gen_endpoint, pdf_path)
-
-                decisions = classify_text_with_llm(table_summaries, gen_model, gen_endpoint, pdf_path)
-                filtered_table_dicts = {
-                    idx: {
-                        'html': html,
-                        'caption': caption,
-                        'summary': summary
-                    }
-                    for idx, (keep, html, caption, summary) in enumerate(zip(decisions, table_htmls, table_captions_list, table_summaries)) if keep
-                }
-                table_count = len(filtered_table_dicts)
-                processed_table_json_path.write_text(json.dumps(filtered_table_dicts, indent=2), encoding="utf-8")
-                timings['process_tables'] = time.time() - t0
+            table_count, process_time = process_table(converted_doc, pdf_path, processed_table_json_path, gen_model, gen_endpoint)
+            timings["process_tables"] = process_time
 
         return pdf_path, processed_text_json_path, processed_table_json_path, page_count, table_count, timings
     except Exception as e:
@@ -350,14 +372,15 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
     try:
         # Light files can be processed in parallel with worker_size
-        worker_size = min(LIGHT_PDF_POOL_SIZE, len(light_files))
+        worker_size = min(WORKER_SIZE, len(light_files))
         l_stats, l_chunks, l_tables = _run_batch(
             light_files,
             convert_worker=worker_size,
             max_worker=worker_size,
         )
 
-        convert_worker_size = min(HEAVY_PDF_POOL_SIZE, len(heavy_files))
+        worker_size = min(WORKER_SIZE, len(heavy_files))
+        convert_worker_size = min(HEAVY_PDF_CONVERT_WORKER_SIZE, len(heavy_files))
         h_stats, h_chunks, h_tables = _run_batch(
             heavy_files,
             convert_worker=convert_worker_size, # Heavy files conversion should happen with less workers compared to light files conversion

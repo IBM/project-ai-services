@@ -8,11 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containers/podman/v5/libpod/define"
-
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -21,7 +20,7 @@ const (
 )
 
 func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string, timeout time.Duration) error {
-	var containerStatus *define.InspectContainerData
+	var containerStatus *types.Container
 	var err error
 
 	deadline := time.Now().Add(timeout)
@@ -33,13 +32,13 @@ func WaitForContainerReadiness(runtime runtime.Runtime, containerNameOrId string
 			return fmt.Errorf("failed to check container status: %w", err)
 		}
 
-		healthStatus := containerStatus.State.Health
+		healthStatus := containerStatus.Health
 
-		if healthStatus == nil {
+		if healthStatus == "" {
 			return nil
 		}
 
-		if healthStatus.Status == string(constants.Ready) {
+		if healthStatus == string(constants.Ready) {
 			return nil
 		}
 
@@ -87,14 +86,7 @@ func FetchContainerStartPeriod(runtime runtime.Runtime, containerNameOrId string
 		return 0, fmt.Errorf("failed to check container stats: %w", err)
 	}
 
-	// Healthcheck settings live under Config.Healthcheck
-	if containerStats.Config == nil || containerStats.Config.Healthcheck == nil {
-		return -1, nil
-	}
-
-	healthCheck := containerStats.Config.Healthcheck
-
-	return healthCheck.StartPeriod, nil
+	return containerStats.HealthcheckStartPeriod, nil
 }
 
 func ListSpyreCards() ([]string, error) {

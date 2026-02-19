@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "opensearch"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: vectordb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: vectordb
+  template:
+    metadata:
+      labels:
+        ai-services.io/application: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+        ai-services.io/component: vectordb
+    spec:
+      serviceAccountName: opensearch-sa 
+      containers:
+        - name: opensearch
+          image: "{{ .Values.opensearch.image }}"
+          env:
+            - name: "discovery.type"
+              value: "single-node"
+            - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "opensearch-credentials"
+                  key: password
+          ports: 
+            - name: os-client-port
+              containerPort: 9200
+            - name: os-metrics-port
+              containerPort: 9600
+          resources:
+            requests:
+              cpu: "2"
+              memory: "{{ .Values.opensearch.memoryLimit }}"
+            limits:
+              cpu: "2"
+              memory: "{{ .Values.opensearch.memoryLimit }}"
+          securityContext:
+            runAsUser: 1000
+          volumeMounts:
+            - mountPath: /usr/share/opensearch/data
+              name: opensearch-data
+          livenessProbe:
+            exec:
+              command:
+              - sh
+              - -c
+              - 'curl -fk -u "admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" https://localhost:9200/_cluster/health'
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 20
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command:
+              - sh
+              - -c
+              - 'curl -fk -u "admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" https://localhost:9200/_cluster/health'
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+      volumes:
+        - name: opensearch-data
+          persistentVolumeClaim:
+            claimName: "opensearch"
