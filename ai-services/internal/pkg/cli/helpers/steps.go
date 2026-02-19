@@ -43,15 +43,22 @@ func PrintInfo(runtime runtime.Runtime, app, appTemplate string) error {
 }
 
 // populatePodValues -> populates the host values within the params.
-func populateHostValues(params map[string]string, varsData *templates.Vars) error {
+func populateHostValues(runtime runtime.Runtime, params map[string]string, varsData *templates.Vars) error {
 	for _, host := range varsData.Hosts {
-		if host.Type == "ip" {
+		switch host.Type {
+		case "ip":
 			// get the host IP
 			hostIP, err := utils.GetHostIP()
 			if err != nil {
 				return fmt.Errorf("unable to fetch the host IP: %w", err)
 			}
 			params["HOST_IP"] = hostIP
+		case "route":
+			route, err := runtime.GetRoute("ui")
+			if err != nil {
+				return fmt.Errorf("unable to fetch the route: %w", err)
+			}
+			params["UI_ROUTE"] = route.HostPort
 		}
 	}
 
@@ -155,7 +162,9 @@ func fetchDataSpecificInfo(data any, format string, defaultValue *string) (strin
 }
 
 func renderStepsMarkdown(runtime runtime.Runtime, appTemplate string, params map[string]string, mdFile, title string) error {
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{
+		Runtime: runtime.Type(),
+	})
 
 	tmpls, err := tp.LoadMdFiles(appTemplate)
 	if err != nil {
@@ -173,7 +182,7 @@ func renderStepsMarkdown(runtime runtime.Runtime, appTemplate string, params map
 	}
 
 	// populate the host values set in vars file
-	if err := populateHostValues(params, varsData); err != nil {
+	if err := populateHostValues(runtime, params, varsData); err != nil {
 		return fmt.Errorf("failed to populate host values: %w", err)
 	}
 

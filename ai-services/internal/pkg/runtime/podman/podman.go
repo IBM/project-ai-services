@@ -112,20 +112,20 @@ func (pc *PodmanClient) InspectContainer(nameOrId string) (*types.Container, err
 	return toInspectContainer(stats), nil
 }
 
-func (pc *PodmanClient) ListContainers(filters map[string][]string) ([]types.Container, error) {
-	var listOpts containers.ListOptions
+// func (pc *PodmanClient) ListContainers(filters map[string][]string) ([]types.Container, error) {
+// 	var listOpts containers.ListOptions
 
-	if len(filters) >= 1 {
-		listOpts.Filters = filters
-	}
+// 	if len(filters) >= 1 {
+// 		listOpts.Filters = filters
+// 	}
 
-	containerlist, err := containers.List(pc.Context, &listOpts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list containers: %w", err)
-	}
+// 	containerlist, err := containers.List(pc.Context, &listOpts)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to list containers: %w", err)
+// 	}
 
-	return toContainerList(containerlist), nil
-}
+// 	return toContainerList(containerlist), nil
+// }
 
 func (pc *PodmanClient) StopPod(id string) error {
 	inspectReport, err := pc.InspectPod(id)
@@ -254,6 +254,12 @@ func (pc *PodmanClient) ContainerLogs(containerNameOrID string) error {
 
 func (pc *PodmanClient) ContainerExists(nameOrID string) (bool, error) {
 	return containers.Exists(pc.Context, nameOrID, nil)
+}
+
+func (pc *PodmanClient) GetRoute(nameOrID string) (*types.Route, error) {
+	logger.Errorf("unsupported method called!")
+
+	return nil, fmt.Errorf("unsupported method")
 }
 
 // Type returns the runtime type for PodmanClient.

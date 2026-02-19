@@ -50,3 +50,9 @@ type Image struct {
 	RepoTags    []string
 	RepoDigests []string
 }
+
+type Route struct {
+	Name       string
+	HostPort   string
+	TargetPort string
+}

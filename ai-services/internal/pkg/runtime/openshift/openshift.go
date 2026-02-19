@@ -15,6 +15,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
+
+	routeclient "github.com/openshift/client-go/route/clientset/versioned"
 )
 
 const (
@@ -23,9 +25,10 @@ const (
 
 // OpenshiftClient implements the Runtime interface for Openshift.
 type OpenshiftClient struct {
-	clientset *kubernetes.Clientset
-	namespace string
-	ctx       context.Context
+	clientset   *kubernetes.Clientset
+	routeClient *routeclient.Clientset
+	namespace   string
+	ctx         context.Context
 }
 
 // NewOpenshiftClient creates and returns a new OpenshiftClient instance.
@@ -45,10 +48,17 @@ func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error)
 		return nil, err
 	}
 
+	// OpenShift Route client
+	routeClient, err := routeclient.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create route clientset: %w", err)
+	}
+
 	return &OpenshiftClient{
-		clientset: clientset,
-		namespace: namespace,
-		ctx:       context.Background(),
+		clientset:   clientset,
+		routeClient: routeClient,
+		namespace:   namespace,
+		ctx:         context.Background(),
 	}, nil
 }
 
@@ -133,28 +143,25 @@ func (kc *OpenshiftClient) DeletePod(id string, force *bool) error {
 
 // InspectPod inspects a pod and returns detailed information.
 func (kc *OpenshiftClient) InspectPod(nameOrID string) (*types.Pod, error) {
-	logger.Warningln("not implemented")
+	podName, err := getPodNameWithPrefix(kc, nameOrID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect the pod: %w", err)
+	}
 
-	return nil, nil
+	p, err := kc.clientset.CoreV1().Pods(kc.namespace).Get(kc.ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return toOpenshiftPod(p), nil
 }
 
 // PodExists checks if a pod exists.
 func (kc *OpenshiftClient) PodExists(nameOrID string) (bool, error) {
-	pod := &corev1.Pod{}
-	err := kc.client.Get(
-		kc.ctx,
-		client.ObjectKey{
-			Namespace: kc.namespace,
-			Name:      nameOrID,
-		},
-		pod,
-	)
+	// Since OpenShift pod names have a random string added to it we cannot use Get() here.
+	_, err := getPodNameWithPrefix(kc, nameOrID)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			return false, nil
-		}
-
-		return false, err
+		return false, fmt.Errorf("failed to list pods: %w", err)
 	}
 
 	return true, nil
@@ -182,17 +189,28 @@ func (kc *OpenshiftClient) PodLogs(podNameOrID string) error {
 }
 
 // ListContainers lists containers (returns pods' containers in Openshift).
-func (kc *OpenshiftClient) ListContainers(filters map[string][]string) ([]types.Container, error) {
-	logger.Warningln("not implemented")
+// func (kc *OpenshiftClient) ListContainers(filters map[string][]string) ([]types.Container, error) {
+// 	logger.Warningln("not implemented")
 
-	return nil, nil
-}
+// 	return nil, nil
+// }
 
 // InspectContainer inspects a container.
-func (kc *OpenshiftClient) InspectContainer(nameOrId string) (*types.Container, error) {
-	logger.Warningln("not implemented")
+func (kc *OpenshiftClient) InspectContainer(nameOrID string) (*types.Container, error) {
+	pods, err := kc.clientset.CoreV1().Pods(kc.namespace).List(kc.ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
 
-	return nil, nil
+	for _, pod := range pods.Items {
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.Name == nameOrID {
+				return toOpenShiftContainer(&cs, &pod), nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("cannot find container: %s", nameOrID)
 }
 
 // ContainerExists checks if a container exists.
@@ -225,7 +243,35 @@ func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
 	return nil
 }
 
+func (kc *OpenshiftClient) GetRoute(nameOrID string) (*types.Route, error) {
+	r, err := kc.routeClient.RouteV1().Routes(kc.namespace).Get(kc.ctx, nameOrID, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("cannot find route: %w", err)
+	}
+
+	return toOpenShiftRoute(r), nil
+}
+
 // Type returns the runtime type.
 func (kc *OpenshiftClient) Type() types.RuntimeType {
 	return types.RuntimeTypeOpenShift
+}
+
+func getPodNameWithPrefix(kc *OpenshiftClient, nameOrID string) (string, error) {
+	podName := ""
+	pods, err := kc.ListPods(nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to list pods: %w", err)
+	}
+
+	for _, pod := range pods {
+		if strings.HasPrefix(pod.Name, nameOrID) {
+			podName = pod.Name
+		}
+	}
+	if podName == "" {
+		return "", fmt.Errorf("cannot find pod: %s", nameOrID)
+	}
+
+	return podName, nil
 }

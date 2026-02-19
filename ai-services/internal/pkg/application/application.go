@@ -3,6 +3,7 @@ package application
 import (
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/application/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -21,10 +22,10 @@ func NewFactory(runtimeType types.RuntimeType) *Factory {
 }
 
 // Create creates an Application instance based on the factory's runtime type.
-func (f *Factory) Create() (Application, error) {
+func (f *Factory) Create(namespace string) (Application, error) {
 	// Create the runtime client first
 	runtimeFactory := runtime.NewRuntimeFactory(f.runtimeType)
-	runtimeClient, err := runtimeFactory.Create()
+	runtimeClient, err := runtimeFactory.Create(namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create runtime client: %w", err)
 	}
@@ -32,6 +33,8 @@ func (f *Factory) Create() (Application, error) {
 	switch f.runtimeType {
 	case types.RuntimeTypePodman:
 		return podman.NewPodmanApplication(runtimeClient), err
+	case types.RuntimeTypeOpenShift:
+		return openshift.NewOpenshiftApplication(runtimeClient), err
 
 	default:
 		return nil, fmt.Errorf("unsupported runtime type: %s", f.runtimeType)
