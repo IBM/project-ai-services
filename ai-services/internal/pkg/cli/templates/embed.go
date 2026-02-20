@@ -353,3 +353,35 @@ func NewEmbedTemplateProvider(options EmbedOptions) Template {
 
 	return t
 }
+
+func (e *embedTemplateProvider) LoadYamls() ([][]byte, error) {
+	if e.Runtime() != string(types.RuntimeTypeOpenShift) {
+		return nil, errors.New("unsupported runtime type")
+	}
+	var yamls [][]byte
+
+	err := fs.WalkDir(e.fs, e.root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		ext := filepath.Ext(d.Name())
+		if ext != ".yaml" && ext != ".yml" {
+			return nil
+		}
+
+		yaml, err := fs.ReadFile(e.fs, p)
+		if err != nil {
+			return fmt.Errorf("error reading %p: %w", yaml, err)
+		}
+
+		yamls = append(yamls, yaml)
+
+		return nil
+	})
+
+	return yamls, err
+}
