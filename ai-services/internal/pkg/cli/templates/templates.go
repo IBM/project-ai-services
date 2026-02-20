@@ -10,17 +10,16 @@ import (
 )
 
 type AppMetadata struct {
-	Name                  string     `yaml:"name,omitempty"`
-	Description           string     `yaml:"description,omitempty"`
-	Hidden                bool       `yaml:"hidden,omitempty"`
-	Version               string     `yaml:"version,omitempty"`
-	SMTLevel              *int       `yaml:"smtLevel,omitempty"`
-	PodTemplateExecutions [][]string `yaml:"podTemplateExecutions"`
-	Runtimes              []Runtime  `yaml:"runtimes,omitempty"`
+	Name                  string           `yaml:"name,omitempty"`
+	Description           string           `yaml:"description,omitempty"`
+	Hidden                bool             `yaml:"hidden,omitempty"`
+	Version               string           `yaml:"version,omitempty"`
+	SMTLevel              *int             `yaml:"smtLevel,omitempty"`
+	PodTemplateExecutions [][]string       `yaml:"podTemplateExecutions"`
+	Openshift             OpenshiftRuntime `yaml:"openshift,omitempty"`
 }
 
-type Runtime struct {
-	Name    string        `yaml:"name,omitempty"`
+type OpenshiftRuntime struct {
 	Timeout time.Duration `yaml:"timeout,omitempty"`
 }
 

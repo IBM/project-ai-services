@@ -3,12 +3,14 @@ package openshift
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"helm.sh/helm/v4/pkg/chart"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -16,52 +18,89 @@ import (
 func (o *OpenshiftApplication) Create(ctx context.Context, opts types.CreateOptions) error {
 	logger.Infof("Creating application '%s' using template '%s'\n", opts.Name, opts.TemplateName)
 
-	// fetch app, namespace and timeout from opts
-	app := opts.Name
-	namespace := app
-	timeout := opts.Timeout
-
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{Runtime: vars.RuntimeFactory.GetRuntimeType()})
 
+	// Step1: Fetch the operation timeout
+	timeout, err := getOperationTimeout(ctx, tp, opts)
+	if err != nil {
+		return err
+	}
+
+	// Step2: Load the Chart from assets for given app template
+	chart, err := loadCharts(ctx, tp, opts)
+	if err != nil {
+		return err
+	}
+
+	// Step3: Deploy Application
+	if err := deployApp(ctx, chart, timeout, opts); err != nil {
+		return err
+	}
+
+	//nolint:godox
+	// TODO: Step4: print Next steps
+
+	return nil
+}
+
+func getOperationTimeout(ctx context.Context, tp templates.Template, opts types.CreateOptions) (time.Duration, error) {
 	s := spinner.New("Setting the operation timeout...")
+
 	s.Start(ctx)
+	timeout := opts.Timeout
 	// populate the operation timeout
 	if timeout == 0 {
 		// load metadata.yml to read the app metadata
 		appMetadata, err := tp.LoadMetadata(opts.TemplateName, false)
 		if err != nil {
-			return fmt.Errorf("failed to read the app metadata: %w", err)
+			s.Fail("failed to read the app metadata")
+
+			return 0, fmt.Errorf("failed to read the app metadata: %w", err)
 		}
 
-		// means timeout is not set, then read from the app metadata
-		for _, runtime := range appMetadata.Runtimes {
-			if runtime.Name == string(runtimeTypes.RuntimeTypeOpenShift) {
-				timeout = runtime.Timeout
-			}
-		}
+		timeout = appMetadata.Openshift.Timeout
 	}
 	s.Stop("Successfully set the operation timeout: " + timeout.String())
 
-	// Load the Chart from assets
-	s = spinner.New("Loading the Chart '" + opts.TemplateName + "'...")
+	return timeout, nil
+}
+
+func loadCharts(ctx context.Context, tp templates.Template, opts types.CreateOptions) (chart.Charter, error) {
+	s := spinner.New("Loading the Chart '" + opts.TemplateName + "'...")
+
 	s.Start(ctx)
 	chart, err := tp.LoadChart(opts.TemplateName)
 	if err != nil {
-		return fmt.Errorf("failed to load chart: %w", err)
+		s.Fail("failed to load the Chart")
+
+		return nil, fmt.Errorf("failed to load the chart: %w", err)
 	}
 	s.Stop("Loaded the Chart '" + opts.TemplateName + "' successfully")
 
-	s = spinner.New("Deploying application '" + app + "'...")
+	return chart, nil
+}
+
+func deployApp(ctx context.Context, chart chart.Charter, timeout time.Duration, opts types.CreateOptions) error {
+	// Fetch app name and derive namespace
+	app := opts.Name
+	namespace := app
+
+	s := spinner.New("Deploying application '" + app + "'...")
+
 	s.Start(ctx)
-	// create a new Helm client
+	// Create a new Helm client
 	helmClient, err := helm.NewHelm(namespace)
 	if err != nil {
+		s.Fail("failed to create application")
+
 		return err
 	}
 
 	// Check if the app exists
 	isAppExist, err := helmClient.IsReleaseExist(app)
 	if err != nil {
+		s.Fail("failed to create application")
+
 		return err
 	}
 
@@ -74,12 +113,13 @@ func (o *OpenshiftApplication) Create(ctx context.Context, opts types.CreateOpti
 		logger.Infof("App: %s already exist, proceeding with reconciling...", app)
 		err = helmClient.Upgrade(app, chart, &helm.UpgradeOpts{Timeout: timeout})
 	}
-
 	if err != nil {
+		s.Fail("failed to create application")
+
 		return fmt.Errorf("failed to perform app installation: %w", err)
 	}
 
-	s.Stop("Application '" + opts.Name + "' deployed successfully")
+	s.Stop("Application '" + app + "' deployed successfully")
 
 	return nil
 }
