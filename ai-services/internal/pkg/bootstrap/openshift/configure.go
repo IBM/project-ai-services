@@ -7,6 +7,7 @@ import (
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -28,8 +29,9 @@ func (o *OpenshiftBootstrap) Configure() error {
 
 func applyYamls(ctx context.Context, c client.Client) error {
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{
-		FS:   &assets.BootstrapFS,
-		Root: "bootstrap",
+		FS:      &assets.BootstrapFS,
+		Root:    "bootstrap",
+		Runtime: types.RuntimeTypeOpenShift,
 	})
 
 	yamls, err := tp.LoadYamls()

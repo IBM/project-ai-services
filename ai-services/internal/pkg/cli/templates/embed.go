@@ -355,6 +355,9 @@ func NewEmbedTemplateProvider(options EmbedOptions) Template {
 }
 
 func (e *embedTemplateProvider) LoadYamls() ([][]byte, error) {
+	if e.Runtime() != string(types.RuntimeTypeOpenShift) {
+		return nil, errors.New("unsupported runtime type")
+	}
 	var yamls [][]byte
 
 	err := fs.WalkDir(e.fs, e.root, func(p string, d fs.DirEntry, err error) error {
