@@ -14,10 +14,6 @@ import (
 	"helm.sh/helm/v4/pkg/storage/driver"
 )
 
-var (
-	defaultWaitingTimeout = 10 * time.Minute
-)
-
 type Helm struct {
 	namespace    string
 	actionConfig *action.Configuration
@@ -60,12 +56,7 @@ func (h *Helm) Install(release string, chart chart.Charter, opts *InstallOpts) e
 	installClient.Namespace = h.namespace
 	installClient.CreateNamespace = true
 	installClient.WaitStrategy = kube.StatusWatcherStrategy
-
 	installClient.Timeout = opts.Timeout
-	if installClient.Timeout <= 0 {
-		// use default timeout if set to 0 or negative
-		installClient.Timeout = defaultWaitingTimeout
-	}
 
 	// Perform helm install
 	_, err := installClient.Run(chart, opts.Values)
@@ -87,12 +78,7 @@ func (h *Helm) Upgrade(release string, chart chart.Charter, opts *UpgradeOpts) e
 	upgradeClient.Namespace = h.namespace
 	upgradeClient.ServerSideApply = "true"
 	upgradeClient.WaitStrategy = kube.StatusWatcherStrategy
-
 	upgradeClient.Timeout = opts.Timeout
-	if upgradeClient.Timeout <= 0 {
-		// use default timeout if set to 0 or negative
-		upgradeClient.Timeout = defaultWaitingTimeout
-	}
 
 	// Perform helm upgrade
 	_, err := upgradeClient.Run(release, chart, opts.Values)
