@@ -52,3 +52,8 @@ func GetLLMasJudgeModelDetails() (downloadPath string, modelName string) {
 func GetLLMasJudgePodDetails() (portNumber string, llmImage string) {
 	return os.Getenv("LLM_JUDGE_PORT"), os.Getenv("LLM_JUDGE_IMAGE")
 }
+
+// GetGoldenDatasetFile returns the name of the golden dataset file.
+func GetGoldenDatasetFile() string {
+	return os.Getenv("GOLDEN_DATASET_FILE")
+}
