@@ -30,7 +30,7 @@ func ValidateOperator(ctx context.Context, operatorSubstring string) error {
 
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
-		return fmt.Errorf("failed to validate openshift cluster: %w", err)
+		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
 
 	if err := client.Client.List(ctx, csvList); err != nil {
@@ -40,25 +40,17 @@ func ValidateOperator(ctx context.Context, operatorSubstring string) error {
 	for _, csv := range csvList.Items {
 		name := csv.GetName()
 
-		if !strings.Contains(strings.ToLower(name), strings.ToLower(operatorSubstring)) {
+		if !strings.HasPrefix(name, operatorSubstring+".") {
 			continue
 		}
 
-		phase, _, _ := unstructured.NestedString(
-			csv.Object,
-			"status",
-			"phase",
-		)
+		phase, _, _ := unstructured.NestedString(csv.Object, "status", "phase")
 
 		if phase == PhaseSucceeded {
 			return nil
 		}
 
-		return fmt.Errorf(
-			"operator %s found but not ready (phase=%s)",
-			name,
-			phase,
-		)
+		return fmt.Errorf("operator %s found but not ready (phase=%s)", name, phase)
 	}
 
 	return fmt.Errorf("operator not installed: %s", operatorSubstring)
