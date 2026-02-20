@@ -115,3 +115,57 @@ flowchart TD
     %% Error path
     Verify -.->|Invalid| Fail[401 Unauthorized]
 ```
+
+Here is the proposed addition to your design document. I recommend adding this as a new section (Section 5) to clearly define the operational rollout of the service.
+
+---
+
+Got it. Shifting from auto-detection to an explicit, user-defined runtime flag is a great design choice for CLI tools. It provides the administrator with deterministic control over the deployment target and avoids unexpected behavior in complex environments.
+
+Here is the revised **Section 5** reflecting the explicit `--runtime` configuration.
+
+---
+
+### 5. Service Bootstrapping
+
+To streamline the installation and operational readiness of the Catalog Service, administrators utilize a unified initialization command. This command uses a global flag to explicitly define the target infrastructure context before executing the bootstrap sequence.
+
+**Command:**
+
+```bash
+$ ai-services catalog-service --runtime <podman|openshift> bootstrap
+
+```
+
+**Execution Flow:**
+This command acts as the primary deployment mechanism, automating the orchestration of the management plane based on the provided configuration. When executed, it performs the following sequence:
+
+1. **Runtime Validation:** Parses the `--runtime` flag to configure the orchestration context for either local execution (`podman` on RHEL LPAR) or clustered execution (`openshift`). If an invalid or missing flag is detected, the CLI halts and returns a usage error.
+2. **Secret Generation:** Automatically generates, securely stores, and mounts the cryptographic Secret Key required for the Go API Server's JWT validation layer.
+3. **Component Deployment:** Concurrently spins up both the **Catalog API Server** and the **Catalog UI** components within the targeted runtime environment.
+4. **Network Binding & Routing:** Establishes the secure connection between the UI and API, exposes the frontend port, and returns the live access URL to the administrator.
+
+```mermaid
+flowchart TD
+    Admin((Admin))
+    Cmd[> ai-services catalog-service bootstrap]
+
+    subgraph Initialization["Bootstrap Sequence"]
+        direction TB
+        Env["1. Validate & Configure<br/>Runtime Context"]
+        Sec["2. Provision JWT Secret Key"]
+        DeployAPI["3a. Start Catalog API Server"]
+        DeployUI["3b. Start Catalog UI"]
+        Route["4. Expose Service URL"]
+    end
+
+    Admin -->|Executes CLI| Cmd
+    Cmd --> Env
+    Env --> Sec
+    Sec --> DeployAPI
+    Sec --> DeployUI
+    DeployAPI --> Route
+    DeployUI --> Route
+    Route -.->|Outputs Access URL| Admin
+
+```
