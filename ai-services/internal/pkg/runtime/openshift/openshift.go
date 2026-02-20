@@ -18,7 +18,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	routeclient "github.com/openshift/client-go/route/clientset/versioned"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (

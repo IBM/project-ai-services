@@ -17,13 +17,9 @@ const (
 	PhaseSucceeded = "Succeeded"
 )
 
-type OCPHelper struct {
-	client *openshift.OpenshiftClient
-}
-
 /* ---------- Operator Validation ---------- */
 
-func (h *OCPHelper) ValidateOperator(ctx context.Context, operatorSubstring string) error {
+func ValidateOperator(ctx context.Context, operatorSubstring string) error {
 	csvList := &unstructured.UnstructuredList{}
 
 	csvList.SetGroupVersionKind(schema.GroupVersionKind{
@@ -32,7 +28,12 @@ func (h *OCPHelper) ValidateOperator(ctx context.Context, operatorSubstring stri
 		Kind:    OLMCSVList,
 	})
 
-	if err := h.client.GetClient().List(ctx, csvList); err != nil {
+	client, err := openshift.NewOpenshiftClient()
+	if err != nil {
+		return fmt.Errorf("failed to validate openshift cluster: %w", err)
+	}
+
+	if err := client.Client.List(ctx, csvList); err != nil {
 		return fmt.Errorf("failed to list ClusterServiceVersions: %w", err)
 	}
 
