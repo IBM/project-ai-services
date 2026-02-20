@@ -49,7 +49,7 @@ func getOperationTimeout(ctx context.Context, tp templates.Template, opts types.
 	s.Start(ctx)
 	timeout := opts.Timeout
 	// populate the operation timeout if its either not set or set negatively
-	if timeout == 0 {
+	if timeout <= 0 {
 		// load metadata.yml to read the app metadata
 		appMetadata, err := tp.LoadMetadata(opts.TemplateName, false)
 		if err != nil {
