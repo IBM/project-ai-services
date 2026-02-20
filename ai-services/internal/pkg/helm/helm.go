@@ -62,8 +62,8 @@ func (h *Helm) Install(release string, chart chart.Charter, opts *InstallOpts) e
 	installClient.WaitStrategy = kube.StatusWatcherStrategy
 
 	installClient.Timeout = opts.Timeout
-	if installClient.Timeout == 0 {
-		// use default timeout if not set
+	if installClient.Timeout <= 0 {
+		// use default timeout if set to 0 or negative
 		installClient.Timeout = defaultWaitingTimeout
 	}
 
@@ -89,8 +89,8 @@ func (h *Helm) Upgrade(release string, chart chart.Charter, opts *UpgradeOpts) e
 	upgradeClient.WaitStrategy = kube.StatusWatcherStrategy
 
 	upgradeClient.Timeout = opts.Timeout
-	if upgradeClient.Timeout == 0 {
-		// use default timeout if not set
+	if upgradeClient.Timeout <= 0 {
+		// use default timeout if set to 0 or negative
 		upgradeClient.Timeout = defaultWaitingTimeout
 	}
 

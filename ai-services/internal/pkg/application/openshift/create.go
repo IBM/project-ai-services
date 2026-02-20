@@ -48,7 +48,7 @@ func getOperationTimeout(ctx context.Context, tp templates.Template, opts types.
 
 	s.Start(ctx)
 	timeout := opts.Timeout
-	// populate the operation timeout
+	// populate the operation timeout if its either not set or set negatively
 	if timeout == 0 {
 		// load metadata.yml to read the app metadata
 		appMetadata, err := tp.LoadMetadata(opts.TemplateName, false)
@@ -109,7 +109,7 @@ func deployApp(ctx context.Context, chart chart.Charter, timeout time.Duration, 
 		logger.Infof("App: %s does not exist, proceeding with install...", app)
 		err = helmClient.Install(app, chart, &helm.InstallOpts{Timeout: timeout})
 	} else {
-		// if App exists, perform upgrade
+		// if App exists, perform upgrade so that the actual state of the app meets the desired state
 		logger.Infof("App: %s already exist, proceeding with reconciling...", app)
 		err = helmClient.Upgrade(app, chart, &helm.UpgradeOpts{Timeout: timeout})
 	}
