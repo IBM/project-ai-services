@@ -14,6 +14,8 @@ import (
 )
 
 func (o *OpenshiftApplication) Create(ctx context.Context, opts types.CreateOptions) error {
+	logger.Infof("Creating application '%s' using template '%s'\n", opts.Name, opts.TemplateName)
+
 	// fetch app, namespace and timeout from opts
 	app := opts.Name
 	namespace := app

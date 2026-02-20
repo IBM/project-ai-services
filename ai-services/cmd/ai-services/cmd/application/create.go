@@ -223,7 +223,7 @@ func initOpenShiftFlags() {
 		&timeout,
 		"timeout",
 		0, // default
-		"Timeout for the operation (e.g. 10s, 2m, 1h)",
+		"Timeout for the operation (e.g. 10s, 2m, 1h). Supported for runtime set to openshift only.",
 	)
 }
 
