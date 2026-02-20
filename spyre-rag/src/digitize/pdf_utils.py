@@ -131,3 +131,30 @@ def find_text_font_size(
         logger.error(f"Error extracting font size: {e}")
 
     return matches
+
+def convert_doc(path):
+    doc_converter = get_doc_converter()
+    doc = doc_converter.convert(path)
+    return doc
+
+def get_doc_converter():
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+
+    # Accelerator & pipeline options
+    pipeline_options = PdfPipelineOptions()
+    # Docling model files are getting downloaded to this /var/docling-models dir by this project-ai-services/images/rag-base/download_docling_models.py script in project-ai-services/images/rag-base/Containerfile
+    pipeline_options.artifacts_path = "/var/docling-models"
+    pipeline_options.do_table_structure = True
+    pipeline_options.table_structure_options.do_cell_matching = True
+    pipeline_options.do_ocr = False
+
+    doc_converter = DocumentConverter(
+        allowed_formats=[
+            InputFormat.PDF
+        ],
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
+    )
+
+    return doc_converter

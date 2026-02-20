@@ -3,6 +3,6 @@ FROM icr.io/ai-services-cicd/rag-base:v0.0.16
 WORKDIR /opt/rag
 
 COPY common common
-COPY ingest ingest
+COPY digitize digitize
 COPY retrieve retrieve
 COPY settings.json .
