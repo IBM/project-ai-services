@@ -10,21 +10,26 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	routeclient "github.com/openshift/client-go/route/clientset/versioned"
 )
 
+const (
+	labelPartsCount = 2 // labelPartsCount is used to split label filters in the format "key=value".
+)
+
 // OpenshiftClient implements the Runtime interface for Openshift.
 type OpenshiftClient struct {
-	clientset   *kubernetes.Clientset
-	routeClient *routeclient.Clientset
-	namespace   string
-	ctx         context.Context
+	Client      client.Client
+	RouteClient *routeclient.Clientset
+	Namespace   string
+	Ctx         context.Context
 }
 
 // NewOpenshiftClient creates and returns a new OpenshiftClient instance.
@@ -39,9 +44,9 @@ func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error)
 		return nil, fmt.Errorf("failed to get openshift config: %w", err)
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
+	kc, err := client.New(config, client.Options{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create openshift clientset: %w", err)
+		return nil, err
 	}
 
 	// OpenShift Route client
@@ -51,10 +56,10 @@ func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error)
 	}
 
 	return &OpenshiftClient{
-		clientset:   clientset,
-		routeClient: routeClient,
-		namespace:   namespace,
-		ctx:         context.Background(),
+		Client:      kc,
+		RouteClient: routeClient,
+		Namespace:   namespace,
+		Ctx:         context.Background(),
 	}, nil
 }
 
@@ -98,15 +103,18 @@ func (kc *OpenshiftClient) PullImage(image string) error {
 
 // ListPods lists pods with optional filters.
 func (kc *OpenshiftClient) ListPods(filters map[string][]string) ([]types.Pod, error) {
-	// Convert filters to label selector
-	var labelSelector string
-	if labelFilters, exists := filters["label"]; exists && len(labelFilters) > 0 {
-		labelSelector = strings.Join(labelFilters, ",")
+	labels := client.MatchingLabels{}
+	if labelFilters, exists := filters["label"]; exists {
+		for _, lf := range labelFilters {
+			parts := strings.SplitN(lf, "=", labelPartsCount)
+			if len(parts) == labelPartsCount {
+				labels[parts[0]] = parts[1]
+			}
+		}
 	}
 
-	podList, err := kc.clientset.CoreV1().Pods(kc.namespace).List(kc.ctx, metav1.ListOptions{
-		LabelSelector: labelSelector,
-	})
+	podList := &corev1.PodList{}
+	err := kc.Client.List(kc.Ctx, podList, client.InNamespace(kc.Namespace), labels)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -135,12 +143,15 @@ func (kc *OpenshiftClient) InspectPod(nameOrID string) (*types.Pod, error) {
 		return nil, fmt.Errorf("failed to inspect the pod: %w", err)
 	}
 
-	p, err := kc.clientset.CoreV1().Pods(kc.namespace).Get(kc.ctx, podName, metav1.GetOptions{})
+	pod := &corev1.Pod{}
+	err = kc.Client.Get(kc.Ctx, client.ObjectKey{
+		Name: podName,
+	}, pod)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get pod from cluster: %w", err)
 	}
 
-	return toOpenshiftPod(p), nil
+	return toOpenshiftPod(pod), nil
 }
 
 // PodExists checks if a pod exists.
@@ -184,9 +195,10 @@ func (kc *OpenshiftClient) PodLogs(podNameOrID string) error {
 
 // InspectContainer inspects a container.
 func (kc *OpenshiftClient) InspectContainer(nameOrID string) (*types.Container, error) {
-	pods, err := kc.clientset.CoreV1().Pods(kc.namespace).List(kc.ctx, metav1.ListOptions{})
+	pods := &corev1.PodList{}
+	err := kc.Client.List(kc.Ctx, pods, client.InNamespace(kc.Namespace))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
 
 	for _, pod := range pods.Items {
@@ -203,9 +215,10 @@ func (kc *OpenshiftClient) InspectContainer(nameOrID string) (*types.Container, 
 // ContainerExists checks if a container exists.
 func (kc *OpenshiftClient) ContainerExists(nameOrID string) (bool, error) {
 	// In Openshift, we check if any pod contains this container
-	pods, err := kc.clientset.CoreV1().Pods(kc.namespace).List(kc.ctx, metav1.ListOptions{})
+	pods := &corev1.PodList{}
+	err := kc.Client.List(kc.Ctx, pods, client.InNamespace(kc.Namespace))
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to check container: %w", err)
 	}
 
 	for _, pod := range pods.Items {
@@ -227,7 +240,7 @@ func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
 }
 
 func (kc *OpenshiftClient) GetRoute(nameOrID string) (*types.Route, error) {
-	r, err := kc.routeClient.RouteV1().Routes(kc.namespace).Get(kc.ctx, nameOrID, metav1.GetOptions{})
+	r, err := kc.RouteClient.RouteV1().Routes(kc.Namespace).Get(kc.Ctx, nameOrID, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("cannot find route: %w", err)
 	}
