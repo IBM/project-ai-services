@@ -453,12 +453,12 @@ github.com/opencontainers/runtime-tools v0.9.1-0.20250523060157-0ea5ed0382a2 h1:
 github.com/opencontainers/runtime-tools v0.9.1-0.20250523060157-0ea5ed0382a2/go.mod h1:MXdPzqAA8pHC58USHqNCSjyLnRQ6D+NjbpP+02Z1U/0=
 github.com/opencontainers/selinux v1.13.0 h1:Zza88GWezyT7RLql12URvoxsbLfjFx988+LGaWfbL84=
 github.com/opencontainers/selinux v1.13.0/go.mod h1:XxWTed+A/s5NNq4GmYScVy+9jzXhGBVEOAyucdRUY8s=
-github.com/peterbourgon/diskv v2.0.1+incompatible h1:UBdAOUP5p4RWqPBg048CAvpKN+vxiaj6gdUUzhl4XmI=
-github.com/peterbourgon/diskv v2.0.1+incompatible/go.mod h1:uqqh8zWWbv1HBMNONnaR/tNboyR3/BZd58JJSHlUSCU=
 github.com/openshift/api v0.0.0-20260213123447-0246c0ac1a77 h1:kAS0KmsQ+HzWUhX6pkGsrrKX8Dx5OKAj93cPNj+RGNs=
 github.com/openshift/api v0.0.0-20260213123447-0246c0ac1a77/go.mod h1:d5uzF0YN2nQQFA0jIEWzzOZ+edmo6wzlGLvx5Fhz4uY=
 github.com/openshift/client-go v0.0.0-20260213141500-06efc6dce93b h1:7rTnxq+haKrzUFKQQDylkklyFRtGFox73dlawRlnTA8=
 github.com/openshift/client-go v0.0.0-20260213141500-06efc6dce93b/go.mod h1:V3s8weD4bKXGXaN7d9g3V1QS2gmlYBRI2i/lfIwmroM=
+github.com/peterbourgon/diskv v2.0.1+incompatible h1:UBdAOUP5p4RWqPBg048CAvpKN+vxiaj6gdUUzhl4XmI=
+github.com/peterbourgon/diskv v2.0.1+incompatible/go.mod h1:uqqh8zWWbv1HBMNONnaR/tNboyR3/BZd58JJSHlUSCU=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pkg/sftp v1.13.9 h1:4NGkvGudBL7GteO3m6qnaQ4pC0Kvf0onSVc9gR3EWBw=

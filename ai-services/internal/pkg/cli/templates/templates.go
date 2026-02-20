@@ -2,6 +2,7 @@ package templates
 
 import (
 	"text/template"
+	"time"
 
 	"helm.sh/helm/v4/pkg/chart"
 
@@ -9,12 +10,17 @@ import (
 )
 
 type AppMetadata struct {
-	Name                  string     `yaml:"name,omitempty"`
-	Description           string     `yaml:"description,omitempty"`
-	Hidden                bool       `yaml:"hidden,omitempty"`
-	Version               string     `yaml:"version,omitempty"`
-	SMTLevel              *int       `yaml:"smtLevel,omitempty"`
-	PodTemplateExecutions [][]string `yaml:"podTemplateExecutions"`
+	Name                  string           `yaml:"name,omitempty"`
+	Description           string           `yaml:"description,omitempty"`
+	Hidden                bool             `yaml:"hidden,omitempty"`
+	Version               string           `yaml:"version,omitempty"`
+	SMTLevel              *int             `yaml:"smtLevel,omitempty"`
+	PodTemplateExecutions [][]string       `yaml:"podTemplateExecutions"`
+	Openshift             OpenshiftRuntime `yaml:"openshift,omitempty"`
+}
+
+type OpenshiftRuntime struct {
+	Timeout time.Duration `yaml:"timeout,omitempty"`
 }
 
 type Vars struct {

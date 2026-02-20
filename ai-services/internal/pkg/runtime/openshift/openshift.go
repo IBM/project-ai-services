@@ -15,13 +15,13 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	routeclient "github.com/openshift/client-go/route/clientset/versioned"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
-	labelPartsCount = 2
+	labelPartsCount = 2 // labelPartsCount is used to split label filters in the format "key=value".
 )
 
 // OpenshiftClient implements the Runtime interface for Openshift.
@@ -44,9 +44,9 @@ func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error)
 		return nil, fmt.Errorf("failed to get openshift config: %w", err)
 	}
 
-	c, err := client.New(config, client.Options{})
+	kc, err := client.New(config, client.Options{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create openshift clientset: %w", err)
+		return nil, err
 	}
 
 	// OpenShift Route client
@@ -56,7 +56,7 @@ func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error)
 	}
 
 	return &OpenshiftClient{
-		Client:      c,
+		Client:      kc,
 		RouteClient: routeClient,
 		Namespace:   namespace,
 		Ctx:         context.Background(),
@@ -148,7 +148,7 @@ func (kc *OpenshiftClient) InspectPod(nameOrID string) (*types.Pod, error) {
 		Name: podName,
 	}, pod)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get pod from cluster: %w", err)
 	}
 
 	return toOpenshiftPod(pod), nil

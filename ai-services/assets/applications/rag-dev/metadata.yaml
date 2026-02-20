@@ -3,3 +3,5 @@ description: "Retrieval Augmented Generation (RAG) application that combines a v
               and a retrieval mechanism to provide accurate and context-aware responses based on ingested documents."
 hidden: true
 smtLevel: 2
+openshift:
+  timeout: 20m

@@ -8,7 +8,7 @@
         "@carbon/react": "^1.31.3",
         "@testing-library/jest-dom": "^5.16.5",
         "@testing-library/react": "^13.4.0",
-        "axios": "^1.12.0",
+        "axios": "^1.13.5",
         "express": "^5.2.1",
         "openai": "^6.9.1",
         "react": "^18.2.0",
