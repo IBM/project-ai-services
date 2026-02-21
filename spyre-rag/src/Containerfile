@@ -5,4 +5,5 @@ WORKDIR /opt/rag
 COPY common common
 COPY ingest ingest
 COPY retrieve retrieve
+COPY summarize summarize
 COPY settings.json .
