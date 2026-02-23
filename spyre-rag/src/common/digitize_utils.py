@@ -25,16 +25,16 @@ def generate_job_id():
     print(f"Hex-only ID: {job_id_hex}")
 
 
-# Use file checksum to compute uuid, helps preventing duplicate document records 
-def generate_document_id(checksum):
+# Use file filename to compute uuid, helps preventing duplicate document records 
+def generate_document_id(filename):
     """
-    Generate UUID based document_id based on file checksum, helps preventing duplicate document records 
+    Generate UUID based document_id based on filename, helps preventing duplicate document records 
     """
     # Define a fixed Namespace: use any valid UUID
     NAMESPACE_INGESTION = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
 
     # Generate deterministic UUID
-    document_id = uuid.uuid5(NAMESPACE_INGESTION, checksum)
+    document_id = uuid.uuid5(NAMESPACE_INGESTION, filename)
     return str(document_id)
 
 # Initializes document dictionary for given file which gets encompassed in status.json
