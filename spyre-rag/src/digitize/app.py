@@ -1,13 +1,17 @@
 import asyncio
 import logging
 import os
-import uuid
-from enum import Enum
+from pathlib import Path
+import shutil
+import time
 from typing import List, Optional
 import uvicorn
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status
 from common.misc_utils import get_logger, set_log_level
+import common.digitize_utils as dg_util
+from status import StatusManager, update_status
+from common.misc_utils import get_logger
 
 log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
@@ -20,28 +24,22 @@ if level != "":
 set_log_level(log_level)
 logger = get_logger("app")
 
+import common.digitize_utils as dg_util
+from status import StatusManager, update_status
+from common.misc_utils import get_logger
+
 app = FastAPI(title="Digitize Documents Service")
 
 # Semaphores for concurrency limiting
 digitization_semaphore = asyncio.BoundedSemaphore(2)
 ingestion_semaphore = asyncio.BoundedSemaphore(1)
 
-class OutputFormat(str, Enum):
-    TEXT = "text"
-    MD = "md"
-    JSON = "json"
+logger = get_logger("digitize_server")
 
-class OperationType(str, Enum):
-    INGESTION = "ingestion"
-    DIGITIZATION = "digitization"
+CACHE_DIR = "/var/cache"
+STAGING_DIR = f"{CACHE_DIR}/staging"
 
-class JobStatus(str, Enum):
-    ACCEPTED = "accepted"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-async def digitize_documents(job_id: str, filenames: List[str], output_format: OutputFormat):
+async def digitize_documents(job_id: str, filenames: List[str], output_format: dg_util.OutputFormat):
     try:
         # Business logic for document conversion.
         pass
@@ -52,26 +50,82 @@ async def digitize_documents(job_id: str, filenames: List[str], output_format: O
         digitization_semaphore.release()
         logger.debug(f"Semaphore slot released from digitization job {job_id}")
 
-
 async def ingest_documents(job_id: str, filenames: List[str]):
+    status_mgr = StatusManager(job_id)
+    job_staging_path = Path(STAGING_DIR) / job_id
+
     try:
-        # Business logic for document conversion.
-        pass
+        logger.info(f"🚀 Ingestion started for {job_id}")
+
+        for filename in filenames:
+            doc_entry = dg_util.initialize_document(filename)
+            status_mgr.update(doc_entry)
+            
+            # Step 1: Converting or digitizing pdf document
+            start_ts = time.perf_counter()
+            status_mgr.update({"documents": {filename: {"status": "conversion"}}})
+
+            # [Logic: PDF to Images/Text]
+            await asyncio.sleep(0.5) 
+            conv_time = time.perf_counter() - start_ts
+            
+            # --- 2. PROCESSING ---
+            status_mgr.update({"documents": {filename: {"status": "processing"}}})
+            # [Logic: OCR or Cleaning]
+            proc_time = time.perf_counter() - (start_ts + conv_time)
+
+            # --- 3. CHUNKING ---
+            status_mgr.update({"documents": {filename: {"status": "chunking"}}})
+            # [Logic: Recursive Character Splitting]
+            chunk_time = time.perf_counter() - (start_ts + conv_time + proc_time)
+
+            # --- 4. INDEXING ---
+            status_mgr.update({"documents": {filename: {"status": "indexing"}}})
+            # [Logic: Vector Embedding + OpenSearch Bulk Index]
+            idx_time = time.perf_counter() - (start_ts + conv_time + proc_time + chunk_time)
+
+            # Final Doc Stats Update
+            status_mgr.update({
+                "documents": {
+                    filename: {
+                        "status": "completed",
+                        "stats": {
+                            "num_pages": 10, # Replace with actual count
+                            "num_chunks": 25, # Replace with actual count
+                            "timings": {
+                                "conversion": round(conv_time, 2),
+                                "processing": round(proc_time, 2),
+                                "chunking": round(chunk_time, 2),
+                                "indexing": round(idx_time, 2)
+                            }
+                        }
+                    }
+                }
+            })
+
+        status_mgr.update({"status": "completed"})
+
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
+        status_mgr.update({"status": "error", "error_message": str(e)})
+    
     finally:
-        # Crucial: Always release the semaphore slot back to the API
+        if job_staging_path.exists():
+            shutil.rmtree(job_staging_path)
+        
+        # Mandatory Semaphore Release
         ingestion_semaphore.release()
-        logger.debug(f"Semaphore slot released from ingestionjob {job_id}")
+        logger.debug(f"✅ Job {job_id} done. Semaphore released.")
+
 
 @app.post("/v1/documents", status_code=status.HTTP_202_ACCEPTED)
 async def digitize_document(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
-    operation: OperationType = Query(OperationType.INGESTION),
-    output_format: OutputFormat = Query(OutputFormat.JSON)
+    operation: dg_util.OperationType = Query(dg_util.OperationType.INGESTION),
+    output_format: dg_util.OutputFormat = Query(dg_util.OutputFormat.JSON)
 ):
-    sem = ingestion_semaphore if operation == OperationType.INGESTION else digitization_semaphore
+    sem = ingestion_semaphore if operation == dg_util.OperationType.INGESTION else digitization_semaphore
     
     # 1. Fail fast if limit reached
     if sem.locked():
@@ -81,21 +135,31 @@ async def digitize_document(
         )
 
     # 2. Validation
-    if operation == OperationType.DIGITIZATION and len(files) > 1:
+    if operation == dg_util.OperationType.DIGITIZATION and len(files) > 1:
         raise HTTPException(status_code=400, detail="Only 1 file allowed for digitization.")
 
-    # 3. Reserve the slot
-    await sem.acquire()
-
-    job_id = str(uuid.uuid4())
+    job_id = dg_util.generate_job_id()
     filenames = [f.filename for f in files]
 
+    # 3. acquire the semaphore
+    await sem.acquire()
+
     # 4. Schedule the background pipeline
-    if operation == OperationType.INGESTION:
-        background_tasks.add_task(ingest_documents, job_id, filenames)
-    else:
-        background_tasks.add_task(digitize_documents, job_id, filenames, output_format)
-    
+    try:
+        if operation == dg_util.OperationType.INGESTION:
+            # Upload the file byte stream to files in staging directory
+            # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
+            dg_util.stage_upload_files(job_id, filenames, Path(STAGING_DIR) / job_id)
+            background_tasks.add_task(ingest_documents, job_id, filenames)
+        else:
+            background_tasks.add_task(digitize_documents, job_id, filenames, output_format)
+
+            await asyncio.sleep(10)
+            update_status(job_id, "ingested", "Done")
+    except Exception as e:
+        update_status(job_id, "failed", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
     return {"job_id": job_id}
 
 @app.get("/v1/documents/jobs")
@@ -103,7 +167,7 @@ async def get_all_jobs(
     latest: bool = False,
     limit: int = 20,
     offset: int = 0,
-    status: Optional[JobStatus] = None
+    status: Optional[dg_util.JobStatus] = None
 ):
     return {"pagination": {"total": 0, "limit": limit, "offset": offset}, "data": []}
 
@@ -116,7 +180,7 @@ async def get_job_by_id(job_id: str):
 async def list_documents(
     limit: int = 20,
     offset: int = 0,
-    status: Optional[JobStatus] = None,
+    status: Optional[dg_util.JobStatus] = None,
     name: Optional[str] = None
 ):
     return {"pagination": {"total": 0, "limit": limit, "offset": offset}, "data": []}
