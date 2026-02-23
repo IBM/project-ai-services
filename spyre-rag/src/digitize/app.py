@@ -1,6 +1,5 @@
 import asyncio
 import uuid
-import time
 from enum import Enum
 from typing import List, Optional
 import uvicorn
@@ -13,8 +12,8 @@ logger = None
 app = FastAPI(title="Digitize Documents Service")
 
 # Semaphores for concurrency limiting
-digitization_semaphore = asyncio.Semaphore(2)
-ingestion_semaphore = asyncio.Semaphore(1)
+digitization_semaphore = asyncio.BoundedSemaphore(2)
+ingestion_semaphore = asyncio.BoundedSemaphore(1)
 
 class OutputFormat(str, Enum):
     TEXT = "text"
