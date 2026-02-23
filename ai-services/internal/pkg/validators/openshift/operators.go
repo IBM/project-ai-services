@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -89,7 +88,7 @@ func (r *OperatorRule) Verify() error {
 		if err := validateOperator(csvList, check.operator); err != nil {
 			failed = append(failed, fmt.Sprintf("  - %s: %s", check.name, err.Error()))
 		} else {
-			logger.Infof("%s is up and running", check.name, logger.VerbosityLevelDebug)
+			// logger.Infof("%s is up and running", check.name, logger.VerbosityLevelDebug)
 			r.passed = append(r.passed, fmt.Sprintf("  - %s installed", check.name))
 		}
 	}
@@ -97,14 +96,14 @@ func (r *OperatorRule) Verify() error {
 	if len(failed) > 0 {
 		checks := append(r.passed, failed...)
 
-		return fmt.Errorf("operator Validation Failed: \n%s", strings.Join(checks, "\n"))
+		return fmt.Errorf("operator validation failed: \n%s", strings.Join(checks, "\n"))
 	}
 
 	return nil
 }
 
 func (r *OperatorRule) Message() string {
-	return "All operators are installed and running"
+	return "Operators installed\n" + strings.Join(r.passed, "\n")
 }
 
 func (r *OperatorRule) Level() constants.ValidationLevel {
