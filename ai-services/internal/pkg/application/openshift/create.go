@@ -133,7 +133,7 @@ func deployApp(ctx context.Context, chart chart.Charter, timeout time.Duration, 
 }
 
 func prepareValues(valuesFiles []string, argParams map[string]string) (map[string]any, error) {
-	finalVals := make(map[string]interface{})
+	finalVals := make(map[string]any)
 
 	// 1. Iterate through all provided values files
 	for _, path := range valuesFiles {
@@ -145,7 +145,7 @@ func prepareValues(valuesFiles []string, argParams map[string]string) (map[strin
 			}
 
 			// Temporary map to hold this file's data
-			fileMap := make(map[string]interface{})
+			fileMap := make(map[string]any)
 			if err := yaml.Unmarshal(data, &fileMap); err != nil {
 				return nil, err // Fails only if the file is invalid YAML
 			}

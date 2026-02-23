@@ -177,14 +177,9 @@ func initCommonFlags() {
 		"values",
 		"f",
 		[]string{},
-		"Specify values.yaml files to override default template values\n\n"+
+		"Specify values files to override default template values.\n\n"+
 			"Usage:\n"+
-			"- Can be provided multiple times\n"+
-			"- Example: --values custom1.yaml --values custom2.yaml\n"+
-			"- Or shorthand: -f custom1.yaml -f custom2.yaml\n\n"+
-			"Notes:\n"+
-			"- Files are applied in the order provided\n"+
-			"- Later files override earlier ones\n",
+			"- Can be provided multiple times; files are applied in order and later files override earlier ones\n",
 	)
 }
 
