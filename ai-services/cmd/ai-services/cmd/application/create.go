@@ -171,31 +171,6 @@ func initCommonFlags() {
 			"Precedence:\n"+
 			"- When both --values and --params are provided, --params overrides --values\n",
 	)
-}
-
-func initPodmanFlags() {
-	createCmd.Flags().BoolVar(
-		&skipImageDownload,
-		"skip-image-download",
-		false,
-		"Skip container image pull/download during application creation\n\n"+
-			"Use this only if the required container images already exist locally\n"+
-			"Recommended for air-gapped or pre-provisioned environments\n\n"+
-			"Warning:\n"+
-			"- If set to true and images are missing → command will fail\n"+
-			"- If left false in air-gapped environments → pull/download attempt will fail\n",
-	)
-	createCmd.Flags().BoolVar(
-		&skipModelDownload,
-		"skip-model-download",
-		false,
-		"Skip model download during application creation\n\n"+
-			"Use this if local models already exist at /var/lib/ai-services/models/\n"+
-			"Recommended for air-gapped networks\n\n"+
-			"Warning:\n"+
-			"- If set to true and models are missing → command will fail\n"+
-			"- If left false in air-gapped environments → download attempt will fail\n",
-	)
 
 	createCmd.Flags().StringArrayVarP(
 		&valuesFiles,
@@ -210,6 +185,33 @@ func initPodmanFlags() {
 			"Notes:\n"+
 			"- Files are applied in the order provided\n"+
 			"- Later files override earlier ones\n",
+	)
+}
+
+func initPodmanFlags() {
+	createCmd.Flags().BoolVar(
+		&skipImageDownload,
+		"skip-image-download",
+		false,
+		"Skip container image pull/download during application creation\n\n"+
+			"Use this only if the required container images already exist locally\n"+
+			"Recommended for air-gapped or pre-provisioned environments\n\n"+
+			"Warning:\n"+
+			"- If set to true and images are missing → command will fail\n"+
+			"- If left false in air-gapped environments → pull/download attempt will fail\n"+
+			"Supported for runtime set to podman only.\n",
+	)
+	createCmd.Flags().BoolVar(
+		&skipModelDownload,
+		"skip-model-download",
+		false,
+		"Skip model download during application creation\n\n"+
+			"Use this if local models already exist at /var/lib/ai-services/models/\n"+
+			"Recommended for air-gapped networks\n\n"+
+			"Warning:\n"+
+			"- If set to true and models are missing → command will fail\n"+
+			"- If left false in air-gapped environments → download attempt will fail\n"+
+			"Supported for runtime set to podman only.\n",
 	)
 
 	initializeImagePullPolicyFlag()
@@ -238,7 +240,8 @@ func initializeImagePullPolicyFlag() {
 			" - Never: never pull; use only local images\n"+
 			" - IfNotPresent: pull only if the image isn't already present locally \n\n"+
 			"Defaults to 'IfNotPresent' if not specified\n\n"+
-			"In air-gapped environments → specify 'Never'\n\n",
+			"In air-gapped environments → specify 'Never'\n\n"+
+			"Supported for runtime set to podman only.\n\n",
 	)
 }
 
