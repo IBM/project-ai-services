@@ -3,18 +3,17 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "packageManager": "yarn@1.22.22",
   "scripts": {
     "dev": "vite",
-    "build": "yarn typecheck && vite build",
+    "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,scss}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,scss}\"",
     "typecheck": "tsc --noEmit",
-    "check": "yarn lint && yarn format:check && yarn typecheck",
-    "fix": "yarn lint:fix && yarn format"
+    "check": "npm run lint && npm run format:check && npm run typecheck",
+    "fix": "npm run lint:fix && npm run format"
   },
   "dependencies": {
     "@carbon/icons-react": "^11.75.0",
