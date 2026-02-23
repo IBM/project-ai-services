@@ -88,7 +88,6 @@ func (r *OperatorRule) Verify() error {
 		if err := validateOperator(csvList, check.operator); err != nil {
 			failed = append(failed, fmt.Sprintf("  - %s: %s", check.name, err.Error()))
 		} else {
-			// logger.Infof("%s is up and running", check.name, logger.VerbosityLevelDebug)
 			r.passed = append(r.passed, fmt.Sprintf("  - %s installed", check.name))
 		}
 	}

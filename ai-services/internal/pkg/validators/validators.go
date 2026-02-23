@@ -4,7 +4,7 @@ import (
 	"sync"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	operators "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift"
+	operators "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/operators"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/numa"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/platform"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/power"
