@@ -51,7 +51,7 @@ async def ingest_documents(job_id: str, filenames: List[str]):
         logger.error(f"Error in job {job_id}: {e}")
     finally:
         # Crucial: Always release the semaphore slot back to the API
-        digitization_semaphore.release()
+        ingestion_semaphore.release()
         logger.debug(f"Semaphore slot released from ingestionjob {job_id}")
 
 @app.post("/v1/documents", status_code=status.HTTP_202_ACCEPTED)
