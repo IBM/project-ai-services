@@ -272,6 +272,7 @@ func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
 					Container: containerNameOrID,
 					Follow:    true,
 				}
+
 				return followLogs(kc, pod.Name, opts)
 			}
 		}
@@ -342,6 +343,7 @@ func followLogs(kc *OpenshiftClient, podName string, opts *corev1.PodLogOptions)
 			errors.Is(err, context.DeadlineExceeded) {
 			return nil
 		}
+
 		return fmt.Errorf("error reading log stream: %w", err)
 	}
 
