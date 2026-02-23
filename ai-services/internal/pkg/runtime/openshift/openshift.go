@@ -269,6 +269,7 @@ func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
 		for _, container := range pod.Spec.Containers {
 			if container.Name == containerNameOrID {
 				podName = pod.Name
+
 				break
 			}
 		}
@@ -330,7 +331,12 @@ func followLogs(kc *OpenshiftClient, podName string, opts *corev1.PodLogOptions)
 	if err != nil {
 		return fmt.Errorf("failed to stream logs: %w", err)
 	}
-	defer stream.Close()
+
+	defer func() {
+		if err := stream.Close(); err != nil {
+			logger.Errorf("error closing log stream: %v", err)
+		}
+	}()
 
 	// Channel to signal goroutine completion
 	done := make(chan struct{})
