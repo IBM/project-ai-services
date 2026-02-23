@@ -155,7 +155,7 @@ async def digitize_document(
             background_tasks.add_task(digitize_documents, job_id, filenames, output_format)
 
             await asyncio.sleep(10)
-            update_status(job_id, "ingested", "Done")
+            update_status(job_id, "completed", "Done")
     except Exception as e:
         update_status(job_id, "failed", str(e))
         raise HTTPException(status_code=500, detail=str(e))
