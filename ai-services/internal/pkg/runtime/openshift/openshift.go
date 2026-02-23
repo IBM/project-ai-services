@@ -3,6 +3,7 @@ package openshift
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -253,38 +254,30 @@ func (kc *OpenshiftClient) ContainerExists(nameOrID string) (bool, error) {
 
 // ContainerLogs retrieves logs from a specific container.
 func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
-	var podName string
 	if containerNameOrID == "" {
 		return fmt.Errorf("container name is required to fetch logs")
 	}
 
 	// In Openshift, we check if any pod contains this container
 	pods := &corev1.PodList{}
-	err := kc.Client.List(kc.Ctx, pods, client.InNamespace(kc.Namespace))
-	if err != nil {
+	if err := kc.Client.List(kc.Ctx, pods, client.InNamespace(kc.Namespace)); err != nil {
 		return fmt.Errorf("failed to check container: %w", err)
 	}
 
+	// Find pod containing the container
 	for _, pod := range pods.Items {
 		for _, container := range pod.Spec.Containers {
 			if container.Name == containerNameOrID {
-				podName = pod.Name
-
-				break
+				opts := &corev1.PodLogOptions{
+					Container: containerNameOrID,
+					Follow:    true,
+				}
+				return followLogs(kc, pod.Name, opts)
 			}
 		}
 	}
 
-	if podName == "" {
-		return fmt.Errorf("cannot find pod for the given container")
-	}
-
-	opts := &corev1.PodLogOptions{
-		Container: containerNameOrID,
-		Follow:    true,
-	}
-
-	return followLogs(kc, podName, opts)
+	return fmt.Errorf("cannot find pod for the given container")
 }
 
 func (kc *OpenshiftClient) GetRoute(nameOrID string) (*types.Route, error) {
@@ -338,28 +331,18 @@ func followLogs(kc *OpenshiftClient, podName string, opts *corev1.PodLogOptions)
 		}
 	}()
 
-	// Channel to signal goroutine completion
-	done := make(chan struct{})
+	scanner := bufio.NewScanner(stream)
 
-	go func() {
-		defer close(done)
+	for scanner.Scan() {
+		logger.Infoln(scanner.Text())
+	}
 
-		scanner := bufio.NewScanner(stream)
-		for scanner.Scan() {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				logger.Infoln(scanner.Text())
-			}
+	if err := scanner.Err(); err != nil {
+		if errors.Is(err, context.Canceled) ||
+			errors.Is(err, context.DeadlineExceeded) {
+			return nil
 		}
-	}()
-
-	<-done
-
-	// Graceful exit on Ctrl+C
-	if ctx.Err() == context.Canceled || ctx.Err() == context.DeadlineExceeded {
-		return nil
+		return fmt.Errorf("error reading log stream: %w", err)
 	}
 
 	return nil

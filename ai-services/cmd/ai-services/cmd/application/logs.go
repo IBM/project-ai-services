@@ -38,8 +38,6 @@ Arguments
 
 		// Create application instance using factory
 		factory := application.NewFactory(rt)
-		//nolint:godox
-		// TODO: For OpenShift we need namespace param added if applicable
 		app, err := factory.Create(applicationName)
 		if err != nil {
 			return fmt.Errorf("failed to create application instance: %w", err)
