@@ -16,6 +16,7 @@ const (
 	RHOAIOperator              = "rhods-operator"
 )
 
+// Validate performs all necessary validations to ensure the OpenShift cluster is ready.
 func (o *OpenshiftBootstrap) Validate(skip map[string]bool) error {
 	ctx := context.Background()
 
@@ -32,6 +33,7 @@ func (o *OpenshiftBootstrap) Validate(skip map[string]bool) error {
 	return nil
 }
 
+// validateAuthentication checks if the Kubeconfig can access the OpenShift cluster.
 func (o *OpenshiftBootstrap) validateAuthentication(ctx context.Context) error {
 	if err := ValidateAuthentication(ctx); err != nil {
 		logger.Infoln("Authentication to OpenShift cluster")
@@ -46,6 +48,7 @@ func (o *OpenshiftBootstrap) validateAuthentication(ctx context.Context) error {
 	return nil
 }
 
+// validateOperators checks if all required operators are installed and ready.
 func (o *OpenshiftBootstrap) validateOperators(ctx context.Context) error {
 	var validationErrors []error
 
@@ -67,6 +70,7 @@ func (o *OpenshiftBootstrap) validateOperators(ctx context.Context) error {
 	return nil
 }
 
+// getOperatorChecks returns a list of operator validation checks with their names, operator substrings, and hints for resolution.
 func getOperatorChecks() []struct {
 	name     string
 	operator string
