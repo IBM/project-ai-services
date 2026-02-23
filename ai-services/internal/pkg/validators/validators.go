@@ -18,16 +18,16 @@ import (
 func init() {
 	// Podman checks
 	// adding root rule on top to verify this check first
-	PodmanDefaultRegistry.Register(root.NewRootRule())
-	PodmanDefaultRegistry.Register(numa.NewNumaRule())
-	PodmanDefaultRegistry.Register(platform.NewPlatformRule())
-	PodmanDefaultRegistry.Register(power.NewPowerRule())
-	PodmanDefaultRegistry.Register(rhn.NewRHNRule())
-	PodmanDefaultRegistry.Register(spyre.NewSpyreRule())
-	PodmanDefaultRegistry.Register(servicereport.NewServiceReportRule())
+	PodmanRegistry.Register(root.NewRootRule())
+	PodmanRegistry.Register(numa.NewNumaRule())
+	PodmanRegistry.Register(platform.NewPlatformRule())
+	PodmanRegistry.Register(power.NewPowerRule())
+	PodmanRegistry.Register(rhn.NewRHNRule())
+	PodmanRegistry.Register(spyre.NewSpyreRule())
+	PodmanRegistry.Register(servicereport.NewServiceReportRule())
 
 	// OpenshiftChecks
-	OpenshiftDefaultRegistry.Register(operators.NewOperatorRule())
+	OpenshiftRegistry.Register(operators.NewOperatorRule())
 }
 
 // Rule defines the interface for validation rules.
@@ -40,9 +40,9 @@ type Rule interface {
 	Description() string
 }
 
-// DefaultRegistry is the default registry instance that holds all registered checks.
-var PodmanDefaultRegistry = NewValidationRegistry()
-var OpenshiftDefaultRegistry = NewValidationRegistry()
+// PodmanRegistry is the podman registry instance that holds all registered checks.
+var PodmanRegistry = NewValidationRegistry()
+var OpenshiftRegistry = NewValidationRegistry()
 
 // ValidationRegistry holds the list of checks.
 type ValidationRegistry struct {

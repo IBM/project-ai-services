@@ -87,7 +87,7 @@ func validateExample() string {
 
 func generateValidationList() string {
 	var b strings.Builder
-	rules := validators.PodmanDefaultRegistry.Rules()
+	rules := validators.PodmanRegistry.Rules()
 
 	maxLen := 0
 
@@ -112,7 +112,7 @@ func generateValidationList() string {
 }
 
 func BuildSkipFlagDescription() string {
-	rules := validators.PodmanDefaultRegistry.Rules()
+	rules := validators.PodmanRegistry.Rules()
 
 	ruleName := make([]string, 0, len(rules))
 	for _, rule := range rules {

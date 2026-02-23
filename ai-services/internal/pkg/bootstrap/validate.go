@@ -22,9 +22,9 @@ func (p *BootstrapFactory) Validate(skip map[string]bool) error {
 	rt := vars.RuntimeFactory.GetRuntimeType()
 	switch rt {
 	case types.RuntimeTypePodman:
-		rules = validators.PodmanDefaultRegistry.Rules()
+		rules = validators.PodmanRegistry.Rules()
 	case types.RuntimeTypeOpenShift:
-		rules = validators.OpenshiftDefaultRegistry.Rules()
+		rules = validators.OpenshiftRegistry.Rules()
 	}
 
 	for _, rule := range rules {
