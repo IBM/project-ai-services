@@ -4,12 +4,11 @@ from pathlib import Path
 
 
 CACHE_DIR = "/var/cache"
-STAGING_DIR = f"{CACHE_DIR}/staging"
 
 class StatusManager:
     """Handler to atomic updates to the status JSON acting as source of truth"""
     def __init__(self, job_id: str):
-        self.path = Path(CACHE_DIR) / f"{job_id}_status.json"
+        self.path = Path(CACHE_DIR) / "jobs"/f"{job_id}_status.json"
         self.job_id = job_id
 
     def update(self, data_details: dict):
@@ -36,7 +35,7 @@ def update_status(job_id: str, status: str, details: dict = None):
     """
     Atomically writes the current pipeline status to the JSON file.
     """
-    status_path = Path(CACHE_DIR) / f"{job_id}_status.json"
+    status_path = Path(CACHE_DIR) / "jobs"/f"{job_id}_status.json"
 
     # Load existing data to preserve initial documents submission info
     if status_path.exists():

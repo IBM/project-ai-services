@@ -52,7 +52,7 @@ async def digitize_documents(job_id: str, filenames: List[str], output_format: d
 
 async def ingest_documents(job_id: str, filenames: List[str]):
     status_mgr = StatusManager(job_id)
-    job_staging_path = Path(STAGING_DIR) / job_id
+    job_staging_path = Path(STAGING_DIR) / "jobs"/job_id
 
     try:
         logger.info(f"🚀 Ingestion started for {job_id}")
