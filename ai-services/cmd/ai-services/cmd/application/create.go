@@ -134,12 +134,8 @@ func doBootstrapValidate() error {
 
 	// Create bootstrap instance based on runtime
 	factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
-	bootstrapInstance, err := factory.Create()
-	if err != nil {
-		return fmt.Errorf("failed to create bootstrap instance: %w", err)
-	}
 
-	if err := bootstrapInstance.Validate(skip); err != nil {
+	if err := factory.Validate(skip); err != nil {
 		return fmt.Errorf("bootstrap validation failed: %w", err)
 	}
 
