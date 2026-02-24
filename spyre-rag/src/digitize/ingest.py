@@ -1,5 +1,4 @@
 from glob import glob
-import logging
 import time
 
 import common.db_utils as db
@@ -10,8 +9,6 @@ from digitize.doc_utils import process_documents
 logger = get_logger("ingest")
 
 def ingest(directory_path, doc_id_dict=None):
-    """Ingest the documents/pdf files present in the given directory_path.
-    doct_id_dict is map of document name and its document id, used only by digitization API service"""
 
     def ingestion_failed():
         logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")

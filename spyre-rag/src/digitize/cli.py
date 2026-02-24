@@ -42,7 +42,6 @@ def main():
         if not total_pages:
             # No pages were processed, ingestion must have done using cached data.
             return
-    
         print("Stats of processed PDFs:")
         max_file_len = max(len(key) for key in converted_pdf_stats.keys())
         total_tables = sum(converted_pdf_stats[file]["table_count"] for file in converted_pdf_stats)
