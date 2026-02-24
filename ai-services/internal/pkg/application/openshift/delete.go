@@ -49,9 +49,10 @@ func (o *OpenshiftApplication) Delete(ctx context.Context, opts types.DeleteOpti
 
 	logger.Infoln("Proceeding with deletion...")
 
+	const defaultDeleteTimeout = 5 * time.Minute
 	timeout := opts.Timeout
 	if timeout <= 0 {
-		timeout = 5 * time.Minute
+		timeout = defaultDeleteTimeout
 	}
 
 	s := spinner.New("Deleting application '" + app + "'...")
