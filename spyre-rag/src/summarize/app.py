@@ -31,7 +31,14 @@ logger = get_logger("Summarize")
 settings = get_settings()
 concurrency_limiter = BoundedSemaphore(settings.max_concurrent_requests)
 
-app = FastAPI(
+@asynccontextmanager
+async def lifespan(app):
+    initialize_models()
+    create_llm_session(pool_maxsize=settings.max_concurrent_requests)
+    yield
+
+
+app = FastAPI(lifespan=lifespan,
     title="AI-Services Summarization API",
     description="Accepts text or files (.txt / .pdf) and returns AI-generated summaries.",
     version="1.0.0"
@@ -158,7 +165,7 @@ async def _handle_summarize(
 ):
     """Core summarization logic shared by both JSON and form-data paths."""
     input_word_count = _word_count(content_text)
-    if summary_length > input_word_count:
+    if summary_length and summary_length > input_word_count:
         return _build_error_response(
             "INPUT_TEXT_SMALLER_THAN_SUMMARY_LENGTH",
             "Input text is smaller than summary length",
@@ -182,9 +189,9 @@ async def _handle_summarize(
         logger.info(f"Received {input_type} request with input size:{input_word_count} "
                     f"words{f', target summary length: {summary_length} words' if summary_length is not None else ''}")
         result, in_tokens, out_tokens = query_vllm_summarize(
-            llm_endpoint=llm_model_dict['llm_model'],
+            llm_endpoint=llm_model_dict['llm_endpoint'],
             messages=messages,
-            model=llm_model_dict['llm_endpoint'],
+            model=llm_model_dict['llm_model'],
             max_tokens=max_tokens,
             temperature=settings.summarization_temperature,
         )
@@ -483,11 +490,7 @@ async def summarize(request: Request):
 async def health():
     return {"status": "ok"}
 
-@asynccontextmanager
-async def lifespan():
-    initialize_models()
-    create_llm_session(pool_maxsize=settings.max_concurrent_requests)
-    yield
+
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
