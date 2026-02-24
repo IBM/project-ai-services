@@ -1,7 +1,17 @@
 import asyncio
+from datetime import datetime, timezone
 from enum import Enum
 from functools import partial
+import json
+from pathlib import Path
 import uuid
+from common.misc_utils import get_logger
+
+CACHE_DIR = "/var/cache"
+DOCS_DIR = f"{CACHE_DIR}/docs"
+JOBS_DIR = f"{CACHE_DIR}/jobs"
+
+logger = get_logger("digitize_utils")
 
 class OutputFormat(str, Enum):
     TEXT = "text"
@@ -25,7 +35,6 @@ def generate_job_id():
     print(f"Hex-only ID: {job_id_hex}")
 
 
-# Use file filename to compute uuid, helps preventing duplicate document records 
 def generate_document_id(filename):
     """
     Generate UUID based document_id based on filename, helps preventing duplicate document records 
@@ -37,15 +46,73 @@ def generate_document_id(filename):
     document_id = uuid.uuid5(NAMESPACE_INGESTION, filename)
     return str(document_id)
 
-# Initializes document dictionary for given file which gets encompassed in status.json
-def initialize_document(filename):
-    doc_entry = {
-        filename: {
-            "status": "processing",
-            "stats": {"num_pages": 0, "num_tables": 0, "num_chunks": 0, "timings": {}}
+
+def initialize_job_state(job_id: str, operation: str, documents_info: list):
+    """
+    Creates the job status file and individual document metadata files.
+    documents_info: List of dicts with {'id': uuid, 'name': filename, 'type': op_type}
+    """
+    submitted_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    # list to store documents in Job file
+    job_documents_summary = []
+
+    # dictionary to keep mapping of filename to document id.
+    # key -> filename
+    # val -> doc_id
+    doc_id_dict = {}
+
+    for doc in documents_info:
+        # Create unique document id and document metadata for each files before spawning backgroundtask
+        doc_id = generate_document_id(doc)
+        doc_id_dict[doc] = doc_id
+        logger.debug(f"Generated document id {doc_id} for the file: {doc}")
+
+        # Create the document level metadata files (<doc_id>_metadata.json)
+        doc_meta_path = DOCS_DIR/f"{doc_id}_metadata.json"
+        doc_initial_data = {
+            "id": doc_id,
+            "name": doc,
+            "operation": operation,
+            "status": "accepted",
+            "output_format": "json",
+            "completed_at": None,
+            "error": "",
+            "pages": 0,
+            "tables": 0,
+            "chunks": 0,
+            "timing_in_secs": {
+                "digitizing": 0, "processing": 0, "chunking": 0, "indexing": 0
+            }
         }
+        with open(doc_meta_path, "w") as f:
+            json.dump(doc_initial_data, f, indent=4)
+
+        # Add doc's summary to list for the Job file
+        job_documents_summary.append({
+            "id": doc_id,
+            "name": doc,
+            "type": operation,
+            "status": "accepted"
+        })
+
+    # Create job status file (<job_id>_status.json)
+    job_status_path = JOBS_DIR / f"{job_id}_status.json"
+
+    job_data = {
+        "job_id": job_id,
+        "operation": operation,
+        "status": "accepted",
+        "submitted_at": submitted_at,
+        "documents": job_documents_summary,
+        "error": ""
     }
-    return {"documents": doc_entry}
+
+    with open(job_status_path, "w") as f:
+        json.dump(job_data, f, indent=4)
+
+    return doc_id_dict
+
 
 async def stage_upload_files(job_id: str, files: List[dict], staging_dir: str):
     def save_sync(path, content):

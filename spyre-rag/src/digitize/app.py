@@ -26,7 +26,9 @@ logger = get_logger("app")
 
 import common.digitize_utils as dg_util
 from status import StatusManager, update_status
-from common.misc_utils import get_logger
+from common.misc_utils import *
+import common.db_utils as db
+from common.emb_utils import get_embedder, Embedding
 
 app = FastAPI(title="Digitize Documents Service")
 
@@ -37,7 +39,11 @@ ingestion_semaphore = asyncio.BoundedSemaphore(1)
 logger = get_logger("digitize_server")
 
 CACHE_DIR = "/var/cache"
+DOCS_DIR = f"{CACHE_DIR}/docs"
 STAGING_DIR = f"{CACHE_DIR}/staging"
+
+def ingestion_failed():
+    logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
 
 async def digitize_documents(job_id: str, filenames: List[str], output_format: dg_util.OutputFormat):
     try:
@@ -50,63 +56,78 @@ async def digitize_documents(job_id: str, filenames: List[str], output_format: d
         digitization_semaphore.release()
         logger.debug(f"Semaphore slot released from digitization job {job_id}")
 
-async def ingest_documents(job_id: str, filenames: List[str]):
+async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict):
     status_mgr = StatusManager(job_id)
     job_staging_path = Path(STAGING_DIR) / "jobs"/job_id
 
     try:
         logger.info(f"🚀 Ingestion started for {job_id}")
+        emb_model_dict, llm_model_dict, _ = get_model_endpoints()
+        # Initialize/reset the database before processing any files
+        vector_store = db.get_vector_store()
+        index_name = vector_store.index_name
 
-        for filename in filenames:
-            doc_entry = dg_util.initialize_document(filename)
-            status_mgr.update(doc_entry)
+        out_path = setup_cache_dir(index_name)
+
+        combined_chunks, converted_pdf_stats = doc_utils.process_documents(
+            filenames, out_path, doc_id_dict, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'],  emb_model_dict["emb_endpoint"],
+            max_tokens=emb_model_dict['max_tokens'] - 100)
+        status_mgr.update_status(job_id, dg_util.JobStatus.IN_PROGRESS, converted_pdf_stats)
+
+        # converted_pdf_stats holds { file_name: {page_count: int, table_count: int, timings: {conversion: time_in_secs, process_text: time_in_secs, process_tables: time_in_secs, chunking: time_in_secs}} }
+        if converted_pdf_stats is None or combined_chunks is None:
+            ingestion_failed()
+            status_mgr.update_status(job_id, dg_util.JobStatus.FAILED, error="Ingestion failed. Either converted pdf stats or combined chunks are found empty")
+            return
+
+        if combined_chunks:
+            logger.info("Loading processed documents into DB")
+            embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
+            # Step 4: Indexing the chunks to VectorStore
+            vector_store.insert_chunks(
+                combined_chunks,
+                embedder=embedder
+            )
+            logger.info("Processed documents loaded into DB")
+
+            # Update <document_id>_metadata.json
+            status_mgr.update_status(job_id, dg_util.JobStatus.COMPLETED, combined_chunks)
+
+
+        # for filename in filenames:
             
-            # Step 1: Converting or digitizing pdf document
-            start_ts = time.perf_counter()
-            status_mgr.update({"documents": {filename: {"status": "conversion"}}})
+        #     # Step 1: Converting or digitizing pdf document
+        #     conversion_details = doc_utils.convert_doc()
 
-            # [Logic: PDF to Images/Text]
-            await asyncio.sleep(0.5) 
-            conv_time = time.perf_counter() - start_ts
-            
-            # --- 2. PROCESSING ---
-            status_mgr.update({"documents": {filename: {"status": "processing"}}})
-            # [Logic: OCR or Cleaning]
-            proc_time = time.perf_counter() - (start_ts + conv_time)
+        #     # Update <document_id>_metadata.json
+        #     status_mgr.update_doc_metadata(doc_id, conversion_details)
+        #     # Update <job_id>_status.json
+        #     status_mgr.update_status(job_id, "", conversion_details)
 
-            # --- 3. CHUNKING ---
-            status_mgr.update({"documents": {filename: {"status": "chunking"}}})
-            # [Logic: Recursive Character Splitting]
-            chunk_time = time.perf_counter() - (start_ts + conv_time + proc_time)
+        #     await asyncio.sleep(0.5)
+        
+        #     # Step 2: Process documents
+        #     process_docs_details = doc_utils.process_documents(
+        #         filename, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'], emb_model_dict["emb_endpoint"],
+        #         max_tokens=emb_model_dict['max_tokens'] - 100
+        #     )
+        #     # Update <document_id>_metadata.json
+        #     status_mgr.update_doc_metadata(doc_id, process_docs_details)
+        #     status_mgr.update_status(job_id, "", process_docs_details)
 
-            # --- 4. INDEXING ---
-            status_mgr.update({"documents": {filename: {"status": "indexing"}}})
-            # [Logic: Vector Embedding + OpenSearch Bulk Index]
-            idx_time = time.perf_counter() - (start_ts + conv_time + proc_time + chunk_time)
+        #     await asyncio.sleep(0.5)
 
-            # Final Doc Stats Update
-            status_mgr.update({
-                "documents": {
-                    filename: {
-                        "status": "completed",
-                        "stats": {
-                            "num_pages": 10, # Replace with actual count
-                            "num_chunks": 25, # Replace with actual count
-                            "timings": {
-                                "conversion": round(conv_time, 2),
-                                "processing": round(proc_time, 2),
-                                "chunking": round(chunk_time, 2),
-                                "indexing": round(idx_time, 2)
-                            }
-                        }
-                    }
-                }
-            })
+        #     # Step 3: Chunk documents
+        #     combined_chunks = doc_utils.create_chunk_documents()
+        #     # Update <document_id>_metadata.json
+        #     status_mgr.update_doc_metadata(doc_id, combined_chunks)
+        #     status_mgr.update_status(job_id, "", combined_chunks)
 
-        status_mgr.update({"status": "completed"})
+        #     await asyncio.sleep(0.5)
 
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
+        status_mgr.update_status(job_id, dg_util.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline. {str(e)}")
         status_mgr.update({"status": "error", "error_message": str(e)})
     
     finally:
@@ -150,7 +171,10 @@ async def digitize_document(
             # Upload the file byte stream to files in staging directory
             # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
             dg_util.stage_upload_files(job_id, filenames, Path(STAGING_DIR) / job_id)
-            background_tasks.add_task(ingest_documents, job_id, filenames)
+
+            doc_id_dict = dg_util.initialize_job_state(job_id, dg_util.OperationType.INGESTION, filenames)
+
+            background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
         else:
             background_tasks.add_task(digitize_documents, job_id, filenames, output_format)
 
