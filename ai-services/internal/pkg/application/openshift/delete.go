@@ -63,7 +63,7 @@ func (o *OpenshiftApplication) Delete(ctx context.Context, opts types.DeleteOpti
 	if err != nil {
 		s.Fail("failed to delete application")
 
-		return fmt.Errorf("failed to perform app uninstallation: %w", err)
+		return fmt.Errorf("failed to perform app deletion: %w", err)
 	}
 
 	s.Stop("Application '" + app + "' deleted successfully")
