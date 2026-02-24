@@ -83,3 +83,4 @@ def ingest(directory_path):
         f"Ingestion summary: {ingested}/{total_pdfs} files ingested "
         f"({percentage:.2f}% of total PDF files)"
     )
+    return converted_pdf_stats
