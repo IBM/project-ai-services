@@ -7,8 +7,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
 
@@ -45,20 +45,8 @@ func validateCmd() *cobra.Command {
 				logger.Warningln("Skipping validation checks: " + strings.Join(skipChecks, ", "))
 			}
 
-			runtimeType, err := cmd.Flags().GetString("runtime")
-			if err != nil {
-				return fmt.Errorf("failed to get runtime flag: %w", err)
-			}
-			rt := types.RuntimeType(runtimeType)
-
-			// Create bootstrap instance based on runtime
-			factory := bootstrap.NewBootstrapFactory(rt)
-			bootstrapInstance, err := factory.Create()
-			if err != nil {
-				return fmt.Errorf("failed to create bootstrap instance: %w", err)
-			}
-
-			if err := bootstrapInstance.Validate(skip); err != nil {
+			factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
+			if err := factory.Validate(skip); err != nil {
 				logger.Infof("Please refer to troubleshooting guide for more information: %s", troubleshootingGuide)
 
 				return fmt.Errorf("bootstrap validation failed: %w", err)
@@ -99,9 +87,10 @@ func validateExample() string {
 
 func generateValidationList() string {
 	var b strings.Builder
+	rules := validators.PodmanRegistry.Rules()
 
 	maxLen := 0
-	rules := validators.DefaultRegistry.Rules()
+
 	for _, rule := range rules {
 		if len(rule.Name()) > maxLen {
 			maxLen = len(rule.Name())
@@ -123,7 +112,8 @@ func generateValidationList() string {
 }
 
 func BuildSkipFlagDescription() string {
-	rules := validators.DefaultRegistry.Rules()
+	rules := validators.PodmanRegistry.Rules()
+
 	ruleName := make([]string, 0, len(rules))
 	for _, rule := range rules {
 		ruleName = append(ruleName, rule.Name())

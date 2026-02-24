@@ -3,8 +3,10 @@ package openshift
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
+	"go.yaml.in/yaml/v3"
 	"helm.sh/helm/v4/pkg/chart"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
@@ -32,8 +34,14 @@ func (o *OpenshiftApplication) Create(ctx context.Context, opts types.CreateOpti
 		return err
 	}
 
-	// Step3: Deploy Application
-	if err := deployApp(ctx, chart, timeout, opts); err != nil {
+	// Step3: Prepare the values
+	values, err := prepareValues(opts.ValuesFiles, opts.ArgParams)
+	if err != nil {
+		return fmt.Errorf("failed to prepare values: %w", err)
+	}
+
+	// Step4: Deploy Application
+	if err := deployApp(ctx, chart, timeout, values, opts); err != nil {
 		return err
 	}
 
@@ -80,7 +88,7 @@ func loadCharts(ctx context.Context, tp templates.Template, opts types.CreateOpt
 	return chart, nil
 }
 
-func deployApp(ctx context.Context, chart chart.Charter, timeout time.Duration, opts types.CreateOptions) error {
+func deployApp(ctx context.Context, chart chart.Charter, timeout time.Duration, values map[string]any, opts types.CreateOptions) error {
 	// Fetch app name and derive namespace
 	app := opts.Name
 	namespace := app
@@ -107,11 +115,11 @@ func deployApp(ctx context.Context, chart chart.Charter, timeout time.Duration, 
 	if !isAppExist {
 		// if App does not exist then perform install
 		logger.Infof("App: %s does not exist, proceeding with install...", app)
-		err = helmClient.Install(app, chart, &helm.InstallOpts{Timeout: timeout})
+		err = helmClient.Install(app, chart, &helm.InstallOpts{Values: values, Timeout: timeout})
 	} else {
 		// if App exists, perform upgrade so that the actual state of the app meets the desired state
 		logger.Infof("App: %s already exist, proceeding with reconciling...", app)
-		err = helmClient.Upgrade(app, chart, &helm.UpgradeOpts{Timeout: timeout})
+		err = helmClient.Upgrade(app, chart, &helm.UpgradeOpts{Values: values, Timeout: timeout})
 	}
 	if err != nil {
 		s.Fail("failed to create application")
@@ -122,4 +130,37 @@ func deployApp(ctx context.Context, chart chart.Charter, timeout time.Duration, 
 	s.Stop("Application '" + app + "' deployed successfully")
 
 	return nil
+}
+
+func prepareValues(valuesFiles []string, argParams map[string]string) (map[string]any, error) {
+	finalVals := make(map[string]any)
+
+	// 1. Iterate through all provided values files
+	for _, path := range valuesFiles {
+		// Check existence to avoid failure if a file in the slice is missing
+		if _, err := os.Stat(path); err == nil {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil, err
+			}
+
+			// Temporary map to hold this file's data
+			fileMap := make(map[string]any)
+			if err := yaml.Unmarshal(data, &fileMap); err != nil {
+				return nil, err // Fails only if the file is invalid YAML
+			}
+
+			// Merge this file into finalVals (shallow merge)
+			for k, v := range fileMap {
+				finalVals[k] = v
+			}
+		}
+	}
+
+	// 2. Append/Override with argParams (highest precedence)
+	for k, v := range argParams {
+		finalVals[k] = v
+	}
+
+	return finalVals, nil
 }
