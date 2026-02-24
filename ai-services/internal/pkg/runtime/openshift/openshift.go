@@ -319,6 +319,7 @@ func getPodNameWithPrefix(kc *OpenshiftClient, nameOrID string) (string, error) 
 			return pod.Name, nil
 		}
 	}
+
 	return "", fmt.Errorf("cannot find pod: %s", nameOrID)
 }
 
