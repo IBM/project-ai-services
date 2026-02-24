@@ -28,6 +28,12 @@ class JobStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
+class DocStatus(str, Enum):
+    ACCEPTED = "accepted"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
 def generate_job_id():
     # Generate a random UUID
     job_id = uuid.uuid4()

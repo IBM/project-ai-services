@@ -25,10 +25,9 @@ set_log_level(log_level)
 logger = get_logger("app")
 
 import common.digitize_utils as dg_util
-from status import StatusManager, update_status
 from common.misc_utils import *
-import common.db_utils as db
-from common.emb_utils import get_embedder, Embedding
+from ingest import ingest 
+from status import StatusManager, update_status
 
 app = FastAPI(title="Digitize Documents Service")
 
@@ -41,9 +40,6 @@ logger = get_logger("digitize_server")
 CACHE_DIR = "/var/cache"
 DOCS_DIR = f"{CACHE_DIR}/docs"
 STAGING_DIR = f"{CACHE_DIR}/staging"
-
-def ingestion_failed():
-    logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
 
 async def digitize_documents(job_id: str, filenames: List[str], output_format: dg_util.OutputFormat):
     try:
@@ -62,69 +58,7 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
 
     try:
         logger.info(f"🚀 Ingestion started for {job_id}")
-        emb_model_dict, llm_model_dict, _ = get_model_endpoints()
-        # Initialize/reset the database before processing any files
-        vector_store = db.get_vector_store()
-        index_name = vector_store.index_name
-
-        out_path = setup_cache_dir(index_name)
-
-        combined_chunks, converted_pdf_stats = doc_utils.process_documents(
-            filenames, out_path, doc_id_dict, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'],  emb_model_dict["emb_endpoint"],
-            max_tokens=emb_model_dict['max_tokens'] - 100)
-        status_mgr.update_status(job_id, dg_util.JobStatus.IN_PROGRESS, converted_pdf_stats)
-
-        # converted_pdf_stats holds { file_name: {page_count: int, table_count: int, timings: {conversion: time_in_secs, process_text: time_in_secs, process_tables: time_in_secs, chunking: time_in_secs}} }
-        if converted_pdf_stats is None or combined_chunks is None:
-            ingestion_failed()
-            status_mgr.update_status(job_id, dg_util.JobStatus.FAILED, error="Ingestion failed. Either converted pdf stats or combined chunks are found empty")
-            return
-
-        if combined_chunks:
-            logger.info("Loading processed documents into DB")
-            embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
-            # Step 4: Indexing the chunks to VectorStore
-            vector_store.insert_chunks(
-                combined_chunks,
-                embedder=embedder
-            )
-            logger.info("Processed documents loaded into DB")
-
-            # Update <document_id>_metadata.json
-            status_mgr.update_status(job_id, dg_util.JobStatus.COMPLETED, combined_chunks)
-
-
-        # for filename in filenames:
-            
-        #     # Step 1: Converting or digitizing pdf document
-        #     conversion_details = doc_utils.convert_doc()
-
-        #     # Update <document_id>_metadata.json
-        #     status_mgr.update_doc_metadata(doc_id, conversion_details)
-        #     # Update <job_id>_status.json
-        #     status_mgr.update_status(job_id, "", conversion_details)
-
-        #     await asyncio.sleep(0.5)
-        
-        #     # Step 2: Process documents
-        #     process_docs_details = doc_utils.process_documents(
-        #         filename, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'], emb_model_dict["emb_endpoint"],
-        #         max_tokens=emb_model_dict['max_tokens'] - 100
-        #     )
-        #     # Update <document_id>_metadata.json
-        #     status_mgr.update_doc_metadata(doc_id, process_docs_details)
-        #     status_mgr.update_status(job_id, "", process_docs_details)
-
-        #     await asyncio.sleep(0.5)
-
-        #     # Step 3: Chunk documents
-        #     combined_chunks = doc_utils.create_chunk_documents()
-        #     # Update <document_id>_metadata.json
-        #     status_mgr.update_doc_metadata(doc_id, combined_chunks)
-        #     status_mgr.update_status(job_id, "", combined_chunks)
-
-        #     await asyncio.sleep(0.5)
-
+        ingest(job_staging_path)
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
         status_mgr.update_status(job_id, dg_util.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline. {str(e)}")
