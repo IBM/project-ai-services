@@ -3,6 +3,7 @@ package templates
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -15,7 +16,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+
 	"go.yaml.in/yaml/v3"
+	"helm.sh/helm/v4/pkg/chart"
+	"helm.sh/helm/v4/pkg/chart/loader/archive"
+	"helm.sh/helm/v4/pkg/chart/v2/loader"
+
 	k8syaml "sigs.k8s.io/yaml"
 )
 
@@ -282,6 +288,42 @@ func (e *embedTemplateProvider) LoadVarsFile(app string, params map[string]strin
 	return &vars, nil
 }
 
+func (e *embedTemplateProvider) LoadChart(app string) (chart.Charter, error) {
+	if e.Runtime() != string(types.RuntimeTypeOpenShift) {
+		return nil, errors.New("unsupported runtime type")
+	}
+
+	// construct chart path
+	chartPath := path.Join(e.root, app, e.Runtime())
+
+	var files []*archive.BufferedFile
+	err := fs.WalkDir(e.fs, chartPath, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+
+		data, err := e.fs.ReadFile(p)
+		if err != nil {
+			return err
+		}
+
+		// Make file name relative to chart root for helm loader
+		rel := strings.TrimPrefix(filepath.ToSlash(p), filepath.ToSlash(chartPath)+"/")
+
+		files = append(files, &archive.BufferedFile{
+			Name: rel,
+			Data: data,
+		})
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return loader.LoadFiles(files)
+}
+
 type EmbedOptions struct {
 	FS      *embed.FS
 	Root    string
@@ -310,4 +352,36 @@ func NewEmbedTemplateProvider(options EmbedOptions) Template {
 	}
 
 	return t
+}
+
+func (e *embedTemplateProvider) LoadYamls() ([][]byte, error) {
+	if e.Runtime() != string(types.RuntimeTypeOpenShift) {
+		return nil, errors.New("unsupported runtime type")
+	}
+	var yamls [][]byte
+
+	err := fs.WalkDir(e.fs, e.root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		ext := filepath.Ext(d.Name())
+		if ext != ".yaml" && ext != ".yml" {
+			return nil
+		}
+
+		yaml, err := fs.ReadFile(e.fs, p)
+		if err != nil {
+			return fmt.Errorf("error reading %p: %w", yaml, err)
+		}
+
+		yamls = append(yamls, yaml)
+
+		return nil
+	})
+
+	return yamls, err
 }

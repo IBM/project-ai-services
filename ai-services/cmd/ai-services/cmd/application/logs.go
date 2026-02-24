@@ -33,7 +33,9 @@ var logsCmd = &cobra.Command{
 
 		// Create application instance using factory
 		factory := application.NewFactory(rt)
-		app, err := factory.Create()
+		//nolint:godox
+		// TODO: For OpenShift we need namespace param added if applicable
+		app, err := factory.Create("")
 		if err != nil {
 			return fmt.Errorf("failed to create application instance: %w", err)
 		}

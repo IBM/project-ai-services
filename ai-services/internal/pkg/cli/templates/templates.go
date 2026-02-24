@@ -2,17 +2,25 @@ package templates
 
 import (
 	"text/template"
+	"time"
+
+	"helm.sh/helm/v4/pkg/chart"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 )
 
 type AppMetadata struct {
-	Name                  string     `yaml:"name,omitempty"`
-	Description           string     `yaml:"description,omitempty"`
-	Hidden                bool       `yaml:"hidden,omitempty"`
-	Version               string     `yaml:"version,omitempty"`
-	SMTLevel              *int       `yaml:"smtLevel,omitempty"`
-	PodTemplateExecutions [][]string `yaml:"podTemplateExecutions"`
+	Name                  string           `yaml:"name,omitempty"`
+	Description           string           `yaml:"description,omitempty"`
+	Hidden                bool             `yaml:"hidden,omitempty"`
+	Version               string           `yaml:"version,omitempty"`
+	SMTLevel              *int             `yaml:"smtLevel,omitempty"`
+	PodTemplateExecutions [][]string       `yaml:"podTemplateExecutions"`
+	Openshift             OpenshiftRuntime `yaml:"openshift,omitempty"`
+}
+
+type OpenshiftRuntime struct {
+	Timeout time.Duration `yaml:"timeout,omitempty"`
 }
 
 type Vars struct {
@@ -58,4 +66,8 @@ type Template interface {
 	LoadMdFiles(app string) (map[string]*template.Template, error)
 	// LoadVarsFile loads the var template file
 	LoadVarsFile(app string, params map[string]string) (*Vars, error)
+	// LoadVarsFile loads the Chart
+	LoadChart(app string) (chart.Charter, error)
+	// LoadYamls loads the yaml in assests dir
+	LoadYamls() ([][]byte, error)
 }

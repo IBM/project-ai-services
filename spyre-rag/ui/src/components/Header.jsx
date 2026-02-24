@@ -2,7 +2,7 @@ import { Header, HeaderName } from '@carbon/react';
 
 const HeaderNav = () => {
   return (
-    <Header aria-label="">
+    <Header>
       <HeaderName to="/" prefix="">
         DigitalAssistant
       </HeaderName>

@@ -29,7 +29,7 @@ var infoCmd = &cobra.Command{
 
 		// Create application instance using factory
 		factory := application.NewFactory(rt)
-		app, err := factory.Create()
+		app, err := factory.Create(applicationName)
 		if err != nil {
 			return fmt.Errorf("failed to create application instance: %w", err)
 		}

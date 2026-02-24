@@ -1,3 +1,4 @@
+
 ## AI Services — E2E Test Suite
 
 Purpose
@@ -14,7 +15,8 @@ minimum number of Spyre cards installed, amongst other pre-flight checks.
 - Go toolchain (the repository uses Go modules). Use the Go version listed in `ai-services/go.mod`.
 - Git (to checkout branches or test fixtures).
 - Podman (preferred runtime) — the suite checks for Podman and may install or skip some tests when Podman is not available. See `tests/e2e/bootstrap` for details.
-- Set your environment Variables values 
+- Set your environment variables values.
+- The golden dataset CSV file must be placed inside the `project-ai-services/test/golden/` directory. The filename should match the value provided in the `GOLDEN_DATASET_FILE` environment variable.
 - Ginkgo CLI — tests can be run with `go test` or `ginkgo`.
 
 How to run tests locally
@@ -40,12 +42,14 @@ How to run tests locally
       
       ```bash 
       make test
+
+      make test-generate-report TEST_ARGS="--timeout=2h"
       ```
 
       Notes:
       - This target runs all tests under `tests/e2e` using `ginkgo -r ./tests/e2e`
       - It can be customized by setting environment variables `TEST_ARGS` for example `make test TEST_ARGS="-v"`.
-
+      - The `test-generate-report`  runs the entire test and stores a JUnit XML report in `tests/e2e/reports/report-$(RUN_ID).xml` 
 
    3. Run using the Ginkgo CLI 
       ```bash
@@ -53,10 +57,10 @@ How to run tests locally
       go install github.com/onsi/ginkgo/v2/ginkgo@latest
 
       ### run the whole suite
-      ginkgo -r ./tests/e2e
+      ginkgo -r --timeout=2h ./tests/e2e
 
-      ### to run a single spec file or focus pattern:
-      ginkgo ./tests/e2e --focus "Application Lifecycle" --skipPackage build
+      ### to generate a junit report with ginkgo 
+      ginkgo  -r --timeout=2h --junit-report=e2e-report.xml --output-dir=tests/e2e/reports ./tests/e2e/... 
       ```
 
 
@@ -83,12 +87,66 @@ export RAG_BACKEND_PORT=5100
 export RAG_UI_PORT=3100
 export LLM_JUDGE_PORT=8000
 
+# Golden dataset filename
+export GOLDEN_DATASET_FILE="filename.csv"
+
 # LLM as a judge model details
 export LLM_JUDGE_MODEL_PATH="/var/lib/ai-services/models/"
 export LLM_JUDGE_MODEL="Qwen/Qwen2.5-7B-Instruct"
 
 # Expected Golden Dataset accuracy 
 export RAG_ACCURACY_THRESHOLD=0.70 
+```
+
+Running Golden Dataset Validation Independently
+------------------------------------------------
+The RAG Golden Dataset Validation can be executed independently from the full E2E lifecycle. This allows validating an already running RAG application without creating or deleting an application during the test run.
+
+This mode is useful when:
+- A RAG application is already deployed.
+- You only want to validate model accuracy.
+- You want to avoid image pulls, bootstrap, or provisioning steps.
+
+Prerequisites
+--------------
+- A RAG application must already be running.
+- The application must be healthy.
+- The application must expose an accessible endpoint.
+- The golden dataset CSV file must be placed inside the `project-ai-services/test/golden/` directory. The filename should match the value provided in the `GOLDEN_DATASET_FILE` environment variable.
+- The following environment variables must be set
+```
+export GOLDEN_DATASET_FILE="filename.csv"
+
+export RAG_ACCURACY_THRESHOLD=0.70
+export RAG_BACKEND_PORT=5100
+
+export RH_REGISTRY_URL="registry.redhat.io"
+export RH_REGISTRY_USER_NAME=<your redhat acc username>
+export RH_REGISTRY_PASSWORD=<your redhat acc password>
+
+export LLM_JUDGE_IMAGE="registry.io/example/vllm-judge:latest"
+export LLM_JUDGE_MODEL_PATH="/var/lib/ai-services/models/"
+export LLM_JUDGE_MODEL="Qwen/Qwen2.5-7B-Instruct"
+export LLM_JUDGE_PORT=8000
+export LLM_CONTAINER_POLLING_INTERVAL=30s
+```
+- Verify the application exists:
+```
+ai-services application info <app-name>
+```
+If this command fails, golden dataset validation will fail.
+
+Command to Run Golden Validation Only
+--------------------------------------
+```
+make test TEST_ARGS="--label-filter=golden-dataset-validation" APP_NAME=<existing-app-name>
+```
+OR
+```
+ginkgo -r ./tests/e2e \
+  --label-filter=golden-dataset-validation \
+  -- \
+  --app-name=<existing-app-name>
 ```
 
 Adding new E2E tests
@@ -172,8 +230,7 @@ ai-services/tests/e2e/
    |   ├─ golden.go
    |   ├─ judge.go
    │   ├─ setup.go
-   ├─ reports/                    # reporting helpers (JUnit formatter, artifacts)
-   │   └─ junit.go
+   ├─ reports/                   # generated test reports (JUnit XML, etc.) are stored here
    ├─ utils/                      # small additional utilities used by tests
    │   └─ json.go
    └─ <other_test_files>          # add your `_test.go` files here (package `e2e`)

@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -21,15 +23,21 @@ import (
 
 // Variables for flags placeholder.
 var (
-	templateName          string
+	// common flags.
+	templateName string
+	rawArgParams []string
+	argParams    map[string]string
+
+	// podman flags.
 	skipModelDownload     bool
 	skipImageDownload     bool
 	skipChecks            []string
-	rawArgParams          []string
-	argParams             map[string]string
 	valuesFiles           []string
 	rawArgImagePullPolicy string
 	imagePullPolicy       image.ImagePullPolicy
+
+	// openshift flags.
+	timeout time.Duration
 )
 
 var createCmd = &cobra.Command{
@@ -88,25 +96,17 @@ var createCmd = &cobra.Command{
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		skip := helpers.ParseSkipChecks(skipChecks)
-		if len(skip) > 0 {
-			logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
-		}
-
-		// Create bootstrap instance based on runtime
-		factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
-		bootstrapInstance, err := factory.Create()
-		if err != nil {
-			return fmt.Errorf("failed to create bootstrap instance: %w", err)
-		}
-
-		if err := bootstrapInstance.Validate(skip); err != nil {
-			return fmt.Errorf("bootstrap validation failed: %w", err)
+		//nolint:godox
+		// TODO: Integrate Bootstrap validate for Openshift in create flow once ready. For now skipping it for Openshift runtime.
+		if vars.RuntimeFactory.GetRuntimeType() != types.RuntimeTypeOpenShift {
+			if err := doBootstrapValidate(); err != nil {
+				return err
+			}
 		}
 
 		// Create application instance using factory
 		appFactory := application.NewFactory(vars.RuntimeFactory.GetRuntimeType())
-		app, err := appFactory.Create()
+		app, err := appFactory.Create(appName)
 		if err != nil {
 			return fmt.Errorf("failed to create application instance: %w", err)
 		}
@@ -119,18 +119,61 @@ var createCmd = &cobra.Command{
 			ArgParams:         argParams,
 			ValuesFiles:       valuesFiles,
 			ImagePullPolicy:   imagePullPolicy,
+			Timeout:           timeout,
 		}
 
 		return app.Create(ctx, opts)
 	},
 }
 
+func doBootstrapValidate() error {
+	skip := helpers.ParseSkipChecks(skipChecks)
+	if len(skip) > 0 {
+		logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
+	}
+
+	// Create bootstrap instance based on runtime
+	factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
+	bootstrapInstance, err := factory.Create()
+	if err != nil {
+		return fmt.Errorf("failed to create bootstrap instance: %w", err)
+	}
+
+	if err := bootstrapInstance.Validate(skip); err != nil {
+		return fmt.Errorf("bootstrap validation failed: %w", err)
+	}
+
+	return nil
+}
+
 func init() {
+	initCommonFlags()
+	initPodmanFlags()
+	initOpenShiftFlags()
+}
+
+func initCommonFlags() {
 	skipCheckDesc := appBootstrap.BuildSkipFlagDescription()
 	createCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
+
 	createCmd.Flags().StringVarP(&templateName, "template", "t", "", "Application template to use (required)")
 	_ = createCmd.MarkFlagRequired("template")
-	// Add a flag for skipping image download
+
+	createCmd.Flags().StringSliceVar(
+		&rawArgParams,
+		"params",
+		[]string{},
+		"Inline parameters to configure the application.\n\n"+
+			"Format:\n"+
+			"- Comma-separated key=value pairs\n"+
+			"- Example: --params key1=value1,key2=value2\n\n"+
+			"- Use \"ai-services application templates\" to view the list of supported parameters\n\n"+
+			"Precedence:\n"+
+			"- When both --values and --params are provided, --params overrides --values\n",
+	)
+}
+
+func initPodmanFlags() {
 	createCmd.Flags().BoolVar(
 		&skipImageDownload,
 		"skip-image-download",
@@ -153,6 +196,7 @@ func init() {
 			"- If set to true and models are missing → command will fail\n"+
 			"- If left false in air-gapped environments → download attempt will fail\n",
 	)
+
 	createCmd.Flags().StringArrayVarP(
 		&valuesFiles,
 		"values",
@@ -167,23 +211,20 @@ func init() {
 			"- Files are applied in the order provided\n"+
 			"- Later files override earlier ones\n",
 	)
-	createCmd.Flags().StringSliceVar(
-		&rawArgParams,
-		"params",
-		[]string{},
-		"Inline parameters to configure the application.\n\n"+
-			"Format:\n"+
-			"- Comma-separated key=value pairs\n"+
-			"- Example: --params key1=value1,key2=value2\n\n"+
-			"- Use \"ai-services application templates\" to view the list of supported parameters\n\n"+
-			"Precedence:\n"+
-			"- When both --values and --params are provided, --params overrides --values\n",
-	)
 
 	initializeImagePullPolicyFlag()
 
 	// deprecated flags
-	deprecatedFlags()
+	deprecatedPodmanFlags()
+}
+
+func initOpenShiftFlags() {
+	createCmd.Flags().DurationVar(
+		&timeout,
+		"timeout",
+		0, // default
+		"Timeout for the operation (e.g. 10s, 2m, 1h). Supported for runtime set to openshift only.",
+	)
 }
 
 func initializeImagePullPolicyFlag() {
@@ -201,7 +242,7 @@ func initializeImagePullPolicyFlag() {
 	)
 }
 
-func deprecatedFlags() {
+func deprecatedPodmanFlags() {
 	if err := createCmd.Flags().MarkDeprecated("skip-image-download", "use --image-pull-policy instead"); err != nil {
 		panic(fmt.Sprintf("Failed to mark 'skip-image-download' flag deprecated. Err: %v", err))
 	}

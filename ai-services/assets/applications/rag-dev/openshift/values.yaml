@@ -1,6 +1,6 @@
 ui:
   # @hidden
-  image: icr.io/ai-services-cicd/rag-ui:v0.0.17
+  image: icr.io/ai-services-cicd/rag-ui:v0.0.18
 
 backend:
   # @hidden

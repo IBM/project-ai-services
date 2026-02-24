@@ -8,16 +8,26 @@ GITCOMMIT ?= $(shell git rev-parse --short HEAD)
 BUILDDATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 BUILD_CMD = CGO_ENABLED=0 $(GO) build $(BUILDFLAGS) \
-	-o $(BIN)/ai-services \
-	-tags $(BUILDTAGS) \
-	-ldflags " \
+     -o $(BIN)/ai-services \
+     -tags $(BUILDTAGS) \
+     -ldflags " \
     -X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.Version=$(VERSION)' \
     -X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.GitCommit=$(GITCOMMIT)' \
     -X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.BuildDate=$(BUILDDATE)' \
-  	" \
-	./cmd/ai-services
+     " \
+     ./cmd/ai-services
 
-TEST_CMD = ginkgo $(TEST_ARGS) -r ./tests/e2e 
+REPORT_DIR := tests/e2e/reports
+RUN_ID := $(shell date +%s)
+export RUN_ID
+
+TEST_BASE = ginkgo -r
+TEST_PKG = ./tests/e2e
+TEST_ARGS ?=
+JUNIT_FLAG = --junit-report=report-$(RUN_ID).xml --output-dir=$(REPORT_DIR)
+
+TEST_CMD = $(TEST_BASE) $(TEST_ARGS) $(TEST_PKG) \
+	-- $(if $(APP_NAME),--app-name=$(APP_NAME),)
 
 .PHONY: default
 default:
@@ -31,6 +41,10 @@ endif
 build:
 	$(BUILD_CMD)
 
-.PHONY: test
 test:
 	$(TEST_CMD)
+
+test-generate-report:
+	@echo "Using RUN_ID=$(RUN_ID)"
+	$(TEST_BASE) $(TEST_ARGS) $(JUNIT_FLAG) $(TEST_PKG)
+    
