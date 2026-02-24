@@ -74,7 +74,8 @@ After conversion, the document will be ingested via a structured processing pipe
         - There are no limits(number of files/number of pages per file)
 - Generate UUID for job as well as for documents.
 - Temporarily write the input documents into the staging directory `/var/cache/staging/<job_id>`
-- Write `<job_id>_status.json` inside `/var/cache` with initial status of job submission with submitted documents along with their UUIDs.
+- Write `<job_id>_status.json` inside `/var/cache/jobs` with initial status of job submission with submitted documents.
+- Write `<doc_id>_metadata.json` for each document inside `/var/cache/docs` to store the finer metadata details of a documents.
 - Start the ingestion in a background process.
 - End the request with returning `job_id` as response and 202 Accepted status.
 - Background process should do following
@@ -88,7 +89,82 @@ After conversion, the document will be ingested via a structured processing pipe
     - Users can submit digitized documents for ingestion; if the file is not cleaned using DELETE, the pipeline will use its cached version.
     - `/var/cache` is the persistent volume mounted by the runtime(Podman/OpenShift) inside the digitize document service container. 
     - In both ingestion/digitization, fastapi's `BackgroundTasks` can be used to run the process pipeline. Internally it can offload the tasks to child process pools. This would help in accessing the semaphore in API server's process for concurrency limiting.
+
+#### Workflow:
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant API as API Server (FastAPI)
+    participant Sem as Semaphore (Concurrency)
+    participant FS as Local Storage (/var/cache)
+    participant Worker as Background Process (Worker Pool)
+    participant VDB as Vector Database
+
+    User->>API: POST /v1/documents (files, operation, format)
     
+    Note over API: Validation: 1 file for digitization,<br/>multi-file for ingestion.
+    
+    API->>Sem: Acquire Lease (Ingest: 1, Digitize: 2)
+    alt Limit Reached
+        Sem-->>API: Limit Exceeded
+        API-->>User: 429 Too Many Requests
+    else Lease Acquired
+        API->>FS: Save incoming files to /var/cache/staging/{job_id}
+        API->>FS: Create /var/cache/jobs/{job_id}_status.json (Status: accepted)
+        
+        loop For each uploaded file
+            API->>FS: Create /var/cache/docs/{doc_id}_metadata.json (Initial values)
+        end
+        
+        API->>Worker: Trigger BackgroundTask(job_id, doc_ids)
+        API-->>User: 202 Accepted {job_id}
+
+        activate Worker
+        Worker->>FS: Update /var/cache/jobs/{job_id}_status.json (Status: in_progress)
+        
+        Note over Worker: Parallel per-document execution
+        loop For each doc_id
+            # Digitization
+            Worker->>FS: Update /var/cache/jobs/{job_id}_status.json (Stage: digitizing)
+            Worker->>Worker: Digitization (Conversion)
+            Worker->>FS: Save /var/cache/{doc_id}.json
+            Worker->>FS: Update /var/cache/docs/{doc_id}_metadata.json (Add Digitization stats)
+            
+            alt operation == 'ingestion'
+                # Processing
+                Worker->>FS: Update /var/cache/jobs/{job_id}_status.json (Stage: processing)
+                Worker->>Worker: Processing
+                Worker->>FS: Save /var/cache/{doc_id}_texts.json & /var/cache/{doc_id}_tables.json
+                Worker->>FS: Update /var/cache/docs/{doc_id}_metadata.json (Add Processing stats)
+                
+                # Chunking
+                Worker->>FS: Update /var/cache/jobs/{job_id}_status.json (Stage: chunking)
+                Worker->>Worker: Chunking
+                Worker->>FS: Save /var/cache/{doc_id}_chunks.json
+                Worker->>FS: Update /var/cache/docs/{doc_id}_metadata.json (Add Chunking stats)
+            end
+        end
+
+        alt operation == 'ingestion'
+            Note over Worker: Gather & Mini-Batch Indexing
+            Worker->>FS: Update /var/cache/jobs/{job_id}_status.json (Stage: indexing)
+            Worker->>FS: Read all /var/cache/{doc_id}_chunks.json for job
+            Worker->>Worker: Flatten all chunks into a master list
+            
+            loop For every 100 chunks
+                Worker->>Worker: Generate Embeddings for Batch
+                Worker->>VDB: Index Batch Vectors
+            end
+        end
+
+        Worker->>FS: Update /var/cache/jobs/{job_id}_status.json (Status: completed)
+        Worker->>FS: Delete files from /var/cache/staging/{job_id}
+        Worker->>Sem: Release Lease
+        deactivate Worker
+    end
+```
+
 **Sample curl for ingestion:**
 ```
 > curl -X 'POST' \ 
@@ -102,7 +178,6 @@ After conversion, the document will be ingested via a structured processing pipe
 > curl -X 'POST' \ 
   'http://localhost:4000/v1/documents?operation=digitization&output_format=md' \
   -F 'files=@/path/to/file3.pdf'
-  -F 'files=@/path/to/file4.pdf'
 > 
 ``` 
 
@@ -200,13 +275,8 @@ After conversion, the document will be ingested via a structured processing pipe
             "documents": [
                 {
                     "id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
-                    "name": "file1.pdf",
+                    "name": "file3.pdf",
                     "status": "completed"
-                },
-                {
-                    "id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
-                    "name": "file2.pdf",
-                    "status": "in_progress"
                 }
             ],
             "error": ""
@@ -243,15 +313,8 @@ After conversion, the document will be ingested via a structured processing pipe
     "submitted_at": "2026-01-10T10:00:00Z",
     "documents": [
         {
-            "id": "c7b2ee21-ccc2-5d93-9865-7fcea2ea9623",
-            "name": "file1.pdf",
-            "type": "digitization",
-            "output_format": "md",
-            "status": "completed"
-        },
-        {
             "id": "6083ecba-dd7e-572e-8cd5-5f950d96fa54",
-            "name": "file2.pdf",
+            "name": "file3.pdf",
             "status": "in_progress"
         }
     ],
@@ -395,7 +458,8 @@ After conversion, the document will be ingested via a structured processing pipe
 **Sample response:**
 ```
 {
-    "result": ... // Based on output_format request, result will contain str in case of md/text, dict in case of json output format, sample json file can be found [here](https://github.com/docling-project/docling-core/blob/5a7e567323fe250fa0b0211f92d8931e0ae64740/examples/2408.09869v3.json)
+    "result": ... // Based on output_format request, result will contain str in case of md/text, dict in case of json output format, sample json file can be found [here](https://github.com/docling-project/docling-core/blob/5a7e567323fe250fa0b0211f92d8931e0ae64740/examples/2408.09869v3.json),
+    "output_format": "md" // text & json also are possible values
 }
 ```
 ---
@@ -443,3 +507,11 @@ After conversion, the document will be ingested via a structured processing pipe
 | **500 Internal Error** | Server Failure | Failure occurred during VDB truncation or recursive file deletion. |
 
 ---
+
+## Recovery Strategy
+In case of process crash (whether it's the FastAPI worker or the entire container) below strategy can be used to recover from the crash.
+
+1. **Boot-up Scan:** When the FastAPI app starts, a routine should scan through  `/var/cache/jobs/*.json`.
+2. **Identify Zombies:** Any job with a status of `accepted` or `in_progress` is a "zombie" because no worker could possibly be handling it yet.
+3. **Mark as Failed:** Update those files to `status: failed` with an error message like `"System restarted during processing"`.
+4. **Cleanup:** Trigger the deletion of the corresponding `/var/cache/staging/<job_id>` directories & user can use `DELETE /v1/documents/{id}` to cleanup stale documents.
