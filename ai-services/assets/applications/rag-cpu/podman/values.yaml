@@ -27,7 +27,7 @@ opensearch:
 
 instruct:
   # @hidden
-  image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
+  image: icr.io/ppc64le-oss/vllm-ppc64le:0.10.1.dev852.gee01645db.d20250827
 
 embedding:
   # @hidden
