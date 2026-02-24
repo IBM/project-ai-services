@@ -494,3 +494,13 @@ func ValidateStartAppOutput(output string) error {
 
 	return nil
 }
+
+func GetApplicationNameFromPSOutput(psOutput string) (appName string) {
+	lines := strings.Split(psOutput, "\n")
+	parts := strings.Fields(lines[2])
+	if len(parts) > 0 {
+		return parts[0]
+	}
+
+	return ""
+}

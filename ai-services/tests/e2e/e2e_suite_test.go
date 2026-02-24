@@ -2,8 +2,8 @@ package e2e
 
 import (
 	"context"
-	"fmt"
 	"flag"
+	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -29,7 +29,8 @@ var (
 	cfg                         *config.Config
 	runID                       string
 	appName                     string
-	providedAppName			    string
+	providedAppName             string
+	deleteExistingApp           bool
 	tempDir                     string
 	tempBinDir                  string
 	aiServiceBin                string
@@ -51,6 +52,7 @@ var (
 
 func init() {
 	flag.StringVar(&providedAppName, "app-name", "", "Use existing application instead of creating one")
+	flag.BoolVar(&deleteExistingApp, "delete-app", false, "Delete existing app before proceeding ahead with test run")
 }
 func TestE2E(t *testing.T) {
 	gomega.RegisterFailHandler(ginkgo.Fail)
@@ -79,7 +81,7 @@ var _ = ginkgo.BeforeSuite(func() {
 	} else {
 		runID = fmt.Sprintf("%d", time.Now().Unix())
 	}
-	
+
 	ginkgo.By("Preparing runtime environment")
 	tempDir = bootstrap.PrepareRuntime(runID)
 	gomega.Expect(tempDir).NotTo(gomega.BeEmpty())
@@ -144,6 +146,31 @@ var _ = ginkgo.BeforeSuite(func() {
 	} else {
 		podmanReady = true
 		logger.Infoln("[SETUP] Podman environment verified")
+	}
+
+	ginkgo.By("Checking if existing app needs to be deleted")
+	if deleteExistingApp {
+		//fetch existing application details
+		psOutput, err := cli.ApplicationPS(ctx, cfg, "")
+		if err != nil {
+			logger.Errorf("Error fetching delete application name")
+			ginkgo.Fail("Error fetching delete application name")
+		}
+
+		//fetch application to be deleted
+		deleteAppName := cli.GetApplicationNameFromPSOutput(psOutput)
+		if deleteAppName != "" {
+			//delete existing application
+			_, err := cli.DeleteAppSkipCleanup(ctx, cfg, deleteAppName)
+			if err != nil {
+				logger.Errorf("Error deleting existing app: %s", deleteAppName)
+				ginkgo.Fail("Existing application could not be deleted")
+			}
+			logger.Infof("[SETUP] Deleted existing app: %s", deleteAppName)
+		} else {
+			logger.Infof("[SETUP] No existing application found to delete")
+		}
+
 	}
 
 	logger.Infoln("[SETUP] ================================================")
@@ -433,7 +460,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				logger.Warningf("[RAG][WARN] Judge cleanup failed: %v", err)
 			}
 		})
-		
+
 		ginkgo.It("validates RAG answers against golden dataset", ginkgo.Label("spyre-dependent"), func() {
 			logger.Infof("[RAG] Starting golden dataset validation")
 			cases, err := rag.LoadGoldenCSV(goldenPath)
