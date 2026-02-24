@@ -171,6 +171,16 @@ func initCommonFlags() {
 			"Precedence:\n"+
 			"- When both --values and --params are provided, --params overrides --values\n",
 	)
+
+	createCmd.Flags().StringArrayVarP(
+		&valuesFiles,
+		"values",
+		"f",
+		[]string{},
+		"Specify values files to override default template values.\n\n"+
+			"Usage:\n"+
+			"- Can be provided multiple times; files are applied in order and later files override earlier ones\n",
+	)
 }
 
 func initPodmanFlags() {
@@ -183,7 +193,8 @@ func initPodmanFlags() {
 			"Recommended for air-gapped or pre-provisioned environments\n\n"+
 			"Warning:\n"+
 			"- If set to true and images are missing → command will fail\n"+
-			"- If left false in air-gapped environments → pull/download attempt will fail\n",
+			"- If left false in air-gapped environments → pull/download attempt will fail\n"+
+			"Supported for podman runtime only.\n",
 	)
 	createCmd.Flags().BoolVar(
 		&skipModelDownload,
@@ -194,22 +205,8 @@ func initPodmanFlags() {
 			"Recommended for air-gapped networks\n\n"+
 			"Warning:\n"+
 			"- If set to true and models are missing → command will fail\n"+
-			"- If left false in air-gapped environments → download attempt will fail\n",
-	)
-
-	createCmd.Flags().StringArrayVarP(
-		&valuesFiles,
-		"values",
-		"f",
-		[]string{},
-		"Specify values.yaml files to override default template values\n\n"+
-			"Usage:\n"+
-			"- Can be provided multiple times\n"+
-			"- Example: --values custom1.yaml --values custom2.yaml\n"+
-			"- Or shorthand: -f custom1.yaml -f custom2.yaml\n\n"+
-			"Notes:\n"+
-			"- Files are applied in the order provided\n"+
-			"- Later files override earlier ones\n",
+			"- If left false in air-gapped environments → download attempt will fail\n"+
+			"Supported for podman runtime only.\n",
 	)
 
 	initializeImagePullPolicyFlag()
@@ -223,7 +220,8 @@ func initOpenShiftFlags() {
 		&timeout,
 		"timeout",
 		0, // default
-		"Timeout for the operation (e.g. 10s, 2m, 1h). Supported for runtime set to openshift only.",
+		"Timeout for the operation (e.g. 10s, 2m, 1h).\n"+
+			"Supported for openshift runtime only.\n",
 	)
 }
 
@@ -238,7 +236,8 @@ func initializeImagePullPolicyFlag() {
 			" - Never: never pull; use only local images\n"+
 			" - IfNotPresent: pull only if the image isn't already present locally \n\n"+
 			"Defaults to 'IfNotPresent' if not specified\n\n"+
-			"In air-gapped environments → specify 'Never'\n\n",
+			"In air-gapped environments → specify 'Never'\n\n"+
+			"Supported for podman runtime only.\n\n",
 	)
 }
 
