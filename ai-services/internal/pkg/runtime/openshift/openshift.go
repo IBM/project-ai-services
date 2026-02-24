@@ -1,17 +1,22 @@
 package openshift
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
@@ -27,6 +32,7 @@ const (
 // OpenshiftClient implements the Runtime interface for Openshift.
 type OpenshiftClient struct {
 	Client      client.Client
+	KubeClient  *kubernetes.Clientset
 	RouteClient *routeclient.Clientset
 	Namespace   string
 	Ctx         context.Context
@@ -44,9 +50,14 @@ func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error)
 		return nil, fmt.Errorf("failed to get openshift config: %w", err)
 	}
 
-	kc, err := client.New(config, client.Options{})
+	kcc, err := client.New(config, client.Options{})
 	if err != nil {
 		return nil, err
+	}
+
+	kc, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create openshift clientset: %w", err)
 	}
 
 	// OpenShift Route client
@@ -56,7 +67,8 @@ func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error)
 	}
 
 	return &OpenshiftClient{
-		Client:      kc,
+		Client:      kcc,
+		KubeClient:  kc,
 		RouteClient: routeClient,
 		Namespace:   namespace,
 		Ctx:         context.Background(),
@@ -181,9 +193,17 @@ func (kc *OpenshiftClient) StartPod(id string) error {
 
 // PodLogs retrieves logs from a pod.
 func (kc *OpenshiftClient) PodLogs(podNameOrID string) error {
-	logger.Warningln("yet to implement")
+	podName, err := getPodNameWithPrefix(kc, podNameOrID)
+	if err != nil {
+		return fmt.Errorf("failed to get the pod: %w", err)
+	}
 
-	return nil
+	// Defaults to only container if there is one container in the pod.
+	opts := &corev1.PodLogOptions{
+		Follow: true,
+	}
+
+	return followLogs(kc, podName, opts)
 }
 
 // ListContainers lists containers (returns pods' containers in Openshift).
@@ -234,9 +254,31 @@ func (kc *OpenshiftClient) ContainerExists(nameOrID string) (bool, error) {
 
 // ContainerLogs retrieves logs from a specific container.
 func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
-	logger.Warningln("yet to implement")
+	if containerNameOrID == "" {
+		return fmt.Errorf("container name is required to fetch logs")
+	}
 
-	return nil
+	// In Openshift, we check if any pod contains this container
+	pods := &corev1.PodList{}
+	if err := kc.Client.List(kc.Ctx, pods, client.InNamespace(kc.Namespace)); err != nil {
+		return fmt.Errorf("failed to check container: %w", err)
+	}
+
+	// Find pod containing the container
+	for _, pod := range pods.Items {
+		for _, container := range pod.Spec.Containers {
+			if container.Name == containerNameOrID {
+				opts := &corev1.PodLogOptions{
+					Container: containerNameOrID,
+					Follow:    true,
+				}
+
+				return followLogs(kc, pod.Name, opts)
+			}
+		}
+	}
+
+	return fmt.Errorf("cannot find pod for the given container")
 }
 
 func (kc *OpenshiftClient) GetRoute(nameOrID string) (*types.Route, error) {
@@ -270,4 +312,40 @@ func getPodNameWithPrefix(kc *OpenshiftClient, nameOrID string) (string, error) 
 	}
 
 	return podName, nil
+}
+
+func followLogs(kc *OpenshiftClient, podName string, opts *corev1.PodLogOptions) error {
+	// Create interrupt-aware context (Ctrl+C)
+	ctx, stop := signal.NotifyContext(kc.Ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	req := kc.KubeClient.CoreV1().Pods(kc.Namespace).GetLogs(podName, opts)
+
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to stream logs: %w", err)
+	}
+
+	defer func() {
+		if err := stream.Close(); err != nil {
+			logger.Errorf("error closing log stream: %v", err)
+		}
+	}()
+
+	scanner := bufio.NewScanner(stream)
+
+	for scanner.Scan() {
+		logger.Infoln(scanner.Text())
+	}
+
+	if err := scanner.Err(); err != nil {
+		if errors.Is(err, context.Canceled) ||
+			errors.Is(err, context.DeadlineExceeded) {
+			return nil
+		}
+
+		return fmt.Errorf("error reading log stream: %w", err)
+	}
+
+	return nil
 }
