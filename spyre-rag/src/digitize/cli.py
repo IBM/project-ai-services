@@ -33,7 +33,45 @@ from digitize.cleanup import reset_db
 
 logger = get_logger("Ingest")
 
-if command_args.command == "ingest":
-    ingest(command_args.path)
-elif command_args.command == "clean-db":
-    reset_db()
+def main():
+    if command_args.command == "ingest":
+        converted_pdf_stats = ingest(command_args.path)
+
+        # Print detailed stats
+        total_pages = sum(converted_pdf_stats[file]["page_count"] for file in converted_pdf_stats)
+        if not total_pages:
+            # No pages were processed, ingestion must have done using cached data.
+            return
+    
+        print("Stats of processed PDFs:")
+        max_file_len = max(len(key) for key in converted_pdf_stats.keys())
+        total_tables = sum(converted_pdf_stats[file]["table_count"] for file in converted_pdf_stats)
+        total_time = 0
+        header_format = f"| {"PDF":<{max_file_len}} | {"Total Pages":^{15}} | {"Total Tables":^{15}} |"
+        if logger.isEnabledFor(logging.DEBUG):
+            header_format += f" {"Conversion":^{15}} | {"Processing Text":^{15}} | {"Processing Tables":^{17}} | {"Chunking":^{15}} |"
+        header_format += f" {"Total Time (s)":>{15}} |"
+
+        print("-" * len(header_format))
+        print(header_format)
+        print("-" * len(header_format))
+        for file in converted_pdf_stats:
+            timings = converted_pdf_stats[file]["timings"]
+            pdf_total_time = sum(timings.values())
+            total_time += pdf_total_time
+            if converted_pdf_stats[file]["page_count"] > 0:
+                stats_to_print = f"| {file:<{max_file_len}} | {converted_pdf_stats[file].get("page_count", 0):^{15}} | {converted_pdf_stats[file].get("table_count", 0):^{15}} |"
+                if logger.isEnabledFor(logging.DEBUG):
+                    stats_to_print += f" {timings.get("conversion", 0.0):^{15}.2f} | {timings.get("process_text", 0.0):^{15}.2f} | {timings.get("process_tables", 0.0):^{17}.2f} | {timings.get("chunking", 0.0):^{15}.2f} |"
+                stats_to_print += f" {pdf_total_time:>{15}.2f} |"
+                print(stats_to_print)
+        print("-" * len(header_format))
+        footer = f"| {"Total":<{max_file_len}} | {total_pages:^{15}} | {total_tables:^{15}} |"
+        print(footer)
+        print("-" * len(footer))
+
+    elif command_args.command == "clean-db":
+        reset_db()
+
+if __name__ == "__main__":
+    main()
