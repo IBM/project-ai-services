@@ -6,11 +6,7 @@ import {
   HeaderMenuButton,
   Theme,
 } from "@carbon/react";
-import {
-  Help,
-  Notification,
-  User,
-} from "@carbon/icons-react";
+import { Help, Notification, User } from "@carbon/icons-react";
 
 interface AppHeaderProps {
   isSideNavOpen: boolean;
@@ -19,14 +15,16 @@ interface AppHeaderProps {
 
 const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
   return (
-    
     <Theme theme="g100">
       <Header aria-label="IBM Power Operations Platform">
-         <HeaderMenuButton aria-label="Open menu" onClick={() => setIsSideNavOpen(!isSideNavOpen)} isActive={isSideNavOpen} isCollapsible />
+        <HeaderMenuButton
+          aria-label="Open menu"
+          onClick={() => setIsSideNavOpen(!isSideNavOpen)}
+          isActive={isSideNavOpen}
+          isCollapsible
+        />
 
-        <HeaderName prefix="IBM">
-          Power Operations Platform
-        </HeaderName>
+        <HeaderName prefix="IBM">Power Operations Platform</HeaderName>
 
         <HeaderGlobalBar>
           <HeaderGlobalAction aria-label="Help">

@@ -2,7 +2,6 @@ import { useState } from "react";
 import AppHeader from "@/components/AppHeader";
 import Navbar from "@/components/Navbar";
 
-
 const Login = () => {
   const [isSideNavOpen, setIsSideNavOpen] = useState(false);
 
@@ -21,9 +20,7 @@ const Login = () => {
           padding: "2rem",
           transition: "margin 0.2s ease",
         }}
-      >
-     
-      </main>
+      ></main>
     </>
   );
 };
