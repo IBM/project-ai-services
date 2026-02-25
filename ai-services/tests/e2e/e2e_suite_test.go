@@ -2,12 +2,14 @@ package e2e
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +30,8 @@ var (
 	cfg                         *config.Config
 	runID                       string
 	appName                     string
+	providedAppName             string
+	deleteExistingApp           bool
 	tempDir                     string
 	tempBinDir                  string
 	aiServiceBin                string
@@ -41,11 +45,16 @@ var (
 	backendPort                 string
 	uiPort                      string
 	judgePort                   string
+	goldenDatasetFile           string
 	mainPodsByTemplate          map[string][]string
 	defaultRagAccuracyThreshold = 0.70
 	defaultMaxRetries           = 2
 )
 
+func init() {
+	flag.StringVar(&providedAppName, "app-name", "", "Use existing application instead of creating one")
+	flag.BoolVar(&deleteExistingApp, "delete-app", false, "Delete existing app before proceeding ahead with test run")
+}
 func TestE2E(t *testing.T) {
 	gomega.RegisterFailHandler(ginkgo.Fail)
 	ginkgo.RunSpecs(t, "AI Services E2E Suite")
@@ -73,7 +82,7 @@ var _ = ginkgo.BeforeSuite(func() {
 	} else {
 		runID = fmt.Sprintf("%d", time.Now().Unix())
 	}
-	
+
 	ginkgo.By("Preparing runtime environment")
 	tempDir = bootstrap.PrepareRuntime(runID)
 	gomega.Expect(tempDir).NotTo(gomega.BeEmpty())
@@ -86,8 +95,14 @@ var _ = ginkgo.BeforeSuite(func() {
 	ginkgo.By("Setting template name")
 	templateName = "rag"
 
-	ginkgo.By("Setting application name")
-	appName = fmt.Sprintf("%s-app-%s", templateName, runID)
+	ginkgo.By("Resolving application name")
+	if providedAppName != "" {
+		appName = providedAppName
+		logger.Infof("[SETUP] Using provided application name: %s", appName)
+	} else {
+		appName = fmt.Sprintf("%s-app-%s", templateName, runID)
+		logger.Infof("[SETUP] Generated application name: %s", appName)
+	}
 
 	ginkgo.By("Setting main pods by template")
 	mainPodsByTemplate = map[string][]string{
@@ -101,7 +116,7 @@ var _ = ginkgo.BeforeSuite(func() {
 	ginkgo.By("Resolving application ports from environment")
 	backendPort = getEnvWithDefault("RAG_BACKEND_PORT", "5100")
 	uiPort = getEnvWithDefault("RAG_UI_PORT", "3100")
-	judgePort = getEnvWithDefault("LLM_JUDGE_PORT", "8011")
+	judgePort = getEnvWithDefault("LLM_JUDGE_PORT", "8000")
 	if ragAccuracyThreshold, err := strconv.ParseFloat(
 		getEnvWithDefault("RAG_ACCURACY_THRESHOLD", "0.70"),
 		64,
@@ -111,17 +126,6 @@ var _ = ginkgo.BeforeSuite(func() {
 		logger.Warningf("[SETUP][WARN] Invalid RAG_ACCURACY_THRESHOLD, using default %.2f", defaultRagAccuracyThreshold)
 	}
 	logger.Infof("[SETUP] Ports: backend=%s ui=%s judge=%s | accuracy=%.2f", backendPort, uiPort, judgePort, defaultRagAccuracyThreshold)
-
-	ginkgo.By("Setting golden dataset path")
-	_, filename, _, _ := runtime.Caller(0)                        // returns the file path of this test file (e2e_suite_test.go)
-	e2eDir := filepath.Dir(filename)                              // resolves ai-services/tests/e2e
-	repoRoot := filepath.Clean(filepath.Join(e2eDir, "../../..")) // navigates to the workspace root
-	goldenPath = filepath.Join(
-		repoRoot,
-		"test",
-		"golden",
-		"golden1.csv",
-	)
 
 	ginkgo.By("Building or verifying ai-services CLI")
 	var err error
@@ -143,6 +147,31 @@ var _ = ginkgo.BeforeSuite(func() {
 	} else {
 		podmanReady = true
 		logger.Infoln("[SETUP] Podman environment verified")
+	}
+
+	ginkgo.By("Checking if existing app needs to be deleted")
+	if deleteExistingApp {
+		//fetch existing application details
+		psOutput, err := cli.ApplicationPS(ctx, cfg, "")
+		if err != nil {
+			logger.Errorf("Error fetching delete application name")
+			ginkgo.Fail("Error fetching delete application name")
+		}
+
+		//fetch application to be deleted
+		deleteAppName := cli.GetApplicationNameFromPSOutput(psOutput)
+		if deleteAppName != "" {
+			//delete existing application
+			_, err := cli.DeleteAppSkipCleanup(ctx, cfg, deleteAppName)
+			if err != nil {
+				logger.Errorf("Error deleting existing app: %s", deleteAppName)
+				ginkgo.Fail("Existing application could not be deleted")
+			}
+			logger.Infof("[SETUP] Deleted existing app: %s", deleteAppName)
+		} else {
+			logger.Infof("[SETUP] No existing application found to delete")
+		}
+
 	}
 
 	logger.Infoln("[SETUP] ================================================")
@@ -245,6 +274,10 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 	})
 	ginkgo.Context("Application Creation", func() {
 		ginkgo.It("creates rag application, runs health checks and validates RAG endpoints", ginkgo.Label("spyre-dependent"), func() {
+			if providedAppName != "" {
+				ginkgo.Skip("Skipping creation — using existing application")
+			}
+
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 			defer cancel()
 
@@ -319,6 +352,112 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "Verify exposed ports failed")
 			logger.Infof("[TEST] Exposed ports verified")
 		})
+		ginkgo.It("verifies application logs output", ginkgo.Label("spyre-dependent"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+
+			psWideArgs := []string{"-o", "wide"}
+			widePsOutput, err := cli.ApplicationPS(ctx, cfg, appName, psWideArgs...)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			wideLines := strings.Split(widePsOutput, "\n")
+
+			type PodInfo struct {
+				PodID      string
+				Containers []string
+			}
+
+			pods := make(map[string]*PodInfo)
+			inTargetApp := false
+
+			for _, line := range wideLines {
+				line = strings.TrimSpace(line)
+				if line == "" ||
+					strings.HasPrefix(line, "APPLICATION") ||
+					strings.HasPrefix(line, "──") {
+					continue
+				}
+
+				fields := strings.Fields(line)
+
+				var podID, podName string
+				var containerStartIdx int
+
+				// First row of the application
+				if len(fields) >= 3 && fields[0] == appName {
+					inTargetApp = true
+					podID = fields[1]
+					podName = fields[2]
+					containerStartIdx = 3
+
+					// Subsequent rows of the same application
+				} else if inTargetApp && len(fields) >= 2 && strings.HasPrefix(fields[1], appName+"--") {
+					podID = fields[0]
+					podName = fields[1]
+					containerStartIdx = 2
+
+				} else if inTargetApp {
+					break
+				} else {
+					continue
+				}
+
+				pod := &PodInfo{
+					PodID: podID,
+				}
+
+				for _, tok := range fields[containerStartIdx:] {
+					tok = strings.TrimSuffix(tok, ",")
+
+					if strings.HasSuffix(tok, "-infra") {
+						continue
+					}
+
+					if strings.HasPrefix(tok, podName+"-") {
+						pod.Containers = append(pod.Containers, tok)
+					}
+				}
+
+				pods[podName] = pod
+			}
+
+			gomega.Expect(pods).NotTo(gomega.BeEmpty(), "No pods found for application %s", appName)
+
+			for podName, pod := range pods {
+
+				// ---- Pod logs by NAME
+				{
+					logCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					logs, err := cli.ApplicationLogs(logCtx, cfg, appName, podName, "")
+					cancel()
+
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(logs).NotTo(gomega.BeEmpty())
+					gomega.Expect(cli.ValidateApplicationLogs(logs, podName, "")).To(gomega.Succeed())
+				}
+
+				// ---- Pod logs by ID
+				{
+					logCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					logs, err := cli.ApplicationLogs(logCtx, cfg, appName, pod.PodID, "")
+					cancel()
+
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(logs).NotTo(gomega.BeEmpty())
+					gomega.Expect(cli.ValidateApplicationLogs(logs, pod.PodID, "")).To(gomega.Succeed())
+				}
+
+				for _, container := range pod.Containers {
+					logCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					logs, err := cli.ApplicationLogs(logCtx, cfg, appName, pod.PodID, container)
+					cancel()
+
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(logs).NotTo(gomega.BeEmpty())
+					gomega.Expect(cli.ValidateApplicationLogs(logs, pod.PodID, container)).To(gomega.Succeed())
+				}
+			}
+		})
 	})
 	ginkgo.Context("Runtime Operations", func() {
 		ginkgo.It("stops the application", ginkgo.Label("spyre-dependent"), func() {
@@ -374,10 +513,50 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] Ingestion completed successfully for application %s", appName)
 		})
 	})
-	ginkgo.Context("RAG Golden Dataset Validation", func() {
+	ginkgo.Context("RAG Golden Dataset Validation", ginkgo.Label("golden-dataset-validation"), func() {
 		ginkgo.BeforeAll(func() {
-			logger.Infof("[RAG] Setting up LLM-as-Judge")
+			if appName == "" {
+				ginkgo.Fail("Application name is not set")
+			}
 
+			logger.Infof("[RAG] Setting golden dataset path")
+			goldenDatasetFile = bootstrap.GetGoldenDatasetFile()
+			if goldenDatasetFile == "" {
+				ginkgo.Fail("GOLDEN_DATASET_FILE environment variable is not set")
+			}
+
+			_, filename, _, _ := runtime.Caller(0)                        // returns the file path of this test file (e2e_suite_test.go)
+			e2eDir := filepath.Dir(filename)                              // resolves ai-services/tests/e2e
+			repoRoot := filepath.Clean(filepath.Join(e2eDir, "../../..")) // navigates to the workspace root
+
+			goldenPath = filepath.Join(
+				repoRoot,
+				"test",
+				"golden",
+				goldenDatasetFile,
+			)
+			logger.Infof("[RAG] Golden dataset file: %s", goldenPath)
+
+			logger.Infof("[RAG] Fetching application info to derive RAG and Judge URLs")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			infoOutput, err := cli.ApplicationInfo(ctx, cfg, appName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			if err := cli.ValidateApplicationInfo(infoOutput, appName, templateName); err != nil {
+				ginkgo.Fail(fmt.Sprintf("Golden dataset validation requires a valid running application: %v", err))
+			}
+
+			ragBaseURL, err = cli.GetBaseURL(infoOutput, backendPort)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			judgeBaseURL, err = cli.GetBaseURL(infoOutput, judgePort)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			logger.Infof("[RAG] RAG Base URL: %s", ragBaseURL)
+			logger.Infof("[RAG] Judge Base URL: %s", judgeBaseURL)
+
+			logger.Infof("[RAG] Setting up LLM-as-Judge")
 			if err := rag.SetupLLMAsJudge(ctx, cfg, runID); err != nil {
 				ginkgo.Fail(fmt.Sprintf("failed to setup LLM-as-Judge: %v", err))
 			}
@@ -388,6 +567,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				logger.Warningf("[RAG][WARN] Judge cleanup failed: %v", err)
 			}
 		})
+
 		ginkgo.It("validates RAG answers against golden dataset", ginkgo.Label("spyre-dependent"), func() {
 			logger.Infof("[RAG] Starting golden dataset validation")
 			cases, err := rag.LoadGoldenCSV(goldenPath)

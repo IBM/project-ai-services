@@ -1,0 +1,26 @@
+worker_processes auto;
+
+error_log  /var/log/nginx/error.log warn;
+pid        /tmp/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    sendfile on;
+    keepalive_timeout 65;
+
+    server {
+        listen 3000;
+
+        location / {
+            root /usr/share/nginx/html;
+            index index.html;
+            try_files $uri /index.html;
+        }
+    }
+}
