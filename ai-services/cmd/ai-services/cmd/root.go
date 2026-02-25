@@ -9,6 +9,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/application"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -70,4 +71,5 @@ func init() {
 	RootCmd.AddCommand(version.VersionCmd)
 	RootCmd.AddCommand(bootstrap.BootstrapCmd())
 	RootCmd.AddCommand(application.ApplicationCmd)
+	RootCmd.AddCommand(catalog.CatalogCmd())
 }

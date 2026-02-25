@@ -1,3 +1,8 @@
+REGISTRY?=icr.io/ai-services-private
+IMAGE=ai-services
+TAG?=0.0.1
+CONTAINER_BUILDER?=podman
+
 GO := go
 BUILDTAGS := "exclude_graphdriver_btrfs containers_image_openpgp remote"
 BIN = ./bin
@@ -41,6 +46,12 @@ endif
 .PHONY: build
 build:
 	$(BUILD_CMD)
+
+image:
+	$(CONTAINER_BUILDER) build --build-arg CMD_VERSION=$(VERSION) \
+    --build-arg GITCOMMIT=$(GITCOMMIT) --build-arg BUILDDATE=$(BUILDDATE) \
+    --build-arg BUILDTAGS=$(BUILDTAGS) -t $(REGISTRY)/$(IMAGE):$(TAG) .
+.PHONY: build
 
 test:
 	$(TEST_CMD)
