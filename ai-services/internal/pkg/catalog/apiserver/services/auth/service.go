@@ -18,6 +18,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 )
 
+const (
+	hashNumPartitions = 3 // iterations.salt.hash
+)
+
 type Service interface {
 	Login(ctx context.Context, username, password string) (accessToken, refreshToken string, err error)
 	Logout(ctx context.Context, accessToken string) error
@@ -109,10 +113,10 @@ func GenerateRandomSecretKey(length int) ([]byte, error) {
 	return key, nil
 }
 
-// verifyPassword verifies a password against a PBKDF2 hash
+// verifyPassword verifies a password against a PBKDF2 hash.
 func verifyPassword(password, encodedHash string) bool {
 	parts := strings.Split(encodedHash, ".")
-	if len(parts) != 3 {
+	if len(parts) != hashNumPartitions {
 		return false
 	}
 

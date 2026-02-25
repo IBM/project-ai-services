@@ -18,11 +18,15 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 )
 
+const (
+	minIterations = 100000
+)
+
 func NewHashpwCmd() *cobra.Command {
 	var (
 		fromStdin  bool
 		noConfirm  bool
-		iterations int = 100000 // NIST recommended minimum
+		iterations = 100000 // NIST recommended minimum
 	)
 
 	cmd := &cobra.Command{
@@ -61,7 +65,7 @@ Tip: Avoid passing plain passwords as CLI args (they can leak via process list).
 		},
 	}
 
-	cmd.Flags().IntVar(&iterations, "iterations", 100000, "PBKDF2 iterations (100000+ recommended)")
+	cmd.Flags().IntVar(&iterations, "iterations", iterations, "PBKDF2 iterations (100000+ recommended)")
 	cmd.Flags().BoolVar(&fromStdin, "stdin", false, "read password from stdin (non-interactive)")
 	cmd.Flags().BoolVar(&noConfirm, "no-confirm", false, "skip confirmation prompt")
 
@@ -114,8 +118,8 @@ func getPasswordInteractive(noConfirm bool) (string, error) {
 }
 
 func validateIterations(iter int) error {
-	if iter < 100000 {
-		return fmt.Errorf("invalid iterations=%d (must be > 100000)", iter)
+	if iter < minIterations {
+		return fmt.Errorf("invalid iterations=%d (must be > %d)", iter, minIterations)
 	}
 
 	return nil
