@@ -36,7 +36,7 @@ func (o *OpenshiftApplication) Delete(ctx context.Context, opts types.DeleteOpti
 	}
 
 	if !opts.AutoYes {
-		confirmDelete, err := utils.ConfirmAction("Are you sure you want to delete the application '" + app + "' from namespace '" + namespace + "'?")
+		confirmDelete, err := utils.ConfirmAction("Are you sure you want to delete the application '" + app + "'?")
 		if err != nil {
 			return fmt.Errorf("failed to take user input: %w", err)
 		}
