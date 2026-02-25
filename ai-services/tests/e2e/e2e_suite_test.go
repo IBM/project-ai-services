@@ -2,13 +2,14 @@ package e2e
 
 import (
 	"context"
-	"fmt"
 	"flag"
+	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ var (
 	cfg                         *config.Config
 	runID                       string
 	appName                     string
-	providedAppName			    string
+	providedAppName             string
 	tempDir                     string
 	tempBinDir                  string
 	aiServiceBin                string
@@ -79,7 +80,7 @@ var _ = ginkgo.BeforeSuite(func() {
 	} else {
 		runID = fmt.Sprintf("%d", time.Now().Unix())
 	}
-	
+
 	ginkgo.By("Preparing runtime environment")
 	tempDir = bootstrap.PrepareRuntime(runID)
 	gomega.Expect(tempDir).NotTo(gomega.BeEmpty())
@@ -324,6 +325,112 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "Verify exposed ports failed")
 			logger.Infof("[TEST] Exposed ports verified")
 		})
+		ginkgo.It("verifies application logs output", ginkgo.Label("spyre-dependent"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+
+			psWideArgs := []string{"-o", "wide"}
+			widePsOutput, err := cli.ApplicationPS(ctx, cfg, appName, psWideArgs...)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			wideLines := strings.Split(widePsOutput, "\n")
+
+			type PodInfo struct {
+				PodID      string
+				Containers []string
+			}
+
+			pods := make(map[string]*PodInfo)
+			inTargetApp := false
+
+			for _, line := range wideLines {
+				line = strings.TrimSpace(line)
+				if line == "" ||
+					strings.HasPrefix(line, "APPLICATION") ||
+					strings.HasPrefix(line, "──") {
+					continue
+				}
+
+				fields := strings.Fields(line)
+
+				var podID, podName string
+				var containerStartIdx int
+
+				// First row of the application
+				if len(fields) >= 3 && fields[0] == appName {
+					inTargetApp = true
+					podID = fields[1]
+					podName = fields[2]
+					containerStartIdx = 3
+
+					// Subsequent rows of the same application
+				} else if inTargetApp && len(fields) >= 2 && strings.HasPrefix(fields[1], appName+"--") {
+					podID = fields[0]
+					podName = fields[1]
+					containerStartIdx = 2
+
+				} else if inTargetApp {
+					break
+				} else {
+					continue
+				}
+
+				pod := &PodInfo{
+					PodID: podID,
+				}
+
+				for _, tok := range fields[containerStartIdx:] {
+					tok = strings.TrimSuffix(tok, ",")
+
+					if strings.HasSuffix(tok, "-infra") {
+						continue
+					}
+
+					if strings.HasPrefix(tok, podName+"-") {
+						pod.Containers = append(pod.Containers, tok)
+					}
+				}
+
+				pods[podName] = pod
+			}
+
+			gomega.Expect(pods).NotTo(gomega.BeEmpty(), "No pods found for application %s", appName)
+
+			for podName, pod := range pods {
+
+				// ---- Pod logs by NAME
+				{
+					logCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					logs, err := cli.ApplicationLogs(logCtx, cfg, appName, podName, "")
+					cancel()
+
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(logs).NotTo(gomega.BeEmpty())
+					gomega.Expect(cli.ValidateApplicationLogs(logs, podName, "")).To(gomega.Succeed())
+				}
+
+				// ---- Pod logs by ID
+				{
+					logCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					logs, err := cli.ApplicationLogs(logCtx, cfg, appName, pod.PodID, "")
+					cancel()
+
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(logs).NotTo(gomega.BeEmpty())
+					gomega.Expect(cli.ValidateApplicationLogs(logs, pod.PodID, "")).To(gomega.Succeed())
+				}
+
+				for _, container := range pod.Containers {
+					logCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					logs, err := cli.ApplicationLogs(logCtx, cfg, appName, pod.PodID, container)
+					cancel()
+
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(logs).NotTo(gomega.BeEmpty())
+					gomega.Expect(cli.ValidateApplicationLogs(logs, pod.PodID, container)).To(gomega.Succeed())
+				}
+			}
+		})
 	})
 	ginkgo.Context("Runtime Operations", func() {
 		ginkgo.It("stops the application", ginkgo.Label("spyre-dependent"), func() {
@@ -433,7 +540,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				logger.Warningf("[RAG][WARN] Judge cleanup failed: %v", err)
 			}
 		})
-		
+
 		ginkgo.It("validates RAG answers against golden dataset", ginkgo.Label("spyre-dependent"), func() {
 			logger.Infof("[RAG] Starting golden dataset validation")
 			cases, err := rag.LoadGoldenCSV(goldenPath)
