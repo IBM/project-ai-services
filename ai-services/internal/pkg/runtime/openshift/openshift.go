@@ -293,13 +293,14 @@ func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
 	return fmt.Errorf("cannot find pod for the given container")
 }
 
-func (kc *OpenshiftClient) GetRoute(nameOrID string) (*types.Route, error) {
-	r, err := kc.RouteClient.RouteV1().Routes(kc.Namespace).Get(kc.Ctx, nameOrID, metav1.GetOptions{})
+// ListRoutes lists all routes in the namespace.
+func (kc *OpenshiftClient) ListRoutes() ([]types.Route, error) {
+	routeList, err := kc.RouteClient.RouteV1().Routes(kc.Namespace).List(kc.Ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("cannot find route: %w", err)
+		return nil, fmt.Errorf("failed to list routes: %w", err)
 	}
 
-	return toOpenShiftRoute(r), nil
+	return toOpenShiftRouteList(routeList.Items), nil
 }
 
 // Type returns the runtime type.

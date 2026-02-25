@@ -15,7 +15,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -96,12 +95,8 @@ var createCmd = &cobra.Command{
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		//nolint:godox
-		// TODO: Integrate Bootstrap validate for Openshift in create flow once ready. For now skipping it for Openshift runtime.
-		if vars.RuntimeFactory.GetRuntimeType() != types.RuntimeTypeOpenShift {
-			if err := doBootstrapValidate(); err != nil {
-				return err
-			}
+		if err := doBootstrapValidate(); err != nil {
+			return err
 		}
 
 		// Create application instance using factory
