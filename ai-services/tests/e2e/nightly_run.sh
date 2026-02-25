@@ -1,22 +1,5 @@
 #!/bin/bash
 
-# Define the path to your .env file
-ENV_FILE=".env"
-
-# Check if the .env file exists
-if [ -f "$ENV_FILE" ]; then
-    echo "Loading environment variables from $ENV_FILE"
-    # set -a automatically exports all variables defined after this command
-    set -a
-    # 'source' or '.' reads and executes the content of the file in the current shell
-    source "$ENV_FILE"
-    # set +a turns off the auto-export feature
-    set +a
-    echo "Variables loaded."
-else
-    echo "Warning: $ENV_FILE not found."
-fi
-
 #Perform clean-up
 echo "Cleaning up existing repository folder"
 rm -rf /root/nightly-run/project-ai-services
