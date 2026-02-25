@@ -147,11 +147,12 @@ func fetchSCPSpec(client *openshift.OpenshiftClient) (map[string]any, error) {
 	return nil, fmt.Errorf("SpyreClusterPolicy not found")
 }
 
-// modifySpec remove `externalDeviceReservation` from `experimentalMode`
+// modifySpec remove `externalDeviceReservation` from `experimentalMode`.
 func modifySpec(spec map[string]any, s *spinner.Spinner) error {
 	expMode, ok := spec[experimentalMode].([]any)
 	if !ok {
 		logger.Infof("%s not found, proceeding with deployment of SpyreClusterPolicy", experimentalMode, logger.VerbosityLevelDebug)
+
 		return nil
 	}
 
