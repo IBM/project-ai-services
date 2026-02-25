@@ -13,7 +13,7 @@ type Application interface {
 	Create(ctx context.Context, opts types.CreateOptions) error
 
 	// Delete removes an application and its associated resources.
-	Delete(opts types.DeleteOptions) error
+	Delete(ctx context.Context, opts types.DeleteOptions) error
 
 	// Start starts a stopped application.
 	Start(opts types.StartOptions) error
