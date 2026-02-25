@@ -1,0 +1,93 @@
+name: Catalog UI
+on:
+  push:
+    paths:
+      - 'catalog-ui/**'
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'catalog-ui/**'
+      - .github/workflows/catalog-ui-image.yml
+    branches:
+      - main
+
+env:
+  ICR_REGISTRY: icr.io
+  ICR_NAMESPACE: ai-services-cicd
+
+jobs:
+  format:
+    name: format
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: catalog-ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: catalog-ui
+        run: npm ci
+
+      - name: Run Prettier check
+        working-directory: catalog-ui
+        run: npm run format:check
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: catalog-ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: catalog-ui
+        run: npm ci
+
+      - name: Run linter
+        working-directory: catalog-ui
+        run: npm run lint
+
+  build-publish-image:
+    name: Build and Publish Image
+    needs: [format, lint]
+    runs-on: ubuntu-24.04-ppc64le
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Build catalog-ui image
+        working-directory: catalog-ui
+        run: |
+          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
+
+      - name: Publish catalog-ui image
+        working-directory: catalog-ui
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          make push \
+            REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} \
+            REGISTRY_USER=${{ secrets.ICR_USERNAME }} \
+            REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      path: 'catalog-ui'
+      image: 'catalog-ui'
