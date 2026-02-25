@@ -9,6 +9,8 @@ import (
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
@@ -20,8 +22,10 @@ import (
 )
 
 const (
-	pollInterval = 5 * time.Second
-	pollTimeout  = 2 * time.Minute
+	pollInterval              = 5 * time.Second
+	pollTimeout               = 2 * time.Minute
+	externalDeviceReservation = "externalDeviceReservation"
+	experimentalMode          = "experimentalMode"
 )
 
 func (o *OpenshiftBootstrap) Configure() error {
@@ -132,20 +136,23 @@ func fetchSCPSpec(client *openshift.OpenshiftClient) (map[string]any, error) {
 	}
 
 	for _, ex := range examples {
-		if ex["kind"] == "SpyreClusterPolicy" {
-			if spec, ok := ex["spec"].(map[string]any); ok {
-				return spec, nil
-			}
+		if ex["kind"] != "SpyreClusterPolicy" {
+			continue
+		}
+		if spec, ok := ex["spec"].(map[string]any); ok {
+			return spec, nil
 		}
 	}
 
 	return nil, fmt.Errorf("SpyreClusterPolicy not found")
 }
 
+// modifySpec remove `externalDeviceReservation` from `experimentalMode`
 func modifySpec(spec map[string]any, s *spinner.Spinner) error {
-	expMode, ok := spec["experimentalMode"].([]any)
+	expMode, ok := spec[experimentalMode].([]any)
 	if !ok {
-		return fmt.Errorf("experimentalMode not found in SpyreClusterPolicy")
+		logger.Infof("%s not found, proceeding with deployment of SpyreClusterPolicy", experimentalMode, logger.VerbosityLevelDebug)
+		return nil
 	}
 
 	// updatedExpMode holds filtered list after removing `externalDeviceReservation`
@@ -160,15 +167,15 @@ func modifySpec(spec map[string]any, s *spinner.Spinner) error {
 			continue
 		}
 
-		if mode == "externalDeviceReservation" {
-			s.UpdateMessage("Found externalDeviceReservation under experimentalMode, removing it")
+		if mode == externalDeviceReservation {
+			s.UpdateMessage("Found " + externalDeviceReservation + "under " + experimentalMode + ", removing it")
 
 			continue
 		}
 
 		updatedExpMode = append(updatedExpMode, mode)
 	}
-	spec["experimentalMode"] = updatedExpMode
+	spec[experimentalMode] = updatedExpMode
 
 	return nil
 }
@@ -200,10 +207,18 @@ func frameAndApply(client *openshift.OpenshiftClient, spec map[string]any, s *sp
 }
 
 func fetchSpyreOperator(ctx context.Context, c k8sClient.Client) (*operatorsv1alpha1.ClusterServiceVersion, error) {
+	sub := &operatorsv1alpha1.Subscription{}
+	if err := c.Get(ctx, k8sClient.ObjectKey{
+		Name:      "spyre-operator",
+		Namespace: constants.SpyreOperatorNamespace,
+	}, sub); err != nil {
+		return nil, err
+	}
+
 	csv := &operatorsv1alpha1.ClusterServiceVersion{}
 	if err := c.Get(ctx, k8sClient.ObjectKey{
-		Name:      "spyre-operator.v1.1.1",
-		Namespace: "spyre-operator",
+		Name:      sub.Status.CurrentCSV,
+		Namespace: constants.SpyreOperatorNamespace,
 	}, csv); err != nil {
 		return nil, err
 	}
