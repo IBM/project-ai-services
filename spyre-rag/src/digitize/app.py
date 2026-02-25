@@ -1,13 +1,23 @@
 import asyncio
+import logging
+import os
 import uuid
 from enum import Enum
 from typing import List, Optional
 import uvicorn
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, set_log_level
 
-logger = None
+log_level = logging.INFO
+level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
+if level != "":
+    if "debug" in level:
+        log_level = logging.DEBUG
+    elif not "info" in level:
+        raise Exception(f"Unknown LOG_LEVEL passed: '{level}'")
+set_log_level(log_level)
+logger = get_logger("app")
 
 app = FastAPI(title="Digitize Documents Service")
 
@@ -134,5 +144,4 @@ async def bulk_delete_documents(confirm: bool = Query(...)):
     return
 
 if __name__ == "__main__":
-    logger = get_logger("app")
     uvicorn.run(app, host="0.0.0.0", port=4000)
