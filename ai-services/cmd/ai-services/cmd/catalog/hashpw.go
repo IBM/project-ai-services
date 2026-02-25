@@ -1,6 +1,9 @@
 package catalog
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -9,28 +12,30 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/term"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 )
 
 func NewHashpwCmd() *cobra.Command {
 	var (
-		cost      int
-		fromStdin bool
-		noConfirm bool
+		fromStdin  bool
+		noConfirm  bool
+		iterations int = 100000 // NIST recommended minimum
 	)
 
 	cmd := &cobra.Command{
 		Use:   "hashpw",
-		Short: "Generate a bcrypt hash from a password",
-		Long: `Reads a password securely and prints a bcrypt hash to stdout.
+		Short: "Generate a password hash",
+		Long: `Reads a password securely and prints a PBKDF2 hash to stdout.
 
 Examples:
   # Interactive (hidden input, with confirmation)
-  ai-services catalog hashpw --cost 12
+  ai-services catalog hashpw --iterations 150000
 
   # Non-interactive (CI): read from stdin
-  printf '%s\n' 'S3cureP@ss!' | ai-services catalog hashpw --stdin --cost 12
+  printf '%s\n' 'S3cureP@ss!' | ai-services catalog hashpw --stdin --iterations 150000
 
 Tip: Avoid passing plain passwords as CLI args (they can leak via process list).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -39,13 +44,13 @@ Tip: Avoid passing plain passwords as CLI args (they can leak via process list).
 				return err
 			}
 
-			if err := validateCost(cost); err != nil {
+			if err := validateIterations(iterations); err != nil {
 				return err
 			}
 
-			hash, err := bcrypt.GenerateFromPassword([]byte(pw), cost)
+			hash, err := hashPasswordPBKDF2(pw, iterations)
 			if err != nil {
-				return fmt.Errorf("bcrypt: %w", err)
+				return fmt.Errorf("pbkdf2: %w", err)
 			}
 
 			if _, err := fmt.Fprintln(cmd.OutOrStdout(), string(hash)); err != nil {
@@ -56,7 +61,7 @@ Tip: Avoid passing plain passwords as CLI args (they can leak via process list).
 		},
 	}
 
-	cmd.Flags().IntVar(&cost, "cost", bcrypt.DefaultCost, "bcrypt cost (10-14 typical; higher is slower & stronger)")
+	cmd.Flags().IntVar(&iterations, "iterations", 100000, "PBKDF2 iterations (100000+ recommended)")
 	cmd.Flags().BoolVar(&fromStdin, "stdin", false, "read password from stdin (non-interactive)")
 	cmd.Flags().BoolVar(&noConfirm, "no-confirm", false, "skip confirmation prompt")
 
@@ -108,9 +113,9 @@ func getPasswordInteractive(noConfirm bool) (string, error) {
 	return pw, nil
 }
 
-func validateCost(cost int) error {
-	if cost < bcrypt.MinCost || cost > bcrypt.MaxCost {
-		return fmt.Errorf("invalid cost=%d (valid: %d..%d)", cost, bcrypt.MinCost, bcrypt.MaxCost)
+func validateIterations(iter int) error {
+	if iter < 100000 {
+		return fmt.Errorf("invalid iterations=%d (must be > 100000)", iter)
 	}
 
 	return nil
@@ -125,4 +130,21 @@ func readHidden(prompt string) (string, error) {
 	}
 
 	return strings.TrimSpace(string(b)), nil
+}
+
+func hashPasswordPBKDF2(password string, iteration int) (string, error) {
+	salt := make([]byte, constants.Pbkdf2SaltLen)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+
+	hash := pbkdf2.Key([]byte(password), salt, iteration, constants.Pbkdf2KeyLen, sha256.New)
+
+	// Format: iterations.salt.hash (base64 encoded)
+	encoded := fmt.Sprintf("%d.%s.%s",
+		iteration,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(hash))
+
+	return encoded, nil
 }

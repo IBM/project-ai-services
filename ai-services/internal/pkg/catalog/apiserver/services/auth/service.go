@@ -3,13 +3,19 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
-	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 )
 
 type Service interface {
@@ -36,11 +42,9 @@ func (s *service) Login(ctx context.Context, username, password string) (string,
 	if err != nil {
 		return "", "", ErrInvalidCredentials
 	}
-	fmt.Printf("User found: %s with hash: %s\n", u.UserName, u.PasswordHash) // Debug log
-	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
+	if !verifyPassword(password, u.PasswordHash) {
 		return "", "", ErrInvalidCredentials
 	}
-	fmt.Printf("Password verified for user: %s\n", u.UserName) // Debug log
 	access, _, err := s.tokens.GenerateAccessToken(u.ID)
 	if err != nil {
 		return "", "", err
@@ -103,4 +107,20 @@ func GenerateRandomSecretKey(length int) ([]byte, error) {
 	}
 
 	return key, nil
+}
+
+// verifyPassword verifies a password against a PBKDF2 hash
+func verifyPassword(password, encodedHash string) bool {
+	parts := strings.Split(encodedHash, ".")
+	if len(parts) != 3 {
+		return false
+	}
+
+	iterations, _ := strconv.Atoi(parts[0])
+	salt, _ := base64.RawStdEncoding.DecodeString(parts[1])
+	hash, _ := base64.RawStdEncoding.DecodeString(parts[2])
+
+	testHash := pbkdf2.Key([]byte(password), salt, iterations, constants.Pbkdf2KeyLen, sha256.New)
+
+	return subtle.ConstantTimeCompare(hash, testHash) == 1
 }

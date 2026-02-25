@@ -32,7 +32,7 @@ func NewInMemoryUserRepo() *InMemoryUserRepo {
 }
 
 // NewInMemoryUserRepoWithAdminHash creates a repo and seeds a single admin user
-// with a precomputed bcrypt hash.
+// with a precomputed hash.
 func NewInMemoryUserRepoWithAdminHash(id, username, name, passwordHash string) *InMemoryUserRepo {
 	r := NewInMemoryUserRepo()
 	r.add(&models.User{
