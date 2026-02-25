@@ -495,6 +495,21 @@ func ValidateStartAppOutput(output string) error {
 	return nil
 }
 
+func ValidateApplicationLogs(output, podName, containerNameOrID string) error {
+	required := []string{
+		"Press Ctrl+C to exit the logs",
+		"Fetching logs for",
+	}
+
+	for _, r := range required {
+		if !strings.Contains(output, r) {
+			return fmt.Errorf("application logs validation failed: missing '%s'", r)
+		}
+	}
+
+	return nil
+}
+
 func GetApplicationNameFromPSOutput(psOutput string) (appName string) {
 	lines := strings.Split(psOutput, "\n")
 	parts := strings.Fields(lines[2])
