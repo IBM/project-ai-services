@@ -256,7 +256,7 @@ func (pc *PodmanClient) ContainerExists(nameOrID string) (bool, error) {
 	return containers.Exists(pc.Context, nameOrID, nil)
 }
 
-func (pc *PodmanClient) GetRoute(nameOrID string) (*types.Route, error) {
+func (pc *PodmanClient) ListRoutes() ([]types.Route, error) {
 	logger.Errorf("unsupported method called!")
 
 	return nil, fmt.Errorf("unsupported method")

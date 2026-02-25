@@ -13,5 +13,5 @@ Day N:
 - Chatbot Backend is available to use.
 {{- else }}
 
-- Chatbot Backend is unavailable to use. Please make sure 'backend' pod is running.
+- Chatbot Backend is available to use at http://{{ .BACKEND_ROUTE }}.
 {{- end }}

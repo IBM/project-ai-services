@@ -89,10 +89,15 @@ func toOpenShiftContainer(cs *corev1.ContainerStatus, pod *corev1.Pod) *types.Co
 	return container
 }
 
-func toOpenShiftRoute(r *routev1.Route) *types.Route {
-	return &types.Route{
-		Name:       r.Name,
-		HostPort:   r.Spec.Host,
-		TargetPort: r.Spec.Port.TargetPort.String(),
+func toOpenShiftRouteList(routes []routev1.Route) []types.Route {
+	routeList := make([]types.Route, 0, len(routes))
+	for _, route := range routes {
+		routeList = append(routeList, types.Route{
+			Name:       route.Name,
+			HostPort:   route.Spec.Host,
+			TargetPort: route.Spec.Port.TargetPort.String(),
+		})
 	}
+
+	return routeList
 }
