@@ -49,5 +49,5 @@ func (r *KubeconfigRule) Level() constants.ValidationLevel {
 }
 
 func (r *KubeconfigRule) Hint() string {
-	return "Ensure your kubeconfig is valid and you have access to the OpenShift cluster"
+	return "Make sure your kubeconfig is correctly configured and that you have the necessary permissions to access the OpenShift cluster."
 }
