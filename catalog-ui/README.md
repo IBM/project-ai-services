@@ -9,12 +9,11 @@ Frontend application built with **React 19**, **Vite 7**, **TypeScript**, and **
 - React 19
 - Vite 7
 - TypeScript (strict mode)
-- IBM Carbon (`@carbon/react` + `@carbon/styles`)
+- IBM Carbon (`@carbon/react` + `@carbon/icons-react`)
 - React Router v7
 - ESLint (flat config)
 - Prettier
 - Sass (`sass`)
-- Yarn (v1.22.22)
 
 ---
 
@@ -23,13 +22,13 @@ Frontend application built with **React 19**, **Vite 7**, **TypeScript**, and **
 ### Install dependencies
 
 ```bash
-yarn install
+npm install
 ```
 
 ### Start development server
 
 ```bash
-yarn dev
+npm run dev
 ```
 
 Application runs at:
@@ -45,7 +44,7 @@ http://localhost:5173
 ### Development
 
 ```bash
-yarn dev
+npm run dev
 ```
 
 Starts Vite dev server with HMR.
@@ -55,7 +54,7 @@ Starts Vite dev server with HMR.
 ### Build
 
 ```bash
-yarn build
+npm run build
 ```
 
 Runs TypeScript type-check and builds the production bundle.
@@ -65,7 +64,7 @@ Runs TypeScript type-check and builds the production bundle.
 ### Preview Production Build
 
 ```bash
-yarn preview
+npm run preview
 ```
 
 Serves the built production files locally.
@@ -77,7 +76,7 @@ Serves the built production files locally.
 ### Lint
 
 ```bash
-yarn lint
+npm run lint
 ```
 
 Runs ESLint.
@@ -85,7 +84,7 @@ Runs ESLint.
 ### Auto-fix Lint Issues
 
 ```bash
-yarn lint:fix
+npm run lint:fix
 ```
 
 ---
@@ -93,7 +92,7 @@ yarn lint:fix
 ### Format Code
 
 ```bash
-yarn format
+npm run format
 ```
 
 Formats files using Prettier.
@@ -103,7 +102,7 @@ Formats files using Prettier.
 ### Type Check
 
 ```bash
-yarn typecheck
+npm run typecheck
 ```
 
 Runs TypeScript validation without emitting files.
@@ -113,7 +112,7 @@ Runs TypeScript validation without emitting files.
 ### Full Validation (Recommended Before Push)
 
 ```bash
-yarn check
+npm run check
 ```
 
 Runs:
@@ -127,7 +126,7 @@ Runs:
 ### Auto Fix (Lint + Format)
 
 ```bash
-yarn fix
+npm run fix
 ```
 
 ---
