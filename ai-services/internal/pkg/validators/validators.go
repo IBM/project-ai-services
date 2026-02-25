@@ -5,6 +5,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	nodelabels "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/nodelabels"
+	kubeconfig "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/kubeconfig"
 	operators "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/operators"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/numa"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/platform"
@@ -28,6 +29,7 @@ func init() {
 	PodmanRegistry.Register(servicereport.NewServiceReportRule())
 
 	// OpenshiftChecks
+	OpenshiftRegistry.Register(kubeconfig.NewKubeconfigRule())
 	OpenshiftRegistry.Register(operators.NewOperatorRule())
 	OpenshiftRegistry.Register(nodelabels.NewNodeLabelsRule())
 }
