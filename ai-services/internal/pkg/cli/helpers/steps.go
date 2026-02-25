@@ -54,11 +54,16 @@ func populateHostValues(runtime runtime.Runtime, params map[string]string, varsD
 			}
 			params["HOST_IP"] = hostIP
 		case "route":
-			route, err := runtime.GetRoute("ui")
+			route, err := runtime.ListRoutes()
 			if err != nil {
 				return fmt.Errorf("unable to fetch the route: %w", err)
 			}
-			params["UI_ROUTE"] = route.HostPort
+
+			// loop over each of the routes and populate the params
+			for _, r := range route {
+				routeName := strings.ToUpper(fmt.Sprintf("%s_route", r.Name))
+				params[routeName] = r.HostPort
+			}
 		}
 	}
 
