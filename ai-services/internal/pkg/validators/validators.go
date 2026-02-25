@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	nodelabels "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/nodelabels"
 	operators "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/operators"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/numa"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/platform"
@@ -28,6 +29,7 @@ func init() {
 
 	// OpenshiftChecks
 	OpenshiftRegistry.Register(operators.NewOperatorRule())
+	OpenshiftRegistry.Register(nodelabels.NewNodeLabelsRule())
 }
 
 // Rule defines the interface for validation rules.
