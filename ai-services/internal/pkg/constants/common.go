@@ -1,9 +1,10 @@
 package constants
 
 const (
-	PodStartOn       = "on"
-	PodStartOff      = "off"
-	ApplicationsPath = "/var/lib/ai-services/applications"
+	PodStartOn             = "on"
+	PodStartOff            = "off"
+	ApplicationsPath       = "/var/lib/ai-services/applications"
+	SpyreOperatorNamespace = "spyre-operator"
 )
 
 type ValidationLevel int
