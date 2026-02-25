@@ -12,18 +12,28 @@ import (
 	"strings"
 	"syscall"
 
+	routeclient "github.com/openshift/client-go/route/clientset/versioned"
+	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	routeclient "github.com/openshift/client-go/route/clientset/versioned"
 )
+
+var scheme = runtime.NewScheme()
+
+func init() {
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(operatorsv1alpha1.AddToScheme(scheme))
+}
 
 const (
 	labelPartsCount = 2 // labelPartsCount is used to split label filters in the format "key=value".
@@ -50,7 +60,9 @@ func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error)
 		return nil, fmt.Errorf("failed to get openshift config: %w", err)
 	}
 
-	kcc, err := client.New(config, client.Options{})
+	kcc, err := client.New(config, client.Options{
+		Scheme: scheme,
+	})
 	if err != nil {
 		return nil, err
 	}
