@@ -230,3 +230,14 @@ error_responses = {
     500: {"description": "LLM service error", "model": SummarizeErrorResponseInternalServiceError},
 }
 
+def validate_summary_length(summary_length):
+    if summary_length:
+        try:
+            summary_length = int(summary_length)
+        except (TypeError, ValueError):
+            return build_error_response(
+                "INVALID_PARAMETER",
+                "length must be an integer",
+                400,
+            )
+    return summary_length

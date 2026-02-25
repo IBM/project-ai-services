@@ -123,143 +123,13 @@ async def handle_summarize(
         output_tokens=out_tokens,
     )
 
-class SummaryData(BaseModel):
-    summary: str = Field(..., description="The generated summary text.")
-    original_length: int = Field(..., description="Word count of original text.")
-    summary_length: int = Field(..., description="Word count of the generated summary.")
 
 
-class SummaryMeta(BaseModel):
-    model: str = Field(..., description="The AI model used for summarization.")
-    processing_time_ms: int = Field(..., description="Request processing time in milliseconds.")
-    input_type: str = Field(..., description="The type of input provided. Valid values: text, file.")
-
-
-class SummaryUsage(BaseModel):
-    input_tokens: int = Field(..., description="Number of input tokens consumed.")
-    output_tokens: int = Field(..., description="Number of output tokens generated.")
-    total_tokens: int = Field(..., description="Total number of tokens used (input + output).")
-
-
-class SummarizeSuccessResponse(BaseModel):
-    data: SummaryData
-    meta: SummaryMeta
-    usage: SummaryUsage
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "data": {
-                    "summary": "AI has advanced significantly through deep learning and large language models, impacting healthcare, finance, and transportation with both opportunities and ethical challenges.",
-                    "original_length": 250,
-                    "summary_length": 22,
-                },
-                "meta": {
-                    "model": "ibm-granite/granite-3.3-8b-instruct",
-                    "processing_time_ms": 1245,
-                    "input_type": "text",
-                },
-                "usage": {
-                    "input_tokens": 385,
-                    "output_tokens": 62,
-                    "total_tokens": 447,
-                },
-            }
-        }
-    }
-
-
-
-class ErrorDetail(BaseModel):
-    code: str = Field(..., description="Machine-readable error code.")
-    message: str = Field(..., description="Human-readable error message.")
-    status: int = Field(..., description="HTTP status code.")
-
-
-class SummarizeErrorResponseBadRequest(BaseModel):
-    error: ErrorDetail
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "error": {
-                    "code": "MISSING_INPUT",
-                    "message": "Either 'text' or 'file' parameter is required",
-                    "status": 400,
-                }
-            }
-        }
-    }
-
-class SummarizeErrorResponseContextLimitExceeded(BaseModel):
-    error: ErrorDetail
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "error": {
-                    "code": "CONTEXT_LIMIT_EXCEEDED",
-                    "message": "File size exceeds maximum token limit",
-                    "status": 413,
-                }
-            }
-        }
-    }
-
-class SummarizeErrorResponseUnsupportedContentType(BaseModel):
-    error: ErrorDetail
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "error": {
-                    "code": "UNSUPPORTED_CONTENT_TYPE",
-                    "message":  "Content-Type must be application/json or multipart/form-data",
-                    "status": 415,
-                }
-            }
-        }
-    }
-
-class SummarizeErrorResponseInternalServiceError(BaseModel):
-    error: ErrorDetail
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "error": {
-                    "code": "LLM_ERROR",
-                    "message":  "Failed to generate summary. Please try again later",
-                    "status": 500,
-                }
-            }
-        }
-    }
-
-_error_responses = {
-    400: {"description": "Bad request (missing input, unsupported file type, invalid params)", "model": SummarizeErrorResponseBadRequest},
-    413: {"description": "Input exceeds context window limit", "model": SummarizeErrorResponseContextLimitExceeded},
-    415: {"description": "Unsupported Content-Type", "model": SummarizeErrorResponseUnsupportedContentType},
-    500: {"description": "LLM service error", "model": SummarizeErrorResponseInternalServiceError},
-}
-
-
-def validate_summary_length(summary_length):
-    if summary_length:
-        try:
-            summary_length = int(summary_length)
-        except (TypeError, ValueError):
-            return build_error_response(
-                "INVALID_PARAMETER",
-                "length must be an integer",
-                400,
-            )
-    return summary_length
 
 
 @app.post("/v1/summarize",
 response_model=SummarizeSuccessResponse,
-responses=_error_responses,
+responses=error_responses,
 summary="Summarize text or file",
 description=(
       "Accepts **either** `application/json` or `multipart/form-data` based on "
@@ -332,7 +202,6 @@ async def summarize(request: Request):
         elif "multipart/form-data" in content_type:
             form = await request.form()
             file: Optional[UploadFile] = form.get("file")
-            logger.info("Received file input")
 
             summary_length = validate_summary_length(form.get("length"))
 
