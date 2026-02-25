@@ -3,7 +3,6 @@ import logging
 import os
 from pathlib import Path
 import shutil
-import time
 from typing import List, Optional
 import uvicorn
 
@@ -26,8 +25,8 @@ logger = get_logger("app")
 
 import common.digitize_utils as dg_util
 from common.misc_utils import *
-from ingest import ingest 
-from status import StatusManager, update_status
+from digitize.ingest import ingest 
+from digitize.status import StatusManager
 
 app = FastAPI(title="Digitize Documents Service")
 
@@ -54,15 +53,15 @@ async def digitize_documents(job_id: str, filenames: List[str], output_format: d
 
 async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict):
     status_mgr = StatusManager(job_id)
-    job_staging_path = Path(STAGING_DIR) / "jobs"/job_id
+    job_staging_path = Path(STAGING_DIR) / f"{job_id}"
 
     try:
         logger.info(f"🚀 Ingestion started for {job_id}")
-        ingest(job_staging_path)
+        ingest(job_staging_path, job_id, doc_id_dict)
+        logger.info(f"Ingestion for {job_id} completed successfully")
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
-        status_mgr.update_status(job_id, dg_util.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline. {str(e)}")
-        status_mgr.update({"status": "error", "error_message": str(e)})
+        status_mgr.update_job_progress(job_id, dg_util.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline. {str(e)}")
     
     finally:
         if job_staging_path.exists():
@@ -95,6 +94,8 @@ async def digitize_document(
 
     job_id = dg_util.generate_job_id()
     filenames = [f.filename for f in files]
+    # asyncio.gather allows us to read all file buffers concurrently
+    file_contents = await asyncio.gather(*[f.read() for f in files])
 
     # 3. acquire the semaphore
     await sem.acquire()
@@ -104,7 +105,7 @@ async def digitize_document(
         if operation == dg_util.OperationType.INGESTION:
             # Upload the file byte stream to files in staging directory
             # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
-            dg_util.stage_upload_files(job_id, filenames, Path(STAGING_DIR) / job_id)
+            await dg_util.stage_upload_files(job_id, filenames, Path(STAGING_DIR) / job_id, file_contents)
 
             doc_id_dict = dg_util.initialize_job_state(job_id, dg_util.OperationType.INGESTION, filenames)
 
@@ -113,9 +114,7 @@ async def digitize_document(
             background_tasks.add_task(digitize_documents, job_id, filenames, output_format)
 
             await asyncio.sleep(10)
-            update_status(job_id, "completed", "Done")
     except Exception as e:
-        update_status(job_id, "failed", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
     return {"job_id": job_id}

@@ -4,6 +4,7 @@ from enum import Enum
 from functools import partial
 import json
 from pathlib import Path
+from typing import List
 import uuid
 from common.misc_utils import get_logger
 
@@ -39,6 +40,8 @@ def generate_job_id():
     job_id = uuid.uuid4()
     job_id_hex = job_id.hex
     print(f"Hex-only ID: {job_id_hex}")
+    print(f"job id : {job_id}")
+    return str(job_id)
 
 
 def generate_document_id(filename):
@@ -58,6 +61,10 @@ def initialize_job_state(job_id: str, operation: str, documents_info: list):
     Creates the job status file and individual document metadata files.
     documents_info: List of dicts with {'id': uuid, 'name': filename, 'type': op_type}
     """
+    # Create docs and jobs dirs if not present already
+    Path(DOCS_DIR).mkdir(parents=True, exist_ok=True)
+    Path(JOBS_DIR).mkdir(parents=True, exist_ok=True)
+
     submitted_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     # list to store documents in Job file
@@ -75,11 +82,11 @@ def initialize_job_state(job_id: str, operation: str, documents_info: list):
         logger.debug(f"Generated document id {doc_id} for the file: {doc}")
 
         # Create the document level metadata files (<doc_id>_metadata.json)
-        doc_meta_path = DOCS_DIR/f"{doc_id}_metadata.json"
+        doc_meta_path = Path(DOCS_DIR)/f"{doc_id}_metadata.json"
         doc_initial_data = {
             "id": doc_id,
             "name": doc,
-            "operation": operation,
+            "type": operation,
             "status": "accepted",
             "output_format": "json",
             "completed_at": None,
@@ -98,18 +105,18 @@ def initialize_job_state(job_id: str, operation: str, documents_info: list):
         job_documents_summary.append({
             "id": doc_id,
             "name": doc,
-            "type": operation,
             "status": "accepted"
         })
 
     # Create job status file (<job_id>_status.json)
-    job_status_path = JOBS_DIR / f"{job_id}_status.json"
+    job_status_path = Path(JOBS_DIR) / f"{job_id}_status.json"
 
     job_data = {
         "job_id": job_id,
         "operation": operation,
         "status": "accepted",
         "submitted_at": submitted_at,
+        "last_updated_at": submitted_at,
         "documents": job_documents_summary,
         "error": ""
     }
@@ -120,16 +127,27 @@ def initialize_job_state(job_id: str, operation: str, documents_info: list):
     return doc_id_dict
 
 
-async def stage_upload_files(job_id: str, files: List[dict], staging_dir: str):
-    def save_sync(path, content):
-        with open(path, "wb") as f:
+async def stage_upload_files(job_id: str, files: List[dict], staging_dir: str, file_contents: List[bytes]):
+    base_stage_path = Path(staging_dir)
+    base_stage_path.mkdir(parents=True, exist_ok=True)
+
+    def save_sync(file_path: Path, content: bytes):
+        with open(file_path, "wb") as f:
             f.write(content)
+        return str(file_path)
 
     loop = asyncio.get_running_loop()
 
-    for file in files:
-        # offload the blocking file write to a thread pools
-        await loop.run_in_executor(
-            None, 
-            partial(save_sync, staging_dir / file["filename"], file["content"])
-        )
+    for filename, content in zip(files, file_contents):
+        target_path = base_stage_path / filename
+
+        try:
+            await loop.run_in_executor(
+                None, 
+                partial(save_sync, target_path, content)
+            )
+            print(f"Successfully staged file: {filename}")
+
+        except Exception as e:
+            logger.error(f"Failed to stage {filename} for job {job_id}: {e}")
+            raise

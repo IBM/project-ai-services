@@ -13,7 +13,7 @@ class StatusManager:
     """Thread-safe handler for updating Job and Document status files"""
     def __init__(self, job_id: str):
         self.job_id = job_id
-        self.job_status = Path(CACHE_DIR) / "jobs"/f"{job_id}_status.json"
+        self.job_status_file = Path(CACHE_DIR) / "jobs"/f"{job_id}_status.json"
         self._lock = threading.Lock()
 
     def _get_timestamp(self):
@@ -21,32 +21,49 @@ class StatusManager:
 
     def update_doc_metadata(self, doc_id: str, details: dict):
         """Updates the detailed <doc_id>_metadata.json file."""
-        meta_file = CACHE_DIR / f"{doc_id}_metadata.json"
+        meta_file = Path(CACHE_DIR) / f"{doc_id}_metadata.json"
         if not meta_file.exists():
             return
 
+        # Create a local copy to avoid modifying the original dictionary passed in
+        # and convert any Enums to their values
+        sanitized_details = {}
+        for k, v in details.items():
+            if k == "timing_in_secs" and isinstance(v, dict):
+                sanitized_details[k] = v # Nested dicts handled later
+            else:
+                sanitized_details[k] = v.value if hasattr(v, "value") else v
+
         with open(meta_file, "r+") as f:
             data = json.load(f)
-            # Handle nested timing updates
-            if "timing_in_secs" in details and "timing_in_secs" in data:
-                data["timing_in_secs"].update(details.pop("timing_in_secs"))
-            data.update(details)
+
+            # Handle nested timing updates safely
+            if "timing_in_secs" in sanitized_details and "timing_in_secs" in data:
+                data["timing_in_secs"].update(sanitized_details.pop("timing_in_secs"))
             
+            data.update(sanitized_details)
+
             f.seek(0)
+            # If this fails, the file is never truncated or updated
             json.dump(data, f, indent=4)
             f.truncate()
 
-    def update_job_progress(self, doc_id: str, status: DocStatus):
+        print(f"✅ Successfully updated metadata for {doc_id}")
+
+    def update_job_progress(self, doc_id: str, doc_status: DocStatus, job_status: JobStatus):
        """ Updates the document status within the <job_id>_status.json """
        with self._lock:
-            if not self.job_status.exists():
-                logger.error(f"{self.job_status} file is missing.")
+            if not self.job_status_file.exists():
+                logger.error(f"{self.job_status_file} file is missing.")
                 return
-            with open(self.job_status, "r+") as f:
+            with open(self.job_status_file, "r+") as f:
                 data = json.load(f)
+                # Update job status
+                data["status"] = job_status.value
+                data["last_updated_at"] = self._get_timestamp()
                 for doc in data.get("documents", []):
                     if doc["id"] == doc_id:
-                        doc["status"] = status.value # Use Enum value
+                        doc["status"] = doc_status.value # Use Enum value
                         break
                 f.seek(0)
                 json.dump(data, f, indent=4)

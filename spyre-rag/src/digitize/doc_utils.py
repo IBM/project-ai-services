@@ -18,7 +18,7 @@ from common.misc_utils import get_logger, generate_file_checksum, text_suffix, t
 from common.misc_utils import get_logger, generate_file_checksum, text_suffix, table_suffix, chunk_suffix
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.status import StatusManager
-from common.digitize_utils import DocStatus
+from common.digitize_utils import DocStatus, JobStatus
 
 logging.getLogger('docling').setLevel(logging.CRITICAL)
 
@@ -166,10 +166,10 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
 
     return table_count, process_time
 
-def process_converted_document(converted_json_path, pdf_path, out_path, conversion_stats, gen_model, gen_endpoint, emb_endpoint, max_tokens):    
+def process_converted_document(converted_json_path, pdf_path, out_path, conversion_stats, gen_model, gen_endpoint, emb_endpoint, max_tokens, doc_id):    
     stem = Path(pdf_path).stem
-    processed_text_json_path = (Path(out_path) / f"{stem}{text_suffix}")
-    processed_table_json_path = (Path(out_path) / f"{stem}{table_suffix}")
+    processed_text_json_path = (Path(out_path) / f"{doc_id}{text_suffix}")
+    processed_table_json_path = (Path(out_path) / f"{doc_id}{table_suffix}")
 
     if conversion_stats["text_processed"] and conversion_stats["table_processed"]:
         logger.debug(f"Text & Table of {pdf_path} is processed already!")
@@ -203,10 +203,12 @@ def process_converted_document(converted_json_path, pdf_path, out_path, conversi
 
         return None, None, None, None, None, None
 
-def convert_document(pdf_path, conversion_stats, out_path):
+def convert_document(pdf_path, conversion_stats, out_path, doc_id_dict):
     try:
         logger.info(f"Processing '{pdf_path}'")
-        converted_json = (Path(out_path) / f"{Path(pdf_path).stem}.json")
+        filename = f"{Path(pdf_path).stem}.pdf"
+        doc_id = doc_id_dict[filename]
+        converted_json = (Path(out_path) / f"{doc_id}.json")
         converted_json_f = str(converted_json)
         if not conversion_stats["convert"]:
             return pdf_path, converted_json_f, 0.0
@@ -226,7 +228,7 @@ def convert_document(pdf_path, conversion_stats, out_path):
 
 # ====================================================
 # refactored process_documents
-def process_documents(job_id, input_paths, out_path, doc_id_dict, llm_model, llm_endpoint, emb_endpoint, max_tokens):
+def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoint, max_tokens, job_id, doc_id_dict):
     # Skip files that already exist by matching the cached checksum of the pdf
     # if there is no difference in checksum and processed text & table json also exist, would skip for convert and process list
     # if checksum is matching but either processed text or table json not exist, process the file, but don't convert
@@ -235,21 +237,40 @@ def process_documents(job_id, input_paths, out_path, doc_id_dict, llm_model, llm
     filtered_input_paths = {}
     for path in input_paths:
         stem = Path(path).stem
-        checksum_path = Path(out_path) / f"{stem}.checksum"
+        filename = f"{stem}.pdf"
+        doc_id = doc_id_dict[filename]
 
-        meta = {"convert": True}
+        # 2. Initialize the status dictionary with all required keys
+        meta = {
+        "convert": True,
+        "text_processed": False,
+        "table_processed": False,
+        "chunked": False
+        }
+
+        # Use doc_id for the filenames instead of stem
+        checksum_path = Path(out_path) / f"{doc_id}.checksum"
+        doc_json = Path(out_path) / f"{doc_id}.json"
+        text_json = Path(out_path) / f"{doc_id}{text_suffix}"
+        table_json = Path(out_path) / f"{doc_id}{table_suffix}"
+        chunk_json = Path(out_path) / f"{doc_id}{chunk_suffix}"
+
         if checksum_path.exists():
             cached_cs = checksum_path.read_text().strip()
             if cached_cs == generate_file_checksum(path):
-                meta["convert"] = not (Path(out_path) / f"{stem}.json").exists()
+                # If checksum matches, check which files actually exist
+                meta["convert"] = not doc_json.exists()
+                meta["text_processed"] = text_json.exists()
+                meta["table_processed"] = table_json.exists()
+                meta["chunked"] = chunk_json.exists()
 
-        filtered_input_paths[path] = meta
+        filtered_input_paths[str(path)] = meta
 
     # Update checksums for files marked for conversion
     for path in filtered_input_paths:
         if filtered_input_paths[path]["convert"]:
             checksum = generate_file_checksum(path)
-            (Path(out_path) / f"{Path(path).stem}.checksum").write_text(checksum, encoding='utf-8')
+            (Path(out_path) / f"{doc_id}.checksum").write_text(checksum, encoding='utf-8')
 
     # Partition files into light and heavy based on page count
     light_files, heavy_files = {}, {}
@@ -262,7 +283,7 @@ def process_documents(job_id, input_paths, out_path, doc_id_dict, llm_model, llm
 
     status_mgr = StatusManager(job_id)
 
-    def _run_batch(batch_paths, convert_worker, max_worker):
+    def _run_batch(batch_paths, convert_worker, max_worker, doc_id_dict):
         batch_stats = {}
         batch_chunk_paths = []
         batch_table_paths = []
@@ -277,7 +298,7 @@ def process_documents(job_id, input_paths, out_path, doc_id_dict, llm_model, llm
 
             # A. Submit Conversions
             conversion_futures = {
-                converter_executor.submit(convert_document, path, batch_paths[path], out_path): path
+                converter_executor.submit(convert_document, path, batch_paths[str(path)], out_path, doc_id_dict): path
                 for path in batch_paths
             }
 
@@ -287,83 +308,98 @@ def process_documents(job_id, input_paths, out_path, doc_id_dict, llm_model, llm
             # B. Handle Conversions -> Submit Processing
             for fut in as_completed(conversion_futures):
                 path = conversion_futures[fut]
-                doc_id = doc_id_dict[path]
+                doc_id = doc_id_dict[Path(path).name]
                 try:
                     path, converted_json, conv_time = fut.result()
-
+                    logger.info(f"fut result: {converted_json}")
                     if not converted_json:
                         continue
 
                     # Update persistence and session stats
-                    converted_paths.append(path) 
-                    batch_stats[path] = {"timings": {"digitizing": round(conv_time, 2)}}
+                    converted_paths.append(path)
+                    batch_stats[str(path)] = {"timings": {"digitizing": round(conv_time, 2)}}
 
+                    logger.info(f"updating doc metadata for {doc_id} after conversion")
                     status_mgr.update_doc_metadata(doc_id, {
-                        "status": DocStatus.IN_PROGRESS.value,
+                        "status": DocStatus.IN_PROGRESS,
                         "timing_in_secs": {"digitizing": round(conv_time, 2)}
                     })
-                    status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS)
+                    logger.info("updating job status after conversion")
+                    status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
 
+                    logger.info("submitting process_converted_document executor")
                     p_future = processor_executor.submit(
                         process_converted_document, converted_json, path, out_path,
-                        batch_paths[path], llm_model, llm_endpoint, emb_endpoint, max_tokens
+                        batch_paths[str(path)], llm_model, llm_endpoint, emb_endpoint, max_tokens, doc_id=doc_id
                     )
-                    process_futures[p_future] = path
+                    process_futures[p_future] = str(path)
                 except Exception as e:
-                    logger.error(f"Error from conversion for {path}: {e}")
-                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED.value, "error": str(e)})
+                    logger.error(f"Error from chunking for {path}: {str(e)}", exc_info=True)
+                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED)
 
             # C. Handle Processing -> Submit Chunking
+            logger.info("handle processing future")
             for fut in as_completed(process_futures):
                 path = process_futures[fut]
-                doc_id = doc_id_dict[path]
+                doc_id = doc_id_dict[Path(path).name]
                 try:
                     path, txt_json, tab_json, pgs, tabs, timings = fut.result()
 
                     if not tab_json:
                         continue
 
-                    batch_stats[path].update({
+                    batch_stats[str(path)].update({
                         "page_count": pgs,
                         "table_count": tabs,
-                        "timings": {**batch_stats[path]["timings"], **timings}
+                        "timings": {**batch_stats[str(path)]["timings"], **timings}
                     })
                     batch_table_paths.append(tab_json)
-                    status_mgr.update_doc_metadata(doc_id, {"pages": pgs, "tables": tabs})
+                    logger.info("updating doc metadata after processing")
+                    status_mgr.update_doc_metadata(doc_id, {
+                        "pages": pgs,
+                        "tables": tabs,
+                        "timing_in_secs": {"processing": round(timings.get("processing", 0), 2)}
+                    })
+                    logger.info("updating job status after processing")
+                    status_mgr.update_job_progress(
+                        doc_id=doc_id,
+                        doc_status=DocStatus.IN_PROGRESS,  # Transitioning within processing
+                        job_status=DocStatus.IN_PROGRESS
+                    )
 
                     c_future = chunker_executor.submit(
-                        chunk_single_file, txt_json, path, out_path, batch_paths[path],
-                        emb_endpoint, max_tokens
+                        chunk_single_file, txt_json, path, out_path, batch_paths[str(path)],
+                        emb_endpoint, max_tokens, doc_id=doc_id
                     )
-                    chunk_futures[c_future] = (path, tab_json)
+                    chunk_futures[c_future] = (str(path), tab_json)
                 except Exception as e:
-                    logger.error(f"Error from processing for {path}: {e}")
-                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED.value, "error": str(e)})
+                    logger.error(f"Error from chunking for {path}: {str(e)}", exc_info=True)
+                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED)
 
             # D. Handle Chunking
             for fut in as_completed(chunk_futures):
                 path, tab_json = chunk_futures[fut]
-                doc_id = doc_id_dict[path]
+                doc_id = doc_id_dict[Path(path).name]
                 try:
                     chunk_json, _, chunk_time = fut.result()
-                    batch_stats[path]["timings"]["chunking"] = round(chunk_time, 2)
+                    batch_stats[str(path)]["timings"]["chunking"] = round(chunk_time, 2)
 
                     if chunk_json:
                         batch_chunk_paths.append(chunk_json)
                         # Capture chunk counts in real time and update <doc_id>_metadata.json
                         final_chunks = create_chunk_documents(chunk_json, tab_json, path)
-                        batch_stats[path]["chunk_count"] = len(final_chunks)
+                        batch_stats[str(path)]["chunk_count"] = len(final_chunks)
 
                         status_mgr.update_doc_metadata(doc_id, {
-                            "status": DocStatus.COMPLETED.value,
+                            "status": DocStatus.COMPLETED,
                             "completed_at": status_mgr._get_timestamp(),
                             "chunks": len(final_chunks),
                             "timing_in_secs": {"chunking": round(chunk_time, 2)}
                         })
-                        status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED)
+                        status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
                 except Exception as e:
-                    logger.error(f"Error from chunking for {path}: {e}")
-
+                    logger.error(f"Error from chunking for {path}: {str(e)}", exc_info=True)
+                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED)
         return batch_stats, batch_chunk_paths, batch_table_paths
 
     # Trigger the batches
@@ -371,14 +407,14 @@ def process_documents(job_id, input_paths, out_path, doc_id_dict, llm_model, llm
         # Process Light Batch
         l_worker = min(WORKER_SIZE, len(light_files)) if light_files else 0
         l_stats, l_chunks_json, l_tabs_json = _run_batch(
-            light_files, convert_worker=l_worker, max_worker=l_worker
+            light_files, convert_worker=l_worker, max_worker=l_worker, doc_id_dict=doc_id_dict
         )
 
         # Process Heavy Batch
         h_worker = min(WORKER_SIZE, len(heavy_files)) if heavy_files else 0
         h_conv_worker = min(HEAVY_PDF_CONVERT_WORKER_SIZE, len(heavy_files)) if heavy_files else 0
         h_stats, h_chunks_json, h_tabs_json = _run_batch(
-            heavy_files, convert_worker=h_conv_worker, max_worker=h_worker
+            heavy_files, convert_worker=h_conv_worker, max_worker=h_worker, doc_id_dict=doc_id_dict
         )
 
         # Combine statistics for the final return
@@ -392,7 +428,7 @@ def process_documents(job_id, input_paths, out_path, doc_id_dict, llm_model, llm
         succeeded_files = converted_pdf_stats.keys()
 
         for path in succeeded_files:
-            doc_id = doc_id_dict[path]
+            doc_id = doc_id_dict[Path(path).name]
             stem = Path(path).stem
             c_path = Path(out_path) / f"{stem}_chunks.json" # Adjust suffix based on your constants
             t_path = Path(out_path) / f"{stem}_tables.json"
@@ -417,9 +453,9 @@ def process_documents(job_id, input_paths, out_path, doc_id_dict, llm_model, llm
         return combined_chunks, converted_pdf_stats
 
     except Exception as e:
-        logger.error(f"Error while processing the documents in job {job_id}: {e}")
+        logger.error(f"Error while processing the documents in job {job_id}: {e}", exc_info=True)
         # In case of failure, mark all remaining docs in the job as failed
-        return [], {}
+        return None, None
 
 def collect_header_font_sizes(elements):
     """
@@ -523,10 +559,9 @@ def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens):
     current_chunk["source_nodes"] = []
 
 
-def chunk_single_file(input_path, pdf_path, out_path, conversion_stats, emb_endpoint, max_tokens=512):
+def chunk_single_file(input_path, pdf_path, out_path, conversion_stats, emb_endpoint, max_tokens=512, doc_id=None):
     t0 = time.time()
-    stem = Path(pdf_path).stem
-    processed_chunk_json_path = (Path(out_path) / f"{stem}{chunk_suffix}")
+    processed_chunk_json_path = (Path(out_path) / f"{doc_id}{chunk_suffix}")
 
     if conversion_stats["chunked"]:
         logger.debug(f"{pdf_path} already chunked!")
