@@ -169,7 +169,8 @@ func (kc *OpenshiftClient) InspectPod(nameOrID string) (*types.Pod, error) {
 
 	pod := &corev1.Pod{}
 	err = kc.Client.Get(kc.Ctx, client.ObjectKey{
-		Name: podName,
+		Name:      podName,
+		Namespace: kc.Namespace,
 	}, pod)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod from cluster: %w", err)
@@ -235,7 +236,7 @@ func (kc *OpenshiftClient) InspectContainer(nameOrID string) (*types.Container, 
 
 	for _, pod := range pods.Items {
 		for _, cs := range pod.Status.ContainerStatuses {
-			if cs.Name == nameOrID {
+			if cs.ContainerID == nameOrID || cs.Name == nameOrID {
 				return toOpenShiftContainer(&cs, &pod), nil
 			}
 		}
@@ -309,22 +310,18 @@ func (kc *OpenshiftClient) Type() types.RuntimeType {
 }
 
 func getPodNameWithPrefix(kc *OpenshiftClient, nameOrID string) (string, error) {
-	podName := ""
 	pods, err := kc.ListPods(nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to list pods: %w", err)
 	}
 
 	for _, pod := range pods {
-		if strings.HasPrefix(pod.Name, nameOrID) {
-			podName = pod.Name
+		if pod.ID == nameOrID || strings.HasPrefix(pod.Name, nameOrID) {
+			return pod.Name, nil
 		}
 	}
-	if podName == "" {
-		return "", fmt.Errorf("cannot find pod: %s", nameOrID)
-	}
 
-	return podName, nil
+	return "", fmt.Errorf("cannot find pod: %s", nameOrID)
 }
 
 func followLogs(kc *OpenshiftClient, podName string, opts *corev1.PodLogOptions) error {

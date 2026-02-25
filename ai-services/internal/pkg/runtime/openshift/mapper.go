@@ -1,6 +1,7 @@
 package openshift
 
 import (
+	"strconv"
 	"time"
 
 	routev1 "github.com/openshift/api/route/v1"
@@ -16,7 +17,7 @@ func toOpenshiftPodList(pods *corev1.PodList) []types.Pod {
 			Name:       pod.Name,
 			Status:     string(pod.Status.Phase),
 			Labels:     pod.Labels,
-			Containers: toOpenshiftContainerList(pod.Spec.Containers),
+			Containers: toOpenshiftContainerList(pod.Status.ContainerStatuses),
 			Created:    pod.CreationTimestamp.Time,
 			Ports:      extractPodPorts(pod.Spec.Containers),
 		})
@@ -30,8 +31,9 @@ func toOpenshiftPod(pod *corev1.Pod) *types.Pod {
 		ID:         string(pod.UID),
 		Name:       pod.Name,
 		Status:     string(pod.Status.Phase),
+		State:      string(pod.Status.Phase),
 		Labels:     pod.Labels,
-		Containers: toOpenshiftContainerList(pod.Spec.Containers),
+		Containers: toOpenshiftContainerList(pod.Status.ContainerStatuses),
 		Created:    pod.CreationTimestamp.Time,
 		Ports:      extractPodPorts(pod.Spec.Containers),
 	}
@@ -41,19 +43,22 @@ func extractPodPorts(containers []corev1.Container) map[string][]string {
 	ports := make(map[string][]string)
 	for _, container := range containers {
 		for _, port := range container.Ports {
-			ports[container.Name] = append(ports[container.Name], string(port.ContainerPort))
+			ports[container.Name] = append(ports[container.Name], strconv.Itoa(int(port.ContainerPort)))
 		}
 	}
 
 	return ports
 }
 
-func toOpenshiftContainerList(containers []corev1.Container) []types.Container {
+func toOpenshiftContainerList(containers []corev1.ContainerStatus) []types.Container {
 	containerList := make([]types.Container, 0, len(containers))
-	for _, container := range containers {
-		containerList = append(containerList, types.Container{
-			Name: container.Name,
-		})
+	for _, cs := range containers {
+		container := &types.Container{
+			ID:   cs.ContainerID,
+			Name: cs.Name,
+		}
+		setContainerStatus(&cs, container)
+		containerList = append(containerList, *container)
 	}
 
 	return containerList
@@ -65,28 +70,33 @@ func toOpenShiftContainer(cs *corev1.ContainerStatus, pod *corev1.Pod) *types.Co
 		Name:        cs.Name,
 		Annotations: pod.Annotations,
 	}
+	setContainerStatus(cs, container)
+
+	return container
+}
+
+func setContainerStatus(cs *corev1.ContainerStatus, container *types.Container) {
 	switch {
 	case cs.State.Running != nil:
-		container.Status = "Running"
+		container.Status = "running"
 		startedAt := cs.State.Running.StartedAt.Time
 		container.HealthcheckStartPeriod = time.Since(startedAt)
 		if cs.Ready {
-			container.Health = "Healthy"
+			container.Health = "healthy"
 		} else {
-			container.Health = "Unhealthy"
+			container.Health = "unhealthy"
 		}
 	case cs.State.Waiting != nil:
-		container.Status = "Waiting"
+		container.Status = "waiting"
 		container.Health = cs.State.Waiting.Reason
 
 	case cs.State.Terminated != nil:
-		container.Status = "Terminated"
+		container.Status = "terminated"
 		container.Health = cs.State.Terminated.Reason
 	default:
-		container.Status = "Unknown"
+		container.Status = "unknown"
+		container.Health = "unknown"
 	}
-
-	return container
 }
 
 func toOpenShiftRouteList(routes []routev1.Route) []types.Route {
