@@ -9,9 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-type KubeconfigRule struct {
-	message string
-}
+type KubeconfigRule struct{}
 
 func NewKubeconfigRule() *KubeconfigRule {
 	return &KubeconfigRule{}
@@ -39,13 +37,11 @@ func (r *KubeconfigRule) Verify() error {
 		return fmt.Errorf("failed to connect to cluster: %w", err)
 	}
 
-	r.message = "Cluster authentication successful"
-
 	return nil
 }
 
 func (r *KubeconfigRule) Message() string {
-	return r.message
+	return "Cluster authentication successful"
 }
 
 func (r *KubeconfigRule) Level() constants.ValidationLevel {
