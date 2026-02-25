@@ -10,6 +10,7 @@ import (
 	"helm.sh/helm/v4/pkg/chart"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -45,8 +46,15 @@ func (o *OpenshiftApplication) Create(ctx context.Context, opts types.CreateOpti
 		return err
 	}
 
-	//nolint:godox
-	// TODO: Step4: print Next steps
+	logger.Infoln("-------")
+
+	// Step5: Print the next steps to be performed at the end of create
+	if err := helpers.PrintNextSteps(o.runtime, opts.Name, opts.TemplateName); err != nil {
+		// do not want to fail the overall create if we cannot print next steps
+		logger.Infof("failed to display next steps: %v\n", err)
+
+		return nil //nolint:nilerr // intentionally swallow error for non-critical step
+	}
 
 	return nil
 }

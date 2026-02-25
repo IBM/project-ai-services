@@ -10,7 +10,7 @@ Day N:
 
 {{- if eq .BACKEND_STATUS "Running" }}
 
-- Chatbot Backend is available to use.
+- Chatbot Backend is available to use at http://{{ .BACKEND_ROUTE }}.
 {{- else }}
 
 - Chatbot Backend is unavailable to use. Please make sure 'backend' pod is running.
