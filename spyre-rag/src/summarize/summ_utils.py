@@ -17,7 +17,7 @@ if level != "":
     elif not "info" in level:
         print(f"Unknown LOG_LEVEL passed: '{level}'")
 set_log_level(log_level)
-logger = get_logger("Summarize")
+logger = get_logger("summarize")
 
 settings = get_settings()
 

@@ -8,7 +8,7 @@ from fastapi.openapi.docs import get_swagger_ui_html
 
 from common.llm_utils import create_llm_session, query_vllm_summarize
 from common.misc_utils import get_model_endpoints, set_log_level, get_logger
-from summ_utils import *
+from summarize.summ_utils import *
 
 log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
@@ -58,7 +58,7 @@ MAX_INPUT_WORDS = int(
 
 def initialize_models():
     global llm_model_dict
-    _, llm_model_dict,  = get_model_endpoints()
+    _, llm_model_dict,_  = get_model_endpoints()
 
 
 
