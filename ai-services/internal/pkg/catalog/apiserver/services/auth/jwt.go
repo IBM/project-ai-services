@@ -32,7 +32,7 @@ func (t *TokenManager) newToken(uid string, ttl time.Duration, tokenType string)
 	claims := customClaims{
 		UserID: uid,
 		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    "go-gin-auth",
+			Issuer:    "ai-services-catalog-server",
 			Subject:   uid,
 			Audience:  []string{tokenType},
 			ExpiresAt: jwt.NewNumericDate(exp),
