@@ -15,7 +15,7 @@ import (
 )
 
 // Delete removes an application and its associated resources.
-func (p *PodmanApplication) Delete(ctx context.Context, opts appTypes.DeleteOptions) error {
+func (p *PodmanApplication) Delete(_ context.Context, opts appTypes.DeleteOptions) error {
 	appDir := filepath.Join(constants.ApplicationsPath, filepath.Base(opts.Name))
 	appExists := utils.FileExists(appDir)
 
