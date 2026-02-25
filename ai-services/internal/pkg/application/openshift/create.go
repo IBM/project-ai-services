@@ -46,6 +46,8 @@ func (o *OpenshiftApplication) Create(ctx context.Context, opts types.CreateOpti
 		return err
 	}
 
+	logger.Infoln("-------")
+
 	// Step5: Print the next steps to be performed at the end of create
 	if err := helpers.PrintNextSteps(o.runtime, opts.Name, opts.TemplateName); err != nil {
 		// do not want to fail the overall create if we cannot print next steps
