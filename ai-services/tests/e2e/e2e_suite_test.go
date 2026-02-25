@@ -31,6 +31,7 @@ var (
 	runID                       string
 	appName                     string
 	providedAppName             string
+	deleteExistingApp           bool
 	tempDir                     string
 	tempBinDir                  string
 	aiServiceBin                string
@@ -52,6 +53,7 @@ var (
 
 func init() {
 	flag.StringVar(&providedAppName, "app-name", "", "Use existing application instead of creating one")
+	flag.BoolVar(&deleteExistingApp, "delete-app", false, "Delete existing app before proceeding ahead with test run")
 }
 func TestE2E(t *testing.T) {
 	gomega.RegisterFailHandler(ginkgo.Fail)
@@ -145,6 +147,31 @@ var _ = ginkgo.BeforeSuite(func() {
 	} else {
 		podmanReady = true
 		logger.Infoln("[SETUP] Podman environment verified")
+	}
+
+	ginkgo.By("Checking if existing app needs to be deleted")
+	if deleteExistingApp {
+		//fetch existing application details
+		psOutput, err := cli.ApplicationPS(ctx, cfg, "")
+		if err != nil {
+			logger.Errorf("Error fetching delete application name")
+			ginkgo.Fail("Error fetching delete application name")
+		}
+
+		//fetch application to be deleted
+		deleteAppName := cli.GetApplicationNameFromPSOutput(psOutput)
+		if deleteAppName != "" {
+			//delete existing application
+			_, err := cli.DeleteAppSkipCleanup(ctx, cfg, deleteAppName)
+			if err != nil {
+				logger.Errorf("Error deleting existing app: %s", deleteAppName)
+				ginkgo.Fail("Existing application could not be deleted")
+			}
+			logger.Infof("[SETUP] Deleted existing app: %s", deleteAppName)
+		} else {
+			logger.Infof("[SETUP] No existing application found to delete")
+		}
+
 	}
 
 	logger.Infoln("[SETUP] ================================================")
