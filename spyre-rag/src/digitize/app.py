@@ -15,7 +15,8 @@ if level != "":
     if "debug" in level:
         log_level = logging.DEBUG
     elif not "info" in level:
-        raise Exception(f"Unknown LOG_LEVEL passed: '{level}'")
+        logging.warning(f"Unknown LOG_LEVEL passed: '{level}', defaulting to INFO.")
+
 set_log_level(log_level)
 logger = get_logger("app")
 
