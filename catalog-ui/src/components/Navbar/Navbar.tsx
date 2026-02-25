@@ -1,11 +1,15 @@
 import { Theme, SideNav, SideNavItems, SideNavMenuItem } from "@carbon/react";
 import { NavLink, useLocation } from "react-router-dom";
+import type { RefObject } from "react";
+import styles from "./Navbar.module.scss";
 
-interface Props {
+type NavbarProps = {
   isSideNavOpen: boolean;
-}
+  sideNavRef?: RefObject<HTMLElement>;
+};
 
-const Navbar = ({ isSideNavOpen }: Props) => {
+const Navbar = (props: NavbarProps) => {
+  const { isSideNavOpen, sideNavRef } = props;
   const location = useLocation();
 
   return (
@@ -14,39 +18,29 @@ const Navbar = ({ isSideNavOpen }: Props) => {
         aria-label="Side navigation"
         expanded={isSideNavOpen}
         isPersistent={false}
+        ref={sideNavRef}
       >
         <SideNavItems>
-          <SideNavMenuItem
-            element={NavLink}
-            to="/applications"
-            isActive={location.pathname === "/applications"}
-          >
-            Applications
-          </SideNavMenuItem>
-
-          <SideNavMenuItem
-            element={NavLink}
-            to="/technical"
-            isActive={location.pathname === "/technical"}
-          >
-            Technical templates
-          </SideNavMenuItem>
-
-          <SideNavMenuItem
-            element={NavLink}
-            to="/business"
-            isActive={location.pathname === "/business"}
-          >
-            Business demo templates
-          </SideNavMenuItem>
-
-          <SideNavMenuItem
-            element={NavLink}
-            to="/services"
-            isActive={location.pathname === "/services"}
-          >
-            Services catalog
-          </SideNavMenuItem>
+          <NavLink to="/applications" className={styles.navLink}>
+            <SideNavMenuItem className={styles.sideNavItem}>
+              Applications
+            </SideNavMenuItem>
+          </NavLink>
+          <NavLink to="/technical-templates" className={styles.navLink}>
+            <SideNavMenuItem className={styles.sideNavItem}>
+              Technical templates
+            </SideNavMenuItem>
+          </NavLink>
+          <NavLink to="/business-demo-templates" className={styles.navLink}>
+            <SideNavMenuItem className={styles.sideNavItem}>
+              Business demo templates
+            </SideNavMenuItem>
+          </NavLink>
+          <NavLink to="/services-catalog" className={styles.navLink}>
+            <SideNavMenuItem className={styles.sideNavItem}>
+              Services catalog
+            </SideNavMenuItem>
+          </NavLink>
         </SideNavItems>
       </SideNav>
     </Theme>

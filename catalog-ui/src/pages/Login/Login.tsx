@@ -1,10 +1,21 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import AppHeader from "@/components/AppHeader";
 import Navbar from "@/components/Navbar";
 
 const Login = () => {
   const [isSideNavOpen, setIsSideNavOpen] = useState(false);
+  const sideNavRef = useRef<HTMLElement>(null!);
 
+  useEffect(() => {
+    function handleOutsideClick(e: MouseEvent) {
+      if (!isSideNavOpen) return;
+      const target = e.target as Node;
+      if (sideNavRef.current && sideNavRef.current.contains(target)) return;
+      setIsSideNavOpen(false);
+    }
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, [isSideNavOpen]);
   return (
     <>
       <AppHeader
@@ -12,15 +23,9 @@ const Login = () => {
         setIsSideNavOpen={setIsSideNavOpen}
       />
 
-      <Navbar isSideNavOpen={isSideNavOpen} />
+      <Navbar isSideNavOpen={isSideNavOpen} sideNavRef={sideNavRef} />
 
-      <main
-        style={{
-          marginLeft: isSideNavOpen ? "256px" : "0",
-          padding: "2rem",
-          transition: "margin 0.2s ease",
-        }}
-      ></main>
+      <main></main>
     </>
   );
 };
