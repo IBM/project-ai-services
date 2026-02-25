@@ -11,10 +11,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// NodeLabelsRule validates node labels in the OpenShift cluster.
 type NodeLabelsRule struct{}
 
-// NewNodeLabelsRule returns a new NodeLabelsRule instance.
 func NewNodeLabelsRule() *NodeLabelsRule {
 	return &NodeLabelsRule{}
 }
@@ -82,6 +80,7 @@ func (r *NodeLabelsRule) checkArch(nodeName string, labels map[string]string) er
 	if labels[openshiftconst.NodeArchLabel] != openshiftconst.NodeArch {
 		return fmt.Errorf("  - %s must have %s=%s", nodeName, openshiftconst.NodeArchLabel, openshiftconst.NodeArch)
 	}
+
 	return nil
 }
 
@@ -89,6 +88,7 @@ func (r *NodeLabelsRule) checkOS(nodeName string, labels map[string]string) erro
 	if labels[openshiftconst.NodeOSLabel] != openshiftconst.NodeOSRHEL {
 		return fmt.Errorf("  - %s must have %s=%s", nodeName, openshiftconst.NodeOSLabel, openshiftconst.NodeOSRHEL)
 	}
+
 	return nil
 }
 
@@ -96,6 +96,7 @@ func (r *NodeLabelsRule) checkSpyre(labels map[string]string) bool {
 	if val, ok := labels[openshiftconst.SpyreLabel]; ok && val == openshiftconst.SpyreLabelTrue {
 		return true
 	}
+
 	return false
 }
 
