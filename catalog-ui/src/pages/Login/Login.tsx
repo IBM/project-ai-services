@@ -1,23 +1,10 @@
-import { useState } from "react";
-import AppHeader from "@/components/AppHeader";
-import Navbar from "@/components/Navbar";
+import styles from "./Login.module.scss";
 
 const Login = () => {
-  const [isSideNavOpen, setIsSideNavOpen] = useState(false);
   return (
-    <>
-      <AppHeader
-        isSideNavOpen={isSideNavOpen}
-        setIsSideNavOpen={setIsSideNavOpen}
-      />
-
-      <Navbar
-        isSideNavOpen={isSideNavOpen}
-        setIsSideNavOpen={setIsSideNavOpen}
-      />
-
-      <main></main>
-    </>
+    <div className={styles.pageContent}>
+      <h1 className={styles.heading}>Login Page</h1>
+    </div>
   );
 };
 
