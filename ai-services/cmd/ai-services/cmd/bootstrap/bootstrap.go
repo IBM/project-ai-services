@@ -70,8 +70,7 @@ func bootstrapExample() string {
 func bootstrapDescription() string {
 	podmanList, openshiftList := generateValidationList()
 
-	return fmt.Sprintf(`
-The bootstrap command configures and validates the environment needed
+	return fmt.Sprintf(`The bootstrap command configures and validates the environment needed
 to run AI Services, ensuring prerequisites are met and initial configuration is completed.
 
 Available subcommands:

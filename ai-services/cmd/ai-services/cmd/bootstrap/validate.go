@@ -94,10 +94,7 @@ func generateValidationList() (string, string) {
 	podmanRules := validators.PodmanRegistry.Rules()
 	openshiftRules := validators.OpenshiftRegistry.Rules()
 
-	p := createRuleList(podmanRules)
-	o := createRuleList(openshiftRules)
-
-	return p, o
+	return createRuleList(podmanRules), createRuleList(openshiftRules)
 }
 
 func createRuleList(rules []validators.Rule) string {
