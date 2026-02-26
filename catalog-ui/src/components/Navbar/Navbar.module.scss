@@ -1,3 +1,13 @@
-.navbar {
-  font-size: large;
+.navLink {
+  outline: none !important ;
+  color: unset;
+  text-decoration: none !important;
+}
+
+.sideNavItem:active {
+  border-left: 5px solid #0f62fe;
+  outline: none !important;
+  background-color: #3a3b3b !important;
+  color: unset;
+  text-decoration: none;
 }
