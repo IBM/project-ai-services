@@ -47,9 +47,10 @@ Arguments
 			Name:        applicationName,
 			AutoYes:     autoYes,
 			SkipCleanup: skipCleanup,
+			Timeout:     timeout,
 		}
 
-		return app.Delete(opts)
+		return app.Delete(cmd.Context(), opts)
 
 	},
 }
@@ -57,4 +58,10 @@ Arguments
 func init() {
 	deleteCmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "Skip deleting application data (default=false)")
 	deleteCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Automatically accept all confirmation prompts (default=false)")
+	deleteCmd.Flags().DurationVar(
+		&timeout,
+		"timeout",
+		0, // default
+		"Timeout for the operation (e.g. 10s, 2m, 1h). Supported for runtime set to openshift only.",
+	)
 }
