@@ -1,5 +1,31 @@
 // Package apiserver provides the implementation of the API server for the AI Services Catalog.
 // It includes the setup of routes, authentication, and server configuration.
+//
+// @title AI Services Catalog API
+// @version 1.0
+// @description API server for managing AI Services catalog, applications, and authentication
+// @termsOfService http://swagger.io/terms/
+//
+// @contact.name API Support
+// @contact.url https://github.com/project-ai-services/ai-services
+// @contact.email support@example.com
+//
+// @license.name Apache 2.0
+// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
+//
+// @host localhost:8080
+// @BasePath /api/v1
+//
+// @tag.name Authentication
+// @tag.description Authentication and authorization endpoints
+//
+// @tag.name Applications
+// @tag.description Application management endpoints
+//
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and JWT token.
 package apiserver
 
 import (
