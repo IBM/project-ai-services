@@ -21,6 +21,14 @@ logger = get_logger("summarize")
 
 settings = get_settings()
 
+# Pre-compute max input word count from context length at startup
+# input_words/ratio + buf + (input_words/ratio)*coeff < max_model_len
+# => input_words * (1 + coeff) / ratio < max_model_len - buf
+MAX_INPUT_WORDS = int(
+    (settings.context_lengths.granite_3_3_8b_instruct - settings.summarization_prompt_token_count)
+    * settings.token_to_word_ratios.en
+    / (1 + settings.summarization_coefficient)
+)
 
 def word_count(text: str) -> int:
     return len(text.split())
@@ -239,6 +247,12 @@ def validate_summary_length(summary_length):
             return build_error_response(
                 "INVALID_PARAMETER",
                 "length must be an integer",
+                400,
+            )
+        if summary_length <=0 or summary_length > MAX_INPUT_WORDS:
+            return build_error_response(
+                "INVALID_PARAMETER",
+                "length is out of bounds",
                 400,
             )
     return summary_length

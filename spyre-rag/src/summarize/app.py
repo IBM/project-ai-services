@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request, UploadFile
 from fastapi.openapi.docs import get_swagger_ui_html
 
 from common.llm_utils import create_llm_session, query_vllm_summarize
-from common.misc_utils import get_model_endpoints, set_log_level, get_logger
+from common.misc_utils import get_model_endpoints
 from summarize.summ_utils import *
 
 log_level = logging.INFO
@@ -46,14 +46,7 @@ def swagger_root():
 
 ALLOWED_FILE_EXTENSIONS = {".txt", ".pdf"}
 
-# Pre-compute max input word count from context length at startup
-# input_words/ratio + buf + (input_words/ratio)*coeff < max_model_len
-# => input_words * (1 + coeff) / ratio < max_model_len - buf
-MAX_INPUT_WORDS = int(
-    (settings.context_lengths.granite_3_3_8b_instruct - settings.summarization_prompt_token_count)
-    * settings.token_to_word_ratios.en
-    / (1 + settings.summarization_coefficient)
-)
+
 
 def initialize_models():
     global llm_model_dict
@@ -180,7 +173,7 @@ async def summarize(request: Request):
                     400,
                 )
 
-            text = body.get("text").strip()
+            text = body.get("text", "").strip()
             if not text:
                 return build_error_response(
                     "MISSING_INPUT",
@@ -188,8 +181,10 @@ async def summarize(request: Request):
                     400,
                 )
             summary_length = validate_summary_length(body.get("length"))
+            if isinstance(summary_length, JSONResponse):
+                return summary_length
 
-            return await handle_summarize(text,"text", summary_length)
+            return await handle_summarize(text, "text", summary_length)
 
         # ----- Multipart / form-data path -----
         elif "multipart/form-data" in content_type:

@@ -20,7 +20,7 @@ class Prompts:
             self.table_summary_and_classify,
             self.summarize_system_prompt,
             self.summarize_user_prompt_with_length,
-            self.summarize_user_prompt_with_length
+            self.summarize_user_prompt_without_length
 
         )):
             raise ValueError(f"One or more prompt variables are missing or empty.")
