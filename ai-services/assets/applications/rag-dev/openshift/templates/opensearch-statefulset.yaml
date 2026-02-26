@@ -73,7 +73,7 @@ spec:
             failureThreshold: 5
   volumeClaimTemplates:
     - metadata:
-        name: opensearch-data
+        name: data
         labels:
           ai-services.io/application: {{ .Release.Name }}
           ai-services.io/template: {{ .Chart.Name }}
