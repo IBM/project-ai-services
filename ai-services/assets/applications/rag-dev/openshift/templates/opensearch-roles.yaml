@@ -2,7 +2,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: opensearch-anyuid-role
+  name: opensearch-role
   labels:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
@@ -10,14 +10,14 @@ metadata:
 rules:
 - apiGroups: ["security.openshift.io"]
   resources: ["securitycontextconstraints"]
-  resourceNames: ["anyuid"]
+  resourceNames: ["nonroot-v2"]
   verbs: ["use"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: opensearch-anyuid-binding
+  name: opensearch-role-binding
   labels:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
@@ -27,5 +27,5 @@ subjects:
   name: opensearch-sa
 roleRef:
   kind: Role
-  name: opensearch-anyuid-role
+  name: opensearch-role
   apiGroup: rbac.authorization.k8s.io
