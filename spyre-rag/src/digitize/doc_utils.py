@@ -15,11 +15,11 @@ from sentence_splitter import SentenceSplitter
 from common.llm_utils import create_llm_session, summarize_and_classify_tables, tokenize_with_llm
 from common.misc_utils import get_logger, generate_file_checksum, text_suffix, table_suffix
 from common.misc_utils import get_logger, generate_file_checksum, text_suffix, table_suffix, chunk_suffix
-from ingest.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count
+from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 
 logging.getLogger('docling').setLevel(logging.CRITICAL)
 
-logger = get_logger("Docling")
+logger = get_logger("doc_utils")
 
 WORKER_SIZE = 4
 HEAVY_PDF_CONVERT_WORKER_SIZE = 2
@@ -40,30 +40,6 @@ excluded_labels = {
 POOL_SIZE = 32
 
 create_llm_session(pool_maxsize=POOL_SIZE)
-
-def get_doc_converter():
-    from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import PdfPipelineOptions
-    from docling.document_converter import DocumentConverter, PdfFormatOption
-
-    # Accelerator & pipeline options
-    pipeline_options = PdfPipelineOptions()
-    # Docling model files are getting downloaded to this /var/docling-models dir by this project-ai-services/images/rag-base/download_docling_models.py script in project-ai-services/images/rag-base/Containerfile
-    pipeline_options.artifacts_path = "/var/docling-models"
-    
-
-    pipeline_options.do_table_structure = True
-    pipeline_options.table_structure_options.do_cell_matching = True
-    pipeline_options.do_ocr = False
-
-    doc_converter = DocumentConverter(
-        allowed_formats=[
-            InputFormat.PDF
-        ],
-        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
-    )
-
-    return doc_converter
 
 def process_text(converted_doc, pdf_path, out_path):
     page_count = 0
@@ -235,8 +211,7 @@ def convert_document(pdf_path, conversion_stats, out_path):
         logger.debug(f"Converting '{pdf_path}'")
         t0 = time.time()
 
-        doc_converter = get_doc_converter()
-        converted_doc = doc_converter.convert(pdf_path).document
+        converted_doc = convert_doc(pdf_path).document
         converted_doc.save_as_json(str(converted_json_f))
 
         conversion_time = time.time() - t0
