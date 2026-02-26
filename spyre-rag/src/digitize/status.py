@@ -21,8 +21,9 @@ class StatusManager:
 
     def update_doc_metadata(self, doc_id: str, details: dict):
         """Updates the detailed <doc_id>_metadata.json file."""
-        meta_file = Path(CACHE_DIR) / f"{doc_id}_metadata.json"
+        meta_file = Path(CACHE_DIR) /"docs"/ f"{doc_id}_metadata.json"
         if not meta_file.exists():
+            logger.error(f"metadata file {doc_id}_metadata.json missing")
             return
 
         # Create a local copy to avoid modifying the original dictionary passed in
@@ -48,7 +49,7 @@ class StatusManager:
             json.dump(data, f, indent=4)
             f.truncate()
 
-        print(f"✅ Successfully updated metadata for {doc_id}")
+        logger.info(f"✅ Successfully updated metadata for {doc_id}")
 
     def update_job_progress(self, doc_id: str, doc_status: DocStatus, job_status: JobStatus):
        """ Updates the document status within the <job_id>_status.json """

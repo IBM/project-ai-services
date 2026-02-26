@@ -56,8 +56,10 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
     job_staging_path = Path(STAGING_DIR) / f"{job_id}"
 
     try:
-        logger.info(f"🚀 Ingestion started for {job_id}")
-        ingest(job_staging_path, job_id, doc_id_dict)
+        logger.info(f"🚀 Ingestion started for job: {job_id}, staging path: {job_staging_path}")
+        # Use to_thread to prevent the heavy 'ingest' function from 
+        # blocking the main FastAPI event loop.
+        await asyncio.to_thread(ingest, job_staging_path, job_id, doc_id_dict)
         logger.info(f"Ingestion for {job_id} completed successfully")
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")

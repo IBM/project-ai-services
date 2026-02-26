@@ -355,10 +355,12 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     })
                     batch_table_paths.append(tab_json)
                     logger.info("updating doc metadata after processing")
+                    total_processing_time = timings["process_text"] + timings["process_tables"]
+
                     status_mgr.update_doc_metadata(doc_id, {
                         "pages": pgs,
                         "tables": tabs,
-                        "timing_in_secs": {"processing": round(timings.get("processing", 0), 2)}
+                        "timing_in_secs": {"processing": round(total_processing_time, 2)}
                     })
                     logger.info("updating job status after processing")
                     status_mgr.update_job_progress(
