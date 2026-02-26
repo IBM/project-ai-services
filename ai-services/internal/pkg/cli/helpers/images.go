@@ -11,7 +11,7 @@ import (
 
 func ListImages(template, appName string) ([]string, error) {
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
-	apps, err := tp.ListApplications()
+	apps, err := tp.ListApplications(true)
 	if err != nil {
 		return nil, fmt.Errorf("error listing templates: %w", err)
 	}
