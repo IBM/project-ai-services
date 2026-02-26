@@ -5,9 +5,13 @@ import (
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	openshiftconst "github.com/project-ai-services/ai-services/internal/pkg/constants/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	storagev1 "k8s.io/api/storage/v1"
+)
+
+const (
+	StorageClassDefaultAnnotation = "storageclass.kubernetes.io/is-default-class"
+	StorageClassDefaultValue      = "true"
 )
 
 type StorageClassRule struct{}
@@ -43,8 +47,8 @@ func (r *StorageClassRule) Verify() error {
 	}
 
 	for _, sc := range scList.Items {
-		val, exists := sc.Annotations[openshiftconst.StorageClassDefaultAnnotation]
-		if exists && val == "true" {
+		val, exists := sc.Annotations[StorageClassDefaultAnnotation]
+		if exists && val == StorageClassDefaultValue {
 			return nil
 		}
 	}
