@@ -1,7 +1,5 @@
 This project is licensed under the Apache-2.0 license
 
-This project uses MinIO, which is licensed under the GNU Affero General Public License (AGPL) version 3.0 license - https://github.com/minio/minio
-
 The following components are separately licensed under the SIL Open Font License (OFL) 1.1 -  http://scripts.sil.org/OFL
 
 plex-serif

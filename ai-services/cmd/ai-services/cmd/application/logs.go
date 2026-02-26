@@ -15,9 +15,11 @@ var (
 )
 
 var logsCmd = &cobra.Command{
-	Use:   "logs",
-	Short: "Show application pod logs",
-	Long:  `Displays logs from an application pod`,
+	Use: "logs [name]",
+	Long: `Displays logs from an application pod
+Arguments
+[name]: Application name (required)`,
+	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if podName == "" {
 			return fmt.Errorf("pod name must be specified using --pod flag")
@@ -26,6 +28,9 @@ var logsCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// fetch application name
+		applicationName := args[0]
+
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
@@ -33,9 +38,7 @@ var logsCmd = &cobra.Command{
 
 		// Create application instance using factory
 		factory := application.NewFactory(rt)
-		//nolint:godox
-		// TODO: For OpenShift we need namespace param added if applicable
-		app, err := factory.Create("")
+		app, err := factory.Create(applicationName)
 		if err != nil {
 			return fmt.Errorf("failed to create application instance: %w", err)
 		}
