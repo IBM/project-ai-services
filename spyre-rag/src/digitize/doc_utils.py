@@ -268,6 +268,9 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
     for path in filtered_input_paths:
         if filtered_input_paths[path]["convert"]:
             checksum = generate_file_checksum(path)
+            stem = Path(path).stem
+            filename = f"{stem}.pdf"
+            doc_id = doc_id_dict[filename]
             (Path(out_path) / f"{doc_id}.checksum").write_text(checksum, encoding='utf-8')
 
     # Partition files into light and heavy based on page count
