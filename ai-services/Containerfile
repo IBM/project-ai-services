@@ -1,0 +1,35 @@
+FROM registry.access.redhat.com/ubi9/go-toolset:1.25 AS builder
+
+ARG CMD_VERSION
+ARG GITCOMMIT
+ARG BUILDDATE
+ARG BUILDTAGS
+
+WORKDIR /go/src/github.com/project-ai-services/ai-services
+
+USER root
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 go build \
+    -o bin/ai-services \
+    -tags "${BUILDTAGS}" \
+    -ldflags " \
+    -X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.Version=${CMD_VERSION}' \
+    -X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.GitCommit=${GITCOMMIT}' \
+    -X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.BuildDate=${BUILDDATE}' \
+    " \
+    ./cmd/ai-services
+
+FROM registry.access.redhat.com/ubi9/ubi-micro:9.7
+
+COPY --from=builder /go/src/github.com/project-ai-services/ai-services/bin/ai-services /usr/bin/ai-services
+
+USER 1001
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/bin/ai-services"]
