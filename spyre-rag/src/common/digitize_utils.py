@@ -95,7 +95,7 @@ def initialize_job_state(job_id: str, operation: str, documents_info: list):
             "tables": 0,
             "chunks": 0,
             "timing_in_secs": {
-                "digitizing": 0, "processing": 0, "chunking": 0, "indexing": 0
+                "digitizing": None, "processing": None, "chunking": None, "indexing": None
             }
         }
         with open(doc_meta_path, "w") as f:

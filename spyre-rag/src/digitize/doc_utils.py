@@ -171,14 +171,14 @@ def process_converted_document(converted_json_path, pdf_path, out_path, conversi
     processed_text_json_path = (Path(out_path) / f"{doc_id}{text_suffix}")
     processed_table_json_path = (Path(out_path) / f"{doc_id}{table_suffix}")
 
+    timings = {"process_text": 0, "process_tables": 0}
     if conversion_stats["text_processed"] and conversion_stats["table_processed"]:
         logger.debug(f"Text & Table of {pdf_path} is processed already!")
         page_count = get_pdf_page_count(pdf_path)
         table_count = processed_table_json_path.exists() and len(json.load(processed_table_json_path.open())) or 0
-        return pdf_path, processed_text_json_path, processed_table_json_path, page_count, table_count, {}
+        return pdf_path, processed_text_json_path, processed_table_json_path, page_count, table_count, timings
 
     try:
-        timings = {}
         converted_doc = None
         page_count = 0
         table_count = 0
@@ -226,8 +226,6 @@ def convert_document(pdf_path, conversion_stats, out_path, doc_id_dict):
         logger.error(f"Error converting '{pdf_path}': {e}")
     return None, None, None
 
-# ====================================================
-# refactored process_documents
 def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoint, max_tokens, job_id, doc_id_dict):
     # Skip files that already exist by matching the cached checksum of the pdf
     # if there is no difference in checksum and processed text & table json also exist, would skip for convert and process list
