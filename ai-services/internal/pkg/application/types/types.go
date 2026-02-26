@@ -32,6 +32,9 @@ type DeleteOptions struct {
 	PodNames    []string
 	AutoYes     bool
 	SkipCleanup bool
+
+	// Openshift
+	Timeout time.Duration
 }
 
 // StartOptions contains parameters for starting an application.
