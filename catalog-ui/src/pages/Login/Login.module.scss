@@ -1,7 +1,40 @@
-.pageContent {
-  padding-top: 2rem;
+@use "@carbon/react/scss/type";
+
+.loginPage {
+  display: flex;
+  height: 100vh;
+}
+
+.loginLeft {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding-left: 64px;
+}
+
+.loginForm {
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
+  width: 531px;
 }
 
 .heading {
-  text-align: center;
+  @include type.type-style("productive-heading-05");
+}
+
+.inputFields {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 288px;
+}
+
+.loginRight {
+  flex: 1;
+  background-color: var(--cds-layer-01);
+}
+
+.continueButton {
+  width: 288px;
 }
