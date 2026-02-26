@@ -52,111 +52,119 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 }
 
 // GetTemplates godoc
-// @Summary List application templates
-// @Description Get a list of available application templates
-// @Tags Applications
-// @Produce json
-// @Security BearerAuth
-// @Success 200 {object} map[string]interface{} "List of templates"
-// @Router /applications/templates [get]
+//
+//	@Summary		List application templates
+//	@Description	Get a list of available application templates
+//	@Tags			Applications
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		200	{object}	map[string]interface{}	"List of templates"
+//	@Router			/applications/templates [get]
 func getTemplates(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "This is a placeholder endpoint for " + c.FullPath()})
 }
 
 // CreateApplication godoc
-// @Summary Create new application
-// @Description Create a new application instance from a template
-// @Tags Applications
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Success 200 {object} map[string]interface{} "Application created"
-// @Router /applications [post]
+//
+//	@Summary		Create new application
+//	@Description	Create a new application instance from a template
+//	@Tags			Applications
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		200	{object}	map[string]interface{}	"Application created"
+//	@Router			/applications [post]
 func createApplication(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "This is a placeholder endpoint for " + c.FullPath()})
 }
 
 // GetApplication godoc
-// @Summary Get application details
-// @Description Get detailed information about a specific application
-// @Tags Applications
-// @Produce json
-// @Security BearerAuth
-// @Param name path string true "Application name"
-// @Success 200 {object} map[string]interface{} "Application details"
-// @Failure 404 {object} map[string]interface{} "Application not found"
-// @Router /applications/{name} [get]
+//
+//	@Summary		Get application details
+//	@Description	Get detailed information about a specific application
+//	@Tags			Applications
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			name	path		string					true	"Application name"
+//	@Success		200		{object}	map[string]interface{}	"Application details"
+//	@Failure		404		{object}	map[string]interface{}	"Application not found"
+//	@Router			/applications/{name} [get]
 func getApplication(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "This is a placeholder endpoint for " + c.FullPath()})
 }
 
 // DeleteApplication godoc
-// @Summary Delete application
-// @Description Delete a specific application and all its resources
-// @Tags Applications
-// @Security BearerAuth
-// @Param name path string true "Application name"
-// @Success 200 {object} map[string]interface{} "Application deleted"
-// @Failure 404 {object} map[string]interface{} "Application not found"
-// @Router /applications/{name} [delete]
+//
+//	@Summary		Delete application
+//	@Description	Delete a specific application and all its resources
+//	@Tags			Applications
+//	@Security		BearerAuth
+//	@Param			name	path		string					true	"Application name"
+//	@Success		200		{object}	map[string]interface{}	"Application deleted"
+//	@Failure		404		{object}	map[string]interface{}	"Application not found"
+//	@Router			/applications/{name} [delete]
 func deleteApplication(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "This is a placeholder endpoint for " + c.FullPath()})
 }
 
 // GetApplicationStatus godoc
-// @Summary Get application status
-// @Description Get the running status and health of an application
-// @Tags Applications
-// @Produce json
-// @Security BearerAuth
-// @Param name path string true "Application name"
-// @Success 200 {object} map[string]interface{} "Application status"
-// @Failure 404 {object} map[string]interface{} "Application not found"
-// @Router /applications/{name}/ps [get]
+//
+//	@Summary		Get application status
+//	@Description	Get the running status and health of an application
+//	@Tags			Applications
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			name	path		string					true	"Application name"
+//	@Success		200		{object}	map[string]interface{}	"Application status"
+//	@Failure		404		{object}	map[string]interface{}	"Application not found"
+//	@Router			/applications/{name}/ps [get]
 func getApplicationStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "This is a placeholder endpoint for " + c.FullPath()})
 }
 
 // StartApplication godoc
-// @Summary Start application
-// @Description Start a stopped application
-// @Tags Applications
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param name path string true "Application name"
-// @Success 200 {object} map[string]interface{} "Application started"
-// @Failure 404 {object} map[string]interface{} "Application not found"
-// @Router /applications/{name}/start [post]
+//
+//	@Summary		Start application
+//	@Description	Start a stopped application
+//	@Tags			Applications
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			name	path		string					true	"Application name"
+//	@Success		200		{object}	map[string]interface{}	"Application started"
+//	@Failure		404		{object}	map[string]interface{}	"Application not found"
+//	@Router			/applications/{name}/start [post]
 func startApplication(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "This is a placeholder endpoint for " + c.FullPath()})
 }
 
 // StopApplication godoc
-// @Summary Stop application
-// @Description Stop a running application
-// @Tags Applications
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param name path string true "Application name"
-// @Success 200 {object} map[string]interface{} "Application stopped"
-// @Failure 404 {object} map[string]interface{} "Application not found"
-// @Router /applications/{name}/stop [post]
+//
+//	@Summary		Stop application
+//	@Description	Stop a running application
+//	@Tags			Applications
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			name	path		string					true	"Application name"
+//	@Success		200		{object}	map[string]interface{}	"Application stopped"
+//	@Failure		404		{object}	map[string]interface{}	"Application not found"
+//	@Router			/applications/{name}/stop [post]
 func stopApplication(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "This is a placeholder endpoint for " + c.FullPath()})
 }
 
 // GetApplicationLogs godoc
-// @Summary Get application logs
-// @Description Get logs from a specific application
-// @Tags Applications
-// @Produce json
-// @Security BearerAuth
-// @Param name path string true "Application name"
-// @Success 200 {object} map[string]interface{} "Application logs"
-// @Failure 404 {object} map[string]interface{} "Application not found"
-// @Router /applications/{name}/logs [get]
+//
+//	@Summary		Get application logs
+//	@Description	Get logs from a specific application
+//	@Tags			Applications
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			name	path		string					true	"Application name"
+//	@Success		200		{object}	map[string]interface{}	"Application logs"
+//	@Failure		404		{object}	map[string]interface{}	"Application not found"
+//	@Router			/applications/{name}/logs [get]
 func getApplicationLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "This is a placeholder endpoint for " + c.FullPath()})
 }

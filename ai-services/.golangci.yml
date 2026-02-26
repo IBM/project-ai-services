@@ -19,3 +19,6 @@ linters:
   disable:
     - wsl
     - depguard
+  exclusions:
+    paths:
+      - docs/docs.go

@@ -66,6 +66,31 @@ jobs:
       - name: Install swag CLI
         run: go install github.com/swaggo/swag/cmd/swag@latest
 
+      - name: Check Swagger format
+        working-directory: ai-services
+        run: |
+          echo "Checking Swagger comment formatting..."
+          make swagger-fmt
+          if ! git diff --exit-code; then
+            echo "❌ ERROR: Swagger comments are not properly formatted!"
+            echo ""
+            echo "Some Swagger comments don't follow the required format."
+            echo ""
+            echo "To fix this, run the following commands:"
+            echo "  cd ai-services"
+            echo "  make swagger-fmt"
+            echo "  git add ."
+            echo "  git commit -m 'Format Swagger comments'"
+            echo ""
+            echo "Changed files:"
+            git diff --name-only
+            echo ""
+            echo "Diff:"
+            git diff
+            exit 1
+          fi
+          echo "✅ Swagger comments are properly formatted!"
+
       - name: Generate Swagger docs
         working-directory: ai-services
         run: make swagger ENABLE_CATALOG_API=true

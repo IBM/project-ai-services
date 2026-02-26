@@ -80,4 +80,4 @@ swagger:
 .PHONY: swagger-fmt
 swagger-fmt:
 	@echo "Formatting Swagger comments..."
-	@swag fmt
+	@swag fmt --exclude tests
