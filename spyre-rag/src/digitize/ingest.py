@@ -57,14 +57,22 @@ def ingest(directory_path, job_id=None, doc_id_dict=None):
         return
 
     if combined_chunks:
-        logger.info("Loading processed documents into DB")
-        embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
-        # Insert data into Opensearch
-        vector_store.insert_chunks(
-            combined_chunks,
-            embedder=embedder
-        )
-        logger.info("Processed documents loaded into DB")
+        # Check if any of the files in this batch actually need indexing
+        # Proceed only if at least one file has chunked=False in its stats
+        needs_indexing = any(not stats.get("chunked", False) for stats in converted_pdf_stats.values())
+
+        if needs_indexing:
+            logger.info("Loading processed documents into DB")
+
+            embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
+            # Insert data into Opensearch
+            vector_store.insert_chunks(
+                combined_chunks,
+                embedder=embedder
+            )
+            logger.info("Processed documents loaded into DB")
+        else:
+            logger.info("All documents are already indexed. Skipping DB insertion.")
 
     # Log time taken for the file
     end_time = time.time()  # End the timer for the current file
