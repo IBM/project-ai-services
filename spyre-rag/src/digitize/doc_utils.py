@@ -166,7 +166,7 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
 
     return table_count, process_time
 
-def process_converted_document(converted_json_path, pdf_path, out_path, conversion_stats, gen_model, gen_endpoint, emb_endpoint, max_tokens, doc_id):    
+def process_converted_document(converted_json_path, pdf_path, out_path, conversion_stats, gen_model, gen_endpoint, emb_endpoint, max_tokens, doc_id):
     stem = Path(pdf_path).stem
     processed_text_json_path = (Path(out_path) / f"{doc_id}{text_suffix}")
     processed_table_json_path = (Path(out_path) / f"{doc_id}{table_suffix}")
@@ -333,7 +333,8 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     process_futures[p_future] = str(path)
                 except Exception as e:
                     logger.error(f"Error from chunking for {path}: {str(e)}", exc_info=True)
-                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED)
+                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to convert document: {str(e)}")
+                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"failed to convert document: {str(e)}")
 
             # C. Handle Processing -> Submit Chunking
             logger.info("handle processing future")
@@ -374,7 +375,8 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     chunk_futures[c_future] = (str(path), tab_json)
                 except Exception as e:
                     logger.error(f"Error from chunking for {path}: {str(e)}", exc_info=True)
-                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED)
+                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to convert document: {str(e)}")
+                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"failed to extract text and tables from document: {str(e)}")
 
             # D. Handle Chunking
             for fut in as_completed(chunk_futures):
@@ -399,7 +401,8 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
                 except Exception as e:
                     logger.error(f"Error from chunking for {path}: {str(e)}", exc_info=True)
-                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED)
+                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to convert document: {str(e)}")
+                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, error=f"failed to chunk document: {str(e)}")
         return batch_stats, batch_chunk_paths, batch_table_paths
 
     # Trigger the batches
@@ -422,6 +425,9 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
         all_chunk_json_paths = l_chunks_json + h_chunks_json
         all_table_json_paths = l_tabs_json + h_tabs_json
 
+        chunk_filenames = {p.name for p in all_chunk_json_paths}
+        table_filenames = {p.name for p in all_table_json_paths}
+
 
         combined_chunks = []
         # Final assembly: create_chunk_documents merges text/table outputs
@@ -429,12 +435,17 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
         for path in succeeded_files:
             doc_id = doc_id_dict[Path(path).name]
-            stem = Path(path).stem
-            c_path = Path(out_path) / f"{stem}_chunks.json" # Adjust suffix based on your constants
-            t_path = Path(out_path) / f"{stem}_tables.json"
+            if not doc_id:
+                logger.error(f"No document id found for file: {filename}")
+                continue
+
+            c_json = f"{doc_id}_clean_chunk.json"
+            t_json = f"{doc_id}_tables.json"
+            c_path = Path(out_path) / f"{c_json}"
+            t_path = Path(out_path) / f"{t_json}"
 
             # Verify the file was actually processed in the batch
-            if c_path in all_chunk_json_paths and t_path in all_table_json_paths:
+            if c_json in chunk_filenames and t_json in table_filenames:
                 # Re-invoke assembly if not already done in _run_batch
                 # or use the combined_docs gathered during the batchs
                 doc_chunks = create_chunk_documents(c_path, t_path, path)
@@ -442,11 +453,11 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
                 # Final Status "Seal" for the document
                 status_mgr.update_doc_metadata(doc_id, {
-                    "status": DocStatus.COMPLETED.value,
+                    "status": DocStatus.COMPLETED,
                     "completed_at": status_mgr._get_timestamp(),
                     "chunks": len(doc_chunks)
                 })
-                status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED)
+                status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
             else:
                 logger.warning(f"Path mismatch for {path}: expected outputs not found in batch results.")
 
@@ -454,6 +465,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
     except Exception as e:
         logger.error(f"Error while processing the documents in job {job_id}: {e}", exc_info=True)
+        status_mgr.update_job_progress("", DocStatus.COMPLETED, JobStatus.COMPLETED, error=f"failed to merge chunked text and tables: {str(e)}")
         # In case of failure, mark all remaining docs in the job as failed
         return None, None
 

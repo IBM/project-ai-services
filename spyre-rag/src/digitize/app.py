@@ -9,7 +9,6 @@ import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status
 from common.misc_utils import get_logger, set_log_level
 import common.digitize_utils as dg_util
-from status import StatusManager, update_status
 from common.misc_utils import get_logger
 
 log_level = logging.INFO
@@ -63,8 +62,7 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
         logger.info(f"Ingestion for {job_id} completed successfully")
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
-        status_mgr.update_job_progress(job_id, dg_util.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline. {str(e)}")
-    
+        status_mgr.update_job_progress("", dg_util.DocStatus.FAILED, dg_util.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline: {str(e)}")
     finally:
         if job_staging_path.exists():
             shutil.rmtree(job_staging_path)
