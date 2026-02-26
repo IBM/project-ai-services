@@ -3,23 +3,20 @@ package spyrepolicy
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
-
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 const (
-	spyreGroup    = "spyre.ibm.com"
-	spyreVersion  = "v1alpha1"
-	spyreKind     = "SpyreClusterPolicy"
-	spyreTimeout  = 10 * time.Minute
-	spyreInterval = 10 * time.Second
+	spyreGroup     = "spyre.ibm.com"
+	spyreVersion   = "v1alpha1"
+	spyreKind      = "SpyreClusterPolicy"
+	spyreNamespace = "spyre-operator"
+	spyreName      = "spyreclusterpolicy"
 )
 
 type SpyrePolicyRule struct{}
@@ -36,7 +33,7 @@ func (r *SpyrePolicyRule) Description() string {
 	return "Validates that Spyre Cluster Policy is in ready state"
 }
 
-// Verify checks if the Spyre Cluster Policy is ready.
+// Verify performs a direct fetch.
 func (r *SpyrePolicyRule) Verify() error {
 	ctx := context.Background()
 
@@ -45,8 +42,32 @@ func (r *SpyrePolicyRule) Verify() error {
 		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
 
-	if err := waitForSpyreReady(ctx, client, "spyreclusterpolicy", spyreTimeout); err != nil {
-		return fmt.Errorf("spyre cluster policy is not ready: %w", err)
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   spyreGroup,
+		Version: spyreVersion,
+		Kind:    spyreKind,
+	})
+
+	err = client.Client.Get(ctx, types.NamespacedName{
+		Name:      spyreName,
+		Namespace: spyreNamespace,
+	}, obj)
+	if err != nil {
+		return fmt.Errorf("failed to find %s in namespace %s: %w", spyreName, spyreNamespace, err)
+	}
+
+	state, found, err := unstructured.NestedString(obj.Object, "status", "state")
+	if err != nil {
+		return fmt.Errorf("failed to parse status.state from policy: %w", err)
+	}
+
+	if !found || state != "ready" {
+		if !found {
+			state = "unknown"
+		}
+
+		return fmt.Errorf("spyre cluster policy is not ready (current state: %s)", state)
 	}
 
 	return nil
@@ -61,26 +82,5 @@ func (r *SpyrePolicyRule) Level() constants.ValidationLevel {
 }
 
 func (r *SpyrePolicyRule) Hint() string {
-	return "Run 'oc get spyreclusterpolicy' and ensure status.state is 'ready'."
-}
-
-// waitForSpyreReady polls until the SpyreClusterPolicy is in ready state.
-func waitForSpyreReady(ctx context.Context, client *openshift.OpenshiftClient, name string, timeout time.Duration) error {
-	return wait.PollUntilContextTimeout(ctx, spyreInterval, timeout, true, func(ctx context.Context) (bool, error) {
-		obj := &unstructured.Unstructured{}
-		obj.SetGroupVersionKind(schema.GroupVersionKind{
-			Group:   spyreGroup,
-			Version: spyreVersion,
-			Kind:    spyreKind,
-		})
-
-		err := client.Client.Get(ctx, types.NamespacedName{Name: name}, obj)
-		if err != nil {
-			return false, nil
-		}
-
-		state, found, _ := unstructured.NestedString(obj.Object, "status", "state")
-
-		return found && state == "ready", nil
-	})
+	return fmt.Sprintf("Run 'oc get spyreclusterpolicy -n %s' and ensure status.state is 'ready'.", spyreNamespace)
 }
