@@ -316,11 +316,12 @@ func (kc *OpenshiftClient) DeletePVCs(appLabel string) error {
 
 	for _, pvc := range pvcs.Items {
 		if err := kc.KubeClient.CoreV1().PersistentVolumeClaims(kc.Namespace).Delete(kc.Ctx, pvc.Name, metav1.DeleteOptions{}); err != nil {
-			logger.Warningf("Failed to delete PVC '%s': %v\n", pvc.Name, err)
+			logger.Warningf("Failed to delete PVC '%s': %w\n", pvc.Name, err)
+
 			continue
 		}
 
-		logger.Infof("Deleted PVC '%s'\n", pvc.Name)
+		logger.Infof("Deleted PVC '%s'\n", pvc.Name, 2)
 	}
 
 	return nil

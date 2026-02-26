@@ -63,10 +63,10 @@ func (o *OpenshiftApplication) Delete(ctx context.Context, opts types.DeleteOpti
 	s.Stop("Application '" + app + "' deleted successfully")
 
 	if !opts.SkipCleanup {
-		logger.Infoln("Cleaning up Persistent Volume Claims...")
+		logger.Infoln("Cleaning up Persistent Volume Claims...", 2)
 		oc, ok := o.runtime.(*runtimeOpenshift.OpenshiftClient)
 		if !ok {
-			return fmt.Errorf("runtime is not an Openshift")
+			return fmt.Errorf("unsupported runtime type")
 		}
 
 		if err := oc.DeletePVCs(app); err != nil {
@@ -90,7 +90,7 @@ func (o *OpenshiftApplication) confirmDeletion(opts types.DeleteOptions) error {
 	if !confirmDelete {
 		logger.Infoln("Deletion cancelled")
 
-		return fmt.Errorf("deletion cancelled")
+		return nil
 	}
 
 	return nil
