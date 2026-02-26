@@ -112,9 +112,10 @@ async def digitize_document(
             background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
         else:
             background_tasks.add_task(digitize_documents, job_id, filenames, output_format)
-
-            await asyncio.sleep(10)
     except Exception as e:
+        # release the semaphore in case of exception
+        sem.release()
+        logger.debug(f"Semaphore slot released from the job {job_id}")
         raise HTTPException(status_code=500, detail=str(e))
 
     return {"job_id": job_id}
