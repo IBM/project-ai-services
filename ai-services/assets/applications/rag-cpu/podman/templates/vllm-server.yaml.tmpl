@@ -10,6 +10,7 @@ metadata:
     ai-services.io/model1: BAAI/bge-reranker-v2-m3
     ai-services.io/model2: ibm-granite/granite-embedding-278m-multilingual
     ai-services.io/model3: ibm-granite/granite-3.3-8b-instruct
+    seccomp.security.alpha.kubernetes.io/pod: unconfined
 spec:
   volumes:
     - name: models
@@ -19,9 +20,11 @@ spec:
   containers:
     - name: instruct
       image: "{{ .Values.instruct.image }}"
+      securityContext:
+        procMount: "Unmasked"
       command: ["/bin/sh", "-c"]
       args: [
-          "vllm serve /models/ibm-granite/granite-3.3-8b-instruct --served-model-name ibm-granite/granite-3.3-8b-instruct --max-model-len 26208 --max-num-batched-tokens 26208 --max-num-seqs 32 --port 8000"
+          "TPT=${THREADS_PER_CORE:-2} && BIND=$(lscpu -p=cpu,core | grep -v '#' | sort -t, -k2 -n | awk -F, -v tpt=$TPT '{c=$2; if(seen[c]<tpt){print $1; seen[c]++}}' | paste -sd,) && export VLLM_CPU_OMP_THREADS_BIND=$BIND && export OMP_NUM_THREADS=$(echo $BIND | tr ',' '\\n' | wc -l) && echo \"Auto-detected thread binding: $BIND ($OMP_NUM_THREADS threads, $TPT per core)\" && vllm serve /models/ibm-granite/granite-3.3-8b-instruct --served-model-name ibm-granite/granite-3.3-8b-instruct --max-model-len 26208 --max-num-batched-tokens 26208 --max-num-seqs 32 --dtype bfloat16 --port 8000"
       ]
       livenessProbe:
         httpGet:
@@ -33,15 +36,7 @@ spec:
         failureThreshold: 3
       env:
         - name: VLLM_CPU_KVCACHE_SPACE
-          value: "40"
-        - name: OMP_NUM_THREADS
-          value: "40"
-        - name: GOMP_CPU_AFFINITY
-          value: "0-15,24-31,40-47,56-63"
-        - name: OMP_PROC_BIND
-          value: "close"
-        - name: OMP_PLACES
-          value: "cores"
+          value: "20"
         {{- /* Check if .env.instruct exists and is a non-empty map */}}
         {{- with .env.instruct }}
           {{- /* If it does, '.' (dot) is now scoped to .env.instruct */}}
@@ -52,9 +47,9 @@ spec:
         {{- end }}
       resources:
         requests:
-          memory: "60Gi"
+          memory: "100Gi"
         limits:
-          memory: "60Gi"
+          memory: "100Gi"
       ports:
         - containerPort: 8000
       volumeMounts:
@@ -78,12 +73,6 @@ spec:
       env:
         - name: OMP_NUM_THREADS
           value: "16"
-        - name: GOMP_CPU_AFFINITY
-          value: "16-23,32-39"
-        - name: OMP_PROC_BIND
-          value: "close"
-        - name: OMP_PLACES
-          value: "cores"
       resources:
         requests:
           memory: "4Gi"
@@ -112,12 +101,6 @@ spec:
       env:
         - name: OMP_NUM_THREADS
           value: "8"
-        - name: GOMP_CPU_AFFINITY
-          value: "48-55"
-        - name: OMP_PROC_BIND
-          value: "close"
-        - name: OMP_PLACES
-          value: "cores"
         {{- /* Check if .env.reranker exists and is a non-empty map */}}
         {{- with .env.reranker }}
           {{- /* If it does, '.' (dot) is now scoped to .env.reranker */}}
