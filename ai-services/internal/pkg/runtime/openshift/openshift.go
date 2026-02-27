@@ -304,6 +304,28 @@ func (kc *OpenshiftClient) ListRoutes() ([]types.Route, error) {
 	return toOpenShiftRouteList(routeList.Items), nil
 }
 
+// DeletePVCs deletes all PVCs matching the given application label.
+func (kc *OpenshiftClient) DeletePVCs(appLabel string) error {
+	pvcs, err := kc.KubeClient.CoreV1().PersistentVolumeClaims(kc.Namespace).List(kc.Ctx, metav1.ListOptions{
+		LabelSelector: appLabel,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list PVCs for cleanup: %w", err)
+	}
+
+	for _, pvc := range pvcs.Items {
+		if err := kc.KubeClient.CoreV1().PersistentVolumeClaims(kc.Namespace).Delete(kc.Ctx, pvc.Name, metav1.DeleteOptions{}); err != nil {
+			logger.Warningf("Failed to delete PVC '%s': %v\n", pvc.Name, err)
+
+			continue
+		}
+
+		logger.Infof("Deleted PVC '%s'\n", pvc.Name, logger.VerbosityLevelDebug)
+	}
+
+	return nil
+}
+
 // Type returns the runtime type.
 func (kc *OpenshiftClient) Type() types.RuntimeType {
 	return types.RuntimeTypeOpenShift

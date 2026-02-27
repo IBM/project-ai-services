@@ -1,5 +1,5 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: "opensearch"
   labels:
@@ -8,6 +8,7 @@ metadata:
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     ai-services.io/component: vectordb
 spec:
+  serviceName: "opensearch"
   replicas: 1
   selector:
     matchLabels:
@@ -49,7 +50,7 @@ spec:
             runAsUser: 1000
           volumeMounts:
             - mountPath: /usr/share/opensearch/data
-              name: opensearch-data
+              name: data
           livenessProbe:
             exec:
               command:
@@ -70,7 +71,17 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 5
-      volumes:
-        - name: opensearch-data
-          persistentVolumeClaim:
-            claimName: "opensearch"
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          ai-services.io/application: {{ .Release.Name }}
+          ai-services.io/template: {{ .Chart.Name }}
+          ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+          ai-services.io/component: vectordb
+      spec:
+        accessModes:
+          - ReadWriteMany
+        resources:
+          requests:
+            storage: "{{ .Values.opensearch.storage }}"

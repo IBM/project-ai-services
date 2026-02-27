@@ -35,16 +35,8 @@ func (o *OpenshiftApplication) Delete(ctx context.Context, opts types.DeleteOpti
 		return nil
 	}
 
-	if !opts.AutoYes {
-		confirmDelete, err := utils.ConfirmAction("Are you sure you want to delete the application '" + app + "'?")
-		if err != nil {
-			return fmt.Errorf("failed to take user input: %w", err)
-		}
-		if !confirmDelete {
-			logger.Infoln("Deletion cancelled")
-
-			return nil
-		}
+	if err := o.confirmDeletion(opts); err != nil {
+		return err
 	}
 
 	logger.Infoln("Proceeding with deletion...")
@@ -68,6 +60,33 @@ func (o *OpenshiftApplication) Delete(ctx context.Context, opts types.DeleteOpti
 	}
 
 	s.Stop("Application '" + app + "' deleted successfully")
+
+	if !opts.SkipCleanup {
+		logger.Infoln("Cleaning up Persistent Volume Claims...", logger.VerbosityLevelDebug)
+
+		if err := o.runtime.DeletePVCs(fmt.Sprintf("ai-services.io/application=%s", app)); err != nil {
+			return fmt.Errorf("failed to cleanup PVCs: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (o *OpenshiftApplication) confirmDeletion(opts types.DeleteOptions) error {
+	if opts.AutoYes {
+		return nil
+	}
+
+	confirmDelete, err := utils.ConfirmAction("Are you sure you want to delete the application '" + opts.Name + "'?")
+	if err != nil {
+		return fmt.Errorf("failed to take user input: %w", err)
+	}
+
+	if !confirmDelete {
+		logger.Infoln("Deletion cancelled")
+
+		return nil
+	}
 
 	return nil
 }

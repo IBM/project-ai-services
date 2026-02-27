@@ -1,7 +1,24 @@
+@use "@carbon/react/scss/type";
+
 .pageContent {
-  padding-top: 2rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
 }
 
 .heading {
+  @include type.type-style("productive-heading-05");
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   text-align: center;
+  height: 120px;
+}
+
+.loginLink {
+  @include type.type-style("body-compact-01");
+  color: var(cds--link-primary);
+  text-decoration: none;
 }

@@ -12,8 +12,6 @@ instruct:
   # @hidden
   image: registry.redhat.io/rhaiis/vllm-spyre-rhel9:3.2.5
   # @hidden
-  imagePullSecret: "redhat-registry-secret"
-  # @hidden
   storageUri: hf://ibm-granite/granite-3.3-8b-instruct
 
 embedding:
@@ -35,9 +33,11 @@ ingest:
 
 opensearch:
   # @hidden
-  image: icr.io/ai-services-private/opensearch:3.3.0-ppc64le
+  image: icr.io/ppc64le-oss/opensearch-ppc64le:3.3.0
   # @description Sets the memory limit for the Opensearch service(Default: 4Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
   memoryLimit: 4Gi
+  # @description Sets the storage limit for the Opensearch service(Default: 10Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
+  storage: 10Gi
   auth:
     username: "admin"
     password: "AiServices@1234"
