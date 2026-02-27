@@ -46,7 +46,18 @@ def swagger_root():
 
 ALLOWED_FILE_EXTENSIONS = {".txt", ".pdf"}
 
-
+@app.exception_handler(SummarizeException)
+async def summarize_exception_handler(request: Request, exc: SummarizeException):
+    return JSONResponse(
+        status_code=exc.status,
+        content={
+            "error": {
+                "code": exc.code,
+                "message": exc.message,
+                "status": exc.status,
+            }
+        },
+    )
 
 def initialize_models():
     global llm_model_dict
@@ -60,18 +71,12 @@ async def handle_summarize(
     """Core summarization logic shared by both JSON and form-data paths."""
     input_word_count = word_count(content_text)
     if summary_length and summary_length > input_word_count:
-        return build_error_response(
-            "INPUT_TEXT_SMALLER_THAN_SUMMARY_LENGTH",
-            "Input text is smaller than summary length",
-            400,
-        )
+        raise SummarizeException(400, "INPUT_TEXT_SMALLER_THAN_SUMMARY_LENGTH",
+            "Input text is smaller than summary length")
 
     if input_word_count > MAX_INPUT_WORDS:
-        return build_error_response(
-            "CONTEXT_LIMIT_EXCEEDED",
-            "Input size exceeds maximum token limit",
-            413,
-        )
+        raise SummarizeException(4013, "CONTEXT_LIMIT_EXCEEDED",
+                                 "Input size exceeds maximum token limit")
 
     target_words, max_tokens = compute_target_and_max_tokens(input_word_count, summary_length)
 
@@ -95,11 +100,8 @@ async def handle_summarize(
         concurrency_limiter.release()
 
     if isinstance(result, dict) and "error" in result:
-        return build_error_response(
-            "LLM_ERROR",
-            "Failed to generate summary. Please try again later",
-            500,
-        )
+        raise SummarizeException(500, "LLM_ERROR",
+                                 "Failed to generate summary. Please try again later")
 
     summary = trim_to_last_sentence(result) if isinstance(result, str) else ""
 
@@ -155,11 +157,8 @@ async def summarize(request: Request):
     """Accept plain text via JSON or text/file via multipart/form-data."""
     try:
         if concurrency_limiter.locked():
-            return build_error_response(
-                "SERVER_BUSY",
-                "Server is busy. Please try again later.",
-                429,
-            )
+            raise SummarizeException(429, "SERVER_BUSY",
+                                     "Server is busy. Please try again later.")
         content_type = request.headers.get("content-type", "")
 
         # ----- JSON path -----
@@ -167,22 +166,14 @@ async def summarize(request: Request):
             try:
                 body = await request.json()
             except Exception:
-                return build_error_response(
-                    "INVALID_JSON",
-                    "Request body is not valid JSON",
-                    400,
-                )
+                raise SummarizeException(400, "INVALID_JSON",
+                                         "Request body is not valid JSON")
 
             text = body.get("text", "").strip()
             if not text:
-                return build_error_response(
-                    "MISSING_INPUT",
-                    "Either 'text' or 'file' parameter is required",
-                    400,
-                )
+                raise SummarizeException(400, "MISSING_INPUT",
+                                         "Either 'text' or 'file' parameter is required")
             summary_length = validate_summary_length(body.get("length"))
-            if isinstance(summary_length, JSONResponse):
-                return summary_length
 
             return await handle_summarize(text, "text", summary_length)
 
@@ -197,11 +188,8 @@ async def summarize(request: Request):
                 filename = file.filename or ""
                 ext = os.path.splitext(filename)[1].lower()
                 if ext not in ALLOWED_FILE_EXTENSIONS:
-                    return build_error_response(
-                        "UNSUPPORTED_FILE_TYPE",
-                        "Only .txt and .pdf files are allowed.",
-                        400,
-                    )
+                    raise SummarizeException(400, "UNSUPPORTED_FILE_TYPE",
+                                             "Only .txt and .pdf files are allowed.")
                 raw = await file.read()
                 if ext == ".pdf":
                     try:
@@ -210,43 +198,27 @@ async def summarize(request: Request):
                         logger.debug(f"PDF extraction took {(time.time() - start) * 1000:.0f}ms")
                     except Exception as e:
                         logger.error(f"PDF extraction failed: {e}")
-                        return build_error_response(
-                            "PDF_EXTRACTION_ERROR",
-                            "Failed to extract text from PDF file.",
-                            400,
-                        )
+                        raise SummarizeException(400, "PDF_EXTRACTION_ERROR",
+                                                 "Failed to extract text from PDF file.")
                 else:
                     content_text = raw.decode("utf-8", errors="replace")
             else:
-                return build_error_response(
-                    "MISSING_INPUT",
-                    "Either 'text' or 'file' parameter is required",
-                    400,
-                )
+                raise SummarizeException(400, "MISSING_INPUT",
+                                         "Either 'text' or 'file' parameter is required")
 
             if not content_text or not content_text.strip():
-                return build_error_response(
-                    "EMPTY_INPUT",
-                    "The provided input contains no extractable text.",
-                    400,
-                )
-
+                raise SummarizeException(400, "EMPTY_INPUT",
+                                         "he provided input contains no extractable text.")
             return await handle_summarize(content_text.strip(), "file", summary_length)
 
         else:
-            return build_error_response(
-                "UNSUPPORTED_CONTENT_TYPE",
-                "Content-Type must be application/json or multipart/form-data",
-                415,
-            )
+            raise SummarizeException(415, "UNSUPPORTED_CONTENT_TYPE",
+                                     "Content-Type must be application/json or multipart/form-data")
 
     except Exception as e:
         logger.error(f"Got exception while generating summary: {e}")
-        return build_error_response(
-            "INTERNAL_SERVER_ERROR",
-            "Failed to generate summary. Please try again later",
-            500,
-        )
+        raise SummarizeException(500, "INTERNAL_SERVER_ERROR",
+                                 "Failed to generate summary. Please try again later")
 
 @app.get("/health")
 async def health():

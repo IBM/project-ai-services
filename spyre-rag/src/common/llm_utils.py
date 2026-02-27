@@ -219,10 +219,10 @@ def query_vllm_summarize(
         if e.response is not None:
             error_details += f", Response Text: {e.response.text}"
         logger.error(f"Error calling vLLM API: {error_details}")
-        return {"error": error_details}
+        return error_details, 0, 0
     except Exception as e:
         logger.error(f"Error calling vLLM API: {e}")
-        return {"error": str(e)}
+        return str(e), 0, 0
 
     result = response.json()
     logger.debug(f"vLLM response: {result}")

@@ -88,17 +88,12 @@ def build_success_response(
         },
     }
 
-def build_error_response(code: str, message: str, status: int):
-    return JSONResponse(
-        status_code=status,
-        content={
-            "error": {
-                "code": code,
-                "message": message,
-                "status": status,
-            }
-        },
-    )
+class SummarizeException(Exception):
+    def __init__(self, code: int, status: str, message: str):
+        self.code = code
+        self.message = message
+        self.status = status
+
 
 def build_messages(text, target_words, summary_length) -> list:
     if summary_length:
@@ -244,15 +239,9 @@ def validate_summary_length(summary_length):
         try:
             summary_length = int(summary_length)
         except (TypeError, ValueError):
-            return build_error_response(
-                "INVALID_PARAMETER",
-                "length must be an integer",
-                400,
-            )
+            raise SummarizeException(400, "INVALID_PARAMETER",
+                                     "Length must be an integer")
         if summary_length <=0 or summary_length > MAX_INPUT_WORDS:
-            return build_error_response(
-                "INVALID_PARAMETER",
-                "length is out of bounds",
-                400,
-            )
+            raise SummarizeException(400, "INVALID_PARAMETER",
+                                     "Length is out of bounds")
     return summary_length
