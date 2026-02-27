@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	nodelabels "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/nodelabels"
 	kubeconfig "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/kubeconfig"
 	operators "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/operators"
 	storageclass "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/storageclass"
@@ -31,6 +32,7 @@ func init() {
 	// OpenshiftChecks
 	OpenshiftRegistry.Register(kubeconfig.NewKubeconfigRule())
 	OpenshiftRegistry.Register(operators.NewOperatorRule())
+	OpenshiftRegistry.Register(nodelabels.NewNodeLabelsRule())
 	OpenshiftRegistry.Register(storageclass.NewStorageClassRule())
 }
 
