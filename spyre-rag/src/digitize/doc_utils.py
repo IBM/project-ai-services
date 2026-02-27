@@ -240,13 +240,12 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
         # 2. Initialize the status dictionary with all required keys
         meta = {
-        "convert": True,
-        "text_processed": False,
-        "table_processed": False,
-        "chunked": False
+            "convert": True,
+            "text_processed": False,
+            "table_processed": False,
+            "chunked": False
         }
 
-        # Use doc_id for the filenames instead of stem
         checksum_path = Path(out_path) / f"{doc_id}.checksum"
         doc_json = Path(out_path) / f"{doc_id}.json"
         text_json = Path(out_path) / f"{doc_id}{text_suffix}"
@@ -320,15 +319,14 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     converted_paths.append(path)
                     batch_stats[str(path)] = {"timings": {"digitizing": round(conv_time, 2)}}
 
-                    logger.info(f"updating doc metadata for {doc_id} after conversion")
+                    logger.debug(f"Convertion Done: updating doc metadata for document: {doc_id}")
                     status_mgr.update_doc_metadata(doc_id, {
                         "status": DocStatus.IN_PROGRESS,
                         "timing_in_secs": {"digitizing": round(conv_time, 2)}
                     })
-                    logger.info("updating job status after conversion")
+                    logger.debug(f"Convertion Done: updating job status for document: {doc_id}")
                     status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
 
-                    logger.info("submitting process_converted_document executor")
                     p_future = processor_executor.submit(
                         process_converted_document, converted_json, path, out_path,
                         batch_paths[str(path)], llm_model, llm_endpoint, emb_endpoint, max_tokens, doc_id=doc_id
@@ -340,7 +338,6 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"failed to convert document: {str(e)}")
 
             # C. Handle Processing -> Submit Chunking
-            logger.info("handle processing future")
             for fut in as_completed(process_futures):
                 path = process_futures[fut]
                 doc_id = doc_id_dict[Path(path).name]
@@ -356,7 +353,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         "timings": {**batch_stats[str(path)]["timings"], **timings}
                     })
                     batch_table_paths.append(tab_json)
-                    logger.info("updating doc metadata after processing")
+                    logger.debug(f"Processing Done: updating doc metadata for document: {doc_id}")
                     total_processing_time = timings["process_text"] + timings["process_tables"]
 
                     status_mgr.update_doc_metadata(doc_id, {
@@ -364,7 +361,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         "tables": tabs,
                         "timing_in_secs": {"processing": round(total_processing_time, 2)}
                     })
-                    logger.info("updating job status after processing")
+                    logger.debug(f"Processing Done: updating job status for document: {doc_id}")
                     status_mgr.update_job_progress(
                         doc_id=doc_id,
                         doc_status=DocStatus.IN_PROGRESS,  # Transitioning within processing
@@ -395,12 +392,14 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         final_chunks = create_chunk_documents(chunk_json, tab_json, path)
                         batch_stats[str(path)]["chunk_count"] = len(final_chunks)
 
+                        logger.debug(f"Chunking Done: updating doc metadata for document: {doc_id}")
                         status_mgr.update_doc_metadata(doc_id, {
                             "status": DocStatus.COMPLETED,
                             "completed_at": status_mgr._get_timestamp(),
                             "chunks": len(final_chunks),
                             "timing_in_secs": {"chunking": round(chunk_time, 2)}
                         })
+                        logger.debug(f"Chunking Done: updating job status for document: {doc_id}")
                         status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
                 except Exception as e:
                     logger.error(f"Error from chunking for {path}: {str(e)}", exc_info=True)
@@ -454,12 +453,14 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                 doc_chunks = create_chunk_documents(c_path, t_path, path)
                 combined_chunks.extend(doc_chunks)
 
+                logger.debug(f"Assembling chunks: updating doc metadata for document: {doc_id}")
                 # Final Status "Seal" for the document
                 status_mgr.update_doc_metadata(doc_id, {
                     "status": DocStatus.COMPLETED,
                     "completed_at": status_mgr._get_timestamp(),
                     "chunks": len(doc_chunks)
                 })
+                logger.debug(f"Assembling chunks: updating job status for document: {doc_id}")
                 status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
             else:
                 logger.warning(f"Path mismatch for {path}: expected outputs not found in batch results.")
