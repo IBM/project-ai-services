@@ -5,6 +5,61 @@
 .iconWidth {
   width: 60px;
 }
+
 .menuBtn {
   border: none !important;
+}
+
+.usercircle {
+  width: 45px;
+  height: 45px;
+  border-radius: 50%;
+  background-color: #525252;
+  /* grey circle like screenshot */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  /* makes icon white */
+  transition: background-color 0.2s ease;
+}
+
+.usercircle:hover {
+  background-color: #6f6f6f;
+}
+
+.userprofile {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0.5rem;
+  padding: 0.7rem;
+  font-size: 1.1rem;
+}
+
+.logout {
+  border-top: 1px solid #393939;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  background-color: #393939;
+  padding: 1rem;
+}
+
+:global(.cds--header-panel--expanded) {
+  max-height: none !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+
+:global(.cds--header-panel) {
+  position: relatives !important;
+  bottom: auto !important;
+  right: 0 !important;
+  left: auto !important;
+  transform: none !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
 }
