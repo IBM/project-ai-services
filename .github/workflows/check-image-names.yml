@@ -1,0 +1,25 @@
+name: Check Image Names
+
+on:
+  pull_request:
+    paths:
+      - 'spyre-rag/src/Makefile'
+      - 'spyre-rag/ui/Makefile'
+      - 'ai-services/assets/**/values.yaml'
+      - .github/workflows/check-image-names.yml
+      - .github/scripts/check_image_names.py
+    branches:
+      - main
+
+jobs:
+  check:
+    name: Verify image names and versions are consistent
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Run image name consistency check
+        run: python3 .github/scripts/check_image_names.py
+
+# Made with Bob
