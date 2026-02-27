@@ -1,0 +1,13 @@
+html,
+body {
+  margin: 0;
+}
+
+.appLayout {
+  min-height: 100vh;
+  background-color: var(--cds-background);
+}
+
+.appContent {
+  margin-top: 3rem;
+}

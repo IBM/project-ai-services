@@ -50,7 +50,7 @@ spec:
             runAsUser: 1000
           volumeMounts:
             - mountPath: /usr/share/opensearch/data
-              name: opensearch-data
+              name: data
           livenessProbe:
             exec:
               command:
