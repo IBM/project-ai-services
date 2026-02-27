@@ -7,7 +7,7 @@ import (
 
 // Stop stops a running application.
 func (o *OpenshiftApplication) Stop(opts types.StopOptions) error {
-	logger.Warningln("not implemented")
+	logger.Warningln("Not implemented")
 
 	return nil
 }
