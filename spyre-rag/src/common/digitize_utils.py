@@ -101,6 +101,8 @@ def initialize_job_state(job_id: str, operation: str, documents_info: list):
         with open(doc_meta_path, "w") as f:
             json.dump(doc_initial_data, f, indent=4)
 
+        logger.debug(f"Created document metadata file: {doc_meta_path}")
+
         # Add doc's summary to list for the Job file
         job_documents_summary.append({
             "id": doc_id,
@@ -123,6 +125,8 @@ def initialize_job_state(job_id: str, operation: str, documents_info: list):
 
     with open(job_status_path, "w") as f:
         json.dump(job_data, f, indent=4)
+
+    logger.debug(f"Created job status file: {job_status_path}")
 
     return doc_id_dict
 
