@@ -21,6 +21,7 @@ import common.db_utils as db
 from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_non_stream, query_vllm_models
 from common.misc_utils import get_model_endpoints, set_log_level
 from common.settings import get_settings
+from common.perf_utils import perf_registry
 from retrieve.backend_utils import search_only
 
 
@@ -72,7 +73,7 @@ def get_reference_docs():
         reranker_model = reranker_model_dict['reranker_model']
         reranker_endpoint = reranker_model_dict['reranker_endpoint']
 
-        docs = search_only(
+        docs, perf_stat_dict = search_only(
             query,
             emb_model, emb_endpoint, emb_max_tokens,
             reranker_model,
@@ -81,12 +82,17 @@ def get_reference_docs():
             settings.num_chunks_post_reranker,
             vectorstore=vectorstore
         )
+        # Store metrics in registry for reference endpoint
+        perf_registry.add_metric(perf_stat_dict)
+        
     except db.get_vector_store_not_ready() as e:
         return jsonify({"error": str(e)}), 503   # Service unavailable
     except Exception as e:
         return jsonify({"error": repr(e)})
+    
+    response_data = {"documents": docs, "perf_metrics": perf_stat_dict}
     return Response(
-        json.dumps({"documents": docs}, default=str),
+        json.dumps(response_data, default=str),
         mimetype="application/json"
     )
 
@@ -101,11 +107,16 @@ def list_models():
         return jsonify({"error": repr(e)})
 
 
-def locked_stream(stream_g):
+@app.get("/v1/perf_metrics")
+def get_perf_metrics():
+    return jsonify(perf_registry.get_metrics())
+
+def locked_stream(stream_g, perf_stat_dict):
     try:
         for chunk in stream_g:
             yield chunk
     finally:
+        perf_registry.add_metric(perf_stat_dict)
         concurrency_limiter.release()
 
 
@@ -128,7 +139,8 @@ def chat_completion():
         llm_endpoint = llm_model_dict['llm_endpoint']
         reranker_model = reranker_model_dict['reranker_model']
         reranker_endpoint = reranker_model_dict['reranker_endpoint']
-        docs = search_only(
+        
+        docs, perf_stat_dict = search_only(
             query,
             emb_model, emb_endpoint, emb_max_tokens,
             reranker_model,
@@ -150,11 +162,18 @@ def chat_completion():
 
         try:
             if stream:
-                vllm_stream = query_vllm_stream(query, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature )
-                resp_text = stream_with_context(locked_stream(vllm_stream))           
+                vllm_stream = query_vllm_stream(query, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, perf_stat_dict )
+                resp_text = stream_with_context(locked_stream(vllm_stream, perf_stat_dict))           
             else:
-                vllm_non_stream = query_vllm_non_stream(query, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature )
+                vllm_non_stream = query_vllm_non_stream(query, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, perf_stat_dict )
+                
+                # Add performance metrics to the response dictionary
+                if isinstance(vllm_non_stream, dict):
+                    vllm_non_stream["perf_metrics"] = perf_stat_dict
+                
                 resp_text = json.dumps(vllm_non_stream, indent=None, separators=(',', ':'))
+                # Store metrics in registry for non-stream
+                perf_registry.add_metric(perf_stat_dict)
                 # release semaphore lock because its non-stream request
                 concurrency_limiter.release()
         except Exception as e:

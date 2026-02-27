@@ -1,5 +1,7 @@
 import logging
 import requests
+import time
+import threading
 from requests.adapters import HTTPAdapter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
@@ -147,11 +149,21 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     }
     return headers, payload
 
-def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature):
+def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict):
     headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False )
     try:
         # Use requests for synchronous HTTP requests
+        start_time = time.time()
         response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=False)
+        request_time = time.time() - start_time
+        perf_stat_dict["inference_time"] = request_time
+        
+        response_json = response.json()
+        if 'choices' in response_json and len(response_json['choices']) > 0:
+            content = response_json['choices'][0]['message']['content']
+            count = len(tokenize_with_llm(content, llm_endpoint))
+            perf_stat_dict["output_token_cnt"] = count
+        
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         error_details = str(e)
@@ -164,17 +176,36 @@ def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_wor
         return {"error": str(e)}
     return response.json()
 
-def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature):
+def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict):
     headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, True )
     try:
         # Use requests for synchronous HTTP requests
         logger.debug("STREAMING RESPONSE")
+        token_latencies = []
+        count = 0
+        start_time = time.time()
+        last_token_time = start_time
+        
         with SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=True) as r:
             for raw_line in r.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
 
+                now = time.time()
+                token_latencies.append(now - last_token_time)
+                last_token_time = now
+                count += 1
+                
                 yield f"{raw_line}\n\n"
+        
+        request_time = time.time() - start_time
+        perf_stat_dict["output_token_cnt"] = count
+        perf_stat_dict["token_latencies"] = token_latencies
+        perf_stat_dict["inference_time"] = request_time
+        
+        import json
+        yield f"data: {json.dumps({'perf_metrics': perf_stat_dict})}\n\n"
+        
     except requests.exceptions.RequestException as e:
         error_details = str(e)
         if e.response is not None:
