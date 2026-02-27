@@ -2,6 +2,7 @@ REGISTRY?=icr.io/ai-services-private
 IMAGE=ai-services
 TAG?=0.0.1
 CONTAINER_BUILDER?=podman
+CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
 GO := go
 # Feature flags - set ENABLE_CATALOG_API=true to include catalog API server
@@ -61,6 +62,10 @@ image:
     --build-arg GITCOMMIT=$(GITCOMMIT) --build-arg BUILDDATE=$(BUILDDATE) \
     --build-arg BUILDTAGS="$(BUILDTAGS)" -t $(REGISTRY)/$(IMAGE):$(TAG) .
 .PHONY: image
+
+push:
+	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(TAG)
+.PHONY: push
 
 test:
 	$(TEST_CMD)
