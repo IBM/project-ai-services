@@ -12,11 +12,10 @@ import (
 )
 
 const (
-	spyreGroup     = "spyre.ibm.com"
-	spyreVersion   = "v1alpha1"
-	spyreKind      = "SpyreClusterPolicy"
-	spyreNamespace = "spyre-operator"
-	spyreName      = "spyreclusterpolicy"
+	spyreGroup   = "spyre.ibm.com"
+	spyreVersion = "v1alpha1"
+	spyreKind    = "SpyreClusterPolicy"
+	spyreName    = "spyreclusterpolicy"
 )
 
 type SpyrePolicyRule struct{}
@@ -51,10 +50,10 @@ func (r *SpyrePolicyRule) Verify() error {
 
 	err = client.Client.Get(ctx, types.NamespacedName{
 		Name:      spyreName,
-		Namespace: spyreNamespace,
+		Namespace: constants.SpyreOperatorNamespace,
 	}, obj)
 	if err != nil {
-		return fmt.Errorf("failed to find %s in namespace %s: %w", spyreName, spyreNamespace, err)
+		return fmt.Errorf("failed to find %s in namespace %s: %w", spyreName, constants.SpyreOperatorNamespace, err)
 	}
 
 	state, found, err := unstructured.NestedString(obj.Object, "status", "state")
@@ -82,5 +81,5 @@ func (r *SpyrePolicyRule) Level() constants.ValidationLevel {
 }
 
 func (r *SpyrePolicyRule) Hint() string {
-	return fmt.Sprintf("Run 'oc get spyreclusterpolicy -n %s' and ensure status.state is 'ready'.", spyreNamespace)
+	return fmt.Sprintf("Run 'oc get spyreclusterpolicy -n %s' and ensure status.state is 'ready'.", constants.SpyreOperatorNamespace)
 }
