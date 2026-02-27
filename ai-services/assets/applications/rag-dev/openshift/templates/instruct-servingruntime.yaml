@@ -13,8 +13,6 @@ spec:
     opendatahub.io/kserve-runtime: vllm
     prometheus.io/path: /metrics
     prometheus.io/port: "8080"
-  imagePullSecrets:
-    - name: {{ .Values.instruct.imagePullSecret }}
   containers:
   - args:
     - --model=/mnt/models
