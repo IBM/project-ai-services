@@ -7,6 +7,7 @@ import (
 	kubeconfig "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/kubeconfig"
 	operators "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/operators"
 	spyrepolicy "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/spyrepolicy"
+	storageclass "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/storageclass"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/numa"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/platform"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/power"
@@ -32,6 +33,7 @@ func init() {
 	OpenshiftRegistry.Register(kubeconfig.NewKubeconfigRule())
 	OpenshiftRegistry.Register(operators.NewOperatorRule())
 	OpenshiftRegistry.Register(spyrepolicy.NewSpyrePolicyRule())
+	OpenshiftRegistry.Register(storageclass.NewStorageClassRule())
 }
 
 // Rule defines the interface for validation rules.
