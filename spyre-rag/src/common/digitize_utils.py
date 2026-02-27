@@ -87,8 +87,8 @@ def initialize_job_state(job_id: str, operation: str, documents_info: list):
             "id": doc_id,
             "name": doc,
             "type": operation,
-            "status": "accepted",
-            "output_format": "json",
+            "status": DocStatus.ACCEPTED,
+            "output_format": OutputFormat.JSON,
             "completed_at": None,
             "error": "",
             "pages": 0,
@@ -107,7 +107,7 @@ def initialize_job_state(job_id: str, operation: str, documents_info: list):
         job_documents_summary.append({
             "id": doc_id,
             "name": doc,
-            "status": "accepted"
+            "status": DocStatus.ACCEPTED
         })
 
     # Create job status file (<job_id>_status.json)
@@ -116,7 +116,7 @@ def initialize_job_state(job_id: str, operation: str, documents_info: list):
     job_data = {
         "job_id": job_id,
         "operation": operation,
-        "status": "accepted",
+        "status": JobStatus.ACCEPTED,
         "submitted_at": submitted_at,
         "last_updated_at": submitted_at,
         "documents": job_documents_summary,
