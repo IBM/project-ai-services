@@ -10,10 +10,6 @@ type Bootstrap interface {
 	// This includes installing dependencies, configuring runtime, and setting up hardware.
 	Configure() error
 
-	// Validate runs all validation checks to ensure the environment is properly configured.
-	// Returns an error if any validation fails.
-	Validate(skip map[string]bool) error
-
 	// Type returns the runtime type this bootstrap implementation supports.
 	Type() types.RuntimeType
 }
