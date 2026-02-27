@@ -20,6 +20,8 @@ var stopCmd = &cobra.Command{
 
 Arguments
   [name]: Application name (required)
+
+Note: Supported for podman runtime only.
 `,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {

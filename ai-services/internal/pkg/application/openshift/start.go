@@ -7,7 +7,7 @@ import (
 
 // Start starts a stopped application.
 func (o *OpenshiftApplication) Start(opts types.StartOptions) error {
-	logger.Warningln("not implemented")
+	logger.Warningln("Not supported for openshift runtime")
 
 	return nil
 }
