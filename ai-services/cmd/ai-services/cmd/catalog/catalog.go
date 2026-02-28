@@ -20,6 +20,11 @@ deploying services, and managing service metadata`,
 
 	catalogCMD.AddCommand(NewAPIServerCmd())
 	catalogCMD.AddCommand(NewHashpwCmd())
+	catalogCMD.AddCommand(NewLoginCmd())
+	catalogCMD.AddCommand(NewLogoutCmd())
+	catalogCMD.AddCommand(NewWhoamiCmd())
 
 	return catalogCMD
 }
+
+// Made with Bob
