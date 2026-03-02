@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 // NewLoginCmd returns the cobra command for logging in to the catalog API server.
@@ -44,23 +45,25 @@ Examples:
 
 		# Non-interactive login via stdin pipe (password not recorded in shell history)
 		echo "$MY_PASSWORD" | ai-services catalog login --server http://localhost:8080 --username admin --password-stdin`,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			return validateServerURL(serverURL)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := validateServerURL(serverURL); err != nil {
-				return err
-			}
+			// Once precheck passes, silence usage for any *later* internal errors.
+			cmd.SilenceUsage = true
 
 			password, err := promptPassword(passwordStdin)
 			if err != nil {
 				return err
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Logging in to %s as %q...\n", serverURL, username)
+			logger.Infof("Logging in to %s as %q...\n", serverURL, username)
 
 			if _, err := client.NewWithLogin(serverURL, username, password); err != nil {
 				return fmt.Errorf("login failed: %w", err)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Login successful.")
+			logger.Infoln("Login successful.")
 
 			return nil
 		},

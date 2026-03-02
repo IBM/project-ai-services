@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 // NewWhoamiCmd returns the cobra command that prints the currently authenticated user.
@@ -22,6 +23,9 @@ logged in to the catalog API server.
 Example:
 		ai-services catalog whoami`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Once precheck passes, silence usage for any *later* internal errors.
+			cmd.SilenceUsage = true
+
 			c, err := client.New()
 			if err != nil {
 				return err
@@ -32,10 +36,10 @@ Example:
 				return fmt.Errorf("get user info: %w", err)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Server  : %s\n", c.ServerURL())
-			fmt.Fprintf(cmd.OutOrStdout(), "User ID : %s\n", info.ID)
-			fmt.Fprintf(cmd.OutOrStdout(), "Username: %s\n", info.Username)
-			fmt.Fprintf(cmd.OutOrStdout(), "Name    : %s\n", info.Name)
+			logger.Infof("Server  : %s\n", c.ServerURL())
+			logger.Infof("User ID : %s\n", info.ID)
+			logger.Infof("Username: %s\n", info.Username)
+			logger.Infof("Name    : %s\n", info.Name)
 
 			return nil
 		},

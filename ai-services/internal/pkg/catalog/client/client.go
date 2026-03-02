@@ -1,27 +1,23 @@
 //go:build catalog_api
 // +build catalog_api
 
-// Package client provides an HTTP client for the AI Services catalog API server.
+// Package client provides an authenticated HTTP client for the AI Services catalog API server.
 // It handles authentication, automatic token refresh, and all API calls.
 package client
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/httpclient"
 )
 
 const (
-	defaultTimeout = 30 * time.Second
-
 	// tokenRefreshSkew is the window before the access token's expiry within
 	// which a proactive refresh is triggered. If the token expires in less than
 	// this duration it is considered "about to expire".
@@ -31,7 +27,7 @@ const (
 // Client is an authenticated HTTP client for the catalog API server.
 type Client struct {
 	serverURL  string
-	httpClient *http.Client
+	httpClient *httpclient.HTTPClient
 	creds      config.Credentials
 }
 
@@ -60,7 +56,7 @@ func New() (*Client, error) {
 
 	c := &Client{
 		serverURL:  creds.ServerURL,
-		httpClient: &http.Client{Timeout: defaultTimeout},
+		httpClient: httpclient.New(creds.ServerURL),
 		creds:      creds,
 	}
 
@@ -101,7 +97,7 @@ func (c *Client) accessTokenNeedsRefresh() bool {
 func NewWithLogin(serverURL, username, password string) (*Client, error) {
 	c := &Client{
 		serverURL:  serverURL,
-		httpClient: &http.Client{Timeout: defaultTimeout},
+		httpClient: httpclient.New(serverURL),
 	}
 
 	resp, err := c.Login(username, password)
@@ -129,13 +125,14 @@ func NewWithLogin(serverURL, username, password string) (*Client, error) {
 
 // Login calls POST /api/v1/auth/login and returns the token pair.
 func (c *Client) Login(username, password string) (LoginResponse, error) {
-	body := map[string]string{
-		"username": username,
-		"password": password,
-	}
-
 	var resp LoginResponse
-	if err := c.postJSON("/api/v1/auth/login", body, &resp); err != nil {
+	err := c.httpClient.Do(httpclient.Request{
+		Method:   http.MethodPost,
+		Endpoint: "/api/v1/auth/login",
+		Payload:  map[string]string{"username": username, "password": password},
+		Out:      &resp,
+	})
+	if err != nil {
 		return LoginResponse{}, err
 	}
 
@@ -145,12 +142,14 @@ func (c *Client) Login(username, password string) (LoginResponse, error) {
 // RefreshToken calls POST /api/v1/auth/refresh using the stored refresh token
 // and updates the in-memory credentials (and persists them to disk).
 func (c *Client) RefreshToken() error {
-	body := map[string]string{
-		"refresh_token": c.creds.RefreshToken,
-	}
-
 	var resp LoginResponse
-	if err := c.postJSON("/api/v1/auth/refresh", body, &resp); err != nil {
+	err := c.httpClient.Do(httpclient.Request{
+		Method:   http.MethodPost,
+		Endpoint: "/api/v1/auth/refresh",
+		Payload:  map[string]string{"refresh_token": c.creds.RefreshToken},
+		Out:      &resp,
+	})
+	if err != nil {
 		return err
 	}
 
@@ -165,6 +164,45 @@ func (c *Client) RefreshToken() error {
 	}
 
 	return config.Save(c.creds)
+}
+
+// Me calls GET /api/v1/auth/me and returns the current user info.
+func (c *Client) Me() (UserInfo, error) {
+	var info UserInfo
+	err := c.httpClient.Do(httpclient.Request{
+		Method:   http.MethodGet,
+		Endpoint: "/api/v1/auth/me",
+		Headers:  map[string]string{"Authorization": "Bearer " + c.creds.AccessToken},
+		Out:      &info,
+	})
+	if err != nil {
+		return UserInfo{}, err
+	}
+
+	return info, nil
+}
+
+// Logout calls POST /api/v1/auth/logout to invalidate the access token on the server,
+// then removes the local credentials file.
+func (c *Client) Logout() error {
+	// Best-effort server-side logout; ignore errors (token may already be expired).
+	_ = c.httpClient.Do(httpclient.Request{
+		Method:   http.MethodPost,
+		Endpoint: "/api/v1/auth/logout",
+		Headers:  map[string]string{"Authorization": "Bearer " + c.creds.AccessToken},
+	})
+
+	return config.Delete()
+}
+
+// AccessToken returns the current access token held by the client.
+func (c *Client) AccessToken() string {
+	return c.creds.AccessToken
+}
+
+// ServerURL returns the server URL the client is connected to.
+func (c *Client) ServerURL() string {
+	return c.serverURL
 }
 
 // ---------------------------------------------------------------------------
@@ -198,118 +236,6 @@ func jwtExpiry(token string) (time.Time, error) {
 	}
 
 	return time.Unix(claims.Exp, 0), nil
-}
-
-// Me calls GET /api/v1/auth/me and returns the current user info.
-func (c *Client) Me() (UserInfo, error) {
-	var info UserInfo
-	if err := c.getJSON("/api/v1/auth/me", &info); err != nil {
-		return UserInfo{}, err
-	}
-
-	return info, nil
-}
-
-// Logout calls POST /api/v1/auth/logout to invalidate the access token on the server,
-// then removes the local credentials file.
-func (c *Client) Logout() error {
-	// Best-effort server-side logout; ignore errors (token may already be expired).
-	_ = c.postJSONAuth("/api/v1/auth/logout", nil, nil)
-
-	return config.Delete()
-}
-
-// AccessToken returns the current access token held by the client.
-func (c *Client) AccessToken() string {
-	return c.creds.AccessToken
-}
-
-// ServerURL returns the server URL the client is connected to.
-func (c *Client) ServerURL() string {
-	return c.serverURL
-}
-
-// ---------------------------------------------------------------------------
-// low-level helpers
-// ---------------------------------------------------------------------------
-
-// postJSON sends an unauthenticated POST request with a JSON body and decodes
-// the response into out (may be nil to discard the body).
-func (c *Client) postJSON(path string, body interface{}, out interface{}) error {
-	return c.doJSON(http.MethodPost, path, body, out, false)
-}
-
-// postJSONAuth sends an authenticated POST request.
-func (c *Client) postJSONAuth(path string, body interface{}, out interface{}) error {
-	return c.doJSON(http.MethodPost, path, body, out, true)
-}
-
-// getJSON sends an authenticated GET request and decodes the response into out.
-func (c *Client) getJSON(path string, out interface{}) error {
-	return c.doJSON(http.MethodGet, path, nil, out, true)
-}
-
-func (c *Client) doJSON(method, path string, body interface{}, out interface{}, auth bool) error {
-	var reqBody io.Reader
-	if body != nil {
-		data, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("marshal request body: %w", err)
-		}
-
-		reqBody = bytes.NewReader(data)
-	}
-
-	reqURL, err := url.JoinPath(c.serverURL, path)
-	if err != nil {
-		return fmt.Errorf("create request URL: %w", err)
-	}
-
-	req, err := http.NewRequest(method, reqURL, reqBody)
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	req.Header.Set("Accept", "application/json")
-
-	if auth {
-		req.Header.Set("Authorization", "Bearer "+c.creds.AccessToken)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("execute request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// Try to extract an error message from the JSON body.
-		var errBody map[string]interface{}
-		if jsonErr := json.Unmarshal(respBytes, &errBody); jsonErr == nil {
-			if msg, ok := errBody["error"].(string); ok {
-				return fmt.Errorf("server error (%d): %s", resp.StatusCode, msg)
-			}
-		}
-
-		return fmt.Errorf("server returned HTTP %d", resp.StatusCode)
-	}
-
-	if out != nil && len(respBytes) > 0 {
-		if err := json.Unmarshal(respBytes, out); err != nil {
-			return fmt.Errorf("decode response: %w", err)
-		}
-	}
-
-	return nil
 }
 
 // Made with Bob
