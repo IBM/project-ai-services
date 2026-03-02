@@ -135,6 +135,7 @@ func validateOperator(c *openshift.OpenshiftClient, csvList *unstructured.Unstru
 				if apierrors.IsNotFound(err) {
 					return false, nil
 				}
+
 				return false, err
 			}
 

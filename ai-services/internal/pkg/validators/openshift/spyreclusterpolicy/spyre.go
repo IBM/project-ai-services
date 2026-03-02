@@ -56,8 +56,10 @@ func (r *SpyrePolicyRule) Verify() error {
 		}, obj); err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.Infof("SpyreClusterPolicy %s not found yet, retrying...", spyreName, logger.VerbosityLevelDebug)
+
 				return false, nil
 			}
+
 			return false, fmt.Errorf("failed to find %s in namespace %s: %w", spyreName, constants.SpyreOperatorNamespace, err)
 		}
 
@@ -71,10 +73,11 @@ func (r *SpyrePolicyRule) Verify() error {
 				state = "unknown"
 			}
 			logger.Infof("SpyreClusterPolicy not ready yet (status.state: %s), waiting...", state, logger.VerbosityLevelDebug)
+
 			return false, nil
 		}
-
 		logger.Infof("SpyreClusterPolicy %s is ready", spyreName, logger.VerbosityLevelDebug)
+
 		return true, nil
 	})
 }
