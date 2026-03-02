@@ -192,14 +192,14 @@ func (kc *OpenshiftClient) PodExists(nameOrID string) (bool, error) {
 
 // StopPod stops a pod.
 func (kc *OpenshiftClient) StopPod(id string) error {
-	logger.Infof("not implemented")
+	logger.Warningf("Unsupported for openshift runtime")
 
 	return nil
 }
 
 // StartPod starts a pod.
 func (kc *OpenshiftClient) StartPod(id string) error {
-	logger.Warningf("not implemented")
+	logger.Warningf("Unsupported for openshift runtime")
 
 	return nil
 }

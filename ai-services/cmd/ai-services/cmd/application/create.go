@@ -110,12 +110,12 @@ func doBootstrapValidate() error {
 }
 
 func init() {
-	initCommonFlags()
-	initPodmanFlags()
-	initOpenShiftFlags()
+	initCreateCommonFlags()
+	initCreatePodmanFlags()
+	initCreateOpenShiftFlags()
 }
 
-func initCommonFlags() {
+func initCreateCommonFlags() {
 	skipCheckDesc := appBootstrap.BuildSkipFlagDescription()
 	createCmd.Flags().StringSliceVar(&skipChecks, appFlags.Create.SkipValidation, []string{}, skipCheckDesc)
 
@@ -146,7 +146,7 @@ func initCommonFlags() {
 	)
 }
 
-func initPodmanFlags() {
+func initCreatePodmanFlags() {
 	createCmd.Flags().BoolVar(
 		&skipImageDownload,
 		appFlags.Create.SkipImageDownload,
@@ -157,7 +157,7 @@ func initPodmanFlags() {
 			"Warning:\n"+
 			"- If set to true and images are missing → command will fail\n"+
 			"- If left false in air-gapped environments → pull/download attempt will fail\n"+
-			"Supported for podman runtime only.\n",
+			"Note: Supported for podman runtime only.\n",
 	)
 	createCmd.Flags().BoolVar(
 		&skipModelDownload,
@@ -169,7 +169,7 @@ func initPodmanFlags() {
 			"Warning:\n"+
 			"- If set to true and models are missing → command will fail\n"+
 			"- If left false in air-gapped environments → download attempt will fail\n"+
-			"Supported for podman runtime only.\n",
+			"Note: Supported for podman runtime only.\n",
 	)
 
 	initializeImagePullPolicyFlag()
@@ -178,13 +178,13 @@ func initPodmanFlags() {
 	deprecatedPodmanFlags()
 }
 
-func initOpenShiftFlags() {
+func initCreateOpenShiftFlags() {
 	createCmd.Flags().DurationVar(
 		&timeout,
 		appFlags.Create.Timeout,
 		0, // default
 		"Timeout for the operation (e.g. 10s, 2m, 1h).\n"+
-			"Supported for openshift runtime only.\n",
+			"Note: Supported for openshift runtime only.\n",
 	)
 }
 
@@ -200,7 +200,7 @@ func initializeImagePullPolicyFlag() {
 			" - IfNotPresent: pull only if the image isn't already present locally \n\n"+
 			"Defaults to 'IfNotPresent' if not specified\n\n"+
 			"In air-gapped environments → specify 'Never'\n\n"+
-			"Supported for podman runtime only.\n\n",
+			"Note: Supported for podman runtime only.\n\n",
 	)
 }
 

@@ -24,6 +24,8 @@ Arguments
   [name]: Application name (required)
 
 Note: Logs are streamed only when a single pod is specified, and only after the pod has started.
+
+Note: Supported for podman runtime only.
 `,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
