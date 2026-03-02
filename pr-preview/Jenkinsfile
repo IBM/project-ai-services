@@ -1,7 +1,6 @@
 pipeline {
     agent { label 'onprem-ai-services-4-spyre-cards' }
-    agent { label 'ai-services-4-spyre-card-1' }
-
+    
     environment {
         PROJECT_NAME = 'project-ai-services'
         AI_SERVICES_DIR = 'ai-services'
