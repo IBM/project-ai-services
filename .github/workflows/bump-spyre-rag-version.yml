@@ -95,6 +95,9 @@ jobs:
             echo "   Current TAG : $HEAD_TAG"
             echo "   Changes to spyre-rag/ui/** require a version bump."
             echo "   Please update TAG in spyre-rag/ui/Makefile."
+            echo "   ui.image references in all values.yaml files under ai-services/assets/."
+            echo ""
+            echo "   Run: python3 .github/scripts/check_image_names.py  (after bumping)"
             echo ""
             exit 1
           fi
