@@ -6,9 +6,13 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 const (
@@ -40,7 +44,6 @@ func (r *OperatorRule) Description() string {
 }
 
 func (r *OperatorRule) Verify() error {
-	ctx := context.Background()
 	var failed []string
 
 	checks := []struct {
@@ -80,12 +83,12 @@ func (r *OperatorRule) Verify() error {
 		Version: olmVersion,
 		Kind:    olmCSVList,
 	})
-	if err := client.Client.List(ctx, csvList); err != nil {
+	if err := client.Client.List(client.Ctx, csvList); err != nil {
 		return fmt.Errorf("failed to list ClusterServiceVersions: %w", err)
 	}
 
 	for _, check := range checks {
-		if err := validateOperator(csvList, check.operator); err != nil {
+		if err := validateOperator(client, csvList, check.operator); err != nil {
 			failed = append(failed, fmt.Sprintf("  - %s: %s", check.name, err.Error()))
 		} else {
 			r.passed = append(r.passed, fmt.Sprintf("  - %s installed", check.name))
@@ -113,19 +116,36 @@ func (r *OperatorRule) Hint() string {
 	return "This tool requires certain operators to be up and running, please run `ai-services bootstrap configure` to install required operators"
 }
 
-func validateOperator(csvList *unstructured.UnstructuredList, operatorSubstring string) error {
+func validateOperator(c *openshift.OpenshiftClient, csvList *unstructured.UnstructuredList, operatorSubstring string) error {
 	for _, csv := range csvList.Items {
 		name := csv.GetName()
 		if !strings.HasPrefix(name, operatorSubstring+".") {
 			continue
 		}
 
-		phase, _, _ := unstructured.NestedString(csv.Object, "status", "phase")
-		if phase == phaseSucceeded {
-			return nil
-		}
+		// operator found, wait until it is ready
+		return wait.PollUntilContextTimeout(c.Ctx, constants.OperatorpPollInterval, constants.OperatorpPollTimeout, true, func(ctx context.Context) (done bool, err error) {
+			current := &unstructured.Unstructured{}
+			current.SetGroupVersionKind(csv.GroupVersionKind())
 
-		return fmt.Errorf("operator %s found but not ready (phase=%s)", name, phase)
+			if err := c.Client.Get(ctx, types.NamespacedName{
+				Name:      name,
+				Namespace: csv.GetNamespace(),
+			}, current); err != nil {
+				if apierrors.IsNotFound(err) {
+					return false, nil
+				}
+				return false, err
+			}
+
+			phase, _, _ := unstructured.NestedString(current.Object, "status", "phase")
+			if phase == phaseSucceeded {
+				return true, nil
+			}
+			logger.Infof("Operator %s not ready yet (phase: %s), waiting...", name, phase, logger.VerbosityLevelDebug)
+
+			return false, nil
+		})
 	}
 
 	return fmt.Errorf("operator not installed: %s", operatorSubstring)
