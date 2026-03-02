@@ -110,12 +110,12 @@ func doBootstrapValidate() error {
 }
 
 func init() {
-	initCommonFlags()
-	initPodmanFlags()
-	initOpenShiftFlags()
+	initCreateCommonFlags()
+	initCreatePodmanFlags()
+	initCreateOpenShiftFlags()
 }
 
-func initCommonFlags() {
+func initCreateCommonFlags() {
 	skipCheckDesc := appBootstrap.BuildSkipFlagDescription()
 	createCmd.Flags().StringSliceVar(&skipChecks, appFlags.Create.SkipValidation, []string{}, skipCheckDesc)
 
@@ -146,7 +146,7 @@ func initCommonFlags() {
 	)
 }
 
-func initPodmanFlags() {
+func initCreatePodmanFlags() {
 	createCmd.Flags().BoolVar(
 		&skipImageDownload,
 		appFlags.Create.SkipImageDownload,
@@ -178,7 +178,7 @@ func initPodmanFlags() {
 	deprecatedPodmanFlags()
 }
 
-func initOpenShiftFlags() {
+func initCreateOpenShiftFlags() {
 	createCmd.Flags().DurationVar(
 		&timeout,
 		appFlags.Create.Timeout,
