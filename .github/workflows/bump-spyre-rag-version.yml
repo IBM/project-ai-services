@@ -4,11 +4,12 @@ on:
   pull_request:
     paths:
       - 'spyre-rag/src/**'
+      - 'spyre-rag/ui/**'
     branches:
       - main
 
 jobs:
-  check-version-bump:
+  check-src-version-bump:
     name: Verify TAG is bumped in spyre-rag/src/Makefile
     runs-on: ubuntu-latest
 
@@ -18,7 +19,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Detect changed paths
+        id: changes
+        run: |
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          echo "Changed files:"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -q '^spyre-rag/src/'; then
+            echo "src_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "src_changed=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Compare TAG against base branch
+        if: steps.changes.outputs.src_changed == 'true'
         run: |
           BASE_TAG=$(git show origin/${{ github.base_ref }}:spyre-rag/src/Makefile \
             | grep -E '^TAG\s*\??=' | head -1 | sed 's/.*=\s*//' | tr -d ' ')
@@ -37,6 +51,51 @@ jobs:
             echo "   backend.image references in all values.yaml files under ai-services/assets/."
             echo ""
             echo "   Run: python3 .github/scripts/check_image_names.py  (after bumping)"
+            exit 1
+          fi
+
+          echo "✅ TAG bumped: $BASE_TAG → $HEAD_TAG"
+
+  check-ui-version-bump:
+    name: Verify TAG is bumped in spyre-rag/ui/Makefile
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: changes
+        run: |
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          echo "Changed files:"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -q '^spyre-rag/ui/'; then
+            echo "ui_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "ui_changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Compare TAG against base branch
+        if: steps.changes.outputs.ui_changed == 'true'
+        run: |
+          BASE_TAG=$(git show origin/${{ github.base_ref }}:spyre-rag/ui/Makefile \
+            | grep -E '^TAG\s*\??=' | head -1 | sed 's/.*=\s*//' | tr -d ' ')
+          HEAD_TAG=$(grep -E '^TAG\s*\??=' spyre-rag/ui/Makefile \
+            | head -1 | sed 's/.*=\s*//' | tr -d ' ')
+
+          echo "Base branch TAG : $BASE_TAG"
+          echo "PR branch TAG   : $HEAD_TAG"
+
+          if [ "$BASE_TAG" = "$HEAD_TAG" ]; then
+            echo ""
+            echo "❌ ERROR: The image TAG in spyre-rag/ui/Makefile has not been bumped."
+            echo "   Current TAG : $HEAD_TAG"
+            echo "   Changes to spyre-rag/ui/** require a version bump."
+            echo "   Please update TAG in spyre-rag/ui/Makefile."
+            echo ""
             exit 1
           fi
 
