@@ -1,57 +1,111 @@
-import { Button, InlineNotification, TextInput } from "@carbon/react";
-import { Theme } from "@carbon/react";
+import {
+  Button,
+  InlineNotification,
+  TextInput,
+  Theme,
+  Grid,
+  Column,
+} from "@carbon/react";
 import { ArrowRight } from "@carbon/icons-react";
-import styles from "./Login.module.scss";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import styles from "./Login.module.scss";
+
+import { login } from "../../services/auth";
+import type { LoginResponse } from "../../types/auth";
 
 const LoginPage = () => {
+  const navigate = useNavigate();
+
+  const [username, setUsername] = useState<string>("");
+  const [password, setPassword] = useState<string>("");
+
   const [error, setError] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(false);
+
+  const handleLogin = async (): Promise<void> => {
+    setError(false);
+    setLoading(true);
+
+    try {
+      const data: LoginResponse = await login({
+        username,
+        password,
+      });
+
+      localStorage.setItem("access_token", data.access_token);
+      localStorage.setItem("refresh_token", data.refresh_token);
+
+      navigate("/applications");
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <Theme theme="white">
-      <div className={styles.loginPage}>
-        <div className={styles.loginLeft}>
+      <Grid fullWidth className={styles.loginPage}>
+        <Column lg={8} md={4} sm={4} className={styles.loginLeft}>
           <div className={styles.loginForm}>
             <h1 className={styles.heading}>
               Log in to IBM <strong>Open-Source AI Foundation for Power</strong>
             </h1>
-            <div className={styles.inputFields}>
+
+            <form
+              className={styles.inputFields}
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleLogin();
+              }}
+            >
               {error && (
                 <InlineNotification
                   kind="error"
+                  role="alert"
                   title="Incorrect user ID or password."
-                  hideCloseButton
                   lowContrast
                 />
               )}
+
               <TextInput
                 id="user-id"
                 labelText="User ID"
                 placeholder="username@example.com"
-                type="text"
+                value={username}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setUsername(e.target.value)
+                }
                 invalid={error}
               />
+
               <TextInput
                 id="password"
                 labelText="Password"
                 type="password"
+                value={password}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setPassword(e.target.value)
+                }
                 invalid={error}
               />
+
               <Button
+                type="submit"
                 kind="primary"
-                className={styles.continueButton}
                 renderIcon={ArrowRight}
-                onClick={() => {
-                  setError((prev) => !prev);
-                }}
+                className={styles.continueButton}
+                disabled={loading}
               >
-                Continue
+                {loading ? "Logging in..." : "Continue"}
               </Button>
-            </div>
+            </form>
           </div>
-        </div>
-        <div className={styles.loginRight}></div>
-      </div>
+        </Column>
+
+        <Column lg={8} md={4} sm={0} className={styles.loginRight} />
+      </Grid>
     </Theme>
   );
 };

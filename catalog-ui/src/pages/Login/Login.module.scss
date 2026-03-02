@@ -1,22 +1,31 @@
 @use "@carbon/react/scss/type";
 
 .loginPage {
-  display: flex;
-  height: 100vh;
+  min-height: 100vh;
 }
 
 .loginLeft {
-  flex: 1;
   display: flex;
   align-items: center;
-  padding-left: 64px;
+  padding: 0;
+}
+
+@media (min-width: 42rem) {
+  .loginLeft {
+    padding: 2rem;
+  }
+}
+
+.loginRight {
+  background-color: var(--cds-layer-01);
 }
 
 .loginForm {
+  width: 100%;
+  max-width: 28rem;
   display: flex;
   flex-direction: column;
-  gap: 48px;
-  width: 531px;
+  gap: 3rem;
 }
 
 .heading {
@@ -26,15 +35,11 @@
 .inputFields {
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  width: 288px;
-}
-
-.loginRight {
-  flex: 1;
-  background-color: var(--cds-layer-01);
+  gap: 1.5rem;
+  width: 100%;
 }
 
 .continueButton {
-  width: 288px;
+  width: 100%;
+  max-width: none;
 }
