@@ -30,6 +30,7 @@ Arguments
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// Build and run flag validator
 		flagValidator := buildPsFlagValidator()
+
 		return flagValidator.Validate(cmd)
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
