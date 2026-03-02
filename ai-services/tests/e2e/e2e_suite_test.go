@@ -495,22 +495,86 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(output).NotTo(gomega.BeEmpty())
 			logger.Infof("[TEST] Application %s started successfully", appName)
 		})
+
+	})
+	ginkgo.Context("Ingestion Tests", func() {
+		ginkgo.BeforeEach(func() {
+			err := ingestion.CleanDocsFolder(appName)
+			if err != nil {
+				ginkgo.Fail("Failed to clean application docs directory")
+			}
+		})
 		ginkgo.It("starts document ingestion pod and validates ingestion completion", ginkgo.Label("spyre-dependent"), func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
 			defer cancel()
 
+			completionStr := "Completed '/var/docs/test_doc.pdf'"
 			gomega.Expect(appName).NotTo(gomega.BeEmpty())
 
-			gomega.Expect(ingestion.PrepareDocs(appName)).To(gomega.Succeed())
+			gomega.Expect(ingestion.PrepareDocs(appName, "test_doc.pdf")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
-			gomega.Expect(logs).To(gomega.ContainSubstring("Completed '/var/docs/test_doc.pdf'"))
+			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
 
-			logger.Infof("[TEST] Ingestion completed successfully for application %s", appName)
+			logger.Infof("[TEST] Valid File Ingestion completed successfully for application %s", appName)
+		})
+		ginkgo.It("ingestion should not fail while ingesting a blank pdf", ginkgo.Label("spyre-dependent"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
+			defer cancel()
+
+			completionStr := "Completed '/var/docs/blank.pdf'"
+			gomega.Expect(appName).NotTo(gomega.BeEmpty())
+
+			gomega.Expect(ingestion.PrepareDocs(appName, "blank.pdf")).To(gomega.Succeed())
+
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr)).To(gomega.Succeed())
+
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
+			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
+
+			logger.Infof("[TEST] Blank File Ingestion completed successfully for application %s", appName)
+		})
+		ginkgo.It("ingestion should fail while ingesting an invalid pdf", ginkgo.Label("spyre-dependent"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
+			defer cancel()
+
+			completionStr := "Skipping file with .pdf extension but unsupported format: /var/docs/sample_png.pdf"
+			gomega.Expect(appName).NotTo(gomega.BeEmpty())
+
+			gomega.Expect(ingestion.PrepareDocs(appName, "sample_png.pdf")).To(gomega.Succeed())
+
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr)).To(gomega.Succeed())
+
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
+			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
+
+			logger.Infof("[TEST] Invalid PDF File Ingestion completed successfully for application %s", appName)
+		})
+		ginkgo.It("ingestion should not fail while ingesting an invalid file", ginkgo.Label("spyre-dependent"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
+			defer cancel()
+
+			completionStr := "No documents found to process in '/var/docs'"
+			gomega.Expect(appName).NotTo(gomega.BeEmpty())
+
+			gomega.Expect(ingestion.PrepareDocs(appName, "sample_txt.txt")).To(gomega.Succeed())
+
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr)).To(gomega.Succeed())
+
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
+			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
+
+			logger.Infof("[TEST] Invalid File Ingestion completed successfully for application %s", appName)
 		})
 	})
 	ginkgo.Context("RAG Golden Dataset Validation", ginkgo.Label("golden-dataset-validation"), func() {
