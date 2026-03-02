@@ -7,6 +7,7 @@ on:
       - 'spyre-rag/ui/Makefile'
       - 'ai-services/assets/**/values.yaml'
       - .github/workflows/check-image-names.yml
+      - .github/workflows/bump-spyre-rag-version.yml
       - .github/scripts/check_image_names.py
     branches:
       - main
