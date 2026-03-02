@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 import threading
-from common.digitize_utils import JobStatus, DocStatus
+from digitize.types import JobStatus, DocStatus
 from common.misc_utils import get_logger
 
 CACHE_DIR = "/var/cache"
@@ -19,7 +19,7 @@ class StatusManager:
     def _get_timestamp(self):
         return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    def update_doc_metadata(self, doc_id: str, details: dict, error: str = None):
+    def update_doc_metadata(self, doc_id: str, details: dict, error: str = ""):
         """Updates the detailed <doc_id>_metadata.json file."""
         meta_file = Path(CACHE_DIR) /"docs"/ f"{doc_id}_metadata.json"
         if not meta_file.exists():
@@ -64,7 +64,7 @@ class StatusManager:
             logger.error(f"❌ Failed to write metadata for {doc_id}: {str(e)}", exc_info=True)
         logger.debug(f"✅ Successfully updated metadata for {doc_id}")
 
-    def update_job_progress(self, doc_id: str, doc_status: DocStatus, job_status: JobStatus, error: str = None):
+    def update_job_progress(self, doc_id: str, doc_status: DocStatus, job_status: JobStatus, error: str = ""):
         """ Updates the document status within the <job_id>_status.json """
         with self._lock:
             if not self.job_status_file.exists():

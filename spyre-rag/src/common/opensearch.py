@@ -11,11 +11,13 @@ from common.vector_db import VectorStore
 
 logger = get_logger("OpenSearch")
 
-def generate_chunk_id(filename: str, page_content: str, index: int) -> int:
+def generate_chunk_id(doc_id: str, page_content: str) -> np.int64:
     """
     Generate a unique, deterministic chunk ID based on filename, content, and index.
     """
-    base = f"{filename}-{index}-{page_content}"
+    # Using doc_id (UUID) is safer than filename to prevent collisions
+    # between different users uploading 'document.pdf'
+    base = f"{doc_id}||{page_content}"
     hash_digest = hashlib.md5(base.encode("utf-8")).hexdigest()
     chunk_int = int(hash_digest[:16], 16)    # Convert first 64 bits to int
     chunk_id = chunk_int % (2**63)           # Fit into signed 64-bit range
@@ -123,8 +125,8 @@ class OpensearchVectorStore(VectorStore):
             return
 
         # Handle Pre-computed Vectors if provided
+        final_embeddings = vectors
         if vectors is not None:
-            final_embeddings = vectors
             # Initialize index using pre-computed vector dimension
             self._setup_index(len(final_embeddings[0]))
 
@@ -145,6 +147,7 @@ class OpensearchVectorStore(VectorStore):
                     self._setup_index(dim)
             else:
                 # Use the relevant slice from pre-computed vectors
+                assert final_embeddings is not None, "final_embeddings must be set when vectors is provided"
                 current_batch_embeddings = final_embeddings[i:i + batch_size]
 
             # 3. Transform batch to OpenSearch document format
@@ -154,7 +157,8 @@ class OpensearchVectorStore(VectorStore):
                 pc = doc.get("page_content", "")
 
                 # Generate chunk ID
-                cid = generate_chunk_id(fn, pc, i + j)
+                doc_id = doc.get("doc_id") or fn # Fallback to filename if UUID missing
+                cid = generate_chunk_id(doc_id, pc)
 
                 actions.append({
                     "_index": self.index_name,
@@ -164,6 +168,7 @@ class OpensearchVectorStore(VectorStore):
                         "embedding": emb.tolist() if isinstance(emb, np.ndarray) else emb,
                         "page_content": pc,
                         "filename": fn,
+                        "doc_id": doc_id,
                         "type": doc.get("type", ""),
                         "source": doc.get("source", ""),
                         "language": doc.get("language", "")
@@ -180,7 +185,7 @@ class OpensearchVectorStore(VectorStore):
         logger.debug(f"Inserted the {len(chunks)} into index.")
 
 
-    def search(self, query, vector=None, embedder=None, top_k=5, mode="hybrid", language='en'):
+    def search(self, query, doc_id=None, vector=None, embedder=None, top_k=5, mode="hybrid", language='en'):
         """
         Supported search modes: dense(semantic search), sparse(keyword match) and hybrid(combination of dense and sparse).
         Accepts either a pre-computed 'vector' OR an 'embedder' instance.
@@ -202,7 +207,7 @@ class OpensearchVectorStore(VectorStore):
             # 1. Define the k-NN search body
             search_body = {
                 "size": limit,
-                "_source": ["chunk_id", "page_content", "filename", "type", "source", "language"],
+                "_source": ["chunk_id", "page_content", "filename", "doc_id", "type", "source", "language"],
                 "query": {
                     "knn": {
                         "embedding": {
@@ -221,7 +226,7 @@ class OpensearchVectorStore(VectorStore):
             # Standard full-text match for sparse/keyword logic
             search_body = {
                 "size": limit,
-                "_source": ["chunk_id", "page_content", "filename", "type", "source", "language"],
+                "_source": ["chunk_id", "page_content", "filename", "doc_id", "type", "source", "language"],
                 "query": {
                     "bool": {
                         "must": [
@@ -237,7 +242,7 @@ class OpensearchVectorStore(VectorStore):
             # OpenSearch Hybrid Query combines Dense (k-NN) and Sparse (Match)
             search_body = {
                 "size": top_k, # Final number of results after fusion
-                "_source": ["chunk_id", "page_content", "filename", "type", "source", "language"],
+                "_source": ["chunk_id", "page_content", "filename", "doc_id", "type", "source", "language"],
                 "query": {
                     "hybrid": {
                         "queries": [

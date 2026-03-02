@@ -8,7 +8,7 @@ import uvicorn
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status
 from common.misc_utils import get_logger, set_log_level
-import common.digitize_utils as dg_util
+import digitize.digitize_utils as dg_util
 from common.misc_utils import get_logger
 
 log_level = logging.INFO
@@ -22,8 +22,6 @@ if level != "":
 set_log_level(log_level)
 logger = get_logger("app")
 
-import common.digitize_utils as dg_util
-from common.misc_utils import *
 from digitize.ingest import ingest 
 from digitize.status import StatusManager
 
@@ -104,7 +102,7 @@ async def digitize_document(
         if operation == dg_util.OperationType.INGESTION:
             # Upload the file byte stream to files in staging directory
             # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
-            await dg_util.stage_upload_files(job_id, filenames, Path(STAGING_DIR) / job_id, file_contents)
+            await dg_util.stage_upload_files(job_id, filenames, str(Path(STAGING_DIR) / job_id), file_contents)
 
             doc_id_dict = dg_util.initialize_job_state(job_id, dg_util.OperationType.INGESTION, filenames)
 
