@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -259,7 +260,12 @@ func (c *Client) doJSON(method, path string, body interface{}, out interface{}, 
 		reqBody = bytes.NewReader(data)
 	}
 
-	req, err := http.NewRequest(method, c.serverURL+path, reqBody)
+	reqURL, err := url.JoinPath(c.serverURL, path)
+	if err != nil {
+		return fmt.Errorf("create request URL: %w", err)
+	}
+
+	req, err := http.NewRequest(method, reqURL, reqBody)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
