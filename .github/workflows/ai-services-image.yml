@@ -1,0 +1,45 @@
+name: AI Services
+on:
+  push:
+    paths:
+      - 'ai-services/**'
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'ai-services/**'
+      - .github/workflows/ai-services-image.yml
+    branches:
+      - main
+
+env:
+  ICR_REGISTRY: icr.io
+  ICR_NAMESPACE: ai-services-cicd
+
+jobs:
+  build-publish-image:
+    name: Build and Publish Image
+    runs-on: ubuntu-24.04-ppc64le
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Build ai-services image
+        working-directory: ai-services
+        run: |
+          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
+
+      - name: Publish ai-services image
+        working-directory: ai-services
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          make push \
+            REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} \
+            REGISTRY_USER=${{ secrets.ICR_USERNAME }} \
+            REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      path: 'ai-services'
+      image: 'ai-services'
