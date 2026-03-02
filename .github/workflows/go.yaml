@@ -1,11 +1,6 @@
 name: Go
 
 on:
-  push:
-    paths:
-      - 'ai-services/**'
-    branches:
-      - main
   pull_request:
     paths:
       - 'ai-services/**'
@@ -66,58 +61,17 @@ jobs:
       - name: Install swag CLI
         run: go install github.com/swaggo/swag/cmd/swag@latest
 
-      - name: Check Swagger format
+      - name: Check Swagger format and docs are up to date
         working-directory: ai-services
         run: |
-          echo "Checking Swagger comment formatting..."
           make swagger-fmt
+          make swagger ENABLE_CATALOG_API=true
           if ! git diff --exit-code; then
-            echo "❌ ERROR: Swagger comments are not properly formatted!"
-            echo ""
-            echo "Some Swagger comments don't follow the required format."
-            echo ""
-            echo "To fix this, run the following commands:"
-            echo "  cd ai-services"
-            echo "  make swagger-fmt"
-            echo "  git add ."
-            echo "  git commit -m 'Format Swagger comments'"
-            echo ""
-            echo "Changed files:"
-            git diff --name-only
-            echo ""
-            echo "Diff:"
+            echo "❌ Swagger comments or docs are out of date. Run 'make swagger-fmt && make swagger' and commit the changes."
             git diff
             exit 1
           fi
-          echo "✅ Swagger comments are properly formatted!"
-
-      - name: Generate Swagger docs
-        working-directory: ai-services
-        run: make swagger ENABLE_CATALOG_API=true
-
-      - name: Check for uncommitted changes
-        working-directory: ai-services
-        run: |
-          if ! git diff --exit-code docs/; then
-            echo "❌ ERROR: Swagger documentation is out of date!"
-            echo ""
-            echo "The generated Swagger docs don't match the committed version."
-            echo "This means you modified API annotations but didn't regenerate the docs."
-            echo ""
-            echo "To fix this, run the following commands:"
-            echo "  cd ai-services"
-            echo "  make swagger"
-            echo "  git add docs/"
-            echo "  git commit -m 'Update Swagger documentation'"
-            echo ""
-            echo "Changed files:"
-            git diff --name-only docs/
-            echo ""
-            echo "Diff:"
-            git diff docs/
-            exit 1
-          fi
-          echo "✅ Swagger documentation is up to date!"
+          echo "✅ Swagger comments and documentation are up to date!"
 
   scan:
     uses: ./.github/workflows/scanner.yml
