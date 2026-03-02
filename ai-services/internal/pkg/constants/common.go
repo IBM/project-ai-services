@@ -1,10 +1,14 @@
 package constants
 
+import "time"
+
 const (
 	PodStartOn             = "on"
 	PodStartOff            = "off"
 	ApplicationsPath       = "/var/lib/ai-services/applications"
 	SpyreOperatorNamespace = "spyre-operator"
+	OperatorpPollInterval  = 5 * time.Second
+	OperatorpPollTimeout   = 2 * time.Minute
 )
 
 type ValidationLevel int
