@@ -28,7 +28,7 @@ jobs:
       - name: Build ai-services image
         working-directory: ai-services
         run: |
-          make image REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
+          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
 
       - name: Publish ai-services image
         working-directory: ai-services
