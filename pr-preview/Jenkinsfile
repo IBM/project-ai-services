@@ -31,8 +31,10 @@ pipeline {
                     usernameVariable: 'username',
                     passwordVariable: 'password',
                 )]) {
-                    sh "chmod +x $POLLER_SCRIPT"
-                    sh "nohup $POLLER_SCRIPT $JENKINS_URL CHECKOUT=$CHECKOUT $BUILD_NUMBER $username $password >> $POLLER_LOGS 2>&1 &"
+                    sh '''
+                    nohup $POLLER_SCRIPT $JENKINS_URL CHECKOUT=$CHECKOUT $BUILD_NUMBER $username $password >> $POLLER_LOGS 2>&1 &
+                    echo "Queue poller process id: $!"
+                    '''
                 }
                 script {
                     if (!params.CHECKOUT.trim()) {

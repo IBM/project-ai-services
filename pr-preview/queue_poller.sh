@@ -40,7 +40,7 @@ is_duplicate_build_queued() {
 # Continuously monitor the pr-preview pipeline job status
 # If a new Jenkins job with the same parameters is queued, abort the current job.
 # This ensures resources are used only for the latest PR commit.
-while true; do
+for i in {1..300}; do
     echo "Polling status of $job_name in jenkins."
     status=$(get_job_status)
     if [[ "$status" == "true" ]]; then
