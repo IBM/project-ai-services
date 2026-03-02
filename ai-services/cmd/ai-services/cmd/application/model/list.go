@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
 
@@ -29,6 +31,13 @@ func init() {
 }
 
 func list(cmd *cobra.Command) error {
+	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypeOpenShift {
+		// Since we do not have tmpl files in OpenShift marking it as unsupported for now
+		logger.Warningln("Not supported for openshift runtime")
+
+		return nil
+	}
+
 	models, err := models(templateName)
 	if err != nil {
 		return fmt.Errorf("failed to list the models, err: %w", err)
