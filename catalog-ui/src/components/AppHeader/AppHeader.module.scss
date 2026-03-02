@@ -39,11 +39,20 @@
 
 .logout {
   border-top: 1px solid #393939;
+
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+
   cursor: pointer;
   display: flex;
   justify-content: space-between;
-  background-color: #393939;
+  align-items: center;
   padding: 1rem;
+
+  background-color: #393939;
+  color: #ffffff;
 }
 
 :global(.cds--header-panel--expanded) {
