@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .AppName }}--digitize-api"
+  labels:
+    ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
+    ai-services.io/component: "digitize-api"
+  annotations:
+    ai-services.io/ports: "{{ .Values.digitize.port }}:4000"
+spec:
+  containers:
+    - name: digitize-api
+      image: "{{ .Values.digitize.image }}"
+      command:
+        - "/var/venv/bin/python"
+        - "-m"
+        - "uvicorn"
+        - "digitize.app:app"
+        - "--host"
+        - "0.0.0.0"
+        - "--port"
+        - "4000"
+      ports:
+        - containerPort: 4000
+          name: http
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "500m"
+        limits:
+          memory: "8Gi"
+          cpu: "2"
+      env:
+        - name: EMB_ENDPOINT
+          value: "http://{{ .AppName }}--vllm-server:8001"
+        - name: EMB_MODEL
+          value: "ibm-granite/granite-embedding-278m-multilingual"
+        - name: EMB_MAX_TOKENS
+          value: "512"
+        - name: LLM_ENDPOINT
+          value: "http://{{ .AppName }}--vllm-server:8000"
+        - name: LLM_MODEL
+          value: "ibm-granite/granite-3.3-8b-instruct"
+        - name: OPENSEARCH_HOST
+          value: "{{ .AppName }}--opensearch"
+        - name: OPENSEARCH_PORT
+          value: "9200"
+        - name: OPENSEARCH_DB_PREFIX
+          value: "RAG_DB"
+        - name: OPENSEARCH_INDEX_NAME
+          value: "RAG_INDEX"
+        - name: OPENSEARCH_USERNAME
+          value: "{{ .Values.opensearch.username }}"
+        - name: OPENSEARCH_PASSWORD
+          value: "{{ .Values.opensearch.password }}"
+        - name: LOG_LEVEL
+          value: "{{ .Values.digitize.log_level }}"
+      volumeMounts:
+        - mountPath: /var/docs:z
+          name: docs
+        - mountPath: /var/cache:z
+          name: cache
+  restartPolicy: Always
+  volumes:
+    - name: cache
+      hostPath:
+        path: "/var/lib/ai-services/applications/{{ .AppName }}/cache"
+        type: DirectoryOrCreate
+        
