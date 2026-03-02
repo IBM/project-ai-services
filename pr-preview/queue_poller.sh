@@ -6,6 +6,7 @@ current_job_param="$2"
 build_number="$3"
 user_name="$4"
 api_token="$5"
+poller_timeout_in_mins="$6"
 
 job_name="pr-preview-pipeline"
 creds="$user_name:$api_token"
@@ -40,7 +41,7 @@ is_duplicate_build_queued() {
 # Continuously monitor the pr-preview pipeline job status
 # If a new Jenkins job with the same parameters is queued, abort the current job.
 # This ensures resources are used only for the latest PR commit.
-for i in {1..300}; do
+for ((i=1; i<=poller_timeout_in_mins; i++)); do
     echo "Polling status of $job_name in jenkins."
     status=$(get_job_status)
     if [[ "$status" == "true" ]]; then
@@ -51,9 +52,11 @@ for i in {1..300}; do
             curl -fsS -u "$creds" -X POST "$job_url/stop"
             exit 0
         fi
-        sleep "30s"
+        sleep "60s"
         continue
     fi
     echo "Jenkins job $job_url is completed."
     exit 0
 done
+
+echo "Queue poller for job $job_url got timedout in $poller_timeout_in_mins minutes."
