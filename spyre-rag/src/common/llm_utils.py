@@ -1,5 +1,8 @@
 import logging
 import requests
+import time
+import threading
+import json
 from requests.adapters import HTTPAdapter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
@@ -145,13 +148,26 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
         "stop": stop_words,
         "stream": stream
     }
+    if stream:
+        # stream_options is only required for streaming to include the final usage chunk.
+        # For non-streaming requests, the 'usage' field is included by default.
+        payload["stream_options"] = {"include_usage": True}
     return headers, payload
 
-def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature):
+def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict):
     headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False )
     try:
         # Use requests for synchronous HTTP requests
+        start_time = time.time()
         response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=False)
+        request_time = time.time() - start_time
+        perf_stat_dict["inference_time"] = request_time
+        
+        response_json = response.json()
+        if 'usage' in response_json:
+            perf_stat_dict["output_token_cnt"] = response_json['usage'].get('completion_tokens', 0)
+            perf_stat_dict["input_token_cnt"] = response_json['usage'].get('prompt_tokens', 0)
+        
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         error_details = str(e)
@@ -164,17 +180,51 @@ def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_wor
         return {"error": str(e)}
     return response.json()
 
-def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature):
+def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict):
     headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, True )
     try:
         # Use requests for synchronous HTTP requests
         logger.debug("STREAMING RESPONSE")
+        token_latencies = []
+        start_time = time.time()
+        last_token_time = start_time
+        
         with SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=True) as r:
             for raw_line in r.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
 
-                yield f"{raw_line}\n\n"
+                if not raw_line.startswith("data: "):
+                    continue
+                
+                data_str = raw_line[len("data: "):]
+                if data_str == "[DONE]":
+                    break
+                
+                try:
+                    chunk = json.loads(data_str)
+                    
+                    # If this is a usage chunk (common in final chunk of OpenAI streams)
+                    if 'usage' in chunk and chunk['usage'] is not None:
+                        perf_stat_dict["output_token_cnt"] = chunk['usage'].get('completion_tokens', 0)
+                        perf_stat_dict["input_token_cnt"] = chunk['usage'].get('prompt_tokens', 0)
+                    
+                    # Only record latency for actual token chunks (choices)
+                    if 'choices' in chunk and len(chunk['choices']) > 0:
+                        now = time.time()
+                        token_latencies.append(now - last_token_time)
+                        last_token_time = now
+                        yield f"{raw_line}\n\n"
+                        
+                except json.JSONDecodeError:
+                    continue
+        
+        request_time = time.time() - start_time
+        perf_stat_dict["token_latencies"] = token_latencies
+        perf_stat_dict["inference_time"] = request_time
+        
+        yield f"data: {json.dumps({'perf_metrics': perf_stat_dict})}\n\n"
+        
     except requests.exceptions.RequestException as e:
         error_details = str(e)
         if e.response is not None:
