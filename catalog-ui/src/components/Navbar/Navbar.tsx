@@ -34,26 +34,37 @@ const Navbar = (props: NavbarProps) => {
         ref={navRef}
       >
         <SideNavItems>
-          <NavLink to="/applications" className={styles.navLink}>
-            <SideNavMenuItem className={styles.sideNavItem}>
-              Applications
-            </SideNavMenuItem>
-          </NavLink>
-          <NavLink to="/technical-templates" className={styles.navLink}>
-            <SideNavMenuItem className={styles.sideNavItem}>
-              Technical templates
-            </SideNavMenuItem>
-          </NavLink>
-          <NavLink to="/business-demo-templates" className={styles.navLink}>
-            <SideNavMenuItem className={styles.sideNavItem}>
-              Business demo templates
-            </SideNavMenuItem>
-          </NavLink>
-          <NavLink to="/services-catalog" className={styles.navLink}>
-            <SideNavMenuItem className={styles.sideNavItem}>
-              Services catalog
-            </SideNavMenuItem>
-          </NavLink>
+          <SideNavMenuItem
+            as={NavLink}
+            to="/applications"
+            className={styles.sideNavItem}
+          >
+            Applications
+          </SideNavMenuItem>
+
+          <SideNavMenuItem
+            as={NavLink}
+            to="/technical-templates"
+            className={styles.sideNavItem}
+          >
+            Technical templates
+          </SideNavMenuItem>
+
+          <SideNavMenuItem
+            as={NavLink}
+            to="/business-demo-templates"
+            className={styles.sideNavItem}
+          >
+            Business demo templates
+          </SideNavMenuItem>
+
+          <SideNavMenuItem
+            as={NavLink}
+            to="/services-catalog"
+            className={styles.sideNavItem}
+          >
+            Services catalog
+          </SideNavMenuItem>
         </SideNavItems>
       </SideNav>
     </Theme>
