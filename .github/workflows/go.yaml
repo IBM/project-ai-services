@@ -44,12 +44,12 @@ jobs:
       - name: Build Go binary (without catalog API)
         working-directory: ai-services
         run: |
-          GOOS=linux GOARCH=ppc64le make build
+          GOOS=linux GOARCH=ppc64le make bin
 
       - name: Build Go binary (with catalog API for CI/CD)
         working-directory: ai-services
         run: |
-          GOOS=linux GOARCH=ppc64le make build ENABLE_CATALOG_API=true
+          GOOS=linux GOARCH=ppc64le make bin ENABLE_CATALOG_API=true
 
   swagger-check:
     name: Verify Swagger Documentation

@@ -38,3 +38,8 @@ jobs:
             REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} \
             REGISTRY_USER=${{ secrets.ICR_USERNAME }} \
             REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      path: 'ai-services'
+      image: 'ai-services'

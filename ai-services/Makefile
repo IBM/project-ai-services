@@ -14,7 +14,7 @@ ifeq ($(ENABLE_CATALOG_API),true)
 endif
 BIN = ./bin
 
-# This will be overriden when we build and upload binary to artifact
+# This will be overridden when we build and upload binary to artifact
 VERSION ?= $(shell git describe --tags --always)
 GITCOMMIT ?= $(shell git rev-parse --short HEAD)
 BUILDDATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -50,18 +50,18 @@ else
 	$(BUILD_CMD)
 endif
 
-.PHONY: build
-build:
+.PHONY: bin
+bin:
 	$(BUILD_CMD)
 
 # Container image build - catalog API enabled by default for containers
 # Override with: make image ENABLE_CATALOG_API=false
-image:
+build:
 	@echo "Building container image with ENABLE_CATALOG_API=$(ENABLE_CATALOG_API)"
 	$(CONTAINER_BUILDER) build --build-arg CMD_VERSION=$(VERSION) \
     --build-arg GITCOMMIT=$(GITCOMMIT) --build-arg BUILDDATE=$(BUILDDATE) \
     --build-arg BUILDTAGS="$(BUILDTAGS)" -t $(REGISTRY)/$(IMAGE):$(TAG) .
-.PHONY: image
+.PHONY: build
 
 push:
 	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(TAG)
