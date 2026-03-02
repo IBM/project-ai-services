@@ -92,7 +92,7 @@ async def digitize_document(
     job_id = dg_util.generate_job_id()
     filenames = [f.filename for f in files]
     # asyncio.gather allows us to read all file buffers concurrently
-    file_contents = await asyncio.gather(*[f.read() for f in files])
+    file_contents = await asyncio.gather(*[f.read() for f in files], return_exceptions=True)
 
     # 3. acquire the semaphore
     await sem.acquire()
