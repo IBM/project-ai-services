@@ -6,21 +6,13 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
+	appFlags "github.com/project-ai-services/ai-services/internal/pkg/cli/constants/application"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
 
 var output string
-
-func init() {
-	psCmd.Flags().StringVarP(
-		&output,
-		"output",
-		"o",
-		"",
-		"Output format (e.g., wide)",
-	)
-}
 
 func isOutputWide() bool {
 	return strings.ToLower(output) == "wide"
@@ -35,6 +27,12 @@ Arguments
   [name]: Application name (optional)
 `,
 	Args: cobra.MaximumNArgs(1),
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// Build and run flag validator
+		flagValidator := buildPsFlagValidator()
+
+		return flagValidator.Validate(cmd)
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
@@ -65,4 +63,31 @@ Arguments
 
 		return nil
 	},
+}
+
+func init() {
+	initPsCommonFlags()
+}
+
+func initPsCommonFlags() {
+	psCmd.Flags().StringVarP(
+		&output,
+		appFlags.Ps.Output,
+		"o",
+		"",
+		"Output format (e.g., wide)",
+	)
+}
+
+// buildPsFlagValidator creates and configures the flag validator for the ps command.
+func buildPsFlagValidator() *flagvalidator.FlagValidator {
+	runtimeType := vars.RuntimeFactory.GetRuntimeType()
+
+	builder := flagvalidator.NewFlagValidatorBuilder(runtimeType)
+
+	// Register common flags
+	builder.
+		AddCommonFlag(appFlags.Ps.Output, nil)
+
+	return builder.Build()
 }
