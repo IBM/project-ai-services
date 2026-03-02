@@ -1,5 +1,4 @@
 from glob import glob
-import logging
 import time
 
 import common.db_utils as db
@@ -9,7 +8,7 @@ from digitize.doc_utils import process_documents
 
 logger = get_logger("ingest")
 
-def ingest(directory_path):
+def ingest(directory_path, job_id=None, doc_id_dict=None):
 
     def ingestion_failed():
         logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
@@ -51,21 +50,29 @@ def ingest(directory_path):
     start_time = time.time()
     combined_chunks, converted_pdf_stats = process_documents(
         input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'],  emb_model_dict["emb_endpoint"],
-        max_tokens=emb_model_dict['max_tokens'] - 100)
+        max_tokens=emb_model_dict['max_tokens'] - 100, job_id=job_id, doc_id_dict=doc_id_dict)
     # converted_pdf_stats holds { file_name: {page_count: int, table_count: int, timings: {conversion: time_in_secs, process_text: time_in_secs, process_tables: time_in_secs, chunking: time_in_secs}} }
     if converted_pdf_stats is None or combined_chunks is None:
         ingestion_failed()
         return
 
     if combined_chunks:
-        logger.info("Loading processed documents into DB")
-        embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
-        # Insert data into Opensearch
-        vector_store.insert_chunks(
-            combined_chunks,
-            embedder=embedder
-        )
-        logger.info("Processed documents loaded into DB")
+        # Check if any of the files in this batch actually need indexing
+        # Proceed only if at least one file has chunked=False in its stats
+        needs_indexing = any(not stats.get("chunked", False) for stats in converted_pdf_stats.values())
+
+        if needs_indexing:
+            logger.info("Loading processed documents into DB")
+
+            embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
+            # Insert data into Opensearch
+            vector_store.insert_chunks(
+                combined_chunks,
+                embedder=embedder
+            )
+            logger.info("Processed documents loaded into DB")
+        else:
+            logger.info("All documents are already indexed. Skipping DB insertion.")
 
     # Log time taken for the file
     end_time = time.time()  # End the timer for the current file
