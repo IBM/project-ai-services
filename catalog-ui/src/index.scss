@@ -6,8 +6,17 @@ body {
 .appLayout {
   min-height: 100vh;
   background-color: var(--cds-background);
+  padding-top: 3rem;
 }
 
-.appContent {
-  margin-top: 3rem;
+@media (min-width: 42rem) {
+  // grid gutters
+  .cds--css-grid--full-width {
+    padding: 0;
+  }
+
+  // grid column margin
+  .cds--css-grid-column {
+    margin-inline: 0;
+  }
 }

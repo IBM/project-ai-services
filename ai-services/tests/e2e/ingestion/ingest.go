@@ -14,13 +14,13 @@ import (
 )
 
 // PrepareDocs copies ingestion PDFs to the app ingestion directory.
-func PrepareDocs(appName string) error {
+func PrepareDocs(appName string, fileName string) error {
 	// Resolve current folder: tests/e2e/ingestion.
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		return fmt.Errorf("unable to resolve ingestion directory")
 	}
-	srcDir := filepath.Dir(filename)
+	srcDir := filepath.Join(filepath.Dir(filename), "docs", fileName)
 
 	dstDir := filepath.Join(
 		"/var/lib/ai-services/applications",
@@ -32,10 +32,11 @@ func PrepareDocs(appName string) error {
 		return fmt.Errorf("failed to create docs dir: %w", err)
 	}
 
-	// Copy all non-.go files (PDFs).
-	return common.CopyDirFiltered(srcDir, dstDir, func(name string) bool {
-		return !strings.HasSuffix(name, ".go")
-	})
+	dstDir = filepath.Join(
+		dstDir, fileName,
+	)
+
+	return common.CopyFile(srcDir, dstDir)
 }
 
 // StartIngestion waits for the vLLM pod to be ready and then starts the ingestion pod.
@@ -43,6 +44,7 @@ func StartIngestion(
 	ctx context.Context,
 	cfg *config.Config,
 	appName string,
+	completionStr string,
 ) error {
 	// Wait for vLLM pod to be ready.
 	if err := WaitForAllPodsHealthy(ctx, cfg, appName); err != nil {
@@ -71,9 +73,24 @@ func StartIngestion(
 	}
 
 	// Wait for ingestion to complete.
-	if _, err := WaitForIngestionLogs(ctx, cfg, appName); err != nil {
+	if _, err := WaitForIngestionLogs(ctx, cfg, appName, completionStr); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+// CleanDocsFolder removes the documents from the application documents folder.
+func CleanDocsFolder(appName string) error {
+	docsDir := filepath.Join(
+		"/var/lib/ai-services/applications",
+		appName,
+		"docs",
+	)
+
+	if err := common.EnsureDir(docsDir); err != nil {
+		return fmt.Errorf("docs directory does not exist: %w", err)
+	}
+
+	return common.RemoveDirContents(docsDir)
 }

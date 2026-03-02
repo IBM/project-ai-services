@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { PageHeader } from "@carbon/ibm-products";
+import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
 import {
   DataTable,
   Table,
@@ -14,6 +14,8 @@ import {
   TableToolbarSearch,
   Pagination,
   Button,
+  Grid,
+  Column,
   type DataTableHeader,
 } from "@carbon/react";
 import {
@@ -42,7 +44,7 @@ const headers: DataTableHeader[] = [
 const rows: ApplicationRow[] = [
   {
     id: "1",
-    name: "Incident troubleshooting",
+    name: "Content goes here and can wrap to multiple lines if needed or be truncated with an ellipsis if it exceeds the maximum length allowed",
     template: "Digital Assistant",
     processors: 1,
     memory: "3GB",
@@ -101,6 +103,7 @@ const rows: ApplicationRow[] = [
     actions: "actions",
   },
 ];
+
 const ApplicationsListPage = () => {
   const [search, setSearch] = useState<string>("");
   const [page, setPage] = useState<number>(1);
@@ -125,6 +128,9 @@ const ApplicationsListPage = () => {
     page * pageSize,
   );
 
+  const noApplications = rows.length === 0;
+  const noSearchResults = rows.length > 0 && filteredRows.length === 0;
+
   return (
     <>
       <PageHeader
@@ -135,147 +141,172 @@ const ApplicationsListPage = () => {
             kind: "tertiary",
             label: "Learn more",
             renderIcon: ArrowRight,
-            onClick: () => {},
+            onClick: () => {
+              window.open(
+                "https://www.ibm.com/docs/en/aiservices?topic=services-introduction",
+                "_blank",
+              );
+            },
           },
         ]}
         pageActionsOverflowLabel="More actions"
         fullWidthGrid="xl"
       />
 
-      <div className={styles.applicationTable}>
-        <DataTable rows={paginatedRows} headers={headers} size="lg">
-          {({
-            rows,
-            headers,
-            getHeaderProps,
-            getRowProps,
-            getCellProps,
-            getTableProps,
-          }) => (
-            <>
-              <TableContainer>
-                <TableToolbar>
-                  <TableToolbarSearch
-                    placeholder="Search"
-                    persistent
-                    value={search}
-                    onChange={(e) => {
-                      if (typeof e !== "string") {
-                        setSearch(e.target.value);
-                      }
-                    }}
-                  />
+      <Grid fullWidth>
+        <Column lg={16} md={8} sm={4}>
+          <div className={styles.tableContent}>
+            <DataTable rows={paginatedRows} headers={headers} size="lg">
+              {({
+                rows,
+                headers,
+                getHeaderProps,
+                getRowProps,
+                getCellProps,
+                getTableProps,
+              }) => (
+                <>
+                  <TableContainer>
+                    <TableToolbar>
+                      <TableToolbarSearch
+                        placeholder="Search"
+                        persistent
+                        value={search}
+                        onChange={(e) => {
+                          if (typeof e !== "string") {
+                            setSearch(e.target.value);
+                          }
+                        }}
+                      />
 
-                  <TableToolbarContent>
-                    <Button
-                      hasIconOnly
-                      kind="ghost"
-                      renderIcon={Download}
-                      iconDescription="Download"
-                      size="lg"
-                    />
-                    <Button
-                      hasIconOnly
-                      kind="ghost"
-                      renderIcon={Renew}
-                      iconDescription="Refresh"
-                      size="lg"
-                    />
-                    <Button
-                      hasIconOnly
-                      kind="ghost"
-                      renderIcon={Settings}
-                      iconDescription="Settings"
-                      size="lg"
-                    />
-                    <Button size="lg" kind="primary" renderIcon={Add}>
-                      Deploy application
-                    </Button>
-                  </TableToolbarContent>
-                </TableToolbar>
+                      <TableToolbarContent>
+                        <Button
+                          hasIconOnly
+                          kind="ghost"
+                          renderIcon={Download}
+                          iconDescription="Download"
+                          size="lg"
+                        />
+                        <Button
+                          hasIconOnly
+                          kind="ghost"
+                          renderIcon={Renew}
+                          iconDescription="Refresh"
+                          size="lg"
+                        />
+                        <Button
+                          hasIconOnly
+                          kind="ghost"
+                          renderIcon={Settings}
+                          iconDescription="Settings"
+                          size="lg"
+                        />
+                        <Button size="lg" kind="primary" renderIcon={Add}>
+                          Deploy application
+                        </Button>
+                      </TableToolbarContent>
+                    </TableToolbar>
+                    <Table {...getTableProps()}>
+                      <TableHead>
+                        <TableRow>
+                          {headers.map((header) => {
+                            const { key, ...rest } = getHeaderProps({ header });
 
-                <Table {...getTableProps()}>
-                  <TableHead>
-                    <TableRow>
-                      {headers.map((header) => {
-                        const { key, ...rest } = getHeaderProps({ header });
-
-                        return (
-                          <TableHeader key={key} {...rest}>
-                            {header.header}
-                          </TableHeader>
-                        );
-                      })}
-                    </TableRow>
-                  </TableHead>
-
-                  <TableBody>
-                    {rows.map((row) => {
-                      const { key: rowKey, ...rowProps } = getRowProps({ row });
-
-                      return (
-                        <TableRow key={rowKey} {...rowProps}>
-                          {row.cells.map((cell) => {
-                            const { key: cellKey, ...cellProps } = getCellProps(
-                              { cell },
-                            );
-
-                            if (cell.info.header === "actions") {
-                              return (
-                                <TableCell key={cellKey} {...cellProps}>
-                                  <div className={styles.rowActions}>
-                                    <Button
-                                      kind="tertiary"
-                                      size="sm"
-                                      renderIcon={ArrowUpRight}
-                                    >
-                                      Open
-                                    </Button>
-                                    <Button
-                                      hasIconOnly
-                                      kind="tertiary"
-                                      size="sm"
-                                      renderIcon={CopyLink}
-                                      iconDescription="Copy"
-                                    />
-                                    <Button
-                                      hasIconOnly
-                                      kind="ghost"
-                                      size="sm"
-                                      renderIcon={TrashCan}
-                                      iconDescription="Delete"
-                                    />
-                                  </div>
-                                </TableCell>
-                              );
-                            }
                             return (
-                              <TableCell key={cellKey} {...cellProps}>
-                                {cell.value}
-                              </TableCell>
+                              <TableHeader key={key} {...rest}>
+                                {header.header}
+                              </TableHeader>
                             );
                           })}
                         </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+                      </TableHead>
 
-              <Pagination
-                page={page}
-                pageSize={pageSize}
-                pageSizes={[5, 10, 20, 30]}
-                totalItems={filteredRows.length}
-                onChange={({ page, pageSize }) => {
-                  setPage(page);
-                  setPageSize(pageSize);
-                }}
-              />
-            </>
-          )}
-        </DataTable>
-      </div>
+                      {noApplications ? (
+                        <NoDataEmptyState
+                          title="Start by adding an application"
+                          subtitle="To deploy an application using a template, click Deploy."
+                          className={styles.noDataContent}
+                        />
+                      ) : noSearchResults ? (
+                        <NoDataEmptyState
+                          title="No data"
+                          subtitle="Try adjusting your search or filter."
+                          className={styles.noDataContent}
+                        />
+                      ) : (
+                        <TableBody>
+                          {rows.map((row) => {
+                            const { key: rowKey, ...rowProps } = getRowProps({
+                              row,
+                            });
+
+                            return (
+                              <TableRow key={rowKey} {...rowProps}>
+                                {row.cells.map((cell) => {
+                                  const { key: cellKey, ...cellProps } =
+                                    getCellProps({ cell });
+
+                                  if (cell.info.header === "actions") {
+                                    return (
+                                      <TableCell key={cellKey} {...cellProps}>
+                                        <div className={styles.rowActions}>
+                                          <Button
+                                            kind="tertiary"
+                                            size="sm"
+                                            renderIcon={ArrowUpRight}
+                                          >
+                                            Open
+                                          </Button>
+                                          <Button
+                                            hasIconOnly
+                                            kind="tertiary"
+                                            size="sm"
+                                            renderIcon={CopyLink}
+                                            iconDescription="Copy"
+                                          />
+                                          <Button
+                                            hasIconOnly
+                                            kind="ghost"
+                                            size="sm"
+                                            renderIcon={TrashCan}
+                                            iconDescription="Delete"
+                                          />
+                                        </div>
+                                      </TableCell>
+                                    );
+                                  }
+                                  return (
+                                    <TableCell key={cellKey} {...cellProps}>
+                                      {cell.value}
+                                    </TableCell>
+                                  );
+                                })}
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      )}
+                    </Table>
+                  </TableContainer>
+
+                  {filteredRows.length > 20 && (
+                    <Pagination
+                      page={page}
+                      pageSize={pageSize}
+                      pageSizes={[5, 10, 20, 30]}
+                      totalItems={filteredRows.length}
+                      onChange={({ page, pageSize }) => {
+                        setPage(page);
+                        setPageSize(pageSize);
+                      }}
+                    />
+                  )}
+                </>
+              )}
+            </DataTable>
+          </div>
+        </Column>
+      </Grid>
     </>
   );
 };
