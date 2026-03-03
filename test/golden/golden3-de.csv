@@ -1,0 +1,1096 @@
+golden_question,golden_answer,source_link
+Wie richte ich eine Datenbankverbindung für einen Microsoft SQL Server‑Content‑Store in IBM Cognos Analytics ein?,"**Einrichtung einer Microsoft SQL Server‑Content‑Store‑Datenbankverbindung in IBM Cognos Analytics**
+
+1. **JDBC‑Treiber beschaffen**
+   - Laden Sie einen von IBM Cognos Analytics unterstützten Microsoft SQL Server JDBC‑Treiber von der Microsoft‑Website herunter (siehe IBM‑DQM‑Test‑Liste für die passende Version).
+
+2. **Treiber auf die Cognos‑Server kopieren**
+   - Kopieren Sie die heruntergeladene *.jar‑Datei in das Verzeichnis
+     `install_location/drivers`
+     auf **jedem** Rechner, auf dem der Content Manager installiert ist.
+
+3. **Optional: Windows‑Authentifizierung (SSO) vorbereiten**
+   - Für Single Sign‑on bzw. Windows‑Authentifizierung muss die Datei `sqljdbc_auth.dll` in das Verzeichnis `bin64` des Cognos‑Installationspfads kopiert werden.
+
+4. **Datenbankverbindung in Cognos Configuration anlegen**
+   - Starten Sie **IBM Cognos Configuration** (unter Windows über *Start > IBM Cognos Configuration*).
+   - Navigieren Sie zu **Data Access > Content Manager > Content Store**.
+   - Wählen Sie als Datenbanktyp **“Microsoft SQL Server‑Datenbank (Windows‑Authentifizierung)”** (oder die entsprechende Option für SQL‑Authentifizierung, falls gewünscht).
+   - Geben Sie die Verbindungsparameter ein:
+     - **Servername/Instanz**
+     - **Datenbankname** (Content‑Store‑Datenbank)
+     - **Benutzerkonto** (falls nicht Windows‑Authentifizierung)
+     - **Passwort** (falls nicht Windows‑Authentifizierung)
+   - Optional können Sie weitere JDBC‑Eigenschaften (z. B. `max.connection.attempts`, `seconds.between.retries`) unter *Advanced Properties* hinzufügen.
+
+5. **Verbindung testen und speichern**
+   - Klicken Sie auf **Test Connection**, um sicherzustellen, dass Cognos die Datenbank erreichen kann.
+   - Nach erfolgreichem Test speichern Sie die Konfiguration und starten Sie die Cognos‑Services neu.
+
+Damit ist die Microsoft SQL Server‑Content‑Store‑Datenbankverbindung in IBM Cognos Analytics eingerichtet.",inst_cr_winux_chunk21.md
+"Wie muss die Kerberos‑Initialisierungsdatei auf einem Windows‑Rechner abgelegt und benannt werden, damit IBM Cognos Analytics sie verwendet?","Auf Windows‑Rechnern muss die Kerberos‑Initialisierungsdatei in das Verzeichnis **C:\Windows** kopiert und dort **krb5.ini** genannt werden, damit IBM Cognos Analytics sie verwendet.",inst_cr_winux_chunk44.md
+Wie erstelle und registriere ich einen SPN für den DQM‑Abfrageservice in Active Directory?,"Um einen Service Principal Name (SPN) für den DQM‑Abfrageservice in Active Directory zu erstellen und zu registrieren, gehen Sie wie folgt vor (alle Angaben basieren auf dem bereitgestellten Dokument):
+
+1. **Bestimmen Sie die erforderlichen Werte**
+   - **Service‑Name**: Für DQM lautet der Service‑Name `dqm`.
+   - **Fully Qualified Domain Name (FQDN)** des Servers, auf dem der Abfrageservice läuft (z. B. `myserver.mydomain.com`).
+   - **Realm**: Der Realm‑Name, der in Ihrer Kerberos‑Initialisierungsdatei (`krb5.conf`/`krb5.ini`) konfiguriert ist (z. B. `MY-WINDOWSDOMAIN.COM`).
+   - **Active‑Directory‑Domänenbenutzer**, der für die Delegierung zugelassen ist (z. B. `dqmuser`).
+
+2. **Erstellen Sie den SPN‑String**
+   Der SPN muss das Format `<service>/<FQDN>@<REALM>` haben.
+   Beispiel:
+   ```
+   dqm/myserver.mydomain.com@MY-WINDOWSDOMAIN.COM
+   ```
+
+3. **Registrieren Sie den SPN im Active Directory**
+   Verwenden Sie das Windows‑Tool **`setspn`** mit dem Parameter `-s` (add / replace).
+   Der Befehl lautet:
+   ```cmd
+   setspn -s dqm/myserver.mydomain.com mywindowsdomain\dqmuser
+   ```
+   - `mywindowsdomain` ist der NetBIOS‑Name Ihrer AD‑Domäne.
+   - `dqmuser` ist der zuvor bestimmte AD‑Benutzer.
+
+4. **Überprüfen Sie die Registrierung**
+   - **Alle SPNs des Benutzers anzeigen**:
+     ```cmd
+     setspn -L mywindowsdomain\dqmuser
+     ```
+   - **Nach dem konkreten SPN suchen**:
+     ```cmd
+     setspn -Q dqm/myserver.mydomain.com
+     ```
+   Die Ausgabe sollte den gerade registrierten SPN enthalten, was bestätigt, dass die Registrierung erfolgreich war.
+
+5. **Hinweis zur Delegierung**
+   Stellen Sie sicher, dass der AD‑Benutzer, dem Sie den SPN zugewiesen haben, für **Kerberos‑Delegierung** (z. B. „vertrauenswürdige für die Delegierung“) konfiguriert ist, damit der DQM‑Abfrageservice sich gegenüber anderen Diensten authentifizieren kann.
+
+Durch Befolgen dieser Schritte ist der SPN für den DQM‑Abfrageservice korrekt erstellt und im Active Directory registriert.",inst_cr_winux_chunk44.md
+"Wie kann ich das ParquetMigrate‑Dienstprogramm unter Windows ausführen, um das Parquet‑Format aller hochgeladenen Dateien und Datasets im Content Store zu aktualisieren?","Um das Parquet‑Format aller hochgeladenen Dateien und Datasets im Content Store unter Windows zu aktualisieren, gehen Sie wie folgt vor:
+
+1. **Öffnen Sie ein Eingabeaufforderungsfenster** (cmd) mit Administratorrechten.
+2. **Navigieren Sie zum Verzeichnis `bin64` Ihrer Cognos‑Installation**:
+   ```bat
+   cd <Installationsverzeichnis>\cognos_analytics_location\bin64
+   ```
+   (Ersetzen Sie `<Installationsverzeichnis>\cognos_analytics_location` durch den tatsächlichen Pfad Ihrer Installation.)
+
+3. **Starten Sie das Dienstprogramm** `ParquetMigrate.bat` mit den erforderlichen Anmeldeinformationen.
+   Für ein reines Update des Parquet‑Formats verwenden Sie:
+   ```bat
+   ParquetMigrate -n <Namespace> -u <Benutzername> -p <Passwort>
+   ```
+   - `-n <Namespace>` : Der Namespace, in dem Sie sich authentifizieren.
+   - `-u <Benutzername>` : Ihr Cognos‑Benutzername.
+   - `-p <Passwort>` : Das zugehörige Passwort.
+
+   **Optional:** Wenn Sie gleichzeitig die tieferen Datenmerkmale (Deep Data Features) neu abrufen möchten, fügen Sie den Parameter `-m` hinzu:
+   ```bat
+   ParquetMigrate -m -n <Namespace> -u <Benutzername> -p <Passwort>
+   ```
+
+4. **Führen Sie den Befehl aus** und warten Sie, bis das Programm beendet ist.
+   Nach Abschluss wird die Anzahl der aktualisierten Objekte angezeigt. Ein Wert von 0 bedeutet, dass keine Objekte ein Update benötigten.
+
+**Hinweis:**
+- Stellen Sie sicher, dass die angegebenen Anmeldeinformationen über die nötigen Berechtigungen verfügen, um auf den Content Store zuzugreifen.
+- Wenn Ihre Cognos‑Umgebung SSL verwendet und das Zertifikat nicht im Java‑Keystore importiert ist, können Sie zusätzlich den Parameter `-k` hinzufügen, um die SSL‑Zertifikatsvalidierung zu ignorieren:
+  ```bat
+  ParquetMigrate -k -n <Namespace> -u <Benutzername> -p <Passwort>
+  ```
+
+Damit wird das Parquet‑Format aller vorhandenen hochgeladenen Dateien und Datasets im Content Store auf das aktuelle Format aktualisiert, sodass alle nachfolgenden Abfragen von den Leistungsverbesserungen profitieren.",inst_cr_winux_chunk15.md
+Wie erstelle ich in IBM Cognos Configuration einen Alias‑Root für ein Dateisystem‑Repository?,"Um in IBM Cognos Configuration einen Alias‑Root für ein Dateisystem‑Repository anzulegen, gehen Sie wie folgt vor:
+
+1. **IBM Cognos‑Service stoppen** (falls er läuft).
+2. **IBM Cognos Configuration starten**.
+3. Im Menü **Aktionen > Globale Konfiguration bearbeiten** auswählen.
+4. Auf der Registerkarte **Allgemein** die Option **Alias‑Stammdaten** wählen und auf **Bearbeiten** klicken.
+5. Im Dialog **Wert – Alias‑Stammdaten** **Hinzufügen** klicken.
+6. **Alias‑Stammname** eingeben (einen eindeutigen Namen für das Repository).
+7. **Vollständigen Pfad** zur Speicherposition angeben:
+   - Unter Windows: `file:///C:/Ihr/Pfad` oder `file://Server/Share`.
+   - Unter UNIX/Linux: `file:///Ihr/Pfad`. (Relative Pfade werden nicht unterstützt.)
+   - In verteilten Installationen müssen sowohl Windows‑URI als auch UNIX‑URI auf dieselbe Dateiposition zeigen.
+8. **OK** bestätigen.
+9. **IBM Cognos‑Service neu starten**, damit die Änderungen wirksam werden.
+
+Damit ist der Alias‑Root für das Dateisystem‑Repository eingerichtet und kann in Datenquellenverbindungen verwendet werden.",inst_cr_winux_chunk60.md
+"Wie deinstalliere ich IBM Cognos Analytics unter Windows und stelle sicher, dass alle temporären Internetdateien entfernt werden?","Um IBM Cognos Analytics unter Windows zu deinstallieren und gleichzeitig sicherzustellen, dass alle temporären Internetdateien entfernt werden, gehen Sie wie folgt vor:
+
+1. **Alle Programme schließen** – Beenden Sie alle laufenden Anwendungen, bevor Sie mit der Deinstallation beginnen, damit keine Dateien gesperrt sind.
+
+2. **Deinstallationsprogramm starten**
+   - **Option 1:** Öffnen Sie das **Startmenü**, suchen Sie die Anwendung **„IBM Cognos Analytics“**, klicken Sie mit der rechten Maustaste darauf und wählen Sie **„Deinstallieren“**.
+   - **Option 2:** Wenn Sie keinen Zugriff auf das Startmenü haben, navigieren Sie zum Installationsverzeichnis `install_location\uninstall` und führen Sie die Datei **`Uninstall_IBM Cognos Analytics.exe`** aus.
+
+3. **Deinstallationsassistenten folgen** – Befolgen Sie die angezeigten Anweisungen, um die gewünschten Komponenten zu entfernen. Der Assistent protokolliert die Vorgänge in der Datei `cognos_uninst_log.htm` (zu finden im Temp‑Verzeichnis).
+
+4. **Temporäre Internetdateien löschen** – Nachdem die Deinstallation abgeschlossen ist, öffnen Sie Ihren Web‑Browser und löschen Sie **alle temporären Internetdateien** (Cache, Cookies, Verlauf etc.). Die genaue Vorgehensweise finden Sie in der Dokumentation Ihres Browsers; typischerweise befindet sich diese Option unter **Einstellungen → Datenschutz/Verlauf → Browserdaten löschen**.
+
+5. **Optional: Restverzeichnisse prüfen** – Das Installationsverzeichnis (`install_location`) bleibt nach der Deinstallation erhalten. Wenn Sie es nicht mehr benötigen, können Sie den Ordner manuell löschen.
+
+Durch diese Schritte wird IBM Cognos Analytics vollständig deinstalliert und sämtliche temporären Internetdateien werden entfernt.",inst_cr_winux_chunk60.md
+Wie kann ich WebView2 für die Authentifizierung im Framework Manager aktivieren?,"Um WebView2 für die Authentifizierung im Framework Manager zu aktivieren, gehen Sie wie folgt vor:
+
+1. **Microsoft Edge WebView2‑Runtime installieren**
+   - Laden Sie die Runtime von https://developer.microsoft.com/en-us/microsoft-edge/webview2/ herunter.
+   - Führen Sie das Installationsprogramm aus und installieren Sie die Runtime auf dem Rechner, auf dem Framework Manager läuft. (Falls die Runtime bereits installiert ist, können Sie diesen Schritt überspringen.)
+
+2. **WebView2 im Framework Manager aktivieren**
+   a. Öffnen Sie das Verzeichnis **`installation_location\configuration`** (der Ordner, in dem Framework Manager installiert ist).
+   b. Öffnen Sie die Datei **`fm.ini`** mit einem Texteditor.
+   c. Suchen Sie im Abschnitt **`webview2`** die Zeile
+
+   ```xml
+   <Preference Name=""logonPage"">FALSE</Preference>
+   ```
+
+   und ändern Sie **`FALSE`** zu **`TRUE`**, sodass die Zeile lautet:
+
+   ```xml
+   <Preference Name=""logonPage"">TRUE</Preference>
+   ```
+
+3. **Framework Manager neu starten**
+   - Schließen Sie den Framework Manager (falls er noch geöffnet ist) und starten Sie ihn anschließend erneut, damit die Änderung wirksam wird.
+
+**Hinweis:**
+Falls die WebView2‑Runtime nicht installiert ist, zeigt Framework Manager beim Aktivieren von WebView2 eine Meldung an, in der Sie aufgefordert werden, die Runtime zu installieren. Bestätigen Sie die Meldung und führen Sie die Installation aus, bevor Sie die oben genannten Schritte wiederholen.
+
+Damit ist WebView2 für die Authentifizierung im Framework Manager aktiviert.",inst_cr_winux_chunk31.md
+Wie aktiviere ich WebView2 für die Authentifizierung im IBM Cognos Framework Manager?,"Um WebView2 für die Authentifizierung im IBM Cognos Framework Manager zu aktivieren, gehen Sie wie folgt vor:
+
+1. **WebView2‑Runtime installieren**
+   Laden Sie die Microsoft Edge WebView2‑Runtime von
+   <https://developer.microsoft.com/en-us/microsoft-edge/webview2/>
+   herunter und führen Sie das Installationsprogramm aus. (Falls die Runtime bereits installiert ist, können Sie diesen Schritt überspringen.)
+
+2. **WebView2 in der Framework‑Manager‑Konfiguration aktivieren**
+   a. Öffnen Sie den Ordner *installation_location\configuration* des Framework Managers.
+   b. Öffnen Sie die Datei **fm.ini** mit einem Texteditor.
+   c. Suchen Sie den Abschnitt **\<webview2\>** und ändern Sie die Zeile
+
+   ```xml
+   <Preference Name=""logonPage"">FALSE</Preference>
+   ```
+
+   zu
+
+   ```xml
+   <Preference Name=""logonPage"">TRUE</Preference>
+   ```
+
+3. **Framework Manager neu starten**
+   Schließen Sie ggf. ein bereits geöffnetes Framework‑Manager‑Fenster und starten Sie das Programm erneut, damit die Änderung wirksam wird.
+
+*Hinweis:* Wenn die Runtime nicht installiert ist und Sie WebView2 aktivieren, erscheint beim nächsten Start eine Meldung, die Sie auffordert, die Runtime zu installieren – folgen Sie dann den Anweisungen in Schritt 1.
+
+Damit ist WebView2 für die Authentifizierung im IBM Cognos Framework Manager aktiviert.",inst_cr_winux_chunk31.md
+Welche Passwortanforderungen muss das Kennwort bei der Easy Install‑Installation von IBM Cognos Analytics erfüllen?,"Das Kennwort muss mindestens einen Großbuchstaben, einen Kleinbuchstaben, mindestens eine Ziffer und mindestens ein Sonderzeichen aus dem Bereich (!@#$) enthalten. Die Länge muss zwischen 15 und 20 Zeichen liegen (Mindestlänge 15 Zeichen gemäß Branchenstandards).",inst_cr_winux_chunk6.md
+"Wie kann ich das LOG_INTERVAL in der config.conf anpassen, um das Intervall für die Leistungsprotokollierung des Jupyter Notebook Servers zu ändern?","Um das Intervall für die Leistungsprotokollierung des Jupyter Notebook‑Servers zu ändern, passen Sie die Variable **LOG_INTERVAL** in der Datei **config.conf** an:
+
+1. Öffnen Sie die Datei
+   - **Linux**: `jupyter_installation_location/dist/scripts/unix/config.conf`
+   - **Windows**: `jupyter_installation_location/dist/scripts/windows/config.conf`
+   in einem Texteditor.
+
+2. Suchen Sie die Zeile, die mit `LOG_INTERVAL=` beginnt (Standardwert = 300 Sekunden).
+
+3. Ändern Sie den Wert nach Ihren Bedürfnissen, z. B.
+   ```
+   LOG_INTERVAL=600   # Protokollierung alle 10 Minuten
+   ```
+
+4. Speichern Sie die Datei.
+
+5. Wenden Sie die Änderung an, indem Sie den Build‑ und Startup‑Prozess erneut ausführen:
+   - **Linux**:
+     ```
+     dist/scripts/unix/build.sh
+     dist/scripts/unix/startup.sh
+     ```
+   - **Windows**:
+     ```
+     dist\scripts\windows\build.bat
+     dist\scripts\windows\startup.bat
+     ```
+
+Nach dem Neustart verwendet der Jupyter Notebook‑Server das neue **LOG_INTERVAL**‑Intervall für die Leistungsprotokolle.",inst_cr_winux_chunk11.md
+"Wie groß muss das temporäre Verzeichnis mindestens sein, bevor ich das IBM Cognos Analytics‑Gateway installiere?",Das temporäre Verzeichnis muss mindestens 5 GB freien Speicherplatz haben.,inst_cr_winux_chunk25.md
+"Wie lege ich den Wert für „Host für die Koordination von Mitgliedern“ fest, wenn mein Computer mehrere Netzadapter hat?","Wenn Ihr Computer über mehrere Netzadapter verfügt, können Sie den Wert für **„Host für die Koordination von Mitgliedern“** auf zwei Arten festlegen:
+
+1. **Direkte Angabe einer IP‑Adresse**
+   - Setzen Sie den Host‑Wert auf die IP‑Adresse des Netzwerkadapters, den Sie verwenden möchten. Damit wird sichergestellt, dass das Produkt genau diesen Adapter nutzt.
+
+2. **Verwendung eines Musterabgleichs**
+   - **Schritt 1:** Setzen Sie den Host‑Wert auf den **vollständig qualifizierten Domänennamen (FQDN)** des lokalen Computers.
+   - **Schritt 2:** Öffnen Sie die Datei
+     `installation_location/wlp/usr/servers/cognosserver/bootstrap.properties`.
+   - **Schritt 3:** Fügen Sie dort einen Eintrag hinzu, der das gewünschte Muster definiert, z. B.:
+
+     ```
+     com.ibm.bi.jgroups.matchaddress=matched_pattern
+     ```
+
+     Dabei kann `matched_pattern` eines der beiden Formate haben:
+
+     * **IP‑Adress‑Muster**
+       ```
+       com.ibm.bi.jgroups.matchaddress=match-address:10\\..*
+       ```
+       (Dieses Beispiel greift jede IP‑Adresse, die mit 10. beginnt, z. B. 10.1.2.3.)
+
+     * **Adapter‑Namens‑Muster**
+       ```
+       com.ibm.bi.jgroups.matchaddress=match-interface:eth.*
+       ```
+       (Dieses Beispiel greift jeden Adapter, dessen Name mit eth beginnt, z. B. eth2.)
+
+   - **Hinweis zur Syntax:** In `.properties`‑Dateien ist der umgekehrte Schrägstrich (`\`) ein Sonderzeichen. Deshalb muss er verdoppelt werden (`\\`).
+
+Wählen Sie die Methode, die am besten zu Ihrer Netzwerkumgebung passt. Durch die Angabe eines eindeutigen IP‑Adress‑ oder Namens‑Musters stellen Sie sicher, dass Cognos den richtigen Netzwerkadapter für die Mitgliedskoordinierung verwendet.",inst_cr_winux_chunk35.md
+"Wie konfiguriere ich den Host für die Koordination von Mitgliedern, wenn der Computer mehrere Netzadapter hat?","Wenn Ihr Computer über mehrere Netzadapter verfügt, können Sie den Host‑Wert für die Koordination von Mitgliedern auf zwei Arten festlegen:
+
+1. **Direktes Festlegen einer IP‑Adresse**
+   - Setzen Sie den Host‑Wert auf die gewünschte IP‑Adresse des Netzwerkadapters, den das Produkt verwenden soll.
+   - Beispiel: `Host = 10.0.1.45`.
+
+2. **Verwendung eines Musterabgleichs (empfohlen, wenn die IP‑Adresse variabel sein kann)**
+   a. Setzen Sie den Host‑Wert weiterhin auf den vollständig qualifizierten Domänennamen (FQDN) des lokalen Computers.
+   b. Öffnen Sie die Datei
+   `installation_location/wlp/usr/servers/cognosserver/bootstrap.properties`.
+   c. Fügen Sie dort einen Eintrag hinzu, der das gewünschte Muster definiert, z. B.:
+
+   - **IP‑Adress‑Muster**
+     ```properties
+     com.ibm.bi.jgroups.matchaddress=match-address:10\\..*
+     ```
+     (Dieses Muster greift jede IP‑Adresse, die mit „10.“ beginnt.)
+
+   - **Adapter‑Namens‑Muster**
+     ```properties
+     com.ibm.bi.jgroups.matchaddress=match-interface:eth.*
+     ```
+     (Damit wird jeder Adapter gewählt, dessen Name mit „eth“ beginnt, z. B. eth0, eth1.)
+
+   Hinweis: In `.properties`‑Dateien muss der Backslash (`\`) escaped werden, daher wird `\\` verwendet.
+
+Wählen Sie die Methode, die am besten zu Ihrer Netzwerkumgebung passt, und stellen Sie sicher, dass dieselben Werte auf allen Cognos‑Analytics‑Servern Ihrer verteilten Umgebung verwendet werden.",inst_cr_winux_chunk35.md
+Wie kann ich das 32‑Bit‑Web‑Gateway in IBM Cognos Analytics aktivieren?,"Im bereitgestellten Dokument wird das Aktivieren des 32‑Bit‑Web‑Gateways lediglich als eigener Abschnitt („32‑Bit‑Web‑Gateway aktivieren“) aufgeführt. Der genaue Vorgang bzw. die einzelnen Schritte zur Aktivierung sind in dem angegebenen Auszug jedoch nicht enthalten. Um das 32‑Bit‑Web‑Gateway zu aktivieren, müssen Sie die vollständige Dokumentation zu diesem Abschnitt konsultieren, da die notwendigen Anweisungen dort beschrieben werden. Ohne weitere Details aus dem Dokument kann keine konkrete Vorgehensweise angegeben werden.",inst_cr_winux_chunk2.md
+Wie konfiguriere ich die Dispatcher‑URIs für IBM Cognos Analytics?,"In dem bereitgestellten Dokument wird die Konfiguration der Dispatcher‑URIs nur als eigener Abschnitt erwähnt. Sie finden die entsprechenden Anweisungen unter dem Kapitel „Dispatcher‑URIs konfigurieren“ auf Seite 138. Der Abschnitt enthält die detaillierten Schritte, die Sie befolgen müssen, um die Dispatcher‑URIs in IBM Cognos Analytics zu konfigurieren. Bitte lesen Sie diesen Teil des Handbuchs für die vollständige Vorgehensweise.",inst_cr_winux_chunk2.md
+"Welches Format muss der Bind‑Benutzer‑DN und das zugehörige Passwort haben, wenn ich Microsoft Active Directory für die LTPA‑Authentifizierung in IBM Cognos Analytics konfiguriere?","Der Bind‑Benutzer‑DN ist als User‑Principal‑Name anzugeben, also im Format **user@domain**. Das zugehörige Passwort ist das reguläre AD‑Passwort des angegebenen Benutzers.",inst_cr_winux_chunk50.md
+Wie deinstalliere ich den IBM Cognos Analytics Jupyter Notebook Server unter Linux?,"Um den IBM Cognos Analytics Jupyter Notebook Server unter Linux zu deinstallieren, führen Sie die folgenden Schritte aus:
+
+1. Öffnen Sie ein Terminal‑Fenster.
+2. Wechseln Sie in das Verzeichnis, in dem die Deinstallations‑Skripte installiert wurden (standardmäßig `dist/scripts/unix` im Installations‑Pfad, z. B. `/opt/ibm/cognos/jupyter/dist/scripts/unix`).
+   ```bash
+   cd /opt/ibm/cognos/jupyter/dist/scripts/unix
+   ```
+3. Stellen Sie sicher, dass das Skript ausführbar ist (falls nötig):
+   ```bash
+   chmod u+x uninstall.sh
+   ```
+4. Führen Sie das Deinstallations‑Skript aus:
+   ```bash
+   ./uninstall.sh
+   ```
+
+Das Skript stoppt die laufenden Docker‑Container, entfernt die zugehörigen Docker‑Images und räumt die Jupyter‑Server‑Komponenten auf. Nach Abschluss ist der IBM Cognos Analytics Jupyter Notebook Server vollständig deinstalliert.",inst_cr_winux_chunk10.md
+Wie deinstalliere ich den IBM Cognos Analytics Jupyter Notebook Server unter Windows?,"Um den IBM Cognos Analytics Jupyter Notebook Server unter Windows zu deinstallieren, gehen Sie wie folgt vor:
+
+1. Öffnen Sie ein Eingabeaufforderungsfenster **mit Administratorrechten**.
+2. Navigieren Sie in das Verzeichnis, in dem die Deinstallations‑Scripts abgelegt wurden, z. B.:
+   ```
+   cd <Installationspfad>\dist\scripts\windows
+   ```
+   (Ersetzen Sie `<Installationspfad>` durch den Pfad, den Sie bei der Installation gewählt haben.)
+3. Führen Sie das Deinstallations‑Script aus:
+   ```
+   uninstall.bat
+   ```
+   bzw. `.\uninstall.bat`.
+
+Das Script entfernt die Docker‑Container, die zugehörigen Images und löscht die Jupyter‑Server‑Komponenten von Ihrem System. Danach können Sie das Eingabeaufforderungsfenster schließen.",inst_cr_winux_chunk10.md
+Wie importiere ich das CA‑Root‑Zertifikat in den Cognos Analytics‑Truststore unter Windows?,"Um das CA‑Root‑Zertifikat (ca.cer) in den Cognos Analytics‑Truststore unter Windows zu importieren, gehen Sie wie folgt vor:
+
+1. **Stellen Sie sicher, dass**
+   * die Datei **ca.cer** im Verzeichnis `install_location\bin` liegt,
+   * das gewünschte **Keystore‑Passwort** (keystore_password) bereitsteht – es muss dasselbe Passwort sein, das Sie ggf. bereits für den Verschlüsselungsschlüssel festgelegt haben.
+
+2. **Öffnen Sie eine Eingabeaufforderung** (cmd) mit Administratorrechten und wechseln Sie in das Cognos‑Installations‑Verzeichnis, z. B.:
+   ```cmd
+   cd C:\Pfad\zu\install_location\bin
+   ```
+
+3. **Führen Sie den Import‑Befehl aus:**
+   ```cmd
+   ThirdPartyCertificateTool.bat -i -T -r ca.cer -p keystore_password
+   ```
+   *`-i`* = importieren,
+   *`-T`* = in den Truststore (Truststore = Cognos Analytics‑Truststore),
+   *`-r ca.cer`* = Pfad zur CA‑Root‑Zertifikatsdatei,
+   *`-p keystore_password`* = Passwort für den Keystore.
+
+4. **Ergebnis:** Der Befehl liest **ca.cer** und legt den Inhalt mit dem angegebenen Passwort in die Datei **CAMKeystore** im Verzeichnis `install_location\configuration\certs`. Damit ist das CA‑Root‑Zertifikat im Truststore von Cognos Analytics verfügbar.
+
+5. **Optional:** Wenn Sie Zwischenzertifikate (Intermediate‑CAs) besitzen, wiederholen Sie den gleichen Befehl für jede Zwischenzertifikatsdatei, um diese ebenfalls in den Truststore zu importieren.
+
+Nachdem der Import abgeschlossen ist, können Sie die Cognos‑Konfiguration speichern und den Cognos‑Dienst neu starten, damit die Änderungen wirksam werden.",inst_cr_winux_chunk41.md
+Wie kann ich die webbasierte Modellierung für eine JDBC‑Datenquelle in IBM Cognos Administration aktivieren?,"Um die webbasierte Modellierung für eine JDBC‑Datenquelle zu aktivieren, gehen Sie wie folgt vor:
+
+1. Öffnen Sie **IBM Cognos Analytics** und navigieren Sie zu **Verwalten > Administrationskonsole**.
+2. Wechseln Sie in der **IBM Cognos Administration** zur Registerkarte **Konfiguration** und wählen Sie dort **Datenquellenverbindungen** aus.
+3. Suchen Sie in der Liste die gewünschte JDBC‑Datenquelle, klicken Sie auf die zugehörige Aktion **Eigenschaften festlegen**.
+4. Öffnen Sie die Registerkarte **Verbindung** und aktivieren Sie das Kontrollkästchen **Webbasierte Modellierung zulassen**.
+
+Nachdem das Häkchen gesetzt ist, speichern Sie die Änderungen (falls erforderlich) und schließen Sie die Konsole. Die Datenquelle steht nun für die Erstellung von Datenmodulen in der webbasierten Modellierung zur Verfügung.",inst_cr_winux_chunk34.md
+Wie aktiviere ich die webbasierte Modellierung für eine JDBC‑Datenquelle in IBM Cognos Analytics?,"Um die webbasierte Modellierung für eine JDBC‑Datenquelle zu aktivieren, gehen Sie wie folgt vor:
+
+1. Öffnen Sie IBM Cognos Analytics und navigieren Sie zu **Verwalten > Administrationskonsole**.
+2. In der **IBM Cognos Administration** wählen Sie auf der Registerkarte **Konfiguration** die Option **Datenquellenverbindungen**.
+3. Suchen Sie in der Liste die gewünschte JDBC‑Datenquelle, klicken Sie auf die zugehörige Aktion **Eigenschaften festlegen**.
+4. Wechseln Sie zur Registerkarte **Verbindung** und aktivieren Sie das Kontrollkästchen **Webbasierte Modellierung zulassen**.
+
+Bestätigen Sie die Änderungen und speichern Sie die Konfiguration. Die webbasierte Modellierung ist nun für die ausgewählte JDBC‑Datenquelle aktiviert.",inst_cr_winux_chunk34.md
+Wie richte ich die JDBC‑Treiber für einen IBM Db2‑Content‑Store in IBM Cognos Analytics ein?,"Um den JDBC‑Treiber für einen IBM Db2‑Content‑Store in IBM Cognos Analytics zu konfigurieren, gehen Sie wie folgt vor (alle Angaben aus dem bereitgestellten Dokument):
+
+1. **Passenden Db2‑JDBC‑Treiber besorgen**
+   - Laden Sie einen **JDBC‑Treiber vom Typ 4** (z. B. `db2jcc4.jar`) herunter.
+   - Zusätzlich benötigen Sie die zugehörige **Lizenzdatei**:
+     *Für Db2 unter Linux/UNIX/Windows* `db2jcc_license_cu.jar`
+     *Für Db2 unter z/OS* `db2jcc_license_cisuz.jar`.
+
+2. **Dateien in das Cognos‑Verzeichnis kopieren**
+   - Öffnen Sie das Verzeichnis Ihrer Db2‑Installation, typischerweise
+     `Db2_installation\sqllib\java`.
+   - Kopieren Sie die beiden Dateien (`db2jcc4.jar` und die passende Lizenz‑jar) in das Verzeichnis
+     `IBM Cognos Analytics\install_location\drivers` Ihrer Cognos‑Installation.
+
+3. **Cognos‑Konfiguration öffnen**
+   - Starten Sie **IBM Cognos Configuration** (z. B. über das Start‑Menü oder `cogconfig.sh`/`cogconfig.exe`).
+
+4. **Datenbankverbindung anlegen**
+   - Navigieren Sie im Baum zu **Datenzugriff → Content Manager → Content Store**.
+   - Vergewissern Sie sich, dass der **Typ** auf **DB2‑Datenbank** eingestellt ist (Standardkonfiguration).
+   - Tragen Sie unter **Datenbank‑Server** und **Port** den Hostnamen und Port Ihrer Db2‑Instanz ein (z. B. `localhost:50000`).
+   - Geben Sie unter **Benutzerkennung** und **Kennwort** die Anmeldedaten für die Content‑Store‑Datenbank ein.
+   - Unter **Datenbankname** geben Sie den Namen der Content‑Store‑Datenbank an (maximal 8 Zeichen, nur Buchstaben, Zahlen, Unter‑ und Bindestriche).
+
+5. **Speichern und prüfen**
+   - Bestätigen Sie die Eingaben und speichern Sie die Konfiguration.
+   - Die kopierten JDBC‑Treiber‑JAR‑Dateien werden nun von Cognos verwendet, um die Verbindung zum Db2‑Content‑Store aufzubauen.
+
+Damit ist der JDBC‑Treiber korrekt eingerichtet und Cognos kann auf den Db2‑Content‑Store zugreifen.",inst_cr_winux_chunk20.md
+"Welche vorbereitenden Schritte muss ich durchführen, bevor ich in IBM Cognos Configuration eine Datenbank als Repository für Protokollnachrichten angeben?","Bevor Sie in IBM Cognos Configuration eine Datenbank als Repository für Protokollnachrichten angeben, müssen Sie sicherstellen, dass
+
+1. die Protokolldatenbank bereits erstellt wurde, und
+2. der passende Datenbank‑Client installiert und eingerichtet ist.
+
+Erst wenn diese beiden vorbereitenden Schritte erledigt sind, können Sie die Datenbank als Repository konfigurieren.",inst_cr_winux_chunk45.md
+"Welche Umgebungseigenschaften müssen auf dem Computer, auf dem Framework Manager installiert ist, konfiguriert werden?","Auf dem Computer, auf dem Framework Manager installiert ist, müssen mindestens die beiden Umgebungseigenschaften **Gateway‑URI** und **Dispatcher‑URI für externe Anwendungen** konfiguriert werden. (Falls ein dediziertes Gateway verwendet wird, ist zusätzlich die Eigenschaft **Dispatcher‑URIs für das Gateway** auf dem entsprechenden Gateway‑Computer zu setzen.)",inst_cr_winux_chunk14.md
+Wie teste ich das IBM Cognos Analytics‑Gateway nach der Installation mit einem Web‑Browser?,"Um das IBM Cognos Analytics‑Gateway nach der Installation zu testen, gehen Sie wie folgt vor:
+
+1. Vergewissern Sie sich, dass der Web‑Server, auf dem das Gateway läuft, gestartet ist.
+2. Öffnen Sie einen Web‑Browser Ihrer Wahl.
+3. Geben Sie in die Adressleiste den Gateway‑URI ein, den Sie in IBM Cognos Configuration konfiguriert haben (z. B. `http://<host_name>:<port>/ibmcognos`).
+
+Wenn die Installation korrekt ist, wird die Willkommensseite des IBM Cognos Analytics‑Portals angezeigt.",inst_cr_winux_chunk30.md
+Wie kann ich das IBM Cognos Analytics‑Gateway nach der Installation mit einem Web‑Browser testen?,"Um das IBM Cognos Analytics‑Gateway nach der Installation zu prüfen, gehen Sie wie folgt vor:
+
+1. **Web‑Server prüfen** – Vergewissern Sie sich, dass der Web‑Server, auf dem das Gateway läuft, gestartet ist.
+2. **Browser öffnen** – Starten Sie einen Web‑Browser Ihrer Wahl.
+3. **Gateway‑URI eingeben** – Geben Sie in die Adressleiste den Gateway‑URI ein, den Sie in IBM Cognos Configuration hinterlegt haben. Ein typisches Beispiel ist:
+
+```
+http://<host_name>:<port>/ibmcognos
+```
+
+4. **Ergebnis prüfen** – Wenn das Gateway korrekt installiert und konfiguriert ist, wird die Willkommensseite des IBM Cognos Analytics‑Portals angezeigt.
+
+Damit haben Sie das Gateway erfolgreich mit einem Browser getestet.",inst_cr_winux_chunk30.md
+"Wie teste ich die Gateway‑Konfiguration, nachdem ich den Dispatcher‑URI in Cognos Configuration angegeben habe?","Nachdem Sie den Dispatcher‑URI in Cognos Configuration unter **Umgebung** eingetragen haben, öffnen Sie im selben Fenster den Bereich **Lokale Konfiguration**. Dort öffnen Sie das **Aktionsmenü** und wählen **Test** aus. Dieser Befehl prüft die Gateway‑Konfiguration und zeigt an, ob die angegebene Dispatcher‑URI korrekt funktioniert.",inst_cr_winux_chunk7.md
+Wie führe ich eine unbeaufsichtigte (silent) Installation von IBM Cognos Analytics unter Windows mit einer Antwortdatei durch?,"Um eine unbeaufsichtigte (silent) Installation von IBM Cognos Analytics unter Windows mit einer Antwortdatei durchzuführen, gehen Sie wie folgt vor (alle Angaben stammen aus dem bereitgestellten Dokument):
+
+1. **Vorbereitung**
+   - Stellen Sie sicher, dass die Umgebungsvariable **DISPLAY** nicht gesetzt ist (dies ist insbesondere bei UNIX/Linux wichtig, schadet aber nicht unter Windows).
+   - Legen Sie ein Verzeichnis für die Antwortdatei an, z. B. `C:\ResponseFile`. Das Verzeichnis muss existieren, bevor Sie den Installer starten.
+
+2. **Antwortdatei erzeugen (optional)**
+   - Sie können eine Antwortdatei aus einer Vorlage erstellen oder den Installer im „Antwort‑Datei‑Modus“ starten, um eine Standard‑Antwortdatei zu generieren:
+
+     ```bat
+     analytics-installer-3.0.<build>-win.exe -DREPO=<RepoZipPath> -r ""C:\ResponseFile\ResponseFile.properties""
+     ```
+
+     Ersetzen Sie `<build>` durch die Build‑Nummer des Installers und `<RepoZipPath>` durch den Pfad zur `repository.zip`‑Datei.
+   - Nach Abschluss können Sie die erzeugte `ResponseFile.properties` nach Bedarf anpassen (z. B. Datenbank‑Parameter, Port‑Angaben, Lizenz‑Schlüssel usw.).
+
+3. **Silent‑Installation starten**
+   - Führen Sie den Installer mit den Optionen **‑f** (Pfad zur Antwortdatei) und **‑i silent** (silent‑Modus) aus:
+
+     ```bat
+     analytics-installer-3.0.<build>-win.exe -DREPO=<RepoZipPath> -f ""C:\ResponseFile\ResponseFile.properties"" -i silent
+     ```
+
+   - Optional können Sie den Rückgabewert (Exit‑Code) ausgeben, um den Erfolg der Installation zu prüfen:
+
+     ```bat
+     analytics-installer-3.0.<build>-win.exe -DREPO=<RepoZipPath> -f ""C:\ResponseFile\ResponseFile.properties"" -i silent
+     echo %errorlevel%
+     ```
+
+     Ein Rückgabewert von **0** bedeutet, dass die Installation erfolgreich abgeschlossen wurde; ein anderer Wert weist auf einen Fehler hin (weitere Details finden Sie im Installations‑Log unter `install_location\logs\IBM_Cognos_Analytics_Install_<timestamp>.log`).
+
+4. **Nach der Installation**
+   - Prüfen Sie das Installations‑Log, um sicherzustellen, dass keine Fehler aufgetreten sind.
+   - Starten Sie ggf. die Anwendungsebene bzw. die Inhaltsebene gemäß den üblichen Schritten (z. B. über Cognos Configuration).
+
+**Kurzfassung der wichtigsten Befehle**
+
+```bat
+REM 1. Antwortdatei erzeugen (falls noch nicht vorhanden)
+analytics-installer-3.0.<build>-win.exe -DREPO=<RepoZipPath> -r ""C:\ResponseFile\ResponseFile.properties""
+
+REM 2. Silent‑Installation mit Antwortdatei
+analytics-installer-3.0.<build>-win.exe -DREPO=<RepoZipPath> -f ""C:\ResponseFile\ResponseFile.properties"" -i silent
+echo %errorlevel%
+```
+
+Damit ist die unbeaufsichtigte (silent) Installation von IBM Cognos Analytics unter Windows abgeschlossen.",inst_cr_winux_chunk8.md
+"Wie exportiere ich die aktuelle IBM Cognos Analytics‑Konfiguration, um sie für eine unbeaufsichtigte Installation zu verwenden?","Um die aktuelle IBM Cognos Analytics‑Konfiguration für eine unbeaufsichtigte Installation zu exportieren, gehen Sie wie folgt vor:
+
+1. **IBM Cognos Configuration öffnen**
+   - Wählen Sie im Menü **Datei** den Eintrag **Exportieren als…**.
+
+2. **Export bestätigen**
+   - Im Dialogfenster bestätigen Sie mit **Ja**, dass der Inhalt unverschlüsselt exportiert werden soll.
+
+3. **Zielordner auswählen (optional)**
+   - Wenn Sie die Datei in einen anderen Ordner exportieren möchten, klicken Sie auf **Suchen** und wählen den gewünschten Pfad.
+
+4. **Dateinamen festlegen**
+   - Geben Sie im Feld **Dateiname** einen Namen für die Export‑Datei ein (z. B. `myConfig.xml`) und klicken auf **Speichern**.
+
+5. **Exportierte Datei bereitstellen**
+   - Kopieren Sie die erzeugte Konfigurationsdatei in das Verzeichnis
+     `install_location/configuration` auf dem Rechner, auf dem die unbeaufsichtigte Installation durchgeführt werden soll.
+
+6. **Datei umbenennen**
+   - Benennen Sie die Datei in `cogstartup.xml` um.
+
+7. **Unbeaufsichtigte Konfiguration starten**
+   - Öffnen Sie ein Terminal/Command‑Prompt und wechseln Sie in das Verzeichnis `install_location/bin` (bzw. `install_location/bin64`).
+   - Führen Sie den entsprechenden Befehl aus:
+     - **unter UNIX/Linux:** `./cogconfig.sh -s`
+     - **unter Windows:** `cogconfig.bat -s`
+
+Nach erfolgreichem Durchlauf wird der Rückgabestatus **0** zurückgegeben; jeder andere Wert weist auf einen Fehler hin.",inst_cr_winux_chunk9.md
+"Wie stelle ich in IBM Cognos Configuration die IP-Version auf IPv6 um, damit die Kommunikation IPv6 verwendet?","Um die IP‑Version in IBM Cognos Configuration auf IPv6 umzustellen, gehen Sie wie folgt vor:
+
+1. **IBM Cognos Configuration starten**
+   Öffnen Sie das Tool (z. B. über das Startmenü).
+
+2. **Zum Bereich „Umgebung“ navigieren**
+   Im Fenster *Explorer* klicken Sie links auf **Umgebung**.
+
+3. **IP‑Version auswählen**
+   - Suchen Sie die Eigenschaft **IP‑Version für die Auflösung des Hostnamens**.
+   - Klicken Sie in der Spalte **Wert** auf das Feld und wählen Sie **IPv6‑Adressen verwenden** (alternativ „IPv6‑Adressen verwenden“).
+
+4. **Einstellungen speichern**
+   Öffnen Sie das Menü **Datei** und klicken Sie auf **Speichern**.
+
+5. **Configuration schließen** (optional)
+   Schließen Sie das Programm, damit die Änderung wirksam wird.
+
+**Hinweis (optional):**
+Damit IBM Cognos Configuration jedes Mal mit IPv6‑Unterstützung startet, können Sie das Startkommando anpassen:
+
+- Unter Windows: Rechtsklick auf die Verknüpfung → **Eigenschaften** → im Feld **Ziel** ergänzen Sie `-ipv6` (z. B. `""C:\Pfad\zu\cogconfigw.exe"" -ipv6`).
+- Alternativ über die Eingabezeile starten: `cogconfig.bat -ipv6`.
+
+Nach diesen Schritten verwendet die IBM Cognos‑Kommunikation IPv6‑Adressen.",inst_cr_winux_chunk48.md
+"Welche Voraussetzungen muss ein Windows-Computer erfüllen, bevor IBM Cognos Analytics installiert werden kann?","Bevor Sie IBM Cognos Analytics auf einem Windows‑Computer installieren können, muss Folgendes sichergestellt sein:
+
+1. **Administratorrechte** – Der Benutzer, der die Installation ausführt, muss über Administrator‑Berechtigungen auf dem Ziel‑Computer verfügen.
+2. **Systemvariable TEMP** – Die Umgebungsvariable **TEMP** (bzw. **TMP**) muss auf ein existierendes Verzeichnis zeigen, in das temporäre Dateien geschrieben werden können. Während der Installation werden Dateien dort zwischengespeichert.
+3. **Ausreichender Speicherplatz** – Im temporären Verzeichnis (TEMP/TMP) muss mindestens **5 GB** freien Speicherplatz vorhanden sein, da die Installation temporär Daten dort ablegt.
+4. **Installationspfad** – Der Ziel‑Installationsordner sollte ausschließlich ASCII‑Zeichen im Pfadnamen enthalten (z. B. `C:\IBM\cognos\analytics`). Pfade mit Sonder‑ oder Nicht‑ASCII‑Zeichen können Probleme verursachen.
+5. **Ausführen von Cognos‑Configuration als Administrator** – Nach der Installation muss IBM Cognos Configuration mit Administratorrechten gestartet werden, um die Konfiguration vorzunehmen.
+
+Erfüllen all diese Voraussetzungen, kann die Installation von IBM Cognos Analytics auf dem Windows‑Computer gestartet werden.",inst_cr_winux_chunk19.md
+"Wie kann ich das asynchrone Zeitlimit in reportservice.xml erhöhen, um Fehler bei hoher Benutzerlast zu vermeiden?","Um das asynchrone Zeitlimit zu erhöhen, gehen Sie wie folgt vor:
+
+1. **Verzeichnis öffnen**
+   Wechseln Sie zum Verzeichnis
+   `installationsposition/webapps/p2pd/WEB-INF/services/`.
+
+2. **Datei bearbeiten**
+   Öffnen Sie die Datei **reportservice.xml** mit einem Texteditor.
+
+3. **Parameter anpassen**
+   Suchen Sie den Parameter **`async_wait_timeout_ms`** und ändern Sie dessen Wert auf einen höheren Wert, z. B. `120000` (statt des Standardwertes 30000).
+
+   *Optional:* Sie können auch das **Warteschlangen‑Zeitlimit** (`queue_wait_timeout`) auf `360` setzen, falls dies empfohlen wird.
+
+4. **Speichern**
+   Speichern Sie die geänderte **reportservice.xml**.
+
+5. **Service neu starten**
+   Starten Sie den betroffenen IBM Cognos‑Service (z. B. den Report‑Service) neu, damit die Änderungen wirksam werden.
+
+Durch das Erhöhen von `async_wait_timeout_ms` (z. B. auf 120 000 ms) wird das asynchrone Zeitlimit verlängert und Fehlermeldungen bei hoher Benutzerlast vermieden.",inst_cr_winux_chunk58.md
+"Wie füge ich die Datei cognos.cgi zu den ISAPI- und CGI-Einschränkungen in IIS hinzu, um IBM Cognos Analytics zu installieren?","Um die Datei **cognos.cgi** zu den ISAPI‑ und CGI‑Einschränkungen in IIS hinzuzufügen, gehen Sie wie folgt vor:
+
+1. **IIS‑Manager öffnen**
+   - Startmenü → „Internet Information Services (IIS) Manager“.
+
+2. **Zum Knoten „ISAPI and CGI Restrictions“ navigieren**
+   - Im linken Baum unter **Connections** Ihren Server auswählen.
+   - Im mittleren Bereich den Eintrag **ISAPI and CGI Restrictions** doppelklicken.
+
+3. **Neue Einschränkung hinzufügen**
+   - Rechts im Aktions‑Paneel auf **Add…** (oder **Hinzufügen**) klicken.
+
+4. **Pfad zur CGI‑Datei angeben**
+   - Im Feld **Executable** den vollständigen Pfad zur Datei **cognos.cgi** eingeben, z. B.:
+     ```
+     ""C:\Program Files\IBM\cognos\analytics\cgi-bin\cognos.cgi""
+     ```
+     (Pfad in Anführungszeichen setzen, wenn er Leerzeichen enthält.)
+
+5. **Beschreibung eingeben**
+   - Im Feld **Description** einen aussagekräftigen Namen angeben, z. B. **CognosCGI**.
+
+6. **Ausführung zulassen**
+   - Das Kontrollkästchen **Allow extension path to execute** (Ausführung des Erweiterungspfads zulassen) aktivieren.
+
+7. **Einschränkung speichern**
+   - Mit **OK** bestätigen. Die neue Regel erscheint nun in der Liste der ISAPI‑ und CGI‑Einschränkungen.
+
+Damit ist die Datei **cognos.cgi** für den IIS freigegeben und kann im Rahmen der IBM Cognos Analytics‑Installation verwendet werden.",inst_cr_winux_chunk29.md
+Wie stelle ich die Zeitüberschreitung für den Austausch der Portnummer des Datensatz‑Dienstes auf 600 Sekunden ein und welche Schritte sind danach nötig?,"Um die Zeitüberschreitung für den Austausch der Portnummer des Datensatz‑Dienstes auf 600 Sekunden (10 Minuten) zu setzen, gehen Sie wie folgt vor:
+
+1. Öffnen Sie die Konfigurationsdatei **xqe.config.custom.xml** (die Datei, in der die Netzwerk‑Parameter definiert sind).
+2. Suchen Sie den Eintrag für den Datensatz‑Dienst‑Timeout, der etwa so aussieht:
+   ```xml
+   <!-- The dataset-service port number exchange timeout in seconds. Default is 300 (5 minutes). -->
+   <dssPortNumberExchangeTimeout value=""300""/>
+   ```
+3. Ändern Sie den Wert **value** von **300** auf **600**:
+   ```xml
+   <dssPortNumberExchangeTimeout value=""600""/>
+   ```
+4. **Speichern** Sie die geänderte Datei **xqe.config.custom.xml**.
+5. **Starten Sie den IBM Cognos Analytics‑Service neu**, damit die neue Einstellung wirksam wird.
+
+Nach dem Neustart ist die Zeitüberschreitung für den Port‑Nummern‑Austausch des Datensatz‑Dienstes auf 600 Sekunden (10 Minuten) eingestellt.",inst_cr_winux_chunk39.md
+Wie kann ich den Timeout für den Austausch der Portnummer des Dataset‑Service in IBM Cognos Analytics ändern?,"Um den Timeout für den Austausch der Portnummer des Dataset‑Service zu ändern, gehen Sie wie folgt vor:
+
+1. Öffnen Sie die Datei **xqe.config.custom.xml** (die Konfigurationsdatei für IBM Cognos Analytics).
+2. Suchen Sie im Abschnitt `<network>` den Eintrag
+
+   ```xml
+   <!-- The dataset-service port number exchange timeout in seconds. Default is 300 (5 minutes). -->
+   <dssPortNumberExchangeTimeout value=""300""/>
+   ```
+
+3. Ändern Sie den Wert im Attribut **value** auf die gewünschte Anzahl Sekunden, z. B. für 10 Minuten:
+
+   ```xml
+   <dssPortNumberExchangeTimeout value=""600""/>
+   ```
+
+4. Speichern Sie die geänderte **xqe.config.custom.xml**.
+5. Starten Sie den **IBM Cognos Analytics‑Service** neu, damit die neue Einstellung wirksam wird.
+
+Nach dem Neustart ist der Timeout für den Port‑Nummern‑Austausch des Dataset‑Service auf den von Ihnen angegebenen Wert (z. B. 600 Sekunden) eingestellt.",inst_cr_winux_chunk39.md
+Wie richte ich in IBM Cognos Analytics einen externen Objektspeicher für die Berichtsausgabe ein?,"Um einen externen Objektspeicher für die Berichtsausgabe in IBM Cognos Analytics einzurichten, gehen Sie wie folgt vor:
+
+1. **Vorbereitung**
+   - Stellen Sie sicher, dass alle Content‑Manager‑Server Lese‑ und Schreibzugriff auf das gewünschte Dateisystem haben.
+   - Gewähren Sie dem Benutzerkonto, unter dem der IBM Cognos‑Service läuft, die entsprechenden Rechte (Read/Write) auf den Speicherort.
+
+2. **Erstellung des externen Objektspeichers**
+   a. Starten Sie **IBM Cognos Configuration**.
+   b. Im Explorer‑Baum navigieren Sie zu **Datenzugriff → Content Manager**.
+   c. Klicken Sie mit der rechten Maustaste auf den Namen Ihres **Content Store** und wählen **Neue Ressource → Externer Objektspeicher**.
+   d. Geben Sie im Dialog **„Neue Ressource – Externer Objektspeicher“** einen eindeutigen Namen für das Repository ein und bestätigen Sie mit **OK**.
+   e. Wählen Sie das neu angelegte Repository aus und öffnen Sie die **Ressourceneigenschaften**.
+   f. Klicken Sie in das Feld **Wert** und geben Sie im sich öffnenden Fenster den **URI‑Pfad** zum Dateisystem an, z. B.
+      - Windows: `file:///c:/meinSpeicherort`
+      - UNIX/Linux: `file:///meinSpeicherort`
+      (Der Pfad muss vollständig und existent sein; relative Pfade und Laufwerkszuordnungen werden nicht unterstützt.)
+
+3. **Abschluss**
+   - Starten Sie den **IBM Cognos‑Service** neu, damit die Änderungen wirksam werden.
+
+4. **Verbindung prüfen**
+   a. Öffnen Sie erneut **IBM Cognos Configuration**.
+   b. Unter **Explorer → Datenzugriff** klicken Sie mit der rechten Maustaste auf die Verbindung zu Ihrem externen Objektspeicher und wählen **Testen**.
+   c. Ist der Test erfolgreich, ist der externe Objektspeicher betriebsbereit; andernfalls prüfen Sie Pfad‑ und Berechtigungs‑Einstellungen.
+
+Damit ist die Berichtsausgabe künftig im definierten externen Objektspeicher abgelegt und wird über das Portal sowie das SDK bereitgestellt, ohne die Content‑Store‑Datenbank zu belasten.",inst_cr_winux_chunk38.md
+"Wie deaktiviere ich den anonymen Zugriff in IBM Cognos Analytics, sodass Benutzer sich authentifiziert anmelden müssen?","Um den anonymen Zugriff in IBM Cognos Analytics zu deaktivieren und damit alle Benutzer sich authentifiziert anmelden müssen, gehen Sie wie folgt vor:
+
+1. **IBM Cognos Configuration starten**
+   Öffnen Sie die Anwendung **IBM Cognos Configuration** auf jedem Rechner, auf dem ein Content Manager installiert ist.
+
+2. **Zum Authentication‑Knoten navigieren**
+   Im Explorer‑Fenster wählen Sie den Pfad **Sicherheit > Authentifizierung** und klicken dort auf **Cognos**.
+
+3. **Anonymen Zugriff deaktivieren**
+   Im Eigenschaften‑Fenster finden Sie die Einstellung **„Anonymen Zugriff zulassen“**.
+   - Aktivieren Sie das Kontrollkästchen neben dieser Eigenschaft (falls nicht bereits aktiviert).
+   - Setzen Sie den Wert auf **Falsch** (False).
+
+4. **Änderungen speichern**
+   Wählen Sie im Menü **Datei > Speichern**, um die Konfiguration zu übernehmen.
+
+Nach dem Speichern ist der anonyme Zugriff deaktiviert; Benutzer müssen sich nun mit gültigen Anmeldeinformationen authentifizieren, um auf IBM Cognos Analytics zugreifen zu können.",inst_cr_winux_chunk49.md
+"Wie deaktiviere ich den anonymen Zugriff in IBM Cognos Analytics, damit Benutzer sich authentifizieren müssen?","Um den anonymen Zugriff in IBM Cognos Analytics zu deaktivieren und damit alle Benutzer sich authentifizieren müssen, gehen Sie wie folgt vor:
+
+1. **IBM Cognos Configuration starten**
+   Öffnen Sie die Anwendung **IBM Cognos Configuration** auf **jedem Server, auf dem ein Content Manager installiert ist**.
+
+2. **Zum Authentifizierungs‑Namespace navigieren**
+   Im Explorer‑Fenster wählen Sie **Sicherheit > Authentifizierung** und klicken dort auf den Eintrag **Cognos** (dies ist der Cognos‑Namespace).
+
+3. **Anonymen Zugriff ausschalten**
+   Im rechten Fenster **Eigenschaften** finden Sie die Einstellung **„Anonymen Zugriff zulassen”** (englisch: *Allow anonymous access*).
+   - Aktivieren Sie das Kontrollkästchen und setzen Sie den Wert auf **Falsch** (False).
+
+4. **Konfiguration speichern**
+   Wählen Sie im Menü **Datei > Speichern**, um die Änderung zu übernehmen.
+
+5. **(Optional) Dienste neu starten**
+   Damit die Änderung wirksam wird, starten Sie den **IBM Cognos‑Service** bzw. die betroffenen Content‑Manager‑Dienste neu.
+
+Nach diesen Schritten ist der anonyme Zugriff deaktiviert; Benutzer werden beim Aufruf des Cognos‑Analytics‑Portals zur Eingabe ihrer Anmeldeinformationen aufgefordert.",inst_cr_winux_chunk49.md
+Welche Komponenten werden bei der Easy Install-Option von IBM Cognos Analytics installiert?,"Bei der Easy Install‑Option von IBM Cognos Analytics werden folgende Komponenten installiert und vollständig konfiguriert:
+
+* Die Vollversion der IBM Cognos Analytics‑Software mit allen neuen Funktionen.
+* Informix 12.10, das als Content‑Store‑Datenbank eingesetzt wird.
+* Der Custom Java Authentication Provider (CJAP) zum Erstellen und Verwalten von Benutzern.",inst_cr_winux_chunk18.md
+Wie starte ich IBM Cognos Analytics im Hintergrundmodus unter UNIX oder Linux?,"Um IBM Cognos Analytics im Hintergrundmodus unter UNIX oder Linux zu starten, gehen Sie wie folgt vor:
+
+1. **Stellen Sie sicher, dass die Datei `cogstartup.xml` im Verzeichnis `install_location/configuration` bereits an Ihre Umgebung angepasst wurde** (siehe Abschnitt „Manuelles Ändern von Standardkonfigurationseinstellungen“).
+
+2. **Navigieren Sie in das Verzeichnis `install_location/bin64`.**
+   ```bash
+   cd /pfad/zu/install_location/bin64
+   ```
+
+3. **Führen Sie das Start‑Kommando aus:**
+   ```bash
+   ./cogconfig.sh -s
+   ```
+
+   Der Parameter `-s` veranlasst das Tool, die in `cogstartup.xml` definierten Konfigurationseinstellungen anzuwenden, Kennwörter zu verschlüsseln, digitale Zertifikate zu erzeugen und anschließend den Cognos‑Service im Hintergrund zu starten.
+
+Nach erfolgreichem Durchlauf wird Cognos Analytics im Hintergrundmodus ausgeführt.",inst_cr_winux_chunk59.md
+Wie starte ich IBM Cognos Analytics im Hintergrundmodus auf einem UNIX‑ oder Linux‑System?,"Um IBM Cognos Analytics im Hintergrundmodus auf einem UNIX‑ oder Linux‑System zu starten, gehen Sie wie folgt vor:
+
+1. **Konfiguration prüfen** – Vergewissern Sie sich, dass die Datei `cogstartup.xml` im Verzeichnis `install_location/configuration` bereits an Ihre Umgebung angepasst wurde (siehe Abschnitt „Manuelles Ändern von Standardkonfigurationseinstellungen“).
+
+2. **Zum Ausführungsverzeichnis wechseln** – Navigieren Sie in das Verzeichnis `install_location/bin64`.
+
+3. **Startbefehl ausführen** – Geben Sie den folgenden Befehl ein:
+
+   ```bash
+   ./cogconfig.sh -s
+   ```
+
+   Der Parameter `-s` startet Cognos Analytics im Hintergrundmodus, wendet die in `cogstartup.xml` definierten Einstellungen an, verschlüsselt Kennwörter, erzeugt ggf. Zertifikate und startet die zugehörigen Services.
+
+Nach erfolgreichem Durchlauf ist IBM Cognos Analytics im Hintergrundmodus aktiv.",inst_cr_winux_chunk59.md
+"Wie muss die Datei server.xml geändert werden, um den internen Dispatcher‑Port für alle Schnittstellen zu öffnen?","Um den internen Dispatcher‑Port für alle Schnittstellen zu öffnen, passen Sie in server.xml das <httpEndpoint>‑Element an, das den internen Dispatcher definiert:
+
+1. Öffnen Sie wlp/usr/servers/cognos/server.xml und suchen Sie das <httpEndpoint>‑Tag mit
+   `id=""defaultHttpEndpoint""` und `host=""localhost""` (z. B. `<httpEndpoint id=""defaultHttpEndpoint"" httpPort=""9400"" host=""localhost"">…</httpEndpoint>`).
+
+2. Ändern Sie das host‑Attribut von `""localhost""` auf `""*""` und passen Sie ggf. das id‑Attribut an, sodass es `""*defaultHttpEndpoint""` lautet. Das Ergebnis sieht etwa so aus:
+
+```xml
+<httpEndpoint id=""*defaultHttpEndpoint"" httpPort=""9400"" host=""*""/>
+```
+
+3. Speichern Sie die Datei server.xml und starten Sie die Cognos‑Dienste neu.
+
+Durch das Setzen von host=""*"" wird der interne Dispatcher‑Port auf allen Netzwerk‑Interfaces lauschen.",inst_cr_winux_chunk42.md
+"Wie kann ich die Datei server.xml ändern, um den internen Dispatcher-Port für alle Schnittstellen zu öffnen?","Um den internen Dispatcher‑Port für alle Schnittstellen zu öffnen, gehen Sie wie folgt vor:
+
+1. **Datei öffnen**
+   Öffnen Sie die Datei `wlp/usr/servers/cognos/server.xml` mit einem Text‑Editor, der Administrator‑Rechte hat.
+
+2. **httpEndpoint finden**
+   Suchen Sie in der Datei nach dem Eintrag, der das `httpEndpoint`‑Element mit
+   `id=""defaultHttpEndpoint""` und `host=""localhost""` enthält. Beispiel:
+
+   ```xml
+   <httpEndpoint id=""defaultHttpEndpoint"" httpPort=""9400"" host=""localhost"">
+       <httpOptions CookiesConfigureNoCache=""false""
+                    AutoDecompression=""false""
+                    removeServerHeader=""true""
+                    persistTimeout=""${persist.timeout}""/>
+   </httpEndpoint>
+   ```
+
+3. **Host‑Wert ändern**
+   Ändern Sie den Wert von `host` von `localhost` zu `*` (Stern‑Wildcard), sodass das Element auf **allen** Netzwerk‑Schnittstellen lauscht. Optional können Sie auch das `id`‑Attribut anpassen, wie im Dokument gezeigt:
+
+   ```xml
+   <httpEndpoint id=""*defaultHttpEndpoint"" httpPort=""9400"" host=""*""/>
+   ```
+
+   *Hinweis:* Das Ändern des `id`‑Werts ist nicht zwingend erforderlich, solange das `host=""*""` gesetzt ist; das Beispiel im Dokument verwendet `*defaultHttpEndpoint` als ID.
+
+4. **Datei speichern**
+   Speichern Sie die geänderte `server.xml`.
+
+5. **Optional: Port‑Zugriff beschränken**
+   Wenn gewünscht, lassen Sie Ihre IT‑Abteilung den externen Zugriff auf den konfigurierten Port (im Beispiel `9400`) deaktivieren, damit er nur intern verwendet wird.
+
+Nach dem Speichern können Sie die Cognos‑Dienste neu starten, damit die Änderungen wirksam werden.",inst_cr_winux_chunk42.md
+"Wie muss ein Modellierungstool (z. B. Framework Manager) konfiguriert werden, wenn es sich außerhalb der Netzfirewall befindet?","Damit ein Modellierungstool wie Framework Manager, das sich außerhalb der Netzfirewall befindet, korrekt mit dem Dispatcher kommunizieren kann, muss entweder ein dediziertes Gateway installiert und so konfiguriert werden, dass der Dispatcher Anfragen von diesem Gateway akzeptiert, oder das Tool muss auf derselben Architekturebene wie die Anwendungskomponenten (innerhalb der Firewall) betrieben werden. Ohne ein solches Gateway wird der Dispatcher standardmäßig keine Anfragen von außerhalb der Firewall annehmen.",inst_cr_winux_chunk13.md
+"Wie ändere ich die Gateway-URI in IBM Cognos Configuration, um SSL über den IBM HTTP Server zu aktivieren?","Um die Gateway‑URI in IBM Cognos Configuration für die Nutzung von SSL über den IBM HTTP Server zu ändern, gehen Sie wie folgt vor (alle Angaben gemäß dem bereitgestellten Dokument):
+
+1. **IBM Cognos Configuration starten**
+   Öffnen Sie IBM Cognos Configuration auf **allen Rechnern**, auf denen Komponenten der Anwendungsebene bzw. Framework Manager installiert sind.
+
+2. **Zum Bereich „Lokale Konfiguration“ navigieren**
+   Wählen Sie im linken Navigationsbaum den Knoten **„Lokale Konfiguration“** und dann **„Umgebung“** (Environment).
+
+3. **Gateway‑URI von http auf https umstellen**
+   - Suchen Sie den Eintrag **„Gateway‑URI“**.
+   - Ersetzen Sie das Präfix **`http://`** durch **`https://`**.
+
+4. **Portnummer anpassen**
+   - Ändern Sie im selben Gateway‑URI die Portnummer von der Standard‑HTTP‑Portnummer (z. B. 80) auf die für SSL konfigurierte Portnummer des IBM HTTP Servers.
+   - Der übliche Standard‑SSL‑Port ist **443** (kann jedoch abweichen, falls ein anderer Port konfiguriert wurde).
+
+5. **Änderungen übernehmen und speichern**
+   - Bestätigen Sie die Änderungen und speichern Sie die Konfiguration.
+   - Wiederholen Sie die Schritte 1‑4 auf jedem weiteren Server, auf dem Cognos‑Komponenten laufen.
+
+Nach diesen Anpassungen verbindet sich Cognos über HTTPS mit dem IBM HTTP Server, sodass SSL‑verschlüsselte Kommunikation verwendet wird. Weitere notwendige Schritte (Zertifikatsimport, GSKit‑Installation usw.) sind im Dokument ebenfalls beschrieben, aber für die reine Änderung der Gateway‑URI sind die oben genannten Punkte ausreichend.",inst_cr_winux_chunk27.md
+Wie aktiviere ich die Sitzungsreplikation für den IBM Cognos Content Manager und welche Ports muss ich konfigurieren?,"Um die Sitzungsreplikation für den IBM Cognos Content Manager zu aktivieren, gehen Sie wie folgt vor:
+
+1. **IBM Cognos Configuration starten** auf einem Rechner, auf dem der Content Manager installiert ist.
+2. Im **Explorer‑Fenster** den Knoten **Sicherheit** auswählen und dort **Replikation** öffnen.
+3. Die folgenden Eigenschaften setzen:
+   - **Replikation aktivieren** = `Wahr` (true).
+   - **Listener‑Portnummer für Peers** = eine gewünschte Portnummer (oder `0`, damit beim Service‑Start ein freier dynamischer Port gewählt wird).
+   - **RMI‑Replikationsportnummer** = eine weitere Portnummer, die für die RMI‑Kommunikation genutzt wird.
+4. **Konfiguration speichern** und den IBM Cognos‑Service neu starten.
+5. Die Schritte auf **allen Content‑Manager‑Instanzen** Ihrer Umgebung wiederholen.
+
+**Ports, die Sie konfigurieren müssen**
+
+- **Listener‑Portnummer für Peers** – Port für den eingehenden Listener‑Dienst zwischen den Content‑Manager‑Peers.
+- **RMI‑Replikationsportnummer** – Port für die RMI‑basierte Replikationskommunikation.
+
+Hinweis: Die angegebenen Portnummern müssen **nicht** für jede Content‑Manager‑Instanz identisch sein; Sie können für jede Instanz eigene Werte wählen, solange sie im Netzwerk frei verfügbar sind.",inst_cr_winux_chunk37.md
+"Wie importiere ich das CA‑Root‑Zertifikat in das Content‑Manager‑Verzeichnis, um eine SSL‑Verbindung zum Active Directory‑Server zu aktivieren?","Um das CA‑Root‑Zertifikat in das Content‑Manager‑Verzeichnis zu importieren und damit eine SSL‑Verbindung zum Active‑Directory‑Server zu aktivieren, gehen Sie wie folgt vor:
+
+1. **Zertifikat aus dem AD‑Server holen**
+   - Öffnen Sie in jedem Content‑Manager‑Verzeichnis einen Web‑Browser.
+   - Stellen Sie über den Browser eine Verbindung zum Active‑Directory‑Server her und laden Sie das CA‑Root‑Zertifikat herunter.
+   - Kopieren Sie das heruntergeladene Zertifikat in das lokale Content‑Manager‑Verzeichnis (z. B. in das Verzeichnis *Cognos\content*).
+
+2. **Zertifikat in den Zertifikatspeicher importieren**
+   - **Bei Ausführung unter einem Benutzerkonto:**
+     Verwenden Sie denselben Web‑Browser, um das CA‑Root‑Zertifikat in den Zertifikatspeicher des angemeldeten Benutzerkontos zu importieren (z. B. über *Zertifikat importieren* → *Persönlich* → *Vertrauenswürdige Stammzertifizierungsstellen*).
+   - **Bei Ausführung unter dem lokalen Systemkonto:**
+     Öffnen Sie die **Microsoft Management Console (MMC)**, fügen Sie das Snap‑In *Zertifikate* für den **Computerkonto**‑Speicher hinzu und importieren Sie das CA‑Root‑Zertifikat in den Bereich *Vertrauenswürdige Stammzertifizierungsstellen*.
+
+3. **Cognos‑Dienst neu starten**
+   - Öffnen Sie **IBM Cognos Configuration** auf dem Server, an dem der Content Manager installiert ist.
+   - Navigieren Sie zu *IBM Cognos‑Services > IBM Cognos* und wählen Sie im Menü **Aktionen → Neustart**, um den Dienst mit dem neuen Zertifikat zu starten.
+
+Nach diesen Schritten verwendet IBM Cognos Analytics eine gesicherte SSL‑Verbindung zum Active‑Directory‑Server.",inst_cr_winux_chunk52.md
+"Wie ersetze ich „localhost“ im Gateway‑URI, damit per E‑Mail gesendete Inhalte von Remote‑Benutzern geöffnet werden können?","Ersetzen Sie in der Konfiguration den Eintrag „localhost“ im Gateway‑URI durch den tatsächlichen Hostnamen oder die IP‑Adresse des Cognos‑Servers. Dazu öffnen Sie IBM Cognos Configuration, navigieren Sie zu der Eigenschaft Gateway‑URI unter Datenzugriff → Benachrichtigung (oder dem entsprechenden Server‑Eintrag) und ändern den Wert von http://localhost:… in http://<Ihr‑Server‑Name‑oder‑IP>:…. Speichern Sie die Änderungen anschließend. Durch die Verwendung des echten Hostnamens bzw. der IP‑Adresse enthält die in E‑Mails erzeugte URL nicht mehr „localhost“, sodass Remote‑Benutzer die verknüpften Inhalte öffnen können.",inst_cr_winux_chunk23.md
+"Wie kann ich mehrere Instanzen von IBM Cognos Analytics auf demselben Computer konfigurieren, um Portkonflikte zu vermeiden?","Um mehrere Instanzen von IBM Cognos Analytics auf demselben Rechner zu betreiben, ohne dass Portkonflikte entstehen, gehen Sie wie folgt vor (alle Angaben stammen aus dem bereitgestellten Dokument):
+
+1. **Instanzen in getrennten Verzeichnissen installieren**
+   Jede Instanz muss in einem eigenen Installationsordner liegen, damit die Konfigurationsdateien nicht überschrieben werden.
+
+2. **Unterschiedliche Port‑ und URI‑Einstellungen festlegen**
+   - Verwenden Sie für jede Instanz andere **Dispatcher‑URIs** (Gateway, externer Dispatcher, interner Dispatcher, Dispatcher für externe Anwendungen).
+   - Setzen Sie für jede Instanz eigene **Content‑Manager‑URIs**.
+   - Ändern Sie die **Portnummer des lokalen Protokoll‑Servers**.
+   - IBM Cognos reserviert einen Port‑Bereich; die Ports der Instanzen müssen mindestens **100 Nummern auseinander liegen** (z. B. 9300 für die erste Instanz, mindestens 9400 für die zweite).
+
+3. **Virtuelle Web‑Server‑Verzeichnisse anpassen**
+   - Definieren Sie für jede Instanz ein eigenes virtuelles Verzeichnis (z. B. `http://servername/ibmcognos1` und `http://servername/ibmcognos2`).
+   - Passen Sie den **Gateway‑URI** in Cognos Configuration an, sodass er das jeweilige virtuelle Verzeichnis widerspiegelt.
+
+4. **Separate Content‑Store‑Datenbanken/Schemata verwenden**
+   Jede Instanz muss auf einen eigenen Content Store oder ein eigenes Schema zugreifen; ein gemeinsamer Content Store führt zu Konflikten.
+
+5. **IIS‑Anwendungspools (falls verwendet) separat konfigurieren**
+   - Wenn Sie `cognosisap.dll` einsetzen, muss jede Instanz einen eigenen Anwendungspool erhalten.
+
+6. **Port‑Konflikte prüfen**
+   - Öffnen Sie **Cognos Configuration → Umgebung** und prüfen Sie unter den genannten Einstellungen, dass keine Portnummer mit einer anderen Instanz überschneidet.
+
+Durch die Einhaltung dieser Punkte stellen Sie sicher, dass jede Cognos‑Instanz ihre eigenen Netzwerk‑ und Ressourcen‑Parameter nutzt und somit keine Port‑ oder Ressourcen‑Konflikte auftreten.",inst_cr_winux_chunk17.md
+Wie richte ich die JDBC‑Treiber für eine Oracle‑Protokolldatenbank in IBM Cognos Analytics ein?,"Um die JDBC‑Treiber für eine Oracle‑Protokolldatenbank in IBM Cognos Analytics einzurichten, gehen Sie wie folgt vor (nur die im Dokument beschriebenen Schritte):
+
+1. **Oracle‑Client‑Verzeichnis ermitteln**
+   Auf dem Rechner, auf dem der Oracle‑Client installiert ist, öffnen Sie das Verzeichnis
+   `ORACLE_HOME/jdbc/lib`.
+
+2. **Passende JDBC‑Bibliothek kopieren**
+   Wählen Sie die für Ihre Oracle‑Version geeignete JAR‑Datei aus.
+   - Beispiel: Für **Oracle 12c Release 2** benötigen Sie die Datei **`ojdbc8.jar`**.
+   Kopieren Sie diese Datei in das Verzeichnis
+   `Cognos_Analytics_install_location\drivers` Ihrer Cognos‑Installation.
+
+3. **JDBC‑Treiber auf allen Anwendungs‑Tier‑Computern bereitstellen**
+   Stellen Sie sicher, dass die kopierte JAR‑Datei auf **allen** Rechnern vorhanden ist, die Komponenten der Anwendungsebene (z. B. Report‑Server, Dispatcher) ausführen und eine Verbindung zur Protokolldatenbank benötigen.
+
+4. **JDBC‑Treiber auch auf dem Content‑Manager‑Computer bereitstellen**
+   Kopieren Sie dieselbe JAR‑Datei ebenfalls in das `drivers`‑Verzeichnis des Content‑Manager‑Servers, **es sei denn**, Sie verwenden für das Protokollieren denselben Datenbanktyp wie für den Content Store.
+
+Nach diesen Schritten erkennt IBM Cognos Analytics den Oracle‑JDBC‑Treiber und Sie können in Cognos Configuration die Datenbankverbindung für die Oracle‑Protokolldatenbank anlegen.
+
+*(Alle Angaben entstammen ausschließlich dem bereitgestellten Dokument.)*",inst_cr_winux_chunk46.md
+Wie richte ich die JDBC‑Treiber für eine Oracle‑Protokolldatenbank in IBM Cognos Analytics ein?,"Um die JDBC‑Treiber für eine Oracle‑Protokolldatenbank in IBM Cognos Analytics zu konfigurieren, gehen Sie wie folgt vor (alle Angaben entstammen ausschließlich dem bereitgestellten Dokument):
+
+1. **Oracle‑Client‑Verzeichnis ermitteln**
+   Auf dem Rechner, auf dem der Oracle‑Client installiert ist, öffnen Sie das Verzeichnis
+   `ORACLE_HOME/jdbc/lib`.
+
+2. **Passende Treiber‑JAR‑Datei auswählen**
+   Wählen Sie die JAR‑Datei, die zu Ihrer Oracle‑Version passt.
+   Beispiel: Für Oracle 12c Release 2 benötigen Sie die Datei `ojdbc8.jar`.
+
+3. **JAR‑Datei in das Cognos‑Verzeichnis kopieren**
+   Kopieren Sie die ausgewählte JAR‑Datei in das Verzeichnis
+   `Cognos_Analytics_install_location\drivers` auf **jedem** Server, auf dem Anwendungskomponenten (z. B. Report‑Server, Dispatcher) laufen und von dem aus auf die Protokolldatenbank zugegriffen wird.
+
+4. **JDBC‑Treiber auch auf dem Content‑Manager bereitstellen**
+   Sofern die Protokolldatenbank **nicht** denselben Datenbanktyp wie der Content‑Store verwendet, müssen Sie die gleiche JAR‑Datei ebenfalls in das `drivers`‑Verzeichnis des Content‑Manager‑Servers kopieren.
+
+Nach diesen Schritten sind die JDBC‑Treiber für die Oracle‑Protokolldatenbank korrekt eingerichtet und die Cognos‑Komponenten können eine Verbindung zur Datenbank herstellen.",inst_cr_winux_chunk46.md
+"Welche SiteMinder‑Bibliotheksdateien muss ich unter Microsoft Windows 64‑Bit hinzufügen, um den IBM Cognos Analytics‑Content‑Manager mit SiteMinder zu verwenden?","Unter Microsoft Windows 64‑Bit müssen Sie die beiden SiteMinder‑Bibliotheksdateien **smagentapi.dll** und **smerrlog.dll** zum Bibliothekspfad (PATH) hinzufügen, damit der IBM Cognos Analytics‑Content‑Manager mit SiteMinder verwendet werden kann.",inst_cr_winux_chunk56.md
+"Wie konfiguriere ich die ulimit‑Einstellungen für CPU‑Zeit, offene Dateien und Stackgröße bei einer Neuinstallation von IBM Cognos Analytics unter Linux?","Bei einer Neuinstallation von IBM Cognos Analytics unter Linux sollten die ulimit‑Werte wie folgt gesetzt werden:
+
+- **CPU‑Zeit (Sekunden)**:
+  ```bash
+  ulimit -t unlimited
+  ```
+
+- **Geöffnete Dateien (Dateideskriptoren)** – Mindestwert 8192 (kann bei Bedarf höher gesetzt werden):
+  ```bash
+  ulimit -n 8192
+  ```
+
+- **Stackgröße (KB)**:
+  ```bash
+  ulimit -s unlimited
+  ```
+
+Diese Befehle können in der Shell (z. B. bash) ausgeführt oder in geeigneten Start‑Scripts (z. B. `/etc/profile`, `~/.bashrc` oder einem Service‑Start‑Script) hinterlegt werden, damit die Werte beim Systemstart bzw. beim Start von Cognos Analytics wirksam sind.",inst_cr_winux_chunk4.md
+"Welche CSP-Direktiven müssen in einer Content Security Policy enthalten sein, damit IBM Cognos Analytics korrekt funktioniert?","Damit IBM Cognos Analytics korrekt funktioniert, muss die Content‑Security‑Policy (CSP) mindestens die folgenden Direktiven enthalten:
+
+- **default-src 'self' ;**
+- **script-src 'self' ;**
+- **connect-src 'self' *.mapbox.com *.ibm.com ;**
+- **frame-src 'self' ;**
+- **worker-src 'self' blob: ;**
+- **style-src 'self' 'unsafe-inline' ;**
+- **img-src 'self' data: blob: ;**
+- **font-src 'self' data: ;**
+
+Diese Direktiven stellen sicher, dass die für Cognos Analytics benötigten Ressourcen (Skripte, Verbindungen, Frames, Worker, Styles, Bilder und Schriftarten) nur von erlaubten Quellen geladen werden und die Anwendung ohne Einschränkungen betrieben werden kann.",inst_cr_winux_chunk4.md
+Wie starte ich IBM Cognos Configuration unter Windows?,"Um IBM Cognos Configuration unter Windows zu starten, öffnen Sie das Windows‑Startmenü, navigieren Sie zu **Programme** und wählen Sie dort **IBM Cognos Configuration** aus. Ein Klick auf diesen Eintrag startet das Konfigurationstool.",inst_cr_winux_chunk33.md
+Wie starte ich IBM Cognos Configuration auf einem Windows‑Computer?,"Um IBM Cognos Configuration auf einem Windows‑Computer zu starten, öffnen Sie das Startmenü, wählen Sie **Programme** und klicken Sie dort auf **IBM Cognos Configuration**.",inst_cr_winux_chunk33.md
+Wie kann ich die Verbindung zwischen Content Manager und dem Content Store testen?,"Um die Verbindung zwischen Content Manager und dem Content Store zu testen, öffnen Sie IBM Cognos Configuration, konfigurieren Sie die Datenbankverbindungseigenschaften (Datenbankname, Server/Port, Benutzer‑ID und Kennwort usw.) und speichern Sie die Änderungen. Anschließend wählen Sie im Menü **Aktionen** die Option **Test**. Beim Testvorgang stellt Content Manager eine Verbindung zur angegebenen Datenbank her, prüft die Berechtigungen, erstellt ggf. eine Testtabelle und füllt sie – damit können Sie bestätigen, dass die Verbindung korrekt funktioniert.",inst_cr_winux_chunk22.md
+Wie kann ich nach dem Einrichten der Datenbankverbindungseigenschaften die Verbindung zwischen Content Manager und dem Content Store testen?,"Nachdem Sie die Datenbankverbindungseigenschaften konfiguriert und gespeichert haben, öffnen Sie im IBM Cognos Configuration‑Fenster das Menü **Aktionen** und wählen dort die Option **Test**. Durch diesen Test führt Content Manager einen Verbindungsaufbau zur Content‑Store‑Datenbank durch, prüft die Berechtigungen und erstellt (bzw. verwendet) eine Test‑Tabelle, sodass Sie sofort sehen, ob die Verbindung erfolgreich ist.",inst_cr_winux_chunk22.md
+"Wie erstelle und konfiguriere ich die Datei preserve.txt, um beim Upgrade von IBM Cognos Analytics bestimmte Dateien beizubehalten?","Um beim Upgrade von IBM Cognos Analytics bestimmte Dateien zu erhalten, gehen Sie wie folgt vor (alle Angaben stammen ausschließlich aus dem bereitgestellten Dokument):
+
+1. **Verzeichnis öffnen**
+   Navigieren Sie zum Ordner
+   ```
+   <install_location>/configuration/preserve
+   ```
+
+2. **Datei anlegen bzw. öffnen**
+   - Ist bereits eine Datei **preserve.txt** vorhanden, öffnen Sie diese.
+   - Existiert sie nicht, öffnen Sie die Vorlage **preserve.txt.template**.
+
+3. **Einträge hinzufügen**
+   Tragen Sie in der geöffneten Datei Zeilen ein, die die zu bewahrenden Dateien bzw. Ordner relativ zum Installationsverzeichnis angeben.
+   Beispiel (aus dem Dokument):
+   ```text
+   #TM1 files
+   templates/ps/portal/variables_TM1.xml
+   templates/ps/portal/variables_plan.xml
+   templates/ps/portal/icon_active_application.gif
+   webcontent/planning.html
+   webcontent/PMHub.html
+   webcontent/tm1/web/tm1web.html
+
+   #CA files
+   templates/ps/system.xml
+   templates/ps/portal/system.xml
+   ```
+   Sie können beliebige weitere Pfade hinzufügen, z. B.
+   `deployment/IBM_Cognos_Mobile_Samples.zip` – wie im Abschnitt *„Andere Dateien und Ordner beibehalten“* beschrieben.
+
+4. **Datei speichern**
+   - Wenn Sie die Vorlage verwendet haben, benennen Sie sie nach dem Editieren in **preserve.txt** um.
+   - Speichern Sie die Datei im Verzeichnis `<install_location>/configuration/preserve`.
+
+5. **Upgrade‑Verhalten**
+   Während des Upgrades wird das Installationsprogramm die in **preserve.txt** aufgeführten Objekte prüfen:
+   - **Beibehalten**: Die bestehenden Dateien bleiben erhalten. Neue Versionen der gleichen Datei werden in das Verzeichnis
+     `install_location/configuration/preserved-by-manifest/<manifest_version>/`
+     mit der Endung **.new** abgelegt (z. B. `IBM_Cognos_Mobile_Samples.zip_12.0.0_2108230833.new`).
+   - **Nicht beibehalten**: Die alten Dateien werden in denselben Ordner mit der Endung **.old** kopiert.
+
+6. **Auswahl beim Upgrade**
+   Im Upgrade‑Assistenten können Sie entscheiden, ob die in **preserve.txt** genannten Dateien **beibehalten** oder **überschrieben** werden sollen. Ihre Entscheidung bestimmt, ob die vorhandenen Dateien weitergenutzt oder durch die neuen Versionen ersetzt werden.
+
+**Kurzfassung:**
+- Öffnen/erstellen Sie `<install_location>/configuration/preserve/preserve.txt` (oder editieren Sie die Vorlage).
+- Listen Sie jede zu bewahrende Datei bzw. jeden Ordner in einer eigenen Zeile auf (relative Pfade).
+- Speichern Sie die Datei.
+- Beim Upgrade wählen Sie im Assistenten „Dateien beibehalten“, sodass die genannten Objekte erhalten bleiben und neue Versionen als *.new*‑Dateien abgelegt werden.
+
+Damit ist die **preserve.txt** korrekt eingerichtet, um beim Upgrade ausgewählte Dateien zu erhalten.",inst_cr_winux_chunk16.md
+Wie kann ich die Server‑Zeitzone für Content Manager in IBM Cognos Analytics ändern?,"Um die Server‑Zeitzone, die von Content Manager verwendet wird, zu ändern, führen Sie die folgenden Schritte in IBM Cognos Configuration aus:
+
+1. **IBM Cognos Configuration starten** – öffnen Sie die Anwendung auf dem Server, auf dem Cognos installiert ist.
+2. **Globale Konfiguration bearbeiten** – wählen Sie im Menü **Aktionen** den Eintrag **Globale Konfiguration bearbeiten**.
+3. **Registerkarte „Allgemein“ öffnen** – im Dialog **Globale Konfiguration** wechseln Sie zur Registerkarte **Allgemein**.
+4. **Server‑Zeitzone ändern** – klicken Sie in der Spalte **Wert** neben **Server‑Zeitzone** und wählen Sie aus der angezeigten Liste die gewünschte Zeitzone aus.
+5. **Speichern** – klicken Sie im Menü **Datei** auf **Speichern**, um die Änderung zu übernehmen.
+
+Nach dem Speichern wird die neue Zeitzone von Content Manager für alle geplanten Aktivitäten und für die Zeitzoneneinstellungen im Portal verwendet.",inst_cr_winux_chunk47.md
+Welche SAP‑RFC‑Bibliotheksdateien muss ich nach der Installation von IBM Cognos auf einem 64‑Bit‑Server in die Verzeichnisse install_location\bin64 und install_location\bin kopieren?,"Auf einem 64‑Bit‑Server müssen Sie die SAP‑RFC‑Bibliotheksdateien manuell aus dem SAP‑Installationsverzeichnis in das IBM Cognos‑Installationsverzeichnis kopieren:
+
+* **Alle 64‑Bit‑RFC‑Speicherarchivdateien** (die 64‑Bit‑Version der Bibliothek) in das Verzeichnis **install_location\bin64**.
+* **Alle 32‑Bit‑RFC‑Speicherarchivdateien** (die 32‑Bit‑Version der Bibliothek) in das Verzeichnis **install_location\bin**.
+
+Damit stehen sowohl die 64‑Bit‑ als auch die 32‑Bit‑Bibliotheken für IBM Cognos zur Verfügung.",inst_cr_winux_chunk57.md
+"Wie konfiguriere ich den externen JMX‑Port und die zugehörigen Anmeldeinformationen, um Systemmetriken von IBM Cognos Analytics extern zu überwachen?","Um Systemmetriken von IBM Cognos Analytics extern über JMX zu überwachen, konfigurieren Sie den externen JMX‑Port und die zugehörigen Anmeldeinformationen in **IBM Cognos Configuration** wie folgt:
+
+1. **Voraussetzung**
+   - Stellen Sie sicher, dass ein Java‑SDK (Oracle JDK oder IBM JDK) auf dem Server installiert ist, da die JMX‑Funktion darauf basiert.
+
+2. **IBM Cognos Configuration öffnen**
+   - Starten Sie das Tool im Verzeichnis, in dem **Content Manager** installiert ist.
+
+3. **Zum JMX‑Port navigieren**
+   - Klicken Sie im linken Explorer‑Baum auf **Umgebung**.
+   - Im rechten Eigenschaften‑Fenster wählen Sie unter **Dispatcher‑Einstellungen** den Eintrag **Externer JMX‑Port**.
+
+4. **Portnummer festlegen**
+   - Geben Sie im Feld **Wert** eine freie TCP‑Portnummer Ihrer Wahl (z. B. `9191`).
+
+5. **JMX‑Anmeldeinformationen definieren**
+   - Klicken Sie auf **Externer JMX‑Berechtigungsnachweis**.
+   - Im Feld **Wert** klicken Sie auf das Bearbeitungssymbol, geben Sie eine **Benutzer‑ID** und ein **Kennwort** ein und bestätigen Sie mit **OK**.
+   - Diese Anmeldedaten schützen den Zugriff auf den JMX‑Port; nur autorisierte Benutzer können sich verbinden.
+
+6. **Einstellungen speichern und Service neu starten**
+   - Wählen Sie **Datei → Speichern**.
+   - Starten Sie den betroffenen Cognos‑Service (z. B. den Content Manager) neu, damit die Änderungen wirksam werden.
+
+7. **Verbindung von einem externen JMX‑Tool herstellen**
+   - Verwenden Sie im JMX‑Client die URL‑Syntax:
+     ```
+     service:jmx:rmi://<Content_Manager_Server>/jndi/rmi://<Monitoring_Server>:<JMXPort>/proxyserver
+     ```
+     (ersetzen Sie `<Content_Manager_Server>`, `<Monitoring_Server>` und `<JMXPort>` durch die entsprechenden Werte).
+   - Geben Sie dieselbe **Benutzer‑ID** und **Kennwort** an, die Sie in Schritt 5 konfiguriert haben.
+
+Damit ist der externe JMX‑Port eingerichtet und gesichert, und Sie können Systemmetriken von IBM Cognos Analytics mit jedem JMX‑Kompatibilitäts‑Tool extern überwachen.",inst_cr_winux_chunk57.md
+Wie kann man WebView2 für die Authentifizierung in IBM Cognos Transformer aktivieren?,"Um WebView2 für die Authentifizierung in IBM Cognos Transformer (Version 12.0.3 oder höher) zu aktivieren, gehen Sie wie folgt vor:
+
+1. **WebView2‑Runtime installieren**
+   Laden Sie die Microsoft Edge WebView2‑Runtime von https://developer.microsoft.com/en-us/microsoft-edge/webview2/ herunter und installieren Sie sie. (Falls die Runtime bereits installiert ist, prüfen Sie dies unter „Apps & Features“ → Suche nach „WebView2“.)
+
+2. **WebView2‑Funktion aktivieren**
+   a. Öffnen Sie das Verzeichnis `<installationsort>\configuration`.
+   b. Öffnen Sie die Datei `cogtr.xml` mit einem Texteditor.
+   c. Suchen Sie im Abschnitt `<Transformer>` den Eintrag
+   ```xml
+   <Preference Name=""UseWebView"" Value=""0""/>
+   ```
+   und ändern Sie ihn zu
+   ```xml
+   <Preference Name=""UseWebView"" Value=""1""/>
+   ```
+
+3. **Transformer neu starten**
+   Schließen Sie IBM Cognos Transformer (falls geöffnet) und starten Sie es erneut, damit die Änderungen wirksam werden.
+
+Falls beim Aktivieren eine Fehlermeldung erscheint, installieren Sie erneut die WebView2‑Runtime und wiederholen Sie Schritt 2.",inst_cr_winux_chunk32.md
+Wie kann ich unter Linux zusätzliche Betriebssystem‑Pakete zum IBM Cognos Analytics Jupyter Notebook Server hinzufügen?,"Um unter Linux zusätzliche Ubuntu‑Betriebssystem‑Pakete zum IBM Cognos Analytics Jupyter Notebook Server hinzuzufügen, gehen Sie wie folgt vor:
+
+1. **Datei öffnen** – Navigieren Sie zu `<install_dir>/dist/scripts/additional_os_packages.txt` und öffnen Sie diese Datei.
+2. **Paket eintragen** – Fügen Sie den Namen des gewünschten Ubuntu‑Pakets in einer eigenen Zeile ein (ein Paket pro Zeile).
+3. **Speichern** – Speichern Sie die geänderte `additional_os_packages.txt`.
+4. **Installation ausführen** – Starten Sie das Installations‑Script für Linux:
+
+   ```bash
+   cd <install_dir>/dist/scripts/unix
+   ./install.sh
+   ```
+
+   Das Skript installiert die in `additional_os_packages.txt` aufgeführten Pakete und integriert sie in den Jupyter‑Notebook‑Server.
+
+Damit sind die zusätzlichen Betriebssystem‑Pakete in Ihrer Linux‑Installation des IBM Cognos Analytics Jupyter Notebook Servers verfügbar.",inst_cr_winux_chunk12.md
+Welche Serverkomponenten kann man im IBM Cognos Analytics‑Installationsprogramm auswählen?,"Im IBM Cognos Analytics‑Installationsprogramm können Sie auswählen, welche der folgenden Serverkomponenten installiert werden sollen:
+
+- **Inhaltsebene**
+- **Anwendungsebene: Komponenten**
+- **Gatewayebene: Webkommunikation**",inst_cr_winux_chunk12.md
+"Wie füge ich einen Hostnamen zur Liste der gültigen Domains/Hosts für die IBM Cognos Application Firewall hinzu, damit Drill‑Through‑Links korrekt funktionieren?","Um einen Hostnamen (bzw. eine Domäne) in die Liste der zulässigen Domains/Hosts der IBM Cognos Application Firewall (CAF) aufzunehmen – damit Drill‑Through‑Links korrekt aufgelöst werden – gehen Sie wie folgt vor:
+
+1. **IBM Cognos Configuration starten**
+   Öffnen Sie **IBM Cognos Configuration** auf jedem Rechner, auf dem die Anwendungsschicht installiert ist.
+
+2. **Zum CAF‑Abschnitt navigieren**
+   Im linken Baum‑Explorer wählen Sie **Sicherheit** → **IBM Cognos Application Firewall**.
+
+3. **Eigenschaft „Gültige Domänen oder Hosts“ bearbeiten**
+   - Klicken Sie im rechten Eigenschaften‑Fenster auf das Feld **Gültige Domänen oder Hosts**.
+   - Drücken Sie das **Bearbeitungssymbol** (Stift‑Icon), um den Dialog **Wert – Gültige Domänen oder Hosts** zu öffnen.
+
+4. **Hostname hinzufügen**
+   - Im Dialog klicken Sie auf **Hinzufügen**.
+   - Geben Sie in die neue Tabellenzeile den gewünschten **Host‑ oder Domänennamen** ein (z. B. `gateway01.mycompany.com`).
+   - Möchten Sie eine gesamte Domäne und deren Sub‑Domänen zulassen, verwenden Sie ein Platzhalter‑Wildcard, z. B. `*.mycompany.com`.
+
+5. **Änderungen speichern**
+   - Bestätigen Sie den Dialog mit **OK**.
+   - Schließen Sie das Eigenschaften‑Fenster und speichern Sie die gesamte Konfiguration über **Datei → Speichern**.
+
+6. **Cognos‑Dienste neu starten**
+   Damit die neue Einstellung wirksam wird, starten Sie die IBM Cognos‑Services (z. B. über das **Cognos Service Management**‑Tool) neu.
+
+**Hinweis:**
+Der gleiche Hostname muss in **allen** Komponenten einer verteilten Umgebung eingetragen werden, sonst kann es zu inkonsistentem Verhalten oder Produktfehlern kommen. Sobald der Hostname in der Liste der gültigen Domains/Hosts steht, werden Drill‑Through‑Links zu diesem Server von der Application Firewall akzeptiert und korrekt verarbeitet.",inst_cr_winux_chunk36.md
+"Wie kann ich in IBM Cognos Analytics den Präsentationsservice deaktivieren, damit er auf einem bestimmten Server nicht ausgeführt wird?","Um den Präsentations‑Service in IBM Cognos Analytics auf einem bestimmten Server zu deaktivieren, gehen Sie wie folgt vor:
+
+1. **IBM Cognos Configuration starten** auf dem Server, auf dem Sie den Service deaktivieren möchten.
+2. Im linken Navigationsbereich **„Umgebung“ → „IBM Cognos‑Services“** auswählen.
+3. In der rechten Detailansicht finden Sie die Liste aller installierten Services.
+4. Suchen Sie den Eintrag **„Presentation Service“** (Präsentations‑Service).
+5. Klicken Sie im Feld **Status** neben diesem Service und setzen Sie den Wert auf **„Falsch“** (deaktiviert).
+6. **Speichern** Sie die Änderungen über das Menü **Datei → Speichern**.
+7. Starten Sie die Cognos‑Dienste neu, damit die Änderung wirksam wird (bei manuellen Neustarts muss der ApacheDS‑cognos‑Dienst vor dem IBM Cognos‑Dienst gestartet werden).
+
+Nach diesen Schritten ist der Präsentations‑Service auf diesem Server inaktiv, wird nicht mehr gestartet und beansprucht keine Ressourcen mehr.",inst_cr_winux_chunk36.md
+Welche Werte kann man für die Eigenschaft singleSignonOption in IBM Cognos Configuration angeben?,"Für die Eigenschaft **singleSignonOption** können Sie einen der folgenden Werte angeben:
+
+- **KerberosS4UAuthentication** – Kerberos‑Authentifizierung wird zuerst versucht; schlägt sie fehl, wird die S4U‑Authentifizierung verwendet; schlägt auch diese fehl, erfolgt eine Aufforderung zur Eingabe von Anmeldeinformationen.
+- **S4UAuthentication** – Die S4U‑Authentifizierung wird zuerst versucht; schlägt sie fehl, wird der Benutzer nach seinen Anmeldeinformationen gefragt.",inst_cr_winux_chunk53.md
