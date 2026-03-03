@@ -15,10 +15,14 @@ const (
 	NodeRoleWorker = "node-role.kubernetes.io/worker"
 )
 
-type NodeLabelsRule struct{}
+type NodeLabelsRule struct {
+	client *openshift.OpenshiftClient
+}
 
-func NewNodeLabelsRule() *NodeLabelsRule {
-	return &NodeLabelsRule{}
+func NewNodeLabelsRule(client *openshift.OpenshiftClient) *NodeLabelsRule {
+	return &NodeLabelsRule{
+		client: client,
+	}
 }
 
 func (r *NodeLabelsRule) Name() string {
@@ -33,13 +37,12 @@ func (r *NodeLabelsRule) Description() string {
 func (r *NodeLabelsRule) Verify() error {
 	ctx := context.Background()
 
-	client, err := openshift.NewOpenshiftClient()
-	if err != nil {
-		return fmt.Errorf("failed to create OpenShift client: %w", err)
+	if r.client == nil {
+		return fmt.Errorf("openshift client is not initialized")
 	}
 
 	nodeList := &corev1.NodeList{}
-	if err := client.Client.List(ctx, nodeList); err != nil {
+	if err := r.client.Client.List(ctx, nodeList); err != nil {
 		return fmt.Errorf("failed to list cluster nodes: %w", err)
 	}
 

@@ -37,14 +37,10 @@ func init() {
 		return
 	}
 	OpenshiftRegistry.Register(kubeconfig.NewKubeconfigRule(client))
+	OpenshiftRegistry.Register(nodelabels.NewNodeLabelsRule(client))
 	OpenshiftRegistry.Register(operators.NewOperatorRule(client))
 	OpenshiftRegistry.Register(spyrepolicy.NewSpyrePolicyRule(client))
 	OpenshiftRegistry.Register(storageclass.NewStorageClassRule(client))
-	OpenshiftRegistry.Register(kubeconfig.NewKubeconfigRule())
-	OpenshiftRegistry.Register(nodelabels.NewNodeLabelsRule())
-	OpenshiftRegistry.Register(operators.NewOperatorRule())
-	OpenshiftRegistry.Register(spyrepolicy.NewSpyrePolicyRule())
-	OpenshiftRegistry.Register(storageclass.NewStorageClassRule())
 }
 
 // Rule defines the interface for validation rules.

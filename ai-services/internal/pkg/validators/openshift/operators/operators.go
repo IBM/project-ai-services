@@ -47,6 +47,7 @@ func (r *OperatorRule) Description() string {
 }
 
 func (r *OperatorRule) Verify() error {
+	ctx := r.client.Ctx
 	var failed []string
 
 	checks := []struct {
@@ -90,7 +91,7 @@ func (r *OperatorRule) Verify() error {
 	}
 
 	for _, check := range checks {
-		if err := validateOperator(csvList, check.operator); err != nil {
+		if err := validateOperator(r.client, csvList, check.operator); err != nil {
 			failed = append(failed, fmt.Sprintf("  - %s: %s", check.name, err.Error()))
 		} else {
 			r.passed = append(r.passed, fmt.Sprintf("  - %s installed", check.name))
