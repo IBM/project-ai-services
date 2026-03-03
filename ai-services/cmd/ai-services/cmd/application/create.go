@@ -35,7 +35,6 @@ var (
 	skipChecks            []string
 	valuesFiles           []string
 	rawArgImagePullPolicy string
-	imagePullPolicy       image.ImagePullPolicy
 
 	// openshift flags.
 	timeout time.Duration
@@ -284,7 +283,7 @@ func validateImagePullPolicyFlag(cmd *cobra.Command) error {
 	if ok := image.ImagePullPolicy(rawArgImagePullPolicy).Valid(); !ok {
 		return fmt.Errorf(
 			"invalid value %q: must be one of %q, %q, %q",
-			imagePullPolicy, image.PullAlways, image.PullNever, image.PullIfNotPresent,
+			image.ImagePullPolicy(rawArgImagePullPolicy), image.PullAlways, image.PullNever, image.PullIfNotPresent,
 		)
 	}
 
