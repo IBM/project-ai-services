@@ -10,3 +10,5 @@ containers:
 hosts:
   - fetch: UI_ROUTE
     type: route
+  - fetch: BACKEND_ROUTE
+    type: route

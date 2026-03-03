@@ -28,7 +28,10 @@ type Runtime interface {
 	ContainerLogs(containerNameOrID string) error
 
 	// Network operations
-	GetRoute(nameOrID string) (*types.Route, error)
+	ListRoutes() ([]types.Route, error)
+
+	// PVC operations
+	DeletePVCs(appLabel string) error
 
 	// Runtime type identification
 	Type() types.RuntimeType

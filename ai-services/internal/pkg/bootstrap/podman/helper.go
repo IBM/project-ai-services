@@ -11,7 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators/spyre"
+	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/spyre"
 )
 
 func runServiceReport() error {

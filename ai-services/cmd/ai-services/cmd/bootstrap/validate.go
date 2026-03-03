@@ -7,8 +7,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +31,7 @@ func validateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "validate",
 		Short:   "Validates the environment",
-		Long:    longDescription(),
+		Long:    validateDescription(),
 		Example: validateExample(),
 		Hidden:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -45,20 +45,8 @@ func validateCmd() *cobra.Command {
 				logger.Warningln("Skipping validation checks: " + strings.Join(skipChecks, ", "))
 			}
 
-			runtimeType, err := cmd.Flags().GetString("runtime")
-			if err != nil {
-				return fmt.Errorf("failed to get runtime flag: %w", err)
-			}
-			rt := types.RuntimeType(runtimeType)
-
-			// Create bootstrap instance based on runtime
-			factory := bootstrap.NewBootstrapFactory(rt)
-			bootstrapInstance, err := factory.Create()
-			if err != nil {
-				return fmt.Errorf("failed to create bootstrap instance: %w", err)
-			}
-
-			if err := bootstrapInstance.Validate(skip); err != nil {
+			factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
+			if err := factory.Validate(skip); err != nil {
 				logger.Infof("Please refer to troubleshooting guide for more information: %s", troubleshootingGuide)
 
 				return fmt.Errorf("bootstrap validation failed: %w", err)
@@ -74,13 +62,17 @@ func validateCmd() *cobra.Command {
 	return cmd
 }
 
-func longDescription() string {
-	validationList := generateValidationList()
+func validateDescription() string {
+	podmanList, openshiftList := generateValidationList()
 
 	return fmt.Sprintf(`Validates all prerequisites and configurations are correct for bootstrapping. 
 
 Following scenarios are validated and are available for skipping using --skip-validation flag:
-%s`, validationList)
+- For Podman:
+%s
+
+- For OpenShift:
+%s`, podmanList, openshiftList)
 }
 
 func validateExample() string {
@@ -97,11 +89,17 @@ func validateExample() string {
   ai-services bootstrap validate --verbose`
 }
 
-func generateValidationList() string {
-	var b strings.Builder
+// generateValidationList return two validation list: podman and openshift.
+func generateValidationList() (string, string) {
+	podmanRules := validators.PodmanRegistry.Rules()
+	openshiftRules := validators.OpenshiftRegistry.Rules()
 
+	return createRuleList(podmanRules), createRuleList(openshiftRules)
+}
+
+func createRuleList(rules []validators.Rule) string {
+	var b strings.Builder
 	maxLen := 0
-	rules := validators.DefaultRegistry.Rules()
 	for _, rule := range rules {
 		if len(rule.Name()) > maxLen {
 			maxLen = len(rule.Name())
@@ -123,11 +121,21 @@ func generateValidationList() string {
 }
 
 func BuildSkipFlagDescription() string {
-	rules := validators.DefaultRegistry.Rules()
-	ruleName := make([]string, 0, len(rules))
-	for _, rule := range rules {
-		ruleName = append(ruleName, rule.Name())
+	podmanRules := validators.PodmanRegistry.Rules()
+	openshiftRules := validators.OpenshiftRegistry.Rules()
+
+	podmanRuleNames := make([]string, 0, len(podmanRules))
+	for _, rule := range podmanRules {
+		podmanRuleNames = append(podmanRuleNames, rule.Name())
 	}
 
-	return fmt.Sprintf("Skip specific validation checks (comma-separated: %s)", strings.Join(ruleName, ","))
+	openshiftRuleNames := make([]string, 0, len(openshiftRules))
+	for _, rule := range openshiftRules {
+		openshiftRuleNames = append(openshiftRuleNames, rule.Name())
+	}
+
+	return fmt.Sprintf("Skip specific validation checks\nFor Podman: %s\nFor OpenShift: %s",
+		strings.Join(podmanRuleNames, ","),
+		strings.Join(openshiftRuleNames, ","),
+	)
 }

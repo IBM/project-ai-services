@@ -1,0 +1,45 @@
+@use "@carbon/react/scss/type";
+
+.loginPage {
+  min-height: 100vh;
+}
+
+.loginLeft {
+  display: flex;
+  align-items: center;
+  padding: 0;
+}
+
+@media (min-width: 42rem) {
+  .loginLeft {
+    padding: 2rem;
+  }
+}
+
+.loginRight {
+  background-color: var(--cds-layer-01);
+}
+
+.loginForm {
+  width: 100%;
+  max-width: 28rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3rem;
+}
+
+.heading {
+  @include type.type-style("productive-heading-05");
+}
+
+.inputFields {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  width: 100%;
+}
+
+.continueButton {
+  width: 100%;
+  max-width: none;
+}

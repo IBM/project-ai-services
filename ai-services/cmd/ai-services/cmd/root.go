@@ -70,4 +70,5 @@ func init() {
 	RootCmd.AddCommand(version.VersionCmd)
 	RootCmd.AddCommand(bootstrap.BootstrapCmd())
 	RootCmd.AddCommand(application.ApplicationCmd)
+	// catalog.CatalogCmd() is registered in catalog_enabled.go when catalog_api build tag is set
 }

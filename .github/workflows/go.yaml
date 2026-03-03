@@ -1,11 +1,6 @@
 name: Go
 
 on:
-  push:
-    paths:
-      - 'ai-services/**'
-    branches:
-      - main
   pull_request:
     paths:
       - 'ai-services/**'
@@ -41,10 +36,43 @@ jobs:
           version: v2.7
           working-directory: ai-services
 
-      - name: Build Go binary
+      - name: Build Go binary (without catalog API)
         working-directory: ai-services
         run: |
-          GOOS=linux GOARCH=ppc64le make build
+          GOOS=linux GOARCH=ppc64le make bin
+
+      - name: Build Go binary (with catalog API for CI/CD)
+        working-directory: ai-services
+        run: |
+          GOOS=linux GOARCH=ppc64le make bin ENABLE_CATALOG_API=true
+
+  swagger-check:
+    name: Verify Swagger Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'ai-services/go.mod'
+
+      - name: Install swag CLI
+        run: go install github.com/swaggo/swag/cmd/swag@latest
+
+      - name: Check Swagger format and docs are up to date
+        working-directory: ai-services
+        run: |
+          make swagger-fmt
+          make swagger ENABLE_CATALOG_API=true
+          if ! git diff --exit-code; then
+            echo "❌ Swagger comments or docs are out of date. Run 'make swagger-fmt && make swagger' and commit the changes."
+            git diff
+            exit 1
+          fi
+          echo "✅ Swagger comments and documentation are up to date!"
+
   scan:
     uses: ./.github/workflows/scanner.yml
     with:

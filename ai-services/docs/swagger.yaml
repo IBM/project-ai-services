@@ -1,0 +1,362 @@
+basePath: /api/v1
+definitions:
+  internal_pkg_catalog_apiserver_handlers.loginReq:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  internal_pkg_catalog_apiserver_handlers.refreshReq:
+    properties:
+      refresh_token:
+        type: string
+    required:
+    - refresh_token
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@example.com
+    name: API Support
+    url: https://github.com/project-ai-services/ai-services
+  description: API server for managing AI Services catalog, applications, and authentication
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: AI Services Catalog API
+  version: "1.0"
+paths:
+  /applications:
+    post:
+      consumes:
+      - application/json
+      description: Create a new application instance from a template
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Application created
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create new application
+      tags:
+      - Applications
+  /applications/{name}:
+    delete:
+      description: Delete a specific application and all its resources
+      parameters:
+      - description: Application name
+        in: path
+        name: name
+        required: true
+        type: string
+      responses:
+        "200":
+          description: Application deleted
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Application not found
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete application
+      tags:
+      - Applications
+    get:
+      description: Get detailed information about a specific application
+      parameters:
+      - description: Application name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Application details
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Application not found
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get application details
+      tags:
+      - Applications
+  /applications/{name}/logs:
+    get:
+      description: Get logs from a specific application
+      parameters:
+      - description: Application name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Application logs
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Application not found
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get application logs
+      tags:
+      - Applications
+  /applications/{name}/ps:
+    get:
+      description: Get the running status and health of an application
+      parameters:
+      - description: Application name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Application status
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Application not found
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get application status
+      tags:
+      - Applications
+  /applications/{name}/start:
+    post:
+      consumes:
+      - application/json
+      description: Start a stopped application
+      parameters:
+      - description: Application name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Application started
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Application not found
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Start application
+      tags:
+      - Applications
+  /applications/{name}/stop:
+    post:
+      consumes:
+      - application/json
+      description: Stop a running application
+      parameters:
+      - description: Application name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Application stopped
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Application not found
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Stop application
+      tags:
+      - Applications
+  /applications/templates:
+    get:
+      description: Get a list of available application templates
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of templates
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List application templates
+      tags:
+      - Applications
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate user and return access and refresh tokens
+      parameters:
+      - description: Login credentials
+        in: body
+        name: credentials
+        required: true
+        schema:
+          $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.loginReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns access_token, refresh_token, and token_type
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid payload
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Invalid credentials
+          schema:
+            additionalProperties: true
+            type: object
+      summary: User login
+      tags:
+      - Authentication
+  /auth/logout:
+    post:
+      consumes:
+      - application/json
+      description: Invalidate the current access token
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Successfully logged out
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Missing token
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Failed to logout
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: User logout
+      tags:
+      - Authentication
+  /auth/me:
+    get:
+      description: Get information about the currently authenticated user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns user id, username, and name
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: User not found
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get current user info
+      tags:
+      - Authentication
+  /auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Get new access and refresh tokens using a valid refresh token
+      parameters:
+      - description: Refresh token
+        in: body
+        name: refresh
+        required: true
+        schema:
+          $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.refreshReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns new access_token, refresh_token, and token_type
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid payload
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Invalid refresh token
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Refresh access token
+      tags:
+      - Authentication
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
+tags:
+- description: Authentication and authorization endpoints
+  name: Authentication
+- description: Application management endpoints
+  name: Applications

@@ -49,8 +49,8 @@ def get_model_endpoints():
     }
 
     llm_model_dict = {
-        'llm_endpoint': os.getenv("LLM_ENDPOINT"),
-        'llm_model':    os.getenv("LLM_MODEL"),
+        'llm_endpoint': os.getenv("LLM_ENDPOINT", ""),
+        'llm_model':    os.getenv("LLM_MODEL", ""),
     }
 
     reranker_model_dict = {

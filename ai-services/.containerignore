@@ -1,0 +1,10 @@
+# Exclude compiled binaries and log files
+bin/
+
+# Exclude common development and version control files
+.dockerignore
+.containerignore
+.gitignore
+.git/
+.vscode/
+.idea/

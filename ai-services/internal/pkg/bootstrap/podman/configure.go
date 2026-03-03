@@ -7,7 +7,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators/root"
+	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/root"
 )
 
 const (
