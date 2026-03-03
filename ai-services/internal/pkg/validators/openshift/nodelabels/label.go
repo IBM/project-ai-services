@@ -11,7 +11,6 @@ import (
 )
 
 const (
-	SpyreLabelTrue = "true"
 	NodeRoleSpyre  = "node-role.kubernetes.io/spyre"
 	NodeRoleWorker = "node-role.kubernetes.io/worker"
 )
