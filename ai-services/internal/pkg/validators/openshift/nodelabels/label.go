@@ -82,5 +82,5 @@ func (r *NodeLabelsRule) Level() constants.ValidationLevel {
 }
 
 func (r *NodeLabelsRule) Hint() string {
-	return "Ensure nodes have correct labels"
+	return "Ensure at least one worker node has the spyre role"
 }
