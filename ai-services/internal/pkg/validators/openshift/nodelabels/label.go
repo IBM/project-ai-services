@@ -6,9 +6,14 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	openshiftconst "github.com/project-ai-services/ai-services/internal/pkg/constants/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	corev1 "k8s.io/api/core/v1"
+)
+
+const (
+	SpyreLabel     = "ibm.com/spyre.present"
+	NodeRoleWorker = "node-role.kubernetes.io/worker"
+	SpyreLabelTrue = "true"
 )
 
 type NodeLabelsRule struct{}
@@ -22,7 +27,7 @@ func (r *NodeLabelsRule) Name() string {
 }
 
 func (r *NodeLabelsRule) Description() string {
-	return "Validates node architecture, OS, and at least one node with Spyre."
+	return "Validates that cluster nodes have correct labels"
 }
 
 // Verify checks node labels in the cluster.
@@ -59,13 +64,24 @@ func (r *NodeLabelsRule) validateNodes(nodes []corev1.Node) []string {
 		if r.checkSpyre(labels) {
 			return failed
 		}
+		if r.checkWorker(labels) {
+			return failed
+		}
 	}
 
-	return append(failed, "no nodes with Spyre label found")
+	return append(failed, "no nodes with required labels found")
 }
 
 func (r *NodeLabelsRule) checkSpyre(labels map[string]string) bool {
-	if val, ok := labels[openshiftconst.SpyreLabel]; ok && val == openshiftconst.SpyreLabelTrue {
+	if val, ok := labels[SpyreLabel]; ok && val == SpyreLabelTrue {
+		return true
+	}
+
+	return false
+}
+
+func (r *NodeLabelsRule) checkWorker(labels map[string]string) bool {
+	if _, ok := labels[NodeRoleWorker]; ok {
 		return true
 	}
 
@@ -81,5 +97,5 @@ func (r *NodeLabelsRule) Level() constants.ValidationLevel {
 }
 
 func (r *NodeLabelsRule) Hint() string {
-	return "Ensure nodes have correct arch, OS, and at least one Spyre node"
+	return "Ensure nodes have correct labels"
 }
