@@ -295,10 +295,18 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
              ThreadPoolExecutor(max_workers=max_worker) as chunker_executor:
 
             # A. Submit Conversions
-            conversion_futures = {
-                converter_executor.submit(convert_document, path, batch_paths[str(path)], out_path, doc_id_dict): path
-                for path in batch_paths
-            }
+            conversion_futures = {}
+            for path in batch_paths:
+                doc_id = doc_id_dict.get(Path(path).name)
+                if doc_id:
+                    # Update status to IN_PROGRESS as soon as document is submitted for conversion
+                    logger.debug(f"Submitting for conversion: updating doc metadata to IN_PROGRESS for document: {doc_id}")
+                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.IN_PROGRESS})
+                    logger.debug(f"Submitting for conversion: updating job status to IN_PROGRESS for document: {doc_id}")
+                    status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
+
+                future = converter_executor.submit(convert_document, path, batch_paths[str(path)], out_path, doc_id_dict)
+                conversion_futures[future] = path
 
             process_futures = {}
             chunk_futures = {}
