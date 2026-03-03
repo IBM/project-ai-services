@@ -5,7 +5,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
 
@@ -23,14 +23,7 @@ func configureCmd() *cobra.Command {
 			logger.Infoln("Running bootstrap configuration...")
 
 			// Create bootstrap instance based on runtime
-			runtimeType, err := cmd.Flags().GetString("runtime")
-			if err != nil {
-				return fmt.Errorf("failed to get runtime flag: %w", err)
-			}
-			rt := types.RuntimeType(runtimeType)
-
-			// Create bootstrap instance based on runtime
-			factory := bootstrap.NewBootstrapFactory(rt)
+			factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
 			bootstrapInstance, err := factory.Create()
 			if err != nil {
 				return fmt.Errorf("failed to create bootstrap instance: %w", err)

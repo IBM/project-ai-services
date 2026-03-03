@@ -11,6 +11,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
+	appFlags "github.com/project-ai-services/ai-services/internal/pkg/cli/constants/application"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
@@ -48,40 +50,10 @@ var createCmd = &cobra.Command{
 	`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		var err error
-		// validate params flag
-		if len(rawArgParams) > 0 {
-			argParams, err = utils.ParseKeyValues(rawArgParams)
-			if err != nil {
-				return fmt.Errorf("error validating params flag: %w", err)
-			}
-		}
-
-		// validate values files
-		for _, vf := range valuesFiles {
-			if !utils.FileExists(vf) {
-				return fmt.Errorf("values file '%s' does not exist", vf)
-			}
-		}
-
-		tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
-		if err := validators.ValidateAppTemplateExist(tp, templateName); err != nil {
+		// Build and run flag validator
+		flagValidator := buildFlagValidator()
+		if err := flagValidator.Validate(cmd); err != nil {
 			return err
-		}
-
-		// load the values and verify params arg values passed
-		_, err = tp.LoadValues(templateName, valuesFiles, argParams)
-		if err != nil {
-			return fmt.Errorf("failed to load params for application: %w", err)
-		}
-
-		// validate ImagePullPolicy
-		imagePullPolicy = image.ImagePullPolicy(rawArgImagePullPolicy)
-		if ok := imagePullPolicy.Valid(); !ok {
-			return fmt.Errorf(
-				"invalid --image-pull-policy %q: must be one of %q, %q, %q",
-				imagePullPolicy, image.PullAlways, image.PullNever, image.PullIfNotPresent,
-			)
 		}
 
 		appName := args[0]
@@ -138,21 +110,21 @@ func doBootstrapValidate() error {
 }
 
 func init() {
-	initCommonFlags()
-	initPodmanFlags()
-	initOpenShiftFlags()
+	initCreateCommonFlags()
+	initCreatePodmanFlags()
+	initCreateOpenShiftFlags()
 }
 
-func initCommonFlags() {
+func initCreateCommonFlags() {
 	skipCheckDesc := appBootstrap.BuildSkipFlagDescription()
-	createCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
+	createCmd.Flags().StringSliceVar(&skipChecks, appFlags.Create.SkipValidation, []string{}, skipCheckDesc)
 
-	createCmd.Flags().StringVarP(&templateName, "template", "t", "", "Application template to use (required)")
-	_ = createCmd.MarkFlagRequired("template")
+	createCmd.Flags().StringVarP(&templateName, appFlags.Create.Template, "t", "", "Application template to use (required)")
+	_ = createCmd.MarkFlagRequired(appFlags.Create.Template)
 
 	createCmd.Flags().StringSliceVar(
 		&rawArgParams,
-		"params",
+		appFlags.Create.Params,
 		[]string{},
 		"Inline parameters to configure the application.\n\n"+
 			"Format:\n"+
@@ -165,7 +137,7 @@ func initCommonFlags() {
 
 	createCmd.Flags().StringArrayVarP(
 		&valuesFiles,
-		"values",
+		appFlags.Create.Values,
 		"f",
 		[]string{},
 		"Specify values files to override default template values.\n\n"+
@@ -174,10 +146,10 @@ func initCommonFlags() {
 	)
 }
 
-func initPodmanFlags() {
+func initCreatePodmanFlags() {
 	createCmd.Flags().BoolVar(
 		&skipImageDownload,
-		"skip-image-download",
+		appFlags.Create.SkipImageDownload,
 		false,
 		"Skip container image pull/download during application creation\n\n"+
 			"Use this only if the required container images already exist locally\n"+
@@ -185,11 +157,11 @@ func initPodmanFlags() {
 			"Warning:\n"+
 			"- If set to true and images are missing → command will fail\n"+
 			"- If left false in air-gapped environments → pull/download attempt will fail\n"+
-			"Supported for podman runtime only.\n",
+			"Note: Supported for podman runtime only.\n",
 	)
 	createCmd.Flags().BoolVar(
 		&skipModelDownload,
-		"skip-model-download",
+		appFlags.Create.SkipModelDownload,
 		false,
 		"Skip model download during application creation\n\n"+
 			"Use this if local models already exist at /var/lib/ai-services/models/\n"+
@@ -197,7 +169,7 @@ func initPodmanFlags() {
 			"Warning:\n"+
 			"- If set to true and models are missing → command will fail\n"+
 			"- If left false in air-gapped environments → download attempt will fail\n"+
-			"Supported for podman runtime only.\n",
+			"Note: Supported for podman runtime only.\n",
 	)
 
 	initializeImagePullPolicyFlag()
@@ -206,20 +178,20 @@ func initPodmanFlags() {
 	deprecatedPodmanFlags()
 }
 
-func initOpenShiftFlags() {
+func initCreateOpenShiftFlags() {
 	createCmd.Flags().DurationVar(
 		&timeout,
-		"timeout",
+		appFlags.Create.Timeout,
 		0, // default
 		"Timeout for the operation (e.g. 10s, 2m, 1h).\n"+
-			"Supported for openshift runtime only.\n",
+			"Note: Supported for openshift runtime only.\n",
 	)
 }
 
 func initializeImagePullPolicyFlag() {
 	createCmd.Flags().StringVar(
 		&rawArgImagePullPolicy,
-		"image-pull-policy",
+		appFlags.Create.ImagePullPolicy,
 		string(image.PullIfNotPresent),
 		"Image pull policy for container images required for given application. Supported values: Always, Never, IfNotPresent.\n\n"+
 			"Determines when the container runtime should pull the image from the registry:\n"+
@@ -228,14 +200,96 @@ func initializeImagePullPolicyFlag() {
 			" - IfNotPresent: pull only if the image isn't already present locally \n\n"+
 			"Defaults to 'IfNotPresent' if not specified\n\n"+
 			"In air-gapped environments → specify 'Never'\n\n"+
-			"Supported for podman runtime only.\n\n",
+			"Note: Supported for podman runtime only.\n\n",
 	)
 }
 
 func deprecatedPodmanFlags() {
-	if err := createCmd.Flags().MarkDeprecated("skip-image-download", "use --image-pull-policy instead"); err != nil {
-		panic(fmt.Sprintf("Failed to mark 'skip-image-download' flag deprecated. Err: %v", err))
+	if err := createCmd.Flags().MarkDeprecated(appFlags.Create.SkipImageDownload, "use --image-pull-policy instead"); err != nil {
+		panic(fmt.Sprintf("Failed to mark '%s' flag deprecated. Err: %v", appFlags.Create.SkipImageDownload, err))
 	}
+}
+
+// buildFlagValidator creates and configures the flag validator with all flag definitions.
+func buildFlagValidator() *flagvalidator.FlagValidator {
+	runtimeType := vars.RuntimeFactory.GetRuntimeType()
+
+	builder := flagvalidator.NewFlagValidatorBuilder(runtimeType)
+
+	// Register common flags with their validation functions
+	builder.
+		AddCommonFlag(appFlags.Create.SkipValidation, nil).
+		AddCommonFlag(appFlags.Create.Template, validateTemplateFlag).
+		AddCommonFlag(appFlags.Create.Params, validateParamsFlag).
+		AddCommonFlag(appFlags.Create.Values, validateValuesFlag)
+
+	// Register Podman-specific flags
+	builder.
+		AddPodmanFlag(appFlags.Create.SkipImageDownload, nil).
+		AddPodmanFlag(appFlags.Create.SkipModelDownload, nil).
+		AddPodmanFlag(appFlags.Create.ImagePullPolicy, validateImagePullPolicyFlag)
+
+	// Register OpenShift-specific flags
+	builder.
+		AddOpenShiftFlag(appFlags.Create.Timeout, nil)
+
+	return builder.Build()
+}
+
+// validateTemplateFlag validates the template flag.
+func validateTemplateFlag(cmd *cobra.Command) error {
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+	if err := validators.ValidateAppTemplateExist(tp, templateName); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateParamsFlag validates the params flag.
+func validateParamsFlag(cmd *cobra.Command) error {
+	if len(rawArgParams) == 0 {
+		return nil
+	}
+
+	var err error
+	argParams, err = utils.ParseKeyValues(rawArgParams)
+	if err != nil {
+		return fmt.Errorf("invalid format: %w", err)
+	}
+
+	// Validate params against template values
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+	_, err = tp.LoadValues(templateName, valuesFiles, argParams)
+	if err != nil {
+		return fmt.Errorf("failed to load params: %w", err)
+	}
+
+	return nil
+}
+
+// validateValuesFlag validates the values flag.
+func validateValuesFlag(cmd *cobra.Command) error {
+	for _, vf := range valuesFiles {
+		if !utils.FileExists(vf) {
+			return fmt.Errorf("file '%s' does not exist", vf)
+		}
+	}
+
+	return nil
+}
+
+// validateImagePullPolicyFlag validates the image-pull-policy flag.
+func validateImagePullPolicyFlag(cmd *cobra.Command) error {
+	imagePullPolicy = image.ImagePullPolicy(rawArgImagePullPolicy)
+	if ok := imagePullPolicy.Valid(); !ok {
+		return fmt.Errorf(
+			"invalid value %q: must be one of %q, %q, %q",
+			imagePullPolicy, image.PullAlways, image.PullNever, image.PullIfNotPresent,
+		)
+	}
+
+	return nil
 }
 
 // Made with Bob

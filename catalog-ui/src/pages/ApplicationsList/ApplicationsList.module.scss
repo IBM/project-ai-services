@@ -1,0 +1,21 @@
+.rowActions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+}
+
+.noDataContent {
+  padding: 2rem;
+}
+
+.tableContent {
+  padding: 1rem;
+}
+
+@media (min-width: 42rem) {
+  .tableContent {
+    padding: 2rem;
+  }
+}

@@ -17,40 +17,13 @@ func EnsureDir(path string) error {
 		return fmt.Errorf("failed to create directory %s: %w", path, err)
 	}
 
-	logger.Infof("Directory ensured:", path)
+	logger.Infof("Directory ensured: %v", path)
 
 	return nil
 }
 
-// CopyDirFiltered copies files from src to dst based on filter.
-func CopyDirFiltered(src, dst string, allow func(name string) bool) error {
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return fmt.Errorf("failed to read source dir %s: %w", src, err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		if !allow(entry.Name()) {
-			continue
-		}
-
-		srcPath := filepath.Join(src, entry.Name())
-		dstPath := filepath.Join(dst, entry.Name())
-
-		if err := copyFile(srcPath, dstPath); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// copyFile copies a single file from src to dst.
-func copyFile(src, dst string) (err error) {
+// CopyFile copies a single file from src to dst.
+func CopyFile(src, dst string) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -77,6 +50,34 @@ func copyFile(src, dst string) (err error) {
 
 	if err = out.Sync(); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+// RemoveDirContents deletes the contents of a directory.
+func RemoveDirContents(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if derr := d.Close(); derr != nil && err == nil {
+			err = derr
+		}
+	}()
+
+	names, err := d.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+
+	for _, name := range names {
+		itemPath := filepath.Join(dir, name)
+		err = os.RemoveAll(itemPath)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

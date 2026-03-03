@@ -1,5 +1,4 @@
-// example of API endpoints constants
-export const API_ENDPOINTS = {
-  LOGIN: "/api/auth/login",
-  LOGOUT: "/api/auth/logout",
-} as const;
+export const AUTH_ENDPOINTS = {
+  LOGIN: "/auth/login",
+  LOGOUT: "/auth/logout",
+};

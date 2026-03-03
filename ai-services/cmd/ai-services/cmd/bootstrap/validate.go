@@ -31,7 +31,7 @@ func validateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "validate",
 		Short:   "Validates the environment",
-		Long:    longDescription(),
+		Long:    validateDescription(),
 		Example: validateExample(),
 		Hidden:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -62,13 +62,17 @@ func validateCmd() *cobra.Command {
 	return cmd
 }
 
-func longDescription() string {
-	validationList := generateValidationList()
+func validateDescription() string {
+	podmanList, openshiftList := generateValidationList()
 
 	return fmt.Sprintf(`Validates all prerequisites and configurations are correct for bootstrapping. 
 
 Following scenarios are validated and are available for skipping using --skip-validation flag:
-%s`, validationList)
+- For Podman:
+%s
+
+- For OpenShift:
+%s`, podmanList, openshiftList)
 }
 
 func validateExample() string {
@@ -85,12 +89,17 @@ func validateExample() string {
   ai-services bootstrap validate --verbose`
 }
 
-func generateValidationList() string {
+// generateValidationList return two validation list: podman and openshift.
+func generateValidationList() (string, string) {
+	podmanRules := validators.PodmanRegistry.Rules()
+	openshiftRules := validators.OpenshiftRegistry.Rules()
+
+	return createRuleList(podmanRules), createRuleList(openshiftRules)
+}
+
+func createRuleList(rules []validators.Rule) string {
 	var b strings.Builder
-	rules := validators.PodmanRegistry.Rules()
-
 	maxLen := 0
-
 	for _, rule := range rules {
 		if len(rule.Name()) > maxLen {
 			maxLen = len(rule.Name())
@@ -112,12 +121,21 @@ func generateValidationList() string {
 }
 
 func BuildSkipFlagDescription() string {
-	rules := validators.PodmanRegistry.Rules()
+	podmanRules := validators.PodmanRegistry.Rules()
+	openshiftRules := validators.OpenshiftRegistry.Rules()
 
-	ruleName := make([]string, 0, len(rules))
-	for _, rule := range rules {
-		ruleName = append(ruleName, rule.Name())
+	podmanRuleNames := make([]string, 0, len(podmanRules))
+	for _, rule := range podmanRules {
+		podmanRuleNames = append(podmanRuleNames, rule.Name())
 	}
 
-	return fmt.Sprintf("Skip specific validation checks (comma-separated: %s)", strings.Join(ruleName, ","))
+	openshiftRuleNames := make([]string, 0, len(openshiftRules))
+	for _, rule := range openshiftRules {
+		openshiftRuleNames = append(openshiftRuleNames, rule.Name())
+	}
+
+	return fmt.Sprintf("Skip specific validation checks\nFor Podman: %s\nFor OpenShift: %s",
+		strings.Join(podmanRuleNames, ","),
+		strings.Join(openshiftRuleNames, ","),
+	)
 }

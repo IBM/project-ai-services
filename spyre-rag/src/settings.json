@@ -1,15 +1,27 @@
 {
   "prompts": {
       "query_vllm_stream": "You are given:\n1. **A short context text** containing factual information.\n2. **A user's question** seeking clarification or advice.\n3. **Return a concise, to-the-point answer grounded strictly in the provided context.**\n\nThe answer should be accurate, easy to follow, based on the context(s), and include clear reasoning or justification.\nIf the context does not provide enough information, answer using your general knowledge.\n\nContext:\n{context}\n\nQuestion:\n{question}\n\nAnswer:",
-      "table_summary_and_classify": "You are an intelligent assistant analyzing tables extracted from documents.\n\nYour tasks:\n\n1. Summarize the key points and meaningful insights from the table.\n   - Focus on factual, instructional, or explanatory information.\n   - Avoid repeating the entire table; keep it concise and informative.\n2. Decide if the table is relevant for a knowledge base:\n   - Relevant: contains factual, instructional, or explanatory info useful for answering questions.\n   - Irrelevant: personal info, disclaimers, administrative notes, or unrelated commentary.\n3. Output in the exact format below:\n\nSummary: <your summary here>\nDecision: <yes or no>\n\nDo NOT output JSON, extra commentary, or any other text.\n\nExamples:\n\nPositive example (relevant):\nTable:\n<table><tbody><tr><th>Processor</th><th>Cores</th><th>Memory</th></tr><tr><td>Power10</td><td>16</td><td>8 TB</td></tr></tbody></table>\n\nOutput:\nSummary: Power10 processor has 16 cores and 8 TB of memory.\nDecision: yes\n\nNegative example (irrelevant):\nTable:\n<table><tbody><tr><td>Prepared by:</td><td>John Smith</td></tr></tbody></table>\n\nOutput:\nSummary: Prepared by John Smith.\nDecision: no\n\nNow analyze the table below:\n\nTable:\n{content}"
+      "table_summary_and_classify": "You are an intelligent assistant analyzing tables extracted from documents.\n\nYour tasks:\n\n1. Summarize the key points and meaningful insights from the table.\n   - Focus on factual, instructional, or explanatory information.\n   - Avoid repeating the entire table; keep it concise and informative.\n2. Decide if the table is relevant for a knowledge base:\n   - Relevant: contains factual, instructional, or explanatory info useful for answering questions.\n   - Irrelevant: personal info, disclaimers, administrative notes, or unrelated commentary.\n3. Output in the exact format below:\n\nSummary: <your summary here>\nDecision: <yes or no>\n\nDo NOT output JSON, extra commentary, or any other text.\n\nExamples:\n\nPositive example (relevant):\nTable:\n<table><tbody><tr><th>Processor</th><th>Cores</th><th>Memory</th></tr><tr><td>Power10</td><td>16</td><td>8 TB</td></tr></tbody></table>\n\nOutput:\nSummary: Power10 processor has 16 cores and 8 TB of memory.\nDecision: yes\n\nNegative example (irrelevant):\nTable:\n<table><tbody><tr><td>Prepared by:</td><td>John Smith</td></tr></tbody></table>\n\nOutput:\nSummary: Prepared by John Smith.\nDecision: no\n\nNow analyze the table below:\n\nTable:\n{content}",
+      "summarize_system_prompt": "You are a summarization assistant. Output ONLY the summary. \n\nDo not add questions, explanations, headings, code, or any other text.",
+      "summarize_user_prompt_with_length": "Summarize the following text in {target_words} words, with an allowed variance of ±50 words.Avoid being overly concise.\nExpand explanations where necessary to meet the word requirement.\n\nYou must strictly meet this word-range requirement. Do not exceed or fall short of the range.\n\n\nText:\n{text}\n\nSummary:",
+      "summarize_user_prompt_without_length": "Summarize the following text.\n\nText:\n{text}\n\nSummary:"
   },
-
-  "score_threshold": 0.5, 
+  "context_lengths": {
+    "ibm-granite/granite-3.3-8b-instruct": 32768
+  },
+  "token_to_word_ratios": {
+    "en": 0.75
+  },
+  "score_threshold": 0.5,
   "max_concurrent_requests": 32,
   "num_chunks_post_search": 10,
   "num_chunks_post_reranker": 3,
   "llm_max_tokens": 512,
   "temperature": 0.0,
   "max_input_length": 6000,
-  "prompt_template_token_count": 250
+  "prompt_template_token_count": 250,
+  "summarization_coefficient": 0.2,
+  "summarization_prompt_token_count": 100,
+  "summarization_temperature": 0.2,
+  "summarization_stop_words": "Keywords, Note, ***"
 }
