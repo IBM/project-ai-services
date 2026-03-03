@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status
-from common.misc_utils import get_logger, set_log_level
+from common.misc_utils import get_logger, set_log_level, has_allowed_extension
 import digitize.digitize_utils as dg_util
 from digitize import types
 from digitize.resource_utils import (
@@ -129,6 +129,25 @@ async def digitize_document(
         )
 
     # 2. Validation
+    # Validate that all files are PDFs
+    allowed_file_types = {'pdf': b'%PDF'}
+    for file in files:
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="File must have a filename.")
+
+        if not has_allowed_extension(file.filename, allowed_file_types):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only PDF files are allowed. Invalid file: {file.filename}"
+            )
+
+        # Check content type if provided
+        if file.content_type and file.content_type not in ['application/pdf', 'application/x-pdf']:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only PDF files are allowed. Invalid content type for {file.filename}: {file.content_type}"
+            )
+
     if operation == dg_util.OperationType.DIGITIZATION and len(files) > 1:
         raise HTTPException(status_code=400, detail="Only 1 file allowed for digitization.")
 
