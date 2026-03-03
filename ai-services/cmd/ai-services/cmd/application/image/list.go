@@ -5,6 +5,8 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
 
@@ -22,6 +24,13 @@ var listCmd = &cobra.Command{
 }
 
 func list(templateName string) error {
+	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypeOpenShift {
+		// Since we do not have tmpl files in OpenShift marking it as unsupported for now
+		logger.Warningln("Not supported for openshift runtime")
+
+		return nil
+	}
+
 	images, err := image.ListImages(templateName, "")
 	if err != nil {
 		return fmt.Errorf("error listing images: %w", err)

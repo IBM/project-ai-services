@@ -11,9 +11,7 @@ import App from "./App";
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Theme theme="g10">
-      <div className="appLayout">
-        <App />
-      </div>
+      <App />
     </Theme>
   </StrictMode>,
 );

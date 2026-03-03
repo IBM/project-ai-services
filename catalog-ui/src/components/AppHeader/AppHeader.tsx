@@ -12,6 +12,7 @@ import { Help, Notification, User, Logout } from "@carbon/icons-react";
 import styles from "./AppHeader.module.scss";
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { logout } from "@/services/auth";
 
 type AppHeaderProps =
   | {
@@ -84,6 +85,8 @@ const AppHeader = (props: AppHeaderProps) => {
 
             <HeaderGlobalAction
               aria-label="User"
+              aria-haspopup="menu"
+              aria-expanded={isProfileOpen}
               className={styles.iconWidth}
               isActive={isProfileOpen}
               onClick={() => setIsProfileOpen((prev) => !prev)}
@@ -102,18 +105,17 @@ const AppHeader = (props: AppHeaderProps) => {
                   </div>
                 </div>
 
-                <div
+                <button
+                  type="button"
                   className={styles.logout}
                   onClick={() => {
                     setIsProfileOpen(false);
                     setIsLogoutModalOpen(true);
                   }}
                 >
-                  <div>Log out</div>
-                  <div>
-                    <Logout size={16} />
-                  </div>
-                </div>
+                  <span>Log out</span>
+                  <Logout size={16} />
+                </button>
               </div>
             </HeaderPanel>
             <Theme theme="g10">
@@ -123,9 +125,22 @@ const AppHeader = (props: AppHeaderProps) => {
                 primaryButtonText="Log out"
                 secondaryButtonText="Cancel"
                 onRequestClose={() => setIsLogoutModalOpen(false)}
-                onRequestSubmit={() => {
+                onRequestSubmit={async () => {
                   setIsLogoutModalOpen(false);
-                  navigate("/logout");
+
+                  const token = localStorage.getItem("access_token");
+
+                  try {
+                    if (token) {
+                      await logout(token);
+                    }
+                  } catch (err) {
+                    console.error("Logout API failed:", err);
+                  } finally {
+                    localStorage.removeItem("access_token");
+                    localStorage.removeItem("refresh_token");
+                    navigate("/logout", { replace: true });
+                  }
                 }}
               >
                 <p>

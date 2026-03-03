@@ -8,7 +8,7 @@ const MainLayout = () => {
   const [isSideNavOpen, setIsSideNavOpen] = useState(false);
 
   return (
-    <>
+    <div className="appLayout">
       <AppHeader
         isSideNavOpen={isSideNavOpen}
         setIsSideNavOpen={setIsSideNavOpen}
@@ -19,10 +19,10 @@ const MainLayout = () => {
         setIsSideNavOpen={setIsSideNavOpen}
       />
 
-      <main className="appContent">
+      <main>
         <Outlet />
       </main>
-    </>
+    </div>
   );
 };
 
