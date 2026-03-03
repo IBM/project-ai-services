@@ -50,10 +50,6 @@ var createCmd = &cobra.Command{
 	`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		// Set imagePullPolicy from rawArgImagePullPolicy (which has the default value)
-		// This ensures it's set even if the flag wasn't explicitly provided by the user
-		imagePullPolicy = image.ImagePullPolicy(rawArgImagePullPolicy)
-
 		// Build and run flag validator
 		flagValidator := buildFlagValidator()
 		if err := flagValidator.Validate(cmd); err != nil {
@@ -89,7 +85,7 @@ var createCmd = &cobra.Command{
 			SkipImageDownload: skipImageDownload,
 			ArgParams:         argParams,
 			ValuesFiles:       valuesFiles,
-			ImagePullPolicy:   imagePullPolicy,
+			ImagePullPolicy:   image.ImagePullPolicy(rawArgImagePullPolicy),
 			Timeout:           timeout,
 		}
 
