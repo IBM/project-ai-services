@@ -247,7 +247,18 @@ Since some of the above approaches are not practical, and some don’t work as e
 
 
 ---
+#### Current prompt
 
+```text
+You are given:
+1. A short context text containing factual information.
+2. A user's question seeking clarification or advice.
+3. Return a concise, to-the-point answer grounded strictly in the provided context.
+
+The answer should be accurate, easy to follow, based on the context(s), and include clear reasoning or justification.
+If the context does not provide enough information, answer using your general knowledge.
+
+```
 #### Multilingual Prompt
 
 ```text
