@@ -4,7 +4,7 @@ import logging
 import os
 
 from tqdm import tqdm
-os.environ['GRPC_VERBOSITY'] = 'ERROR' 
+os.environ['GRPC_VERBOSITY'] = 'ERROR'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 from pathlib import Path
@@ -17,6 +17,7 @@ from common.misc_utils import get_logger, generate_file_checksum, text_suffix, t
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.status import StatusManager
 from digitize.types import DocStatus, JobStatus
+from digitize.resource_utils import safe_cleanup, log_resource_usage
 
 logging.getLogger('docling').setLevel(logging.CRITICAL)
 
@@ -169,7 +170,10 @@ def process_converted_document(converted_json_path, pdf_path, out_path, conversi
     if conversion_stats["text_processed"] and conversion_stats["table_processed"]:
         logger.debug(f"Text & Table of {pdf_path} is processed already!")
         page_count = get_pdf_page_count(pdf_path)
-        table_count = processed_table_json_path.exists() and len(json.load(processed_table_json_path.open())) or 0
+        # Calculate table count: check if file exists and load JSON to get count
+        table_count = 0
+        if processed_table_json_path.exists():
+            table_count = len(json.load(processed_table_json_path.open()))
         return pdf_path, processed_text_json_path, processed_table_json_path, page_count, table_count, timings
 
     try:
@@ -309,6 +313,9 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                 try:
                     path, converted_json, conv_time = fut.result()
                     if not converted_json:
+                        logger.error(f"Conversion failed for {path}: converted_json is None")
+                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error="Failed to convert document: conversion returned None")
+                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error="Failed to convert document: conversion returned None")
                         continue
 
                     # Update persistence and session stats
@@ -344,6 +351,9 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     path, txt_json, tab_json, pgs, tabs, timings = fut.result()
 
                     if not tab_json:
+                        logger.error(f"Processing failed for {path}: tab_json is None")
+                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error="Failed to process document: processing returned None for tables")
+                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error="Failed to extract text and tables from document: processing returned None")
                         continue
 
                     batch_stats[str(path)].update({
@@ -391,14 +401,14 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     if chunk_json:
                         batch_chunk_paths.append(chunk_json)
                         # Capture chunk counts in real time and update <doc_id>_metadata.json
-                        final_chunks = create_chunk_documents(chunk_json, tab_json, path)
-                        batch_stats[str(path)]["chunk_count"] = len(final_chunks)
+                        chunk_count = count_chunks(chunk_json, tab_json)
+                        batch_stats[str(path)]["chunk_count"] = chunk_count
 
                         logger.debug(f"Chunking Done: updating doc metadata for document: {doc_id}")
                         status_mgr.update_doc_metadata(doc_id, {
                             "status": DocStatus.COMPLETED,
                             "completed_at": status_mgr._get_timestamp(),
-                            "chunks": len(final_chunks),
+                            "chunks": chunk_count,
                             "timing_in_secs": {"chunking": round(float(chunk_time or 0), 2)}
                         })
                         logger.debug(f"Chunking Done: updating job status for document: {doc_id}")
@@ -453,6 +463,9 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                 # Re-invoke assembly if not already done in _run_batch
                 # or use the combined_docs gathered during the batchs
                 doc_chunks = create_chunk_documents(c_path, t_path, path)
+                # Inject the doc_id into every chunk so insert_chunks can find it
+                for chunk in doc_chunks:
+                    chunk["doc_id"] = doc_id
                 combined_chunks.extend(doc_chunks)
 
                 logger.debug(f"Assembling chunks: updating doc metadata for document: {doc_id}")
@@ -472,8 +485,26 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
     except Exception as e:
         logger.error(f"Error while processing the documents in job {job_id}: {e}", exc_info=True)
         status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=f"failed to merge chunked text and tables: {str(e)}")
+
+        # Clean up intermediate files for failed documents
+        try:
+            for path in filtered_input_paths.keys():
+                doc_id = doc_id_dict.get(Path(path).name)
+                if doc_id:
+                    # Remove intermediate files
+                    for pattern in [f"{doc_id}.json", f"{doc_id}{text_suffix}",
+                                   f"{doc_id}{table_suffix}", f"{doc_id}{chunk_suffix}"]:
+                        file_path = Path(out_path) / pattern
+                        if file_path.exists():
+                            safe_cleanup(str(file_path))
+        except Exception as cleanup_error:
+            logger.warning(f"Error during cleanup of failed job {job_id}: {cleanup_error}")
+
         # In case of failure, mark all remaining docs in the job as failed
         return None, None
+    finally:
+        # Log resource usage after processing
+        log_resource_usage(out_path)
 
 def collect_header_font_sizes(elements):
     """
@@ -613,7 +644,8 @@ def chunk_single_file(input_path, pdf_path, out_path, conversion_stats, emb_endp
                 text = block.get("text", "").strip()
                 try:
                     page_no = block.get("prov", {})[0].get("page_no")
-                except:
+                except (KeyError, IndexError, TypeError) as e:
+                    logger.debug(f"Could not extract page_no from block {idx}: {e}")
                     page_no = 0
                 ref = f"#texts/{idx}"
 
@@ -677,6 +709,20 @@ def chunk_single_file(input_path, pdf_path, out_path, conversion_stats, emb_endp
     except Exception as e:
         logger.error(f"error chunking file '{input_path}': {e}")
     return None, None, None
+
+def count_chunks(in_txt_f, in_tab_f):
+    """Count total chunks from text and table JSON files without creating document objects."""
+    with open(in_txt_f, "r") as f:
+        txt_data = json.load(f)
+
+    with open(in_tab_f, "r") as f:
+        tab_data = json.load(f)
+
+    txt_count = len(txt_data) if txt_data else 0
+    tab_count = len(tab_data) if tab_data else 0
+
+    return txt_count + tab_count
+
 
 def create_chunk_documents(in_txt_f, in_tab_f, orig_fn):
     logger.debug(f"Creating combined chunk documents from '{in_txt_f}' & '{in_tab_f}'")

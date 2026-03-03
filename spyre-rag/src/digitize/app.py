@@ -4,12 +4,23 @@ import os
 from pathlib import Path
 import shutil
 from typing import List, Optional
+from contextlib import asynccontextmanager
 import uvicorn
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status
 from common.misc_utils import get_logger, set_log_level
 import digitize.digitize_utils as dg_util
-from common.misc_utils import get_logger
+from digitize import types
+from digitize.resource_utils import (
+    check_disk_space,
+    cleanup_staging_directory,
+    cleanup_failed_job,
+    cleanup_old_failed_jobs,
+    safe_cleanup,
+    log_resource_usage,
+    DiskSpaceError
+)
+from digitize.cleanup_scheduler import start_cleanup_scheduler, stop_cleanup_scheduler
 
 log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
@@ -20,12 +31,9 @@ if level != "":
         logging.warning(f"Unknown LOG_LEVEL passed: '{level}', defaulting to INFO.")
 
 set_log_level(log_level)
-logger = get_logger("app")
 
-from digitize.ingest import ingest 
+from digitize.ingest import ingest
 from digitize.status import StatusManager
-
-app = FastAPI(title="Digitize Documents Service")
 
 # Semaphores for concurrency limiting
 digitization_semaphore = asyncio.BoundedSemaphore(2)
@@ -36,6 +44,39 @@ logger = get_logger("digitize_server")
 CACHE_DIR = "/var/cache"
 DOCS_DIR = f"{CACHE_DIR}/docs"
 STAGING_DIR = f"{CACHE_DIR}/staging"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan events (startup and shutdown)."""
+    # Startup
+    logger.info("Running startup cleanup tasks...")
+    try:
+        # Clean up old staging directories from previous crashes
+        cleanup_staging_directory(STAGING_DIR, force=False)
+        # Clean up old failed jobs
+        cleanup_old_failed_jobs(CACHE_DIR)
+        # Log initial resource usage
+        log_resource_usage(CACHE_DIR)
+        # Start periodic cleanup scheduler
+        await start_cleanup_scheduler(CACHE_DIR)
+        logger.info("Periodic cleanup scheduler started")
+    except Exception as e:
+        logger.warning(f"Startup cleanup encountered errors: {e}")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Running shutdown cleanup tasks...")
+    try:
+        # Stop periodic cleanup scheduler
+        await stop_cleanup_scheduler()
+        logger.info("Periodic cleanup scheduler stopped")
+    except Exception as e:
+        logger.warning(f"Shutdown cleanup encountered errors: {e}")
+
+
+app = FastAPI(title="Digitize Documents Service", lifespan=lifespan)
 
 async def digitize_documents(job_id: str, filenames: List[str], output_format: dg_util.OutputFormat):
     try:
@@ -59,10 +100,12 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
         logger.info(f"Ingestion for {job_id} completed successfully")
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
-        status_mgr.update_job_progress("", dg_util.DocStatus.FAILED, dg_util.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline: {str(e)}")
+        status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline: {str(e)}")
+        # Clean up failed job resources
+        cleanup_failed_job(job_id, CACHE_DIR)
     finally:
-        if job_staging_path.exists():
-            shutil.rmtree(job_staging_path)
+        # Always clean up staging directory, even on crashes
+        safe_cleanup(str(job_staging_path))
         
         # Mandatory Semaphore Release
         ingestion_semaphore.release()
@@ -89,15 +132,32 @@ async def digitize_document(
     if operation == dg_util.OperationType.DIGITIZATION and len(files) > 1:
         raise HTTPException(status_code=400, detail="Only 1 file allowed for digitization.")
 
+    # 3. Check disk space before processing
+    try:
+        file_sizes = [f.size for f in files if f.size]
+        total_size_gb = sum(file_sizes) / (1024 ** 3)
+        # Estimate required space (3x for intermediate files)
+        required_space = max(5.0, total_size_gb * 3)
+        check_disk_space(CACHE_DIR, required_gb=required_space)
+        log_resource_usage(CACHE_DIR)
+    except DiskSpaceError as e:
+        logger.error(f"Disk space check failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.warning(f"Could not check disk space: {e}")
+
     job_id = dg_util.generate_job_id()
     filenames = [f.filename for f in files]
     # asyncio.gather allows us to read all file buffers concurrently
     file_contents = await asyncio.gather(*[f.read() for f in files], return_exceptions=True)
 
-    # 3. acquire the semaphore
+    # 4. acquire the semaphore
     await sem.acquire()
 
-    # 4. Schedule the background pipeline
+    # 5. Schedule the background pipeline
     try:
         if operation == dg_util.OperationType.INGESTION:
             # Upload the file byte stream to files in staging directory

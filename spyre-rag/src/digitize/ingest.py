@@ -5,6 +5,8 @@ import common.db_utils as db
 from common.emb_utils import get_embedder
 from common.misc_utils import *
 from digitize.doc_utils import process_documents
+from digitize.status import StatusManager
+from digitize.types import JobStatus, DocStatus
 
 logger = get_logger("ingest")
 
@@ -14,6 +16,12 @@ def ingest(directory_path, job_id=None, doc_id_dict=None):
         logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
 
     logger.info(f"Ingestion started from dir '{directory_path}'")
+    
+    # Update job status to IN_PROGRESS as soon as ingestion request is received
+    if job_id:
+        status_mgr = StatusManager(job_id)
+        status_mgr.update_job_progress("", DocStatus.ACCEPTED, JobStatus.IN_PROGRESS)
+        logger.info(f"Job {job_id} status updated to IN_PROGRESS")
 
     # Process each document in the directory
     allowed_file_types = {'pdf': b'%PDF'}
@@ -68,7 +76,7 @@ def ingest(directory_path, job_id=None, doc_id_dict=None):
             # Insert data into Opensearch
             vector_store.insert_chunks(
                 combined_chunks,
-                embedder=embedder
+                embedding=embedder
             )
             logger.info("Processed documents loaded into DB")
         else:
