@@ -167,9 +167,7 @@ def chat_completion():
             else:
                 vllm_non_stream = query_vllm_non_stream(query, docs, llm_endpoint, llm_model, stop_words, max_tokens, temperature, perf_stat_dict )
                 
-                # Add performance metrics to the response dictionary
-                if isinstance(vllm_non_stream, dict):
-                    vllm_non_stream["perf_metrics"] = perf_stat_dict
+
                 
                 resp_text = json.dumps(vllm_non_stream, indent=None, separators=(',', ':'))
                 # Store metrics in registry for non-stream

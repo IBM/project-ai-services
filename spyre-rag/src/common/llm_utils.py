@@ -220,8 +220,6 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
         perf_stat_dict["token_latencies"] = token_latencies
         perf_stat_dict["inference_time"] = request_time
         
-        yield f"data: {json.dumps({'perf_metrics': perf_stat_dict})}\n\n"
-        
     except requests.exceptions.RequestException as e:
         error_details = str(e)
         if e.response is not None:
