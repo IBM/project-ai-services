@@ -54,42 +54,14 @@ func (r *NodeLabelsRule) Verify() error {
 // validateNodes performs the actual node checks.
 func (r *NodeLabelsRule) validateNodes(nodes []corev1.Node) []string {
 	var failed []string
-	hasSpyreNode := false
-
 	for _, node := range nodes {
 		labels := node.Labels
-		if err := r.checkArch(node.Name, labels); err != nil {
-			failed = append(failed, err.Error())
-		}
-		if err := r.checkOS(node.Name, labels); err != nil {
-			failed = append(failed, err.Error())
-		}
 		if r.checkSpyre(labels) {
-			hasSpyreNode = true
+			return failed
 		}
 	}
 
-	if !hasSpyreNode {
-		failed = append(failed, " - no node with ibm.com/spyre.present=true found")
-	}
-
-	return failed
-}
-
-func (r *NodeLabelsRule) checkArch(nodeName string, labels map[string]string) error {
-	if labels[openshiftconst.NodeArchLabel] != openshiftconst.NodeArch {
-		return fmt.Errorf("  - %s must have %s=%s", nodeName, openshiftconst.NodeArchLabel, openshiftconst.NodeArch)
-	}
-
-	return nil
-}
-
-func (r *NodeLabelsRule) checkOS(nodeName string, labels map[string]string) error {
-	if labels[openshiftconst.NodeOSLabel] != openshiftconst.NodeOSRHEL {
-		return fmt.Errorf("  - %s must have %s=%s", nodeName, openshiftconst.NodeOSLabel, openshiftconst.NodeOSRHEL)
-	}
-
-	return nil
+	return append(failed, "no nodes with Spyre label found")
 }
 
 func (r *NodeLabelsRule) checkSpyre(labels map[string]string) bool {
