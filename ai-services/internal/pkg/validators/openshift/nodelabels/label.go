@@ -61,15 +61,12 @@ func (r *NodeLabelsRule) validateNodes(nodes []corev1.Node) []string {
 	var failed []string
 	for _, node := range nodes {
 		labels := node.Labels
-		if r.checkSpyre(labels) {
-			return failed
-		}
-		if r.checkWorker(labels) {
+		if r.checkSpyre(labels) || r.checkWorker(labels) {
 			return failed
 		}
 	}
 
-	return append(failed, "no nodes with required labels found")
+	return append(failed, "no nodes with spyre and worker labels found")
 }
 
 func (r *NodeLabelsRule) checkSpyre(labels map[string]string) bool {
