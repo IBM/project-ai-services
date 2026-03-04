@@ -385,7 +385,13 @@ const ApplicationsListPage = () => {
           >
             <Checkbox
               id="checkbox-label-1"
-              labelText={<strong>Case routing</strong>}
+              labelText={
+                <strong>
+                  {selectedRowId
+                    ? rowsData.find((r) => r.id === selectedRowId)?.name
+                    : ""}
+                </strong>
+              }
               checked={isConfirmed}
               onChange={(_, { checked }) => setIsConfirmed(checked)}
             />
