@@ -27,6 +27,13 @@
   box-shadow: none !important;
   border: none !important;
 }
+.deleteButton {
+  transition: background-color 0.2s ease;
+}
+
+.selectedDelete {
+  background-color: #d6d7d8 !important; 
+}
 
 .customToast {
   :global(.cds--actionable-notification__action-button) {
