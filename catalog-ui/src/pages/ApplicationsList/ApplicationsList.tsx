@@ -112,7 +112,7 @@ const ApplicationsListPage = () => {
   const [search, setSearch] = useState<string>("");
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(10);
-   const [isDeleteDialogOpen, setdeleteDialogOpen] = useState<boolean>(false);
+  const [isDeleteDialogOpen, setdeleteDialogOpen] = useState<boolean>(false);
   const [isConfirmed, setIsConfirmed] = useState(false);
   const [rowsData, setRowsData] = useState<ApplicationRow[]>(rows);
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
@@ -181,7 +181,7 @@ const ApplicationsListPage = () => {
 
   return (
     <>
-    {toastOpen && (
+      {toastOpen && (
         <ActionableNotification
           actionButtonLabel="Try again"
           aria-label="close notification"
@@ -333,23 +333,25 @@ const ApplicationsListPage = () => {
                                             renderIcon={CopyLink}
                                             iconDescription="Copy"
                                           />
-                                         <Button
-                                      hasIconOnly
-                                      kind="ghost"
-                                      size="sm"
-                                      renderIcon={TrashCan}
-                                      iconDescription="Delete"
-                                      className={`${styles.deleteButton} ${
-                                        selectedRowId === row.id
-                                          ? styles.selectedDelete
-                                          : ""
-                                      }`}
-                                      onClick={() => {
-                                        setSelectedRowId(row.id as string);
-                                        setToastOpen(false);
-                                        setdeleteDialogOpen(true);
-                                      }}
-                                    />
+                                          <Button
+                                            hasIconOnly
+                                            kind="ghost"
+                                            size="sm"
+                                            renderIcon={TrashCan}
+                                            iconDescription="Delete"
+                                            className={`${styles.deleteButton} ${
+                                              selectedRowId === row.id
+                                                ? styles.selectedDelete
+                                                : ""
+                                            }`}
+                                            onClick={() => {
+                                              setSelectedRowId(
+                                                row.id as string,
+                                              );
+                                              setToastOpen(false);
+                                              setdeleteDialogOpen(true);
+                                            }}
+                                          />
                                         </div>
                                       </TableCell>
                                     );
@@ -385,46 +387,46 @@ const ApplicationsListPage = () => {
             </DataTable>
           </div>
           <Modal
-        open={isDeleteDialogOpen}
-        size="xs"
-        modalLabel="Delete Case routing"
-        modalHeading="Confirm delete"
-        primaryButtonText="Delete"
-        secondaryButtonText="Cancel"
-        danger
-        primaryButtonDisabled={!isConfirmed}
-        onRequestClose={() => {
-          setIsConfirmed(false);
-          setdeleteDialogOpen(false);
-          setSelectedRowId(null);
-        }}
-        onRequestSubmit={handleDelete}
-      >
-        <p>
-          Deleting an application permanently removes all associated components,
-          including connected services, runtime metadata, and any data or
-          configurations created.
-        </p>
-        <div>
-          <CheckboxGroup
-            className={styles.deleteConfirmation}
-            legendText="Confirm application to be deleted"
+            open={isDeleteDialogOpen}
+            size="xs"
+            modalLabel="Delete Case routing"
+            modalHeading="Confirm delete"
+            primaryButtonText="Delete"
+            secondaryButtonText="Cancel"
+            danger
+            primaryButtonDisabled={!isConfirmed}
+            onRequestClose={() => {
+              setIsConfirmed(false);
+              setdeleteDialogOpen(false);
+              setSelectedRowId(null);
+            }}
+            onRequestSubmit={handleDelete}
           >
-            <Checkbox
-              id="checkbox-label-1"
-              labelText={
-                <strong>
-                  {selectedRowId
-                    ? rowsData.find((r) => r.id === selectedRowId)?.name
-                    : ""}
-                </strong>
-              }
-              checked={isConfirmed}
-              onChange={(_, { checked }) => setIsConfirmed(checked)}
-            />
-          </CheckboxGroup>
-        </div>
-      </Modal>
+            <p>
+              Deleting an application permanently removes all associated
+              components, including connected services, runtime metadata, and
+              any data or configurations created.
+            </p>
+            <div>
+              <CheckboxGroup
+                className={styles.deleteConfirmation}
+                legendText="Confirm application to be deleted"
+              >
+                <Checkbox
+                  id="checkbox-label-1"
+                  labelText={
+                    <strong>
+                      {selectedRowId
+                        ? rowsData.find((r) => r.id === selectedRowId)?.name
+                        : ""}
+                    </strong>
+                  }
+                  checked={isConfirmed}
+                  onChange={(_, { checked }) => setIsConfirmed(checked)}
+                />
+              </CheckboxGroup>
+            </div>
+          </Modal>
         </Column>
       </Grid>
     </>
