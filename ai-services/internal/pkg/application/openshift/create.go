@@ -36,7 +36,7 @@ func (o *OpenshiftApplication) Create(ctx context.Context, opts types.CreateOpti
 	}
 
 	// Step3: Prepare the values
-	values, err := prepareValues(opts.ValuesFiles, opts.ArgParams)
+	values, err := tp.LoadValues(opts.TemplateName, opts.ValuesFiles, opts.ArgParams)
 	if err != nil {
 		return fmt.Errorf("failed to prepare values: %w", err)
 	}
