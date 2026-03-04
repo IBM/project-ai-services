@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ROUTES } from "@/constants";
 import MainLayout from "./layouts/MainLayout";
 import AuthLayout from "./layouts/AuthLayout";
@@ -11,6 +11,8 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/" element={<Navigate to={ROUTES.LOGIN} replace />} />
+
         <Route element={<MainLayout />}>
           <Route
             path={ROUTES.APPLICATIONS_LIST}

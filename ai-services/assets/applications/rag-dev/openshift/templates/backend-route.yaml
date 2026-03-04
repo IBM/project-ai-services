@@ -12,3 +12,6 @@ spec:
   to:
     kind: Service
     name: "backend"
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge

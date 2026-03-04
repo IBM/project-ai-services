@@ -116,6 +116,7 @@ func WaitForIngestionLogs(
 	ctx context.Context,
 	cfg *config.Config,
 	appName string,
+	completionStr string,
 ) (string, error) {
 	podName := fmt.Sprintf("%s--ingest-docs", appName)
 
@@ -150,7 +151,7 @@ func WaitForIngestionLogs(
 
 			logs := string(out)
 
-			if strings.Contains(logs, "Ingestion completed successfully") {
+			if strings.Contains(logs, completionStr) {
 				logger.Infof("[WAIT] Ingestion completed successfully")
 
 				return logs, nil
