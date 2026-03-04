@@ -513,9 +513,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "test_doc.pdf")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -531,9 +531,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "blank.pdf")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -549,9 +549,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "sample_png.pdf")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -567,9 +567,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "sample_txt.txt")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -702,6 +702,24 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 
 			logger.Infof("[RAG] Golden dataset validation completed")
+		})
+	})
+	ginkgo.Context("Clean Ingestion Docs", func() {
+		ginkgo.It("cleans the ingestion docs from the db", ginkgo.Label("spyre-dependent"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+			defer cancel()
+
+			completionStr := "DB Cleaned successfully!"
+			gomega.Expect(appName).NotTo(gomega.BeEmpty())
+
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, true)).To(gomega.Succeed())
+
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, true)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(logs).To(gomega.ContainSubstring("Local cache cleaned up."))
+			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
+
+			logger.Infof("[TEST] Clean Ingestion completed successfully for application %s", appName)
 		})
 	})
 	ginkgo.Context("Application Teardown", func() {
