@@ -13,7 +13,11 @@ import {
   TableToolbarContent,
   TableToolbarSearch,
   Pagination,
+  Modal,
   Button,
+  Checkbox,
+  ActionableNotification,
+  CheckboxGroup,
   type DataTableHeader,
 } from "@carbon/react";
 import {
@@ -105,8 +109,55 @@ const ApplicationsListPage = () => {
   const [search, setSearch] = useState<string>("");
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(10);
+  const [isDeleteDialogOpen, setdeleteDialogOpen] = useState<boolean>(false);
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const [rowsData, setRowsData] = useState<ApplicationRow[]>(rows);
+  const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
+  const [toastOpen, setToastOpen] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  const filteredRows = rows.filter((row) =>
+  const handleDelete = async () => {
+    if (!selectedRowId) {
+      setErrorMessage("No application selected to delete.");
+      setToastOpen(true);
+      return;
+    }
+
+    setIsDeleting(true);
+    setToastOpen(false);
+    setErrorMessage("");
+
+    try {
+      // Attempt server-side delete; if no backend exists this may fail.
+      const res = await fetch(`/api/applications/${selectedRowId}`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) {
+        const text = await res
+          .text()
+          .catch(() => res.statusText || "Delete failed");
+        throw new Error(text || `Delete failed (${res.status})`);
+      }
+
+      // On success remove locally
+      setRowsData((prev) => prev.filter((r) => r.id !== selectedRowId));
+      setdeleteDialogOpen(false);
+      setSelectedRowId(null);
+      setIsConfirmed(false);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed deleting application",
+      );
+      setToastOpen(true);
+      // keep modal open so user can retry or cancel
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const filteredRows = rowsData.filter((row) =>
     [
       row.name,
       row.template,
@@ -127,6 +178,24 @@ const ApplicationsListPage = () => {
 
   return (
     <>
+      {toastOpen && (
+        <ActionableNotification
+          actionButtonLabel="Try again"
+          aria-label="close notification"
+          kind="error"
+          closeOnEscape
+          title={`Delete technical template ${selectedRowId ? rowsData.find((r) => r.id === selectedRowId)?.name : "selected"}`}
+          subtitle={errorMessage}
+          onCloseButtonClick={() => setToastOpen(false)}
+          style={{
+            position: "fixed",
+            top: "4rem",
+            right: "2rem",
+            zIndex: "46567",
+          }}
+          className={styles.customToast}
+        />
+      )}
       <PageHeader
         title={{ text: "Applications" }}
         pageActions={[
@@ -244,6 +313,10 @@ const ApplicationsListPage = () => {
                                       size="sm"
                                       renderIcon={TrashCan}
                                       iconDescription="Delete"
+                                      onClick={() => {
+                                        setSelectedRowId(row.id as string);
+                                        setdeleteDialogOpen(true);
+                                      }}
                                     />
                                   </div>
                                 </TableCell>
@@ -276,6 +349,40 @@ const ApplicationsListPage = () => {
           )}
         </DataTable>
       </div>
+      <Modal
+        open={isDeleteDialogOpen}
+        size="xs"
+        modalLabel="Delete Case routing"
+        modalHeading="Confirm delete"
+        primaryButtonText="Delete"
+        secondaryButtonText="Cancel"
+        danger
+        primaryButtonDisabled={!isConfirmed}
+        onRequestClose={() => {
+          setIsConfirmed(false);
+          setdeleteDialogOpen(false);
+        }}
+        onRequestSubmit={handleDelete}
+      >
+        <p>
+          Deleting an application permanently removes all associated components,
+          including connected services, runtime metadata, and any data or
+          configurations created.
+        </p>
+        <div>
+          <CheckboxGroup
+            className={styles.deleteConfirmation}
+            legendText="Confirm application to be deleted"
+          >
+            <Checkbox
+              id="checkbox-label-1"
+              labelText={<strong>Case routing</strong>}
+              checked={isConfirmed}
+              onChange={(_, { checked }) => setIsConfirmed(checked)}
+            />
+          </CheckboxGroup>
+        </div>
+      </Modal>
     </>
   );
 };
