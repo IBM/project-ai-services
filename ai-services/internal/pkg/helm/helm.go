@@ -79,6 +79,8 @@ func (h *Helm) Upgrade(release string, chart chart.Charter, opts *UpgradeOpts) e
 	upgradeClient.ServerSideApply = "true"
 	upgradeClient.WaitStrategy = kube.StatusWatcherStrategy
 	upgradeClient.Timeout = opts.Timeout
+	upgradeClient.ForceConflicts = true
+	upgradeClient.RollbackOnFailure = true
 
 	// Perform helm upgrade
 	_, err := upgradeClient.Run(release, chart, opts.Values)

@@ -258,7 +258,7 @@ func validateParamsFlag(cmd *cobra.Command) error {
 	}
 
 	// Validate params against template values
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{Runtime: vars.RuntimeFactory.GetRuntimeType()})
 	_, err = tp.LoadValues(templateName, valuesFiles, argParams)
 	if err != nil {
 		return fmt.Errorf("failed to load params: %w", err)
