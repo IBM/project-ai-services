@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useReducer } from "react";
 import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
 import {
   DataTable,
@@ -108,32 +108,116 @@ const rows: ApplicationRow[] = [
   },
 ];
 
+interface AppState {
+  search: string;
+  page: number;
+  pageSize: number;
+  isDeleteDialogOpen: boolean;
+  isConfirmed: boolean;
+  rowsData: ApplicationRow[];
+  selectedRowId: string | null;
+  toastOpen: boolean;
+  errorMessage: string;
+  errorRowName: string;
+  isDeleting: boolean;
+}
+
+type AppAction =
+  | { type: "SET_SEARCH"; payload: string }
+  | { type: "SET_PAGE"; payload: number }
+  | { type: "SET_PAGE_SIZE"; payload: number }
+  | { type: "OPEN_DELETE_DIALOG"; payload: string }
+  | { type: "CLOSE_DELETE_DIALOG" }
+  | { type: "SET_CONFIRMED"; payload: boolean }
+  | { type: "DELETE_ROW"; payload: string }
+  | { type: "SHOW_ERROR"; payload: { message: string; rowName?: string } }
+  | { type: "HIDE_ERROR" }
+  | { type: "SET_IS_DELETING"; payload: boolean };
+
+const initialState: AppState = {
+  search: "",
+  page: 1,
+  pageSize: 10,
+  isDeleteDialogOpen: false,
+  isConfirmed: false,
+  rowsData: rows,
+  selectedRowId: null,
+  toastOpen: false,
+  errorMessage: "",
+  errorRowName: "",
+  isDeleting: false,
+};
+
+const appReducer = (state: AppState, action: AppAction): AppState => {
+  switch (action.type) {
+    case "SET_SEARCH":
+      return { ...state, search: action.payload };
+    case "SET_PAGE":
+      return { ...state, page: action.payload };
+    case "SET_PAGE_SIZE":
+      return { ...state, pageSize: action.payload };
+    case "OPEN_DELETE_DIALOG":
+      return {
+        ...state,
+        selectedRowId: action.payload,
+        isDeleteDialogOpen: true,
+        toastOpen: false,
+      };
+    case "CLOSE_DELETE_DIALOG":
+      return {
+        ...state,
+        isDeleteDialogOpen: false,
+        isConfirmed: false,
+        selectedRowId: null,
+      };
+    case "SET_CONFIRMED":
+      return { ...state, isConfirmed: action.payload };
+    case "DELETE_ROW":
+      return {
+        ...state,
+        rowsData: state.rowsData.filter((r) => r.id !== action.payload),
+        isDeleteDialogOpen: false,
+        isConfirmed: false,
+      };
+    case "SHOW_ERROR":
+      return {
+        ...state,
+        errorMessage: action.payload.message,
+        errorRowName: action.payload.rowName ?? "",
+        toastOpen: true,
+        isDeleting: false,
+      };
+    case "HIDE_ERROR":
+      return {
+        ...state,
+        toastOpen: false,
+        selectedRowId: null,
+        errorRowName: "",
+      };
+    case "SET_IS_DELETING":
+      return { ...state, isDeleting: action.payload };
+    default:
+      return state;
+  }
+};
+
 const ApplicationsListPage = () => {
-  const [search, setSearch] = useState<string>("");
-  const [page, setPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(10);
-  const [isDeleteDialogOpen, setdeleteDialogOpen] = useState<boolean>(false);
-  const [isConfirmed, setIsConfirmed] = useState(false);
-  const [rowsData, setRowsData] = useState<ApplicationRow[]>(rows);
-  const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
-  const [toastOpen, setToastOpen] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [state, dispatch] = useReducer(appReducer, initialState);
+
   const handleDelete = async () => {
-    if (!selectedRowId) {
-      setErrorMessage("No application selected to delete.");
-      setSelectedRowId(null);
-      setToastOpen(true);
+    if (!state.selectedRowId) {
+      dispatch({
+        type: "SHOW_ERROR",
+        payload: { message: "No application selected for deletion" },
+      });
       return;
     }
 
-    setIsDeleting(true);
-    setToastOpen(false);
-    setErrorMessage("");
+    dispatch({ type: "SET_IS_DELETING", payload: true });
 
     try {
       // Attempt server-side delete; if no backend exists this may fail.
-      const res = await fetch(`/api/applications/${selectedRowId}`, {
+      const res = await fetch(`/api/applications/${state.selectedRowId}`, {
         method: "DELETE",
       });
 
@@ -143,18 +227,19 @@ const ApplicationsListPage = () => {
           .catch(() => res.statusText || "Delete failed");
         throw new Error(text || `Delete failed (${res.status})`);
       }
-      setRowsData((prev) => prev.filter((r) => r.id !== selectedRowId));
-      setdeleteDialogOpen(false);
-      setIsConfirmed(false);
+      dispatch({ type: "DELETE_ROW", payload: state.selectedRowId });
     } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : "Failed deleting application",
-      );
-      setToastOpen(true);
+      const msg =
+        err instanceof Error ? err.message : "Failed deleting application";
+      const name =
+        state.rowsData.find((r) => r.id === state.selectedRowId)?.name ?? "";
+      dispatch({
+        type: "SHOW_ERROR",
+        payload: { message: msg, rowName: name },
+      });
     } finally {
-      setIsDeleting(false);
-      setdeleteDialogOpen(false);
-      setIsConfirmed(false);
+      dispatch({ type: "SET_IS_DELETING", payload: false });
+      dispatch({ type: "CLOSE_DELETE_DIALOG" }); // still ok; the name is preserved
     }
   };
   const filteredRows = rows.filter((row) =>
@@ -168,12 +253,12 @@ const ApplicationsListPage = () => {
     ]
       .join(" ")
       .toLowerCase()
-      .includes(search.toLowerCase()),
+      .includes(state.search.toLowerCase()),
   );
 
   const paginatedRows = filteredRows.slice(
-    (page - 1) * pageSize,
-    page * pageSize,
+    (state.page - 1) * state.pageSize,
+    state.page * state.pageSize,
   );
 
   const noApplications = rows.length === 0;
@@ -181,17 +266,16 @@ const ApplicationsListPage = () => {
 
   return (
     <>
-      {toastOpen && (
+      {state.toastOpen && (
         <ActionableNotification
           actionButtonLabel="Try again"
           aria-label="close notification"
           kind="error"
           closeOnEscape
-          title={`Delete technical template ${selectedRowId ? rowsData.find((r) => r.id === selectedRowId)?.name : ""} failed`}
-          subtitle={errorMessage}
+          title={`Delete technical template ${state.errorRowName} failed`}
+          subtitle={state.errorMessage}
           onCloseButtonClick={() => {
-            setToastOpen(false);
-            setSelectedRowId(null);
+            dispatch({ type: "HIDE_ERROR" });
           }}
           style={{
             position: "fixed",
@@ -240,10 +324,13 @@ const ApplicationsListPage = () => {
                       <TableToolbarSearch
                         placeholder="Search"
                         persistent
-                        value={search}
+                        value={state.search}
                         onChange={(e) => {
                           if (typeof e !== "string") {
-                            setSearch(e.target.value);
+                            dispatch({
+                              type: "SET_SEARCH",
+                              payload: e.target.value,
+                            });
                           }
                         }}
                       />
@@ -340,16 +427,15 @@ const ApplicationsListPage = () => {
                                             renderIcon={TrashCan}
                                             iconDescription="Delete"
                                             className={`${styles.deleteButton} ${
-                                              selectedRowId === row.id
+                                              state.selectedRowId === row.id
                                                 ? styles.selectedDelete
                                                 : ""
                                             }`}
                                             onClick={() => {
-                                              setSelectedRowId(
-                                                row.id as string,
-                                              );
-                                              setToastOpen(false);
-                                              setdeleteDialogOpen(true);
+                                              dispatch({
+                                                type: "OPEN_DELETE_DIALOG",
+                                                payload: row.id as string,
+                                              });
                                             }}
                                           />
                                         </div>
@@ -372,13 +458,13 @@ const ApplicationsListPage = () => {
 
                   {filteredRows.length > 20 && (
                     <Pagination
-                      page={page}
-                      pageSize={pageSize}
+                      page={state.page}
+                      pageSize={state.pageSize}
                       pageSizes={[5, 10, 20, 30]}
                       totalItems={filteredRows.length}
                       onChange={({ page, pageSize }) => {
-                        setPage(page);
-                        setPageSize(pageSize);
+                        dispatch({ type: "SET_PAGE", payload: page });
+                        dispatch({ type: "SET_PAGE_SIZE", payload: pageSize });
                       }}
                     />
                   )}
@@ -387,18 +473,16 @@ const ApplicationsListPage = () => {
             </DataTable>
           </div>
           <Modal
-            open={isDeleteDialogOpen}
+            open={state.isDeleteDialogOpen}
             size="xs"
             modalLabel="Delete Case routing"
             modalHeading="Confirm delete"
             primaryButtonText="Delete"
             secondaryButtonText="Cancel"
             danger
-            primaryButtonDisabled={!isConfirmed}
+            primaryButtonDisabled={!state.isConfirmed}
             onRequestClose={() => {
-              setIsConfirmed(false);
-              setdeleteDialogOpen(false);
-              setSelectedRowId(null);
+              dispatch({ type: "CLOSE_DELETE_DIALOG" });
             }}
             onRequestSubmit={handleDelete}
           >
@@ -416,13 +500,17 @@ const ApplicationsListPage = () => {
                   id="checkbox-label-1"
                   labelText={
                     <strong>
-                      {selectedRowId
-                        ? rowsData.find((r) => r.id === selectedRowId)?.name
+                      {state.selectedRowId
+                        ? state.rowsData.find(
+                            (r: ApplicationRow) => r.id === state.selectedRowId,
+                          )?.name
                         : ""}
                     </strong>
                   }
-                  checked={isConfirmed}
-                  onChange={(_, { checked }) => setIsConfirmed(checked)}
+                  checked={state.isConfirmed}
+                  onChange={(_, { checked }) =>
+                    dispatch({ type: "SET_CONFIRMED", payload: checked })
+                  }
                 />
               </CheckboxGroup>
             </div>
