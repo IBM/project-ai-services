@@ -3,6 +3,7 @@ package apiserver
 import (
 	"net/http"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_ "github.com/project-ai-services/ai-services/docs" // Import generated docs
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/handlers"
@@ -16,6 +17,11 @@ import (
 // CreateRouter sets up the Gin router with the necessary routes and authentication middleware for the API server.
 func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist) *gin.Engine {
 	router := gin.Default()
+	router.Use(cors.New(cors.Config{
+		AllowOrigins: []string{"*"},
+		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders: []string{"Origin", "Content-Type", "Authorization"},
+	}))
 
 	// Health check endpoint
 	router.GET("/healthz", func(c *gin.Context) {
