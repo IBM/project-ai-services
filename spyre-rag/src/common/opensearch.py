@@ -83,7 +83,6 @@ class OpensearchVectorStore(VectorStore):
         logger.debug(f"Setting up index {self.index_name} with dimension {dim}")
 
         if self.client.indices.exists(index=self.index_name):
-            logger.info(f"Index {self.index_name} already present in vectorstore")
             return
 
         logger.debug(f"Creating new index {self.index_name}")
@@ -162,13 +161,11 @@ class OpensearchVectorStore(VectorStore):
 
             # Generate embeddings only for this specific batch
             if vectors is None and embedding is not None:
-                logger.debug(f"Generating embeddings for batch {i//batch_size + 1}")
                 current_batch_embeddings = embedding.embed_documents(page_contents)
 
                 # Initialize index on the first batch if not already done
                 if i == 0:
                     dim = len(current_batch_embeddings[0])
-                    logger.debug(f"First batch processed, detected dimension: {dim}")
                     self._setup_index(dim)
             else:
                 # Use the relevant slice from pre-computed vectors
@@ -202,14 +199,12 @@ class OpensearchVectorStore(VectorStore):
 
             # Bulk insert the current batch
             batch_num = i // batch_size + 1
-            logger.debug(f"Bulk inserting batch {batch_num} with {len(actions)} actions")
 
             try:
-                success, failed = helpers.bulk(self.client, actions, stats_only=True)
+                _, failed = helpers.bulk(self.client, actions, stats_only=True)
                 if failed:
                     logger.error(f"Failed to insert {failed} chunks in batch {batch_num} starting at index {i}")
                     return
-                logger.debug(f"Batch {batch_num}: Successfully indexed {success} chunks, Failed: {failed}")
             except Exception as e:
                 logger.error(f"Exception during bulk insert for batch {batch_num}: {e}")
                 raise

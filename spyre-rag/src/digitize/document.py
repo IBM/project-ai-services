@@ -1,13 +1,10 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import LiteralString, Optional
+from typing import Optional
 
+from digitize.config import DOCS_DIR
 from digitize.types import DocStatus, OutputFormat
-
-
-CACHE_DIR = "/var/cache"
-DOCS_DIR: LiteralString = f"{CACHE_DIR}/docs"
 
 @dataclass
 class TimingInfo:
@@ -58,7 +55,7 @@ class DocumentMetadata:
             "metadata": self.metadata,
         }
 
-    def save(self, docs_dir: str = DOCS_DIR) -> Path:
+    def save(self, docs_dir: Path = DOCS_DIR) -> Path:
         """
         Persist the document metadata as <doc_id>_metadata.json.
 
@@ -68,8 +65,8 @@ class DocumentMetadata:
         Returns:
             Path to the written metadata file.
         """
-        Path(docs_dir).mkdir(parents=True, exist_ok=True)
-        meta_path = Path(docs_dir) / f"{self.id}_metadata.json"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        meta_path = docs_dir / f"{self.id}_metadata.json"
         with open(meta_path, "w") as f:
             json.dump(self.to_dict(), f, indent=4)
         return meta_path

@@ -22,5 +22,8 @@ class JobStatus(str, Enum):
 class DocStatus(str, Enum):
     ACCEPTED = "accepted"
     IN_PROGRESS = "in_progress"
+    DIGITIZED = "digitized"
+    PROCESSED = "processed"
+    CHUNKED = "chunked"
     COMPLETED = "completed"
     FAILED = "failed"

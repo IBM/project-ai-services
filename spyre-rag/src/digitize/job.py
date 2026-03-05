@@ -4,10 +4,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from digitize.types import JobStatus
-
-
-CACHE_DIR = "/var/cache"
-JOBS_DIR = f"{CACHE_DIR}/jobs"
+from digitize import config
 
 
 @dataclass
@@ -70,7 +67,7 @@ class JobState:
             "error": self.error,
         }
 
-    def save(self, jobs_dir: str = JOBS_DIR) -> Path:
+    def save(self, jobs_dir: Path = config.JOBS_DIR) -> Path:
         """
         Persist the job state as <job_id>_status.json.
 
@@ -80,8 +77,8 @@ class JobState:
         Returns:
             Path to the written status file.
         """
-        Path(jobs_dir).mkdir(parents=True, exist_ok=True)
-        status_path = Path(jobs_dir) / f"{self.job_id}_status.json"
+        jobs_dir.mkdir(parents=True, exist_ok=True)
+        status_path = jobs_dir / f"{self.job_id}_status.json"
         with open(status_path, "w") as f:
             json.dump(self.to_dict(), f, indent=4)
         return status_path

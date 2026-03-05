@@ -2,6 +2,7 @@
 Standardized error responses for the digitize API.
 """
 from enum import Enum
+from typing import Optional
 from fastapi import HTTPException
 
 
@@ -54,7 +55,7 @@ class APIError:
     }
 
     @staticmethod
-    def raise_error(error_type: str, detail: str = None):
+    def raise_error(error_type: str, detail: Optional[str] = None):
         """
         Raise a standardized HTTPException.
         

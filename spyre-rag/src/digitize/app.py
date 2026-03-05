@@ -11,7 +11,8 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Q
 from common.misc_utils import get_logger, set_log_level, has_allowed_extension
 import digitize.digitize_utils as dg_util
 from digitize import types
-from digitize.errors import APIError
+from digitize.errors import *
+from digitize.config import *
 
 log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
@@ -32,11 +33,6 @@ ingestion_semaphore = asyncio.BoundedSemaphore(1)
 
 logger = get_logger("digitize_server")
 
-CACHE_DIR = "/var/cache"
-DOCS_DIR = f"{CACHE_DIR}/docs"
-STAGING_DIR = f"{CACHE_DIR}/staging"
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan events (startup and shutdown)."""
@@ -51,7 +47,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Digitize Documents Service", lifespan=lifespan)
 
-async def digitize_documents(job_id: str, filenames: List[str], output_format: dg_util.OutputFormat):
+async def digitize_documents(job_id: str, filenames: List[str], output_format: types.OutputFormat):
     try:
         # Business logic for document conversion.
         pass
@@ -64,7 +60,7 @@ async def digitize_documents(job_id: str, filenames: List[str], output_format: d
 
 async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict):
     status_mgr = StatusManager(job_id)
-    job_staging_path = Path(STAGING_DIR) / f"{job_id}"
+    job_staging_path = STAGING_DIR / f"{job_id}"
 
     try:
         logger.info(f"🚀 Ingestion started for job: {job_id}")
@@ -92,59 +88,80 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
 async def digitize_document(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
-    operation: dg_util.OperationType = Query(dg_util.OperationType.INGESTION),
-    output_format: dg_util.OutputFormat = Query(dg_util.OutputFormat.JSON)
+    operation: types.OperationType = Query(types.OperationType.INGESTION),
+    output_format: types.OutputFormat = Query(types.OutputFormat.JSON)
 ):
     try:
         # 0. Early exit if no files submitted
         if not files or len(files) == 0:
-            APIError.raise_error("INVALID_REQUEST", "No files provided. Please submit at least one file.")
+            APIError.raise_error(ErrorCode.INVALID_REQUEST, "No files provided. Please submit at least one file.")
 
-        sem = ingestion_semaphore if operation == dg_util.OperationType.INGESTION else digitization_semaphore
+        sem = ingestion_semaphore if operation == types.OperationType.INGESTION else digitization_semaphore
 
         # 1. Fail fast if limit reached
         if sem.locked():
-            APIError.raise_error("RATE_LIMIT_EXCEEDED", f"Too many concurrent {operation} requests.")
+            APIError.raise_error(ErrorCode.RATE_LIMIT_EXCEEDED, f"Too many concurrent {operation} requests.")
 
         # 2. Validation
         # Validate that all files are PDFs
         allowed_file_types = {'pdf': b'%PDF'}
         for file in files:
             if not file.filename:
-                APIError.raise_error("INVALID_REQUEST", "File must have a filename.")
+                APIError.raise_error(ErrorCode.INVALID_REQUEST, "File must have a filename.")
 
             if not has_allowed_extension(file.filename, allowed_file_types):
-                APIError.raise_error("UNSUPPORTED_MEDIA_TYPE", f"Only PDF files are allowed. Invalid file: {file.filename}")
+                APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, f"Only PDF files are allowed. Invalid file: {file.filename}")
 
             # Check content type if provided
             if file.content_type and file.content_type not in ['application/pdf', 'application/x-pdf']:
-                APIError.raise_error("UNSUPPORTED_MEDIA_TYPE", f"Only PDF files are allowed. Invalid content type for {file.filename}: {file.content_type}")
+                APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, f"Only PDF files are allowed. Invalid content type for {file.filename}: {file.content_type}")
 
-        if operation == dg_util.OperationType.DIGITIZATION and len(files) > 1:
+        if operation == types.OperationType.DIGITIZATION and len(files) > 1:
             APIError.raise_error("INVALID_REQUEST", "Only 1 file allowed for digitization.")
 
         job_id = dg_util.generate_uuid()
-        filenames = [f.filename for f in files]
-        # asyncio.gather allows us to read all file buffers concurrently
-        file_contents = await asyncio.gather(*[f.read() for f in files])
+        # Filter out None filenames and ensure all files have valid names
+        filenames = [f.filename for f in files if f.filename]
+        if len(filenames) != len(files):
+            APIError.raise_error(ErrorCode.INVALID_REQUEST, "All files must have valid filenames.")
+        
+        # Read all file buffers concurrently with error handling
+        # return_exceptions=True ensures partial failures don't cancel other reads
+        file_contents_raw = await asyncio.gather(*[f.read() for f in files], return_exceptions=True)
+        
+        # Validate all file reads succeeded and filter to bytes only
+        failed_reads = []
+        file_contents: List[bytes] = []
+        for idx, content in enumerate(file_contents_raw):
+            if isinstance(content, Exception):
+                filename = filenames[idx]
+                logger.error(f"Failed to read file {filename}: {content}")
+                failed_reads.append(f"{filename}: {str(content)}")
+            elif isinstance(content, bytes):
+                file_contents.append(content)
+        
+        if failed_reads:
+            error_details = "; ".join(failed_reads)
+            APIError.raise_error(ErrorCode.INVALID_REQUEST, f"Failed to read files: {error_details}")
 
         # 4. acquire the semaphore
         await sem.acquire()
 
         # 5. Schedule the background pipeline
         try:
-            if operation == dg_util.OperationType.INGESTION:
+            if operation == types.OperationType.INGESTION:
                 # Upload the file byte stream to files in staging directory
                 # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
-                await dg_util.stage_upload_files(job_id, filenames, str(Path(STAGING_DIR) / job_id), file_contents)
+                await dg_util.stage_upload_files(job_id, filenames, str(STAGING_DIR / job_id), file_contents)
 
-                doc_id_dict = dg_util.initialize_job_state(job_id, dg_util.OperationType.INGESTION, filenames)
+                doc_id_dict = dg_util.initialize_job_state(job_id, types.OperationType.INGESTION, filenames)
 
                 background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
             else:
                 background_tasks.add_task(digitize_documents, job_id, filenames, output_format)
         except Exception as e:
-            logger.debug(f"Semaphore slot released from the job {job_id}")
+            sem.release()
+            logger.error(f"Failed to schedule background task for job {job_id}, semaphore released: {e}")
             APIError.raise_error("INTERNAL_SERVER_ERROR", str(e))
 
         return {"job_id": job_id}
@@ -160,7 +177,7 @@ async def get_all_jobs(
     latest: bool = False,
     limit: int = 20,
     offset: int = 0,
-    status: Optional[dg_util.JobStatus] = None
+    status: Optional[types.JobStatus] = None
 ):
     return {"pagination": {"total": 0, "limit": limit, "offset": offset}, "data": []}
 
@@ -173,7 +190,7 @@ async def get_job_by_id(job_id: str):
 async def list_documents(
     limit: int = 20,
     offset: int = 0,
-    status: Optional[dg_util.JobStatus] = None,
+    status: Optional[types.JobStatus] = None,
     name: Optional[str] = None
 ):
     return {"pagination": {"total": 0, "limit": limit, "offset": offset}, "data": []}
