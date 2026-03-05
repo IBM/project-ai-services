@@ -124,7 +124,7 @@ pipeline {
                 script {
                     // Compile AI services binary from source
                     dir("${PROJECT_NAME}/${AI_SERVICES_DIR}") {
-                        sh 'make build'
+                        sh 'make bin'
                         sh "${AI_SERVICES_BINARY} --version"
                     }
                 }
