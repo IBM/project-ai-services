@@ -17,7 +17,8 @@ def ingest(directory_path, job_id=None, doc_id_dict=None):
 
     logger.info(f"Ingestion started from dir '{directory_path}'")
     
-    # Update job status to IN_PROGRESS as soon as ingestion request is received
+    # Initialize status manager
+    status_mgr = None
     if job_id:
         status_mgr = StatusManager(job_id)
         status_mgr.update_job_progress("", DocStatus.ACCEPTED, JobStatus.IN_PROGRESS)
@@ -65,22 +66,16 @@ def ingest(directory_path, job_id=None, doc_id_dict=None):
         return
 
     if combined_chunks:
-        # Check if any of the files in this batch actually need indexing
-        # Proceed only if at least one file has chunked=False in its stats
-        needs_indexing = any(not stats.get("chunked", False) for stats in converted_pdf_stats.values())
+        # Always index documents - treating each request as fresh
+        logger.info("Loading processed documents into DB")
 
-        if needs_indexing:
-            logger.info("Loading processed documents into DB")
-
-            embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
-            # Insert data into Opensearch
-            vector_store.insert_chunks(
-                combined_chunks,
-                embedding=embedder
-            )
-            logger.info("Processed documents loaded into DB")
-        else:
-            logger.info("All documents are already indexed. Skipping DB insertion.")
+        embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
+        # Insert data into Opensearch
+        vector_store.insert_chunks(
+            combined_chunks,
+            embedding=embedder
+        )
+        logger.info("Processed documents loaded into DB")
 
     # Log time taken for the file
     end_time = time.time()  # End the timer for the current file
@@ -98,4 +93,10 @@ def ingest(directory_path, job_id=None, doc_id_dict=None):
         f"Ingestion summary: {ingested}/{total_pdfs} files ingested "
         f"({percentage:.2f}% of total PDF files)"
     )
+
+    # Ensure all status updates are flushed before returning
+    if status_mgr:
+        status_mgr.shutdown()
+        logger.debug(f"Status manager shutdown and flushed for job {job_id}")
+
     return converted_pdf_stats

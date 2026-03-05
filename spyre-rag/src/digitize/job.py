@@ -15,34 +15,47 @@ class JobDocumentSummary:
     """Compact per-document entry stored inside a job status file."""
     id: str
     name: str
-    status: JobStatus = JobStatus.ACCEPTED
+    status: str
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "name": self.name,
-            "status": self.status.value if hasattr(self.status, "value") else self.status,
+            "status": self.status,
+        }
+
+
+@dataclass
+class JobStats:
+    """Statistics for documents in a job."""
+    total_documents: int = 0
+    completed: int = 0
+    failed: int = 0
+    in_progress: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "total_documents": self.total_documents,
+            "completed": self.completed,
+            "failed": self.failed,
+            "in_progress": self.in_progress,
         }
 
 
 @dataclass
 class JobState:
     """
-    Represents the overall state of a job.
+    Represents the overall state of a job. Job tracks overall progress and statistics
     Persisted as <job_id>_status.json under JOBS_DIR.
     """
     job_id: str
     operation: str
+    status: JobStatus
     submitted_at: str
-    status: JobStatus = JobStatus.ACCEPTED
-    last_updated_at: Optional[str] = None
+    completed_at: Optional[str] = None
     documents: List[JobDocumentSummary] = field(default_factory=list)
-    error: str = ""
-
-    def __post_init__(self):
-        # Default last_updated_at to submitted_at when not explicitly provided
-        if self.last_updated_at is None:
-            self.last_updated_at = self.submitted_at
+    stats: JobStats = field(default_factory=JobStats)
+    error: Optional[str] = None
 
     def to_dict(self) -> dict:
         """Serialize the job state to a JSON-compatible dictionary."""
@@ -51,8 +64,9 @@ class JobState:
             "operation": self.operation,
             "status": self.status.value if hasattr(self.status, "value") else self.status,
             "submitted_at": self.submitted_at,
-            "last_updated_at": self.last_updated_at,
+            "completed_at": self.completed_at,
             "documents": [doc.to_dict() for doc in self.documents],
+            "stats": self.stats.to_dict(),
             "error": self.error,
         }
 

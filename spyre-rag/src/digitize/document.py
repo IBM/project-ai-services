@@ -37,12 +37,11 @@ class DocumentMetadata:
     type: str
     status: DocStatus = DocStatus.ACCEPTED
     output_format: OutputFormat = OutputFormat.JSON
+    submitted_at: Optional[str] = None
     completed_at: Optional[str] = None
-    error: str = ""
-    pages: int = 0
-    tables: int = 0
-    chunks: int = 0
-    timing_in_secs: TimingInfo = field(default_factory=TimingInfo)
+    error: Optional[str] = None
+    job_id: Optional[str] = None
+    metadata: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Serialize the document metadata to a JSON-compatible dictionary."""
@@ -52,12 +51,11 @@ class DocumentMetadata:
             "type": self.type,
             "status": self.status.value if hasattr(self.status, "value") else self.status,
             "output_format": self.output_format.value if hasattr(self.output_format, "value") else self.output_format,
+            "submitted_at": self.submitted_at,
             "completed_at": self.completed_at,
             "error": self.error,
-            "pages": self.pages,
-            "tables": self.tables,
-            "chunks": self.chunks,
-            "timing_in_secs": self.timing_in_secs.to_dict(),
+            "job_id": self.job_id,
+            "metadata": self.metadata,
         }
 
     def save(self, docs_dir: str = DOCS_DIR) -> Path:

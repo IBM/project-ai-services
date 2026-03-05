@@ -7,7 +7,7 @@ from typing import List
 import uuid
 from common.misc_utils import get_logger
 from digitize.types import OutputFormat, OperationType, JobStatus, DocStatus
-from digitize.document import DocumentMetadata, TimingInfo
+from digitize.document import DocumentMetadata
 from digitize.job import JobState, JobDocumentSummary
 
 CACHE_DIR = "/var/cache"
@@ -16,28 +16,23 @@ JOBS_DIR = f"{CACHE_DIR}/jobs"
 
 logger = get_logger("digitize_utils")
 
-def generate_job_id():
-    # Generate a random UUID
-    job_id = uuid.uuid4()
-    logger.debug(f"job id : {job_id}")
-    return str(job_id)
-
-
-def generate_document_id(filename):
+def generate_uuid():
     """
-    Generate UUID based document_id based on filename, helps preventing duplicate document records 
-    """
-    # Define a fixed Namespace: use any valid UUID
-    NAMESPACE_INGESTION = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
+    Generate a random UUID: can be used for job IDs and document IDs.
 
-    # Generate deterministic UUID
-    document_id = uuid.uuid5(NAMESPACE_INGESTION, filename)
-    return str(document_id)
+    Returns:
+        Random UUID string
+    """
+    # Generate a random UUID (uuid4)
+    generated_uuid = uuid.uuid4()
+    logger.debug(f"Generated UUID: {generated_uuid}")
+    return str(generated_uuid)
 
 
 def initialize_job_state(job_id: str, operation: str, documents_info: list):
     """
     Creates the job status file and individual document metadata files.
+
     documents_info: List of filenames to be processed under this job.
 
     Returns:
@@ -53,35 +48,58 @@ def initialize_job_state(job_id: str, operation: str, documents_info: list):
     job_doc_summaries = []
 
     for doc in documents_info:
-        # Generate a deterministic document id from the filename
-        doc_id = generate_document_id(doc)
+        # Generate a random document id
+        doc_id = generate_uuid()
         doc_id_dict[doc] = doc_id
         logger.debug(f"Generated document id {doc_id} for the file: {doc}")
 
-        # Build and persist the DocumentMetadata object
+        # Build and persist the DocumentMetadata object with new structure
         doc_metadata = DocumentMetadata(
             id=doc_id,
             name=doc,
             type=operation,
             status=DocStatus.ACCEPTED,
             output_format=OutputFormat.JSON,
-            timing_in_secs=TimingInfo(),
+            submitted_at=submitted_at,
+            completed_at=None,
+            error=None,
+            job_id=job_id,
+            metadata={
+                "pages": 0,
+                "tables": 0,
+                "timing_in_secs": {
+                    "digitizing": None,
+                    "processing": None,
+                    "chunking": None,
+                    "indexing": None
+                }
+            }
         )
         doc_meta_path = doc_metadata.save(DOCS_DIR)
         logger.debug(f"Created document metadata file: {doc_meta_path}")
 
         # Collect a compact summary for the job status file
         job_doc_summaries.append(
-            JobDocumentSummary(id=doc_id, name=doc, status=JobStatus.ACCEPTED)
+            JobDocumentSummary(id=doc_id, name=doc, status="accepted")
         )
 
-    # Build and persist the JobState object
+    # Build and persist the JobState object with new structure
+    from digitize.job import JobStats
+
     job_state = JobState(
         job_id=job_id,
         operation=operation,
-        submitted_at=submitted_at,
         status=JobStatus.ACCEPTED,
+        submitted_at=submitted_at,
+        completed_at=None,
         documents=job_doc_summaries,
+        stats=JobStats(
+            total_documents=len(documents_info),
+            completed=0,
+            failed=0,
+            in_progress=0
+        ),
+        error=None
     )
     job_status_path = job_state.save(JOBS_DIR)
     logger.debug(f"Created job status file: {job_status_path}")

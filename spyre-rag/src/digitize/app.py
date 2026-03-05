@@ -11,6 +11,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Q
 from common.misc_utils import get_logger, set_log_level, has_allowed_extension
 import digitize.digitize_utils as dg_util
 from digitize import types
+from digitize.errors import APIError
 from digitize.resource_utils import (
     check_disk_space,
     cleanup_staging_directory,
@@ -119,82 +120,91 @@ async def digitize_document(
     operation: dg_util.OperationType = Query(dg_util.OperationType.INGESTION),
     output_format: dg_util.OutputFormat = Query(dg_util.OutputFormat.JSON)
 ):
-    sem = ingestion_semaphore if operation == dg_util.OperationType.INGESTION else digitization_semaphore
-    
-    # 1. Fail fast if limit reached
-    if sem.locked():
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many concurrent {operation} requests."
-        )
-
-    # 2. Validation
-    # Validate that all files are PDFs
-    allowed_file_types = {'pdf': b'%PDF'}
-    for file in files:
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="File must have a filename.")
-
-        if not has_allowed_extension(file.filename, allowed_file_types):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Only PDF files are allowed. Invalid file: {file.filename}"
-            )
-
-        # Check content type if provided
-        if file.content_type and file.content_type not in ['application/pdf', 'application/x-pdf']:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Only PDF files are allowed. Invalid content type for {file.filename}: {file.content_type}"
-            )
-
-    if operation == dg_util.OperationType.DIGITIZATION and len(files) > 1:
-        raise HTTPException(status_code=400, detail="Only 1 file allowed for digitization.")
-
-    # 3. Check disk space before processing
     try:
-        file_sizes = [f.size for f in files if f.size]
-        total_size_gb = sum(file_sizes) / (1024 ** 3)
-        # Estimate required space (3x for intermediate files)
-        required_space = max(5.0, total_size_gb * 3)
-        check_disk_space(CACHE_DIR, required_gb=required_space)
-        log_resource_usage(CACHE_DIR)
-    except DiskSpaceError as e:
-        logger.error(f"Disk space check failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
-            detail=str(e)
-        )
+        # 0. Early exit if no files submitted
+        if not files or len(files) == 0:
+            APIError.raise_error("INVALID_REQUEST", "No files provided. Please submit at least one file.")
+
+        sem = ingestion_semaphore if operation == dg_util.OperationType.INGESTION else digitization_semaphore
+
+        # 1. Fail fast if limit reached
+        if sem.locked():
+            APIError.raise_error("RATE_LIMIT_EXCEEDED", f"Too many concurrent {operation} requests.")
+
+        # 2. Validation
+        # Validate that all files are PDFs
+        allowed_file_types = {'pdf': b'%PDF'}
+        for file in files:
+            if not file.filename:
+                APIError.raise_error("INVALID_REQUEST", "File must have a filename.")
+
+            if not has_allowed_extension(file.filename, allowed_file_types):
+                APIError.raise_error("UNSUPPORTED_MEDIA_TYPE", f"Only PDF files are allowed. Invalid file: {file.filename}")
+
+            # Check content type if provided
+            if file.content_type and file.content_type not in ['application/pdf', 'application/x-pdf']:
+                APIError.raise_error("UNSUPPORTED_MEDIA_TYPE", f"Only PDF files are allowed. Invalid content type for {file.filename}: {file.content_type}")
+
+        if operation == dg_util.OperationType.DIGITIZATION and len(files) > 1:
+            APIError.raise_error("INVALID_REQUEST", "Only 1 file allowed for digitization.")
+
+        # 3. Check disk space before processing
+        try:
+            from digitize.resource_utils import get_directory_size
+
+            file_sizes = [f.size for f in files if f.size]
+            total_size_gb = sum(file_sizes) / (1024 ** 3)
+
+            # Calculate space already consumed by processed files
+            docs_dir_size = get_directory_size(DOCS_DIR)
+            docs_dir_size_gb = docs_dir_size / (1024 ** 3)
+
+            # Estimate required space (3x for intermediate files) + existing processed files
+            required_space = max(5.0, total_size_gb * 3 + docs_dir_size_gb)
+
+            logger.debug(f"Disk space calculation: incoming files={total_size_gb:.2f}GB, "
+                        f"existing processed files={docs_dir_size_gb:.2f}GB, "
+                        f"total required={required_space:.2f}GB")
+
+            check_disk_space(CACHE_DIR, required_gb=required_space)
+            log_resource_usage(CACHE_DIR)
+        except DiskSpaceError as e:
+            logger.error(f"Disk space check failed: {e}")
+            APIError.raise_error("INSUFFICIENT_STORAGE", str(e))
+        except Exception as e:
+            logger.warning(f"Could not check disk space: {e}")
+
+        job_id = dg_util.generate_uuid()
+        filenames = [f.filename for f in files]
+        # asyncio.gather allows us to read all file buffers concurrently
+        file_contents = await asyncio.gather(*[f.read() for f in files])
+
+        # 4. acquire the semaphore
+        await sem.acquire()
+
+        # 5. Schedule the background pipeline
+        try:
+            if operation == dg_util.OperationType.INGESTION:
+                # Upload the file byte stream to files in staging directory
+                # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
+                await dg_util.stage_upload_files(job_id, filenames, str(Path(STAGING_DIR) / job_id), file_contents)
+
+                doc_id_dict = dg_util.initialize_job_state(job_id, dg_util.OperationType.INGESTION, filenames)
+
+                background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
+            else:
+                background_tasks.add_task(digitize_documents, job_id, filenames, output_format)
+        except Exception as e:
+            logger.debug(f"Semaphore slot released from the job {job_id}")
+            APIError.raise_error("INTERNAL_SERVER_ERROR", str(e))
+
+        return {"job_id": job_id}
+    except HTTPException:
+        # Re-raise HTTPException as-is
+        raise
     except Exception as e:
-        logger.warning(f"Could not check disk space: {e}")
-
-    job_id = dg_util.generate_job_id()
-    filenames = [f.filename for f in files]
-    # asyncio.gather allows us to read all file buffers concurrently
-    file_contents = await asyncio.gather(*[f.read() for f in files], return_exceptions=True)
-
-    # 4. acquire the semaphore
-    await sem.acquire()
-
-    # 5. Schedule the background pipeline
-    try:
-        if operation == dg_util.OperationType.INGESTION:
-            # Upload the file byte stream to files in staging directory
-            # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
-            await dg_util.stage_upload_files(job_id, filenames, str(Path(STAGING_DIR) / job_id), file_contents)
-
-            doc_id_dict = dg_util.initialize_job_state(job_id, dg_util.OperationType.INGESTION, filenames)
-
-            background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
-        else:
-            background_tasks.add_task(digitize_documents, job_id, filenames, output_format)
-    except Exception as e:
-        # release the semaphore in case of exception
-        sem.release()
-        logger.debug(f"Semaphore slot released from the job {job_id}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-    return {"job_id": job_id}
+        logger.error(f"Unexpected error in digitize_document: {e}")
+        APIError.raise_error("INTERNAL_SERVER_ERROR", str(e))
 
 @app.get("/v1/documents/jobs")
 async def get_all_jobs(
@@ -237,7 +247,7 @@ async def delete_document(doc_id: str):
 @app.delete("/v1/documents", status_code=status.HTTP_204_NO_CONTENT)
 async def bulk_delete_documents(confirm: bool = Query(...)):
     if not confirm:
-        raise HTTPException(status_code=400, detail="Confirm parameter required.")
+        APIError.raise_error("INVALID_REQUEST", "Confirm parameter required.")
     # 1. Check for active jobs
     # 2. Truncate VDB and wipe cache
     return

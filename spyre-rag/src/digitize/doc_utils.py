@@ -13,7 +13,7 @@ from concurrent.futures import as_completed, ProcessPoolExecutor, ThreadPoolExec
 from sentence_splitter import SentenceSplitter
 
 from common.llm_utils import create_llm_session, summarize_and_classify_tables, tokenize_with_llm
-from common.misc_utils import get_logger, generate_file_checksum, text_suffix, table_suffix, chunk_suffix
+from common.misc_utils import get_logger, text_suffix, table_suffix, chunk_suffix
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.status import StatusManager
 from digitize.types import DocStatus, JobStatus
@@ -163,18 +163,14 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
     return table_count, process_time
 
 def process_converted_document(converted_json_path, pdf_path, out_path, conversion_stats, gen_model, gen_endpoint, emb_endpoint, max_tokens, doc_id):
+    """
+    Process converted document to extract text and tables.
+    No caching - always process fresh.
+    """
     processed_text_json_path = (Path(out_path) / f"{doc_id}{text_suffix}")
     processed_table_json_path = (Path(out_path) / f"{doc_id}{table_suffix}")
 
     timings: dict[str, float] = {"process_text": 0.0, "process_tables": 0.0}
-    if conversion_stats["text_processed"] and conversion_stats["table_processed"]:
-        logger.debug(f"Text & Table of {pdf_path} is processed already!")
-        page_count = get_pdf_page_count(pdf_path)
-        # Calculate table count: check if file exists and load JSON to get count
-        table_count = 0
-        if processed_table_json_path.exists():
-            table_count = len(json.load(processed_table_json_path.open()))
-        return pdf_path, processed_text_json_path, processed_table_json_path, page_count, table_count, timings
 
     try:
         converted_doc = None
@@ -225,50 +221,20 @@ def convert_document(pdf_path, conversion_stats, out_path, doc_id_dict):
     return None, None, None
 
 def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoint, max_tokens, job_id, doc_id_dict):
-    # Skip files that already exist by matching the cached checksum of the pdf
-    # if there is no difference in checksum and processed text & table json also exist, would skip for convert and process list
-    # if checksum is matching but either processed text or table json not exist, process the file, but don't convert
-    # else add the file to convert and process list(filtered_input_paths)
+    """
+    Process documents for ingestion pipeline.
+    Each request is treated as fresh.
+    """
 
+    # Treat all files as needing full processing (no caching)
     filtered_input_paths = {}
     for path in input_paths:
-        stem = Path(path).stem
-        filename = f"{stem}.pdf"
-        doc_id = doc_id_dict[filename]
-
-        # 2. Initialize the status dictionary with all required keys
-        meta = {
+        filtered_input_paths[str(path)] = {
             "converted": True,
             "text_processed": False,
             "table_processed": False,
             "chunked": False
         }
-
-        checksum_path = Path(out_path) / f"{doc_id}.checksum"
-        doc_json = Path(out_path) / f"{doc_id}.json"
-        text_json = Path(out_path) / f"{doc_id}{text_suffix}"
-        table_json = Path(out_path) / f"{doc_id}{table_suffix}"
-        chunk_json = Path(out_path) / f"{doc_id}{chunk_suffix}"
-
-        if checksum_path.exists():
-            cached_cs = checksum_path.read_text().strip()
-            if cached_cs == generate_file_checksum(path):
-                # If checksum matches, check which files actually exist
-                meta["converted"] = not doc_json.exists()
-                meta["text_processed"] = text_json.exists()
-                meta["table_processed"] = table_json.exists()
-                meta["chunked"] = chunk_json.exists()
-
-        filtered_input_paths[str(path)] = meta
-
-    # Update checksums for files marked for conversion
-    for path in filtered_input_paths:
-        if filtered_input_paths[path]["converted"]:
-            checksum = generate_file_checksum(path)
-            stem = Path(path).stem
-            filename = f"{stem}.pdf"
-            doc_id = doc_id_dict[filename]
-            (Path(out_path) / f"{doc_id}.checksum").write_text(checksum, encoding='utf-8')
 
     # Partition files into light and heavy based on page count
     light_files, heavy_files = {}, {}
@@ -423,7 +389,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
                 except Exception as e:
                     logger.error(f"Error from chunking for {path}: {str(e)}", exc_info=True)
-                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to convert document: {str(e)}")
+                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to chunk document: {str(e)}")
                     status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"failed to chunk document: {str(e)}")
         return batch_stats, batch_chunk_paths, batch_table_paths
 
@@ -485,6 +451,20 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                 })
                 logger.debug(f"Assembling chunks: updating job status for document: {doc_id}")
                 status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
+
+                # Clean up intermediate files after successful processing
+                # Preserve <doc_id>.json for GET requests, clean up other intermediate files
+                try:
+                    for pattern in [f"{doc_id}.checksum", f"{doc_id}{text_suffix}",
+                                   f"{doc_id}{table_suffix}", f"{doc_id}{chunk_suffix}"]:
+                        file_path = Path(out_path) / pattern
+                        if file_path.exists():
+                            safe_cleanup(str(file_path))
+                            logger.debug(f"Cleaned up intermediate file: {file_path}")
+                    # Keep <doc_id>.json persisted for GET requests
+                    logger.debug(f"Preserved {doc_id}.json for future GET requests")
+                except Exception as cleanup_error:
+                    logger.warning(f"Error cleaning up intermediate files for {doc_id}: {cleanup_error}")
             else:
                 logger.warning(f"Path mismatch for {path}: expected outputs not found in batch results.")
 
@@ -494,17 +474,22 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
         logger.error(f"Error while processing the documents in job {job_id}: {e}", exc_info=True)
         status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=f"failed to merge chunked text and tables: {str(e)}")
 
+        # Flush error status immediately to ensure it's persisted
+        status_mgr.flush()
+
         # Clean up intermediate files for failed documents
+        # Preserve <doc_id>.json even for failed jobs for debugging/GET requests
         try:
             for path in filtered_input_paths.keys():
                 doc_id = doc_id_dict.get(Path(path).name)
                 if doc_id:
-                    # Remove intermediate files
-                    for pattern in [f"{doc_id}.json", f"{doc_id}{text_suffix}",
+                    # Remove intermediate files but keep <doc_id>.json
+                    for pattern in [f"{doc_id}.checksum", f"{doc_id}{text_suffix}",
                                    f"{doc_id}{table_suffix}", f"{doc_id}{chunk_suffix}"]:
                         file_path = Path(out_path) / pattern
                         if file_path.exists():
                             safe_cleanup(str(file_path))
+                    logger.debug(f"Preserved {doc_id}.json for failed document")
         except Exception as cleanup_error:
             logger.warning(f"Error during cleanup of failed job {job_id}: {cleanup_error}")
 
@@ -617,17 +602,16 @@ def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens):
 
 
 def chunk_single_file(input_path, pdf_path, out_path, conversion_stats, emb_endpoint, max_tokens=512, doc_id=None):
+    """
+    Chunk a single file into smaller pieces.
+    No caching - always process fresh.
+    """
     t0 = time.time()
     processed_chunk_json_path = (Path(out_path) / f"{doc_id}{chunk_suffix}")
 
-    if conversion_stats["chunked"]:
-        logger.debug(f"{pdf_path} already chunked!")
-        return processed_chunk_json_path, pdf_path, 0.0
-
     try:
-        if not Path(processed_chunk_json_path).exists():
-            with open(input_path, "r") as f:
-                data = json.load(f)
+        with open(input_path, "r") as f:
+            data = json.load(f)
             
             font_size_levels = collect_header_font_sizes(data)
 
@@ -706,13 +690,11 @@ def chunk_single_file(input_path, pdf_path, out_path, conversion_stats, emb_endp
             # Flush any remaining content
             flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens)
 
-            # Save the processed chunks to the output file
-            with open(processed_chunk_json_path, "w") as f:
-                json.dump(chunks, f, indent=2)
+        # Save the processed chunks to the output file
+        with open(processed_chunk_json_path, "w") as f:
+            json.dump(chunks, f, indent=2)
 
-            logger.debug(f"{len(chunks)} RAG chunks saved to {processed_chunk_json_path}")
-        else:
-            logger.debug(f"{processed_chunk_json_path} already exists.")
+        logger.debug(f"{len(chunks)} RAG chunks saved to {processed_chunk_json_path}")
         return processed_chunk_json_path, pdf_path, time.time() - t0
     except Exception as e:
         logger.error(f"error chunking file '{input_path}': {e}")
