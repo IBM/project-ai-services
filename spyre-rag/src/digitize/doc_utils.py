@@ -198,6 +198,10 @@ def process_converted_document(converted_json_path, pdf_path, out_path, conversi
         return None, None, None, None, None, None
 
 def convert_document(pdf_path, conversion_stats, out_path, doc_id_dict):
+    """
+    Convert a single document to JSON format.
+    This function runs in a separate process via ProcessPoolExecutor.
+    """
     try:
         logger.info(f"Processing '{pdf_path}'")
         filename = f"{Path(pdf_path).stem}.pdf"
@@ -473,9 +477,6 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
     except Exception as e:
         logger.error(f"Error while processing the documents in job {job_id}: {e}", exc_info=True)
         status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=f"failed to merge chunked text and tables: {str(e)}")
-
-        # Flush error status immediately to ensure it's persisted
-        status_mgr.flush()
 
         # Clean up intermediate files for failed documents
         # Preserve <doc_id>.json even for failed jobs for debugging/GET requests

@@ -94,9 +94,4 @@ def ingest(directory_path, job_id=None, doc_id_dict=None):
         f"({percentage:.2f}% of total PDF files)"
     )
 
-    # Ensure all status updates are flushed before returning
-    if status_mgr:
-        status_mgr.shutdown()
-        logger.debug(f"Status manager shutdown and flushed for job {job_id}")
-
     return converted_pdf_stats
