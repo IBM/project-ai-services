@@ -1,15 +1,12 @@
-
 ## AI Services — E2E Test Suite
 
-Purpose
--------
+## Purpose
 
 This document explains how to run the End-to-End (E2E) test suite located under `ai-services/tests/e2e`, how to run the suite, and how to add new tests.
 
-Prerequisites
--------------
+## Prerequisites
 
-The Ginkgo test suite runs an end-to-end test which consists of setting up the machine with ai-services binary, checking for the 
+The Ginkgo test suite runs an end-to-end test which consists of setting up the machine with ai-services binary, checking for the
 minimum number of Spyre cards installed, amongst other pre-flight checks.
 
 - Go toolchain (the repository uses Go modules). Use the Go version listed in `ai-services/go.mod`.
@@ -19,18 +16,16 @@ minimum number of Spyre cards installed, amongst other pre-flight checks.
 - The golden dataset CSV file must be placed inside the `project-ai-services/test/golden/` directory. The filename should match the value provided in the `GOLDEN_DATASET_FILE` environment variable.
 - Ginkgo CLI — tests can be run with `go test` or `ginkgo`.
 
-How to run tests locally
-------------------------
+## How to run tests locally
 
 1. From the repository root, change into the `ai-services` folder:
 
    cd ai-services
 
 2. To run the E2E suite follow either of the options below:
-
    1. Run using `go test`
 
-      ```bash 
+      ```bash
       go test ./tests/e2e -v
       ```
 
@@ -39,8 +34,8 @@ How to run tests locally
       - Many E2E tests perform long-running operations (image pulls, application startup, ingestion). Expect tests to take many minutes (or longer) depending on environment and flags.
 
    2. Run using `make` (which uses `ginkgo cli` under the hood)
-      
-      ```bash 
+
+      ```bash
       make test
 
       make test-generate-report TEST_ARGS="--timeout=2h"
@@ -49,23 +44,25 @@ How to run tests locally
       Notes:
       - This target runs all tests under `tests/e2e` using `ginkgo -r ./tests/e2e`
       - It can be customized by setting environment variables `TEST_ARGS` for example `make test TEST_ARGS="-v"`.
-      - The `test-generate-report`  runs the entire test and stores a JUnit XML report in `tests/e2e/reports/report-$(RUN_ID).xml` 
+      - The `test-generate-report` runs the entire test and stores a JUnit XML report in `tests/e2e/reports/report-$(RUN_ID).xml`
 
-   3. Run using the Ginkgo CLI 
+   3. Run using the Ginkgo CLI
+
       ```bash
-      ### install ginkgo 
+      ### install ginkgo
       go install github.com/onsi/ginkgo/v2/ginkgo@latest
+
+      ### add the installation path to PATH
+      export PATH=$PATH:$(go env GOPATH)/bin
 
       ### run the whole suite
       ginkgo -r --timeout=2h ./tests/e2e
 
-      ### to generate a junit report with ginkgo 
-      ginkgo  -r --timeout=2h --junit-report=e2e-report.xml --output-dir=tests/e2e/reports ./tests/e2e/... 
+      ### to generate a junit report with ginkgo
+      ginkgo  -r --timeout=2h --junit-report=e2e-report.xml --output-dir=tests/e2e/reports ./tests/e2e/...
       ```
 
-
-Environment variables to set before running tests
--------------------------------------------------
+## Environment variables to set before running tests
 
 The test suite reads several environment variables. Many have sensible defaults, so set these before running the suite when required.
 
@@ -75,7 +72,7 @@ export REGISTRY_URL="icr.io"
 export REGISTRY_USER_NAME=myuser
 export REGISTRY_PASSWORD=mypassword
 
-# Used to download vllm image 
+# Used to download vllm image
 export RH_REGISTRY_URL="registry.redhat.io"
 export RH_REGISTRY_USER_NAME=<your redhat acc username>
 export RH_REGISTRY_PASSWORD=<your redhat acc password>
@@ -94,26 +91,28 @@ export GOLDEN_DATASET_FILE="filename.csv"
 export LLM_JUDGE_MODEL_PATH="/var/lib/ai-services/models/"
 export LLM_JUDGE_MODEL="Qwen/Qwen2.5-7B-Instruct"
 
-# Expected Golden Dataset accuracy 
-export RAG_ACCURACY_THRESHOLD=0.70 
+# Expected Golden Dataset accuracy
+export RAG_ACCURACY_THRESHOLD=0.70
 ```
 
-Running Golden Dataset Validation Independently
-------------------------------------------------
+## Running Golden Dataset Validation Independently
+
 The RAG Golden Dataset Validation can be executed independently from the full E2E lifecycle. This allows validating an already running RAG application without creating or deleting an application during the test run.
 
 This mode is useful when:
+
 - A RAG application is already deployed.
 - You only want to validate model accuracy.
 - You want to avoid image pulls, bootstrap, or provisioning steps.
 
-Prerequisites
---------------
+## Prerequisites
+
 - A RAG application must already be running.
 - The application must be healthy.
 - The application must expose an accessible endpoint.
 - The golden dataset CSV file must be placed inside the `project-ai-services/test/golden/` directory. The filename should match the value provided in the `GOLDEN_DATASET_FILE` environment variable.
 - The following environment variables must be set
+
 ```
 export GOLDEN_DATASET_FILE="filename.csv"
 
@@ -130,18 +129,23 @@ export LLM_JUDGE_MODEL="Qwen/Qwen2.5-7B-Instruct"
 export LLM_JUDGE_PORT=8000
 export LLM_CONTAINER_POLLING_INTERVAL=30s
 ```
+
 - Verify the application exists:
+
 ```
 ai-services application info <app-name>
 ```
+
 If this command fails, golden dataset validation will fail.
 
-Command to Run Golden Validation Only
---------------------------------------
+## Command to Run Golden Validation Only
+
 ```
 make test TEST_ARGS="--label-filter=golden-dataset-validation" APP_NAME=<existing-app-name>
 ```
+
 OR
+
 ```
 ginkgo -r ./tests/e2e \
   --label-filter=golden-dataset-validation \
@@ -149,11 +153,9 @@ ginkgo -r ./tests/e2e \
   --app-name=<existing-app-name>
 ```
 
-Adding new E2E tests
----------------------
+## Adding new E2E tests
 
 Add new test files under `ai-services/tests/e2e/` as standard Go test files (package `e2e`). The suite's entrypoint is `e2e_suite_test.go` which registers the Ginkgo suite.
-
 
 1. Create a new `my_feature_test.go` file in `ai-services/tests/e2e`, for example `my_feature_test.go`.
 2. Use Ginkgo and Gomega style already used in the repo:
@@ -176,25 +178,21 @@ Add new test files under `ai-services/tests/e2e/` as standard Go test files (pac
 
 4. If the test depends on external services (images, models), document that in the test file header and consider adding timeouts or retries.
 
-
-Best practices and conventions
------------------------------
+## Best practices and conventions
 
 - Use the suite's context helpers: `bootstrap`, `cli`, `ingestion`, `podman`, etc. Reuse validation helpers under `tests/e2e` rather than reimplementing checks.
 - Prefer short timeout values for unit-like checks and longer timeouts for operations that need time (image pulls, container startup).
 - Use `By("...")` messages (Ginkgo) and `fmt.Printf` to produce helpful logs when tests fail.
 - Use `Skip("reason")` when a test cannot run in the current environment (e.g., Podman missing).
 
-Maintaining test stability
--------------------------
+## Maintaining test stability
 
 - Keep external dependencies pinned where possible (image tags, model versions).
 - Add retries for transient network operations using the `tests` helpers (retry.go).
 - If tests become flaky, split them and add targeted diagnostics to capture state on failure.
 
+## Project Structure (E2E)
 
-Project Structure (E2E)
---------------------------
 Below is an accurate overview of the current `ai-services/tests/e2e` layout and the primary files you will interact with when adding or debugging E2E tests.
 
 ```text
