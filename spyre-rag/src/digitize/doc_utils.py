@@ -2,6 +2,7 @@ import json
 import time
 import logging
 import os
+import shutil
 
 from tqdm import tqdm
 os.environ['GRPC_VERBOSITY'] = 'ERROR'
@@ -17,7 +18,6 @@ from common.misc_utils import get_logger, text_suffix, table_suffix, chunk_suffi
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.status import StatusManager
 from digitize.types import DocStatus, JobStatus
-from digitize.resource_utils import safe_cleanup, log_resource_usage
 
 logging.getLogger('docling').setLevel(logging.CRITICAL)
 
@@ -463,8 +463,14 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                                    f"{doc_id}{table_suffix}", f"{doc_id}{chunk_suffix}"]:
                         file_path = Path(out_path) / pattern
                         if file_path.exists():
-                            safe_cleanup(str(file_path))
-                            logger.debug(f"Cleaned up intermediate file: {file_path}")
+                            try:
+                                if file_path.is_dir():
+                                    shutil.rmtree(file_path)
+                                else:
+                                    file_path.unlink()
+                                logger.debug(f"Cleaned up intermediate file: {file_path}")
+                            except Exception as e:
+                                logger.warning(f"Failed to clean up {file_path}: {e}")
                     # Keep <doc_id>.json persisted for GET requests
                     logger.debug(f"Preserved {doc_id}.json for future GET requests")
                 except Exception as cleanup_error:
@@ -489,16 +495,19 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                                    f"{doc_id}{table_suffix}", f"{doc_id}{chunk_suffix}"]:
                         file_path = Path(out_path) / pattern
                         if file_path.exists():
-                            safe_cleanup(str(file_path))
+                            try:
+                                if file_path.is_dir():
+                                    shutil.rmtree(file_path)
+                                else:
+                                    file_path.unlink()
+                            except Exception as e:
+                                logger.warning(f"Failed to clean up {file_path}: {e}")
                     logger.debug(f"Preserved {doc_id}.json for failed document")
         except Exception as cleanup_error:
             logger.warning(f"Error during cleanup of failed job {job_id}: {cleanup_error}")
 
         # In case of failure, mark all remaining docs in the job as failed
         return None, None
-    finally:
-        # Log resource usage after processing
-        log_resource_usage(out_path)
 
 def collect_header_font_sizes(elements):
     """

@@ -12,16 +12,6 @@ from common.misc_utils import get_logger, set_log_level, has_allowed_extension
 import digitize.digitize_utils as dg_util
 from digitize import types
 from digitize.errors import APIError
-from digitize.resource_utils import (
-    check_disk_space,
-    cleanup_staging_directory,
-    cleanup_failed_job,
-    cleanup_old_failed_jobs,
-    safe_cleanup,
-    log_resource_usage,
-    DiskSpaceError
-)
-from digitize.cleanup_scheduler import start_cleanup_scheduler, stop_cleanup_scheduler
 
 log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
@@ -51,30 +41,12 @@ STAGING_DIR = f"{CACHE_DIR}/staging"
 async def lifespan(app: FastAPI):
     """Manage application lifespan events (startup and shutdown)."""
     # Startup
-    logger.info("Running startup cleanup tasks...")
-    try:
-        # Clean up old staging directories from previous crashes
-        cleanup_staging_directory(STAGING_DIR, force=False)
-        # Clean up old failed jobs
-        cleanup_old_failed_jobs(CACHE_DIR)
-        # Log initial resource usage
-        log_resource_usage(CACHE_DIR)
-        # Start periodic cleanup scheduler
-        await start_cleanup_scheduler(CACHE_DIR)
-        logger.info("Periodic cleanup scheduler started")
-    except Exception as e:
-        logger.warning(f"Startup cleanup encountered errors: {e}")
+    logger.info("Application starting up...")
     
     yield
     
     # Shutdown
-    logger.info("Running shutdown cleanup tasks...")
-    try:
-        # Stop periodic cleanup scheduler
-        await stop_cleanup_scheduler()
-        logger.info("Periodic cleanup scheduler stopped")
-    except Exception as e:
-        logger.warning(f"Shutdown cleanup encountered errors: {e}")
+    logger.info("Application shutting down...")
 
 
 app = FastAPI(title="Digitize Documents Service", lifespan=lifespan)
@@ -102,11 +74,14 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
         status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline: {str(e)}")
-        # Clean up failed job resources
-        cleanup_failed_job(job_id, CACHE_DIR)
     finally:
         # Always clean up staging directory, even on crashes
-        safe_cleanup(str(job_staging_path))
+        try:
+            if job_staging_path.exists():
+                shutil.rmtree(job_staging_path)
+                logger.debug(f"Cleaned up staging directory: {job_staging_path}")
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to clean up staging directory {job_staging_path}: {cleanup_error}")
         
         # Mandatory Semaphore Release
         ingestion_semaphore.release()
@@ -147,32 +122,6 @@ async def digitize_document(
 
         if operation == dg_util.OperationType.DIGITIZATION and len(files) > 1:
             APIError.raise_error("INVALID_REQUEST", "Only 1 file allowed for digitization.")
-
-        # 3. Check disk space before processing
-        try:
-            from digitize.resource_utils import get_directory_size
-
-            file_sizes = [f.size for f in files if f.size]
-            total_size_gb = sum(file_sizes) / (1024 ** 3)
-
-            # Calculate space already consumed by processed files
-            docs_dir_size = get_directory_size(DOCS_DIR)
-            docs_dir_size_gb = docs_dir_size / (1024 ** 3)
-
-            # Estimate required space (3x for intermediate files) + existing processed files
-            required_space = max(5.0, total_size_gb * 3 + docs_dir_size_gb)
-
-            logger.debug(f"Disk space calculation: incoming files={total_size_gb:.2f}GB, "
-                        f"existing processed files={docs_dir_size_gb:.2f}GB, "
-                        f"total required={required_space:.2f}GB")
-
-            check_disk_space(CACHE_DIR, required_gb=required_space)
-            log_resource_usage(CACHE_DIR)
-        except DiskSpaceError as e:
-            logger.error(f"Disk space check failed: {e}")
-            APIError.raise_error("INSUFFICIENT_STORAGE", str(e))
-        except Exception as e:
-            logger.warning(f"Could not check disk space: {e}")
 
         job_id = dg_util.generate_uuid()
         filenames = [f.filename for f in files]
