@@ -1,25 +1,34 @@
+// Jenkins Pipeline for PR Preview Deployment
+// This pipeline deploys AI services applications for PR testing and validation
 pipeline {
     agent { label 'onprem-ai-services-4-spyre-cards' }
 
     environment {
+        // Project configuration
         PROJECT_NAME = 'project-ai-services'
         AI_SERVICES_DIR = 'ai-services'
         AI_SERVICES_BINARY = './bin/ai-services'
-        SLACK_NOTIFICATION_CHANNEL = '#jenkins-pr-preview'
-        RAG_CHAT_BOT_PORT = '4000'
         AI_SERVICES_REPO_URL = 'https://github.com/IBM/project-ai-services.git'
 
-        RAG_APP_NAME = 'rag-dev'
-        // Holding pipeline for configured minutes, to allow user to complete testing
-        MAX_APP_RUN_TIME_IN_MINS = '120'
+        // Slack notification settings
+        SLACK_NOTIFICATION_CHANNEL = '#jenkins-pr-preview'
         TEAM_DOMAIN = credentials('team-domain')
 
+        // Application configuration
+        RAG_APP_NAME = 'rag-dev'
+        RAG_CHAT_BOT_PORT = '4000'
+
+        // Pipeline timing configuration
+        // Maximum time (in minutes) to keep the application running for testing
+        MAX_APP_RUN_TIME_IN_MINS = '120'
+
+        // Queue poller configuration
         POLLER_LOGS = '/root/cicd/queue_poller.logs'
         POLLER_SCRIPT = '/root/cicd/queue_poller.sh'
         POLLER_TIMEOUT_IN_MINS = '150'
     }
 
-    // Using options to allow one deployment at any given point of time.
+    // Prevent concurrent builds to ensure only one deployment at a time
     options {
         disableConcurrentBuilds()
     }
@@ -27,37 +36,43 @@ pipeline {
     parameters {
         string(
             name: 'CHECKOUT',
-            description: 'Please provide the PR number or commit hash value.',
+            description: 'Please provide the PR number or commit hash value.'
         )
-        // If no selection is made, the deployment will proceed based on the code changes.
+        // If 'auto' is selected, deployment proceeds based on detected code changes
         choice(
             name: 'DEPLOY_APP',
             choices: ['auto', 'rag-dev'],
-            description: 'Select the application to deploy',
+            description: 'Select the application to deploy'
         )
     }
 
     stages {
         stage('Pre Steps') {
             steps {
+                // Start queue poller to detect and abort duplicate builds
                 withCredentials([usernamePassword(
                     credentialsId: 'jenkins-api',
                     usernameVariable: 'username',
-                    passwordVariable: 'password',
+                    passwordVariable: 'password'
                 )]) {
                     sh '''
                     nohup $POLLER_SCRIPT $JENKINS_URL CHECKOUT=$CHECKOUT $BUILD_NUMBER $username $password $POLLER_TIMEOUT_IN_MINS >> $POLLER_LOGS 2>&1 &
                     echo "Queue poller process id: $!"
                     '''
                 }
+
                 script {
+                    // Validate that CHECKOUT parameter is provided
                     if (!params.CHECKOUT.trim()) {
                         error('PR number or commit hash must be provided')
                     }
-                    if(params.DEPLOY_APP) {
+
+                    // Set application name with CICD suffix if app is explicitly selected
+                    if (params.DEPLOY_APP) {
                         env.APP_NAME = "${params.DEPLOY_APP}-cicd"
                     }
                 }
+                // Clean workspace before starting
                 deleteDir()
             }
         }
@@ -65,23 +80,25 @@ pipeline {
         stage('Checkout Code') {
             steps {
                 script {
-                    repoCheckout(params.CHECKOUT)
+                    // Checkout code from PR or commit hash
+                    checkoutRepository(params.CHECKOUT)
                 }
             }
         }
 
-        stage('Modified App') {
+        stage('Detect Modified App') {
+            // Only run when 'auto' deployment mode is selected
             when { expression { params.DEPLOY_APP == 'auto' } }
             steps {
                 script {
                     println 'No app is selected for deployment.'
                     println 'Identifying which application is modified in the branch.'
 
-                    def modifiedApp = getModifiedApp()
-                    if (modifiedApp) {
-                        env.APP_NAME = "${modifiedApp}-cicd"
-                        env.DEPLOY_APP = "${modifiedApp}"
-                        println "${env.APP_NAME} app is going to deployed"
+                    def modifiedAppName = detectModifiedApp()
+                    if (modifiedAppName) {
+                        env.APP_NAME = "${modifiedAppName}-cicd"
+                        env.DEPLOY_APP = "${modifiedAppName}"
+                        println "${env.APP_NAME} app is going to be deployed"
                     } else {
                         error('No app is selected or modified in branch for deployment.')
                     }
@@ -89,14 +106,14 @@ pipeline {
             }
         }
 
-        // Build image locally, if image is modified
         stage('Build Images') {
             steps {
                 script {
+                    // Build container images locally if source code is modified
                     if (env.DEPLOY_APP == env.RAG_APP_NAME) {
-                        buildAppImage(env.RAG_APP_NAME)
+                        buildApplicationImages(env.RAG_APP_NAME)
                     } else {
-                        println 'Skipping rebuilding images of the application.'
+                        println 'Skipping image rebuild - no changes detected.'
                     }
                 }
             }
@@ -105,34 +122,39 @@ pipeline {
         stage('Build AI Services Binary') {
             steps {
                 script {
+                    // Compile AI services binary from source
                     dir("${PROJECT_NAME}/${AI_SERVICES_DIR}") {
-                        sh "make build"
+                        sh 'make build'
                         sh "${AI_SERVICES_BINARY} --version"
                     }
                 }
             }
         }
 
-        stage('Delete CICD App') {
-            steps{
+        stage('Delete Existing CICD App') {
+            steps {
                 script {
-                    deleteCicdApp()
+                    // Clean up any existing CICD application before deployment
+                    deleteCicdApplication()
                 }
             }
         }
 
-        stage('Deployment') {
+        stage('Deploy Application') {
             steps {
                 script {
                     dir("${env.PROJECT_NAME}/${env.AI_SERVICES_DIR}") {
+                        // List current applications
                         sh "${env.AI_SERVICES_BINARY} application ps"
+                        
+                        // Create and deploy the application
                         sh "${env.AI_SERVICES_BINARY} application create ${env.APP_NAME} -t ${env.DEPLOY_APP} --params ui.port=${env.RAG_CHAT_BOT_PORT} --skip-validation numa"
                     }
                 }
             }
         }
 
-        stage('Ingest Document') {
+        stage('Ingest Documents') {
             steps {
                 script {
                     sh "cp -r /root/cicd-app-doc/${APP_NAME}/* /var/lib/ai-services/applications/${APP_NAME}/docs/"
@@ -145,7 +167,12 @@ pipeline {
             post {
                 success {
                     script {
-                        def hostname = sh(script: "hostname -I | awk '{print \$1}'", returnStdout: true).trim()
+                        // Notify successful deployment with chatbot URL
+                        def hostname = sh(
+                            script: "hostname -I | awk '{print \$1}'",
+                            returnStdout: true
+                        ).trim()
+                        
                         def message = """
                         Application is deployed and document is ingested.
                             *Chat bot URL:* http://${hostname}:${env.RAG_CHAT_BOT_PORT}
@@ -156,41 +183,43 @@ pipeline {
             }
         }
 
-        stage('Test Deployment') {
-            steps{
-                script{
-                    // Polling to check if app is deleted
-                    for (int i = 0; i < env.MAX_APP_RUN_TIME_IN_MINS.toInteger() ; i++) {
-                        def appName = getDeployedAppName()
-                        if (appName.isEmpty()) {
+        stage('Wait for Testing') {
+            steps {
+                script {
+                    // Poll to check if the application is manually deleted by the user
+                    // This allows users to test the deployment before automatic cleanup
+                    for (int i = 0; i < env.MAX_APP_RUN_TIME_IN_MINS.toInteger(); i++) {
+                        def deployedAppName = getDeployedApplicationName()
+                        if (deployedAppName.isEmpty()) {
+                            println 'Application has been deleted by user. Exiting wait loop.'
                             break
                         }
-                        println "Iteration number ${i}, waiting for 60s"
                         sh 'sleep 60s'
                     }
                 }
             }
         }
     }
+
     post {
         always {
-            // Cleanup app deployed by the pipeline
+            // Always cleanup the CICD application after pipeline completion
             script {
-                deleteCicdApp()
+                deleteCicdApplication()
             }
         }
         failure {
-            script{
-                sendSlackNotification('danger', 'Jenkins PR preview pipeline job has been failed with an error.')
+            script {
+                sendSlackNotification('danger', 'Jenkins PR preview pipeline job has failed with an error.')
             }
         }
         success {
             script {
-                sendSlackNotification('good', 'Jenkins PR preview pipeline job has been completed.')
+                sendSlackNotification('good', 'Jenkins PR preview pipeline job has been completed successfully.')
             }
         }
         aborted {
-            script{
+            script {
                 sendSlackNotification('warning', 'Jenkins PR preview pipeline job has been aborted.')
             }
         }
@@ -212,138 +241,155 @@ def sendSlackNotification(String color, String message) {
         ${message}
             *Job Name      :* ${env.JOB_NAME}
             *Build Number  :* ${env.BUILD_NUMBER}
-            *Build URL.    :* ${env.BUILD_URL}
+            *Build URL     :* ${env.BUILD_URL}
             *Host          :* ${hostname}
             *CommitHash/PR :* ${params.CHECKOUT}
         """.stripIndent()
     )
 }
 
-// Returning app name which is deployed in the machine
-def getDeployedAppName() {
+def getDeployedApplicationName() {
     String appName = ''
     dir("${env.PROJECT_NAME}/${env.AI_SERVICES_DIR}") {
-        def apps = sh(
+        def appsOutput = sh(
             script: "${AI_SERVICES_BINARY} application ps 2>&1",
             returnStdout: true
         ).trim()
-        def outputLines = apps.readLines()
-        if (outputLines.size() > 2 ) {
+        
+        def outputLines = appsOutput.readLines()
+        // Check if there are applications listed (more than header lines)
+        if (outputLines.size() > 2) {
             appName = outputLines[2].split()[0]
-            println "Application: '${appName}' is deployed."
+            println "Application: '${appName}' is currently deployed."
         }
     }
     return appName
 }
 
-def repoCheckout(String branch) {
+def checkoutRepository(String checkoutRef) {
     sh "git clone ${env.AI_SERVICES_REPO_URL}"
     dir("${PROJECT_NAME}") {
-        if (branch ==~ /^\d+$/) {
-            println "Checking out to ${branch} PR number"
+        // Check if the reference is a PR number (digits only)
+        if (checkoutRef ==~ /^\d+$/) {
+            println "Checking out PR #${checkoutRef}"
             sh """
-                git fetch origin pull/${branch}/head:pr-${branch}
-                git checkout pr-${branch}
+                git fetch origin pull/${checkoutRef}/head:pr-${checkoutRef}
+                git checkout pr-${checkoutRef}
             """
         } else {
-            println "Checking out to ${branch} commit hash"
-            sh "git rev-parse --verify ${branch}"
-            sh "git checkout ${branch}"
+            // Treat as commit hash
+            println "Checking out commit hash: ${checkoutRef}"
+            sh "git rev-parse --verify ${checkoutRef}"
+            sh "git checkout ${checkoutRef}"
         }
     }
 }
 
-// Delete application deployed via CI/CD pipeline
-def deleteCicdApp() {
-    String appName = getDeployedAppName()
+def deleteCicdApplication() {
+    String appName = getDeployedApplicationName()
     dir("${env.PROJECT_NAME}/${env.AI_SERVICES_DIR}") {
         if (appName.contains('cicd')) {
-            println "Cleaning up ${appName} which is deployed by pipelines."
+            println "Cleaning up ${appName} which was deployed by the pipeline."
             sh "${AI_SERVICES_BINARY} application delete ${appName} -y"
         }
     }
 }
 
-def isFileUpdated(String path) {
-    def isfileChanged = false
+def isPathModified(String filePath) {
+    def isModified = false
     dir("${PROJECT_NAME}") {
         def changedFiles = sh(
             script: 'git diff --name-only origin/main...HEAD',
             returnStdout: true
         ).trim().split('\n')
+        
         println "Modified files list: ${changedFiles}"
-        isfileChanged = changedFiles.any{ it.startsWith(path)}
+        isModified = changedFiles.any { it.startsWith(filePath) }
     }
-    return isfileChanged
+    return isModified
 }
 
-def buildImage(String imageName, String containerFilePath) {
+def buildContainerImage(String imageName, String containerFilePath) {
     String localRegistry = 'localhost'
-    String imagePath = ""
+    String fullImagePath = ''
+    
     dir(env.PROJECT_NAME) {
         dir(containerFilePath) {
+            // Build the image
             sh "make build REGISTRY=${localRegistry}"
 
-            def tag = sh(script: "make image-tag REGISTRY=${localRegistry}", returnStdout: true).trim()
-            imagePath = "${localRegistry}/${imageName}:${tag}"
-            println "Successfully built ${imagePath} on the machine"
+            // Get the image tag
+            def imageTag = sh(
+                script: "make image-tag REGISTRY=${localRegistry}",
+                returnStdout: true
+            ).trim()
+            
+            fullImagePath = "${localRegistry}/${imageName}:${imageTag}"
+            println "Successfully built ${fullImagePath} on the machine"
         }
     }
-    return imagePath
+    return fullImagePath
 }
 
-def getModifiedApp() {
-    // Contains list of supported application and there file path
-    def appList = [
+def detectModifiedApp() {
+    // List of supported applications and their file paths
+    def supportedApps = [
         [appName: 'rag-dev', filePath: 'spyre-rag']
     ]
 
-    def modifiedApp = ''
-    for (app in appList) {
-        def isChanged = isFileUpdated(app.filePath).toBoolean()
-        if (isChanged) {
-            println "Files are modified in path '${app.filePath}', therefore deploying '${app.appName}'"
-            modifiedApp = app.appName
+    def modifiedAppName = ''
+    for (app in supportedApps) {
+        def hasChanges = isPathModified(app.filePath).toBoolean()
+        if (hasChanges) {
+            println "Files modified in path '${app.filePath}', deploying '${app.appName}'"
+            modifiedAppName = app.appName
             break
         }
     }
-    return modifiedApp
+    return modifiedAppName
 }
 
-// Rebuilding modified images in the application
-def buildAppImage(String appName) {
+def buildApplicationImages(String appName) {
     if (appName == env.RAG_APP_NAME) {
-        def imageMapList = [
-            [imageName: 'rag-ui', filePath: 'spyre-rag/ui', jsonPath: '.ui.image'],
-            [imageName: 'rag', filePath: 'spyre-rag/src', jsonPath: '.backend.image']
+        // Define image components and their paths
+        def imageComponents = [
+            [imageName: 'rag-ui', filePath: 'spyre-rag/ui', yamlPath: '.ui.image'],
+            [imageName: 'rag', filePath: 'spyre-rag/src', yamlPath: '.backend.image']
         ]
 
-        for (imageInfo in imageMapList) {
-            def isChanged = isFileUpdated(imageInfo.filePath).toBoolean()
-            if (isChanged) {
-                println "Rebuilding ${imageInfo.imageName} for deployment"
-                String imageVal = buildImage(imageInfo.imageName, imageInfo.filePath)
-                updateYamlFile(env.RAG_APP_NAME, imageVal, imageInfo.jsonPath)
-            }else {
-                println "No changes in ${imageInfo.imageName} image"
+        for (imageComponent in imageComponents) {
+            def hasChanges = isPathModified(imageComponent.filePath).toBoolean()
+            if (hasChanges) {
+                println "Rebuilding ${imageComponent.imageName} image for deployment"
+                String builtImagePath = buildContainerImage(
+                    imageComponent.imageName,
+                    imageComponent.filePath
+                )
+                updateApplicationYamlFile(
+                    env.RAG_APP_NAME,
+                    builtImagePath,
+                    imageComponent.yamlPath
+                )
+            } else {
+                println "No changes detected in ${imageComponent.imageName} image"
             }
         }
     } else {
-        error("Selected ${appName} not supported.")
+        error("Application ${appName} is not supported for image building.")
     }
 }
 
-
-// Method to update local image in the yaml file
-// so that deployment of local image is done
-def updateYamlFile(String appName, String imageValue, String overridePath) {
+def updateApplicationYamlFile(String appName, String imageValue, String yamlPath) {
     dir(env.PROJECT_NAME) {
-        String valuesFile = "ai-services/assets/applications/${appName}/podman/values.yaml"
-        if (!fileExists(valuesFile)) {
-            error("no values.yaml for ${appName}")
+        String valuesFilePath = "ai-services/assets/applications/${appName}/podman/values.yaml"
+
+        if (!fileExists(valuesFilePath)) {
+            error("values.yaml file not found for ${appName}")
             return
         }
-        sh "yq e '${overridePath} = \"${imageValue}\"' -i ${valuesFile}"
-        println "Values.yaml is updated in ${appName} for parameter ${overridePath} with value ${imageValue}"
+        
+        // Update the YAML file using yq
+        sh "yq e '${yamlPath} = \"${imageValue}\"' -i ${valuesFilePath}"
+        println "Updated values.yaml for ${appName}: ${yamlPath} = ${imageValue}"
     }
 }
