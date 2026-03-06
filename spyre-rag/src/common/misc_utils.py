@@ -2,6 +2,24 @@ import hashlib
 import logging
 import os
 from pathlib import Path
+from contextvars import ContextVar
+
+# ContextVar to store the request ID for each request
+request_id_ctx = ContextVar("request_id", default="-")
+
+class RequestIDFilter(logging.Filter):
+    #Filter to inject request_id from ContextVar into log records.
+    def filter(self, record):
+        record.request_id = request_id_ctx.get()
+        return True
+
+def set_request_id(request_id: str):
+    #Set the request ID for the current context.
+    request_id_ctx.set(request_id)
+
+def get_request_id() -> str:
+    # Get the request ID from the current context. Currently unused.
+    return request_id_ctx.get()
 
 LOG_LEVEL = logging.INFO
 
@@ -19,10 +37,15 @@ def get_logger(name):
     logger.setLevel(LOG_LEVEL)
     logger.propagate = False
 
+    # Add the filter to inject request_id
+    logger.addFilter(RequestIDFilter())
+
     console_handler = logging.StreamHandler()
     console_handler.setLevel(LOG_LEVEL)
+    
+    # Update formatter to include request_id
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)-18s - %(levelname)-8s - %(message)s',
+        '%(asctime)s - %(name)-18s - %(levelname)-8s - [%(request_id)s] - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S')
     console_handler.setFormatter(formatter)
 
