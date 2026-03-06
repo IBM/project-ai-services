@@ -27,7 +27,12 @@ spec:
           command:
             - "/var/venv/bin/python"
             - "-m"
-            - "retrieve.backend_server"
+            - "uvicorn"
+            - "retrieve.app:app"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "5000"
           env:
             - name: EMB_ENDPOINT
               value: http://embedding-predictor:8080
