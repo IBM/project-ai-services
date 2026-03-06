@@ -20,6 +20,7 @@ spec:
         ai-services.io/component: ui
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: ui
           image: "{{ .Values.ui.image }}"
