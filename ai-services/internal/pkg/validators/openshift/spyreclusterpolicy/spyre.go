@@ -33,7 +33,7 @@ func NewSpyrePolicyRule(client *openshift.OpenshiftClient) *SpyrePolicyRule {
 }
 
 func (r *SpyrePolicyRule) Name() string {
-	return "spyre-cluster-policy"
+	return "scp"
 }
 
 func (r *SpyrePolicyRule) Description() string {
@@ -53,40 +53,39 @@ func (r *SpyrePolicyRule) Verify() error {
 		Kind:    spyreKind,
 	})
 
-	return wait.PollUntilContextTimeout(ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true,
-		func(ctx context.Context) (bool, error) {
-			err := r.client.Client.Get(ctx, types.NamespacedName{
-				Name:      spyreName,
-				Namespace: constants.SpyreOperatorNamespace,
-			}, obj)
-			if err != nil {
-				if apierrors.IsNotFound(err) {
-					logger.Infof("SpyreClusterPolicy %s not found yet, retrying...", spyreName, logger.VerbosityLevelDebug)
-
-					return false, nil
-				}
-
-				return false, fmt.Errorf("failed to fetch SpyreClusterPolicy %s: %w", spyreName, err)
-			}
-
-			state, found, err := unstructured.NestedString(obj.Object, "status", "state")
-			if err != nil {
-				return false, fmt.Errorf("failed to parse status.state from SpyreClusterPolicy: %w", err)
-			}
-
-			if !found || state != "ready" {
-				if !found {
-					state = "unknown"
-				}
-				logger.Infof("SpyreClusterPolicy not ready yet (status.state: %s), waiting...", state, logger.VerbosityLevelDebug)
+	return wait.PollUntilContextTimeout(ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
+		err := r.client.Client.Get(ctx, types.NamespacedName{
+			Name:      spyreName,
+			Namespace: constants.SpyreOperatorNamespace,
+		}, obj)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.Infof("SpyreClusterPolicy %s not found yet, retrying...", spyreName, logger.VerbosityLevelDebug)
 
 				return false, nil
 			}
 
-			logger.Infof("SpyreClusterPolicy %s is ready", spyreName, logger.VerbosityLevelDebug)
+			return false, fmt.Errorf("failed to fetch SpyreClusterPolicy %s: %w", spyreName, err)
+		}
 
-			return true, nil
-		})
+		state, found, err := unstructured.NestedString(obj.Object, "status", "state")
+		if err != nil {
+			return false, fmt.Errorf("failed to parse status.state from SpyreClusterPolicy: %w", err)
+		}
+
+		if !found || state != "ready" {
+			if !found {
+				state = "unknown"
+			}
+			logger.Infof("SpyreClusterPolicy not ready yet (status.state: %s), waiting...", state, logger.VerbosityLevelDebug)
+
+			return false, nil
+		}
+
+		logger.Infof("SpyreClusterPolicy %s is ready", spyreName, logger.VerbosityLevelDebug)
+
+		return true, nil
+	})
 }
 
 func (r *SpyrePolicyRule) Message() string {
