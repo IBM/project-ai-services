@@ -2,12 +2,11 @@ package utils
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"k8s.io/apimachinery/pkg/api/errors"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	apiyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -17,7 +16,7 @@ const (
 	yamlDecoderBufSz = 4096
 )
 
-func ApplyYaml(ctx context.Context, yaml []byte, c client.Client) error {
+func ApplyYaml(c *openshift.OpenshiftClient, yaml []byte) error {
 	resourceList := []*unstructured.Unstructured{}
 
 	decoder := apiyaml.NewYAMLOrJSONDecoder(bytes.NewReader([]byte(yaml)), yamlDecoderBufSz)
@@ -34,7 +33,7 @@ func ApplyYaml(ctx context.Context, yaml []byte, c client.Client) error {
 	}
 
 	for _, object := range resourceList {
-		if err := applyObject(ctx, object, c); err != nil {
+		if err := applyObject(c, object); err != nil {
 			return fmt.Errorf("error applying object %v", err.Error())
 		}
 	}
@@ -43,7 +42,7 @@ func ApplyYaml(ctx context.Context, yaml []byte, c client.Client) error {
 }
 
 // applyObject applies the desired object against the apiserver.
-func applyObject(ctx context.Context, object *unstructured.Unstructured, client client.Client) error {
+func applyObject(c *openshift.OpenshiftClient, object *unstructured.Unstructured) error {
 	// Retrieve name, namespace, groupVersionKind from given object.
 	name := object.GetName()
 	namespace := object.GetNamespace()
@@ -55,15 +54,9 @@ func applyObject(ctx context.Context, object *unstructured.Unstructured, client 
 
 	objDesc := fmt.Sprintf("(%s) %s/%s", groupVersionKind.String(), namespace, name)
 
-	// Create the k8s object with provided version kind in given namespace.
-	err := client.Create(ctx, object)
+	// Apply the k8s object with provided version kind in given namespace.
+	err := c.Client.Apply(c.Ctx, client.ApplyConfigurationFromUnstructured(object), &client.ApplyOptions{FieldManager: constants.AIServices})
 	if err != nil {
-		if errors.IsAlreadyExists(err) {
-			logger.Infof("%s already exists", objDesc, logger.VerbosityLevelDebug)
-
-			return nil
-		}
-
 		return fmt.Errorf("could not create %s. Error: %v", objDesc, err.Error())
 	}
 
