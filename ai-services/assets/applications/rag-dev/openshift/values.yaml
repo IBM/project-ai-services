@@ -8,6 +8,16 @@ backend:
   # @hidden
   log_level: "INFO"
 
+digitize:
+  # @hidden
+  image: icr.io/ai-services-cicd/rag:v0.0.34
+  # @hidden
+  log_level: "INFO"
+
+digitizeUi:
+  # @hidden
+  image: icr.io/ppc64le-oss/nginx-ppc64le:latest
+
 instruct:
   # @hidden
   image: registry.redhat.io/rhaiis/vllm-spyre-rhel9:3.2.5
