@@ -120,7 +120,7 @@ func configureSCP(client *openshift.OpenshiftClient, s *spinner.Spinner) error {
 }
 
 func fetchSCPSpec(client *openshift.OpenshiftClient) (map[string]any, error) {
-	csv, err := fetchSpyreOperator(client.Ctx, client.Client)
+	csv, err := utils.FetchSpyreOperator(client.Ctx, client.Client)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching spyre operator: %w", err)
 	}
@@ -207,29 +207,9 @@ func frameAndApply(client *openshift.OpenshiftClient, spec map[string]any, s *sp
 	return err
 }
 
-func fetchSpyreOperator(ctx context.Context, c k8sClient.Client) (*operatorsv1alpha1.ClusterServiceVersion, error) {
-	sub := &operatorsv1alpha1.Subscription{}
-	if err := c.Get(ctx, k8sClient.ObjectKey{
-		Name:      "spyre-operator",
-		Namespace: constants.SpyreOperatorNamespace,
-	}, sub); err != nil {
-		return nil, err
-	}
-
-	csv := &operatorsv1alpha1.ClusterServiceVersion{}
-	if err := c.Get(ctx, k8sClient.ObjectKey{
-		Name:      sub.Spec.StartingCSV,
-		Namespace: constants.SpyreOperatorNamespace,
-	}, csv); err != nil {
-		return nil, err
-	}
-
-	return csv, nil
-}
-
 func waitForSpyreOperator(ctx context.Context, c k8sClient.Client) error {
 	return wait.PollUntilContextTimeout(ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
-		csv, err := fetchSpyreOperator(ctx, c)
+		csv, err := utils.FetchSpyreOperator(ctx, c)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				// keep waiting until timeout

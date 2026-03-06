@@ -1,14 +1,18 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"net"
 	"os"
 	"strings"
 
+	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"go.yaml.in/yaml/v3"
+	k8sClient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -299,4 +303,24 @@ func checkParamsInValues(param string, values map[string]any) bool {
 	}
 
 	return false
+}
+
+func FetchSpyreOperator(ctx context.Context, c k8sClient.Client) (*operatorsv1alpha1.ClusterServiceVersion, error) {
+	sub := &operatorsv1alpha1.Subscription{}
+	if err := c.Get(ctx, k8sClient.ObjectKey{
+		Name:      "spyre-operator",
+		Namespace: constants.SpyreOperatorNamespace,
+	}, sub); err != nil {
+		return nil, err
+	}
+
+	csv := &operatorsv1alpha1.ClusterServiceVersion{}
+	if err := c.Get(ctx, k8sClient.ObjectKey{
+		Name:      sub.Spec.StartingCSV,
+		Namespace: constants.SpyreOperatorNamespace,
+	}, csv); err != nil {
+		return nil, err
+	}
+
+	return csv, nil
 }

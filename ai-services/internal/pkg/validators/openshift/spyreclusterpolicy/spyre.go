@@ -7,6 +7,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -28,7 +29,7 @@ func NewSpyrePolicyRule() *SpyrePolicyRule {
 }
 
 func (r *SpyrePolicyRule) Name() string {
-	return "scp"
+	return "spyreclusterpolicy"
 }
 
 func (r *SpyrePolicyRule) Description() string {
@@ -40,6 +41,16 @@ func (r *SpyrePolicyRule) Verify() error {
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
 		return fmt.Errorf("failed to create openshift client: %w", err)
+	}
+
+	// checking if spyreoperator is installed
+	_, err = utils.FetchSpyreOperator(client.Ctx, client.Client)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("spyre operator not found: %w", err)
+		}
+
+		return fmt.Errorf("error fetching spyre operator: %w", err)
 	}
 
 	obj := &unstructured.Unstructured{}
