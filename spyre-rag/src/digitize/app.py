@@ -11,6 +11,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Q
 from common.misc_utils import get_logger, set_log_level, has_allowed_extension
 import digitize.digitize_utils as dg_util
 from digitize import types
+from digitize.digitize import digitize
 from digitize.errors import *
 from digitize.config import *
 
@@ -47,13 +48,27 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Digitize Documents Service", lifespan=lifespan)
 
-async def digitize_documents(job_id: str, filenames: List[str], output_format: types.OutputFormat):
+async def digitize_documents(job_id: str, filenames: List[str], doc_id_dict: dict, output_format: types.OutputFormat):
+    status_mgr = StatusManager(job_id)
+    job_staging_path = Path(STAGING_DIR) / f"{job_id}"
+
     try:
-        # Business logic for document conversion.
-        pass
+        logger.info(f"🚀 Digitization started for job: {job_id}")
+        # to_thread prevents the heavy 'digitize' process from blocking the main FastAPI event loop and returns the response to request asynchronously.
+        await asyncio.to_thread(digitize, job_staging_path, job_id, doc_id_dict, output_format)
+        logger.info(f"Digitization for {job_id} completed successfully")
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
+        status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing digitization pipeline: {str(e)}")
     finally:
+       # Always clean up staging directory, even on crashes
+        try:
+            if job_staging_path.exists():
+                shutil.rmtree(job_staging_path)
+                logger.debug(f"Cleaned up staging directory: {job_staging_path}")
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to clean up staging directory {job_staging_path}: {cleanup_error}")
+
         # Crucial: Always release the semaphore slot back to the API
         digitization_semaphore.release()
         logger.debug(f"Semaphore slot released from digitization job {job_id}")
@@ -116,6 +131,7 @@ async def digitize_document(
             if file.content_type and file.content_type not in ['application/pdf', 'application/x-pdf']:
                 APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, f"Only PDF files are allowed. Invalid content type for {file.filename}: {file.content_type}")
 
+        # Validate only one file is allowed for digitization
         if operation == types.OperationType.DIGITIZATION and len(files) > 1:
             APIError.raise_error("INVALID_REQUEST", "Only 1 file allowed for digitization.")
 
@@ -158,7 +174,13 @@ async def digitize_document(
 
                 background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
             else:
-                background_tasks.add_task(digitize_documents, job_id, filenames, output_format)
+                # Upload the file byte stream to files in staging directory
+                # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
+                await dg_util.stage_upload_files(job_id, filenames, str(Path(STAGING_DIR) / job_id), file_contents)
+
+                doc_id_dict = dg_util.initialize_job_state(job_id, types.OperationType.DIGITIZATION, filenames)
+
+                background_tasks.add_task(digitize_documents, job_id, filenames, doc_id_dict, output_format)
         except Exception as e:
             sem.release()
             logger.error(f"Failed to schedule background task for job {job_id}, semaphore released: {e}")
