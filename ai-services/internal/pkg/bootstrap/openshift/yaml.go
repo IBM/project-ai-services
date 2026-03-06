@@ -1,4 +1,4 @@
-package utils
+package openshift
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ const (
 	yamlDecoderBufSz = 4096
 )
 
-func ApplyYaml(c *openshift.OpenshiftClient, yaml []byte) error {
+func applyYaml(c *openshift.OpenshiftClient, yaml []byte) error {
 	resourceList := []*unstructured.Unstructured{}
 
 	decoder := apiyaml.NewYAMLOrJSONDecoder(bytes.NewReader([]byte(yaml)), yamlDecoderBufSz)

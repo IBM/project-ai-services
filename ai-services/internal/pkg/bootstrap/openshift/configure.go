@@ -13,7 +13,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -102,7 +101,7 @@ func applyYamls(client *openshift.OpenshiftClient) error {
 	}
 
 	for _, yaml := range yamls {
-		if err := utils.ApplyYaml(client, yaml); err != nil {
+		if err := applyYaml(client, yaml); err != nil {
 			return fmt.Errorf("failed to apply YAML %s: %w", string(yaml), err)
 		}
 	}
