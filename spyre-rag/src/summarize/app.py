@@ -2,6 +2,7 @@ import asyncio
 import time
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -12,7 +13,7 @@ from fastapi.responses import JSONResponse
 from common.llm_utils import create_llm_session, query_vllm_summarize
 from common.misc_utils import get_model_endpoints
 from common.settings import get_settings
-from common.misc_utils import set_log_level, get_logger
+from common.misc_utils import set_log_level, get_logger, set_request_id
 from summarize.summ_utils import (
     SummarizeException,
     word_count,
@@ -52,6 +53,14 @@ app = FastAPI(lifespan=lifespan,
     description="Accepts text or files (.txt / .pdf) and returns AI-generated summaries.",
     version="1.0.0"
 )
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    set_request_id(request_id)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 @app.get("/", include_in_schema=False)
 def swagger_root():

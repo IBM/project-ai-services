@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useReducer } from "react";
 import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
 import {
   DataTable,
@@ -16,6 +16,10 @@ import {
   Button,
   Grid,
   Column,
+  Checkbox,
+  CheckboxGroup,
+  ActionableNotification,
+  Modal,
   type DataTableHeader,
 } from "@carbon/react";
 import {
@@ -29,7 +33,8 @@ import {
   CopyLink,
 } from "@carbon/icons-react";
 import styles from "./ApplicationsList.module.scss";
-import type { ApplicationRow } from "./types";
+import type { ApplicationRow, AppState, AppAction } from "./types";
+import { ACTION_TYPES } from "./types";
 
 const headers: DataTableHeader[] = [
   { header: "Name", key: "name" },
@@ -104,12 +109,115 @@ const rows: ApplicationRow[] = [
   },
 ];
 
-const ApplicationsListPage = () => {
-  const [search, setSearch] = useState<string>("");
-  const [page, setPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(10);
+const initialState: AppState = {
+  search: "",
+  page: 1,
+  pageSize: 10,
+  isDeleteDialogOpen: false,
+  isConfirmed: false,
+  rowsData: rows,
+  selectedRowId: null,
+  toastOpen: false,
+  errorMessage: "",
+  errorRowName: "",
+  isDeleting: false,
+};
 
-  const filteredRows = rows.filter((row) =>
+const appReducer = (state: AppState, action: AppAction): AppState => {
+  switch (action.type) {
+    case ACTION_TYPES.SET_SEARCH:
+      return { ...state, search: action.payload };
+    case ACTION_TYPES.SET_PAGE:
+      return { ...state, page: action.payload };
+    case ACTION_TYPES.SET_PAGE_SIZE:
+      return { ...state, pageSize: action.payload };
+    case ACTION_TYPES.OPEN_DELETE_DIALOG:
+      return {
+        ...state,
+        selectedRowId: action.payload,
+        isDeleteDialogOpen: true,
+        toastOpen: false,
+      };
+    case ACTION_TYPES.CLOSE_DELETE_DIALOG:
+      return {
+        ...state,
+        isDeleteDialogOpen: false,
+        isConfirmed: false,
+        selectedRowId: null,
+      };
+    case ACTION_TYPES.SET_CONFIRMED:
+      return { ...state, isConfirmed: action.payload };
+    case ACTION_TYPES.DELETE_ROW:
+      return {
+        ...state,
+        rowsData: state.rowsData.filter((r) => r.id !== action.payload),
+        isDeleteDialogOpen: false,
+        isConfirmed: false,
+      };
+    case ACTION_TYPES.SHOW_ERROR:
+      return {
+        ...state,
+        errorMessage: action.payload.message,
+        errorRowName: action.payload.rowName ?? "",
+        toastOpen: true,
+        isDeleting: false,
+      };
+    case ACTION_TYPES.HIDE_ERROR:
+      return {
+        ...state,
+        toastOpen: false,
+        selectedRowId: null,
+        errorRowName: "",
+      };
+    case ACTION_TYPES.SET_IS_DELETING:
+      return { ...state, isDeleting: action.payload };
+    default:
+      return state;
+  }
+};
+
+const ApplicationsListPage = () => {
+  const [state, dispatch] = useReducer(appReducer, initialState);
+
+  const handleDelete = async () => {
+    if (!state.selectedRowId) {
+      dispatch({
+        type: ACTION_TYPES.SHOW_ERROR,
+        payload: { message: "No application selected for deletion" },
+      });
+      return;
+    }
+
+    dispatch({ type: ACTION_TYPES.SET_IS_DELETING, payload: true });
+
+    try {
+      // Attempt server-side delete; if no backend exists this may fail.
+      const res = await fetch(`/api/applications/${state.selectedRowId}`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) {
+        const text = await res
+          .text()
+          .catch(() => res.statusText || "Delete failed");
+        throw new Error(text || `Delete failed (${res.status})`);
+      }
+      dispatch({ type: ACTION_TYPES.DELETE_ROW, payload: state.selectedRowId });
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Failed deleting application";
+      const name =
+        state.rowsData.find((r) => r.id === state.selectedRowId)?.name ?? "";
+      dispatch({
+        type: ACTION_TYPES.SHOW_ERROR,
+        payload: { message: msg, rowName: name },
+      });
+    } finally {
+      dispatch({ type: ACTION_TYPES.SET_IS_DELETING, payload: false });
+      dispatch({ type: ACTION_TYPES.CLOSE_DELETE_DIALOG }); // still ok; the name is preserved
+    }
+  };
+  const filteredRows = state.rowsData.filter((row) =>
     [
       row.name,
       row.template,
@@ -120,19 +228,40 @@ const ApplicationsListPage = () => {
     ]
       .join(" ")
       .toLowerCase()
-      .includes(search.toLowerCase()),
+      .includes(state.search.toLowerCase()),
   );
 
   const paginatedRows = filteredRows.slice(
-    (page - 1) * pageSize,
-    page * pageSize,
+    (state.page - 1) * state.pageSize,
+    state.page * state.pageSize,
   );
 
-  const noApplications = rows.length === 0;
-  const noSearchResults = rows.length > 0 && filteredRows.length === 0;
+  const noApplications = state.rowsData.length === 0;
+  const noSearchResults =
+    state.rowsData.length > 0 && filteredRows.length === 0;
 
   return (
     <>
+      {state.toastOpen && (
+        <ActionableNotification
+          actionButtonLabel="Try again"
+          aria-label="close notification"
+          kind="error"
+          closeOnEscape
+          title={`Delete technical template ${state.errorRowName} failed`}
+          subtitle={state.errorMessage}
+          onCloseButtonClick={() => {
+            dispatch({ type: ACTION_TYPES.HIDE_ERROR });
+          }}
+          style={{
+            position: "fixed",
+            top: "4rem",
+            right: "2rem",
+            zIndex: "46567",
+          }}
+          className={styles.customToast}
+        />
+      )}
       <PageHeader
         title={{ text: "Applications" }}
         pageActions={[
@@ -171,10 +300,13 @@ const ApplicationsListPage = () => {
                       <TableToolbarSearch
                         placeholder="Search"
                         persistent
-                        value={search}
+                        value={state.search}
                         onChange={(e) => {
                           if (typeof e !== "string") {
-                            setSearch(e.target.value);
+                            dispatch({
+                              type: ACTION_TYPES.SET_SEARCH,
+                              payload: e.target.value,
+                            });
                           }
                         }}
                       />
@@ -270,6 +402,17 @@ const ApplicationsListPage = () => {
                                             size="sm"
                                             renderIcon={TrashCan}
                                             iconDescription="Delete"
+                                            className={`${styles.deleteButton} ${
+                                              state.selectedRowId === row.id
+                                                ? styles.selectedDelete
+                                                : ""
+                                            }`}
+                                            onClick={() => {
+                                              dispatch({
+                                                type: ACTION_TYPES.OPEN_DELETE_DIALOG,
+                                                payload: row.id as string,
+                                              });
+                                            }}
                                           />
                                         </div>
                                       </TableCell>
@@ -291,13 +434,19 @@ const ApplicationsListPage = () => {
 
                   {filteredRows.length > 20 && (
                     <Pagination
-                      page={page}
-                      pageSize={pageSize}
+                      page={state.page}
+                      pageSize={state.pageSize}
                       pageSizes={[5, 10, 20, 30]}
                       totalItems={filteredRows.length}
                       onChange={({ page, pageSize }) => {
-                        setPage(page);
-                        setPageSize(pageSize);
+                        dispatch({
+                          type: ACTION_TYPES.SET_PAGE,
+                          payload: page,
+                        });
+                        dispatch({
+                          type: ACTION_TYPES.SET_PAGE_SIZE,
+                          payload: pageSize,
+                        });
                       }}
                     />
                   )}
@@ -305,6 +454,52 @@ const ApplicationsListPage = () => {
               )}
             </DataTable>
           </div>
+          <Modal
+            open={state.isDeleteDialogOpen}
+            size="xs"
+            modalLabel="Delete Case routing"
+            modalHeading="Confirm delete"
+            primaryButtonText="Delete"
+            secondaryButtonText="Cancel"
+            danger
+            primaryButtonDisabled={!state.isConfirmed}
+            onRequestClose={() => {
+              dispatch({ type: ACTION_TYPES.CLOSE_DELETE_DIALOG });
+            }}
+            onRequestSubmit={handleDelete}
+          >
+            <p>
+              Deleting an application permanently removes all associated
+              components, including connected services, runtime metadata, and
+              any data or configurations created.
+            </p>
+            <div>
+              <CheckboxGroup
+                className={styles.deleteConfirmation}
+                legendText="Confirm application to be deleted"
+              >
+                <Checkbox
+                  id="checkbox-label-1"
+                  labelText={
+                    <strong>
+                      {state.selectedRowId
+                        ? state.rowsData.find(
+                            (r: ApplicationRow) => r.id === state.selectedRowId,
+                          )?.name
+                        : ""}
+                    </strong>
+                  }
+                  checked={state.isConfirmed}
+                  onChange={(_, { checked }) =>
+                    dispatch({
+                      type: ACTION_TYPES.SET_CONFIRMED,
+                      payload: checked,
+                    })
+                  }
+                />
+              </CheckboxGroup>
+            </div>
+          </Modal>
         </Column>
       </Grid>
     </>

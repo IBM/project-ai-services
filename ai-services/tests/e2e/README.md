@@ -82,6 +82,7 @@ export LLM_CONTAINER_POLLING_INTERVAL=30s
 # Exposed Ports
 export RAG_BACKEND_PORT=5100
 export RAG_UI_PORT=3100
+export DIGIITIZE_PORT=4100
 export LLM_JUDGE_PORT=8000
 
 # Golden dataset filename

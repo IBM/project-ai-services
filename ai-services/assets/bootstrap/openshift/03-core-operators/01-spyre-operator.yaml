@@ -13,7 +13,6 @@ metadata:
   namespace: spyre-operator
 spec:
   channel: stable-v1.1
-  installPlanApproval: Automatic
   name: spyre-operator
   source: certified-operators
   sourceNamespace: openshift-marketplace
