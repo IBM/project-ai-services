@@ -20,7 +20,6 @@ const (
 	certManagerOperator        = "cert-manager-operator"
 	serviceMeshOperator        = "servicemeshoperator3"
 	nfdOperator                = "nfd"
-	rhoaiOperator              = "rhods-operator"
 	olmGroup                   = "operators.coreos.com"
 	olmVersion                 = "v1alpha1"
 	olmCSVList                 = "ClusterServiceVersionList"
@@ -51,15 +50,15 @@ func (r *OperatorRule) Verify() error {
 		operator string
 	}{
 		{
-			"Secondary Scheduler Operator",
+			"Secondary Scheduler Operator for Red Hat OpenShift",
 			secondarySchedulerOperator,
 		},
 		{
-			"Cert-Manager Operator",
+			"Cert-Manager Operator for Red Hat OpenShift",
 			certManagerOperator,
 		},
 		{
-			"Service Mesh 3 Operator",
+			"Red Hat OpenShift Service Mesh 3 Operator",
 			serviceMeshOperator,
 		},
 		{
@@ -67,8 +66,12 @@ func (r *OperatorRule) Verify() error {
 			nfdOperator,
 		},
 		{
-			"RHOAI Operator",
-			rhoaiOperator,
+			"Red Hat OpenShift AI Operator",
+			constants.RHODSOperatorName,
+		},
+		{
+			"IBM Spyre Operator",
+			constants.SpyreOperatorName,
 		},
 	}
 
