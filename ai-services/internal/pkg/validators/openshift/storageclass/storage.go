@@ -1,7 +1,6 @@
 package storageclass
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -14,10 +13,14 @@ const (
 	StorageClassDefaultValue      = "true"
 )
 
-type StorageClassRule struct{}
+type StorageClassRule struct {
+	client *openshift.OpenshiftClient
+}
 
-func NewStorageClassRule() *StorageClassRule {
-	return &StorageClassRule{}
+func NewStorageClassRule(client *openshift.OpenshiftClient) *StorageClassRule {
+	return &StorageClassRule{
+		client: client,
+	}
 }
 
 func (r *StorageClassRule) Name() string {
@@ -30,15 +33,10 @@ func (r *StorageClassRule) Description() string {
 
 // Verify checks if a default StorageClass exists.
 func (r *StorageClassRule) Verify() error {
-	ctx := context.Background()
-
-	client, err := openshift.NewOpenshiftClient()
-	if err != nil {
-		return fmt.Errorf("failed to create openshift client: %w", err)
-	}
-
+	ctx := r.client.Ctx
 	scList := &storagev1.StorageClassList{}
-	if err := client.Client.List(ctx, scList); err != nil {
+
+	if err := r.client.Client.List(ctx, scList); err != nil {
 		return fmt.Errorf("failed to list storage classes: %w", err)
 	}
 

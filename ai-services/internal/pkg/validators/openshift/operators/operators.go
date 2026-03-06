@@ -29,10 +29,13 @@ const (
 
 type OperatorRule struct {
 	passed []string
+	client *openshift.OpenshiftClient
 }
 
-func NewOperatorRule() *OperatorRule {
-	return &OperatorRule{}
+func NewOperatorRule(client *openshift.OpenshiftClient) *OperatorRule {
+	return &OperatorRule{
+		client: client,
+	}
 }
 
 func (r *OperatorRule) Name() string {
@@ -44,6 +47,7 @@ func (r *OperatorRule) Description() string {
 }
 
 func (r *OperatorRule) Verify() error {
+	ctx := r.client.Ctx
 	var failed []string
 
 	checks := []struct {
@@ -72,9 +76,8 @@ func (r *OperatorRule) Verify() error {
 		},
 	}
 
-	client, err := openshift.NewOpenshiftClient()
-	if err != nil {
-		return fmt.Errorf("failed to create openshift client: %w", err)
+	if r.client == nil {
+		return fmt.Errorf("openshift client is not initialized")
 	}
 
 	csvList := &unstructured.UnstructuredList{}
@@ -83,12 +86,12 @@ func (r *OperatorRule) Verify() error {
 		Version: olmVersion,
 		Kind:    olmCSVList,
 	})
-	if err := client.Client.List(client.Ctx, csvList); err != nil {
+	if err := r.client.Client.List(ctx, csvList); err != nil {
 		return fmt.Errorf("failed to list ClusterServiceVersions: %w", err)
 	}
 
 	for _, check := range checks {
-		if err := validateOperator(client, csvList, check.operator); err != nil {
+		if err := validateOperator(r.client, csvList, check.operator); err != nil {
 			failed = append(failed, fmt.Sprintf("  - %s: %s", check.name, err.Error()))
 		} else {
 			r.passed = append(r.passed, fmt.Sprintf("  - %s installed", check.name))

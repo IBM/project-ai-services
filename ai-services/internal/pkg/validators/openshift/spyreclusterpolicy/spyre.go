@@ -21,10 +21,15 @@ const (
 	spyreName    = "spyreclusterpolicy"
 )
 
-type SpyrePolicyRule struct{}
+// SpyrePolicyRule validates that the Spyre Cluster Policy is installed and ready.
+type SpyrePolicyRule struct {
+	client *openshift.OpenshiftClient
+}
 
-func NewSpyrePolicyRule() *SpyrePolicyRule {
-	return &SpyrePolicyRule{}
+func NewSpyrePolicyRule(client *openshift.OpenshiftClient) *SpyrePolicyRule {
+	return &SpyrePolicyRule{
+		client: client,
+	}
 }
 
 func (r *SpyrePolicyRule) Name() string {
@@ -35,12 +40,11 @@ func (r *SpyrePolicyRule) Description() string {
 	return "Validates that Spyre Cluster Policy is in ready state"
 }
 
-// Verify performs a direct fetch.
 func (r *SpyrePolicyRule) Verify() error {
-	client, err := openshift.NewOpenshiftClient()
-	if err != nil {
-		return fmt.Errorf("failed to create openshift client: %w", err)
+	if r.client == nil {
+		return fmt.Errorf("openshift client is not initialized")
 	}
+	ctx := r.client.Ctx
 
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(schema.GroupVersionKind{
@@ -49,8 +53,8 @@ func (r *SpyrePolicyRule) Verify() error {
 		Kind:    spyreKind,
 	})
 
-	return wait.PollUntilContextTimeout(client.Ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
-		if err := client.Client.Get(ctx, types.NamespacedName{
+	return wait.PollUntilContextTimeout(ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
+		if err := r.client.Client.Get(ctx, types.NamespacedName{
 			Name:      spyreName,
 			Namespace: constants.SpyreOperatorNamespace,
 		}, obj); err != nil {
@@ -65,7 +69,7 @@ func (r *SpyrePolicyRule) Verify() error {
 
 		state, found, err := unstructured.NestedString(obj.Object, "status", "state")
 		if err != nil {
-			return false, fmt.Errorf("failed to parse status.state from policy: %w", err)
+			return false, fmt.Errorf("failed to parse status.state from SpyreClusterPolicy: %w", err)
 		}
 
 		if !found || state != "ready" {

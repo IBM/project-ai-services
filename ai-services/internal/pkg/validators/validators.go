@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	kubeconfig "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/kubeconfig"
 	nodelabels "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/nodelabels"
 	operators "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/operators"
@@ -31,11 +32,15 @@ func init() {
 	PodmanRegistry.Register(servicereport.NewServiceReportRule())
 
 	// OpenshiftChecks
-	OpenshiftRegistry.Register(kubeconfig.NewKubeconfigRule())
-	OpenshiftRegistry.Register(nodelabels.NewNodeLabelsRule())
-	OpenshiftRegistry.Register(operators.NewOperatorRule())
-	OpenshiftRegistry.Register(spyrepolicy.NewSpyrePolicyRule())
-	OpenshiftRegistry.Register(storageclass.NewStorageClassRule())
+	client, err := openshift.NewOpenshiftClient()
+	if err != nil {
+		return
+	}
+	OpenshiftRegistry.Register(kubeconfig.NewKubeconfigRule(client))
+	OpenshiftRegistry.Register(nodelabels.NewNodeLabelsRule(client))
+	OpenshiftRegistry.Register(operators.NewOperatorRule(client))
+	OpenshiftRegistry.Register(spyrepolicy.NewSpyrePolicyRule(client))
+	OpenshiftRegistry.Register(storageclass.NewStorageClassRule(client))
 }
 
 // Rule defines the interface for validation rules.

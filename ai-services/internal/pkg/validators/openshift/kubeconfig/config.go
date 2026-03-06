@@ -1,7 +1,6 @@
 package kubeconfig
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -9,10 +8,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-type KubeconfigRule struct{}
+type KubeconfigRule struct {
+	client *openshift.OpenshiftClient
+}
 
-func NewKubeconfigRule() *KubeconfigRule {
-	return &KubeconfigRule{}
+func NewKubeconfigRule(client *openshift.OpenshiftClient) *KubeconfigRule {
+	return &KubeconfigRule{
+		client: client,
+	}
 }
 
 func (r *KubeconfigRule) Name() string {
@@ -25,15 +28,13 @@ func (r *KubeconfigRule) Description() string {
 
 // Verify checks if the kubeconfig can access the OpenShift cluster.
 func (r *KubeconfigRule) Verify() error {
-	ctx := context.Background()
+	ctx := r.client.Ctx
 
-	client, err := openshift.NewOpenshiftClient()
-	if err != nil {
-		return fmt.Errorf("failed to create openshift client: %w", err)
+	if r.client == nil {
+		return fmt.Errorf("openshift client is not initialized")
 	}
-
 	// listing namespaces to validate cluster access.
-	if err := client.Client.List(ctx, &corev1.NamespaceList{}); err != nil {
+	if err := r.client.Client.List(ctx, &corev1.NamespaceList{}); err != nil {
 		return fmt.Errorf("failed to connect to cluster: %w", err)
 	}
 
