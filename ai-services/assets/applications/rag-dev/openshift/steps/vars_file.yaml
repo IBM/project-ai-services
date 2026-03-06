@@ -7,8 +7,20 @@ containers:
     format: ".Status"
     alias: BACKEND_STATUS
 
+  - name: "digitize-api"
+    format: ".Status"
+    alias: DIGITIZE-API_STATUS
+
+  - name: "digitize-ui"
+    format: ".Status"
+    alias: DIGITIZE-UI_STATUS
+
 hosts:
   - fetch: UI_ROUTE
     type: route
   - fetch: BACKEND_ROUTE
+    type: route
+  - fetch: DIGITIZE-API_ROUTE
+    type: route
+  - fetch: DIGITIZE-UI_ROUTE
     type: route
