@@ -3,6 +3,7 @@ import logging
 import os
 from pathlib import Path
 import shutil
+import signal
 from typing import List, Optional
 from contextlib import asynccontextmanager
 import uvicorn
@@ -25,7 +26,7 @@ if level != "":
 set_log_level(log_level)
 
 from digitize.ingest import ingest
-from digitize.status import StatusManager
+from digitize.status import StatusManager, scan_and_recover_orphan_jobs
 
 # Semaphores for concurrency limiting
 digitization_semaphore = asyncio.BoundedSemaphore(2)
@@ -33,16 +34,65 @@ ingestion_semaphore = asyncio.BoundedSemaphore(1)
 
 logger = get_logger("digitize_server")
 
+def mark_all_active_jobs_as_failed():
+    """
+    Mark all jobs with status 'accepted' or 'in_progress' as failed.
+    Called during graceful shutdown to handle in-progress jobs.
+    """
+    try:
+        logger.info("Marking all active jobs as failed due to shutdown...")
+        failed_count = scan_and_recover_orphan_jobs()
+        if failed_count > 0:
+            logger.info(f"Marked {failed_count} active job(s) as failed during shutdown")
+    except Exception as e:
+        logger.error(f"Error marking active jobs as failed: {e}", exc_info=True)
+
+
+def setup_signal_handlers():
+    """
+    Setup signal handlers for graceful shutdown.
+    Handles SIGTERM (container stop) and SIGINT (Ctrl+C).
+    """
+    def signal_handler(signum, frame):
+        sig_name = signal.Signals(signum).name
+        logger.warning(f"Received {sig_name} signal, initiating graceful shutdown...")
+
+        # Mark all active jobs as failed
+        mark_all_active_jobs_as_failed()
+
+        # Exit gracefully
+        logger.info("Graceful shutdown complete")
+        os._exit(0)
+
+    # Register handlers for SIGTERM and SIGINT
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    logger.info("Signal handlers registered for SIGTERM and SIGINT")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan events (startup and shutdown)."""
     # Startup
     logger.info("Application starting up...")
+
+    # Setup signal handlers for graceful shutdown
+    setup_signal_handlers()
+
+    # Scan for orphan jobs and mark them as failed
+    try:
+        orphan_count = scan_and_recover_orphan_jobs()
+        if orphan_count > 0:
+            logger.info(f"Recovered {orphan_count} orphan job(s) from previous crash")
+    except Exception as e:
+        logger.error(f"Error during orphan job recovery: {e}", exc_info=True)
     
     yield
     
     # Shutdown
     logger.info("Application shutting down...")
+    # Mark any remaining active jobs as failed
+    mark_all_active_jobs_as_failed()
 
 
 app = FastAPI(title="Digitize Documents Service", lifespan=lifespan)
