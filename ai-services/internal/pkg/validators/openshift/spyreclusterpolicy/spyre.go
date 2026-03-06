@@ -29,7 +29,7 @@ func NewSpyrePolicyRule() *SpyrePolicyRule {
 }
 
 func (r *SpyrePolicyRule) Name() string {
-	return "spyreclysterpolicy"
+	return "spyreclusterpolicy"
 }
 
 func (r *SpyrePolicyRule) Description() string {
