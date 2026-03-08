@@ -2,6 +2,11 @@ apiVersion: template.openshift.io/v1
 kind: TemplateInstance
 metadata:
   name: vllm-cpu-runtime
+  labels:
+    networking.kserve.io/visibility: cluster-local
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   template:
     metadata:
