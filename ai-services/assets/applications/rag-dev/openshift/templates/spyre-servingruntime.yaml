@@ -1,0 +1,9 @@
+apiVersion: template.openshift.io/v1
+kind: TemplateInstance
+metadata:
+  name: vllm-spyre-ppc64le-runtime
+spec:
+  template:
+    metadata:
+      name: vllm-spyre-ppc64le-runtime-template
+      namespace: redhat-ods-applications
