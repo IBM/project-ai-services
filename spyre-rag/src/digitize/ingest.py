@@ -53,6 +53,8 @@ def ingest(directory_path, job_id=None, doc_id_dict=None):
         emb_model_dict, llm_model_dict, _ = get_model_endpoints()
 
         # Initialize/reset the database before processing any files
+        vector_store = db.get_vector_store()
+
         out_path = setup_digitized_doc_dir()
 
         start_time = time.time()

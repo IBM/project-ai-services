@@ -1,7 +1,6 @@
-import json
-
-import common.db_utils as db
+from glob import glob
 from common.misc_utils import *
+from pathlib import Path
 from digitize.status import StatusManager,get_utc_timestamp
 from digitize.types import JobStatus, DocStatus, OutputFormat
 from digitize.pdf_utils import get_pdf_page_count
@@ -10,7 +9,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 logger = get_logger("digitize")
 
-def digitize(directory_path: str, job_id: str, doc_id_dict: dict, output_format: OutputFormat):
+def digitize(directory_path: Path, job_id: str, doc_id_dict: dict, output_format: OutputFormat):
     """
     Digitize a single PDF file in the staging directory.
 
@@ -27,7 +26,6 @@ def digitize(directory_path: str, job_id: str, doc_id_dict: dict, output_format:
     Returns:
         None
     """
-    directory_path = Path(directory_path)
     if not directory_path.exists():
         raise Exception(f"Staging directory does not exist: {directory_path}")
 

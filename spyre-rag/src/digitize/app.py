@@ -10,10 +10,10 @@ import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status
 from common.misc_utils import get_logger, set_log_level, has_allowed_extension
 import digitize.digitize_utils as dg_util
-from digitize import types
+import digitize.types as types
 from digitize.digitize import digitize
 from digitize.errors import *
-from digitize.config import *
+import digitize.config as config
 
 log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
@@ -50,7 +50,7 @@ app = FastAPI(title="Digitize Documents Service", lifespan=lifespan)
 
 async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat):
     status_mgr = StatusManager(job_id)
-    job_staging_path = STAGING_DIR / f"{job_id}"
+    job_staging_path = config.STAGING_DIR / f"{job_id}"
 
     try:
         logger.info(f"🚀 Digitization started for job: {job_id}")
@@ -75,7 +75,7 @@ async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: type
 
 async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict):
     status_mgr = StatusManager(job_id)
-    job_staging_path = STAGING_DIR / f"{job_id}"
+    job_staging_path = config.STAGING_DIR / f"{job_id}"
 
     try:
         logger.info(f"🚀 Ingestion started for job: {job_id}")
@@ -165,22 +165,17 @@ async def digitize_document(
 
         # 5. Schedule the background pipeline
         try:
+            # Upload the file byte stream to files in staging directory
+            # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
+            await dg_util.stage_upload_files(job_id, filenames, str(config.STAGING_DIR / job_id), file_contents)
+            doc_id_dict = dg_util.initialize_job_state(job_id, operation, output_format, filenames)
             if operation == types.OperationType.INGESTION:
-                # Upload the file byte stream to files in staging directory
-                # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
-                await dg_util.stage_upload_files(job_id, filenames, str(STAGING_DIR / job_id), file_contents)
-
-                doc_id_dict = dg_util.initialize_job_state(job_id, types.OperationType.INGESTION, types.OutputFormat.JSON, filenames)
-
                 background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
             else:
-                # Upload the file byte stream to files in staging directory
-                # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
-                await dg_util.stage_upload_files(job_id, filenames, str(STAGING_DIR / job_id), file_contents)
-
-                doc_id_dict = dg_util.initialize_job_state(job_id, types.OperationType.DIGITIZATION, output_format, filenames)
-
                 background_tasks.add_task(digitize_documents, job_id, doc_id_dict, output_format)
+        except Exception as e:
+            sem.release()
+            logger.error(f"Failed to schedule background task for job {job_id}, semaphore released: {e}")
         except Exception as e:
             sem.release()
             logger.error(f"Failed to schedule background task for job {job_id}, semaphore released: {e}")

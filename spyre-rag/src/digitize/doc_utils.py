@@ -19,7 +19,7 @@ from common.misc_utils import get_logger, text_suffix, table_suffix, chunk_suffi
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.status import StatusManager
 from digitize.types import DocStatus, JobStatus, OutputFormat
-from digitize import config
+import digitize.config as config
 
 logging.getLogger('docling').setLevel(logging.CRITICAL)
 
@@ -749,7 +749,7 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn):
 
     return combined_docs
 
-def convert_document_format(pdf_path: str, out_path: str, doc_id: str, output_format: OutputFormat):
+def convert_document_format(pdf_path: str, out_path: Path, doc_id: str, output_format: OutputFormat):
     try:
         logger.info(f"Processing '{pdf_path}'")
 
