@@ -236,7 +236,6 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
     Process documents for ingestion pipeline.
     Each request is treated as fresh.
     """
-
     # Partition files into light and heavy based on page count
     light_files, heavy_files = [], []
     for path in input_paths:
@@ -750,40 +749,30 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn):
     return combined_docs
 
 def convert_document_format(pdf_path: str, out_path: Path, doc_id: str, output_format: OutputFormat):
-    try:
-        logger.info(f"Processing '{pdf_path}'")
+    logger.info(f"Processing '{pdf_path}'")
 
-        out_dir = Path(out_path)
-        out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(out_path)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-        t0 = time.time()
+    t0 = time.time()
 
-        # Convert PDF → DoclingDocument
-        doc_obj = convert_doc(pdf_path).document
+    # Convert PDF → DoclingDocument
+    doc_obj = convert_doc(pdf_path).document
 
-        conversion_time = time.time() - t0
+    conversion_time = time.time() - t0
 
-        # Save requested format only
-        if output_format == OutputFormat.JSON:
-            logger.info("Saving JSON")
-            out_file = out_dir / f"{doc_id}.json"
-            doc_obj.save_as_json(str(out_file))
+    # Save requested format
+    if output_format == OutputFormat.JSON:
+        out_file = out_dir / f"{doc_id}.json"
+        doc_obj.save_as_json(str(out_file))
 
-        elif output_format == OutputFormat.MD:
-            logger.debug("Saving Markdown")
-            out_file = out_dir / f"{doc_id}.md"
-            with open(out_file, "w", encoding="utf-8") as f:
-                f.write(doc_obj.export_to_markdown())
+    elif output_format == OutputFormat.MD:
+        out_file = out_dir / f"{doc_id}.md"
+        out_file.write_text(doc_obj.export_to_markdown(), encoding="utf-8")
 
-        elif output_format == OutputFormat.TEXT:
-            logger.debug("Saving Text")
-            out_file = out_dir / f"{doc_id}.txt"
-            with open(out_file, "w", encoding="utf-8") as f:
-                f.write(doc_obj.export_to_text())
+    elif output_format == OutputFormat.TEXT:
+        out_file = out_dir / f"{doc_id}.txt"
+        out_file.write_text(doc_obj.export_to_text(), encoding="utf-8")
 
-        return str(out_file), conversion_time
-
-    except Exception as e:
-        logger.exception(f"Error converting '{pdf_path}': {e}")
-        return None, None
-
+    logger.debug(f"Saved converted file to '{out_file}'")
+    return str(out_file), conversion_time
