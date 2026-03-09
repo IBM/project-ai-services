@@ -140,24 +140,24 @@ func buildBinary(ctx context.Context, tempBinDir string) (string, error) {
 	return buildUsingGo(ctx, moduleRoot, tempBinDir)
 }
 
-// buildUsingMake runs `make build`.
+// buildUsingMake runs `make bin`.
 func buildUsingMake(
 	ctx context.Context,
 	moduleRoot string,
 	tempBinDir string,
 ) (string, error) {
-	cmd := exec.CommandContext(ctx, "make", "build")
+	cmd := exec.CommandContext(ctx, "make", "bin")
 	cmd.Dir = moduleRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("make build failed: %w", err)
+		return "", fmt.Errorf("make bin failed: %w", err)
 	}
 
 	srcBinPath := filepath.Join(moduleRoot, "bin", "ai-services")
 	if _, err := os.Stat(srcBinPath); err != nil {
-		return "", fmt.Errorf("binary not found after make build: %w", err)
+		return "", fmt.Errorf("binary not found after make bin: %w", err)
 	}
 
 	return copyBinaryToTemp(srcBinPath, tempBinDir)

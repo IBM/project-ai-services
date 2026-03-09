@@ -45,6 +45,7 @@ func StartIngestion(
 	cfg *config.Config,
 	appName string,
 	completionStr string,
+	cleanDocs bool,
 ) error {
 	// Wait for vLLM pod to be ready.
 	if err := WaitForAllPodsHealthy(ctx, cfg, appName); err != nil {
@@ -52,7 +53,11 @@ func StartIngestion(
 	}
 
 	// Start ingestion pod.
-	podName := fmt.Sprintf("%s--ingest-docs", appName)
+	podSuffix := "--ingest-docs"
+	if cleanDocs {
+		podSuffix = "--clean-docs"
+	}
+	podName := fmt.Sprintf("%s%s", appName, podSuffix)
 
 	args := []string{
 		"application", "start",
@@ -73,7 +78,7 @@ func StartIngestion(
 	}
 
 	// Wait for ingestion to complete.
-	if _, err := WaitForIngestionLogs(ctx, cfg, appName, completionStr); err != nil {
+	if _, err := WaitForIngestionLogs(ctx, cfg, appName, completionStr, cleanDocs); err != nil {
 		return err
 	}
 

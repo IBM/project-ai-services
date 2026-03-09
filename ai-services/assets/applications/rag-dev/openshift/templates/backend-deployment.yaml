@@ -20,6 +20,7 @@ spec:
         ai-services.io/component: backend
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: server
           image: "{{ .Values.backend.image }}"

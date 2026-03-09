@@ -2,13 +2,21 @@ ui:
   # @description Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/rag-ui:v0.0.18
+  image: icr.io/ai-services-cicd/rag-ui:v0.0.20
 
 backend:
   # @description Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.
   port: "0"
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.32
+  image: icr.io/ai-services-cicd/rag:v0.0.35
+  # @hidden
+  log_level: "INFO"
+
+digitize:
+  # @description Host port for the DIGITIZE API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
+  port: ""
+  # @hidden
+  image: icr.io/ai-services-cicd/rag:v0.0.35
   # @hidden
   log_level: "INFO"
 
@@ -36,3 +44,11 @@ embedding:
 reranker:
   # @hidden
   image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
+
+summarize:
+  # @description Host port for the Summarize API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
+  port: "6000"
+  # @hidden
+  image: icr.io/ai-services-cicd/rag:v0.0.35
+  # @hidden
+  log_level: "INFO"

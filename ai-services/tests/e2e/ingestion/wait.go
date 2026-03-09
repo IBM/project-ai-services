@@ -117,8 +117,13 @@ func WaitForIngestionLogs(
 	cfg *config.Config,
 	appName string,
 	completionStr string,
+	cleanDocs bool,
 ) (string, error) {
-	podName := fmt.Sprintf("%s--ingest-docs", appName)
+	podSuffix := "--ingest-docs"
+	if cleanDocs {
+		podSuffix = "--clean-docs"
+	}
+	podName := fmt.Sprintf("%s%s", appName, podSuffix)
 
 	ctx, cancel := context.WithTimeout(ctx, ingestionTimeout)
 	defer cancel()

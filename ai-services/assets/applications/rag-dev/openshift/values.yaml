@@ -1,10 +1,10 @@
 ui:
   # @hidden
-  image: icr.io/ai-services-cicd/rag-ui:v0.0.18
+  image: icr.io/ai-services-cicd/rag-ui:v0.0.20
 
 backend:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.32
+  image: icr.io/ai-services-cicd/rag:v0.0.35
   # @hidden
   log_level: "INFO"
 

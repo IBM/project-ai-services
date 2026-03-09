@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/project-ai-services/ai-services/assets"
@@ -14,7 +13,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -22,40 +20,50 @@ import (
 )
 
 const (
-	pollInterval              = 5 * time.Second
-	pollTimeout               = 2 * time.Minute
 	externalDeviceReservation = "externalDeviceReservation"
 	experimentalMode          = "experimentalMode"
 )
 
 func (o *OpenshiftBootstrap) Configure() error {
+	logger.Infoln("Configuring OpenShift cluster")
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
 		return fmt.Errorf("failed to configure openshift cluster")
 	}
 
 	// 1. Apply all yamls
-	s := spinner.New("Applying YAMLs")
+	s := spinner.New("Applying the configurations")
 	s.Start(client.Ctx)
 
 	// iterate through the directory and apply the YAMLs
-	if err := applyYamls(client.Ctx, client.Client); err != nil {
+	if err := applyYamls(client); err != nil {
 		s.Fail("failed to apply YAMLs")
 
 		return fmt.Errorf("error occurred while applying YAMLs: %w", err)
 	}
-	s.Stop("YAMLs Applied")
+	s.Stop("Configurations applied successfully")
 
 	s = spinner.New("Waiting for spyre operator to be ready")
 	s.Start(client.Ctx)
 
-	err = waitForSpyreOperator(client.Ctx, client.Client)
+	err = waitForOperator(client, constants.SpyreOperatorName, constants.SpyreOperatorNamespace)
 	if err != nil {
-		s.Stop("spyre operator not ready")
+		s.Fail("spyre operator not ready")
 
 		return fmt.Errorf("spyre operator not ready: %w", err)
 	}
 	s.Stop("Spyre Operator up and ready")
+
+	s = spinner.New("Waiting for rhods operator to be ready")
+	s.Start(client.Ctx)
+
+	err = waitForOperator(client, constants.RHODSOperatorName, constants.RHODSOperatorNamespace)
+	if err != nil {
+		s.Fail("rhods operator not ready")
+
+		return fmt.Errorf("rhods operator not ready: %w", err)
+	}
+	s.Stop("RHODS Operator up and ready")
 
 	/*
 		2. Configure Spyre cluster policy
@@ -75,10 +83,12 @@ func (o *OpenshiftBootstrap) Configure() error {
 	}
 	s.Stop("Spyre Cluster Policy configured")
 
+	logger.Infoln("Cluster configured successfully")
+
 	return nil
 }
 
-func applyYamls(ctx context.Context, c k8sClient.Client) error {
+func applyYamls(client *openshift.OpenshiftClient) error {
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{
 		FS:      &assets.BootstrapFS,
 		Root:    "bootstrap",
@@ -91,7 +101,7 @@ func applyYamls(ctx context.Context, c k8sClient.Client) error {
 	}
 
 	for _, yaml := range yamls {
-		if err := utils.ApplyYaml(ctx, yaml, c); err != nil {
+		if err := applyYaml(client, yaml); err != nil {
 			return fmt.Errorf("failed to apply YAML %s: %w", string(yaml), err)
 		}
 	}
@@ -120,7 +130,7 @@ func configureSCP(client *openshift.OpenshiftClient, s *spinner.Spinner) error {
 }
 
 func fetchSCPSpec(client *openshift.OpenshiftClient) (map[string]any, error) {
-	csv, err := fetchSpyreOperator(client.Ctx, client.Client)
+	csv, err := fetchOperator(client, constants.SpyreOperatorName, constants.SpyreOperatorNamespace)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching spyre operator: %w", err)
 	}
@@ -207,19 +217,19 @@ func frameAndApply(client *openshift.OpenshiftClient, spec map[string]any, s *sp
 	return err
 }
 
-func fetchSpyreOperator(ctx context.Context, c k8sClient.Client) (*operatorsv1alpha1.ClusterServiceVersion, error) {
+func fetchOperator(client *openshift.OpenshiftClient, opName string, opNS string) (*operatorsv1alpha1.ClusterServiceVersion, error) {
 	sub := &operatorsv1alpha1.Subscription{}
-	if err := c.Get(ctx, k8sClient.ObjectKey{
-		Name:      "spyre-operator",
-		Namespace: constants.SpyreOperatorNamespace,
+	if err := client.Client.Get(client.Ctx, k8sClient.ObjectKey{
+		Name:      opName,
+		Namespace: opNS,
 	}, sub); err != nil {
 		return nil, err
 	}
 
 	csv := &operatorsv1alpha1.ClusterServiceVersion{}
-	if err := c.Get(ctx, k8sClient.ObjectKey{
-		Name:      sub.Status.CurrentCSV,
-		Namespace: constants.SpyreOperatorNamespace,
+	if err := client.Client.Get(client.Ctx, k8sClient.ObjectKey{
+		Name:      sub.Spec.StartingCSV,
+		Namespace: opNS,
 	}, csv); err != nil {
 		return nil, err
 	}
@@ -227,9 +237,9 @@ func fetchSpyreOperator(ctx context.Context, c k8sClient.Client) (*operatorsv1al
 	return csv, nil
 }
 
-func waitForSpyreOperator(ctx context.Context, c k8sClient.Client) error {
-	return wait.PollUntilContextTimeout(ctx, pollInterval, pollTimeout, true, func(ctx context.Context) (bool, error) {
-		csv, err := fetchSpyreOperator(ctx, c)
+func waitForOperator(client *openshift.OpenshiftClient, opName string, opNS string) error {
+	return wait.PollUntilContextTimeout(client.Ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
+		csv, err := fetchOperator(client, opName, opNS)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				// keep waiting until timeout

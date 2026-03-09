@@ -22,6 +22,9 @@ COMPONENTS = {
         ("ai-services/assets/applications/rag/podman/values.yaml", "backend"),
         ("ai-services/assets/applications/rag-dev/podman/values.yaml", "backend"),
         ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "backend"),
+        ("ai-services/assets/applications/rag/podman/values.yaml", "digitize"),
+        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "summarize"),
+
     ],
     "spyre-rag/ui/Makefile": [
         ("ai-services/assets/applications/rag/podman/values.yaml", "ui"),
