@@ -37,6 +37,7 @@ func init() {
 	OpenshiftRegistry.Register(operators.NewOperatorRule())
 	OpenshiftRegistry.Register(spyrepolicy.NewSpyrePolicyRule())
 	OpenshiftRegistry.Register(rhods.NewDSCInitializationRule())
+	OpenshiftRegistry.Register(rhods.NewDataScienceClusterRule())
 	OpenshiftRegistry.Register(storageclass.NewStorageClassRule())
 }
 
