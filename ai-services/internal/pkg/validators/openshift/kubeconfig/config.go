@@ -21,7 +21,7 @@ func (r *KubeconfigRule) Name() string {
 }
 
 func (r *KubeconfigRule) Description() string {
-	return "Validates cluster access and operator installation permissions"
+	return "Validates cluster access"
 }
 
 // Verify checks if the kubeconfig can access the OpenShift cluster and has required permissions.
@@ -92,7 +92,7 @@ func (r *KubeconfigRule) checkPermission(ctx context.Context, client *openshift.
 }
 
 func (r *KubeconfigRule) Message() string {
-	return "Cluster authentication and operator permissions validated"
+	return "Cluster authentication validated successfully."
 }
 
 func (r *KubeconfigRule) Level() constants.ValidationLevel {
