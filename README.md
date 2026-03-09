@@ -38,6 +38,8 @@ AI Services, part of the IBM Open-Source AI Foundation for Power, deliver pre-bu
 
 - [**🚀 Contributing**](./CONTRIBUTING.md)
 
+- [**📝 Release Notes**](#release-notes)
+
 ---
 
 ## Quick Start
@@ -83,7 +85,9 @@ project-ai-services/
 ├── README.md          # Project documentation
 ├── ai-services/       # CLI tool for project-ai-services
 │   ├── assets/        # Application template files
+├── changelog/         # Release notes for each version
 ├── images/            # Helper/Utility image assets
+├── scripts/           # Utility scripts including release notes generator
 ├── spyre-rag/         # Spyre RAG implementation
 ├── test/              # Test assets
 │   ├── golden/        # Golden dataset
