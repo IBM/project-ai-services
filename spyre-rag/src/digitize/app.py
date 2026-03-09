@@ -48,9 +48,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Digitize Documents Service", lifespan=lifespan)
 
-async def digitize_documents(job_id: str, filenames: List[str], doc_id_dict: dict, output_format: types.OutputFormat):
+async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat):
     status_mgr = StatusManager(job_id)
-    job_staging_path = Path(STAGING_DIR) / f"{job_id}"
+    job_staging_path = STAGING_DIR / f"{job_id}"
 
     try:
         logger.info(f"🚀 Digitization started for job: {job_id}")
@@ -133,7 +133,7 @@ async def digitize_document(
 
         # Validate only one file is allowed for digitization
         if operation == types.OperationType.DIGITIZATION and len(files) > 1:
-            APIError.raise_error("INVALID_REQUEST", "Only 1 file allowed for digitization.")
+            APIError.raise_error(ErrorCode.INVALID_REQUEST, "Only 1 file allowed for digitization.")
 
         job_id = dg_util.generate_uuid()
         # Filter out None filenames and ensure all files have valid names
@@ -170,17 +170,17 @@ async def digitize_document(
                 # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
                 await dg_util.stage_upload_files(job_id, filenames, str(STAGING_DIR / job_id), file_contents)
 
-                doc_id_dict = dg_util.initialize_job_state(job_id, types.OperationType.INGESTION, filenames)
+                doc_id_dict = dg_util.initialize_job_state(job_id, types.OperationType.INGESTION, types.OutputFormat.JSON, filenames)
 
                 background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
             else:
                 # Upload the file byte stream to files in staging directory
                 # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
-                await dg_util.stage_upload_files(job_id, filenames, str(Path(STAGING_DIR) / job_id), file_contents)
+                await dg_util.stage_upload_files(job_id, filenames, str(STAGING_DIR / job_id), file_contents)
 
-                doc_id_dict = dg_util.initialize_job_state(job_id, types.OperationType.DIGITIZATION, filenames)
+                doc_id_dict = dg_util.initialize_job_state(job_id, types.OperationType.DIGITIZATION, output_format, filenames)
 
-                background_tasks.add_task(digitize_documents, job_id, filenames, doc_id_dict, output_format)
+                background_tasks.add_task(digitize_documents, job_id, doc_id_dict, output_format)
         except Exception as e:
             sem.release()
             logger.error(f"Failed to schedule background task for job {job_id}, semaphore released: {e}")

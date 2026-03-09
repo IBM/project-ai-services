@@ -3,25 +3,29 @@ import json
 import common.db_utils as db
 from common.misc_utils import *
 from digitize.status import StatusManager,get_utc_timestamp
-from digitize.types import JobStatus, DocStatus
+from digitize.types import JobStatus, DocStatus, OutputFormat
 from digitize.pdf_utils import get_pdf_page_count
 from digitize.doc_utils import convert_document_format
 from concurrent.futures import ProcessPoolExecutor
 
-from docling.datamodel.document import DoclingDocument, TextItem
-
 logger = get_logger("digitize")
 
-def digitize(directory_path, job_id=None, doc_id_dict: dict = None, output_format: str = "json"):
+def digitize(directory_path: str, job_id: str, doc_id_dict: dict, output_format: OutputFormat):
     """
     Digitize a single PDF file in the staging directory.
-    Converts to JSON and optionally Markdown or text, updates metadata, but does not return anything.
-    
+
     Args:
         directory_path: Path to staging directory containing exactly one PDF
         job_id: Job identifier for StatusManager
         doc_id_dict: Mapping from filename to document ID
         output_format: "json", "md", or "text"
+
+    Raises:
+        Exception: If directory doesn't exist, no PDFs found, conversion fails,
+                  or doc_id not found in doc_id_dict
+
+    Returns:
+        None
     """
     directory_path = Path(directory_path)
     if not directory_path.exists():
@@ -31,11 +35,11 @@ def digitize(directory_path, job_id=None, doc_id_dict: dict = None, output_forma
     status_mgr = StatusManager(job_id) if job_id else None
 
     # Prepare output/cache path
-    vector_store = db.get_vector_store()
-    index_name = vector_store.index_name
-    out_path = setup_cache_dir(index_name)
+    out_path = setup_digitized_doc_dir()
 
     pdfs = list(directory_path.glob("*.pdf"))
+    if len(pdfs) == 0:
+        raise Exception(f"No PDF files found in {directory_path}")
     file_path = pdfs[0]
     filename = file_path.name
     doc_id = doc_id_dict.get(filename)
@@ -46,7 +50,7 @@ def digitize(directory_path, job_id=None, doc_id_dict: dict = None, output_forma
         # Mark document/job as IN_PROGRESS
         if status_mgr:
             logger.debug(f"Submitted for conversion: updating job & doc metadata to IN_PROGRESS for document: {doc_id}")
-            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.COMPLETED, "completed_at": get_utc_timestamp()})
+            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.IN_PROGRESS})
             status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
 
         # Convert document
@@ -60,7 +64,7 @@ def digitize(directory_path, job_id=None, doc_id_dict: dict = None, output_forma
                 output_format
             )
 
-            _, output_file, conversion_time = future.result()
+            output_file, conversion_time = future.result()
 
         if not output_file:
             raise Exception("Conversion failed")
@@ -74,14 +78,14 @@ def digitize(directory_path, job_id=None, doc_id_dict: dict = None, output_forma
             status_mgr.update_doc_metadata(doc_id, {
                 "status": DocStatus.COMPLETED,
                 "pages": page_count,
+                "completed_at": get_utc_timestamp(),
                 "timing_in_secs": {"digitizing": round(conversion_time, 2)}
             })
             status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
 
     except Exception as e:
         # Mark FAILED
-        logger.error(f"Conversion failed for {filename}: converted_json is None")
+        logger.error(f"Conversion failed for {filename}: {str(e)}", exc_info=True)
         if status_mgr:
-            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error="Failed to convert document: conversion returned None")
-            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error="Failed to convert document: conversion returned None")
+            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Failed to convert document: {str(e)}")
         raise

@@ -18,7 +18,7 @@ from common.llm_utils import create_llm_session, summarize_and_classify_tables, 
 from common.misc_utils import get_logger, text_suffix, table_suffix, chunk_suffix
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.status import StatusManager
-from digitize.types import DocStatus, JobStatus
+from digitize.types import DocStatus, JobStatus, OutputFormat
 from digitize import config
 
 logging.getLogger('docling').setLevel(logging.CRITICAL)
@@ -749,13 +749,9 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn):
 
     return combined_docs
 
-def convert_document_format(pdf_path, out_path, doc_id, output_format="json"):
+def convert_document_format(pdf_path: str, out_path: str, doc_id: str, output_format: OutputFormat):
     try:
         logger.info(f"Processing '{pdf_path}'")
-
-        output_format = output_format.lower()
-        if output_format not in {"json", "md", "text"}:
-            raise ValueError(f"Unsupported output_format: {output_format}")
 
         out_dir = Path(out_path)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -768,26 +764,26 @@ def convert_document_format(pdf_path, out_path, doc_id, output_format="json"):
         conversion_time = time.time() - t0
 
         # Save requested format only
-        if output_format == "json":
+        if output_format == OutputFormat.JSON:
             logger.info("Saving JSON")
             out_file = out_dir / f"{doc_id}.json"
             doc_obj.save_as_json(str(out_file))
 
-        elif output_format == "md":
+        elif output_format == OutputFormat.MD:
             logger.debug("Saving Markdown")
             out_file = out_dir / f"{doc_id}.md"
             with open(out_file, "w", encoding="utf-8") as f:
                 f.write(doc_obj.export_to_markdown())
 
-        elif output_format == "text":
+        elif output_format == OutputFormat.TEXT:
             logger.debug("Saving Text")
             out_file = out_dir / f"{doc_id}.txt"
             with open(out_file, "w", encoding="utf-8") as f:
                 f.write(doc_obj.export_to_text())
 
-        return pdf_path, str(out_file), conversion_time
+        return str(out_file), conversion_time
 
     except Exception as e:
         logger.exception(f"Error converting '{pdf_path}': {e}")
-        return None, None, None
+        return None, None
 
