@@ -99,9 +99,7 @@ func (r *OperatorRule) Verify() error {
 	}
 
 	if len(failed) > 0 {
-		checks := append(r.passed, failed...)
-
-		return fmt.Errorf("operator validation failed: \n%s", strings.Join(checks, "\n"))
+		return fmt.Errorf("operator validation failed: \n%s", strings.Join(append(r.passed, failed...), "\n"))
 	}
 
 	return nil
