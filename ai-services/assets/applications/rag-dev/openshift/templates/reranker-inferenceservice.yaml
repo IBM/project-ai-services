@@ -1,0 +1,27 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: reranker
+  annotations:
+    security.opendatahub.io/enable-auth: "false"
+    serving.kserve.io/deploymentMode: RawDeployment
+  labels:
+    networking.kserve.io/visibility: cluster-local
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  predictor:
+    automountServiceAccountToken: false
+    deploymentStrategy:
+      type: Recreate
+    maxReplicas: 1
+    minReplicas: 1
+    model:
+      modelFormat:
+        name: vLLM
+      resources: {}
+      runtime: cpu-temp
+      storageUri: {{ .Values.reranker.storageUri }}
+      args:
+      - --served-model-name=BAAI/bge-reranker-v2-m3
