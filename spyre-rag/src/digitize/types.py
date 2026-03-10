@@ -1,4 +1,6 @@
 from enum import Enum
+from typing import List
+from pydantic import BaseModel
 
 
 class OutputFormat(str, Enum):
@@ -27,3 +29,12 @@ class DocStatus(str, Enum):
     CHUNKED = "chunked"
     COMPLETED = "completed"
     FAILED = "failed"
+
+class PaginationInfo(BaseModel):
+    total: int
+    limit: int
+    offset: int
+
+class JobsListResponse(BaseModel):
+    pagination: PaginationInfo
+    data: List[dict]

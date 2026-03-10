@@ -10,9 +10,10 @@ import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status
 from common.misc_utils import get_logger, set_log_level, has_allowed_extension
 import digitize.digitize_utils as dg_util
-from digitize import types
+import digitize.types as types
+from digitize.digitize import digitize
 from digitize.errors import *
-from digitize.config import *
+import digitize.config as config
 
 log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
@@ -47,20 +48,34 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Digitize Documents Service", lifespan=lifespan)
 
-async def digitize_documents(job_id: str, filenames: List[str], output_format: types.OutputFormat):
+async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat):
+    status_mgr = StatusManager(job_id)
+    job_staging_path = config.STAGING_DIR / f"{job_id}"
+
     try:
-        # Business logic for document conversion.
-        pass
+        logger.info(f"🚀 Digitization started for job: {job_id}")
+        # to_thread prevents the heavy 'digitize' process from blocking the main FastAPI event loop and returns the response to request asynchronously.
+        await asyncio.to_thread(digitize, job_staging_path, job_id, doc_id_dict, output_format)
+        logger.info(f"Digitization for {job_id} completed successfully")
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
+        status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing digitization pipeline: {str(e)}")
     finally:
+       # Always clean up staging directory, even on crashes
+        try:
+            if job_staging_path.exists():
+                shutil.rmtree(job_staging_path)
+                logger.debug(f"Cleaned up staging directory: {job_staging_path}")
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to clean up staging directory {job_staging_path}: {cleanup_error}")
+
         # Crucial: Always release the semaphore slot back to the API
         digitization_semaphore.release()
         logger.debug(f"Semaphore slot released from digitization job {job_id}")
 
 async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict):
     status_mgr = StatusManager(job_id)
-    job_staging_path = STAGING_DIR / f"{job_id}"
+    job_staging_path = config.STAGING_DIR / f"{job_id}"
 
     try:
         logger.info(f"🚀 Ingestion started for job: {job_id}")
@@ -116,8 +131,9 @@ async def digitize_document(
             if file.content_type and file.content_type not in ['application/pdf', 'application/x-pdf']:
                 APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, f"Only PDF files are allowed. Invalid content type for {file.filename}: {file.content_type}")
 
+        # Validate only one file is allowed for digitization
         if operation == types.OperationType.DIGITIZATION and len(files) > 1:
-            APIError.raise_error("INVALID_REQUEST", "Only 1 file allowed for digitization.")
+            APIError.raise_error(ErrorCode.INVALID_REQUEST, "Only 1 file allowed for digitization.")
 
         job_id = dg_util.generate_uuid()
         # Filter out None filenames and ensure all files have valid names
@@ -149,16 +165,14 @@ async def digitize_document(
 
         # 5. Schedule the background pipeline
         try:
+            # Upload the file byte stream to files in staging directory
+            # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
+            await dg_util.stage_upload_files(job_id, filenames, str(config.STAGING_DIR / job_id), file_contents)
+            doc_id_dict = dg_util.initialize_job_state(job_id, operation, output_format, filenames)
             if operation == types.OperationType.INGESTION:
-                # Upload the file byte stream to files in staging directory
-                # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
-                await dg_util.stage_upload_files(job_id, filenames, str(STAGING_DIR / job_id), file_contents)
-
-                doc_id_dict = dg_util.initialize_job_state(job_id, types.OperationType.INGESTION, filenames)
-
                 background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
             else:
-                background_tasks.add_task(digitize_documents, job_id, filenames, output_format)
+                background_tasks.add_task(digitize_documents, job_id, doc_id_dict, output_format)
         except Exception as e:
             sem.release()
             logger.error(f"Failed to schedule background task for job {job_id}, semaphore released: {e}")
@@ -172,19 +186,116 @@ async def digitize_document(
         logger.error(f"Unexpected error in digitize_document: {e}")
         APIError.raise_error("INTERNAL_SERVER_ERROR", str(e))
 
-@app.get("/v1/documents/jobs")
+@app.get("/v1/jobs", response_model=types.JobsListResponse)
 async def get_all_jobs(
-    latest: bool = False,
-    limit: int = 20,
-    offset: int = 0,
-    status: Optional[types.JobStatus] = None
+    latest: bool = Query(False, description="Return only the latest job"),
+    limit: int = Query(20, ge=1, le=100, description="Number of records per page"),
+    offset: int = Query(0, ge=0, description="Number of records to skip"),
+    status: Optional[types.JobStatus] = Query(None, description="Filter by job status"),
+    operation: Optional[types.OperationType] = Query(None, description="Filter by operation type")
 ):
-    return {"pagination": {"total": 0, "limit": limit, "offset": offset}, "data": []}
+    """Retrieve information about all submitted jobs with pagination and filtering."""
+    try:
+        # Read all job status files
+        all_jobs = dg_util.read_all_job_files()
 
-@app.get("/v1/documents/jobs/{job_id}")
+        # Apply filters in single pass
+        filtered_jobs = [
+            j for j in all_jobs
+            if (status is None or j.status == status) and
+               (operation is None or j.operation == operation.value)
+        ]
+
+        # sorting by submitted_at
+        filtered_jobs = sorted(
+            filtered_jobs,
+            key=lambda j: j.submitted_at,
+            reverse=True
+        )
+
+        # Handle latest flag before pagination
+        if latest and filtered_jobs:
+            filtered_jobs = [filtered_jobs[0]]
+
+        total = len(filtered_jobs)
+
+        # Apply pagination
+        paginated_jobs = filtered_jobs[offset : offset + limit]
+
+        # Convert to response format
+        jobs_data = [job.to_dict() for job in paginated_jobs]
+
+        return types.JobsListResponse(
+            pagination=types.PaginationInfo(total=total, limit=limit, offset=offset),
+            data=jobs_data
+        )
+    except HTTPException as e:
+        logger.error(f"Server error in get_all_jobs: {e.status_code} - {e.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"Failed to retrieve jobs: {e}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to retrieve jobs")
+
+
+@app.get("/v1/jobs/{job_id}")
 async def get_job_by_id(job_id: str):
-    # Logic to read /var/cache/{job_id}_status.json
-    return {}
+    """Retrieve detailed status of a specific job by its ID."""
+    try:
+        job_status_file = config.JOBS_DIR / f"{job_id}_status.json"
+
+        if not job_status_file.exists():
+            APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"No job found with id '{job_id}'")
+
+        if not job_status_file.is_file():
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Job status path for '{job_id}' is not a valid file")
+
+        job_state = dg_util.read_job_file(job_status_file)
+        if job_state is None:
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to read job status for '{job_id}'")
+            return  # This line should never be reached, but helps type checker
+
+        # Convert JobState object to JSON-compatible dictionary
+        return job_state.to_dict()
+    except HTTPException as e:
+        logger.error(f"HTTP error retrieving job {job_id}: "
+        f"status={e.status_code}, detail={e.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"Failed to retrieve job {job_id}: {e}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to retrieve job information for '{job_id}'")
+
+@app.delete("/v1/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_job(job_id: str):
+    """Deletes a job status file. Does not touch associated document metadata."""
+    try:
+        job_status_file = config.JOBS_DIR / f"{job_id}_status.json"
+
+        if not job_status_file.exists():
+            APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"No job found with id '{job_id}'")
+
+        # Reject deletion if the job is still active
+        job_state = dg_util.read_job_file(job_status_file)
+        if job_state is None:
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to read job status for '{job_id}'")
+            return  # This line should never be reached, but helps type checker
+
+        # Compare with JobStatus enum
+        if job_state.status in (types.JobStatus.ACCEPTED, types.JobStatus.IN_PROGRESS):
+            APIError.raise_error(ErrorCode.RESOURCE_LOCKED, f"Job '{job_id}' is still active and cannot be deleted")
+
+        # Delete the job status file (missing_ok=True handles race conditions)
+        job_status_file.unlink(missing_ok=True)
+        logger.info(f"Deleted job status file for job '{job_id}'")
+        return
+    except HTTPException as e:
+        logger.error(f"HTTP error deleting job {job_id}: "
+                     f"status={e.status_code}, detail={e.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete job {job_id}: {e}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to delete job '{job_id}'")
+
+
 
 @app.get("/v1/documents")
 async def list_documents(

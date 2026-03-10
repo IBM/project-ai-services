@@ -1,30 +1,14 @@
 package operators
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
+	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
-)
-
-const (
-	secondarySchedulerOperator = "secondaryscheduleroperator"
-	certManagerOperator        = "cert-manager-operator"
-	serviceMeshOperator        = "servicemeshoperator3"
-	nfdOperator                = "nfd"
-	rhoaiOperator              = "rhods-operator"
-	olmGroup                   = "operators.coreos.com"
-	olmVersion                 = "v1alpha1"
-	olmCSVList                 = "ClusterServiceVersionList"
-	phaseSucceeded             = "Succeeded"
+	k8sClient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type OperatorRule struct {
@@ -46,59 +30,21 @@ func (r *OperatorRule) Description() string {
 func (r *OperatorRule) Verify() error {
 	var failed []string
 
-	checks := []struct {
-		name     string
-		operator string
-	}{
-		{
-			"Secondary Scheduler Operator",
-			secondarySchedulerOperator,
-		},
-		{
-			"Cert-Manager Operator",
-			certManagerOperator,
-		},
-		{
-			"Service Mesh 3 Operator",
-			serviceMeshOperator,
-		},
-		{
-			"Node Feature Discovery Operator",
-			nfdOperator,
-		},
-		{
-			"RHOAI Operator",
-			rhoaiOperator,
-		},
-	}
-
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
 		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
 
-	csvList := &unstructured.UnstructuredList{}
-	csvList.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   olmGroup,
-		Version: olmVersion,
-		Kind:    olmCSVList,
-	})
-	if err := client.Client.List(client.Ctx, csvList); err != nil {
-		return fmt.Errorf("failed to list ClusterServiceVersions: %w", err)
-	}
-
-	for _, check := range checks {
-		if err := validateOperator(client, csvList, check.operator); err != nil {
-			failed = append(failed, fmt.Sprintf("  - %s: %s", check.name, err.Error()))
+	for _, op := range constants.RequiredOperators {
+		if err := validateOperator(client, op.Name, op.Namespace); err != nil {
+			failed = append(failed, fmt.Sprintf("  - %s: %s", op.Label, err.Error()))
 		} else {
-			r.passed = append(r.passed, fmt.Sprintf("  - %s installed", check.name))
+			r.passed = append(r.passed, fmt.Sprintf("  - %s installed", op.Label))
 		}
 	}
 
 	if len(failed) > 0 {
-		checks := append(r.passed, failed...)
-
-		return fmt.Errorf("operator validation failed: \n%s", strings.Join(checks, "\n"))
+		return fmt.Errorf("operator validation failed: \n%s", strings.Join(append(r.passed, failed...), "\n"))
 	}
 
 	return nil
@@ -116,38 +62,42 @@ func (r *OperatorRule) Hint() string {
 	return "This tool requires certain operators to be up and running, please run `ai-services bootstrap configure` to install required operators"
 }
 
-func validateOperator(c *openshift.OpenshiftClient, csvList *unstructured.UnstructuredList, operatorSubstring string) error {
-	for _, csv := range csvList.Items {
-		name := csv.GetName()
-		if !strings.HasPrefix(name, operatorSubstring+".") {
-			continue
+func validateOperator(c *openshift.OpenshiftClient, opName, opNamespace string) error {
+	// Get subscription
+	sub := &operatorsv1alpha1.Subscription{}
+	if err := c.Client.Get(c.Ctx, k8sClient.ObjectKey{
+		Name:      opName,
+		Namespace: opNamespace,
+	}, sub); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("subscription not found")
 		}
 
-		// operator found, wait until it is ready
-		return wait.PollUntilContextTimeout(c.Ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (done bool, err error) {
-			current := &unstructured.Unstructured{}
-			current.SetGroupVersionKind(csv.GroupVersionKind())
-
-			if err := c.Client.Get(ctx, types.NamespacedName{
-				Name:      name,
-				Namespace: csv.GetNamespace(),
-			}, current); err != nil {
-				if apierrors.IsNotFound(err) {
-					return false, nil
-				}
-
-				return false, err
-			}
-
-			phase, _, _ := unstructured.NestedString(current.Object, "status", "phase")
-			if phase == phaseSucceeded {
-				return true, nil
-			}
-			logger.Infof("Operator %s not ready yet (phase: %s), waiting...", name, phase, logger.VerbosityLevelDebug)
-
-			return false, nil
-		})
+		return fmt.Errorf("failed to get subscription: %w", err)
 	}
 
-	return fmt.Errorf("operator not installed: %s", operatorSubstring)
+	// Check if CSV is installed
+	if sub.Status.InstalledCSV == "" {
+		return fmt.Errorf("no CSV installed yet")
+	}
+
+	// Get CSV
+	csv := &operatorsv1alpha1.ClusterServiceVersion{}
+	if err := c.Client.Get(c.Ctx, k8sClient.ObjectKey{
+		Name:      sub.Status.InstalledCSV,
+		Namespace: opNamespace,
+	}, csv); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("CSV not found")
+		}
+
+		return fmt.Errorf("failed to get CSV: %w", err)
+	}
+
+	// Check CSV phase
+	if csv.Status.Phase != operatorsv1alpha1.CSVPhaseSucceeded {
+		return fmt.Errorf("not ready (phase: %s)", csv.Status.Phase)
+	}
+
+	return nil
 }

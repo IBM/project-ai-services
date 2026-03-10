@@ -1,30 +1,25 @@
-import json
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
+
+from pydantic import BaseModel, Field, field_validator
 
 from digitize.config import DOCS_DIR
 from digitize.types import DocStatus, OutputFormat
 
-@dataclass
-class TimingInfo:
+
+class TimingInfo(BaseModel):
     """Holds stage-wise processing durations (in seconds) for a document."""
     digitizing: Optional[float] = None
     processing: Optional[float] = None
     chunking: Optional[float] = None
     indexing: Optional[float] = None
 
-    def to_dict(self) -> dict:
-        return {
-            "digitizing": self.digitizing,
-            "processing": self.processing,
-            "chunking": self.chunking,
-            "indexing": self.indexing,
-        }
+    class Config:
+        """Pydantic configuration."""
+        use_enum_values = True
 
 
-@dataclass
-class DocumentMetadata:
+class DocumentMetadata(BaseModel):
     """
     Represents the metadata for a single document being processed.
     Persisted as <doc_id>_metadata.json under DOCS_DIR.
@@ -38,22 +33,42 @@ class DocumentMetadata:
     completed_at: Optional[str] = None
     error: Optional[str] = None
     job_id: Optional[str] = None
-    metadata: dict = field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator('status', mode='before')
+    @classmethod
+    def validate_status(cls, v):
+        """Convert string to DocStatus enum, default to ACCEPTED if invalid."""
+        if isinstance(v, DocStatus):
+            return v
+        try:
+            return DocStatus(v)
+        except (ValueError, TypeError):
+            return DocStatus.ACCEPTED
+
+    @field_validator('output_format', mode='before')
+    @classmethod
+    def validate_output_format(cls, v):
+        """Convert string to OutputFormat enum, default to JSON if invalid."""
+        if isinstance(v, OutputFormat):
+            return v
+        try:
+            return OutputFormat(v)
+        except (ValueError, TypeError):
+            return OutputFormat.JSON
+
+    class Config:
+        """Pydantic configuration."""
+        use_enum_values = True
 
     def to_dict(self) -> dict:
-        """Serialize the document metadata to a JSON-compatible dictionary."""
-        return {
-            "id": self.id,
-            "name": self.name,
-            "type": self.type,
-            "status": self.status.value if hasattr(self.status, "value") else self.status,
-            "output_format": self.output_format.value if hasattr(self.output_format, "value") else self.output_format,
-            "submitted_at": self.submitted_at,
-            "completed_at": self.completed_at,
-            "error": self.error,
-            "job_id": self.job_id,
-            "metadata": self.metadata,
-        }
+        """
+        Serialize the document metadata to a JSON-compatible dictionary.
+        
+        Returns:
+            Dictionary representation of the document metadata
+        """
+        return self.dict()
 
     def save(self, docs_dir: Path = DOCS_DIR) -> Path:
         """
@@ -67,8 +82,8 @@ class DocumentMetadata:
         """
         docs_dir.mkdir(parents=True, exist_ok=True)
         meta_path = docs_dir / f"{self.id}_metadata.json"
-        with open(meta_path, "w") as f:
-            json.dump(self.to_dict(), f, indent=4)
+        with open(meta_path, "w", encoding="utf-8") as f:
+            f.write(self.json(indent=4))
         return meta_path
 
     def job_summary(self) -> dict:
@@ -78,5 +93,5 @@ class DocumentMetadata:
         return {
             "id": self.id,
             "name": self.name,
-            "status": self.status.value if hasattr(self.status, "value") else self.status,
+            "status": self.status.value if isinstance(self.status, DocStatus) else self.status,
         }
