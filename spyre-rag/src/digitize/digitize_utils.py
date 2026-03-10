@@ -6,7 +6,12 @@ from typing import List, Optional
 import uuid
 
 from common.misc_utils import get_logger
-from digitize.types import OutputFormat
+from digitize.types import (
+    OutputFormat,
+    DocumentListItem,
+    DocumentDetailResponse,
+    DocumentContentResponse
+)
 from digitize.config import DOCS_DIR, JOBS_DIR, DIGITIZED_DOCS_DIR
 from digitize.status import (
     get_utc_timestamp,
@@ -14,7 +19,7 @@ from digitize.status import (
     create_job_state
 )
 from digitize.job import JobState, JobDocumentSummary, JobStats
-from digitize.types import JobStatus
+from digitize.document import DocumentMetadata
 
 logger = get_logger("digitize_utils")
 
@@ -165,14 +170,51 @@ def read_all_job_files() -> List[JobState]:
     return jobs
 
 
+def _read_document_metadata(doc_id: str, docs_dir: Path = DOCS_DIR) -> DocumentMetadata:
+    """
+    Internal helper to read and parse document metadata file into a Pydantic model.
+
+    Args:
+        doc_id: Unique identifier of the document
+        docs_dir: Directory containing document metadata files
+
+    Returns:
+        DocumentMetadata model with validated data
+
+    Raises:
+        FileNotFoundError: If document metadata file doesn't exist
+        json.JSONDecodeError: If metadata file is corrupted
+        ValidationError: If metadata doesn't match expected schema
+    """
+    # Construct the metadata file path
+    meta_file = docs_dir / f"{doc_id}_metadata.json"
+
+    # Check if the document exists
+    if not meta_file.exists():
+        logger.error(f"Document metadata file not found: {meta_file}")
+        raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
+
+    # Read and parse the metadata file using Pydantic
+    try:
+        with open(meta_file, "r", encoding="utf-8") as f:
+            doc_data = json.load(f)
+
+        # Parse and validate using Pydantic model
+        return DocumentMetadata(**doc_data)
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse metadata file for document {doc_id}: {e}")
+        raise
+
+
 def get_all_documents(
     status_filter: Optional[str] = None,
     name_filter: Optional[str] = None,
     docs_dir: Path = DOCS_DIR
-) -> List[dict]:
+) -> List[DocumentListItem]:
     """
     Read all document metadata files, apply filters, and sort by submitted time.
-    Returns minimal document information (id, name, type, status).
+    Returns minimal document information (id, name, type, status) as Pydantic models.
 
     Args:
         status_filter: Optional status to filter by (case-insensitive)
@@ -180,7 +222,7 @@ def get_all_documents(
         docs_dir: Directory containing document metadata files
 
     Returns:
-        List of minimal document info dictionaries sorted by submitted_at (most recent first)
+        List of DocumentListItem models sorted by submitted_at (most recent first)
     """
     logger.debug(f"Fetching documents with filters: status={status_filter}, name={name_filter}")
 
@@ -194,127 +236,78 @@ def get_all_documents(
     logger.debug(f"Found {len(metadata_files)} metadata files")
 
     for meta_file in metadata_files:
+        # Extract document ID from filename (format: {doc_id}_metadata.json)
+        doc_id = meta_file.stem.replace("_metadata", "")
+
         try:
-            with open(meta_file, "r") as f:
-                doc_data = json.load(f)
+            doc_metadata = _read_document_metadata(doc_id, docs_dir)
 
-                # Apply status filter
-                if status_filter:
-                    doc_status = doc_data.get("status", "").lower()
-                    if doc_status != status_filter.lower():
-                        continue
+            # Apply status filter
+            if status_filter:
+                doc_status = doc_metadata.status.value if hasattr(doc_metadata.status, 'value') else str(doc_metadata.status)
+                if doc_status.lower() != status_filter.lower():
+                    continue
 
-                # Apply name filter (case-insensitive partial match)
-                if name_filter:
-                    doc_name = doc_data.get("name", "").lower()
-                    if name_filter.lower() not in doc_name:
-                        continue
+            # Apply name filter (case-insensitive partial match)
+            if name_filter:
+                if name_filter.lower() not in doc_metadata.name.lower():
+                    continue
 
-                doc_info = {
-                    "id": doc_data.get("id"),
-                    "name": doc_data.get("name"),
-                    "type": doc_data.get("type"),
-                    "status": doc_data.get("status")
-                }
-                # Store submitted_at for sorting but don't include in response
-                doc_info["_submitted_at"] = doc_data.get("submitted_at")
-                all_documents.append(doc_info)
+            doc_item = DocumentListItem(**doc_metadata.model_dump())
 
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse metadata file {meta_file}: {e}")
+            # Store submitted_at for sorting
+            all_documents.append((doc_metadata.submitted_at or "", doc_item))
+
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.warning(f"Failed to read metadata file {meta_file}: {e}")
             continue
         except Exception as e:
             logger.warning(f"Error reading metadata file {meta_file}: {e}")
             continue
 
-    # Sort by submitted_at (most recent first)
-    all_documents.sort(key=lambda x: x.get("_submitted_at") or "", reverse=True)
+    # Sort by submitted_at (most recent first) and extract DocumentListItem
+    all_documents.sort(key=lambda x: x[0], reverse=True)
+    result = [doc_item for _, doc_item in all_documents]
 
-    # Remove the temporary sorting field
-    for doc in all_documents:
-        doc.pop("_submitted_at", None)
-
-    logger.debug(f"Returning {len(all_documents)} documents after filtering")
-    return all_documents
+    logger.debug(f"Returning {len(result)} documents after filtering")
+    return result
 
 
-def _read_document_metadata(doc_id: str, docs_dir: Path = DOCS_DIR) -> dict:
+def get_document_by_id(doc_id: str, include_details: bool = False, docs_dir: Path = DOCS_DIR) -> DocumentDetailResponse:
     """
-    Internal helper to read and parse document metadata file.
+    Read a specific document's metadata by ID and return formatted response as Pydantic model.
 
     Args:
         doc_id: Unique identifier of the document
+        include_details: If True, includes metadata fields
         docs_dir: Directory containing document metadata files
 
     Returns:
-        Dictionary containing the parsed metadata
+        DocumentDetailResponse model with document information
 
     Raises:
         FileNotFoundError: If document metadata file doesn't exist
         json.JSONDecodeError: If metadata file is corrupted
-    """
-    # Construct the metadata file path
-    meta_file = docs_dir / f"{doc_id}_metadata.json"
-
-    # Check if the document exists
-    if not meta_file.exists():
-        logger.error(f"Document metadata file not found: {meta_file}")
-        raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
-
-    # Read the metadata file
-    try:
-        with open(meta_file, "r") as f:
-            doc_data = json.load(f)
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse metadata file for document {doc_id}: {e}")
-        raise
-
-    return doc_data
-
-
-def get_document_by_id(doc_id: str, include_details: bool = False, docs_dir: Path = DOCS_DIR) -> dict:
-    """
-    Read a specific document's metadata by ID and return formatted response.
-
-    Args:
-        doc_id: Unique identifier of the document
-        include_details: If True, includes job_id and metadata fields
-        docs_dir: Directory containing document metadata files
-
-    Returns:
-        Dictionary with document information
-
-    Raises:
-        FileNotFoundError: If document metadata file doesn't exist
-        json.JSONDecodeError: If metadata file is corrupted
+        ValidationError: If metadata doesn't match expected schema
     """
     logger.debug(f"Fetching document {doc_id} with include_details={include_details}")
 
-    # Read document metadata using the common helper
-    doc_data = _read_document_metadata(doc_id, docs_dir)
+    doc_metadata = _read_document_metadata(doc_id, docs_dir)
 
-    # Build the base response
-    response = {
-        "id": doc_data.get("id"),
-        "job_id": doc_data.get("job_id"),
-        "name": doc_data.get("name"),
-        "type": doc_data.get("type"),
-        "status": doc_data.get("status"),
-        "output_format": doc_data.get("output_format"),
-        "submitted_at": doc_data.get("submitted_at"),
-        "completed_at": doc_data.get("completed_at"),
-        "error": doc_data.get("error")
-    }
+    doc_dict = doc_metadata.model_dump()
 
-    # If details flag is true, include additional metadata
-    if include_details:
-        response["metadata"] = doc_data.get("metadata", {})
+    # Conditionally exclude metadata if not requested
+    if not include_details:
+        doc_dict.pop('metadata', None)
+
+    # Let Pydantic validate and convert the data
+    response = DocumentDetailResponse(**doc_dict)
 
     logger.debug(f"Successfully retrieved document for {doc_id}")
     return response
 
 
-def get_document_content(doc_id: str, docs_dir: Path = DOCS_DIR) -> dict:
+def get_document_content(doc_id: str, docs_dir: Path = DOCS_DIR) -> DocumentContentResponse:
     """
     Read the digitized content of a document from the local cache.
 
@@ -326,19 +319,20 @@ def get_document_content(doc_id: str, docs_dir: Path = DOCS_DIR) -> dict:
         docs_dir: Directory containing document metadata files
 
     Returns:
-        Dictionary with result and output_format
+        DocumentContentResponse model with result and output_format
 
     Raises:
         FileNotFoundError: If document metadata or content file doesn't exist
         json.JSONDecodeError: If metadata or content file is corrupted
+        ValidationError: If metadata doesn't match expected schema
     """
     logger.debug(f"Fetching content for document {doc_id}")
 
-    # Read document metadata using the common helper
-    doc_data = _read_document_metadata(doc_id, docs_dir)
+    # Read document metadata using the common helper (returns DocumentMetadata)
+    doc_metadata = _read_document_metadata(doc_id, docs_dir)
 
-    # Get the output format from metadata (defaults to json if not specified)
-    output_format = doc_data.get("output_format", "json")
+    # Get the output format from metadata
+    output_format = doc_metadata.output_format.value if hasattr(doc_metadata.output_format, 'value') else str(doc_metadata.output_format)
 
     # Determine file extension based on output format
     file_extension = output_format  # json, md, or text
@@ -367,11 +361,9 @@ def get_document_content(doc_id: str, docs_dir: Path = DOCS_DIR) -> dict:
     # The content is already in the requested format
     # For json: content_data is a dict (DoclingDocument JSON)
     # For md/text: content_data is a string (already converted during digitization)
-    result = content_data
-
     logger.debug(f"Successfully retrieved content for document {doc_id} in {output_format} format")
 
-    return {
-        "result": result,
-        "output_format": output_format
-    }
+    return DocumentContentResponse(
+        result=content_data,
+        output_format=output_format
+    )

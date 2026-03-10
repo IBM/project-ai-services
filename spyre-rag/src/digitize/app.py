@@ -340,13 +340,14 @@ async def list_documents(
 
         logger.debug(f"Returning {len(paginated_documents)} documents out of {total} total (offset={offset}, limit={limit})")
 
+        # Convert Pydantic models to dicts for response
         return {
             "pagination": {
                 "total": total,
                 "limit": limit,
                 "offset": offset
             },
-            "data": paginated_documents
+            "data": [doc.model_dump() for doc in paginated_documents]
         }
 
     except HTTPException:
