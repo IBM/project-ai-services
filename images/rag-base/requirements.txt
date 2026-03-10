@@ -1,5 +1,6 @@
 antlr4-python3-runtime==4.9.3
 cohere==5.19.0
+pillow==12.1.1
 docling==2.60.1
 docling-parse==4.7.1
 fastapi[all]==0.121.0
