@@ -61,7 +61,9 @@ func populateHostValues(runtime runtime.Runtime, params map[string]string, varsD
 
 			// loop over each of the routes and populate the params
 			for _, r := range route {
-				routeName := strings.ToUpper(fmt.Sprintf("%s_route", r.Name))
+				// Replace hyphens with underscores to make valid Go template variable names
+				sanitizedName := strings.ReplaceAll(r.Name, "-", "_")
+				routeName := strings.ToUpper(fmt.Sprintf("%s_route", sanitizedName))
 				params[routeName] = r.HostPort
 			}
 		}
@@ -97,8 +99,10 @@ func populatePodInfo(runtime runtime.Runtime, params map[string]string, varsData
 			continue
 		}
 
+		// Sanitize alias by replacing hyphens with underscores for valid Go template variable names
+		sanitizedAlias := strings.ReplaceAll(pod.Alias, "-", "_")
 		// update the specific result to the params for given alias set
-		params[pod.Alias] = result
+		params[sanitizedAlias] = result
 	}
 
 	return nil
@@ -131,8 +135,10 @@ func populateContainerInfo(runtime runtime.Runtime, params map[string]string, va
 			continue
 		}
 
+		// Sanitize alias by replacing hyphens with underscores for valid Go template variable names
+		sanitizedAlias := strings.ReplaceAll(container.Alias, "-", "_")
 		// update the specific result to the params for given alias set
-		params[container.Alias] = result
+		params[sanitizedAlias] = result
 	}
 
 	return nil
