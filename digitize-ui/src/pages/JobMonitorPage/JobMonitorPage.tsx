@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useReducer, useEffect } from 'react';
 import {
   DataTable,
   Table,
@@ -32,6 +32,126 @@ import IngestSidePanel from '../../components/IngestSidePanel';
 import { calculateDuration } from '../../utils/dateUtils';
 import { JOB_STATUS, DISPLAY_STATUS, JOB_OPERATION, JOB_TYPE_DISPLAY } from '../../constants/jobConstants';
 import styles from './JobMonitorPage.module.scss';
+
+interface NotificationStatus {
+  show: boolean;
+  kind: 'success' | 'error' | 'info';
+  title: string;
+  subtitle?: string;
+}
+
+interface JobMonitorState {
+  jobs: Job[];
+  loading: boolean;
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  selectedJob: Job | null;
+  isSidePanelOpen: boolean;
+  searchValue: string;
+  isIngestSidePanelOpen: boolean;
+  uploadStatus: NotificationStatus;
+  deleteStatus: NotificationStatus;
+}
+
+type JobMonitorAction =
+  | { type: 'SET_JOBS'; payload: { jobs: Job[]; totalItems: number } }
+  | { type: 'SET_LOADING'; payload: boolean }
+  | { type: 'SET_PAGE'; payload: number }
+  | { type: 'SET_PAGE_SIZE'; payload: number }
+  | { type: 'SET_SELECTED_JOB'; payload: Job | null }
+  | { type: 'SET_SIDE_PANEL_OPEN'; payload: boolean }
+  | { type: 'SET_SEARCH_VALUE'; payload: string }
+  | { type: 'SET_INGEST_SIDE_PANEL_OPEN'; payload: boolean }
+  | { type: 'SET_UPLOAD_STATUS'; payload: NotificationStatus }
+  | { type: 'SET_DELETE_STATUS'; payload: NotificationStatus }
+  | { type: 'HIDE_UPLOAD_STATUS' }
+  | { type: 'HIDE_DELETE_STATUS' };
+
+const initialState: JobMonitorState = {
+  jobs: [],
+  loading: false,
+  page: 1,
+  pageSize: 100,
+  totalItems: 0,
+  selectedJob: null,
+  isSidePanelOpen: false,
+  searchValue: '',
+  isIngestSidePanelOpen: false,
+  uploadStatus: { show: false, kind: 'info', title: '' },
+  deleteStatus: { show: false, kind: 'info', title: '' },
+};
+
+const jobMonitorReducer = (
+  state: JobMonitorState,
+  action: JobMonitorAction
+): JobMonitorState => {
+  switch (action.type) {
+    case 'SET_JOBS':
+      return {
+        ...state,
+        jobs: action.payload.jobs,
+        totalItems: action.payload.totalItems,
+      };
+    case 'SET_LOADING':
+      return {
+        ...state,
+        loading: action.payload,
+      };
+    case 'SET_PAGE':
+      return {
+        ...state,
+        page: action.payload,
+      };
+    case 'SET_PAGE_SIZE':
+      return {
+        ...state,
+        pageSize: action.payload,
+      };
+    case 'SET_SELECTED_JOB':
+      return {
+        ...state,
+        selectedJob: action.payload,
+      };
+    case 'SET_SIDE_PANEL_OPEN':
+      return {
+        ...state,
+        isSidePanelOpen: action.payload,
+      };
+    case 'SET_SEARCH_VALUE':
+      return {
+        ...state,
+        searchValue: action.payload,
+      };
+    case 'SET_INGEST_SIDE_PANEL_OPEN':
+      return {
+        ...state,
+        isIngestSidePanelOpen: action.payload,
+      };
+    case 'SET_UPLOAD_STATUS':
+      return {
+        ...state,
+        uploadStatus: action.payload,
+      };
+    case 'SET_DELETE_STATUS':
+      return {
+        ...state,
+        deleteStatus: action.payload,
+      };
+    case 'HIDE_UPLOAD_STATUS':
+      return {
+        ...state,
+        uploadStatus: { show: false, kind: 'info', title: '' },
+      };
+    case 'HIDE_DELETE_STATUS':
+      return {
+        ...state,
+        deleteStatus: { show: false, kind: 'info', title: '' },
+      };
+    default:
+      return state;
+  }
+};
 
 const headers = [
   { key: 'job_name', header: 'Job name' },
@@ -72,43 +192,28 @@ const getTypeTagStyle = (type: string) => {
 
 const JobMonitorPage = () => {
   const { effectiveTheme } = useTheme();
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [page, setPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(100);
-  const [totalItems, setTotalItems] = useState<number>(0);
-  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
-  const [isSidePanelOpen, setIsSidePanelOpen] = useState<boolean>(false);
-  const [searchValue, setSearchValue] = useState<string>('');
-  const [isIngestSidePanelOpen, setIsIngestSidePanelOpen] = useState<boolean>(false);
-  const [uploadStatus, setUploadStatus] = useState<{
-    show: boolean;
-    kind: 'success' | 'error' | 'info';
-    title: string;
-    subtitle?: string;
-  }>({ show: false, kind: 'info', title: '' });
-  const [deleteStatus, setDeleteStatus] = useState<{
-    show: boolean;
-    kind: 'success' | 'error' | 'info';
-    title: string;
-    subtitle?: string;
-  }>({ show: false, kind: 'info', title: '' });
+  const [state, dispatch] = useReducer(jobMonitorReducer, initialState);
 
   const fetchJobs = async () => {
-    setLoading(true);
+    dispatch({ type: 'SET_LOADING', payload: true });
     try {
-      const offset = (page - 1) * pageSize;
+      const offset = (state.page - 1) * state.pageSize;
       const response = await getAllJobs({
-        limit: pageSize,
+        limit: state.pageSize,
         offset: offset,
       });
       
-      setJobs(response.data || []);
-      setTotalItems(response.pagination?.total || 0);
+      dispatch({
+        type: 'SET_JOBS',
+        payload: {
+          jobs: response.data || [],
+          totalItems: response.pagination?.total || 0,
+        },
+      });
     } catch (error) {
       console.error('Error fetching jobs:', error);
     } finally {
-      setLoading(false);
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 
@@ -116,13 +221,13 @@ const JobMonitorPage = () => {
     fetchJobs();
     const interval = setInterval(fetchJobs, 10000);
     return () => clearInterval(interval);
-  }, [page, pageSize]);
+  }, [state.page, state.pageSize]);
 
   const handleViewDetails = async (jobId: string) => {
     try {
       const jobDetails = await getJobById(jobId);
-      setSelectedJob(jobDetails);
-      setIsSidePanelOpen(true);
+      dispatch({ type: 'SET_SELECTED_JOB', payload: jobDetails });
+      dispatch({ type: 'SET_SIDE_PANEL_OPEN', payload: true });
     } catch (error) {
       console.error('Error fetching job details:', error);
     }
@@ -135,39 +240,48 @@ const JobMonitorPage = () => {
     files: File[]
   ) => {
     try {
-      setUploadStatus({
-        show: true,
-        kind: 'info',
-        title: 'Uploading documents...',
-        subtitle: `Uploading ${files.length} file(s)`,
+      dispatch({
+        type: 'SET_UPLOAD_STATUS',
+        payload: {
+          show: true,
+          kind: 'info',
+          title: 'Uploading documents...',
+          subtitle: `Uploading ${files.length} file(s)`,
+        },
       });
 
       const response = await uploadDocuments(files, operation, outputFormat);
 
-      setUploadStatus({
-        show: true,
-        kind: 'success',
-        title: 'Documents uploaded successfully',
-        subtitle: `Job ID: ${response.job_id}`,
+      dispatch({
+        type: 'SET_UPLOAD_STATUS',
+        payload: {
+          show: true,
+          kind: 'success',
+          title: 'Documents uploaded successfully',
+          subtitle: `Job ID: ${response.job_id}`,
+        },
       });
 
       // Refresh jobs list after successful upload
       setTimeout(() => {
         fetchJobs();
-        setUploadStatus({ show: false, kind: 'info', title: '' });
+        dispatch({ type: 'HIDE_UPLOAD_STATUS' });
       }, 3000);
     } catch (error: any) {
       console.error('Error uploading documents:', error);
-      setUploadStatus({
-        show: true,
-        kind: 'error',
-        title: 'Upload failed',
-        subtitle: error.response?.data?.message || error.message || 'An error occurred',
+      dispatch({
+        type: 'SET_UPLOAD_STATUS',
+        payload: {
+          show: true,
+          kind: 'error',
+          title: 'Upload failed',
+          subtitle: error.response?.data?.message || error.message || 'An error occurred',
+        },
       });
 
       // Hide error after 5 seconds
       setTimeout(() => {
-        setUploadStatus({ show: false, kind: 'info', title: '' });
+        dispatch({ type: 'HIDE_UPLOAD_STATUS' });
       }, 5000);
     }
   };
@@ -176,11 +290,14 @@ const JobMonitorPage = () => {
     try {
       const jobIds = selectedRows.map(row => row.id);
       
-      setDeleteStatus({
-        show: true,
-        kind: 'info',
-        title: 'Deleting jobs...',
-        subtitle: `Deleting ${jobIds.length} job(s)`,
+      dispatch({
+        type: 'SET_DELETE_STATUS',
+        payload: {
+          show: true,
+          kind: 'info',
+          title: 'Deleting jobs...',
+          subtitle: `Deleting ${jobIds.length} job(s)`,
+        },
       });
 
       if (jobIds.length === 1) {
@@ -189,30 +306,36 @@ const JobMonitorPage = () => {
         await bulkDeleteJobs(jobIds);
       }
 
-      setDeleteStatus({
-        show: true,
-        kind: 'success',
-        title: 'Jobs deleted successfully',
-        subtitle: `${jobIds.length} job(s) deleted`,
+      dispatch({
+        type: 'SET_DELETE_STATUS',
+        payload: {
+          show: true,
+          kind: 'success',
+          title: 'Jobs deleted successfully',
+          subtitle: `${jobIds.length} job(s) deleted`,
+        },
       });
 
       // Refresh jobs list after successful deletion
       setTimeout(() => {
         fetchJobs();
-        setDeleteStatus({ show: false, kind: 'info', title: '' });
+        dispatch({ type: 'HIDE_DELETE_STATUS' });
       }, 2000);
     } catch (error: any) {
       console.error('Error deleting jobs:', error);
-      setDeleteStatus({
-        show: true,
-        kind: 'error',
-        title: 'Delete failed',
-        subtitle: error.response?.data?.message || error.message || 'An error occurred',
+      dispatch({
+        type: 'SET_DELETE_STATUS',
+        payload: {
+          show: true,
+          kind: 'error',
+          title: 'Delete failed',
+          subtitle: error.response?.data?.message || error.message || 'An error occurred',
+        },
       });
 
       // Hide error after 5 seconds
       setTimeout(() => {
-        setDeleteStatus({ show: false, kind: 'info', title: '' });
+        dispatch({ type: 'HIDE_DELETE_STATUS' });
       }, 5000);
     }
   };
@@ -246,14 +369,14 @@ const JobMonitorPage = () => {
     return 'Error message goes here';
   };
 
-  const filteredJobs = jobs.filter((job) => {
-    if (searchValue === '') return true;
+  const filteredJobs = state.jobs.filter((job) => {
+    if (state.searchValue === '') return true;
     const jobName = getJobName(job).toLowerCase();
     const jobType = getJobType(job).toLowerCase();
     const jobStatus = getJobStatus(job).toLowerCase();
-    return jobName.includes(searchValue.toLowerCase()) ||
-           jobType.includes(searchValue.toLowerCase()) ||
-           jobStatus.includes(searchValue.toLowerCase());
+    return jobName.includes(state.searchValue.toLowerCase()) ||
+           jobType.includes(state.searchValue.toLowerCase()) ||
+           jobStatus.includes(state.searchValue.toLowerCase());
   });
 
   const rows = filteredJobs.map((job) => {
@@ -306,13 +429,13 @@ const JobMonitorPage = () => {
     <Theme theme={effectiveTheme}>
       <div className={styles.jobMonitorPage}>
         {/* Upload Status Notification */}
-        {uploadStatus.show && (
+        {state.uploadStatus.show && (
           <div className={styles.notificationWrapper}>
             <InlineNotification
-              kind={uploadStatus.kind}
-              title={uploadStatus.title}
-              subtitle={uploadStatus.subtitle}
-              onClose={() => setUploadStatus({ show: false, kind: 'info', title: '' })}
+              kind={state.uploadStatus.kind}
+              title={state.uploadStatus.title}
+              subtitle={state.uploadStatus.subtitle}
+              onClose={() => dispatch({ type: 'HIDE_UPLOAD_STATUS' })}
               hideCloseButton={false}
               lowContrast
             />
@@ -320,13 +443,13 @@ const JobMonitorPage = () => {
         )}
 
         {/* Delete Status Notification */}
-        {deleteStatus.show && (
+        {state.deleteStatus.show && (
           <div className={styles.notificationWrapper}>
             <InlineNotification
-              kind={deleteStatus.kind}
-              title={deleteStatus.title}
-              subtitle={deleteStatus.subtitle}
-              onClose={() => setDeleteStatus({ show: false, kind: 'info', title: '' })}
+              kind={state.deleteStatus.kind}
+              title={state.deleteStatus.title}
+              subtitle={state.deleteStatus.subtitle}
+              onClose={() => dispatch({ type: 'HIDE_DELETE_STATUS' })}
               hideCloseButton={false}
               lowContrast
             />
@@ -379,8 +502,8 @@ const JobMonitorPage = () => {
                       <TableToolbarSearch
                         persistent
                         placeholder="Search"
-                        onChange={(e: any, value?: string) => setSearchValue(value || '')}
-                        value={searchValue}
+                        onChange={(e: any, value?: string) => dispatch({ type: 'SET_SEARCH_VALUE', payload: value || '' })}
+                        value={state.searchValue}
                       />
                       <Button
                         kind="ghost"
@@ -395,7 +518,7 @@ const JobMonitorPage = () => {
                         renderIcon={Renew}
                         iconDescription="Refresh"
                         onClick={fetchJobs}
-                        disabled={loading}
+                        disabled={state.loading}
                         tooltipPosition="bottom"
                       />
                       <TableToolbarMenu
@@ -415,7 +538,7 @@ const JobMonitorPage = () => {
                       <Button
                         kind="primary"
                         renderIcon={Add}
-                        onClick={() => setIsIngestSidePanelOpen(true)}
+                        onClick={() => dispatch({ type: 'SET_INGEST_SIDE_PANEL_OPEN', payload: true })}
                       >
                         Ingest
                       </Button>
@@ -464,13 +587,13 @@ const JobMonitorPage = () => {
                   </Table>
                   {rows.length > 0 && (
                     <Pagination
-                      page={page}
-                      pageSize={pageSize}
+                      page={state.page}
+                      pageSize={state.pageSize}
                       pageSizes={[10, 25, 50, 100]}
-                      totalItems={totalItems}
+                      totalItems={state.totalItems}
                       onChange={({ page, pageSize }) => {
-                        setPage(page);
-                        setPageSize(pageSize);
+                        dispatch({ type: 'SET_PAGE', payload: page });
+                        dispatch({ type: 'SET_PAGE_SIZE', payload: pageSize });
                       }}
                       itemsPerPageText="Items per page:"
                     />
@@ -483,15 +606,15 @@ const JobMonitorPage = () => {
 
         {/* Ingest Side Panel */}
         <IngestSidePanel
-          open={isIngestSidePanelOpen}
-          onClose={() => setIsIngestSidePanelOpen(false)}
+          open={state.isIngestSidePanelOpen}
+          onClose={() => dispatch({ type: 'SET_INGEST_SIDE_PANEL_OPEN', payload: false })}
           onSubmit={handleIngestSubmit}
         />
 
         {/* Job Details Side Panel */}
         <SidePanel
-          open={isSidePanelOpen}
-          onRequestClose={() => setIsSidePanelOpen(false)}
+          open={state.isSidePanelOpen}
+          onRequestClose={() => dispatch({ type: 'SET_SIDE_PANEL_OPEN', payload: false })}
           title="Documents"
           slideIn
           selectorPageContent=".jobMonitorPage"
@@ -499,18 +622,18 @@ const JobMonitorPage = () => {
           size="md"
           includeOverlay
         >
-          {selectedJob && (
+          {state.selectedJob && (
             <div className={styles.sidePanelContent}>
               <div className={styles.sidePanelSection}>
                 <h6 className={styles.sectionLabel}>Job name</h6>
-                <p className={styles.sectionValue}>{getJobName(selectedJob)}</p>
+                <p className={styles.sectionValue}>{getJobName(state.selectedJob)}</p>
               </div>
 
               <div className={styles.sidePanelSection}>
                 <h6 className={styles.sectionLabel}>Ingested PDF files</h6>
-                {selectedJob.documents && selectedJob.documents.length > 0 ? (
+                {state.selectedJob.documents && state.selectedJob.documents.length > 0 ? (
                   <div className={styles.documentTagsList}>
-                    {selectedJob.documents.map((doc, idx) => (
+                    {state.selectedJob.documents.map((doc, idx) => (
                       <Tag
                         key={idx}
                         type="gray"

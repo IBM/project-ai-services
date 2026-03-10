@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useReducer, useEffect } from 'react';
 import { NoDataEmptyState } from '@carbon/ibm-products';
 import {
   DataTable,
@@ -30,6 +30,135 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { listDocuments, getDocumentContent, deleteDocument, Document } from '../../services/api';
 import styles from './DocumentListPage.module.scss';
 
+interface DocumentListState {
+  documents: Document[];
+  loading: boolean;
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  search: string;
+  selectedDoc: string | null;
+  showContentModal: boolean;
+  docContent: any;
+  showDeleteModal: boolean;
+  docToDelete: string | null;
+}
+
+type DocumentListAction =
+  | { type: 'SET_DOCUMENTS'; payload: { documents: Document[]; totalItems: number } }
+  | { type: 'SET_LOADING'; payload: boolean }
+  | { type: 'SET_PAGE'; payload: number }
+  | { type: 'SET_PAGE_SIZE'; payload: number }
+  | { type: 'SET_SEARCH'; payload: string }
+  | { type: 'SET_SELECTED_DOC'; payload: string | null }
+  | { type: 'SET_SHOW_CONTENT_MODAL'; payload: boolean }
+  | { type: 'SET_DOC_CONTENT'; payload: any }
+  | { type: 'SET_SHOW_DELETE_MODAL'; payload: boolean }
+  | { type: 'SET_DOC_TO_DELETE'; payload: string | null }
+  | { type: 'OPEN_CONTENT_MODAL'; payload: { docId: string; content: any } }
+  | { type: 'CLOSE_CONTENT_MODAL' }
+  | { type: 'OPEN_DELETE_MODAL'; payload: string }
+  | { type: 'CLOSE_DELETE_MODAL' };
+
+const initialState: DocumentListState = {
+  documents: [],
+  loading: false,
+  page: 1,
+  pageSize: 10,
+  totalItems: 0,
+  search: '',
+  selectedDoc: null,
+  showContentModal: false,
+  docContent: null,
+  showDeleteModal: false,
+  docToDelete: null,
+};
+
+const documentListReducer = (
+  state: DocumentListState,
+  action: DocumentListAction
+): DocumentListState => {
+  switch (action.type) {
+    case 'SET_DOCUMENTS':
+      return {
+        ...state,
+        documents: action.payload.documents,
+        totalItems: action.payload.totalItems,
+      };
+    case 'SET_LOADING':
+      return {
+        ...state,
+        loading: action.payload,
+      };
+    case 'SET_PAGE':
+      return {
+        ...state,
+        page: action.payload,
+      };
+    case 'SET_PAGE_SIZE':
+      return {
+        ...state,
+        pageSize: action.payload,
+      };
+    case 'SET_SEARCH':
+      return {
+        ...state,
+        search: action.payload,
+      };
+    case 'SET_SELECTED_DOC':
+      return {
+        ...state,
+        selectedDoc: action.payload,
+      };
+    case 'SET_SHOW_CONTENT_MODAL':
+      return {
+        ...state,
+        showContentModal: action.payload,
+      };
+    case 'SET_DOC_CONTENT':
+      return {
+        ...state,
+        docContent: action.payload,
+      };
+    case 'SET_SHOW_DELETE_MODAL':
+      return {
+        ...state,
+        showDeleteModal: action.payload,
+      };
+    case 'SET_DOC_TO_DELETE':
+      return {
+        ...state,
+        docToDelete: action.payload,
+      };
+    case 'OPEN_CONTENT_MODAL':
+      return {
+        ...state,
+        docContent: action.payload.content,
+        selectedDoc: action.payload.docId,
+        showContentModal: true,
+      };
+    case 'CLOSE_CONTENT_MODAL':
+      return {
+        ...state,
+        showContentModal: false,
+      };
+    case 'OPEN_DELETE_MODAL':
+      return {
+        ...state,
+        docToDelete: action.payload,
+        showDeleteModal: true,
+      };
+    case 'CLOSE_DELETE_MODAL':
+      return {
+        ...state,
+        showDeleteModal: false,
+        docToDelete: null,
+      };
+    default:
+      return state;
+  }
+};
+
 const headers = [
   { key: 'name', header: 'Document name' },
   { key: 'status', header: 'Status' },
@@ -52,71 +181,64 @@ const getStatusIcon = (status: string) => {
 
 const DocumentListPage = () => {
   const { effectiveTheme } = useTheme();
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [page, setPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(10);
-  const [totalItems, setTotalItems] = useState<number>(0);
-  const [search, setSearch] = useState<string>('');
-  const [selectedDoc, setSelectedDoc] = useState<string | null>(null);
-  const [showContentModal, setShowContentModal] = useState<boolean>(false);
-  const [docContent, setDocContent] = useState<any>(null);
-  const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
-  const [docToDelete, setDocToDelete] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(documentListReducer, initialState);
 
   const fetchDocuments = async () => {
-    setLoading(true);
+    dispatch({ type: 'SET_LOADING', payload: true });
     try {
-      const offset = (page - 1) * pageSize;
+      const offset = (state.page - 1) * state.pageSize;
       const response = await listDocuments({
-        limit: pageSize,
+        limit: state.pageSize,
         offset: offset,
-        name: search || null,
+        name: state.search || null,
       });
       
-      const docs = response.data || [];
-      setDocuments(docs);
-      setTotalItems(response.pagination?.total || 0);
+      dispatch({
+        type: 'SET_DOCUMENTS',
+        payload: {
+          documents: response.data || [],
+          totalItems: response.pagination?.total || 0,
+        },
+      });
     } catch (error) {
       console.error('Error fetching documents:', error);
     } finally {
-      setLoading(false);
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 
   useEffect(() => {
     fetchDocuments();
-  }, [page, pageSize, search]);
+  }, [state.page, state.pageSize, state.search]);
 
   const handleViewContent = async (docId: string) => {
     try {
       const content = await getDocumentContent(docId);
-      setDocContent(content);
-      setSelectedDoc(docId);
-      setShowContentModal(true);
+      dispatch({
+        type: 'OPEN_CONTENT_MODAL',
+        payload: { docId, content },
+      });
     } catch (error) {
       console.error('Error fetching document content:', error);
     }
   };
 
   const handleDeleteClick = (docId: string) => {
-    setDocToDelete(docId);
-    setShowDeleteModal(true);
+    dispatch({ type: 'OPEN_DELETE_MODAL', payload: docId });
   };
 
   const handleDeleteConfirm = async () => {
-    if (!docToDelete) return;
+    if (!state.docToDelete) return;
     try {
-      await deleteDocument(docToDelete);
-      setShowDeleteModal(false);
-      setDocToDelete(null);
+      await deleteDocument(state.docToDelete);
+      dispatch({ type: 'CLOSE_DELETE_MODAL' });
       fetchDocuments();
     } catch (error) {
       console.error('Error deleting document:', error);
     }
   };
 
-  const rows = documents.map((doc) => ({
+  const rows = state.documents.map((doc) => ({
     id: doc.id,
     name: doc.name || doc.filename || 'N/A',
     status: (
@@ -146,8 +268,8 @@ const DocumentListPage = () => {
     ),
   }));
 
-  const noDocuments = documents.length === 0 && !search;
-  const noSearchResults = documents.length === 0 && search;
+  const noDocuments = state.documents.length === 0 && !state.search;
+  const noSearchResults = state.documents.length === 0 && state.search;
 
   const handleDeleteJobs = async (selectedRows: any[]) => {
     try {
@@ -212,8 +334,8 @@ const DocumentListPage = () => {
                       <TableToolbarSearch
                         persistent
                         placeholder="Search"
-                        onChange={(e: any, value?: string) => setSearch(value || '')}
-                        value={search}
+                        onChange={(e: any, value?: string) => dispatch({ type: 'SET_SEARCH', payload: value || '' })}
+                        value={state.search}
                       />
                       <Button
                         kind="ghost"
@@ -228,7 +350,7 @@ const DocumentListPage = () => {
                         renderIcon={Renew}
                         iconDescription="Refresh"
                         onClick={fetchDocuments}
-                        disabled={loading}
+                        disabled={state.loading}
                         tooltipPosition="bottom"
                       />
                     </TableToolbarContent>
@@ -276,13 +398,13 @@ const DocumentListPage = () => {
                   </Table>
                   {rows.length > 0 && (
                     <Pagination
-                      page={page}
-                      pageSize={pageSize}
+                      page={state.page}
+                      pageSize={state.pageSize}
                       pageSizes={[10, 25, 50, 100]}
-                      totalItems={totalItems}
+                      totalItems={state.totalItems}
                       onChange={({ page, pageSize }) => {
-                        setPage(page);
-                        setPageSize(pageSize);
+                        dispatch({ type: 'SET_PAGE', payload: page });
+                        dispatch({ type: 'SET_PAGE_SIZE', payload: pageSize });
                       }}
                       itemsPerPageText="Items per page:"
                     />
@@ -295,30 +417,30 @@ const DocumentListPage = () => {
 
       {/* Content Modal */}
       <Modal
-        open={showContentModal}
-        onRequestClose={() => setShowContentModal(false)}
-        modalHeading={`Document Content: ${selectedDoc}`}
+        open={state.showContentModal}
+        onRequestClose={() => dispatch({ type: 'CLOSE_CONTENT_MODAL' })}
+        modalHeading={`Document Content: ${state.selectedDoc}`}
         primaryButtonText="Close"
-        onRequestSubmit={() => setShowContentModal(false)}
+        onRequestSubmit={() => dispatch({ type: 'CLOSE_CONTENT_MODAL' })}
         size="lg"
       >
         <div className={styles.modalContent}>
           <pre>
-            {docContent ? JSON.stringify(docContent, null, 2) : 'Loading...'}
+            {state.docContent ? JSON.stringify(state.docContent, null, 2) : 'Loading...'}
           </pre>
         </div>
       </Modal>
 
       {/* Delete Confirmation Modal */}
       <Modal
-        open={showDeleteModal}
+        open={state.showDeleteModal}
         danger
-        onRequestClose={() => setShowDeleteModal(false)}
+        onRequestClose={() => dispatch({ type: 'CLOSE_DELETE_MODAL' })}
         modalHeading="Delete Document"
         primaryButtonText="Delete"
         secondaryButtonText="Cancel"
         onRequestSubmit={handleDeleteConfirm}
-        onSecondarySubmit={() => setShowDeleteModal(false)}
+        onSecondarySubmit={() => dispatch({ type: 'CLOSE_DELETE_MODAL' })}
       >
         <p>Are you sure you want to delete this document? This action cannot be undone.</p>
       </Modal>

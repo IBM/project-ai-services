@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useReducer } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '@carbon/ibm-products';
 import {
@@ -22,78 +22,203 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { uploadDocuments } from '../../services/api';
 import styles from './DocumentUploadPage.module.scss';
 
+interface DocumentUploadState {
+  files: File[];
+  operation: string;
+  outputFormat: string;
+  loading: boolean;
+  error: string | null;
+  success: string | null;
+  currentStep: number;
+  fileUploaderKey: number;
+  isFileListExpanded: boolean;
+  isCompleted: boolean;
+  jobId: string | null;
+}
+
+type DocumentUploadAction =
+  | { type: 'SET_FILES'; payload: File[] }
+  | { type: 'SET_OPERATION'; payload: string }
+  | { type: 'SET_OUTPUT_FORMAT'; payload: string }
+  | { type: 'SET_LOADING'; payload: boolean }
+  | { type: 'SET_ERROR'; payload: string | null }
+  | { type: 'SET_SUCCESS'; payload: string | null }
+  | { type: 'SET_CURRENT_STEP'; payload: number }
+  | { type: 'INCREMENT_FILE_UPLOADER_KEY' }
+  | { type: 'TOGGLE_FILE_LIST_EXPANDED' }
+  | { type: 'SET_IS_COMPLETED'; payload: boolean }
+  | { type: 'SET_JOB_ID'; payload: string | null }
+  | { type: 'UPLOAD_START' }
+  | { type: 'UPLOAD_SUCCESS'; payload: { jobId: string; message: string } }
+  | { type: 'UPLOAD_ERROR'; payload: string }
+  | { type: 'RESET_FORM' }
+  | { type: 'CLEAR_FILES' };
+
+const initialState: DocumentUploadState = {
+  files: [],
+  operation: 'ingestion',
+  outputFormat: 'json',
+  loading: false,
+  error: null,
+  success: null,
+  currentStep: 0,
+  fileUploaderKey: 0,
+  isFileListExpanded: true,
+  isCompleted: false,
+  jobId: null,
+};
+
+const documentUploadReducer = (
+  state: DocumentUploadState,
+  action: DocumentUploadAction
+): DocumentUploadState => {
+  switch (action.type) {
+    case 'SET_FILES':
+      return {
+        ...state,
+        files: action.payload,
+        error: null,
+        success: null,
+        currentStep: action.payload.length > 0 ? 2 : state.currentStep,
+      };
+    case 'SET_OPERATION':
+      return {
+        ...state,
+        operation: action.payload,
+        currentStep: 1,
+      };
+    case 'SET_OUTPUT_FORMAT':
+      return {
+        ...state,
+        outputFormat: action.payload,
+      };
+    case 'SET_LOADING':
+      return {
+        ...state,
+        loading: action.payload,
+      };
+    case 'SET_ERROR':
+      return {
+        ...state,
+        error: action.payload,
+      };
+    case 'SET_SUCCESS':
+      return {
+        ...state,
+        success: action.payload,
+      };
+    case 'SET_CURRENT_STEP':
+      return {
+        ...state,
+        currentStep: action.payload,
+      };
+    case 'INCREMENT_FILE_UPLOADER_KEY':
+      return {
+        ...state,
+        fileUploaderKey: state.fileUploaderKey + 1,
+      };
+    case 'TOGGLE_FILE_LIST_EXPANDED':
+      return {
+        ...state,
+        isFileListExpanded: !state.isFileListExpanded,
+      };
+    case 'SET_IS_COMPLETED':
+      return {
+        ...state,
+        isCompleted: action.payload,
+      };
+    case 'SET_JOB_ID':
+      return {
+        ...state,
+        jobId: action.payload,
+      };
+    case 'UPLOAD_START':
+      return {
+        ...state,
+        loading: true,
+        error: null,
+        success: null,
+      };
+    case 'UPLOAD_SUCCESS':
+      return {
+        ...state,
+        loading: false,
+        jobId: action.payload.jobId,
+        success: action.payload.message,
+        files: [],
+        currentStep: 3,
+        isCompleted: true,
+      };
+    case 'UPLOAD_ERROR':
+      return {
+        ...state,
+        loading: false,
+        error: action.payload,
+      };
+    case 'RESET_FORM':
+      return {
+        ...initialState,
+        fileUploaderKey: state.fileUploaderKey + 1,
+      };
+    case 'CLEAR_FILES':
+      return {
+        ...state,
+        files: [],
+        currentStep: 1,
+        fileUploaderKey: state.fileUploaderKey + 1,
+      };
+    default:
+      return state;
+  }
+};
+
 const DocumentUploadPage = () => {
   const navigate = useNavigate();
   const { effectiveTheme } = useTheme();
-  const [files, setFiles] = useState<File[]>([]);
-  const [operation, setOperation] = useState<string>('ingestion');
-  const [outputFormat, setOutputFormat] = useState<string>('json');
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [currentStep, setCurrentStep] = useState<number>(0);
-  const [fileUploaderKey, setFileUploaderKey] = useState<number>(0);
-  const [isFileListExpanded, setIsFileListExpanded] = useState<boolean>(true);
-  const [isCompleted, setIsCompleted] = useState<boolean>(false);
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(documentUploadReducer, initialState);
 
   const handleFileChange = (event: any) => {
     const selectedFiles = Array.from((event.target?.files || []) as FileList);
-    setFiles(selectedFiles);
-    setError(null);
-    setSuccess(null);
-    if (selectedFiles.length > 0) {
-      setCurrentStep(2);
-    }
+    dispatch({ type: 'SET_FILES', payload: selectedFiles });
   };
 
   const handleOperationChange = (value: string | number | undefined) => {
     if (value !== undefined) {
-      setOperation(String(value));
-      setCurrentStep(1);
+      dispatch({ type: 'SET_OPERATION', payload: String(value) });
     }
   };
 
   const handleUpload = async () => {
-    if (files.length === 0) {
-      setError('Please select at least one file to upload');
+    if (state.files.length === 0) {
+      dispatch({ type: 'SET_ERROR', payload: 'Please select at least one file to upload' });
       return;
     }
 
-    if (operation === 'digitization' && files.length > 1) {
-      setError('Only 1 file allowed for digitization operation');
+    if (state.operation === 'digitization' && state.files.length > 1) {
+      dispatch({ type: 'SET_ERROR', payload: 'Only 1 file allowed for digitization operation' });
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
+    dispatch({ type: 'UPLOAD_START' });
 
     try {
-      const result = await uploadDocuments(files, operation, outputFormat);
-      setJobId(result.job_id);
-      setSuccess(`Upload successful! Job ID: ${result.job_id}`);
-      setFiles([]);
-      setCurrentStep(3);
-      setIsCompleted(true);
+      const result = await uploadDocuments(state.files, state.operation, state.outputFormat);
+      dispatch({
+        type: 'UPLOAD_SUCCESS',
+        payload: {
+          jobId: result.job_id,
+          message: `Upload successful! Job ID: ${result.job_id}`,
+        },
+      });
     } catch (err) {
       const error = err as any;
       const errorMessage = error.response?.data?.detail || error.message || 'Upload failed';
-      setError(errorMessage);
-    } finally {
-      setLoading(false);
+      dispatch({ type: 'UPLOAD_ERROR', payload: errorMessage });
     }
   };
 
   const handleUploadMore = () => {
-    setIsCompleted(false);
-    setSuccess(null);
-    setJobId(null);
-    setCurrentStep(0);
-    setOperation('ingestion');
-    setOutputFormat('json');
-    setFiles([]);
-    setFileUploaderKey(prev => prev + 1);
+    dispatch({ type: 'RESET_FORM' });
   };
 
   const handleViewJobs = () => {
@@ -113,7 +238,7 @@ const DocumentUploadPage = () => {
           <div className={styles.uploadContent}>
             {/* Progress Indicator */}
             <div className={styles.progressSection}>
-              <ProgressIndicator currentIndex={currentStep} spaceEqually>
+              <ProgressIndicator currentIndex={state.currentStep} spaceEqually>
                 <ProgressStep
                   label="Select operation"
                   description="Choose processing type"
@@ -134,7 +259,7 @@ const DocumentUploadPage = () => {
             </div>
 
             {/* Completion State */}
-            {isCompleted ? (
+            {state.isCompleted ? (
               <div className={styles.completionContainer}>
                 <Tile className={styles.completionTile}>
                   <div className={styles.completionContent}>
@@ -143,12 +268,12 @@ const DocumentUploadPage = () => {
                     </div>
                     <h3 className={styles.completionTitle}>Upload Complete!</h3>
                     <p className={styles.completionMessage}>
-                      Your document{files.length > 1 ? 's have' : ' has'} been successfully uploaded and processing has started.
+                      Your document{state.files.length > 1 ? 's have' : ' has'} been successfully uploaded and processing has started.
                     </p>
-                    {jobId && (
+                    {state.jobId && (
                       <div className={styles.jobIdContainer}>
                         <span className={styles.jobIdLabel}>Job ID:</span>
-                        <code className={styles.jobId}>{jobId}</code>
+                        <code className={styles.jobId}>{state.jobId}</code>
                       </div>
                     )}
                   </div>
@@ -186,7 +311,7 @@ const DocumentUploadPage = () => {
                   <RadioButtonGroup
                     legendText=""
                     name="operation"
-                    valueSelected={operation}
+                    valueSelected={state.operation}
                     onChange={handleOperationChange}
                     orientation="vertical"
                   >
@@ -204,7 +329,7 @@ const DocumentUploadPage = () => {
                 </Tile>
 
                 {/* Output Format (only for digitization) */}
-                {operation === 'digitization' && (
+                {state.operation === 'digitization' && (
                   <Tile className={styles.formTile}>
                     <div className={styles.tileHeader}>
                       <h4>Output Format</h4>
@@ -215,8 +340,8 @@ const DocumentUploadPage = () => {
                     <RadioButtonGroup
                       legendText=""
                       name="outputFormat"
-                      valueSelected={outputFormat}
-                      onChange={(value) => value !== undefined && setOutputFormat(String(value))}
+                      valueSelected={state.outputFormat}
+                      onChange={(value) => value !== undefined && dispatch({ type: 'SET_OUTPUT_FORMAT', payload: String(value) })}
                       orientation="horizontal"
                     >
                       <RadioButton
@@ -243,19 +368,19 @@ const DocumentUploadPage = () => {
                   <div className={styles.tileHeader}>
                     <h4>Step 2: Upload Files</h4>
                     <p className={styles.tileDescription}>
-                      {operation === 'ingestion'
+                      {state.operation === 'ingestion'
                         ? 'Upload one or more PDF files (max 500MB each)'
                         : 'Upload a single PDF file (max 500MB)'}
                     </p>
                   </div>
                   <FileUploader
-                    key={fileUploaderKey}
+                    key={state.fileUploaderKey}
                     labelTitle=""
                     labelDescription="Drag and drop files here or click to browse"
                     buttonLabel="Select files"
                     filenameStatus="edit"
                     accept={['.pdf']}
-                    multiple={operation === 'ingestion'}
+                    multiple={state.operation === 'ingestion'}
                     onChange={handleFileChange}
                     size="lg"
                     className={styles.fileUploader}
@@ -263,23 +388,23 @@ const DocumentUploadPage = () => {
                 </Tile>
 
                 {/* Selected Files Display */}
-                {files.length > 0 && (
+                {state.files.length > 0 && (
                   <Tile className={styles.fileListTile}>
                     <div
                       className={styles.fileListHeader}
-                      onClick={() => setIsFileListExpanded(!isFileListExpanded)}
+                      onClick={() => dispatch({ type: 'TOGGLE_FILE_LIST_EXPANDED' })}
                       role="button"
                       tabIndex={0}
                     >
                       <DocumentPdf size={24} />
-                      <h4>Selected Files ({files.length})</h4>
-                      <span className={`${styles.expandIcon} ${isFileListExpanded ? styles.expanded : ''}`}>
+                      <h4>Selected Files ({state.files.length})</h4>
+                      <span className={`${styles.expandIcon} ${state.isFileListExpanded ? styles.expanded : ''}`}>
                         ▼
                       </span>
                     </div>
-                    {isFileListExpanded && (
+                    {state.isFileListExpanded && (
                       <ul className={styles.fileList}>
-                        {files.map((file, index) => (
+                        {state.files.map((file, index) => (
                           <li key={index} className={styles.fileItem}>
                             <DocumentPdf size={20} className={styles.fileIcon} />
                             <span className={styles.fileName}>{file.name}</span>
@@ -290,11 +415,11 @@ const DocumentUploadPage = () => {
                               className={styles.removeButton}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                const newFiles = files.filter((_, i) => i !== index);
-                                setFiles(newFiles);
+                                const newFiles = state.files.filter((_, i) => i !== index);
+                                dispatch({ type: 'SET_FILES', payload: newFiles });
                                 if (newFiles.length === 0) {
-                                  setCurrentStep(1);
-                                  setFileUploaderKey(prev => prev + 1);
+                                  dispatch({ type: 'SET_CURRENT_STEP', payload: 1 });
+                                  dispatch({ type: 'INCREMENT_FILE_UPLOADER_KEY' });
                                 }
                               }}
                               aria-label="Remove file"
@@ -310,23 +435,23 @@ const DocumentUploadPage = () => {
                 )}
 
                 {/* Notifications */}
-                {error && (
+                {state.error && (
                   <InlineNotification
                     kind="error"
                     title="Upload Error"
-                    subtitle={error}
-                    onCloseButtonClick={() => setError(null)}
+                    subtitle={state.error}
+                    onCloseButtonClick={() => dispatch({ type: 'SET_ERROR', payload: null })}
                     className={styles.notification}
                     lowContrast
                   />
                 )}
 
-                {success && !isCompleted && (
+                {state.success && !state.isCompleted && (
                   <InlineNotification
                     kind="success"
                     title="Upload Successful"
-                    subtitle={success}
-                    onCloseButtonClick={() => setSuccess(null)}
+                    subtitle={state.success}
+                    onCloseButtonClick={() => dispatch({ type: 'SET_SUCCESS', payload: null })}
                     className={styles.notification}
                     lowContrast
                   />
@@ -338,19 +463,15 @@ const DocumentUploadPage = () => {
                     kind="primary"
                     renderIcon={Upload}
                     onClick={handleUpload}
-                    disabled={loading || files.length === 0}
+                    disabled={state.loading || state.files.length === 0}
                     size="lg"
                   >
-                    {loading ? 'Processing...' : 'Upload and Process'}
+                    {state.loading ? 'Processing...' : 'Upload and Process'}
                   </Button>
-                  {files.length > 0 && !loading && (
+                  {state.files.length > 0 && !state.loading && (
                     <Button
                       kind="secondary"
-                      onClick={() => {
-                        setFiles([]);
-                        setCurrentStep(1);
-                        setFileUploaderKey(prev => prev + 1);
-                      }}
+                      onClick={() => dispatch({ type: 'CLEAR_FILES' })}
                       size="lg"
                     >
                       Clear Selection
@@ -358,7 +479,7 @@ const DocumentUploadPage = () => {
                   )}
                 </div>
 
-                {loading && (
+                {state.loading && (
                   <div className={styles.loadingContainer}>
                     <Loading description="Uploading and processing documents..." withOverlay={false} />
                   </div>
