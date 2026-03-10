@@ -1,17 +1,14 @@
 package rhods
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 const (
@@ -35,7 +32,7 @@ func (r *DSCInitialization) Description() string {
 	return "Validates that DSC Initialization is in ready state"
 }
 
-// Verify performs a direct fetch.
+// Verify performs a direct check without polling.
 func (r *DSCInitialization) Verify() error {
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
@@ -49,34 +46,28 @@ func (r *DSCInitialization) Verify() error {
 		Kind:    dsciKind,
 	})
 
-	return wait.PollUntilContextTimeout(client.Ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
-		if err := client.Client.Get(ctx, types.NamespacedName{Name: dsciName}, obj); err != nil {
-			if apierrors.IsNotFound(err) {
-				logger.Infof("DSCInitialization %s not found yet, retrying...", dsciName, logger.VerbosityLevelDebug)
-
-				return false, nil
-			}
-
-			return false, fmt.Errorf("failed to find %s: %w", dsciName, err)
+	if err := client.Client.Get(client.Ctx, types.NamespacedName{Name: dsciName}, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("DSCInitialization %s not found", dsciName)
 		}
 
-		phase, found, err := unstructured.NestedString(obj.Object, "status", "phase")
-		if err != nil {
-			return false, fmt.Errorf("failed to parse status.phase from dsci: %w", err)
-		}
+		return fmt.Errorf("failed to find %s: %w", dsciName, err)
+	}
 
-		if !found || phase != "Ready" {
-			if !found {
-				phase = "unknown"
-			}
-			logger.Infof("DSCInitialization not ready yet (status.phase: %s), waiting...", phase, logger.VerbosityLevelDebug)
+	phase, found, err := unstructured.NestedString(obj.Object, "status", "phase")
+	if err != nil {
+		return fmt.Errorf("failed to parse status.phase from dsci: %w", err)
+	}
 
-			return false, nil
-		}
-		logger.Infof("DSCInitialization %s is ready", dsciName, logger.VerbosityLevelDebug)
+	if !found {
+		return fmt.Errorf("DSCInitialization status.phase not found")
+	}
 
-		return true, nil
-	})
+	if phase != "Ready" {
+		return fmt.Errorf("DSCInitialization not ready (status.phase: %s)", phase)
+	}
+
+	return nil
 }
 
 func (r *DSCInitialization) Message() string {

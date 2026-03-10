@@ -1,18 +1,14 @@
 package operators
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 const (
@@ -124,30 +120,23 @@ func validateOperator(c *openshift.OpenshiftClient, csvList *unstructured.Unstru
 			continue
 		}
 
-		// operator found, wait until it is ready
-		return wait.PollUntilContextTimeout(c.Ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (done bool, err error) {
-			current := &unstructured.Unstructured{}
-			current.SetGroupVersionKind(csv.GroupVersionKind())
+		// operator found, check if it is ready
+		current := &unstructured.Unstructured{}
+		current.SetGroupVersionKind(csv.GroupVersionKind())
 
-			if err := c.Client.Get(ctx, types.NamespacedName{
-				Name:      name,
-				Namespace: csv.GetNamespace(),
-			}, current); err != nil {
-				if apierrors.IsNotFound(err) {
-					return false, nil
-				}
+		if err := c.Client.Get(c.Ctx, types.NamespacedName{
+			Name:      name,
+			Namespace: csv.GetNamespace(),
+		}, current); err != nil {
+			return fmt.Errorf("failed to get operator %s: %w", name, err)
+		}
 
-				return false, err
-			}
+		phase, _, _ := unstructured.NestedString(current.Object, "status", "phase")
+		if phase != phaseSucceeded {
+			return fmt.Errorf("operator %s not ready (phase: %s)", name, phase)
+		}
 
-			phase, _, _ := unstructured.NestedString(current.Object, "status", "phase")
-			if phase == phaseSucceeded {
-				return true, nil
-			}
-			logger.Infof("Operator %s not ready yet (phase: %s), waiting...", name, phase, logger.VerbosityLevelDebug)
-
-			return false, nil
-		})
+		return nil
 	}
 
 	return fmt.Errorf("operator not installed: %s", operatorSubstring)
