@@ -351,7 +351,7 @@ async def list_documents(
         }
 
     except HTTPException:
-        logger.error("HTTP error in list_documents")
+        logger.error("HTTP error in list documents")
         # Re-raise HTTPException as-is
         raise
     except Exception as e:
@@ -381,6 +381,7 @@ async def get_document_metadata(doc_id: str, details: bool = Query(False, descri
         logger.error(f"Failed to parse metadata file for document {doc_id}: {e}")
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to read document metadata")
     except HTTPException:
+        logger.error("HTTP error in get document")
         # Re-raise HTTPException as-is
         raise
     except Exception as e:
@@ -412,6 +413,7 @@ async def get_document_content(doc_id: str):
         logger.error(f"Failed to parse content file for document {doc_id}: {e}")
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to read document content")
     except HTTPException:
+        logger.error("HTTP error in get document content")
         # Re-raise HTTPException as-is
         raise
     except Exception as e:
