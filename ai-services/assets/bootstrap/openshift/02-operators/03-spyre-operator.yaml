@@ -17,4 +17,3 @@ spec:
   source: certified-operators
   sourceNamespace: openshift-marketplace
   startingCSV: spyre-operator.v1.1.1
-

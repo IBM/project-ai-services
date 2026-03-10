@@ -279,6 +279,52 @@ def query_vllm_summarize(
         input_tokens = result.get("usage", {}).get("prompt_tokens", 0)
         output_tokens = result.get("usage", {}).get("completion_tokens", 0)
     return content.strip(), input_tokens, output_tokens
+    
+def query_vllm_summarize_stream(
+    llm_endpoint: str,
+    messages: list,
+    model: str,
+    max_tokens: int,
+    temperature: float,
+):
+    """Stream a summarization request to vLLM, yielding raw SSE lines."""
+    headers = {
+        "accept": "application/json",
+        "Content-type": "application/json",
+    }
+    stop_words = [w for w in settings.summarization_stop_words.split(",") if w]
+    payload = {
+        "messages": messages,
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": True,
+    }
+    if stop_words:
+        payload["stop"] = stop_words
+
+    try:
+        logger.debug("STREAMING SUMMARIZE RESPONSE")
+        with SESSION.post(
+            f"{llm_endpoint}/v1/chat/completions",
+            json=payload,
+            headers=headers,
+            stream=True,
+        ) as r:
+            r.raise_for_status()
+            for raw_line in r.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                yield f"{raw_line}\n\n"
+    except requests.exceptions.RequestException as e:
+        error_details = str(e)
+        if e.response is not None:
+            error_details += f", Response Text: {e.response.text}"
+        logger.error(f"Error calling vLLM stream API: {error_details}")
+        yield error_details
+    except Exception as e:
+        logger.error(f"Error calling vLLM stream API: {e}")
+        yield f"Error calling vLLM stream API: {e}"
 
 def tokenize_with_llm(prompt, emb_endpoint):
     payload = {
