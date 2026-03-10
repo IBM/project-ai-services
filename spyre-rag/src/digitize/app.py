@@ -448,7 +448,7 @@ async def delete_document(doc_id: str):
     - doc_id: Unique identifier of the document to delete
     
     Returns:
-    - 204 No Content on successful deletion
+    - 204 No Content on successful deletion (HTTP 204)
     - 404 Not Found if document doesn't exist
     - 409 Conflict if document is part of an active job
     - 500 Internal Server Error on unexpected errors
@@ -517,7 +517,7 @@ async def delete_document(doc_id: str):
             # If VDB was deleted, consider this a partial success
             if vdb_deleted:
                 logger.info(f"Document {doc_id} partially deleted (VDB cleaned but files missing)")
-                return
+                return None
             else:
                 APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(e))
         except Exception as e:
@@ -541,7 +541,7 @@ async def delete_document(doc_id: str):
             # Should not reach here, but log if it does
             logger.warning(f"Delete completed with warnings: {'; '.join(errors)}")
         
-        return
+        return None
         
     except HTTPException:
         # Re-raise HTTPException as-is

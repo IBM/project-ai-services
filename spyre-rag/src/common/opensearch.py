@@ -11,19 +11,14 @@ from common.vector_db import VectorStore
 
 logger = get_logger("OpenSearch")
 
-def generate_chunk_id(page_content: str, filename: str = "") -> np.int64:
+
+def generate_chunk_id(doc_id: str, page_content: str) -> np.int64:
     """
-    Generate a unique, deterministic chunk ID based on content and filename.
-    
-    NOTE: chunk_id is based on CONTENT + FILENAME only (not doc_id).
-    This ensures that re-ingesting the same file with a new doc_id will
-    UPDATE the existing chunks rather than creating duplicates.
-    
-    The doc_id field in the chunk is separate and can be updated.
+    Generate a unique, deterministic chunk ID based on filename, content, and index.
     """
-    # Use filename + content for chunk ID generation
-    # This allows updating doc_id when re-ingesting the same file
-    base = f"{filename}||{page_content}"
+    # Using doc_id (UUID) is safer than filename to prevent collisions
+    # between different users uploading 'document.pdf'
+    base = f"{doc_id}||{page_content}"
     hash_digest = hashlib.md5(base.encode("utf-8")).hexdigest()
     chunk_int = int(hash_digest[:16], 16)    # Convert first 64 bits to int
     chunk_id = chunk_int % (2**63)           # Fit into signed 64-bit range
@@ -188,7 +183,7 @@ class OpensearchVectorStore(VectorStore):
                 # This allows updating doc_id when re-ingesting the same file
                 doc_id = doc.get("doc_id") or fn # Fallback to filename if UUID missing
                 logger.debug(f"Inserting chunk {j+1}: doc_id={doc_id}, filename={fn}")
-                cid = generate_chunk_id(pc, fn)
+                cid = generate_chunk_id(doc_id, pc)
 
                 actions.append({
                     "_index": self.index_name,
@@ -209,15 +204,15 @@ class OpensearchVectorStore(VectorStore):
             batch_num = i // batch_size + 1
 
             try:
-                success, failed = helpers.bulk(self.client, actions, stats_only=True)
+                success, failed = helpers.bulk(self.client, actions, stats_only=True, refresh=True)
                 if failed:
                     logger.error(f"Failed to insert {failed} chunks in batch {batch_num} starting at index {i}")
                     return
                 logger.debug(f"Batch {batch_num}: Successfully inserted {success} chunks, failed {failed}")
-                
+
                 # Log the doc_ids that were inserted in this batch for verification
                 inserted_doc_ids = list(set([action["_source"]["doc_id"] for action in actions]))
-                logger.info(f"Batch {batch_num}: Inserted chunks for doc_ids: {inserted_doc_ids}")
+                logger.debug(f"Batch {batch_num}: Inserted chunks for doc_ids: {inserted_doc_ids}")
             except Exception as e:
                 logger.error(f"Exception during bulk insert for batch {batch_num}: {e}")
                 raise
@@ -393,10 +388,10 @@ class OpensearchVectorStore(VectorStore):
     def delete_document_by_id(self, doc_id: str):
         """
         Delete all chunks associated with a specific document from the index.
-        
+
         Args:
             doc_id: The unique identifier of the document to delete
-            
+
         Returns:
             Number of chunks deleted
         """
@@ -405,95 +400,49 @@ class OpensearchVectorStore(VectorStore):
         if not self.client.indices.exists(index=self.index_name):
             logger.warning(f"Index {self.index_name} does not exist, nothing to delete")
             return 0
-        
+
         try:
-            # First, check if any chunks exist for this document (for debugging)
-            count_query = {
-                "query": {
-                    "term": {
-                        "doc_id": doc_id
-                    }
-                }
-            }
-            
             try:
-                logger.debug(f"Count query: {count_query}")
-                count_response = self.client.count(index=self.index_name, body=count_query)
-                chunk_count = count_response.get("count", 0)
-                logger.debug(f"Count response: {count_response}")
-                logger.debug(f"Found {chunk_count} chunks for document {doc_id} before deletion")
-                
-                if chunk_count == 0:
-                    # Try to find if chunks exist with a different doc_id (e.g., filename instead of UUID)
-                    # Search for any chunks to see what doc_ids are actually stored
-                    sample_query = {
-                        "size": 5,
-                        "_source": ["doc_id", "filename"],
-                        "query": {"match_all": {}}
-                    }
-                    try:
-                        sample_response = self.client.search(index=self.index_name, body=sample_query)
-                        sample_docs = sample_response.get("hits", {}).get("hits", [])
-                        if sample_docs:
-                            sample_doc_ids = [hit['_source'].get('doc_id', 'N/A') for hit in sample_docs[:3]]
-                            sample_filenames = [hit['_source'].get('filename', 'N/A') for hit in sample_docs[:3]]
-                            logger.warning(f"Sample doc_ids in index: {sample_doc_ids}")
-                            logger.warning(f"Sample filenames in index: {sample_filenames}")
-                            logger.warning(f"Looking for doc_id: {doc_id}")
-                        else:
-                            logger.warning(f"Index {self.index_name} appears to be empty (no documents found)")
-                    except Exception as e:
-                        logger.warning(f"Could not retrieve sample documents: {e}")
-                    
-                    logger.warning(
-                        f"No chunks found for document {doc_id} in index {self.index_name}. "
-                        f"Possible causes: (1) doc_id mismatch - chunks may be indexed with filename instead of UUID, "
-                        f"(2) document not ingested, (3) already deleted"
-                    )
-                    return 0
-            except Exception as count_error:
-                logger.warning(f"Could not count chunks for document {doc_id}: {count_error}")
-                # Continue with deletion attempt anyway
+                # STEP 1: Try to find filename corresponding to doc_id to prevent orphans chunks
+                sample = self.client.search(
+                index=self.index_name,
+                body={"size": 1, "_source": ["filename"], "query": {"term": {"doc_id": doc_id}}}
+                )
+                hits = sample.get("hits", {}).get("hits", [])
             
-            # Use delete_by_query to remove all chunks with matching doc_id
-            delete_query = {
-                "query": {
-                    "term": {
-                        "doc_id": doc_id
-                    }
-                }
-            }
-            
+                # If we found a filename, we delete by FILENAME (Cleaner)
+                if hits:
+                    filename = hits[0]["_source"]["filename"]
+                    logger.info(f"Resolved doc_id {doc_id} to filename {filename}. Cleaning all versions.")
+                    match_key = "filename"
+                    match_val = filename
+                else:
+                    # If no filename found, fallback to the provided doc_id
+                    match_key = "doc_id"
+                    match_val = doc_id
+            except Exception:
+                match_key = "doc_id"
+                match_val = doc_id
+
+            # STEP 2: Perform the actual deletion
+            delete_query = {"query": {"term": {match_key: match_val}}}
+
             response = self.client.delete_by_query(
                 index=self.index_name,
                 body=delete_query,
-                params={"refresh": "true"}  # Ensure changes are immediately visible
+                params={"refresh": "true", "conflicts": "proceed"},  # Ensure changes are immediately visible
             )
-            
-            # delete_by_query returns a response with structure:
-            # {
-            #   "took": <time_in_ms>,
-            #   "timed_out": false,
-            #   "total": <total_docs_matched>,
-            #   "deleted": <docs_deleted>,
-            #   "batches": <number_of_batches>,
-            #   "version_conflicts": 0,
-            #   "noops": 0,
-            #   "retries": {...},
-            #   "throttled_millis": 0,
-            #   "failures": []
-            # }
-            
+
             deleted_count = response.get("deleted", 0)
             total_matched = response.get("total", 0)
             failures = response.get("failures", [])
-            
+
             # Log detailed response for debugging
             logger.debug(f"delete_by_query response: took={response.get('took')}ms, total={total_matched}, deleted={deleted_count}, failures={len(failures)}")
-            
+
             if failures:
                 logger.error(f"Deletion failures for document {doc_id}: {failures}")
-            
+
             if deleted_count > 0:
                 logger.info(f"✓ Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name}")
             else:
@@ -501,9 +450,7 @@ class OpensearchVectorStore(VectorStore):
                     logger.info(f"Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name} (no matching documents found)")
                 else:
                     logger.warning(f"Matched {total_matched} documents but deleted {deleted_count} for document {doc_id} (possible version conflicts or failures)")
-            
             return deleted_count
-            
         except Exception as e:
             logger.error(f"Failed to delete document {doc_id} from index: {e}")
             raise
