@@ -29,6 +29,8 @@ import { Download, Renew, Settings, Add, CheckmarkFilled, WarningFilled, InProgr
 import { useTheme } from '../../contexts/ThemeContext';
 import { getAllJobs, getJobById, uploadDocuments, deleteJob, bulkDeleteJobs, Job, Document } from '../../services/api';
 import IngestSidePanel from '../../components/IngestSidePanel';
+import { calculateDuration } from '../../utils/dateUtils';
+import { JOB_STATUS, DISPLAY_STATUS, JOB_OPERATION, JOB_TYPE_DISPLAY } from '../../constants/jobConstants';
 import styles from './JobMonitorPage.module.scss';
 
 const headers = [
@@ -42,17 +44,17 @@ const headers = [
 
 const getStatusIcon = (status: string) => {
   switch (status) {
-    case 'completed':
-    case 'Ingested':
-    case 'Digitized':
+    case JOB_STATUS.COMPLETED:
+    case DISPLAY_STATUS.INGESTED:
+    case DISPLAY_STATUS.DIGITIZED:
       return <CheckmarkFilled size={16} className={styles.statusIconSuccess} />;
-    case 'failed':
-    case 'Ingestion error':
-    case 'Digitization error':
+    case JOB_STATUS.FAILED:
+    case DISPLAY_STATUS.INGESTION_ERROR:
+    case DISPLAY_STATUS.DIGITIZATION_ERROR:
       return <ErrorFilled size={16} className={styles.statusIconError} />;
-    case 'in_progress':
-    case 'Ingesting...':
-    case 'Digitizing...':
+    case JOB_STATUS.IN_PROGRESS:
+    case DISPLAY_STATUS.INGESTING:
+    case DISPLAY_STATUS.DIGITIZING:
       return <InProgress size={16} className={styles.statusIconProgress} />;
     default:
       return null;
@@ -60,46 +62,12 @@ const getStatusIcon = (status: string) => {
 };
 
 const getTypeTagStyle = (type: string) => {
-  if (type === 'Ingestion') {
+  if (type === JOB_TYPE_DISPLAY.INGESTION) {
     return 'gray';
-  } else if (type === 'Digitization only') {
+  } else if (type === JOB_TYPE_DISPLAY.DIGITIZATION) {
     return 'cool-gray';
   }
   return 'gray';
-};
-
-const calculateDuration = (startTime: string | undefined) => {
-  if (!startTime) return 'N/A';
-  
-  const start = new Date(startTime);
-  const now = new Date();
-  const diffMs = now.getTime() - start.getTime();
-  
-  const totalSeconds = Math.floor(diffMs / 1000);
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  const totalHours = Math.floor(totalMinutes / 60);
-  const days = Math.floor(totalHours / 24);
-  
-  const hours = totalHours % 24;
-  const minutes = totalMinutes % 60;
-  const seconds = totalSeconds % 60;
-  
-  const parts = [];
-  
-  if (days > 0) {
-    parts.push(`${days}d`);
-  }
-  if (hours > 0 || days > 0) {
-    parts.push(`${hours}h`);
-  }
-  if (minutes > 0 || hours > 0 || days > 0) {
-    parts.push(`${minutes}m`);
-  }
-  if (parts.length === 0) {
-    parts.push(`${seconds}s`);
-  }
-  
-  return parts.join(' ');
 };
 
 const JobMonitorPage = () => {
@@ -257,22 +225,22 @@ const JobMonitorPage = () => {
   };
 
   const getJobType = (job: Job) => {
-    return job.operation === 'ingestion' ? 'Ingestion' : 'Digitization only';
+    return job.operation === JOB_OPERATION.INGESTION ? JOB_TYPE_DISPLAY.INGESTION : JOB_TYPE_DISPLAY.DIGITIZATION;
   };
 
   const getJobStatus = (job: Job) => {
-    if (job.status === 'completed') {
-      return job.operation === 'ingestion' ? 'Ingested' : 'Digitized';
-    } else if (job.status === 'failed') {
-      return job.operation === 'ingestion' ? 'Ingestion error' : 'Digitization error';
-    } else if (job.status === 'in_progress') {
-      return job.operation === 'ingestion' ? 'Ingesting...' : 'Digitizing...';
+    if (job.status === JOB_STATUS.COMPLETED) {
+      return job.operation === JOB_OPERATION.INGESTION ? DISPLAY_STATUS.INGESTED : DISPLAY_STATUS.DIGITIZED;
+    } else if (job.status === JOB_STATUS.FAILED) {
+      return job.operation === JOB_OPERATION.INGESTION ? DISPLAY_STATUS.INGESTION_ERROR : DISPLAY_STATUS.DIGITIZATION_ERROR;
+    } else if (job.status === JOB_STATUS.IN_PROGRESS) {
+      return job.operation === JOB_OPERATION.INGESTION ? DISPLAY_STATUS.INGESTING : DISPLAY_STATUS.DIGITIZING;
     }
     return job.status;
   };
 
   const getErrorMessage = (job: Job) => {
-    if (job.status === 'failed' && job.error) {
+    if (job.status === JOB_STATUS.FAILED && job.error) {
       return job.error;
     }
     return 'Error message goes here';

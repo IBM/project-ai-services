@@ -10,8 +10,8 @@ import {
   Modal,
 } from '@carbon/react';
 import { Help } from '@carbon/icons-react';
-import { useTheme } from '../../contexts/ThemeContext';
-import ThemeSwitcher from '../ThemeSwitcher/ThemeSwitcher';
+import { useTheme } from '@contexts/ThemeContext';
+import ThemeSwitcher from '@components/ThemeSwitcher/ThemeSwitcher';
 import styles from './AppHeader.module.scss';
 
 interface AppHeaderProps {
