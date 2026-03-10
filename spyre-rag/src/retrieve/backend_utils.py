@@ -1,11 +1,31 @@
 from common.misc_utils import get_logger
 from common.settings import get_settings
+from common.llm_utils import tokenize_with_llm
 from retrieve.reranker_utils import rerank_documents
 from retrieve.retrieval_utils import retrieve_documents
 import time
 
 logger = get_logger("backend_utils")
 settings = get_settings()
+
+def validate_query_length(query, emb_endpoint):
+    
+    #Validate that the query length does not exceed the maximum allowed tokens.
+    try:
+        tokens = tokenize_with_llm(query, emb_endpoint)
+        token_count = len(tokens)
+        
+        if token_count > settings.max_query_token_length:
+            error_msg = f"Query length ({token_count} tokens) exceeds maximum allowed length of {settings.max_query_token_length} tokens"
+            logger.warning(error_msg)
+            return False, token_count, error_msg
+        
+        return True, token_count, None
+    except Exception as e:
+        logger.error(f"Error validating query length: {e}")
+        # If tokenization fails, we'll allow the request to proceed
+        # to avoid blocking legitimate requests due to tokenization issues
+        return True, 0, None
 
 def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, reranker_endpoint, top_k, top_r, vectorstore):
     # Perform retrieval

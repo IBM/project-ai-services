@@ -111,6 +111,7 @@ class Settings:
     temperature: float
     max_input_length: int
     prompt_template_token_count: int
+    max_query_token_length: int
     summarization_coefficient: float
     summarization_prompt_token_count: int
     summarization_temperature: float
@@ -126,6 +127,7 @@ class Settings:
         default_temperature = 0.0
         default_max_input_length = 6000
         default_prompt_template_token_count = 250
+        default_max_query_token_length = 512
         default_summarization_coefficient = 0.2
         default_summarization_prompt_token_count = 100
         default_summarization_temperature = 0.2
@@ -167,6 +169,10 @@ class Settings:
             object.__setattr__(self, "prompt_template_token_count", default_prompt_template_token_count)
             logger.warning(f"Setting prompt_template_token_count to default '{default_prompt_template_token_count}' as it is missing in the settings")
 
+        if not (isinstance(self.max_query_token_length, int) and self.max_query_token_length > 0):
+            object.__setattr__(self, "max_query_token_length", default_max_query_token_length)
+            logger.warning(f"Setting max_query_token_length to default '{default_max_query_token_length}' as it is missing or malformed in the settings")
+
         if not isinstance(self.summarization_coefficient, float):
             object.__setattr__(self, "summarization_coefficient", default_summarization_coefficient)
             logger.warning(f"Setting summarization_coefficient to default '{default_summarization_coefficient}' as it is missing in the settings")
@@ -206,6 +212,7 @@ class Settings:
             temperature = data.get("temperature", None),  # type: ignore[arg-type]
             max_input_length = data.get("max_input_length", None),  # type: ignore[arg-type]
             prompt_template_token_count = data.get("prompt_template_token_count", None),  # type: ignore[arg-type]
+            max_query_token_length = data.get("max_query_token_length", None),  # type: ignore[arg-type]
             summarization_coefficient = data.get("summarization_coefficient", None),  # type: ignore[arg-type]
             summarization_prompt_token_count = data.get("summarization_prompt_token_count", None),  # type: ignore[arg-type]
             summarization_temperature = data.get("summarization_temperature", None),  # type: ignore[arg-type]

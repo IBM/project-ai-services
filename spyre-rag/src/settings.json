@@ -20,6 +20,7 @@
   "temperature": 0.0,
   "max_input_length": 6000,
   "prompt_template_token_count": 250,
+  "max_query_token_length": 512,
   "summarization_coefficient": 0.2,
   "summarization_prompt_token_count": 100,
   "summarization_temperature": 0.2,
