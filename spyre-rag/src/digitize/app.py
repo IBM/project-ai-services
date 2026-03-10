@@ -481,8 +481,9 @@ async def delete_document(doc_id: str):
         # 3. Remove from vector database FIRST (if the document was ingested)
         # This ensures the document is removed from search results even if file deletion fails
         assert doc_metadata is not None
-        doc_status = doc_metadata.get("status", "").lower()
-        doc_type = doc_metadata.get("type", "").lower()
+        # doc_metadata is a DocumentDetailResponse Pydantic model, access attributes directly
+        doc_status = doc_metadata.status.lower() if isinstance(doc_metadata.status, str) else doc_metadata.status.value.lower()
+        doc_type = doc_metadata.type.lower()
         
         if doc_type == types.OperationType.INGESTION.value and doc_status == types.DocStatus.COMPLETED.value:
             try:
@@ -544,6 +545,7 @@ async def delete_document(doc_id: str):
         return None
         
     except HTTPException:
+        logger.error("HTTP error during document deletion")
         # Re-raise HTTPException as-is
         raise
     except Exception as e:
@@ -551,12 +553,123 @@ async def delete_document(doc_id: str):
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(e))
 
 @app.delete("/v1/documents", status_code=status.HTTP_204_NO_CONTENT)
-async def bulk_delete_documents(confirm: bool = Query(...)):
-    if not confirm:
-        APIError.raise_error("INVALID_REQUEST", "Confirm parameter required.")
-    # 1. Check for active jobs
-    # 2. Truncate VDB and wipe cache
-    return
+async def bulk_delete_documents(confirm: bool = Query(..., description="Required confirmation to proceed with bulk deletion")):
+    """
+    Bulk delete all documents from the system.
+
+    This endpoint performs a complete system cleanup:
+    1. Checks for active jobs and rejects if any exist
+    2. Resets the vector database index (removes all indexed chunks)
+    3. Deletes all digitized content files from /var/cache/digitized
+    4. Deletes all document metadata files from /var/cache/docs
+
+    Query Parameters:
+    - confirm: Must be true to proceed with deletion (required)
+
+    Returns:
+    - 204 No Content on successful deletion
+    - 400 Bad Request if confirm is not true
+    - 409 Conflict if there are active jobs
+    - 500 Internal Server Error on unexpected errors
+    """
+    try:
+        logger.info("Bulk delete request received")
+
+        # 1. Validate confirmation parameter
+        if not confirm:
+            logger.warning("Bulk delete rejected: confirm parameter is false")
+            APIError.raise_error(
+                ErrorCode.INVALID_REQUEST,
+                "Bulk deletion requires explicit confirmation. Set 'confirm=true' to proceed."
+            )
+
+        # 2. Check for active jobs
+        has_active, active_job_ids = dg_util.has_active_jobs()
+        if has_active:
+            logger.warning(f"Bulk delete rejected: {len(active_job_ids)} active job(s) found")
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                f"Cannot perform bulk deletion while jobs are active. Active jobs: {', '.join(active_job_ids)}"
+            )
+
+        logger.info("No active jobs found, proceeding with bulk deletion")
+
+        # Track deletion progress
+        vdb_reset = False
+        files_deleted = False
+        errors = []
+
+        # 3. Reset vector database index FIRST
+        # This ensures documents are removed from search even if file deletion fails
+        try:
+            logger.info("Resetting vector database index...")
+            import common.db_utils as db
+            vector_store = db.get_vector_store()
+            vector_store.reset_index()
+            vdb_reset = True
+            logger.info("✓ Vector database index reset successfully")
+        except Exception as e:
+            error_msg = f"Failed to reset vector database: {str(e)}"
+            logger.error(f"✗ {error_msg}")
+            errors.append(error_msg)
+            # Don't raise here - continue with file deletion
+
+        # 4. Delete all document files LAST
+        try:
+            logger.info("Deleting all document files...")
+            deletion_stats = dg_util.bulk_delete_all_documents()
+            files_deleted = True
+
+            total_deleted = deletion_stats["metadata_files_deleted"] + deletion_stats["content_files_deleted"]
+            logger.info(
+                f"✓ Deleted {total_deleted} files "
+                f"({deletion_stats['metadata_files_deleted']} metadata, "
+                f"{deletion_stats['content_files_deleted']} content)"
+            )
+
+            # Add any file deletion errors to our error list
+            if deletion_stats["errors"]:
+                errors.extend(deletion_stats["errors"])
+
+        except Exception as e:
+            error_msg = f"Failed to delete document files: {str(e)}"
+            logger.error(f"✗ {error_msg}")
+            errors.append(error_msg)
+
+            # If VDB was reset but file deletion failed, report partial success
+            if vdb_reset:
+                logger.warning("Bulk deletion partially completed: VDB reset but file deletion failed")
+                APIError.raise_error(
+                    ErrorCode.INTERNAL_SERVER_ERROR,
+                    f"Partial deletion: vector database reset but file deletion failed. {error_msg}"
+                )
+            else:
+                APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, error_msg)
+
+        # 5. Success - both VDB and files deleted
+        if vdb_reset and files_deleted:
+            if errors:
+                logger.warning(f"✅ Bulk deletion completed with {len(errors)} warnings")
+            else:
+                logger.info("✅ Bulk deletion completed successfully")
+        elif errors:
+            # Should not reach here, but handle gracefully
+            error_summary = "; ".join(errors[:3])  # Limit to first 3 errors
+            logger.error(f"Bulk deletion completed with errors: {error_summary}")
+            APIError.raise_error(
+                ErrorCode.INTERNAL_SERVER_ERROR,
+                f"Bulk deletion completed with errors: {error_summary}"
+            )
+
+        return None
+
+    except HTTPException:
+        logger.error("HTTP error during bulk documents deletion")
+        # Re-raise HTTPException as-is
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during bulk deletion: {e}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(e))
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=4000)

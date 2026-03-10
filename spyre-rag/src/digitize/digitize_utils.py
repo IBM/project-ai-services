@@ -596,3 +596,119 @@ def cleanup_orphaned_files(docs_dir: Path = DOCS_DIR) -> dict:
         logger.warning(f"Cleanup completed with {len(cleanup_stats['errors'])} errors")
     
     return cleanup_stats
+
+
+def has_active_jobs(jobs_dir: Path = JOBS_DIR) -> tuple[bool, list[str]]:
+    """
+    Check if there are any active jobs (accepted or in_progress status).
+
+    Args:
+        jobs_dir: Directory containing job status files
+
+    Returns:
+        Tuple of (has_active, active_job_ids) where has_active is True if any active jobs exist
+    """
+    logger.debug("Checking for active jobs")
+
+    if not jobs_dir.exists():
+        logger.debug(f"Jobs directory {jobs_dir} does not exist")
+        return False, []
+
+    active_job_ids = []
+    job_files = list(jobs_dir.glob("*_status.json"))
+
+    for job_file in job_files:
+        try:
+            with open(job_file, "r") as f:
+                job_data = json.load(f)
+
+            job_status = job_data.get("status", "").lower()
+            if job_status in [JobStatus.ACCEPTED.value, JobStatus.IN_PROGRESS.value]:
+                job_id = job_data.get("job_id", job_file.stem.replace("_status", ""))
+                active_job_ids.append(job_id)
+                logger.debug(f"Found active job: {job_id} with status {job_status}")
+
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning(f"Error reading job file {job_file}: {e}")
+            continue
+
+    has_active = len(active_job_ids) > 0
+    if has_active:
+        logger.info(f"Found {len(active_job_ids)} active job(s): {active_job_ids}")
+    else:
+        logger.debug("No active jobs found")
+
+    return has_active, active_job_ids
+
+
+def bulk_delete_all_documents(docs_dir: Path = DOCS_DIR) -> dict:
+    """
+    Delete all documents from the system including:
+    1. All digitized content files from /var/cache/digitized
+    2. All document metadata files from /var/cache/docs
+
+    This function does NOT delete job status files or reset the vector database.
+    Those operations should be handled separately by the caller.
+
+    Args:
+        docs_dir: Directory containing document metadata files
+
+    Returns:
+        Dictionary with deletion statistics
+    """
+    logger.info("Starting bulk deletion of all documents...")
+
+    deletion_stats = {
+        "metadata_files_deleted": 0,
+        "content_files_deleted": 0,
+        "errors": []
+    }
+
+    # Step 1: Delete all digitized content files
+    if DIGITIZED_DOCS_DIR.exists():
+        logger.debug(f"Deleting content files from {DIGITIZED_DOCS_DIR}")
+        for extension in ["json", "md", "text"]:
+            content_files = list(DIGITIZED_DOCS_DIR.glob(f"*.{extension}"))
+            logger.debug(f"Found {len(content_files)} .{extension} files to delete")
+
+            for content_file in content_files:
+                try:
+                    content_file.unlink()
+                    deletion_stats["content_files_deleted"] += 1
+                    logger.debug(f"✓ Deleted content file: {content_file.name}")
+                except Exception as e:
+                    error_msg = f"Failed to delete content file {content_file.name}: {e}"
+                    logger.error(f"✗ {error_msg}")
+                    deletion_stats["errors"].append(error_msg)
+    else:
+        logger.warning(f"Digitized directory {DIGITIZED_DOCS_DIR} does not exist")
+
+    # Step 2: Delete all document metadata files
+    if docs_dir.exists():
+        logger.debug(f"Deleting metadata files from {docs_dir}")
+        metadata_files = list(docs_dir.glob("*_metadata.json"))
+        logger.debug(f"Found {len(metadata_files)} metadata files to delete")
+
+        for meta_file in metadata_files:
+            try:
+                meta_file.unlink()
+                deletion_stats["metadata_files_deleted"] += 1
+                logger.debug(f"✓ Deleted metadata file: {meta_file.name}")
+            except Exception as e:
+                error_msg = f"Failed to delete metadata file {meta_file.name}: {e}"
+                logger.error(f"✗ {error_msg}")
+                deletion_stats["errors"].append(error_msg)
+    else:
+        logger.warning(f"Documents directory {docs_dir} does not exist")
+
+    # Log summary
+    total_deleted = deletion_stats["metadata_files_deleted"] + deletion_stats["content_files_deleted"]
+    logger.info(
+        f"✅ Bulk deletion completed: {deletion_stats['metadata_files_deleted']} metadata files, "
+        f"{deletion_stats['content_files_deleted']} content files deleted (total: {total_deleted})"
+    )
+
+    if deletion_stats["errors"]:
+        logger.warning(f"Bulk deletion completed with {len(deletion_stats['errors'])} errors")
+
+    return deletion_stats

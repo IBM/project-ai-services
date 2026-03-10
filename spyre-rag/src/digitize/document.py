@@ -68,7 +68,7 @@ class DocumentMetadata(BaseModel):
         Returns:
             Dictionary representation of the document metadata
         """
-        return self.dict()
+        return self.model_dump()
 
     def save(self, docs_dir: Path = DOCS_DIR) -> Path:
         """

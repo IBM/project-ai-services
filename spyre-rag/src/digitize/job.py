@@ -97,7 +97,7 @@ class JobState(BaseModel):
         Returns:
             Dictionary representation of the job state
         """
-        return self.dict()
+        return self.model_dump()
 
     def save(self, jobs_dir: Path = config.JOBS_DIR) -> Path:
         """

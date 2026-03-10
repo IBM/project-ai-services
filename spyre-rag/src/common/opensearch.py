@@ -350,17 +350,29 @@ class OpensearchVectorStore(VectorStore):
         return exists
 
     def reset_index(self):
+        """
+        Clear all documents from the index while keeping the index structure intact.
+        Also clears local cache files.
+        """
         logger.debug(f"Starting reset_index operation for {self.index_name}")
 
         if self.client.indices.exists(index=self.index_name):
             try:
-                self.client.indices.delete(index=self.index_name)
-                logger.info(f"Index {self.index_name} deleted successfully")
+                # Delete all documents from the index using delete_by_query with match_all
+                delete_query = {"query": {"match_all": {}}}
+                response = self.client.delete_by_query(
+                    index=self.index_name,
+                    body=delete_query,
+                    params={"refresh": "true", "conflicts": "proceed"}
+                )
+
+                deleted_count = response.get("deleted", 0)
+                logger.info(f"Cleared {deleted_count} documents from index {self.index_name}")
             except Exception as e:
-                logger.error(f"Failed to delete index {self.index_name}: {e}")
+                logger.error(f"Failed to clear documents from index {self.index_name}: {e}")
                 raise
         else:
-            logger.info(f"Index {self.index_name} does not exist, nothing to delete")
+            logger.info(f"Index {self.index_name} does not exist, nothing to clear")
 
         # Clear local cache
         cache_pattern = os.path.join(LOCAL_CACHE_DIR, self.index_name+"*")
