@@ -8,6 +8,12 @@ backend:
   # @hidden
   log_level: "INFO"
 
+summarize:
+  # @hidden
+  image: icr.io/ai-services-cicd/rag:v0.0.35
+  # @hidden
+  log_level: "INFO"
+
 instruct:
   # @hidden
   image: registry.redhat.io/rhaiis/vllm-spyre-rhel9:3.2.5
