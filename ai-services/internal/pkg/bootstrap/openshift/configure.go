@@ -34,25 +34,35 @@ func (o *OpenshiftBootstrap) Configure() error {
 		return fmt.Errorf("failed to configure openshift cluster: %w", err)
 	}
 
-	// 1. Apply all yamls
+	// 1. Apply machine-config
 	s := spinner.New("Applying the configurations")
 	s.Start(client.Ctx)
 
-	// iterate through the directory and apply the YAMLs
-	if err := applyYamls(client); err != nil {
-		s.Fail("failed to apply YAMLs")
+	if err := applyYamlsFromFolder(client, "01-machine-config"); err != nil {
+		s.Fail("failed to apply the configurations")
 
-		return fmt.Errorf("error occurred while applying YAMLs: %w", err)
+		return fmt.Errorf("error occurred while applying the configurations: %w", err)
 	}
 	s.Stop("Configurations applied successfully")
 
-	// 2. Wait for all operators to be ready
+	// 2. Apply operators (namespaces, operatorgroups, subscriptions)
+	s = spinner.New("Applying operator configurations")
+	s.Start(client.Ctx)
+
+	if err := applyYamlsFromFolder(client, "02-operators"); err != nil {
+		s.Fail("failed to apply operator configurations")
+
+		return fmt.Errorf("error occurred while applying operator configurations: %w", err)
+	}
+	s.Stop("Operator configurations applied successfully")
+
+	// 3. Wait for all operators to be ready
 	if err := waitForAllOperators(client); err != nil {
 		return err
 	}
 
-	// 3. Configure Spyre cluster policy
-	s = spinner.New("Configuring Spyre Cluster Policy")
+	// 4. Apply operands (CRs) - Does SpyreClusterPolicy configure + applying operand yamls
+	s = spinner.New("Applying operand configurations")
 	s.Start(client.Ctx)
 
 	if err := configureSCP(client, s); err != nil {
@@ -60,9 +70,15 @@ func (o *OpenshiftBootstrap) Configure() error {
 
 		return fmt.Errorf("error occurred while configuring spyre cluster policy: %w", err)
 	}
-	s.Stop("Spyre Cluster Policy configured")
 
-	// 4. Wait for all CRs to be ready
+	if err := applyYamlsFromFolder(client, "03-operands"); err != nil {
+		s.Fail("failed to apply operand configurations")
+
+		return fmt.Errorf("error occurred while applying operand configurations: %w", err)
+	}
+	s.Stop("Operand configurations applied successfully")
+
+	// 5. Wait for all CRs to be ready
 	if err := waitForAllCRs(client); err != nil {
 		return err
 	}
@@ -83,7 +99,7 @@ func waitForAllOperators(client *openshift.OpenshiftClient) error {
 
 			return fmt.Errorf("%s not ready: %w", op.Label, err)
 		}
-		s.Stop(fmt.Sprintf("%s up and ready", op.Label))
+		s.Stop(fmt.Sprintf("  %s up and ready", op.Label))
 	}
 
 	return nil
@@ -100,7 +116,7 @@ func waitForAllCRs(client *openshift.OpenshiftClient) error {
 
 		return fmt.Errorf("SpyreClusterPolicy not ready: %w", err)
 	}
-	s.Stop("SpyreClusterPolicy is ready")
+	s.Stop("  SpyreClusterPolicy is ready")
 
 	// Wait for DSCInitialization
 	s = spinner.New("Waiting for DSCInitialization to be ready")
@@ -112,7 +128,7 @@ func waitForAllCRs(client *openshift.OpenshiftClient) error {
 
 		return fmt.Errorf("DSCInitialization not ready: %w", err)
 	}
-	s.Stop("DSCInitialization is ready")
+	s.Stop("  DSCInitialization is ready")
 
 	// Wait for DataScienceCluster
 	s = spinner.New("Waiting for DataScienceCluster to be ready")
@@ -124,26 +140,26 @@ func waitForAllCRs(client *openshift.OpenshiftClient) error {
 
 		return fmt.Errorf("DataScienceCluster not ready: %w", err)
 	}
-	s.Stop("DataScienceCluster is ready")
+	s.Stop("  DataScienceCluster is ready")
 
 	return nil
 }
 
-func applyYamls(client *openshift.OpenshiftClient) error {
+func applyYamlsFromFolder(client *openshift.OpenshiftClient, folder string) error {
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{
 		FS:      &assets.BootstrapFS,
-		Root:    "bootstrap",
+		Root:    "bootstrap/openshift/" + folder,
 		Runtime: types.RuntimeTypeOpenShift,
 	})
 
 	yamls, err := tp.LoadYamls()
 	if err != nil {
-		return fmt.Errorf("error loading yamls: %w", err)
+		return fmt.Errorf("error loading yamls from %s: %w", folder, err)
 	}
 
 	for _, yaml := range yamls {
 		if err := applyYaml(client, yaml); err != nil {
-			return fmt.Errorf("failed to apply YAML %s: %w", string(yaml), err)
+			return fmt.Errorf("failed to apply YAML from %s: %w", folder, err)
 		}
 	}
 
