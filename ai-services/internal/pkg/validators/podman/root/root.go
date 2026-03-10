@@ -39,7 +39,7 @@ func (r *RootRule) Message() string {
 }
 
 func (r *RootRule) Level() constants.ValidationLevel {
-	return constants.ValidationLevelError
+	return constants.ValidationLevelCritical
 }
 
 func (r *RootRule) Hint() string {

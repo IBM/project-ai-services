@@ -20,6 +20,7 @@ type ValidationLevel int
 const (
 	ValidationLevelWarning ValidationLevel = iota
 	ValidationLevelError
+	ValidationLevelCritical // Critical failures require immediate exit
 )
 
 // HealthStatus represents the type for Container Health status.
