@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List
+from typing import List, Optional, Dict, Any, Union
 from pydantic import BaseModel
 
 
@@ -38,3 +38,31 @@ class PaginationInfo(BaseModel):
 class JobsListResponse(BaseModel):
     pagination: PaginationInfo
     data: List[dict]
+
+
+class DocumentListItem(BaseModel):
+    """Minimal document information for list responses."""
+    id: str
+    name: str
+    type: str
+    status: str
+
+
+class DocumentDetailResponse(BaseModel):
+    """Detailed document information response."""
+    id: str
+    job_id: Optional[str] = None
+    name: str
+    type: str
+    status: str
+    output_format: str
+    submitted_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class DocumentContentResponse(BaseModel):
+    """Document content response with format information."""
+    result: Union[Dict[str, Any], str]
+    output_format: str
