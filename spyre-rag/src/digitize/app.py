@@ -298,7 +298,7 @@ async def delete_job(job_id: str):
 
 
 
-@app.get("/v1/documents")
+@app.get("/v1/documents", response_model=List[types.DocumentListItem])
 async def list_documents(
     limit: int = Query(20, ge=1, le=100, description="Number of records to return per page"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
@@ -350,15 +350,15 @@ async def list_documents(
             "data": [doc.model_dump() for doc in paginated_documents]
         }
 
-    except HTTPException:
-        logger.error("HTTP error in list documents")
+    except HTTPException as e:
+        logger.error(f"Failed to list documents, HTTP error: {e}")
         # Re-raise HTTPException as-is
         raise
     except Exception as e:
         logger.error(f"Unexpected error in list_documents: {e}", exc_info=True)
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(e))
 
-@app.get("/v1/documents/{doc_id}")
+@app.get("/v1/documents/{doc_id}", response_model=types.DocumentDetailResponse)
 async def get_document_metadata(doc_id: str, details: bool = Query(False, description="Include detailed metadata")):
     """
     Get details of a specific document by ID.
@@ -380,15 +380,15 @@ async def get_document_metadata(doc_id: str, details: bool = Query(False, descri
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse metadata file for document {doc_id}: {e}")
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to read document metadata")
-    except HTTPException:
-        logger.error("HTTP error in get document")
+    except HTTPException as e:
+        logger.error("Failed to get document by id {doc_id}, HTTP error: {e}")
         # Re-raise HTTPException as-is
         raise
     except Exception as e:
         logger.error(f"Unexpected error in get_document_metadata: {e}", exc_info=True)
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(e))
 
-@app.get("/v1/documents/{doc_id}/content")
+@app.get("/v1/documents/{doc_id}/content", response_model=types.DocumentContentResponse)
 async def get_document_content(doc_id: str):
     """
     Get the digitized content of a specific document.
@@ -412,8 +412,8 @@ async def get_document_content(doc_id: str):
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse content file for document {doc_id}: {e}")
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to read document content")
-    except HTTPException:
-        logger.error("HTTP error in get document content")
+    except HTTPException as e:
+        logger.error("Failed to get document content for id {doc_id}, HTTP error: {e}")
         # Re-raise HTTPException as-is
         raise
     except Exception as e:
