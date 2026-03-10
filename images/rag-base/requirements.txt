@@ -4,7 +4,6 @@ docling==2.60.1
 docling-parse==4.7.1
 fastapi[all]==0.121.0
 fastavro==1.12.1
-Flask==3.1.2
 grpcio==1.67.1
 hf-xet==1.1.1
 huggingface-hub==0.36.0

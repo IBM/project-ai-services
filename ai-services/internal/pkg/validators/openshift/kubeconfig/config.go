@@ -45,7 +45,7 @@ func (r *KubeconfigRule) Message() string {
 }
 
 func (r *KubeconfigRule) Level() constants.ValidationLevel {
-	return constants.ValidationLevelError
+	return constants.ValidationLevelCritical
 }
 
 func (r *KubeconfigRule) Hint() string {

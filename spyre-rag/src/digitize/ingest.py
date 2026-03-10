@@ -51,11 +51,11 @@ def ingest(directory_path, job_id=None, doc_id_dict=None):
         logger.info(f"Processing {file_cnt} document(s)")
 
         emb_model_dict, llm_model_dict, _ = get_model_endpoints()
+
         # Initialize/reset the database before processing any files
         vector_store = db.get_vector_store()
-        index_name = vector_store.index_name
-        
-        out_path = setup_cache_dir(index_name)
+
+        out_path = setup_digitized_doc_dir()
 
         start_time = time.time()
         combined_chunks, converted_pdf_stats = process_documents(

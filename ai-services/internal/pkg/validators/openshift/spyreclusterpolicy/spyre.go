@@ -50,17 +50,14 @@ func (r *SpyrePolicyRule) Verify() error {
 	})
 
 	return wait.PollUntilContextTimeout(client.Ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
-		if err := client.Client.Get(ctx, types.NamespacedName{
-			Name:      spyreName,
-			Namespace: constants.SpyreOperatorNamespace,
-		}, obj); err != nil {
+		if err := client.Client.Get(ctx, types.NamespacedName{Name: spyreName}, obj); err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.Infof("SpyreClusterPolicy %s not found yet, retrying...", spyreName, logger.VerbosityLevelDebug)
 
 				return false, nil
 			}
 
-			return false, fmt.Errorf("failed to find %s in namespace %s: %w", spyreName, constants.SpyreOperatorNamespace, err)
+			return false, fmt.Errorf("failed to find %s: %w", spyreName, err)
 		}
 
 		state, found, err := unstructured.NestedString(obj.Object, "status", "state")
@@ -91,5 +88,5 @@ func (r *SpyrePolicyRule) Level() constants.ValidationLevel {
 }
 
 func (r *SpyrePolicyRule) Hint() string {
-	return fmt.Sprintf("Run 'oc get spyreclusterpolicy -n %s' and ensure status.state is 'ready'.", constants.SpyreOperatorNamespace)
+	return "Run 'oc get spyreclusterpolicy and ensure status.state is 'ready'."
 }

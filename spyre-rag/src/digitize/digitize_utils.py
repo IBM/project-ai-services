@@ -6,6 +6,7 @@ from typing import List, Optional
 import uuid
 
 from common.misc_utils import get_logger
+from digitize.types import OutputFormat
 from digitize.config import DOCS_DIR, JOBS_DIR
 from digitize.status import (
     get_utc_timestamp,
@@ -30,7 +31,7 @@ def generate_uuid():
     return str(generated_uuid)
 
 
-def initialize_job_state(job_id: str, operation: str, documents_info: list[str]) -> dict[str, str]:
+def initialize_job_state(job_id: str, operation: str, output_format:OutputFormat, documents_info: list[str]) -> dict[str, str]:
     """
     Creates the job status file and individual document metadata files.
 
@@ -51,7 +52,7 @@ def initialize_job_state(job_id: str, operation: str, documents_info: list[str])
     for doc in documents_info:
         doc_id = doc_id_dict[doc]
         logger.debug(f"Generated document id {doc_id} for the file: {doc}")
-        create_document_metadata(doc, doc_id, job_id, operation, submitted_at, DOCS_DIR)
+        create_document_metadata(doc, doc_id, job_id, output_format, operation, submitted_at, DOCS_DIR)
 
     # Create and persist the job state file
     create_job_state(job_id, operation, submitted_at, doc_id_dict, documents_info, JOBS_DIR)
