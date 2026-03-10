@@ -12,20 +12,18 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
+// validationResult holds the outcome of a single rule execution.
+type validationResult struct {
+	err        error
+	shouldStop bool
+}
+
 // Validate runs all validation checks.
 func (p *BootstrapFactory) Validate(skip map[string]bool) error {
-	var validationErrors []error
 	ctx := context.Background()
+	rules := getRulesForRuntime()
 
-	var rules []validators.Rule
-
-	rt := vars.RuntimeFactory.GetRuntimeType()
-	switch rt {
-	case types.RuntimeTypePodman:
-		rules = validators.PodmanRegistry.Rules()
-	case types.RuntimeTypeOpenShift:
-		rules = validators.OpenshiftRegistry.Rules()
-	}
+	var validationErrors []error
 
 	for _, rule := range rules {
 		ruleName := rule.Name()
@@ -35,28 +33,16 @@ func (p *BootstrapFactory) Validate(skip map[string]bool) error {
 			continue
 		}
 
-		s := spinner.New("Validating " + ruleName + " ...")
-		s.Start(ctx)
-		err := rule.Verify()
+		result := executeRule(ctx, rule)
 
-		if err != nil {
-			s.Fail(err.Error())
-			s.StopWithHint(err.Error(), rule.Hint())
+		// Handle critical failures that require immediate exit
+		if result.shouldStop {
+			return result.err
+		}
 
-			// exit right away if user is not root as other checks require root privileges
-			if ruleName == "root" {
-				return fmt.Errorf("root privileges are required for validation")
-			}
-
-			switch rule.Level() {
-			case constants.ValidationLevelError:
-				s.Fail(err.Error())
-				validationErrors = append(validationErrors, fmt.Errorf("%s: %w", ruleName, err))
-			case constants.ValidationLevelWarning:
-				s.Stop("Warning: " + err.Error())
-			}
-		} else {
-			s.Stop(rule.Message())
+		// Collect non-critical errors
+		if result.err != nil {
+			validationErrors = append(validationErrors, result.err)
 		}
 	}
 
@@ -67,4 +53,53 @@ func (p *BootstrapFactory) Validate(skip map[string]bool) error {
 	logger.Infoln("All validations passed")
 
 	return nil
+}
+
+// getRulesForRuntime returns the appropriate validation rules based on the runtime type.
+func getRulesForRuntime() []validators.Rule {
+	rt := vars.RuntimeFactory.GetRuntimeType()
+	switch rt {
+	case types.RuntimeTypePodman:
+		return validators.PodmanRegistry.Rules()
+	case types.RuntimeTypeOpenShift:
+		return validators.OpenshiftRegistry.Rules()
+	default:
+		return nil
+	}
+}
+
+// executeRule runs a single validation rule, handles errors based on validation level,
+// and returns whether execution should continue or stop immediately.
+func executeRule(ctx context.Context, rule validators.Rule) validationResult {
+	ruleName := rule.Name()
+	s := spinner.New("Validating " + ruleName + " ...")
+	s.Start(ctx)
+
+	err := rule.Verify()
+	if err != nil {
+		s.StopWithHint(err.Error(), rule.Hint())
+
+		// Handle based on validation level
+		switch rule.Level() {
+		case constants.ValidationLevelCritical:
+			// Critical failures require immediate exit
+			return validationResult{
+				err:        fmt.Errorf("%s: %w", ruleName, err),
+				shouldStop: true,
+			}
+		case constants.ValidationLevelError:
+			// Error level
+			return validationResult{
+				err: fmt.Errorf("%s: %w", ruleName, err),
+			}
+		case constants.ValidationLevelWarning:
+			// Warning level
+			s.Stop("Warning: " + err.Error())
+
+			return validationResult{}
+		}
+	}
+	s.Stop(rule.Message())
+
+	return validationResult{}
 }

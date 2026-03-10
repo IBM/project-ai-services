@@ -18,8 +18,8 @@ from common.llm_utils import create_llm_session, summarize_and_classify_tables, 
 from common.misc_utils import get_logger, text_suffix, table_suffix, chunk_suffix
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.status import StatusManager
-from digitize.types import DocStatus, JobStatus
-from digitize import config
+from digitize.types import DocStatus, JobStatus, OutputFormat
+import digitize.config as config
 
 logging.getLogger('docling').setLevel(logging.CRITICAL)
 
@@ -236,7 +236,6 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
     Process documents for ingestion pipeline.
     Each request is treated as fresh.
     """
-
     # Partition files into light and heavy based on page count
     light_files, heavy_files = [], []
     for path in input_paths:
@@ -748,3 +747,32 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn):
     logger.debug(f"Combined chunk documents created")
 
     return combined_docs
+
+def convert_document_format(pdf_path: str, out_path: Path, doc_id: str, output_format: OutputFormat):
+    logger.info(f"Processing '{pdf_path}'")
+
+    out_dir = Path(out_path)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    t0 = time.time()
+
+    # Convert PDF → DoclingDocument
+    doc_obj = convert_doc(pdf_path).document
+
+    conversion_time = time.time() - t0
+
+    # Save requested format
+    if output_format == OutputFormat.JSON:
+        out_file = out_dir / f"{doc_id}.json"
+        doc_obj.save_as_json(str(out_file))
+
+    elif output_format == OutputFormat.MD:
+        out_file = out_dir / f"{doc_id}.md"
+        out_file.write_text(doc_obj.export_to_markdown(), encoding="utf-8")
+
+    elif output_format == OutputFormat.TEXT:
+        out_file = out_dir / f"{doc_id}.txt"
+        out_file.write_text(doc_obj.export_to_text(), encoding="utf-8")
+
+    logger.debug(f"Saved converted file to '{out_file}'")
+    return str(out_file), conversion_time

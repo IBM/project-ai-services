@@ -28,7 +28,7 @@ func (o *OpenshiftBootstrap) Configure() error {
 	logger.Infoln("Configuring OpenShift cluster")
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
-		return fmt.Errorf("failed to configure openshift cluster")
+		return fmt.Errorf("failed to configure openshift cluster: %w", err)
 	}
 
 	// 1. Apply all yamls
