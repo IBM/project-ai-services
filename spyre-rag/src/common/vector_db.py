@@ -76,6 +76,19 @@ class VectorStore(ABC):
         """
         pass
 
+    @abstractmethod
+    def delete_document_by_id(self, doc_id: str) -> int:
+        """
+        Delete all chunks associated with a specific document from the index.
+        
+        Args:
+            doc_id: The unique identifier of the document to delete
+            
+        Returns:
+            Number of chunks deleted
+        """
+        pass
+
 class VectorStoreNotReadyError(Exception):
     """Raised when the database is unreachable or initializing."""
     pass

@@ -41,6 +41,19 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Application starting up...")
     
+    # Run cleanup for orphaned files from incomplete deletions
+    try:
+        logger.info("Running orphaned files cleanup...")
+        cleanup_stats = dg_util.cleanup_orphaned_files()
+        total_cleaned = cleanup_stats["orphaned_metadata_removed"] + cleanup_stats["orphaned_content_removed"]
+        if total_cleaned > 0:
+            logger.info(f"Startup cleanup: Removed {total_cleaned} orphaned files")
+        if cleanup_stats["errors"]:
+            logger.warning(f"Startup cleanup completed with {len(cleanup_stats['errors'])} errors")
+    except Exception as e:
+        logger.error(f"Error during startup cleanup: {e}", exc_info=True)
+        # Don't fail startup if cleanup fails
+    
     yield
     
     # Shutdown
@@ -418,9 +431,124 @@ async def get_document_content(doc_id: str):
 
 @app.delete("/v1/documents/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(doc_id: str):
-    # 1. Check if part of active job (409 Conflict)
-    # 2. Remove from VDB and local cache
-    return
+    """
+    Delete a single document by ID.
+    
+    This endpoint implements a robust deletion strategy:
+    1. Checks if the document exists
+    2. Verifies the document is not part of any active job (in_progress)
+    3. Removes the document from the vector database (if ingested) - FIRST
+    4. Deletes all associated files from cache - LAST
+    
+    The order is important: VDB deletion is done first so that if file deletion fails,
+    the document is already removed from search results. The operation is idempotent -
+    calling it multiple times has the same effect as calling it once.
+    
+    Path Parameters:
+    - doc_id: Unique identifier of the document to delete
+    
+    Returns:
+    - 204 No Content on successful deletion
+    - 404 Not Found if document doesn't exist
+    - 409 Conflict if document is part of an active job
+    - 500 Internal Server Error on unexpected errors
+    """
+    try:
+        logger.info(f"Delete request received for document {doc_id}")
+        
+        # 1. Check if document exists by trying to get its metadata
+        doc_metadata = None
+        try:
+            doc_metadata = dg_util.get_document_by_id(doc_id, include_details=False)
+        except FileNotFoundError as e:
+            logger.warning(f"Document {doc_id} not found: {e}")
+            APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(e))
+        
+        # 2. Check if document is part of any active job
+        is_active, job_id = dg_util.is_document_in_active_job(doc_id)
+        if is_active:
+            logger.warning(f"Cannot delete document {doc_id}: part of active job {job_id}")
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                f"Document is part of active job '{job_id}' and cannot be deleted"
+            )
+        
+        # Track deletion progress for error reporting
+        vdb_deleted = False
+        files_deleted = False
+        errors = []
+        
+        # 3. Remove from vector database FIRST (if the document was ingested)
+        # This ensures the document is removed from search results even if file deletion fails
+        assert doc_metadata is not None
+        doc_status = doc_metadata.get("status", "").lower()
+        doc_type = doc_metadata.get("type", "").lower()
+        
+        if doc_type == types.OperationType.INGESTION.value and doc_status == types.DocStatus.COMPLETED.value:
+            try:
+                logger.debug(f"Attempting to remove document {doc_id} from vector database (type={doc_type}, status={doc_status})")
+                import common.db_utils as db
+                vector_store = db.get_vector_store()
+                deleted_chunks = vector_store.delete_document_by_id(doc_id)
+                vdb_deleted = True
+                if deleted_chunks > 0:
+                    logger.info(f"✓ Removed {deleted_chunks} chunks for document {doc_id} from vector database")
+                else:
+                    logger.info(f"✓ VDB deletion completed: 0 chunks found for document {doc_id} (may have been already deleted or ingestion incomplete)")
+            except Exception as e:
+                error_msg = f"Failed to remove document from vector database: {str(e)}"
+                logger.error(f"✗ {error_msg}")
+                errors.append(error_msg)
+                # Don't raise here - continue with file deletion
+        else:
+            logger.info(f"Skipping VDB deletion: document not ingested (type={doc_type}, status={doc_status})")
+            vdb_deleted = True  # Mark as "deleted" since there's nothing to delete
+        
+        # 4. Delete all associated files from cache LAST
+        try:
+            dg_util.delete_document_files(doc_id)
+            files_deleted = True
+            logger.info(f"✓ Successfully deleted all files for document {doc_id}")
+        except FileNotFoundError as e:
+            # Document metadata was found earlier but now missing - possible race condition
+            error_msg = f"Document files not found during deletion (possible race condition): {str(e)}"
+            logger.warning(error_msg)
+            errors.append(error_msg)
+            # If VDB was deleted, consider this a partial success
+            if vdb_deleted:
+                logger.info(f"Document {doc_id} partially deleted (VDB cleaned but files missing)")
+                return
+            else:
+                APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(e))
+        except Exception as e:
+            error_msg = f"Failed to delete document files: {str(e)}"
+            logger.error(f"✗ {error_msg}")
+            errors.append(error_msg)
+            # If VDB was deleted but file deletion failed, report partial success
+            if vdb_deleted:
+                logger.warning(f"Document {doc_id} partially deleted: VDB cleaned but file deletion failed")
+                APIError.raise_error(
+                    ErrorCode.INTERNAL_SERVER_ERROR,
+                    f"Partial deletion: document removed from search but files remain. {error_msg}"
+                )
+            else:
+                APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, error_msg)
+        
+        # 5. Success - both VDB and files deleted (or nothing to delete)
+        if vdb_deleted and files_deleted:
+            logger.info(f"✅ Document {doc_id} deleted successfully")
+        elif errors:
+            # Should not reach here, but log if it does
+            logger.warning(f"Delete completed with warnings: {'; '.join(errors)}")
+        
+        return
+        
+    except HTTPException:
+        # Re-raise HTTPException as-is
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error deleting document {doc_id}: {e}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(e))
 
 @app.delete("/v1/documents", status_code=status.HTTP_204_NO_CONTENT)
 async def bulk_delete_documents(confirm: bool = Query(...)):

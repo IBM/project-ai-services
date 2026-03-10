@@ -20,6 +20,7 @@ from digitize.status import (
 )
 from digitize.job import JobState, JobDocumentSummary, JobStats
 from digitize.document import DocumentMetadata
+from digitize.types import JobStatus
 
 logger = get_logger("digitize_utils")
 
@@ -367,3 +368,231 @@ def get_document_content(doc_id: str, docs_dir: Path = DOCS_DIR) -> DocumentCont
         result=content_data,
         output_format=output_format
     )
+
+def is_document_in_active_job(doc_id: str, jobs_dir: Path = JOBS_DIR) -> tuple[bool, Optional[str]]:
+    """
+    Check if a document is part of any active job (in_progress status).
+    
+    Args:
+        doc_id: Unique identifier of the document
+        jobs_dir: Directory containing job status files
+        
+    Returns:
+        Tuple of (is_active, job_id) where is_active is True if document is in an active job
+    """
+    logger.debug(f"Checking if document {doc_id} is part of an active job")
+    
+    if not jobs_dir.exists():
+        logger.debug(f"Jobs directory {jobs_dir} does not exist")
+        return False, None
+    
+    # Get all job status files
+    job_files = list(jobs_dir.glob("*_status.json"))
+    
+    for job_file in job_files:
+        try:
+            with open(job_file, "r") as f:
+                job_data = json.load(f)
+            
+            # Check if job is in progress
+            job_status = job_data.get("status", "").lower()
+            if job_status == JobStatus.IN_PROGRESS.value:
+                # Check if this document is part of this job
+                documents = job_data.get("documents", [])
+                for doc in documents:
+                    if doc.get("id") == doc_id:
+                        job_id = job_data.get("job_id")
+                        logger.info(f"Document {doc_id} is part of active job {job_id}")
+                        return True, job_id
+                        
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning(f"Error reading job file {job_file}: {e}")
+            continue
+    
+    logger.debug(f"Document {doc_id} is not part of any active job")
+    return False, None
+
+
+def delete_document_files(doc_id: str, docs_dir: Path = DOCS_DIR) -> None:
+    """
+    Delete all files associated with a document from the cache directories.
+    
+    Deletion order (important for crash recovery):
+    1. FIRST: Delete digitized content files (.json, .md, .text)
+    2. LAST: Delete metadata file
+    
+    This ensures that if a crash occurs during deletion, the metadata file
+    remains as a record, allowing for cleanup retry or manual intervention.
+    
+    Files deleted:
+    - /var/cache/digitized/<doc_id>.json
+    - /var/cache/digitized/<doc_id>.md
+    - /var/cache/digitized/<doc_id>.text
+    - /var/cache/docs/<doc_id>_metadata.json (LAST)
+    
+    Args:
+        doc_id: Unique identifier of the document
+        docs_dir: Directory containing document metadata files
+        
+    Raises:
+        FileNotFoundError: If document metadata file doesn't exist
+    """
+    logger.debug(f"Deleting files for document {doc_id}")
+    
+    # Check if document exists
+    meta_file = docs_dir / f"{doc_id}_metadata.json"
+    if not meta_file.exists():
+        logger.error(f"Document metadata file not found: {meta_file}")
+        raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
+    
+    files_deleted = []
+    files_not_found = []
+    content_deletion_errors = []
+    
+    # STEP 1: Delete digitized content files FIRST (json, md, text)
+    for extension in ["json", "md", "text"]:
+        content_file = DIGITIZED_DOCS_DIR / f"{doc_id}.{extension}"
+        if content_file.exists():
+            try:
+                content_file.unlink()
+                files_deleted.append(str(content_file))
+                logger.debug(f"✓ Deleted content file: {content_file}")
+            except Exception as e:
+                error_msg = f"Failed to delete content file {content_file}: {e}"
+                logger.warning(f"✗ {error_msg}")
+                content_deletion_errors.append(error_msg)
+        else:
+            files_not_found.append(str(content_file))
+    
+    # If content file deletion had errors, raise exception before deleting metadata
+    if content_deletion_errors:
+        error_summary = "; ".join(content_deletion_errors)
+        logger.error(f"Content file deletion failed, preserving metadata file: {error_summary}")
+        raise Exception(f"Failed to delete content files: {error_summary}")
+    
+    # STEP 2: Delete metadata file LAST (only after content files are successfully deleted)
+    try:
+        meta_file.unlink()
+        files_deleted.append(str(meta_file))
+        logger.debug(f"✓ Deleted metadata file: {meta_file}")
+    except Exception as e:
+        logger.error(f"✗ Failed to delete metadata file {meta_file}: {e}")
+        raise
+    
+    logger.info(f"✅ Deleted {len(files_deleted)} files for document {doc_id}")
+    if files_not_found:
+        logger.debug(f"Files not found (already deleted or never created): {files_not_found}")
+
+
+def cleanup_orphaned_files(docs_dir: Path = DOCS_DIR) -> dict:
+    """
+    Cleanup orphaned files from incomplete deletion operations.
+    
+    This function is designed to run at application startup to handle partial
+    deletions that may have occurred due to crashes. It identifies and cleans up:
+    
+    1. Orphaned digitized files (content exists but no metadata)
+    2. Orphaned metadata files (metadata exists but no content files)
+    
+    The cleanup strategy:
+    - If metadata exists but ALL content files are missing: Delete metadata (deletion was nearly complete)
+    - If content files exist but metadata is missing: Delete content files (orphaned content)
+    
+    Args:
+        docs_dir: Directory containing document metadata files
+        
+    Returns:
+        Dictionary with cleanup statistics
+    """
+    logger.info("Starting orphaned files cleanup...")
+    
+    cleanup_stats = {
+        "orphaned_metadata_removed": 0,
+        "orphaned_content_removed": 0,
+        "errors": []
+    }
+    
+    if not docs_dir.exists():
+        logger.warning(f"Documents directory {docs_dir} does not exist, skipping cleanup")
+        return cleanup_stats
+    
+    if not DIGITIZED_DOCS_DIR.exists():
+        logger.warning(f"Digitized directory {DIGITIZED_DOCS_DIR} does not exist, skipping cleanup")
+        return cleanup_stats
+    
+    # Get all metadata files
+    metadata_files = list(docs_dir.glob("*_metadata.json"))
+    logger.debug(f"Found {len(metadata_files)} metadata files to check")
+    
+    # Check each metadata file for orphaned content
+    for meta_file in metadata_files:
+        try:
+            # Extract doc_id from filename (format: <doc_id>_metadata.json)
+            doc_id = meta_file.stem.replace("_metadata", "")
+            
+            # Check if any content files exist
+            content_files_exist = []
+            for extension in ["json", "md", "text"]:
+                content_file = DIGITIZED_DOCS_DIR / f"{doc_id}.{extension}"
+                if content_file.exists():
+                    content_files_exist.append(str(content_file))
+            
+            # If metadata exists but NO content files exist, it's likely a partial deletion
+            # Delete the orphaned metadata file
+            if not content_files_exist:
+                try:
+                    meta_file.unlink()
+                    cleanup_stats["orphaned_metadata_removed"] += 1
+                    logger.info(f"✓ Removed orphaned metadata file: {meta_file.name}")
+                except Exception as e:
+                    error_msg = f"Failed to remove orphaned metadata {meta_file.name}: {e}"
+                    logger.error(f"✗ {error_msg}")
+                    cleanup_stats["errors"].append(error_msg)
+                    
+        except Exception as e:
+            error_msg = f"Error processing metadata file {meta_file.name}: {e}"
+            logger.error(error_msg)
+            cleanup_stats["errors"].append(error_msg)
+    
+    # Check for orphaned content files (content exists but no metadata)
+    for extension in ["json", "md", "text"]:
+        content_files = list(DIGITIZED_DOCS_DIR.glob(f"*.{extension}"))
+        
+        for content_file in content_files:
+            try:
+                # Extract doc_id from filename
+                doc_id = content_file.stem
+                
+                # Check if metadata file exists
+                meta_file = docs_dir / f"{doc_id}_metadata.json"
+                
+                if not meta_file.exists():
+                    # Orphaned content file - delete it
+                    try:
+                        content_file.unlink()
+                        cleanup_stats["orphaned_content_removed"] += 1
+                        logger.info(f"✓ Removed orphaned content file: {content_file.name}")
+                    except Exception as e:
+                        error_msg = f"Failed to remove orphaned content {content_file.name}: {e}"
+                        logger.error(f"✗ {error_msg}")
+                        cleanup_stats["errors"].append(error_msg)
+                        
+            except Exception as e:
+                error_msg = f"Error processing content file {content_file.name}: {e}"
+                logger.error(error_msg)
+                cleanup_stats["errors"].append(error_msg)
+    
+    # Log summary
+    total_cleaned = cleanup_stats["orphaned_metadata_removed"] + cleanup_stats["orphaned_content_removed"]
+    if total_cleaned > 0:
+        logger.info(
+            f"✅ Cleanup completed: {cleanup_stats['orphaned_metadata_removed']} metadata files, "
+            f"{cleanup_stats['orphaned_content_removed']} content files removed"
+        )
+    else:
+        logger.info("✅ No orphaned files found")
+    
+    if cleanup_stats["errors"]:
+        logger.warning(f"Cleanup completed with {len(cleanup_stats['errors'])} errors")
+    
+    return cleanup_stats
