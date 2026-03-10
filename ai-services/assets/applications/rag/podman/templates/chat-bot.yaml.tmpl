@@ -38,7 +38,16 @@ spec:
       command:
         - "/var/venv/bin/python"
         - "-m"
-        - "retrieve.backend_server"
+        - "uvicorn"
+        - "retrieve.app:app"
+        - "--host"
+        - "0.0.0.0"
+        - "--port"
+        - "5000"
+        - "--loop"
+        - "uvloop"
+        - "--http"
+        - "httptools"
       env:
         - name: EMB_ENDPOINT
           value: "http://{{ .AppName  }}--vllm-server:8001"

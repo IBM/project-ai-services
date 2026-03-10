@@ -174,7 +174,7 @@ sequenceDiagram
 
 ## 5. Rate Limiting
 
-- Rate limiting for this endpoint will be done similar to how it's done for retrieve.backend_server currently
+- Rate limiting for this endpoint will be done similar to how it's done for retrieve.app currently
 - Since we want to support only upto 32 connections to the vLLM at any given time, `max_concurrent_requests=32`,
 - Use `concurrency_limiter = BoundedSemaphore(max_concurrent_requests)` and acquire a lock on it whenever we are serving a request.
 - As soon as the response is returned, release the lock and return the semaphore back to the pool.

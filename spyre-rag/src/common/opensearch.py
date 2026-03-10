@@ -334,7 +334,7 @@ class OpensearchVectorStore(VectorStore):
         logger.debug(f"Search operation completed successfully with {len(results)} results")
         return results
 
-    def check_db_populated(self, emb_model, emb_endpoint, max_tokens):
+    def check_db_populated(self):
         logger.debug(f"Checking if database is populated for index {self.index_name}")
 
         exists = self.client.indices.exists(index=self.index_name)

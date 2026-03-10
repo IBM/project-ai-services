@@ -66,6 +66,6 @@ class VectorStore(ABC):
         """
         pass
 
-class VectorStoreNotReadyError():
+class VectorStoreNotReadyError(Exception):
     """Raised when the database is unreachable or initializing."""
     pass
