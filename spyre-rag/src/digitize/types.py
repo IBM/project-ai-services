@@ -1,4 +1,6 @@
 from enum import Enum
+from typing import List
+from pydantic import BaseModel
 
 
 class OutputFormat(str, Enum):
@@ -35,3 +37,12 @@ class SortBy(str, Enum):
 class SortOrder(str, Enum):
     ASC = "asc"
     DESC = "desc"
+
+class PaginationInfo(BaseModel):
+    total: int
+    limit: int
+    offset: int
+
+class JobsListResponse(BaseModel):
+    pagination: PaginationInfo
+    data: List[dict]

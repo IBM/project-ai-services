@@ -12,6 +12,8 @@ from digitize.status import (
     create_document_metadata,
     create_job_state
 )
+from digitize.job import JobState, JobDocumentSummary, JobStats
+from digitize.types import JobStatus
 
 logger = get_logger("digitize_utils")
 
@@ -94,27 +96,88 @@ async def stage_upload_files(job_id: str, files: List[str], staging_dir: str, fi
             logger.error(f"Unexpected error while staging {filename} for job {job_id}: {e}")
             raise
 
-def read_job_file(file_path: Path) -> Optional[dict]:
+def read_job_file(file_path: Path) -> Optional[JobState]:
     """
-    Read and parse a single job status JSON file.
+    Read and parse a single job status JSON file into a JobState object.
 
     Args:
         file_path: Path to the job status JSON file.
 
     Returns:
-        Parsed job data dictionary, or None if the file cannot be read/parsed.
+        JobState object, or None if the file cannot be read/parsed.
     """
     try:
         with open(file_path, "r") as f:
-            return json.load(f)
+            data = json.load(f)
+        
+        # Validate required fields
+        required_fields = ["job_id", "operation", "status", "submitted_at"]
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            logger.warning(f"Job file {file_path.name} missing required fields: {missing_fields}")
+            return None
+        
+        # Parse documents list
+        documents = []
+        if "documents" in data and isinstance(data["documents"], list):
+            for doc_data in data["documents"]:
+                try:
+                    if isinstance(doc_data, dict) and all(k in doc_data for k in ["id", "name", "status"]):
+                        documents.append(JobDocumentSummary(
+                            id=doc_data["id"],
+                            name=doc_data["name"],
+                            status=doc_data["status"]
+                        ))
+                except Exception as e:
+                    logger.warning(f"Failed to parse document in {file_path.name}: {e}")
+                    continue
+        
+        # Parse stats
+        stats = JobStats()
+        if "stats" in data and isinstance(data["stats"], dict):
+            stats_data = data["stats"]
+            stats = JobStats(
+                total_documents=stats_data.get("total_documents", 0),
+                completed=stats_data.get("completed", 0),
+                failed=stats_data.get("failed", 0),
+                in_progress=stats_data.get("in_progress", 0)
+            )
+        
+        # Parse status enum
+        try:
+            job_status = JobStatus(data["status"])
+        except ValueError:
+            logger.warning(f"Invalid status '{data['status']}' in {file_path.name}, defaulting to ACCEPTED")
+            job_status = JobStatus.ACCEPTED
+        
+        # Create JobState object
+        job_state = JobState(
+            job_id=data["job_id"],
+            operation=data["operation"],
+            status=job_status,
+            submitted_at=data["submitted_at"],
+            completed_at=data.get("completed_at"),
+            documents=documents,
+            stats=stats,
+            error=data.get("error")
+        )
+        
+        return job_state
+        
     except json.JSONDecodeError as e:
         logger.warning(f"Failed to parse job file {file_path.name}: {e}")
         return None
     except (IOError, OSError) as e:
         logger.warning(f"Failed to read job file {file_path.name}: {e}")
         return None
+    except KeyError as e:
+        logger.warning(f"Missing required field in job file {file_path.name}: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"Unexpected error parsing job file {file_path.name}: {e}")
+        return None
 
-def read_all_job_files() -> List[dict]:
+def read_all_job_files() -> List[JobState]:
     """
     Read all job status JSON files from the jobs directory.
 
@@ -122,7 +185,7 @@ def read_all_job_files() -> List[dict]:
         jobs_dir: Path to the directory containing job status files.
 
     Returns:
-        List of parsed job data dictionaries. Files that fail to parse are skipped.
+        List of JobState objects. Files that fail to parse are skipped.
     """
 
     if not JOBS_DIR.exists() or not JOBS_DIR.is_dir():
@@ -132,8 +195,8 @@ def read_all_job_files() -> List[dict]:
     for file_path in JOBS_DIR.glob("*_status.json"):
         if not file_path.is_file():
             continue
-        job_data = read_job_file(file_path)
-        if job_data is not None:
-            jobs.append(job_data)
+        job_state = read_job_file(file_path)
+        if job_state is not None:
+            jobs.append(job_state)
 
     return jobs

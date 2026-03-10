@@ -172,7 +172,7 @@ async def digitize_document(
         logger.error(f"Unexpected error in digitize_document: {e}")
         APIError.raise_error("INTERNAL_SERVER_ERROR", str(e))
 
-@app.get("/v1/jobs")
+@app.get("/v1/jobs", response_model=types.JobsListResponse)
 async def get_all_jobs(
     latest: bool = Query(False, description="Return only the latest job"),
     limit: int = Query(20, ge=1, le=100, description="Number of records per page"),
@@ -184,48 +184,45 @@ async def get_all_jobs(
 ):
     """Retrieve information about all submitted jobs with pagination and filtering."""
     try:
-
-        # Read and parse all job status files as JobState objects
+        # Read all job status files
         all_jobs = dg_util.read_all_job_files()
 
-        # Filter by status if provided
-        if status is not None:
-            all_jobs = [j for j in all_jobs if j.status == status]
+        # Apply filters in single pass
+        filtered_jobs = [
+            j for j in all_jobs
+            if (status is None or j.status == status) and
+               (operation is None or j.operation == operation.value)
+        ]
 
-        # Filter by operation if provided
-        if operation is not None:
-            all_jobs = [j for j in all_jobs if j.operation == operation.value]
-
-        # Sort by the requested field and direction
+        # Sort by requested field
         reverse = sort_order == types.SortOrder.DESC
-        if sort_by == types.SortBy.SUBMITTED_AT:
-            all_jobs.sort(key=lambda j: j.submitted_at, reverse=reverse)
+        filtered_jobs = sorted(
+            filtered_jobs,
+            key=lambda j: j.submitted_at,
+            reverse=reverse
+        )
 
-        # If latest=true, return only the most recent job
-        if latest and all_jobs:
-            all_jobs = [all_jobs[0]]
+        # Handle latest flag before pagination
+        if latest and filtered_jobs:
+            filtered_jobs = [filtered_jobs[0]]
 
-        total = len(all_jobs)
+        total = len(filtered_jobs)
 
         # Apply pagination
-        paginated_jobs = all_jobs[offset : offset + limit]
+        paginated_jobs = filtered_jobs[offset : offset + limit]
 
-        # Convert JobState objects to JSON-compatible dictionaries
+        # Convert to response format
         jobs_data = [job.to_dict() for job in paginated_jobs]
 
-        return {
-            "pagination": {
-                "total": total,
-                "limit": limit,
-                "offset": offset,
-            },
-            "data": jobs_data,
-        }
+        return types.JobsListResponse(
+            pagination=types.PaginationInfo(total=total, limit=limit, offset=offset),
+            data=jobs_data
+        )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to retrieve jobs: {e}", exc_info=True)
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to retrieve job information")
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to retrieve jobs")
 
 
 @app.get("/v1/jobs/{job_id}")
@@ -252,6 +249,36 @@ async def get_job_by_id(job_id: str):
     except Exception as e:
         logger.error(f"Failed to retrieve job {job_id}: {e}", exc_info=True)
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to retrieve job information for '{job_id}'")
+
+@app.delete("/v1/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_job(job_id: str):
+    """Deletes a job status file. Does not touch associated document metadata."""
+    try:
+        job_status_file = JOBS_DIR / f"{job_id}_status.json"
+
+        if not job_status_file.exists():
+            APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"No job found with id '{job_id}'")
+
+        # Reject deletion if the job is still active
+        job_state = dg_util.read_job_file(job_status_file)
+        if job_state is None:
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to read job status for '{job_id}'")
+            return  # This line should never be reached, but helps type checker
+
+        # Compare with JobStatus enum
+        if job_state.status in (types.JobStatus.ACCEPTED, types.JobStatus.IN_PROGRESS):
+            APIError.raise_error(ErrorCode.RESOURCE_LOCKED, f"Job '{job_id}' is still active and cannot be deleted")
+
+        # Delete the job status file (missing_ok=True handles race conditions)
+        job_status_file.unlink(missing_ok=True)
+        logger.info(f"Deleted job status file for job '{job_id}'")
+        return
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete job {job_id}: {e}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to delete job '{job_id}'")
+
 
 
 @app.get("/v1/documents")
