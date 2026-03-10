@@ -49,6 +49,7 @@ def create_document_metadata(
     doc_name: str,
     doc_id: str,
     job_id: str,
+    output_format: OutputFormat,
     operation: str,
     submitted_at: str,
     docs_dir: Path = config.DOCS_DIR
@@ -72,7 +73,7 @@ def create_document_metadata(
         name=doc_name,
         type=operation,
         status=DocStatus.ACCEPTED,
-        output_format=OutputFormat.JSON,
+        output_format=output_format,
         submitted_at=submitted_at,
         completed_at=None,
         error=None,
