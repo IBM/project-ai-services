@@ -83,7 +83,7 @@ class DocumentMetadata(BaseModel):
         docs_dir.mkdir(parents=True, exist_ok=True)
         meta_path = docs_dir / f"{self.id}_metadata.json"
         with open(meta_path, "w", encoding="utf-8") as f:
-            f.write(self.json(indent=4))
+            f.write(self.model_dump_json(indent=4))
         return meta_path
 
     def job_summary(self) -> dict:

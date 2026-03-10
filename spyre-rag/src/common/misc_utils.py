@@ -24,7 +24,7 @@ def get_request_id() -> str:
 
 LOG_LEVEL = logging.INFO
 
-LOCAL_CACHE_DIR = "/var/cache"
+LOCAL_CACHE_DIR = os.getenv("LOCAL_CACHE_DIR", "/var/cache")
 chunk_suffix = "_clean_chunk.json"
 text_suffix = "_clean_text.json"
 table_suffix = "_tables.json"
