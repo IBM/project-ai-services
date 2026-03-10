@@ -19,3 +19,57 @@
     padding: 2rem;
   }
 }
+.deleteConfirmation {
+  margin-top: 16px;
+  font-weight: bolder;
+  border: none;
+}
+:global(
+  .cds--checkbox-wrapper
+    input:focus:not(:focus-visible)
+    + .cds--checkbox-label::before
+) {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+:global(.cds--btn:focus:not(:focus-visible)) {
+  outline: none !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+.deleteButton {
+  transition: background-color 0.2s ease;
+}
+
+.selectedDelete {
+  background-color: #d6d7d8 !important;
+}
+
+.customToast {
+  :global(.cds--actionable-notification__action-button) {
+    border: 1px solid white !important;
+    color: white !important;
+    font-weight: lighter;
+    background-color: transparent !important;
+
+    &:hover {
+      border: 1px solid white !important;
+      color: white !important;
+      background-color: transparent !important;
+    }
+
+    &:focus {
+      border: 1px solid white !important;
+      color: white !important;
+      background-color: transparent !important;
+      outline-offset: 2px !important;
+    }
+
+    &:active {
+      border: 1px solid white !important;
+      color: white !important;
+      background-color: rgba(90, 90, 90, 0.486) !important;
+    }
+  }
+}

@@ -14,7 +14,6 @@ metadata:
   namespace: openshift-secondary-scheduler-operator
 spec:
   channel: stable
-  installPlanApproval: Automatic
   name: openshift-secondary-scheduler-operator
   source: redhat-operators
   sourceNamespace: openshift-marketplace

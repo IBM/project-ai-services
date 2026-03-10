@@ -319,8 +319,85 @@ Now using this solution, and granite-278m-multilingual-embedding model as the em
 | German   | 3            | 10               |  |
 | English  | 1            | 9                | 96–98%             |
 
+---
 
-## 7. Conclusion and Final Architecture
+## 7. Experimentation 3: Use lingua Library as language detection strategy
+In this experiment, we compare two prompt strategies for handling multilingual queries in the RAG pipeline:
+
+1. **Single Prompt (Automatic LLM-Based Language Detection)** — The approach selected in the experiment above, where a single multilingual prompt instructs the LLM to silently detect the query language and respond accordingly.
+2. **Multiple Prompts (External Language Detection via [`lingua`](https://pypi.org/project/lingua-language-detector/) Library)** — An alternative approach where an external library (`lingua`) detects the query language first, and a language-specific prompt is then selected and passed to the LLM.
+
+The goal is to determine which strategy yields better **answer correctness** and **language relevance** across all corpus–query language combinations.
+
+The English prompt in the multi prompt strategy is the old prompt. The German prompt is as follows:
+```text
+"Sie erhalten: 
+1. **Einen kurzen Kontexttext** mit sachlichen Informationen.\n
+2. **Die Frage eines Nutzers**, der um Klärung oder Rat bittet.\n
+3. **Geben Sie eine prägnante und aussagekräftige Antwort, die sich strikt auf den gegebenen Kontext stützt.\n\n
+Die Antwort muss auf Deutsch verfasst sein. Die Antwort sollte korrekt, leicht verständlich und kontextbezogen sein
+sowie eine klare Begründung enthalten.\nWenn der Kontext nicht genügend Informationen liefert, antworten Sie mit Ihrem 
+Allgemeinwissen.\n\nKontext:{context}\n\nFrage:{question}\n\nAntwort:"
+```
+> **Note:** All tests under this experiment were conducted using the **Granite-278m-multilingual embedding model** (as selected in the main report) and **OpenSearch** as the vector database.
+> The tests were conducted using the in-house e2e golden dataset validation tests and the model used ofr LLMaJ was **Qwen2.5-7B-Instruct**.
+
+---
+
+### 1. Evaluation Setup
+
+#### Metrics
+
+Each test case was evaluated on two dimensions:
+
+- **Correctness (%)** — How closely the model's answer matches the golden dataset answer.
+- **Language Relevance (%)** — Whether the model responded in the same language as the golden answer (i.e., the expected query language).
+
+#### Test Matrix
+
+We evaluated four use cases representing all combinations of query language and corpus language:
+
+| Use Case                  | Description                                      |
+|---------------------------|--------------------------------------------------|
+| English on English Corpus | English queries against English-language documents |
+| German on English Corpus  | German queries against English-language documents  |
+| English on German Corpus  | English queries against German-language documents  |
+| German on German Corpus   | German queries against German-language documents   |
+
+---
+
+### 2. Results
+
+### Evaluation Table
+
+| Use Case                  | Single Prompt (Correctness, Lang Relevance) | Multiple Prompts (Correctness, Lang Relevance) |
+|---------------------------|---------------------------------------------|------------------------------------------------|
+| English on English Corpus | 84.00%, 100%                                | 84.00%, 100%                                   |
+| German on English Corpus  | 84.00%, 78%                                 | 84.00%, 100%                                   |
+| English on German Corpus  | 70.59%, 100%                                | 73.53%, 100%                                   |
+| German on German Corpus   | 67.65%, 10.3%                               | 72.06%, 100%                                   |
+
+---
+
+### 3. Analysis
+
+#### 3.1 Language Relevance
+
+The most significant finding is the **language relevance gap** between the two approaches:
+
+- The **multiple prompts** strategy achieved **100% language relevance across all four use cases**.
+- The **single prompt** strategy suffered severe language relevance degradation when German queries were involved:
+  - **German on English Corpus**: Only 78% language relevance (22% of responses defaulted to English).
+  - **German on German Corpus**: Only 10.3% language relevance — the LLM responded in English for nearly 90% of German queries.
+
+---
+
+#### 3.2 Answer Correctness
+
+Beyond language relevance, the **multiple prompts** strategy also showed **modest correctness improvements** on the German corpus.
+
+
+## 8. Conclusion and Final Architecture
 
 ### Embedding Model
 
@@ -331,25 +408,81 @@ Used for cross-lingual semantic retrieval.
 
 ### Language Handling
 
-✅ **Single multilingual LLM prompt**  
-Used for implicit language detection and response generation.
+**The multiple prompts strategy (external language detection via `lingua` + language-specific prompts) is selected** as the production approach for multilingual support.
+
+### Rationale
+
+- **Language relevance**: 100% across all use cases vs. severe degradation (as low as 10.3%) with the single prompt approach.
+- **Correctness**: Equal or better in all cases, with up to +4.41% improvement on German corpus queries.
+- **Robustness**: Decoupling language detection from the LLM generation step eliminates a fragile dependency on the model's ability to follow meta-instructions under competing objectives.
+- **Max Tokens**: This way, we can also control the max tokens number separately for each language according to their unique token-to-word ratios.
+
+### Recommended Implementation:
+
+```commandline
+SUPPORTED_LANGUAGES = [
+    Language.ENGLISH,
+    Language.GERMAN
+]
+
+def setup_lang_detector():
+    """Call once at app startup, before serving requests."""
+    global _detector
+    _detector = (
+        LanguageDetectorBuilder
+        .from_languages(*SUPPORTED_LANGUAGES)
+        .with_preloaded_language_models()
+        .build()
+    )
+    
+ # at the time of startup 
+ init_detector()
+    
+def detect_language(text: str, min_confidence: float = 0.5) -> str:
+    """
+    Detect the language of a text string.
+
+    Returns a language code if confidence >= min_confidence, else None.
+    Thread-safe — can be called from any endpoint or background task.
+    min_confidence is 0.5 because number of supported languages are 2.
+    Hence the total confidence of 1.0 is distributed over 2 languages.
+    """
+    if not _detector:
+        raise RuntimeError("Lingua detector not initialized. Call init_detector() at startup.")
+
+    confidences = _detector.compute_language_confidence_values(text)
+    if confidences and confidences[0].value >= min_confidence:
+        top = confidences[0]
+        return top.language.iso_code_639_1.name
+    return "EN"
+```
+### Trade-off Acknowledged
+
+- The multiple prompts approach introduces an additional dependency (`lingua` library) and requires maintaining separate prompt templates per language.
+- There will be an additional delay of 0.045s for every query due to language detection.
+- However, this overhead is minimal compared to the significant quality and reliability gains observed.
 
 ---
 
 ### Final Architecture
 
+
 ```text
 User Query
+    ↓
+lingua Library → Detect Language
+    ↓
+Select Language-Specific Prompt (EN / DE)
     ↓
 Granite-278m-multilingual Embedding
     ↓
 OpenSearch (Vector Retrieval)
     ↓
-Retrieved Context
+Retrieved Context + Language-Specific Prompt
     ↓
 Granite-Instruct LLM
-    • Detect language internally
-    • Respond in same language
     ↓
-Final Response
+Final Response (in detected language)
 ```
+
+---

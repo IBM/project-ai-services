@@ -1,8 +1,12 @@
 import logging
 import os
 import argparse
+from glob import glob
+from pathlib import Path
 
+from digitize.digitize_utils import *
 from common.misc_utils import *
+from digitize.types import *
 
 common_parser = argparse.ArgumentParser(add_help=False)
 common_parser.add_argument("--debug", action="store_true", help="Enable debug logging")
@@ -35,14 +39,33 @@ logger = get_logger("Ingest")
 
 def main():
     if command_args.command == "ingest":
-        converted_pdf_stats = ingest(command_args.path)
+        job_id = generate_uuid()
+        
+        # Loop through all documents in the path and generate UUIDs
+        doc_id_dict = {}
+        
+        # Use Path to list all files recursively and store paths as strings
+        base_path = Path(command_args.path)
+        filenames = [path.name for path in base_path.rglob('*') if path.is_file()]
+            
+        doc_id_dict = initialize_job_state(job_id, OperationType.INGESTION, OutputFormat.JSON, filenames)
+
+        
+        logger.info(f"Generated UUIDs for {len(doc_id_dict)} document(s)")
+        
+        # Pass doc_id_dict as the last argument to ingest
+        converted_pdf_stats = ingest(command_args.path, job_id, doc_id_dict)
+
+        # Check if ingestion failed
+        if converted_pdf_stats is None:
+            logger.error("Ingestion failed")
+            return
 
         # Print detailed stats
         total_pages = sum(converted_pdf_stats[file]["page_count"] for file in converted_pdf_stats)
         if not total_pages:
             # No pages were processed, ingestion must have done using cached data.
             return
-    
         print("Stats of processed PDFs:")
         max_file_len = max(len(key) for key in converted_pdf_stats.keys())
         total_tables = sum(converted_pdf_stats[file]["table_count"] for file in converted_pdf_stats)

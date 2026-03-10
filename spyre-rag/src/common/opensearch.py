@@ -11,11 +11,13 @@ from common.vector_db import VectorStore
 
 logger = get_logger("OpenSearch")
 
-def generate_chunk_id(filename: str, page_content: str, index: int) -> int:
+def generate_chunk_id(doc_id: str, page_content: str) -> np.int64:
     """
     Generate a unique, deterministic chunk ID based on filename, content, and index.
     """
-    base = f"{filename}-{index}-{page_content}"
+    # Using doc_id (UUID) is safer than filename to prevent collisions
+    # between different users uploading 'document.pdf'
+    base = f"{doc_id}||{page_content}"
     hash_digest = hashlib.md5(base.encode("utf-8")).hexdigest()
     chunk_int = int(hash_digest[:16], 16)    # Convert first 64 bits to int
     chunk_id = chunk_int % (2**63)           # Fit into signed 64-bit range
@@ -26,11 +28,15 @@ class OpensearchNotReadyError(Exception):
 
 class OpensearchVectorStore(VectorStore):
     def __init__(self):
+        logger.debug("Initializing OpensearchVectorStore")
+
         self.host = os.getenv("OPENSEARCH_HOST")
         self.port = os.getenv("OPENSEARCH_PORT")
         self.db_prefix = os.getenv("OPENSEARCH_DB_PREFIX", "rag").lower()
         i_name = os.getenv("OPENSEARCH_INDEX_NAME", "default")
         self.index_name = self._generate_index_name(i_name.lower())
+
+        logger.debug(f"Connecting to OpenSearch at {self.host}:{self.port}, index: {self.index_name}")
 
         self.client = OpenSearch(
             hosts=[{'host': self.host, 'port': self.port}],
@@ -40,6 +46,8 @@ class OpensearchVectorStore(VectorStore):
             verify_certs=False,
             ssl_show_warn=False
         )
+
+        logger.debug("OpenSearch client initialized successfully")
         self._create_pipeline()
 
     def _generate_index_name(self, name):
@@ -47,6 +55,8 @@ class OpensearchVectorStore(VectorStore):
         return f"{self.db_prefix}_{hash_part}"
 
     def _create_pipeline(self):
+        logger.debug("Creating hybrid search pipeline")
+
         pipeline_body = {
             "description": "Post-processor for hybrid search",
             "phase_results_processors": [
@@ -65,13 +75,17 @@ class OpensearchVectorStore(VectorStore):
         }
         try:
             self.client.search_pipeline.put(id="hybrid_pipeline", body=pipeline_body)
+            logger.debug("Hybrid search pipeline created successfully")
         except Exception as e:
             logger.error(f"Failed to create hybrid search pipeline: {e}")
 
     def _setup_index(self, dim):
+        logger.debug(f"Setting up index {self.index_name} with dimension {dim}")
+
         if self.client.indices.exists(index=self.index_name):
-            logger.info(f"Index {self.index_name} already present in vectorstore")
             return
+
+        logger.debug(f"Creating new index {self.index_name}")
 
         # index body: setting and mappings
         index_body = {
@@ -102,6 +116,7 @@ class OpensearchVectorStore(VectorStore):
                         "analyzer": "standard"
                     },
                     "filename": {"type": "keyword"},
+                    "doc_id": { "type": "keyword" },
                     "type": {"type": "keyword"},
                     "source": {"type": "keyword"},
                     "language": {"type": "keyword"}
@@ -109,26 +124,35 @@ class OpensearchVectorStore(VectorStore):
             }
         }
         # Create the Index
-        self.client.indices.create(index=self.index_name, body=index_body)
+        try:
+            self.client.indices.create(index=self.index_name, body=index_body)
+            logger.debug(f"Index {self.index_name} created successfully with {dim} dimensions")
+        except Exception as e:
+            logger.error(f"Failed to create index {self.index_name}: {e}")
+            raise
 
-    def insert_chunks(self, chunks, vectors=None, embedder=None, batch_size=10):
+    def insert_chunks(self, chunks, vectors=None, embedding=None, batch_size=10):
         """
         Supports 2 modes of insertion
         1. Pure embedding: pass 'chunks' and 'vectors'
-        2. Text chunks: pass 'chunks' and 'embedder' (class instance)
+        2. Text chunks: pass 'chunks' and 'embedding' (class instance)
         """
+        logger.info("Starting insert_chunks operation")
 
         if not chunks:
             logger.debug("Nothing to chunk!")
             return
 
-        # Handle Pre-computed Vectors if provided
-        if vectors is not None:
-            final_embeddings = vectors
-            # Initialize index using pre-computed vector dimension
-            self._setup_index(len(final_embeddings[0]))
+        logger.debug(f"Inserting {len(chunks)} chunks into OpenSearch with batch_size={batch_size}")
 
-        logger.debug(f"Inserting {len(chunks)} chunks into OpenSearch...")
+        # Handle Pre-computed Vectors if provided
+        final_embeddings = vectors
+        if vectors is not None and len(vectors) > 0:
+            logger.debug(f"Using pre-computed vectors, dimension: {len(vectors[0])}")
+            # Initialize index using pre-computed vector dimension
+            self._setup_index(len(vectors[0]))
+        else:
+            logger.debug("Will generate embeddings using provided embedding instance")
 
         # Iterate through chunks in batches and insert in bulk
         for i in tqdm(range(0, len(chunks), batch_size)):
@@ -136,8 +160,8 @@ class OpensearchVectorStore(VectorStore):
             page_contents = [doc.get("page_content") for doc in batch]
 
             # Generate embeddings only for this specific batch
-            if vectors is None and embedder is not None:
-                current_batch_embeddings = embedder.embed_documents(page_contents)
+            if vectors is None and embedding is not None:
+                current_batch_embeddings = embedding.embed_documents(page_contents)
 
                 # Initialize index on the first batch if not already done
                 if i == 0:
@@ -145,6 +169,7 @@ class OpensearchVectorStore(VectorStore):
                     self._setup_index(dim)
             else:
                 # Use the relevant slice from pre-computed vectors
+                assert final_embeddings is not None, "final_embeddings must be set when vectors is provided"
                 current_batch_embeddings = final_embeddings[i:i + batch_size]
 
             # 3. Transform batch to OpenSearch document format
@@ -154,7 +179,8 @@ class OpensearchVectorStore(VectorStore):
                 pc = doc.get("page_content", "")
 
                 # Generate chunk ID
-                cid = generate_chunk_id(fn, pc, i + j)
+                doc_id = doc.get("doc_id") or fn # Fallback to filename if UUID missing
+                cid = generate_chunk_id(doc_id, pc)
 
                 actions.append({
                     "_index": self.index_name,
@@ -164,6 +190,7 @@ class OpensearchVectorStore(VectorStore):
                         "embedding": emb.tolist() if isinstance(emb, np.ndarray) else emb,
                         "page_content": pc,
                         "filename": fn,
+                        "doc_id": doc_id,
                         "type": doc.get("type", ""),
                         "source": doc.get("source", ""),
                         "language": doc.get("language", "")
@@ -171,38 +198,56 @@ class OpensearchVectorStore(VectorStore):
                 })
 
             # Bulk insert the current batch
-            success, failed = helpers.bulk(self.client, actions, stats_only=True)
-            if failed:
-                logger.error(f"Failed to insert {failed} chunks in batch starting at {i}")
-                return
-            logger.debug(f"Successfully indexed {success} chunks. Failed: {failed}")
+            batch_num = i // batch_size + 1
 
-        logger.debug(f"Inserted the {len(chunks)} into index.")
+            try:
+                _, failed = helpers.bulk(self.client, actions, stats_only=True)
+                if failed:
+                    logger.error(f"Failed to insert {failed} chunks in batch {batch_num} starting at index {i}")
+                    return
+            except Exception as e:
+                logger.error(f"Exception during bulk insert for batch {batch_num}: {e}")
+                raise
+
+        logger.info(f"Insert operation completed: {len(chunks)} chunks inserted into index {self.index_name}")
 
 
-    def search(self, query, vector=None, embedder=None, top_k=5, mode="hybrid", language='en'):
+    def search(self, query_text, vector=None, embedding=None, top_k=5, mode=None, doc_id=None, language='en'):
         """
         Supported search modes: dense(semantic search), sparse(keyword match) and hybrid(combination of dense and sparse).
-        Accepts either a pre-computed 'vector' OR an 'embedder' instance.
+        Accepts either a pre-computed 'vector' OR an 'embedding' instance.
         """
+        logger.debug(f"Starting search operation: query='{query_text[:50]}...', top_k={top_k}, mode={mode}, language={language}")
+
+        query = query_text
         if not self.client.indices.exists(index=self.index_name):
+            logger.error(f"Index {self.index_name} does not exist")
             raise OpensearchNotReadyError("Index is empty. Ingest documents first.")
 
         if vector is not None:
+            logger.debug("Using pre-computed query vector")
             query_vector = vector
-        elif embedder is not None:
-            query_vector = embedder.embed_query(query)
+        elif embedding is not None:
+            logger.debug("Generating query embedding")
+            query_vector = embedding.embed_query(query)
         else:
-            raise ValueError("Provide 'vector' or 'embedder' to perform search.")
+            logger.error("No vector or embedding provided for search")
+            raise ValueError("Provide 'vector' or 'embedding' to perform search.")
+
+        # Default to hybrid mode if not specified
+        if mode is None:
+            mode = "hybrid"
+            logger.debug("Mode not specified, defaulting to 'hybrid'")
 
         limit = top_k * 3
+        logger.debug(f"Search mode: {mode}, limit: {limit}")
         params = {}
 
         if mode == "dense":
             # 1. Define the k-NN search body
             search_body = {
                 "size": limit,
-                "_source": ["chunk_id", "page_content", "filename", "type", "source", "language"],
+                "_source": ["chunk_id", "page_content", "filename", "doc_id", "type", "source", "language"],
                 "query": {
                     "knn": {
                         "embedding": {
@@ -221,7 +266,7 @@ class OpensearchVectorStore(VectorStore):
             # Standard full-text match for sparse/keyword logic
             search_body = {
                 "size": limit,
-                "_source": ["chunk_id", "page_content", "filename", "type", "source", "language"],
+                "_source": ["chunk_id", "page_content", "filename", "doc_id", "type", "source", "language"],
                 "query": {
                     "bool": {
                         "must": [
@@ -237,7 +282,7 @@ class OpensearchVectorStore(VectorStore):
             # OpenSearch Hybrid Query combines Dense (k-NN) and Sparse (Match)
             search_body = {
                 "size": top_k, # Final number of results after fusion
-                "_source": ["chunk_id", "page_content", "filename", "type", "source", "language"],
+                "_source": ["chunk_id", "page_content", "filename", "doc_id", "type", "source", "language"],
                 "query": {
                     "hybrid": {
                         "queries": [
@@ -262,42 +307,72 @@ class OpensearchVectorStore(VectorStore):
                     }
                 }
             }
+        else:
+            logger.error(f"Invalid search mode: {mode}")
+            raise ValueError(f"Invalid search mode: {mode}. Must be 'dense', 'sparse', or 'hybrid'.")
 
         params = {"search_pipeline": "hybrid_pipeline"}
-        response = self.client.search(index=self.index_name, body=search_body, params=params)
+
+        try:
+            logger.debug(f"Executing search query on index {self.index_name}")
+            response = self.client.search(index=self.index_name, body=search_body, params=params)
+
+            total_hits = response["hits"]["total"]["value"] if isinstance(response["hits"]["total"], dict) else response["hits"]["total"]
+            logger.info(f"Search completed: found {total_hits} total hits, returning top {len(response['hits']['hits'])} results")
+        except Exception as e:
+            logger.error(f"Search query failed: {e}")
+            raise
 
         # Format results
         results = []
-        for hit in response["hits"]["hits"]:
+        for idx, hit in enumerate(response["hits"]["hits"]):
             metadata = hit["_source"]
             metadata["score"] = hit["_score"] # unified search score
             results.append(metadata)
+            logger.debug(f"Result {idx+1}: doc_id={metadata.get('doc_id', 'N/A')}, score={hit['_score']:.4f}")
 
+        logger.debug(f"Search operation completed successfully with {len(results)} results")
         return results
 
-    def check_db_populated(self, emb_model, emb_endpoint, max_tokens):
-        if not self.client.indices.exists(index=self.index_name):
-            return False
-        return True
+    def check_db_populated(self):
+        logger.debug(f"Checking if database is populated for index {self.index_name}")
+
+        exists = self.client.indices.exists(index=self.index_name)
+        logger.info(f"Database populated check: {exists}")
+        return exists
 
     def reset_index(self):
+        logger.debug(f"Starting reset_index operation for {self.index_name}")
+
         if self.client.indices.exists(index=self.index_name):
-            self.client.indices.delete(index=self.index_name)
-            logger.info(f"Collection {self.index_name} deleted.")
+            try:
+                self.client.indices.delete(index=self.index_name)
+                logger.info(f"Index {self.index_name} deleted successfully")
+            except Exception as e:
+                logger.error(f"Failed to delete index {self.index_name}: {e}")
+                raise
         else:
-            logger.info(f"Collection {self.index_name} does not exist!")
+            logger.info(f"Index {self.index_name} does not exist, nothing to delete")
 
         # Clear local cache
-        files_to_remove = glob(os.path.join(LOCAL_CACHE_DIR, self.index_name+"*"))
+        cache_pattern = os.path.join(LOCAL_CACHE_DIR, self.index_name+"*")
+        logger.debug(f"Searching for cache files matching pattern: {cache_pattern}")
+
+        files_to_remove = glob(cache_pattern)
         if files_to_remove:
+            logger.debug(f"Found {len(files_to_remove)} cache files/directories to remove")
             for file_path in files_to_remove:
                 try:
                     if os.path.isdir(file_path):
                         shutil.rmtree(file_path)
+                        logger.debug(f"Removed directory: {file_path}")
                         continue
                     os.remove(file_path)
+                    logger.debug(f"Removed file: {file_path}")
                 except OSError as e:
                     logger.error(f"Error removing {file_path}: {e}")
-            logger.info("Local cache cleaned up.")
+            logger.info("Local cache cleaned up successfully")
         else:
-            logger.info("Local cache cleaned up already!")
+            logger.info("No cache files found, cache already clean")
+
+        logger.info("Reset index operation completed")
