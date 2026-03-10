@@ -7,8 +7,8 @@ set -e
 
 # Parse command line arguments
 JENKINS_URL="${1%/}"
-CURRENT_JOB_PARAM="$2"
-BUILD_NUMBER="$3"
+JENKINS_JOB_PARAM="$2"
+JENKINS_JOB_URL="$3"
 JENKINS_USERNAME="$4"
 JENKINS_API_TOKEN="$5"
 POLLER_TIMEOUT_MINS="$6"
@@ -16,16 +16,15 @@ POLLER_TIMEOUT_MINS="$6"
 # Jenkins job configuration
 JOB_NAME="pr-preview-pipeline"
 JENKINS_CREDENTIALS="$JENKINS_USERNAME:$JENKINS_API_TOKEN"
-CURRENT_JOB_URL="$JENKINS_URL/job/adarsh/job/$JOB_NAME/$BUILD_NUMBER"
 
 echo "Started polling Jenkins queue to find duplicate $JOB_NAME jobs"
-echo "Jenkins job $CURRENT_JOB_URL running with param: $CURRENT_JOB_PARAM"
+echo "Jenkins job $JENKINS_JOB_URL running with param: $JENKINS_JOB_PARAM"
 
 # Function: Check the status of the current running job
 # Returns: "true" if job is in progress, "false" otherwise
 get_job_status() {
     local response
-    response=$(curl -fsS -u "$JENKINS_CREDENTIALS" "$CURRENT_JOB_URL/api/json")
+    response=$(curl -fsS -u "$JENKINS_CREDENTIALS" "$JENKINS_JOB_URL/api/json")
     local in_progress
     in_progress=$(echo "$response" | jq ".inProgress")
     echo "$in_progress"
@@ -46,7 +45,7 @@ is_duplicate_build_queued() {
             job_params=$(echo "$queued_job" | jq '.params')
             
             # Check if the queued job has the same parameters as current job
-            if [[ "$job_params" == *"$CURRENT_JOB_PARAM"* ]]; then
+            if [[ "$job_params" == *"$JENKINS_JOB_PARAM"* ]]; then
                 echo "YES"
                 break
             fi
@@ -70,8 +69,8 @@ for ((iteration=1; iteration<=POLLER_TIMEOUT_MINS; iteration++)); do
         duplicate_found=$(is_duplicate_build_queued)
         
         if [[ "$duplicate_found" == *"YES"* ]]; then
-            echo "Duplicate job detected in queue. Aborting current job: $CURRENT_JOB_URL"
-            curl -fsS -u "$JENKINS_CREDENTIALS" -X POST "$CURRENT_JOB_URL/stop"
+            echo "Duplicate job detected in queue. Aborting current job: $JENKINS_JOB_URL"
+            curl -fsS -u "$JENKINS_CREDENTIALS" -X POST "$JENKINS_JOB_URL/stop"
             exit 0
         fi
         
@@ -81,9 +80,9 @@ for ((iteration=1; iteration<=POLLER_TIMEOUT_MINS; iteration++)); do
     fi
     
     # Job has completed
-    echo "Jenkins job $CURRENT_JOB_URL has completed"
+    echo "Jenkins job $JENKINS_JOB_URL has completed"
     exit 0
 done
 
 # Timeout reached
-echo "Queue poller for job $CURRENT_JOB_URL timed out after $POLLER_TIMEOUT_MINS minutes"
+echo "Queue poller for job $JENKINS_JOB_URL timed out after $POLLER_TIMEOUT_MINS minutes"
