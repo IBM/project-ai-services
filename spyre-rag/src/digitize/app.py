@@ -453,9 +453,7 @@ async def delete_document(doc_id: str):
     - 409 Conflict if document is part of an active job
     - 500 Internal Server Error on unexpected errors
     """
-    try:
-        logger.info(f"Delete request received for document {doc_id}")
-        
+    try:        
         # 1. Check if document exists by trying to get its metadata
         doc_metadata = None
         try:
@@ -537,7 +535,7 @@ async def delete_document(doc_id: str):
         
         # 5. Success - both VDB and files deleted (or nothing to delete)
         if vdb_deleted and files_deleted:
-            logger.info(f"✅ Document {doc_id} deleted successfully")
+            logger.debug(f"✅ Document {doc_id} deleted successfully")
         elif errors:
             # Should not reach here, but log if it does
             logger.warning(f"Delete completed with warnings: {'; '.join(errors)}")
@@ -573,8 +571,6 @@ async def bulk_delete_documents(confirm: bool = Query(..., description="Required
     - 500 Internal Server Error on unexpected errors
     """
     try:
-        logger.info("Bulk delete request received")
-
         # 1. Validate confirmation parameter
         if not confirm:
             logger.warning("Bulk delete rejected: confirm parameter is false")
@@ -602,7 +598,7 @@ async def bulk_delete_documents(confirm: bool = Query(..., description="Required
         # 3. Reset vector database index FIRST
         # This ensures documents are removed from search even if file deletion fails
         try:
-            logger.info("Resetting vector database index...")
+            logger.debug("Resetting vector database index...")
             import common.db_utils as db
             vector_store = db.get_vector_store()
             vector_store.reset_index()
@@ -616,7 +612,7 @@ async def bulk_delete_documents(confirm: bool = Query(..., description="Required
 
         # 4. Delete all document files LAST
         try:
-            logger.info("Deleting all document files...")
+            logger.debug("Deleting all document files...")
             deletion_stats = dg_util.bulk_delete_all_documents()
             files_deleted = True
 
