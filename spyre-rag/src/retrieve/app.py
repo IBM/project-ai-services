@@ -243,6 +243,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
 @app.get(
     "/db-status",
     response_model=DBStatusResponse,
+    response_model_exclude_none=True,
     summary="Vector DB status",
     description="Check whether the vector store is initialized and populated."
 )
