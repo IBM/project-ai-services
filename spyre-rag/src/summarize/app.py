@@ -298,7 +298,7 @@ async def summarize(request: Request):
     except Exception as e:
         logger.error(f"Got exception while generating summary: {e}")
         raise SummarizeException(500, "INTERNAL_SERVER_ERROR",
-                                 "Failed to generate summary. Please try again later")
+                                 f"Failed to generate summary, error: {e} Please try again later")
 
 @app.get("/health")
 async def health():
