@@ -30,14 +30,6 @@ class DocStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
-class SortBy(str, Enum):
-    SUBMITTED_AT = "submitted_at"
-
-
-class SortOrder(str, Enum):
-    ASC = "asc"
-    DESC = "desc"
-
 class PaginationInfo(BaseModel):
     total: int
     limit: int

@@ -192,9 +192,7 @@ async def get_all_jobs(
     limit: int = Query(20, ge=1, le=100, description="Number of records per page"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
     status: Optional[types.JobStatus] = Query(None, description="Filter by job status"),
-    operation: Optional[types.OperationType] = Query(None, description="Filter by operation type"),
-    sort_by: types.SortBy = Query(types.SortBy.SUBMITTED_AT, description="Field to sort by"),
-    sort_order: types.SortOrder = Query(types.SortOrder.DESC, description="Sort direction"),
+    operation: Optional[types.OperationType] = Query(None, description="Filter by operation type")
 ):
     """Retrieve information about all submitted jobs with pagination and filtering."""
     try:
@@ -208,12 +206,11 @@ async def get_all_jobs(
                (operation is None or j.operation == operation.value)
         ]
 
-        # Sort by requested field
-        reverse = sort_order == types.SortOrder.DESC
+        # sorting by submitted_at
         filtered_jobs = sorted(
             filtered_jobs,
             key=lambda j: j.submitted_at,
-            reverse=reverse
+            reverse=True
         )
 
         # Handle latest flag before pagination
@@ -232,7 +229,8 @@ async def get_all_jobs(
             pagination=types.PaginationInfo(total=total, limit=limit, offset=offset),
             data=jobs_data
         )
-    except HTTPException:
+    except HTTPException as e:
+        logger.error(f"Server error in get_all_jobs: {e.status_code} - {e.detail}")
         raise
     except Exception as e:
         logger.error(f"Failed to retrieve jobs: {e}", exc_info=True)
@@ -258,7 +256,9 @@ async def get_job_by_id(job_id: str):
 
         # Convert JobState object to JSON-compatible dictionary
         return job_state.to_dict()
-    except HTTPException:
+    except HTTPException as e:
+        logger.error(f"HTTP error retrieving job {job_id}: "
+        f"status={e.status_code}, detail={e.detail}")
         raise
     except Exception as e:
         logger.error(f"Failed to retrieve job {job_id}: {e}", exc_info=True)
@@ -287,7 +287,9 @@ async def delete_job(job_id: str):
         job_status_file.unlink(missing_ok=True)
         logger.info(f"Deleted job status file for job '{job_id}'")
         return
-    except HTTPException:
+    except HTTPException as e:
+        logger.error(f"HTTP error deleting job {job_id}: "
+                     f"status={e.status_code}, detail={e.detail}")
         raise
     except Exception as e:
         logger.error(f"Failed to delete job {job_id}: {e}", exc_info=True)
