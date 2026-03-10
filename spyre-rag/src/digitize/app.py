@@ -350,6 +350,7 @@ async def list_documents(
         }
 
     except HTTPException:
+        logger.error("HTTP error in list_documents")
         # Re-raise HTTPException as-is
         raise
     except Exception as e:

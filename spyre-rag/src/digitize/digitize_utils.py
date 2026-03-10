@@ -238,6 +238,40 @@ def get_all_documents(
     return all_documents
 
 
+def _read_document_metadata(doc_id: str, docs_dir: Path = DOCS_DIR) -> dict:
+    """
+    Internal helper to read and parse document metadata file.
+
+    Args:
+        doc_id: Unique identifier of the document
+        docs_dir: Directory containing document metadata files
+
+    Returns:
+        Dictionary containing the parsed metadata
+
+    Raises:
+        FileNotFoundError: If document metadata file doesn't exist
+        json.JSONDecodeError: If metadata file is corrupted
+    """
+    # Construct the metadata file path
+    meta_file = docs_dir / f"{doc_id}_metadata.json"
+
+    # Check if the document exists
+    if not meta_file.exists():
+        logger.error(f"Document metadata file not found: {meta_file}")
+        raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
+
+    # Read the metadata file
+    try:
+        with open(meta_file, "r") as f:
+            doc_data = json.load(f)
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse metadata file for document {doc_id}: {e}")
+        raise
+
+    return doc_data
+
+
 def get_document_by_id(doc_id: str, include_details: bool = False, docs_dir: Path = DOCS_DIR) -> dict:
     """
     Read a specific document's metadata by ID and return formatted response.
@@ -256,21 +290,8 @@ def get_document_by_id(doc_id: str, include_details: bool = False, docs_dir: Pat
     """
     logger.debug(f"Fetching document {doc_id} with include_details={include_details}")
 
-    # Construct the metadata file path
-    meta_file = docs_dir / f"{doc_id}_metadata.json"
-
-    # Check if the document exists
-    if not meta_file.exists():
-        logger.error(f"Document metadata file not found: {meta_file}")
-        raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
-
-    # Read the metadata file
-    try:
-        with open(meta_file, "r") as f:
-            doc_data = json.load(f)
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse metadata file for document {doc_id}: {e}")
-        raise
+    # Read document metadata using the common helper
+    doc_data = _read_document_metadata(doc_id, docs_dir)
 
     # Build the base response
     response = {
@@ -313,19 +334,8 @@ def get_document_content(doc_id: str, docs_dir: Path = DOCS_DIR) -> dict:
     """
     logger.debug(f"Fetching content for document {doc_id}")
 
-    # First, get the document metadata to determine the output format
-    meta_file = docs_dir / f"{doc_id}_metadata.json"
-
-    if not meta_file.exists():
-        logger.error(f"Document metadata file not found: {meta_file}")
-        raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
-
-    try:
-        with open(meta_file, "r") as f:
-            doc_data = json.load(f)
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse metadata file for document {doc_id}: {e}")
-        raise
+    # Read document metadata using the common helper
+    doc_data = _read_document_metadata(doc_id, docs_dir)
 
     # Get the output format from metadata (defaults to json if not specified)
     output_format = doc_data.get("output_format", "json")
