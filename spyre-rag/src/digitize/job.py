@@ -1,48 +1,38 @@
-import json
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
+from pydantic import BaseModel, Field, field_validator
+
 from digitize.types import JobStatus
-from digitize import config
+import digitize.config as config
 
 
-@dataclass
-class JobDocumentSummary:
+class JobDocumentSummary(BaseModel):
     """Compact per-document entry stored inside a job status file."""
     id: str
     name: str
     status: str
 
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "name": self.name,
-            "status": self.status,
-        }
+    class Config:
+        """Pydantic configuration."""
+        use_enum_values = True
 
 
-@dataclass
-class JobStats:
+class JobStats(BaseModel):
     """Statistics for documents in a job."""
-    total_documents: int = 0
-    completed: int = 0
-    failed: int = 0
-    in_progress: int = 0
+    total_documents: int = Field(default=0, ge=0, description="Total number of documents")
+    completed: int = Field(default=0, ge=0, description="Number of completed documents")
+    failed: int = Field(default=0, ge=0, description="Number of failed documents")
+    in_progress: int = Field(default=0, ge=0, description="Number of in-progress documents")
 
-    def to_dict(self) -> dict:
-        return {
-            "total_documents": self.total_documents,
-            "completed": self.completed,
-            "failed": self.failed,
-            "in_progress": self.in_progress,
-        }
+    class Config:
+        """Pydantic configuration."""
+        use_enum_values = True
 
 
-@dataclass
-class JobState:
+class JobState(BaseModel):
     """
-    Represents the overall state of a job. Job tracks overall progress and statistics
+    Represents the overall state of a job. Job tracks overall progress and statistics.
     Persisted as <job_id>_status.json under JOBS_DIR.
     """
     job_id: str
@@ -50,22 +40,64 @@ class JobState:
     status: JobStatus
     submitted_at: str
     completed_at: Optional[str] = None
-    documents: List[JobDocumentSummary] = field(default_factory=list)
-    stats: JobStats = field(default_factory=JobStats)
+    documents: List[JobDocumentSummary] = Field(default_factory=list)
+    stats: JobStats = Field(default_factory=JobStats)
     error: Optional[str] = None
 
+    @field_validator('status', mode='before')
+    @classmethod
+    def validate_status(cls, v):
+        """Convert string to JobStatus enum, default to ACCEPTED if invalid."""
+        if isinstance(v, JobStatus):
+            return v
+        try:
+            return JobStatus(v)
+        except (ValueError, TypeError):
+            return JobStatus.ACCEPTED
+
+    @field_validator('documents', mode='before')
+    @classmethod
+    def validate_documents(cls, v):
+        """Ensure documents is a list and filter out invalid entries."""
+        if not isinstance(v, list):
+            return []
+        
+        valid_docs = []
+        for doc in v:
+            if isinstance(doc, dict) and all(k in doc for k in ['id', 'name', 'status']):
+                try:
+                    valid_docs.append(JobDocumentSummary(**doc))
+                except Exception:
+                    continue
+            elif isinstance(doc, JobDocumentSummary):
+                valid_docs.append(doc)
+        return valid_docs
+
+    @field_validator('stats', mode='before')
+    @classmethod
+    def validate_stats(cls, v):
+        """Ensure stats is valid, return default if not."""
+        if isinstance(v, JobStats):
+            return v
+        if isinstance(v, dict):
+            try:
+                return JobStats(**v)
+            except Exception:
+                return JobStats()
+        return JobStats()
+
+    class Config:
+        """Pydantic configuration."""
+        use_enum_values = True
+
     def to_dict(self) -> dict:
-        """Serialize the job state to a JSON-compatible dictionary."""
-        return {
-            "job_id": self.job_id,
-            "operation": self.operation,
-            "status": self.status.value if hasattr(self.status, "value") else self.status,
-            "submitted_at": self.submitted_at,
-            "completed_at": self.completed_at,
-            "documents": [doc.to_dict() for doc in self.documents],
-            "stats": self.stats.to_dict(),
-            "error": self.error,
-        }
+        """
+        Serialize the job state to a JSON-compatible dictionary.
+        
+        Returns:
+            Dictionary representation of the job state
+        """
+        return self.dict()
 
     def save(self, jobs_dir: Path = config.JOBS_DIR) -> Path:
         """
@@ -79,6 +111,6 @@ class JobState:
         """
         jobs_dir.mkdir(parents=True, exist_ok=True)
         status_path = jobs_dir / f"{self.job_id}_status.json"
-        with open(status_path, "w") as f:
-            json.dump(self.to_dict(), f, indent=4)
+        with open(status_path, "w", encoding="utf-8") as f:
+            f.write(self.json(indent=4))
         return status_path

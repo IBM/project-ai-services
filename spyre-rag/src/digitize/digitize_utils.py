@@ -100,82 +100,44 @@ async def stage_upload_files(job_id: str, files: List[str], staging_dir: str, fi
 def read_job_file(file_path: Path) -> Optional[JobState]:
     """
     Read and parse a single job status JSON file into a JobState object.
+    
+    Uses Pydantic for automatic validation and deserialization with built-in
+    error handling and type coercion.
 
     Args:
         file_path: Path to the job status JSON file.
 
     Returns:
-        JobState object, or None if the file cannot be read/parsed.
+        JobState object if successful, None otherwise.
     """
+    # Validate file exists and is readable
+    if not file_path.exists():
+        logger.warning(f"Job file does not exist: {file_path}")
+        return None
+    
+    if not file_path.is_file():
+        logger.warning(f"Path is not a file: {file_path}")
+        return None
+    
     try:
-        with open(file_path, "r") as f:
+        # Read and parse JSON
+        with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         
-        # Validate required fields
-        required_fields = ["job_id", "operation", "status", "submitted_at"]
-        missing_fields = [field for field in required_fields if field not in data]
-        if missing_fields:
-            logger.warning(f"Job file {file_path.name} missing required fields: {missing_fields}")
-            return None
-        
-        # Parse documents list
-        documents = []
-        if "documents" in data and isinstance(data["documents"], list):
-            for doc_data in data["documents"]:
-                try:
-                    if isinstance(doc_data, dict) and all(k in doc_data for k in ["id", "name", "status"]):
-                        documents.append(JobDocumentSummary(
-                            id=doc_data["id"],
-                            name=doc_data["name"],
-                            status=doc_data["status"]
-                        ))
-                except Exception as e:
-                    logger.warning(f"Failed to parse document in {file_path.name}: {e}")
-                    continue
-        
-        # Parse stats
-        stats = JobStats()
-        if "stats" in data and isinstance(data["stats"], dict):
-            stats_data = data["stats"]
-            stats = JobStats(
-                total_documents=stats_data.get("total_documents", 0),
-                completed=stats_data.get("completed", 0),
-                failed=stats_data.get("failed", 0),
-                in_progress=stats_data.get("in_progress", 0)
-            )
-        
-        # Parse status enum
-        try:
-            job_status = JobStatus(data["status"])
-        except ValueError:
-            logger.warning(f"Invalid status '{data['status']}' in {file_path.name}, defaulting to ACCEPTED")
-            job_status = JobStatus.ACCEPTED
-        
-        # Create JobState object
-        job_state = JobState(
-            job_id=data["job_id"],
-            operation=data["operation"],
-            status=job_status,
-            submitted_at=data["submitted_at"],
-            completed_at=data.get("completed_at"),
-            documents=documents,
-            stats=stats,
-            error=data.get("error")
-        )
-        
-        return job_state
+        # Pydantic handles all validation, type conversion, and required field checks
+        return JobState(**data)
         
     except json.JSONDecodeError as e:
-        logger.warning(f"Failed to parse job file {file_path.name}: {e}")
+        logger.warning(f"Invalid JSON in job file {file_path.name}: {e}")
         return None
-    except (IOError, OSError) as e:
+    except (IOError, OSError, PermissionError) as e:
         logger.warning(f"Failed to read job file {file_path.name}: {e}")
         return None
-    except KeyError as e:
-        logger.warning(f"Missing required field in job file {file_path.name}: {e}")
-        return None
     except Exception as e:
-        logger.warning(f"Unexpected error parsing job file {file_path.name}: {e}")
+        logger.error(
+            f"Failed to parse job file {file_path.name}: {e}",
+            exc_info=True
+        )
         return None
 
 def read_all_job_files() -> List[JobState]:

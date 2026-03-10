@@ -176,9 +176,6 @@ async def digitize_document(
         except Exception as e:
             sem.release()
             logger.error(f"Failed to schedule background task for job {job_id}, semaphore released: {e}")
-        except Exception as e:
-            sem.release()
-            logger.error(f"Failed to schedule background task for job {job_id}, semaphore released: {e}")
             APIError.raise_error("INTERNAL_SERVER_ERROR", str(e))
 
         return {"job_id": job_id}
