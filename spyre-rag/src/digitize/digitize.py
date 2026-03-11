@@ -17,7 +17,7 @@ def digitize(directory_path: Path, job_id: str, doc_id_dict: dict, output_format
         directory_path: Path to staging directory containing exactly one PDF
         job_id: Job identifier for StatusManager
         doc_id_dict: Mapping from filename to document ID
-        output_format: "json", "md", or "text"
+        output_format: "json", "md", or "txt"
 
     Raises:
         Exception: If directory doesn't exist, no PDFs found, conversion fails,

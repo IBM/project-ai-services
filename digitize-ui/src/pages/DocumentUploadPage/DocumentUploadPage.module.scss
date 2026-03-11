@@ -1,0 +1,460 @@
+.mainGrid {
+  background-color: var(--cds-background);
+}
+
+.uploadContent {
+  padding: 2rem;
+  
+  :global(.cds--label),
+  :global(.cds--fieldset-legend),
+  :global(.cds--file--label) {
+    color: var(--cds-text-primary) !important;
+    font-weight: 600;
+  }
+  
+  :global(.cds--label-description) {
+    color: var(--cds-text-secondary) !important;
+  }
+}
+
+.progressSection {
+  margin-bottom: 3rem;
+  
+  :global(.cds--progress-step-button) {
+    pointer-events: none;
+  }
+  
+  :global(.cds--progress-label) {
+    color: var(--cds-text-primary) !important;
+  }
+  
+  :global(.cds--progress-step-button__label) {
+    color: var(--cds-text-primary) !important;
+  }
+}
+
+.fileUploader {
+  :global(.cds--file-container) {
+    display: none !important;
+  }
+  
+  :global(.cds--file__selected-file) {
+    display: none !important;
+  }
+}
+
+.formTile {
+  margin-bottom: 1rem;
+  padding: 1.5rem;
+  background-color: var(--cds-layer-01) !important;
+  
+  :global(.cds--radio-button-group) {
+    margin-top: 1rem;
+  }
+  
+  :global(.cds--radio-button-wrapper) {
+    margin-bottom: 1rem;
+  }
+  
+  :global(.cds--radio-button__label) {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.75rem;
+    color: var(--cds-text-primary) !important;
+    padding-left: 0 !important;
+  }
+  
+  :global(.cds--radio-button__label-text) {
+    color: var(--cds-text-primary) !important;
+    font-weight: 500;
+  }
+  
+  :global(.cds--radio-button__label-description) {
+    color: var(--cds-text-secondary) !important;
+    margin-top: 0.25rem;
+  }
+  
+  :global(.cds--radio-button__appearance) {
+    border: 2px solid var(--cds-icon-secondary) !important;
+    background-color: var(--cds-field-01) !important;
+  }
+  
+  :global(.cds--radio-button:checked + .cds--radio-button__label .cds--radio-button__appearance) {
+    border-color: var(--cds-link-primary) !important;
+    background-color: var(--cds-field-01) !important;
+  }
+  
+  :global(.cds--radio-button:checked + .cds--radio-button__label .cds--radio-button__appearance::before) {
+    background-color: var(--cds-link-primary) !important;
+  }
+  
+  :global(.cds--radio-button__label:hover .cds--radio-button__appearance) {
+    border-color: var(--cds-link-primary) !important;
+  }
+}
+
+.tileHeader {
+  margin-bottom: 1rem;
+  
+  h4 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--cds-text-primary) !important;
+    margin: 0 0 0.5rem 0;
+  }
+}
+
+.tileDescription {
+  color: var(--cds-text-secondary) !important;
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.fileListTile {
+  margin-bottom: 1rem;
+  padding: 1.5rem;
+  background-color: var(--cds-layer-02) !important;
+}
+
+.fileListHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  cursor: pointer;
+  user-select: none;
+  
+  &:hover {
+    opacity: 0.8;
+  }
+  
+  h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--cds-text-primary) !important;
+    margin: 0;
+    flex: 1;
+  }
+  
+  svg {
+    fill: var(--cds-icon-primary);
+  }
+}
+
+.expandIcon {
+  font-size: 0.75rem;
+  color: var(--cds-text-primary);
+  transition: transform 0.2s ease;
+  
+  &.expanded {
+    transform: rotate(180deg);
+  }
+}
+
+.fileList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.fileItem {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.75rem 0.75rem 1rem;
+  background-color: var(--cds-layer-01);
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  border: 1px solid var(--cds-border-subtle-01);
+  
+  &:last-child {
+    margin-bottom: 0;
+  }
+  
+  &:hover {
+    background-color: var(--cds-layer-hover-01);
+  }
+}
+
+.fileIcon {
+  fill: var(--cds-link-primary);
+  flex-shrink: 0;
+}
+
+.fileName {
+  flex: 1;
+  color: var(--cds-text-primary) !important;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileSize {
+  color: var(--cds-text-secondary) !important;
+  font-size: 0.875rem;
+  flex-shrink: 0;
+  margin-right: 0.5rem;
+}
+
+.removeButton {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+  
+  svg {
+    fill: var(--cds-support-error);
+  }
+  
+  &:hover {
+    background-color: var(--cds-layer-hover-01);
+    
+    svg {
+      fill: var(--cds-support-error-inverse);
+    }
+  }
+  
+  &:focus {
+    outline: 2px solid var(--cds-focus);
+    outline-offset: 2px;
+  }
+}
+
+.notification {
+  margin: 1.5rem 0;
+  max-width: 100%;
+}
+
+.actionButtons {
+  display: flex;
+  gap: 1rem;
+  margin-top: 2rem;
+  
+  button {
+    flex: 0 0 auto;
+  }
+}
+
+.loadingContainer {
+  margin-top: 2rem;
+}
+
+.infoPanel {
+  padding: 2rem 2rem 2rem 1rem;
+  position: sticky;
+  top: 4rem;
+  
+  :global(.cds--accordion__item) {
+    border-top: 1px solid var(--cds-border-subtle-01);
+  }
+  
+  :global(.cds--accordion__heading) {
+    color: var(--cds-text-primary) !important;
+  }
+  
+  :global(.cds--accordion__title) {
+    color: var(--cds-text-primary) !important;
+    font-weight: 600 !important;
+  }
+  
+  :global(.cds--accordion__content) {
+    padding: 1rem 1rem 1rem 2rem;
+    color: var(--cds-text-secondary) !important;
+  }
+}
+
+.accordionContent {
+  h5 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--cds-text-primary) !important;
+    margin: 0 0 0.5rem 0;
+  }
+  
+  p {
+    color: var(--cds-text-secondary) !important;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    margin: 0;
+  }
+}
+
+.infoTile {
+  margin-bottom: 1.5rem;
+  padding: 1.5rem;
+  background-color: var(--cds-layer-01) !important;
+  
+  h4 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--cds-text-primary) !important;
+    margin: 0 0 1rem 0;
+  }
+  
+  h5 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--cds-text-primary) !important;
+    margin: 0 0 0.5rem 0;
+  }
+  
+  p {
+    color: var(--cds-text-secondary) !important;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    margin: 0;
+  }
+}
+
+.infoSection {
+  margin-bottom: 1.5rem;
+  
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.featureList,
+.requirementsList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  
+  li {
+    color: var(--cds-text-secondary) !important;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--cds-border-subtle-01);
+    
+    &:last-child {
+      border-bottom: none;
+    }
+    
+    strong {
+      color: var(--cds-text-primary) !important;
+    }
+  }
+}
+
+.completionContainer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+}
+
+.completionTile {
+  padding: 3rem;
+  background-color: var(--cds-layer-01) !important;
+  text-align: center;
+  max-width: 600px;
+  width: 100%;
+}
+
+.completionContent {
+  margin-bottom: 2rem;
+}
+
+.completionIcon {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 1.5rem;
+
+  svg {
+    fill: var(--cds-support-success);
+    background-color: var(--cds-support-success-inverse);
+    border-radius: 50%;
+    padding: 1rem;
+  }
+}
+
+.completionTitle {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: var(--cds-text-primary) !important;
+  margin: 0 0 1rem 0;
+}
+
+.completionMessage {
+  font-size: 1rem;
+  color: var(--cds-text-secondary) !important;
+  margin: 0 0 1.5rem 0;
+  line-height: 1.5;
+}
+
+.jobIdContainer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  background-color: var(--cds-layer-02);
+  border-radius: 4px;
+  margin-top: 1rem;
+}
+
+.jobIdLabel {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--cds-text-primary) !important;
+}
+
+.jobId {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.875rem;
+  color: var(--cds-link-primary) !important;
+  background-color: var(--cds-layer-01);
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  border: 1px solid var(--cds-border-subtle-01);
+}
+
+.completionActions {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 2rem;
+
+  button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 66rem) {
+  .infoPanel {
+    position: static;
+    padding: 2rem;
+  }
+
+  .completionTile {
+    padding: 2rem;
+  }
+
+  .completionTitle {
+    font-size: 1.5rem;
+  }
+}
+
+@media (min-width: 42rem) {
+  .completionActions {
+    flex-direction: row;
+    justify-content: center;
+
+    button {
+      width: auto;
+      min-width: 200px;
+    }
+  }
+}
+
+// Made with Bob

@@ -4,7 +4,7 @@
     "private": true,
     "type": "module",
     "dependencies": {
-        "@carbon/ai-chat": "^1.4.3",
+        "@carbon/ai-chat": "~1.8.0",
         "@carbon/react": "^1.31.3",
         "@testing-library/jest-dom": "^5.16.5",
         "@testing-library/react": "^13.4.0",
@@ -51,16 +51,5 @@
             "last 1 firefox version",
             "last 1 safari version"
         ]
-    },
-    "overrides": {
-        "nth-check": "^2.0.1",
-        "postcss": "^8.4.31",
-        "rollup": "^4.59.0",
-        "swiper": "^12.1.2",
-        "immutable": "^5.1.5",
-        "minimatch": "^3.1.3",
-        "markdown-it": "^14.1.1",
-        "dompurify": "^3.3.2",
-        "qs": "^6.14.2"
     }
 }
