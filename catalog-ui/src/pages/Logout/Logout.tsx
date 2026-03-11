@@ -1,12 +1,24 @@
 import { useEffect } from "react";
 import styles from "./Logout.module.scss";
 import { Theme } from "@carbon/react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
+
+import { logout } from "@/services/auth";
 
 const Logout = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    const performLogout = async () => {
+      try {
+        await logout();
+      } catch {
+        // ignore errors, still log out locally
+      }
+    };
+
+    performLogout();
+
     const timer = setTimeout(() => {
       navigate("/login", { replace: true });
     }, 5000);
@@ -23,9 +35,10 @@ const Logout = () => {
           </span>
           <span>You are now logged out.</span>
         </h1>
-        <a className={styles.loginLink} href="/login">
+
+        <Link to="/login" className={styles.loginLink}>
           Return to the log in page now
-        </a>
+        </Link>
       </div>
     </Theme>
   );

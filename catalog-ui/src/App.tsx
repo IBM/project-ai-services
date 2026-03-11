@@ -6,6 +6,7 @@ import AuthLayout from "./layouts/AuthLayout";
 import Login from "./pages/Login";
 import Logout from "./pages/Logout";
 import ApplicationsListPage from "./pages/ApplicationsList";
+import { ProtectedRoute } from "@/components";
 
 function App() {
   return (
@@ -13,13 +14,17 @@ function App() {
       <Routes>
         <Route path="/" element={<Navigate to={ROUTES.LOGIN} replace />} />
 
-        <Route element={<MainLayout />}>
-          <Route
-            path={ROUTES.APPLICATIONS_LIST}
-            element={<ApplicationsListPage />}
-          />
+        {/* Protected routes */}
+        <Route element={<ProtectedRoute />}>
+          <Route element={<MainLayout />}>
+            <Route
+              path={ROUTES.APPLICATIONS_LIST}
+              element={<ApplicationsListPage />}
+            />
+          </Route>
         </Route>
 
+        {/* Public routes */}
         <Route element={<AuthLayout />}>
           <Route path={ROUTES.LOGIN} element={<Login />} />
         </Route>

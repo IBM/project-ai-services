@@ -12,7 +12,6 @@ import { useNavigate } from "react-router-dom";
 import styles from "./Login.module.scss";
 
 import { login } from "@/services/auth";
-import type { LoginResponse } from "@/types/auth";
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -28,13 +27,10 @@ const LoginPage = () => {
     setLoading(true);
 
     try {
-      const data: LoginResponse = await login({
+      await login({
         username,
         password,
       });
-
-      localStorage.setItem("access_token", data.access_token);
-      localStorage.setItem("refresh_token", data.refresh_token);
 
       navigate("/applications");
     } catch {
