@@ -138,14 +138,27 @@ def convert_doc(path):
     return doc
 
 def get_doc_converter():
+    import os
+    from pathlib import Path
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions
     from docling.document_converter import DocumentConverter, PdfFormatOption
 
     # Accelerator & pipeline options
     pipeline_options = PdfPipelineOptions()
-    # Docling model files are getting downloaded to this /var/docling-models dir by this project-ai-services/images/rag-base/download_docling_models.py script in project-ai-services/images/rag-base/Containerfile
-    pipeline_options.artifacts_path = "/var/docling-models"
+    
+    # Only set artifacts_path if DOCLING_MODELS_PATH environment variable is set
+    docling_models_path = os.environ.get('DOCLING_MODELS_PATH')
+    if docling_models_path:
+        artifacts_path = Path(docling_models_path)
+        if artifacts_path.exists():
+            pipeline_options.artifacts_path = artifacts_path
+            logger.debug(f"Using docling models from: {artifacts_path}")
+        else:
+            logger.warning(f"DOCLING_MODELS_PATH set to {artifacts_path} but directory does not exist")
+    else:
+        logger.debug("DOCLING_MODELS_PATH not set. Docling will use default model loading behavior.")
+    
     pipeline_options.do_table_structure = True
     pipeline_options.table_structure_options.do_cell_matching = True
     pipeline_options.do_ocr = False
