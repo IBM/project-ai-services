@@ -210,7 +210,6 @@ class OpensearchVectorStore(VectorStore):
                     logger.error(f"Failed to insert {failed} chunks in batch {batch_num} starting at index {i}")
                     return
 
-                # Log the doc_ids that were inserted in this batch for verification
                 inserted_doc_ids = list(set([action["_source"]["doc_id"] for action in actions]))
             except Exception as e:
                 logger.error(f"Exception during bulk insert for batch {batch_num}: {e}")
