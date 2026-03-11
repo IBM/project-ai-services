@@ -48,6 +48,12 @@ class DocumentListItem(BaseModel):
     status: str
 
 
+class DocumentsListResponse(BaseModel):
+    """Response model for documents list endpoint with pagination."""
+    pagination: PaginationInfo
+    data: List[DocumentListItem]
+
+
 class DocumentDetailResponse(BaseModel):
     """Detailed document information response."""
     id: str
