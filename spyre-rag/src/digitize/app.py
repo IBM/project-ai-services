@@ -471,8 +471,7 @@ async def delete_document(doc_id: str):
         except Exception as e:
             logger.error(f"VDB cleanup failed for {doc_id}: {e}")
             # If metadata is already deleted and VDB fails, we MUST raise to let the user retry
-            if not doc_metadata:
-                APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Document metadata deleted but VDB cleanup failed: {e}")
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Document metadata deleted but VDB cleanup failed: {e}")
 
         # 4. Step B: File & Metadata Cleanup
         # If metadata is already deleted, we assume files were either deleted or are being handled
@@ -485,13 +484,11 @@ async def delete_document(doc_id: str):
             except Exception as e:
                 # If VDB succeeded but files failed, we report a 500 so the user retries
                 # even though the document is now 'hidden' from search.
-                if vdb_cleaned:
-                    logger.warning(f"VDB cleaned but file deletion failed for {doc_id}")
-                    APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Search data removed but files remain: {e}")
-                raise
+                logger.error(f"VDB cleaned but file deletion failed for {doc_id}")
+                APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Search data removed but files remain: {e}")
 
         # 5. Idempotent Success
-        # If we reach here, either everything is deleted, or metadata was already gone and VDB is now clean.
+        # If we reach here, either everything is deleted, or metadata was already deleted and VDB is now clean.
         return None
 
     except HTTPException as e:
