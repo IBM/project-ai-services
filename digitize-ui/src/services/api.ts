@@ -18,6 +18,7 @@ export interface Document {
   filename?: string;
   status: string;
   created_at?: string;
+  output_format?: string;
 }
 
 export interface JobStats {

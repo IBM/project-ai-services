@@ -24,11 +24,17 @@ import {
   Modal,
   Theme,
   Link,
+  Loading,
 } from '@carbon/react';
 import { Renew, TrashCan, View, Download, CheckmarkFilled, ErrorFilled, InProgress } from '@carbon/icons-react';
 import { useTheme } from '../../contexts/ThemeContext';
 import { listDocuments, getDocumentContent, deleteDocument, Document } from '../../services/api';
 import styles from './DocumentListPage.module.scss';
+
+interface DocumentContentData {
+  result: any;
+  output_format: string;
+}
 
 interface DocumentListState {
   documents: Document[];
@@ -37,9 +43,10 @@ interface DocumentListState {
   pageSize: number;
   totalItems: number;
   search: string;
-  selectedDoc: string | null;
+  selectedDoc: Document | null;
   showContentModal: boolean;
-  docContent: any;
+  docContent: DocumentContentData | null;
+  loadingContent: boolean;
   showDeleteModal: boolean;
   docToDelete: string | null;
 }
@@ -50,12 +57,13 @@ type DocumentListAction =
   | { type: 'SET_PAGE'; payload: number }
   | { type: 'SET_PAGE_SIZE'; payload: number }
   | { type: 'SET_SEARCH'; payload: string }
-  | { type: 'SET_SELECTED_DOC'; payload: string | null }
+  | { type: 'SET_SELECTED_DOC'; payload: Document | null }
   | { type: 'SET_SHOW_CONTENT_MODAL'; payload: boolean }
-  | { type: 'SET_DOC_CONTENT'; payload: any }
+  | { type: 'SET_DOC_CONTENT'; payload: DocumentContentData | null }
+  | { type: 'SET_LOADING_CONTENT'; payload: boolean }
   | { type: 'SET_SHOW_DELETE_MODAL'; payload: boolean }
   | { type: 'SET_DOC_TO_DELETE'; payload: string | null }
-  | { type: 'OPEN_CONTENT_MODAL'; payload: { docId: string; content: any } }
+  | { type: 'OPEN_CONTENT_MODAL'; payload: { doc: Document; content: DocumentContentData } }
   | { type: 'CLOSE_CONTENT_MODAL' }
   | { type: 'OPEN_DELETE_MODAL'; payload: string }
   | { type: 'CLOSE_DELETE_MODAL' };
@@ -70,6 +78,7 @@ const initialState: DocumentListState = {
   selectedDoc: null,
   showContentModal: false,
   docContent: null,
+  loadingContent: false,
   showDeleteModal: false,
   docToDelete: null,
 };
@@ -120,6 +129,11 @@ const documentListReducer = (
         ...state,
         docContent: action.payload,
       };
+    case 'SET_LOADING_CONTENT':
+      return {
+        ...state,
+        loadingContent: action.payload,
+      };
     case 'SET_SHOW_DELETE_MODAL':
       return {
         ...state,
@@ -134,13 +148,16 @@ const documentListReducer = (
       return {
         ...state,
         docContent: action.payload.content,
-        selectedDoc: action.payload.docId,
+        selectedDoc: action.payload.doc,
         showContentModal: true,
+        loadingContent: false,
       };
     case 'CLOSE_CONTENT_MODAL':
       return {
         ...state,
         showContentModal: false,
+        docContent: null,
+        selectedDoc: null,
       };
     case 'OPEN_DELETE_MODAL':
       return {
@@ -211,15 +228,114 @@ const DocumentListPage = () => {
     fetchDocuments();
   }, [state.page, state.pageSize, state.search]);
 
-  const handleViewContent = async (docId: string) => {
+  const handleViewContent = async (doc: Document) => {
+    dispatch({ type: 'SET_LOADING_CONTENT', payload: true });
+    dispatch({ type: 'SET_SHOW_CONTENT_MODAL', payload: true });
+    dispatch({ type: 'SET_SELECTED_DOC', payload: doc });
+    
     try {
-      const content = await getDocumentContent(docId);
+      const content = await getDocumentContent(doc.id);
       dispatch({
         type: 'OPEN_CONTENT_MODAL',
-        payload: { docId, content },
+        payload: { doc, content },
       });
     } catch (error) {
       console.error('Error fetching document content:', error);
+      dispatch({ type: 'SET_LOADING_CONTENT', payload: false });
+    }
+  };
+
+  const getFileExtensionAndMimeType = (outputFormat: string) => {
+    // Backend supports: json, md, text
+    switch (outputFormat.toLowerCase()) {
+      case 'json':
+        return { extension: 'json', mimeType: 'application/json' };
+      case 'md':
+        return { extension: 'md', mimeType: 'text/markdown' };
+      case 'text':
+        return { extension: 'txt', mimeType: 'text/plain' };
+      default:
+        return { extension: 'json', mimeType: 'application/json' };
+    }
+  };
+
+  const handleDownloadContent = () => {
+    if (!state.docContent || !state.selectedDoc) return;
+
+    try {
+      const outputFormat = state.docContent.output_format || 'json';
+      const { extension, mimeType } = getFileExtensionAndMimeType(outputFormat);
+      
+      // Convert content to appropriate string format
+      let contentStr: string;
+      const contentResult = state.docContent.result;
+      
+      if (typeof contentResult === 'string') {
+        // For md and text formats, content is already a string
+        contentStr = contentResult;
+      } else {
+        // For JSON format, stringify with formatting
+        contentStr = JSON.stringify(contentResult, null, 2);
+      }
+      
+      // Create a Blob from the content
+      const blob = new Blob([contentStr], { type: mimeType });
+      
+      // Create a download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Generate filename from document name
+      const docName = state.selectedDoc.name || state.selectedDoc.filename || 'document';
+      const baseFilename = docName.replace(/\.[^/.]+$/, '');
+      link.download = `${baseFilename}_content.${extension}`;
+      
+      // Trigger download
+      document.body.appendChild(link);
+      link.click();
+      
+      // Cleanup
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading content:', error);
+    }
+  };
+
+  const renderContentPreview = () => {
+    if (state.loadingContent) {
+      return (
+        <div className={styles.loadingContainer}>
+          <Loading description="Loading content..." withOverlay={false} />
+        </div>
+      );
+    }
+
+    if (!state.docContent) {
+      return <p>No content available</p>;
+    }
+
+    // Format the content for better readability based on type
+    try {
+      const contentResult = state.docContent.result;
+      let displayContent: string;
+      
+      if (typeof contentResult === 'string') {
+        // For md and text formats, display as-is
+        displayContent = contentResult;
+      } else {
+        // For JSON format, stringify with formatting
+        displayContent = JSON.stringify(contentResult, null, 2);
+      }
+      
+      return (
+        <div className={styles.contentPreview}>
+          <pre className={styles.contentPre}>{displayContent}</pre>
+        </div>
+      );
+    } catch (error) {
+      return <p>Error displaying content</p>;
     }
   };
 
@@ -261,7 +377,7 @@ const DocumentListPage = () => {
       <Button
         kind="ghost"
         size="sm"
-        onClick={() => handleViewContent(doc.id)}
+        onClick={() => handleViewContent(doc)}
       >
         View content
       </Button>
@@ -419,15 +535,16 @@ const DocumentListPage = () => {
       <Modal
         open={state.showContentModal}
         onRequestClose={() => dispatch({ type: 'CLOSE_CONTENT_MODAL' })}
-        modalHeading={`Document Content: ${state.selectedDoc}`}
-        primaryButtonText="Close"
-        onRequestSubmit={() => dispatch({ type: 'CLOSE_CONTENT_MODAL' })}
+        modalHeading={`Document Content: ${state.selectedDoc?.name || state.selectedDoc?.filename || 'Document'}`}
+        primaryButtonText="Download"
+        primaryButtonDisabled={state.loadingContent || !state.docContent}
+        secondaryButtonText="Close"
+        onRequestSubmit={handleDownloadContent}
+        onSecondarySubmit={() => dispatch({ type: 'CLOSE_CONTENT_MODAL' })}
         size="lg"
       >
         <div className={styles.modalContent}>
-          <pre>
-            {state.docContent ? JSON.stringify(state.docContent, null, 2) : 'Loading...'}
-          </pre>
+          {renderContentPreview()}
         </div>
       </Modal>
 

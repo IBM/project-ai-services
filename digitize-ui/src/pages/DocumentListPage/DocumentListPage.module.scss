@@ -146,16 +146,31 @@
 .modalContent {
   max-height: 60vh;
   overflow: auto;
+}
 
-  pre {
-    background-color: var(--cds-layer-02);
-    padding: 1rem;
-    border-radius: 4px;
-    font-size: 0.875rem;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    color: var(--cds-text-primary);
-  }
+.loadingContainer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
+  padding: 2rem;
+}
+
+.contentPreview {
+  width: 100%;
+}
+
+.contentPre {
+  background-color: var(--cds-layer-02);
+  padding: 1rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  color: var(--cds-text-primary);
+  margin: 0;
+  font-family: 'IBM Plex Mono', 'Menlo', 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', Courier, monospace;
+  line-height: 1.5;
 }
 
 // Made with Bob
