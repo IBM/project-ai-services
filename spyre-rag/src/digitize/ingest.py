@@ -10,13 +10,13 @@ from digitize.types import JobStatus, DocStatus
 
 logger = get_logger("ingest")
 
-def ingest(directory_path, job_id=None, doc_id_dict=None):
+def ingest(directory_path: Path, job_id: str = None, doc_id_dict: dict = None):
 
     def ingestion_failed():
         logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
 
     logger.info(f"Ingestion started from dir '{directory_path}'")
-    
+
     # Initialize status manager
     status_mgr = None
     if job_id:
@@ -25,28 +25,12 @@ def ingest(directory_path, job_id=None, doc_id_dict=None):
         logger.info(f"Job {job_id} status updated to IN_PROGRESS")
 
     try:
-        # Process each document in the directory
-        allowed_file_types = {'pdf': b'%PDF'}
-        input_file_paths = []
-        total_pdfs = 0
+        # Files are already staged and validated at API level in app.py
+        # Just collect the PDF files from the staging directory
+        input_file_paths = [str(p) for p in directory_path.glob("*.pdf")]
 
-        for path in glob(f'{directory_path}/**/*', recursive=True):
-            if not has_allowed_extension(path, allowed_file_types):
-                continue
-
-            total_pdfs += 1
-
-            if is_supported_file(path, allowed_file_types):
-                input_file_paths.append(path)
-            else:
-                logger.warning(
-                    f"Skipping file with .pdf extension but unsupported format: {path}"
-                )
-        
         file_cnt = len(input_file_paths)
-        if not file_cnt > 0:
-            logger.info(f"No documents found to process in '{directory_path}'")
-            return
+        total_pdfs = file_cnt
 
         logger.info(f"Processing {file_cnt} document(s)")
 
@@ -90,13 +74,13 @@ def ingest(directory_path, job_id=None, doc_id_dict=None):
         # Log time taken for the file
         end_time = time.time()  # End the timer for the current file
         file_processing_time = end_time - start_time
-        
+
         unprocessed_files = get_unprocessed_files(input_file_paths, converted_pdf_stats.keys())
         if len(unprocessed_files):
             logger.info(f"Ingestion completed partially, please re-run the ingestion again to ingest the following files.\n{"\n".join(unprocessed_files)}\nIf the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
         else:
             logger.info(f"✅ Ingestion completed successfully, Time taken: {file_processing_time:.2f} seconds. You can query your documents via chatbot")
-        
+
         ingested = file_cnt - len(unprocessed_files)
         percentage = (ingested / total_pdfs * 100) if total_pdfs else 0.0
         logger.info(
@@ -114,12 +98,12 @@ def ingest(directory_path, job_id=None, doc_id_dict=None):
     except Exception as e:
         logger.error(f"Error during ingestion: {str(e)}", exc_info=True)
         ingestion_failed()
-        
+
         # Update status to FAILED for all documents in this job
         if status_mgr and doc_id_dict:
             for doc_id in doc_id_dict.values():
                 logger.debug(f"Ingestion failed: updating doc & job metadata to FAILED for document: {doc_id}")
                 status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Ingestion failed: {str(e)}")
                 status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"Ingestion failed: {str(e)}")
-        
+
         return None

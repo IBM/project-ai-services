@@ -14,20 +14,19 @@ def digitize(directory_path: Path, job_id: str, doc_id_dict: dict, output_format
     Digitize a single PDF file in the staging directory.
 
     Args:
-        directory_path: Path to staging directory containing exactly one PDF
+        directory_path: Path to staging directory containing exactly one PDF (pre-validated and staged by app.py)
         job_id: Job identifier for StatusManager
         doc_id_dict: Mapping from filename to document ID
         output_format: "json", "md", or "txt"
 
     Raises:
-        Exception: If directory doesn't exist, no PDFs found, conversion fails,
-                  or doc_id not found in doc_id_dict
+        Exception: If conversion fails
 
     Returns:
         None
     """
-    if not directory_path.exists():
-        raise Exception(f"Staging directory does not exist: {directory_path}")
+    # All validations are done at API level in app.py
+    # Files are pre-staged and doc_id_dict is pre-created
 
     # Initialize StatusManager
     status_mgr = StatusManager(job_id) if job_id else None
@@ -35,14 +34,11 @@ def digitize(directory_path: Path, job_id: str, doc_id_dict: dict, output_format
     # Prepare output/cache path
     out_path = setup_digitized_doc_dir()
 
+    # Get the single PDF file from staging directory
     pdfs = list(directory_path.glob("*.pdf"))
-    if len(pdfs) == 0:
-        raise Exception(f"No PDF files found in {directory_path}")
     file_path = pdfs[0]
     filename = file_path.name
-    doc_id = doc_id_dict.get(filename)
-    if doc_id is None:
-        raise Exception(f"Document ID not found for {filename}")
+    doc_id = doc_id_dict[filename]
 
     try:
         # Mark document/job as IN_PROGRESS

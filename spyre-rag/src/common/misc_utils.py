@@ -43,7 +43,7 @@ def get_logger(name):
 
     console_handler = logging.StreamHandler()
     console_handler.setLevel(LOG_LEVEL)
-    
+
     # Update formatter to include request_id
     formatter = logging.Formatter(
         '%(asctime)s - %(name)-18s - %(levelname)-8s - [%(request_id)s] - %(message)s',
@@ -104,20 +104,18 @@ def verify_checksum(file, checksum_file):
         return True
     return False
 
+def validate_pdf_content(content: bytes) -> bool:
+    """
+    Validate that file content is a valid PDF by checking magic bytes.
 
-def has_allowed_extension(path, allowed_file_types):
-    return path.lower().split('.')[-1] in allowed_file_types
+    Args:
+        content: File content as bytes
 
-def is_supported_file(path,allowed_file_types):
-    try:
-        with open(path, "rb") as f:
-            header = f.read(8)
-        for signature in allowed_file_types.values():
-            if header.startswith(signature):
-                return True
-        return False
-    except Exception as e:
-        return False
+    Returns:
+        True if content starts with PDF signature, False otherwise
+    """
+    pdf_signature = b'%PDF'
+    return content.startswith(pdf_signature)
 
 def get_unprocessed_files(original_files, processed_pdfs):
     return set(original_files).difference(set(processed_pdfs))
