@@ -2,14 +2,15 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from pathlib import Path
 import shutil
 from typing import List, Optional
 from contextlib import asynccontextmanager
 import uvicorn
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status
-from common.misc_utils import get_logger, set_log_level, has_allowed_extension
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status, Request
+from common.misc_utils import get_logger, set_log_level, has_allowed_extension, set_request_id
 import digitize.digitize_utils as dg_util
 import digitize.types as types
 from digitize.digitize import digitize
@@ -41,9 +42,9 @@ async def lifespan(app: FastAPI):
     """Manage application lifespan events (startup and shutdown)."""
     # Startup
     logger.info("Application starting up...")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Application shutting down...")
 
@@ -106,11 +107,18 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
                 logger.debug(f"Cleaned up staging directory: {job_staging_path}")
         except Exception as cleanup_error:
             logger.warning(f"Failed to clean up staging directory {job_staging_path}: {cleanup_error}")
-        
+
         # Mandatory Semaphore Release
         ingestion_semaphore.release()
         logger.debug(f"✅ Job {job_id} done. Semaphore released.")
 
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    set_request_id(request_id)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 @app.post("/v1/documents", status_code=status.HTTP_202_ACCEPTED)
 async def digitize_document(
@@ -153,11 +161,11 @@ async def digitize_document(
         filenames = [f.filename for f in files if f.filename]
         if len(filenames) != len(files):
             APIError.raise_error(ErrorCode.INVALID_REQUEST, "All files must have valid filenames.")
-        
+
         # Read all file buffers concurrently with error handling
         # return_exceptions=True ensures partial failures don't cancel other reads
         file_contents_raw = await asyncio.gather(*[f.read() for f in files], return_exceptions=True)
-        
+
         # Validate all file reads succeeded and filter to bytes only
         failed_reads = []
         file_contents: List[bytes] = []
@@ -168,7 +176,7 @@ async def digitize_document(
                 failed_reads.append(f"{filename}: {str(content)}")
             elif isinstance(content, bytes):
                 file_contents.append(content)
-        
+
         if failed_reads:
             error_details = "; ".join(failed_reads)
             APIError.raise_error(ErrorCode.INVALID_REQUEST, f"Failed to read files: {error_details}")
