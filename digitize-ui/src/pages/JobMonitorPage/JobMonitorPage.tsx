@@ -407,7 +407,7 @@ const JobMonitorPage = () => {
             hour12: true,
           })
         : 'N/A',
-      duration: calculateDuration(job.submitted_at),
+      duration: calculateDuration(job.submitted_at, job.completed_at),
       actions: hasError ? (
         <div className={styles.errorMessage}>
           <ErrorFilled size={16} className={styles.errorIcon} />
@@ -615,7 +615,7 @@ const JobMonitorPage = () => {
         <SidePanel
           open={state.isSidePanelOpen}
           onRequestClose={() => dispatch({ type: 'SET_SIDE_PANEL_OPEN', payload: false })}
-          title="Documents"
+          title="Job Details"
           slideIn
           selectorPageContent=".jobMonitorPage"
           placement="right"
@@ -625,29 +625,108 @@ const JobMonitorPage = () => {
           {state.selectedJob && (
             <div className={styles.sidePanelContent}>
               <div className={styles.sidePanelSection}>
-                <h6 className={styles.sectionLabel}>Job name</h6>
-                <p className={styles.sectionValue}>{getJobName(state.selectedJob)}</p>
+                <h6 className={styles.sectionLabel}>Job ID</h6>
+                <p className={styles.sectionValue}>{state.selectedJob.job_id}</p>
               </div>
 
               <div className={styles.sidePanelSection}>
-                <h6 className={styles.sectionLabel}>Ingested PDF files</h6>
+                <h6 className={styles.sectionLabel}>Operation</h6>
+                <p className={styles.sectionValue}>{state.selectedJob.operation}</p>
+              </div>
+
+              <div className={styles.sidePanelSection}>
+                <h6 className={styles.sectionLabel}>Status</h6>
+                <div className={styles.statusCell}>
+                  {getStatusIcon(getJobStatus(state.selectedJob))}
+                  <span className={styles.statusText}>{getJobStatus(state.selectedJob)}</span>
+                </div>
+              </div>
+
+              <div className={styles.sidePanelSection}>
+                <h6 className={styles.sectionLabel}>Submitted At</h6>
+                <p className={styles.sectionValue}>
+                  {state.selectedJob.submitted_at
+                    ? new Date(state.selectedJob.submitted_at).toLocaleString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: true,
+                      })
+                    : 'N/A'}
+                </p>
+              </div>
+
+              {state.selectedJob.completed_at && (
+                <div className={styles.sidePanelSection}>
+                  <h6 className={styles.sectionLabel}>Completed At</h6>
+                  <p className={styles.sectionValue}>
+                    {new Date(state.selectedJob.completed_at).toLocaleString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                      second: '2-digit',
+                      hour12: true,
+                    })}
+                  </p>
+                </div>
+              )}
+
+              {state.selectedJob.stats && (
+                <div className={styles.sidePanelSection}>
+                  <h6 className={styles.sectionLabel}>Statistics</h6>
+                  <div className={styles.statsGrid}>
+                    <div className={styles.statItem}>
+                      <span className={styles.statLabel}>Total Documents:</span>
+                      <span className={styles.statValue}>{state.selectedJob.stats.total_documents}</span>
+                    </div>
+                    <div className={styles.statItem}>
+                      <span className={styles.statLabel}>Completed:</span>
+                      <span className={styles.statValue}>{state.selectedJob.stats.completed}</span>
+                    </div>
+                    <div className={styles.statItem}>
+                      <span className={styles.statLabel}>Failed:</span>
+                      <span className={styles.statValue}>{state.selectedJob.stats.failed}</span>
+                    </div>
+                    <div className={styles.statItem}>
+                      <span className={styles.statLabel}>In Progress:</span>
+                      <span className={styles.statValue}>{state.selectedJob.stats.in_progress}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className={styles.sidePanelSection}>
+                <h6 className={styles.sectionLabel}>Documents</h6>
                 {state.selectedJob.documents && state.selectedJob.documents.length > 0 ? (
-                  <div className={styles.documentTagsList}>
+                  <div className={styles.documentsList}>
                     {state.selectedJob.documents.map((doc, idx) => (
-                      <Tag
-                        key={idx}
-                        type="gray"
-                        size="md"
-                        className={styles.documentTag}
-                      >
-                        {doc.name}
-                      </Tag>
+                      <div key={idx} className={styles.documentItem}>
+                        <div className={styles.documentInfo}>
+                          <span className={styles.documentName}>{doc.name}</span>
+                          <div className={styles.documentStatus}>
+                            {getStatusIcon(doc.status)}
+                            <span className={styles.statusText}>{doc.status}</span>
+                          </div>
+                        </div>
+                      </div>
                     ))}
                   </div>
                 ) : (
                   <p className={styles.noDocuments}>No documents</p>
                 )}
               </div>
+
+              {state.selectedJob.error && (
+                <div className={styles.sidePanelSection}>
+                  <h6 className={styles.sectionLabel}>Error</h6>
+                  <p className={styles.errorText}>{state.selectedJob.error}</p>
+                </div>
+              )}
             </div>
           )}
         </SidePanel>

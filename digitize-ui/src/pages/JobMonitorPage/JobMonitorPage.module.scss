@@ -172,28 +172,71 @@
 }
 
 .documentsList {
-  margin-top: 0.5rem;
+  margin-top: $spacing-03;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-05;
 }
 
 .documentItem {
-  padding: 0.75rem;
-  margin-bottom: 0.5rem;
+  padding: $spacing-05;
   border: 1px solid var(--cds-border-subtle-01);
   border-radius: 4px;
   background-color: var(--cds-layer-02);
-  
-  div {
-    margin-bottom: 0.25rem;
-    
-    &:last-child {
-      margin-bottom: 0;
-    }
-    
-    strong {
-      font-weight: 600;
-      margin-right: 0.5rem;
-    }
-  }
+}
+
+.documentInfo {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+}
+
+.documentName {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--cds-text-primary);
+}
+
+.documentStatus {
+  display: flex;
+  align-items: center;
+  gap: $spacing-03;
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $spacing-05;
+  margin-top: $spacing-03;
+}
+
+.statItem {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-02;
+}
+
+.statLabel {
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+}
+
+.statValue {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--cds-text-primary);
+}
+
+.errorText {
+  font-size: 0.875rem;
+  color: var(--cds-support-error);
+  margin: 0;
+  padding: $spacing-05;
+  background-color: var(--cds-notification-background-error);
+  border-left: 3px solid var(--cds-support-error);
+  border-radius: 4px;
 }
 
 .emptyStateCell {
@@ -213,14 +256,14 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 3rem 2rem;
+  padding: $spacing-09 $spacing-07;
   min-height: 350px;
   text-align: center;
   background-color: var(--cds-layer-01);
 }
 
 .emptyStateIcon {
-  margin-bottom: 1rem;
+  margin-bottom: $spacing-05;
   opacity: 0.3;
   
   svg {
@@ -234,7 +277,7 @@
   font-size: 1.125rem;
   font-weight: 400;
   color: var(--cds-text-primary);
-  margin: 0 0 0.5rem 0;
+  margin: 0 0 $spacing-03 0;
   line-height: 1.5;
 }
 
@@ -246,18 +289,18 @@
 }
 
 .sidePanelContent {
-  padding: 1rem;
+  padding: $spacing-05;
 }
 
 .sidePanelSection {
-  margin-bottom: 2rem;
+  margin-bottom: $spacing-07;
 }
 
 .sectionLabel {
   font-size: 0.75rem;
   font-weight: 400;
   color: var(--cds-text-secondary);
-  margin: 0 0 0.5rem 0;
+  margin: 0 0 $spacing-03 0;
   text-transform: none;
   letter-spacing: 0;
 }
@@ -273,7 +316,7 @@
 .documentTagsList {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: $spacing-03;
 }
 
 .documentTag {

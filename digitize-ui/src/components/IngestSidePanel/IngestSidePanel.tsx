@@ -116,7 +116,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
               />
               <RadioButton
                 labelText="Markdown"
-                value="markdown"
+                value="md"
                 id="format-markdown"
               />
               <RadioButton

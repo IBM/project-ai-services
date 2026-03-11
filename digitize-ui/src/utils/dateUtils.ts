@@ -1,14 +1,18 @@
 /**
- * Calculate the duration between a start time and now
+ * Calculate the duration between a start time and end time (or now if not completed)
  * @param startTime - ISO 8601 date string
+ * @param endTime - ISO 8601 date string (optional, defaults to current time)
  * @returns Formatted duration string (e.g., "2d 3h 45m" or "5m 30s")
  */
-export const calculateDuration = (startTime: string | undefined): string => {
+export const calculateDuration = (startTime: string | undefined, endTime?: string | undefined): string => {
   if (!startTime) return 'N/A';
   
   const start = new Date(startTime);
-  const now = new Date();
-  const diffMs = now.getTime() - start.getTime();
+  const end = endTime ? new Date(endTime) : new Date();
+  const diffMs = end.getTime() - start.getTime();
+  
+  // Handle negative durations (shouldn't happen but just in case)
+  if (diffMs < 0) return 'N/A';
   
   const totalSeconds = Math.floor(diffMs / 1000);
   const totalMinutes = Math.floor(totalSeconds / 60);

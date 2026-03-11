@@ -20,13 +20,22 @@ export interface Document {
   created_at?: string;
 }
 
+export interface JobStats {
+  total_documents: number;
+  completed: number;
+  failed: number;
+  in_progress: number;
+}
+
 export interface Job {
   job_id: string;
   operation: string;
   status: string;
   submitted_at?: string;
-  error?: string;
+  completed_at?: string;
+  error?: string | null;
   documents?: Document[];
+  stats?: JobStats;
 }
 
 export interface PaginationInfo {
@@ -100,13 +109,13 @@ export const getAllJobs = async (params: GetJobsParams = {}): Promise<JobsRespon
     queryParams.append('status', status);
   }
 
-  const response: AxiosResponse<JobsResponse> = await api.get(`/documents/jobs?${queryParams}`);
+  const response: AxiosResponse<JobsResponse> = await api.get(`/jobs?${queryParams}`);
   return response.data;
 };
 
 export const getJobById = async (jobId: string): Promise<Job> => {
-  const response: AxiosResponse<{ data: Job }> = await api.get(`/documents/jobs/${jobId}`);
-  return response.data.data;
+  const response: AxiosResponse<Job> = await api.get(`/jobs/${jobId}`);
+  return response.data;
 };
 
 // Document Management
@@ -149,12 +158,12 @@ export const bulkDeleteDocuments = async (): Promise<{ message: string }> => {
 };
 
 export const deleteJob = async (jobId: string): Promise<{ message: string }> => {
-  const response: AxiosResponse<{ message: string }> = await api.delete(`/documents/jobs/${jobId}`);
+  const response: AxiosResponse<{ message: string }> = await api.delete(`/jobs/${jobId}`);
   return response.data;
 };
 
 export const bulkDeleteJobs = async (jobIds: string[]): Promise<{ message: string }> => {
-  const response: AxiosResponse<{ message: string }> = await api.post('/documents/jobs/bulk-delete', {
+  const response: AxiosResponse<{ message: string }> = await api.post('/jobs/bulk-delete', {
     job_ids: jobIds,
   });
   return response.data;
