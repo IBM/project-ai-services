@@ -438,7 +438,7 @@ def delete_document_files(doc_id: str, output_format: str, docs_dir: Path = DOCS
     
     Args:
         doc_id: Unique identifier of the document
-        output_format: Output format of the document (json, markdown, or text)
+        output_format: Output format of the document (txt, md, or json)
         docs_dir: Directory containing document metadata files
         
     Raises:
@@ -453,6 +453,11 @@ def delete_document_files(doc_id: str, output_format: str, docs_dir: Path = DOCS
         logger.error(f"Document metadata file not found: {meta_file}")
         raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
     
+    # Validate output_format against OutputFormat enum
+    valid_formats = [fmt.value for fmt in OutputFormat]
+    if output_format not in valid_formats:
+        raise ValueError(f"Invalid output_format: '{output_format}'. Must be one of: {', '.join(valid_formats)}")
+
     files_deleted = []
     
     # STEP 1: Delete digitized content file FIRST
@@ -548,7 +553,9 @@ def cleanup_digitized_files() -> dict:
     
     if DIGITIZED_DOCS_DIR.exists():
         logger.debug(f"Deleting content files from {DIGITIZED_DOCS_DIR}")
-        for extension in ["json", "md", "text"]:
+        # Use OutputFormat enum values for consistency
+        for output_format in OutputFormat:
+            extension = output_format.value
             content_files = list(DIGITIZED_DOCS_DIR.glob(f"*.{extension}"))
             logger.debug(f"Found {len(content_files)} .{extension} files to delete")
 

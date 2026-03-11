@@ -460,13 +460,11 @@ async def delete_document(doc_id: str):
 
         # 3. Step A: Vector Database Cleanup (High Priority)
         # We attempt this regardless of whether metadata exists to fix partial failures.
-        vdb_cleaned = False
         try:
             import common.db_utils as db
             vector_store = db.get_vector_store()
             # This method should use the 'refresh=True' param we discussed earlier
             deleted_chunks = vector_store.delete_document_by_id(doc_id)
-            vdb_cleaned = True
             logger.info(f"VDB cleanup for {doc_id}: {deleted_chunks} chunks removed.")
         except Exception as e:
             logger.error(f"VDB cleanup failed for {doc_id}: {e}")
