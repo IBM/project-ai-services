@@ -184,7 +184,6 @@ class OpensearchVectorStore(VectorStore):
                 # Generate chunk ID based on content + filename (not doc_id)
                 # This allows updating doc_id when re-ingesting the same file
                 doc_id = doc.get("doc_id") or fn # Fallback to filename if UUID missing
-                logger.debug(f"Inserting chunk {j+1}: doc_id={doc_id}, filename={fn}")
                 cid = generate_chunk_id(doc_id, pc)
 
                 actions.append({
@@ -210,11 +209,9 @@ class OpensearchVectorStore(VectorStore):
                 if failed:
                     logger.error(f"Failed to insert {failed} chunks in batch {batch_num} starting at index {i}")
                     return
-                logger.debug(f"Batch {batch_num}: Successfully inserted {success} chunks, failed {failed}")
 
                 # Log the doc_ids that were inserted in this batch for verification
                 inserted_doc_ids = list(set([action["_source"]["doc_id"] for action in actions]))
-                logger.debug(f"Batch {batch_num}: Inserted chunks for doc_ids: {inserted_doc_ids}")
             except Exception as e:
                 logger.error(f"Exception during bulk insert for batch {batch_num}: {e}")
                 raise

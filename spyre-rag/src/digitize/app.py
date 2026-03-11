@@ -15,6 +15,7 @@ import digitize.types as types
 from digitize.digitize import digitize
 from digitize.errors import *
 import digitize.config as config
+from digitize.cleanup import reset_db
 
 log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
@@ -427,9 +428,8 @@ async def delete_document(doc_id: str):
     3. Removes the document from the vector database (if ingested) - FIRST
     4. Deletes all associated files from cache - LAST
     
-    The order is important: VDB deletion is done first so that if file deletion fails,
-    the document is already removed from search results. The operation is idempotent -
-    calling it multiple times has the same effect as calling it once.
+    Deletes document with an 'Always-Clean-VDB' retry strategy.
+    Order: 1. VDB (Search) -> 2. Files (Storage) -> 3. Metadata (Record)
     
     Path Parameters:
     - doc_id: Unique identifier of the document to delete
@@ -440,94 +440,60 @@ async def delete_document(doc_id: str):
     - 409 Conflict if document is part of an active job
     - 500 Internal Server Error on unexpected errors
     """
+
     try:
-        # 1. Check if document exists by trying to get its metadata
+        # 1. Fetch Metadata (if it exists)
+        doc_metadata = None
         try:
             doc_metadata = dg_util.get_document_by_id(doc_id, include_details=False)
-        except FileNotFoundError as e:
-            logger.error(f"Document {doc_id} not found: {e}")
-            APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(e))
-            return  # This line will never be reached, but helps type checker
-        
-        # 2. Check if document is part of any active job
-        is_active, job_id = dg_util.is_document_in_active_job(doc_id, job_id=doc_metadata.job_id)
-        if is_active:
-            logger.error(f"Cannot delete document {doc_id}: part of active job {job_id}")
-            APIError.raise_error(
-                ErrorCode.RESOURCE_LOCKED,
-                f"Document is part of active job '{job_id}' and cannot be deleted"
-            )
-        
-        # Track deletion progress for error reporting
-        vdb_deleted = False
-        files_deleted = False
-        errors = []
-        
-        # 3. Remove from vector database FIRST (if the document was ingested)
-        # This ensures the document is removed from search results even if file deletion fails
-        # doc_metadata is a DocumentDetailResponse Pydantic model, access attributes directly
-        doc_status = doc_metadata.status.lower() if isinstance(doc_metadata.status, str) else doc_metadata.status.value.lower()
-        doc_type = doc_metadata.type.lower()
-        
-        if doc_type == types.OperationType.INGESTION.value and doc_status == types.DocStatus.COMPLETED.value:
-            try:
-                logger.debug(f"Attempting to remove document {doc_id} from vector database (type={doc_type}, status={doc_status})")
-                import common.db_utils as db
-                vector_store = db.get_vector_store()
-                deleted_chunks = vector_store.delete_document_by_id(doc_id)
-                vdb_deleted = True
-                if deleted_chunks > 0:
-                    logger.info(f"✓ Removed {deleted_chunks} chunks for document {doc_id} from vector database")
-                else:
-                    logger.info(f"✓ VDB deletion completed: 0 chunks found for document {doc_id} (may have been already deleted or ingestion incomplete)")
-            except Exception as e:
-                error_msg = f"Failed to remove document from vector database: {str(e)}"
-                logger.error(f"✗ {error_msg}")
-                errors.append(error_msg)
-                # Don't raise here - continue with file deletion
-        else:
-            logger.info(f"Skipping VDB deletion: document not ingested (type={doc_type}, status={doc_status})")
-            vdb_deleted = True  # Mark as "deleted" since there's nothing to delete
-        
-        # 4. Delete all associated files from cache LAST
-        try:
-            dg_util.delete_document_files(doc_id)
-            files_deleted = True
-            logger.info(f"✓ Successfully deleted all files for document {doc_id}")
-        except FileNotFoundError as e:
-            # Document metadata was found earlier but now missing - possible race condition
-            error_msg = f"Document files not found during deletion (possible race condition): {str(e)}"
-            logger.error(error_msg)
-            errors.append(error_msg)
-            # If VDB was deleted, consider this a partial success
-            if vdb_deleted:
-                logger.info(f"Document {doc_id} partially deleted (VDB cleaned but files missing)")
-                return None
-            else:
-                APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(e))
-        except Exception as e:
-            error_msg = f"Failed to delete document files: {str(e)}"
-            logger.error(f"✗ {error_msg}")
-            errors.append(error_msg)
-            # If VDB was deleted but file deletion failed, report partial success
-            if vdb_deleted:
-                logger.warning(f"Document {doc_id} partially deleted: VDB cleaned but file deletion failed")
+        except FileNotFoundError:
+            logger.error(f"Metadata for {doc_id} not found. Proceeding with vectorstore cleanup.")
+
+        # 2. Lock Check: Only if metadata exists and indicates an active job
+        if doc_metadata:
+            is_active = dg_util.is_document_in_active_job(doc_id, job_id=doc_metadata.job_id)
+            if is_active:
                 APIError.raise_error(
-                    ErrorCode.INTERNAL_SERVER_ERROR,
-                    f"Partial deletion: document removed from search but files remain. {error_msg}"
+                    ErrorCode.RESOURCE_LOCKED,
+                    f"Document part of active job '{doc_metadata.job_id}' and cannot be deleted"
                 )
-            else:
-                APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, error_msg)
-        
-        # 5. Success - both VDB and files deleted (or nothing to delete)
-        if vdb_deleted and files_deleted:
-            logger.debug(f"✅ Document {doc_id} deleted successfully")
-        elif errors:
-            # Should not reach here, but log if it does
-            logger.error(f"Delete completed with warnings: {'; '.join(errors)}")
-        
+
+        # 3. Step A: Vector Database Cleanup (High Priority)
+        # We attempt this regardless of whether metadata exists to fix partial failures.
+        vdb_cleaned = False
+        try:
+            import common.db_utils as db
+            vector_store = db.get_vector_store()
+            # This method should use the 'refresh=True' param we discussed earlier
+            deleted_chunks = vector_store.delete_document_by_id(doc_id)
+            vdb_cleaned = True
+            logger.info(f"VDB cleanup for {doc_id}: {deleted_chunks} chunks removed.")
+        except Exception as e:
+            logger.error(f"VDB cleanup failed for {doc_id}: {e}")
+            # If metadata is already deleted and VDB fails, we MUST raise to let the user retry
+            if not doc_metadata:
+                APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Document metadata deleted but VDB cleanup failed: {e}")
+
+        # 4. Step B: File & Metadata Cleanup
+        # If metadata is already deleted, we assume files were either deleted or are being handled
+        if doc_metadata:
+            try:
+                # Delete digitized files AND the metadata file last
+                # Pass output_format to delete only the specific format file instead of looping through all
+                dg_util.delete_document_files(doc_id, output_format=doc_metadata.output_format)
+                logger.info(f"Files and metadata for {doc_id} deleted successfully.")
+            except Exception as e:
+                # If VDB succeeded but files failed, we report a 500 so the user retries
+                # even though the document is now 'hidden' from search.
+                if vdb_cleaned:
+                    logger.warning(f"VDB cleaned but file deletion failed for {doc_id}")
+                    APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Search data removed but files remain: {e}")
+                raise
+
+        # 5. Idempotent Success
+        # If we reach here, either everything is deleted, or metadata was already gone and VDB is now clean.
         return None
-        
+
     except HTTPException as e:
         logger.error(f"Failed to delete document {id}, HTTP error: {e}")
         # Re-raise HTTPException as-is
@@ -535,6 +501,7 @@ async def delete_document(doc_id: str):
     except Exception as e:
         logger.error(f"Unexpected error deleting document {doc_id}: {e}", exc_info=True)
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(e))
+
 
 @app.delete("/v1/documents", status_code=status.HTTP_204_NO_CONTENT)
 async def bulk_delete_documents(confirm: bool = Query(..., description="Required confirmation to proceed with bulk deletion")):
@@ -576,61 +543,9 @@ async def bulk_delete_documents(confirm: bool = Query(..., description="Required
 
         logger.info("No active jobs found, proceeding with bulk deletion")
 
-        # Track deletion progress
-        vdb_reset = False
-        files_deleted = False
-
-        # 3. Reset vector database index FIRST
-        # This ensures documents are removed from search even if file deletion fails
-        try:
-            logger.debug("Resetting vector database index...")
-            import common.db_utils as db
-            vector_store = db.get_vector_store()
-            vector_store.reset_index()
-            vdb_reset = True
-            logger.info("✓ Vector database index reset successfully")
-        except Exception as e:
-            error_msg = f"Failed to reset vector database: {str(e)}"
-            logger.error(f"✗ {error_msg}")
-            # Raise error immediately - VDB reset is critical
-            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, error_msg)
-
-        # 4. Delete all document files LAST
-        try:
-            logger.debug("Deleting all document files...")
-            deletion_stats = dg_util.bulk_delete_all_documents()
-            files_deleted = True
-
-            total_deleted = deletion_stats["metadata_files_deleted"] + deletion_stats["content_files_deleted"]
-            logger.info(
-                f"✓ Deleted {total_deleted} files "
-                f"({deletion_stats['metadata_files_deleted']} metadata, "
-                f"{deletion_stats['content_files_deleted']} content)"
-            )
-
-            # If there were any file deletion errors, raise an error
-            if deletion_stats["errors"]:
-                error_summary = "; ".join(deletion_stats["errors"][:3])  # Limit to first 3 errors
-                logger.error(f"File deletion completed with errors: {error_summary}")
-                APIError.raise_error(
-                    ErrorCode.INTERNAL_SERVER_ERROR,
-                    f"Partial deletion: vector database reset but some files failed to delete. {error_summary}"
-                )
-
-        except HTTPException as e:
-            logger.error(f"Failed to list documents, HTTP error: {e}")
-            # Re-raise HTTPException (from APIError.raise_error above)
-            raise
-        except Exception as e:
-            error_msg = f"Failed to delete document files: {str(e)}"
-            logger.error(f"✗ {error_msg}")
-            # VDB was reset but file deletion failed completely
-            APIError.raise_error(
-                ErrorCode.INTERNAL_SERVER_ERROR,
-                f"Partial deletion: vector database reset but file deletion failed. {error_msg}"
-            )
-
-        # 5. Success - both VDB and files deleted without errors
+        # 3. Reset vector database and delete all files
+        # Uses reset_db() which handles VDB reset and file deletion with proper error handling
+        reset_db()
         logger.info("✅ Bulk deletion completed successfully")
         return None
 
