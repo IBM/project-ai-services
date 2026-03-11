@@ -3,6 +3,7 @@ import logging
 import os
 from pathlib import Path
 from contextvars import ContextVar
+from digitize.config import DIGITIZED_DOCS_DIR
 
 # ContextVar to store the request ID for each request
 request_id_ctx = ContextVar("request_id", default="-")
@@ -23,7 +24,7 @@ def get_request_id() -> str:
 
 LOG_LEVEL = logging.INFO
 
-LOCAL_CACHE_DIR = "/var/cache"
+LOCAL_CACHE_DIR = os.getenv("LOCAL_CACHE_DIR", "/var/cache")
 chunk_suffix = "_clean_chunk.json"
 text_suffix = "_clean_text.json"
 table_suffix = "_tables.json"
@@ -83,10 +84,9 @@ def get_model_endpoints():
 
     return emb_model_dict, llm_model_dict, reranker_model_dict
 
-def setup_cache_dir(dir):
-    cache_dir = os.path.join(LOCAL_CACHE_DIR, f'{dir}_cache')
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
+def setup_digitized_doc_dir():
+    os.makedirs(DIGITIZED_DOCS_DIR, exist_ok=True)
+    return DIGITIZED_DOCS_DIR
 
 def generate_file_checksum(file):
     sha256 = hashlib.sha256()

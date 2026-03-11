@@ -6,10 +6,11 @@ import os
 from pathlib import Path
 
 # Directory paths
-CACHE_DIR = Path("/var/cache")
+CACHE_DIR = Path(os.getenv("CACHE_DIR", "/var/cache"))
 DOCS_DIR = CACHE_DIR / "docs"
 JOBS_DIR = CACHE_DIR / "jobs"
 STAGING_DIR = CACHE_DIR / "staging"
+DIGITIZED_DOCS_DIR = CACHE_DIR / "digitized"
 
 # Worker pool sizes
 WORKER_SIZE = int(os.getenv("DOC_WORKER_SIZE", "4"))

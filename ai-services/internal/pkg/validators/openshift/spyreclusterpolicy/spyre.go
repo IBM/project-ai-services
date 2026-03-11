@@ -1,17 +1,14 @@
 package spyrepolicy
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 const (
@@ -35,7 +32,7 @@ func (r *SpyrePolicyRule) Description() string {
 	return "Validates that Spyre Cluster Policy is in ready state"
 }
 
-// Verify performs a direct fetch.
+// Verify performs a direct check without polling.
 func (r *SpyrePolicyRule) Verify() error {
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
@@ -49,37 +46,28 @@ func (r *SpyrePolicyRule) Verify() error {
 		Kind:    spyreKind,
 	})
 
-	return wait.PollUntilContextTimeout(client.Ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
-		if err := client.Client.Get(ctx, types.NamespacedName{
-			Name:      spyreName,
-			Namespace: constants.SpyreOperatorNamespace,
-		}, obj); err != nil {
-			if apierrors.IsNotFound(err) {
-				logger.Infof("SpyreClusterPolicy %s not found yet, retrying...", spyreName, logger.VerbosityLevelDebug)
-
-				return false, nil
-			}
-
-			return false, fmt.Errorf("failed to find %s in namespace %s: %w", spyreName, constants.SpyreOperatorNamespace, err)
+	if err := client.Client.Get(client.Ctx, types.NamespacedName{Name: spyreName}, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("SpyreClusterPolicy %s not found", spyreName)
 		}
 
-		state, found, err := unstructured.NestedString(obj.Object, "status", "state")
-		if err != nil {
-			return false, fmt.Errorf("failed to parse status.state from policy: %w", err)
-		}
+		return fmt.Errorf("failed to find %s: %w", spyreName, err)
+	}
 
-		if !found || state != "ready" {
-			if !found {
-				state = "unknown"
-			}
-			logger.Infof("SpyreClusterPolicy not ready yet (status.state: %s), waiting...", state, logger.VerbosityLevelDebug)
+	state, found, err := unstructured.NestedString(obj.Object, "status", "state")
+	if err != nil {
+		return fmt.Errorf("failed to parse status.state from policy: %w", err)
+	}
 
-			return false, nil
-		}
-		logger.Infof("SpyreClusterPolicy %s is ready", spyreName, logger.VerbosityLevelDebug)
+	if !found {
+		return fmt.Errorf("SpyreClusterPolicy status.state not found")
+	}
 
-		return true, nil
-	})
+	if state != "ready" {
+		return fmt.Errorf("SpyreClusterPolicy not ready (status.state: %s)", state)
+	}
+
+	return nil
 }
 
 func (r *SpyrePolicyRule) Message() string {
@@ -91,5 +79,5 @@ func (r *SpyrePolicyRule) Level() constants.ValidationLevel {
 }
 
 func (r *SpyrePolicyRule) Hint() string {
-	return fmt.Sprintf("Run 'oc get spyreclusterpolicy -n %s' and ensure status.state is 'ready'.", constants.SpyreOperatorNamespace)
+	return "Run 'oc get spyreclusterpolicy and ensure status.state is 'ready'."
 }

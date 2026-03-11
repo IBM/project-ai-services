@@ -4,25 +4,25 @@ ui:
 
 backend:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.35
+  image: icr.io/ai-services-cicd/rag:v0.0.43
+  # @hidden
+  log_level: "INFO"
+
+summarize:
+  # @hidden
+  image: icr.io/ai-services-cicd/rag:v0.0.43
   # @hidden
   log_level: "INFO"
 
 instruct:
   # @hidden
-  image: registry.redhat.io/rhaiis/vllm-spyre-rhel9:3.2.5
-  # @hidden
   storageUri: hf://ibm-granite/granite-3.3-8b-instruct
 
 embedding:
   # @hidden
-  image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
-  # @hidden
   storageUri: hf://ibm-granite/granite-embedding-278m-multilingual
 
 reranker:
-  # @hidden
-  image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
   # @hidden
   storageUri: hf://BAAI/bge-reranker-v2-m3
 
