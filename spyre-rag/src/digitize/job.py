@@ -112,5 +112,5 @@ class JobState(BaseModel):
         jobs_dir.mkdir(parents=True, exist_ok=True)
         status_path = jobs_dir / f"{self.job_id}_status.json"
         with open(status_path, "w", encoding="utf-8") as f:
-            f.write(self.json(indent=4))
+            f.write(self.model_dump_json(indent=4))
         return status_path

@@ -298,7 +298,7 @@ async def delete_job(job_id: str):
 
 
 
-@app.get("/v1/documents", response_model=List[types.DocumentListItem])
+@app.get("/v1/documents", response_model=types.DocumentsListResponse)
 async def list_documents(
     limit: int = Query(20, ge=1, le=100, description="Number of records to return per page"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
@@ -340,15 +340,11 @@ async def list_documents(
 
         logger.debug(f"Returning {len(paginated_documents)} documents out of {total} total (offset={offset}, limit={limit})")
 
-        # Convert Pydantic models to dicts for response
-        return {
-            "pagination": {
-                "total": total,
-                "limit": limit,
-                "offset": offset
-            },
-            "data": [doc.model_dump() for doc in paginated_documents]
-        }
+        # Return properly typed response
+        return types.DocumentsListResponse(
+            pagination=types.PaginationInfo(total=total, limit=limit, offset=offset),
+            data=paginated_documents
+        )
 
     except HTTPException as e:
         logger.error(f"Failed to list documents, HTTP error: {e}")
