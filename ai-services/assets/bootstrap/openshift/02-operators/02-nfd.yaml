@@ -17,11 +17,3 @@ spec:
   name: nfd
   source: redhat-operators
   sourceNamespace: openshift-marketplace
----
-apiVersion: nfd.openshift.io/v1
-kind: NodeFeatureDiscovery
-metadata:
-  name: nfd-instance
-  namespace: openshift-nfd
-spec:
-  instance: ""

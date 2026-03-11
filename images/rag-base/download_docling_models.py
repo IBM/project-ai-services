@@ -1,7 +1,9 @@
 from docling.utils import model_downloader
 from pathlib import Path
+import os
 
-OUTPUT_DIR = Path("/var/docling-models") 
+# Use DOCLING_MODELS_PATH environment variable, fallback to /var/docling-models
+OUTPUT_DIR = Path(os.getenv("DOCLING_MODELS_PATH", "/var/docling-models"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 print(f"Downloading ds4sd--docling-models (Layout & TableFormer) to: {OUTPUT_DIR}")
