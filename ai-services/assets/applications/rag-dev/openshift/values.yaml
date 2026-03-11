@@ -22,7 +22,7 @@ digitize:
 
 digitizeUi:
   # @hidden
-  image: icr.io/ppc64le-oss/nginx-ppc64le:latest
+  image: icr.io/ai-services-cicd/rag-ui:v0.0.20
 
 instruct:
   # @hidden
