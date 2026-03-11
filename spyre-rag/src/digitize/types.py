@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 
 class OutputFormat(str, Enum):
-    TEXT = "text"
+    TEXT = "txt"
     MD = "md"
     JSON = "json"
 
