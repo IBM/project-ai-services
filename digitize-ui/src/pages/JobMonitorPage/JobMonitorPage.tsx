@@ -269,13 +269,14 @@ const JobMonitorPage = () => {
       }, 3000);
     } catch (error: any) {
       console.error('Error uploading documents:', error);
+      const errorMessage = error.response?.data?.detail || error.response?.data?.message || error.message || 'An error occurred';
       dispatch({
         type: 'SET_UPLOAD_STATUS',
         payload: {
           show: true,
           kind: 'error',
           title: 'Upload failed',
-          subtitle: error.response?.data?.message || error.message || 'An error occurred',
+          subtitle: errorMessage,
         },
       });
 
@@ -323,13 +324,14 @@ const JobMonitorPage = () => {
       }, 2000);
     } catch (error: any) {
       console.error('Error deleting jobs:', error);
+      const errorMessage = error.response?.data?.detail || error.response?.data?.message || error.message || 'An error occurred';
       dispatch({
         type: 'SET_DELETE_STATUS',
         payload: {
           show: true,
           kind: 'error',
           title: 'Delete failed',
-          subtitle: error.response?.data?.message || error.message || 'An error occurred',
+          subtitle: errorMessage,
         },
       });
 
@@ -419,7 +421,7 @@ const JobMonitorPage = () => {
           size="sm"
           onClick={() => handleViewDetails(job.job_id)}
         >
-          View documents
+          View details
         </Button>
       ),
     };
