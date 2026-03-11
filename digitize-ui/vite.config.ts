@@ -29,7 +29,7 @@ export default defineConfig(({ mode }) => {
       }
     },
     server: {
-      port: parseInt(env.VITE_PORT) || 3000,
+      port: parseInt(env.VITE_PORT) || 4001,
       proxy: {
         '/v1': {
           target: env.VITE_API_TARGET || 'http://localhost:4000',
