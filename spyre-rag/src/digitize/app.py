@@ -120,6 +120,55 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
         ingestion_semaphore.release()
         logger.debug(f"✅ Job {job_id} done. Semaphore released.")
 
+async def validate_pdf_files(
+    files: List[UploadFile],
+    file_contents_raw: List[bytes | BaseException]
+) -> tuple[List[str], List[bytes]]:
+    """
+    Validate uploaded PDF files.
+
+    Performs four validation checks:
+    1. Filename exists
+    2. File has .pdf extension
+    3. File was read successfully
+    4. File content is valid PDF (magic bytes check)
+
+    Raises APIError on any validation failure.
+
+    Returns:
+        Tuple of (filenames, file_contents)
+    """
+    filenames: List[str] = []
+    file_contents: List[bytes] = []
+
+    for idx, file in enumerate(files):
+        if not file.filename:
+            APIError.raise_error(ErrorCode.INVALID_REQUEST, "File must have a filename.")
+
+        assert file.filename is not None
+        filename = file.filename
+
+        # Validate .pdf extension
+        if not filename.lower().endswith('.pdf'):
+            APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, f"Only PDF files are allowed. Invalid file: {filename}")
+
+        # Validate file was read successfully
+        content = file_contents_raw[idx]
+        if isinstance(content, Exception):
+            logger.error(f"Failed to read file {filename}: {content}")
+            APIError.raise_error(ErrorCode.INVALID_REQUEST, f"Failed to read file: {filename}")
+
+        assert isinstance(content, bytes)
+
+        # Validate PDF content (magic bytes)
+        if not validate_pdf_content(content):
+            APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, f"File has .pdf extension but unsupported format: {filename}")
+
+        filenames.append(filename)
+        file_contents.append(content)
+
+    return filenames, file_contents
+
 @app.post("/v1/documents", status_code=status.HTTP_202_ACCEPTED)
 async def digitize_document(
     background_tasks: BackgroundTasks,
@@ -128,7 +177,7 @@ async def digitize_document(
     output_format: types.OutputFormat = Query(types.OutputFormat.JSON)
 ):
     try:
-        # 1. Basic validation
+        # 1. Early exit if no files submitted
         if not files or len(files) == 0:
             APIError.raise_error(ErrorCode.INVALID_REQUEST, "No files provided. Please submit at least one file.")
 
@@ -140,62 +189,10 @@ async def digitize_document(
         if sem.locked():
             APIError.raise_error(ErrorCode.RATE_LIMIT_EXCEEDED, f"Too many concurrent {operation} requests.")
 
-        # 3. Validate and filter files in a single pass
+        # 3. Generate job ID and validate PDF files
         job_id = dg_util.generate_uuid()
-        filenames: List[str] = []
-        file_contents: List[bytes] = []
-        skipped_files: List[str] = []
-
-        # Read all files concurrently
         file_contents_raw = await asyncio.gather(*[f.read() for f in files], return_exceptions=True)
-
-        # Validate each file: filename, extension, read success, and PDF content
-        for idx, file in enumerate(files):
-            # Check filename
-            if not file.filename:
-                APIError.raise_error(ErrorCode.INVALID_REQUEST, "File must have a filename.")
-
-            assert file.filename is not None  # Type narrowing
-            filename = file.filename
-
-            # Check extension
-            if not filename.lower().endswith('.pdf'):
-                if operation == types.OperationType.DIGITIZATION:
-                    APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, f"Only PDF files are allowed. Invalid file: {filename}")
-                else:
-                    logger.warning(f"Skipping non-PDF file: {filename}")
-                    skipped_files.append(filename)
-                    continue
-
-            # Check read success
-            content = file_contents_raw[idx]
-            if isinstance(content, Exception):
-                logger.error(f"Failed to read file {filename}: {content}")
-                if operation == types.OperationType.DIGITIZATION:
-                    APIError.raise_error(ErrorCode.INVALID_REQUEST, f"Failed to read file: {filename}")
-                else:
-                    skipped_files.append(filename)
-                    continue
-
-            # After Exception check, content is guaranteed to be bytes
-            assert isinstance(content, bytes)  # Type narrowing
-
-            # Check PDF content (magic bytes)
-            if not validate_pdf_content(content):
-                if operation == types.OperationType.DIGITIZATION:
-                    APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, f"File has .pdf extension but unsupported format: {filename}")
-                else:
-                    logger.warning(f"Skipping file with .pdf extension but unsupported format: {filename}")
-                    skipped_files.append(filename)
-                    continue
-
-            # File is valid
-            filenames.append(filename)
-            file_contents.append(content)
-
-        # Check if any valid files remain
-        if not filenames:
-            APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, "No valid PDF files found")
+        filenames, file_contents = await validate_pdf_files(files, file_contents_raw)
 
         # 4. Acquire the semaphore
         await sem.acquire()

@@ -29,10 +29,9 @@ def ingest(directory_path: Path, job_id: str = None, doc_id_dict: dict = None):
         # Just collect the PDF files from the staging directory
         input_file_paths = [str(p) for p in directory_path.glob("*.pdf")]
 
-        file_cnt = len(input_file_paths)
-        total_pdfs = file_cnt
+        total_pdfs = len(input_file_paths)
 
-        logger.info(f"Processing {file_cnt} document(s)")
+        logger.info(f"Processing {total_pdfs} document(s)")
 
         emb_model_dict, llm_model_dict, _ = get_model_endpoints()
 
@@ -81,7 +80,7 @@ def ingest(directory_path: Path, job_id: str = None, doc_id_dict: dict = None):
         else:
             logger.info(f"✅ Ingestion completed successfully, Time taken: {file_processing_time:.2f} seconds. You can query your documents via chatbot")
 
-        ingested = file_cnt - len(unprocessed_files)
+        ingested = total_pdfs - len(unprocessed_files)
         percentage = (ingested / total_pdfs * 100) if total_pdfs else 0.0
         logger.info(
             f"Ingestion summary: {ingested}/{total_pdfs} files ingested "
