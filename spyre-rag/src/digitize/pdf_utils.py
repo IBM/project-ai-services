@@ -153,11 +153,11 @@ def get_doc_converter():
         artifacts_path = Path(docling_models_path)
         if artifacts_path.exists():
             pipeline_options.artifacts_path = artifacts_path
-            logger.info(f"Using docling models from: {artifacts_path}")
+            logger.debug(f"Using docling models from: {artifacts_path}")
         else:
             logger.warning(f"DOCLING_MODELS_PATH set to {artifacts_path} but directory does not exist")
     else:
-        logger.info("DOCLING_MODELS_PATH not set. Docling will use default model loading behavior.")
+        logger.debug("DOCLING_MODELS_PATH not set. Docling will use default model loading behavior.")
     
     pipeline_options.do_table_structure = True
     pipeline_options.table_structure_options.do_cell_matching = True
