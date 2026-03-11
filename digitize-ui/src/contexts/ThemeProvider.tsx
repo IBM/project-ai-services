@@ -1,4 +1,4 @@
-import { useState, useEffect, ReactNode } from 'react';
+import { useState, useEffect, useMemo, ReactNode } from 'react';
 import { ThemeContext } from './ThemeContext';
 import type { Theme, EffectiveTheme, ThemeContextType } from './ThemeContext';
 
@@ -13,30 +13,29 @@ export const ThemeProvider = ({ children }: ThemeProviderProps) => {
     return savedTheme || 'system';
   });
 
-  const [effectiveTheme, setEffectiveTheme] = useState<EffectiveTheme>('white');
+  const [systemTheme, setSystemTheme] = useState<EffectiveTheme>(() => {
+    // Initialize with current system preference
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return prefersDark ? 'g100' : 'white';
+  });
 
-  useEffect(() => {
-    // Save theme preference to localStorage
-    localStorage.setItem('app-theme', theme);
-
-    // Determine the effective theme
-    let newEffectiveTheme: EffectiveTheme = theme as EffectiveTheme;
-    
+  // Derive effective theme from theme and systemTheme
+  const effectiveTheme = useMemo<EffectiveTheme>(() => {
     if (theme === 'system') {
-      // Check system preference
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      newEffectiveTheme = prefersDark ? 'g100' : 'white';
+      return systemTheme;
     } else if (theme === 'dark') {
-      newEffectiveTheme = 'g100';
+      return 'g100';
     } else if (theme === 'light') {
-      newEffectiveTheme = 'white';
+      return 'white';
     }
+    return theme as EffectiveTheme;
+  }, [theme, systemTheme]);
 
-    setEffectiveTheme(newEffectiveTheme);
-
-    // Apply theme to document root
-    document.documentElement.setAttribute('data-carbon-theme', newEffectiveTheme);
-  }, [theme]);
+  // Save theme preference and apply to DOM
+  useEffect(() => {
+    localStorage.setItem('app-theme', theme);
+    document.documentElement.setAttribute('data-carbon-theme', effectiveTheme);
+  }, [theme, effectiveTheme]);
 
   // Listen for system theme changes when in system mode
   useEffect(() => {
@@ -44,9 +43,7 @@ export const ThemeProvider = ({ children }: ThemeProviderProps) => {
 
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = (e: MediaQueryListEvent) => {
-      const newEffectiveTheme: EffectiveTheme = e.matches ? 'g100' : 'white';
-      setEffectiveTheme(newEffectiveTheme);
-      document.documentElement.setAttribute('data-carbon-theme', newEffectiveTheme);
+      setSystemTheme(e.matches ? 'g100' : 'white');
     };
 
     mediaQuery.addEventListener('change', handleChange);
