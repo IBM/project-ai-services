@@ -146,7 +146,7 @@ class OpensearchVectorStore(VectorStore):
             logger.debug("Nothing to chunk!")
             return
 
-        logger.info(f"Inserting {len(chunks)} chunks into OpenSearch with batch_size={batch_size}")
+        logger.debug(f"Inserting {len(chunks)} chunks into OpenSearch with batch_size={batch_size}")
 
         # Handle Pre-computed Vectors if provided
         final_embeddings = vectors
