@@ -337,11 +337,6 @@ const DocumentListPage = () => {
     }
   };
 
-  // TODO: used later when we integrate delete
-  // const handleDeleteClick = (docId: string) => {
-  //   dispatch({ type: 'OPEN_DELETE_MODAL', payload: docId });
-  // };
-
   const handleDeleteConfirm = async () => {
     if (!state.docToDelete) return;
     try {
