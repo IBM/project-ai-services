@@ -66,6 +66,16 @@ class VectorStore(ABC):
         """
         pass
 
+    @abstractmethod
+    def check_db_populated(self) -> bool:
+        """
+        Check if the vector database is populated with data.
+
+        Returns:
+            bool: True if the database contains indexed documents, False otherwise.
+        """
+        pass
+
 class VectorStoreNotReadyError(Exception):
     """Raised when the database is unreachable or initializing."""
     pass
