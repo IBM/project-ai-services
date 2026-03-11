@@ -25,9 +25,9 @@ import {
   InlineNotification,
 } from '@carbon/react';
 import { SidePanel, NoDataEmptyState } from '@carbon/ibm-products';
-import { Download, Renew, Settings, Add, CheckmarkFilled, WarningFilled, InProgress, ErrorFilled, TrashCan, Close } from '@carbon/icons-react';
-import { useTheme } from '../../contexts/ThemeContext';
-import { getAllJobs, getJobById, uploadDocuments, deleteJob, bulkDeleteJobs, Job, Document } from '../../services/api';
+import { Download, Renew, Settings, Add, CheckmarkFilled, InProgress, ErrorFilled, TrashCan } from '@carbon/icons-react';
+import { useTheme } from '../../contexts/useTheme';
+import { getAllJobs, getJobById, uploadDocuments, deleteJob, bulkDeleteJobs, Job } from '../../services/api';
 import IngestSidePanel from '../../components/IngestSidePanel';
 import { calculateDuration } from '../../utils/dateUtils';
 import { JOB_STATUS, DISPLAY_STATUS, JOB_OPERATION, JOB_TYPE_DISPLAY } from '../../constants/jobConstants';
@@ -221,6 +221,7 @@ const JobMonitorPage = () => {
     fetchJobs();
     const interval = setInterval(fetchJobs, 10000);
     return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.page, state.pageSize]);
 
   const handleViewDetails = async (jobId: string) => {
@@ -234,7 +235,6 @@ const JobMonitorPage = () => {
   };
 
   const handleIngestSubmit = async (
-    jobName: string,
     operation: string,
     outputFormat: string,
     files: File[]
@@ -504,7 +504,7 @@ const JobMonitorPage = () => {
                       <TableToolbarSearch
                         persistent
                         placeholder="Search"
-                        onChange={(e: any, value?: string) => dispatch({ type: 'SET_SEARCH_VALUE', payload: value || '' })}
+                        onChange={(_e: any, value?: string) => dispatch({ type: 'SET_SEARCH_VALUE', payload: value || '' })}
                         value={state.searchValue}
                       />
                       <Button

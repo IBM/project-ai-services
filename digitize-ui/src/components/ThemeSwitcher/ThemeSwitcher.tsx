@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { HeaderGlobalAction } from '@carbon/react';
 import { Asleep, Light, Laptop } from '@carbon/icons-react';
 import type { CarbonIconType } from '@carbon/icons-react';
-import { useTheme } from '../../contexts/ThemeContext';
+import { useTheme } from '@contexts/useTheme';
 import styles from './ThemeSwitcher.module.scss';
 
 type ThemeValue = 'system' | 'light' | 'dark';

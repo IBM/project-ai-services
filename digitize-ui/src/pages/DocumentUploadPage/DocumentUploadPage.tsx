@@ -18,7 +18,7 @@ import {
   Theme,
 } from '@carbon/react';
 import { Upload, DocumentPdf, Close, Checkmark, Renew, View } from '@carbon/icons-react';
-import { useTheme } from '../../contexts/ThemeContext';
+import { useTheme } from '../../contexts/useTheme';
 import { uploadDocuments } from '../../services/api';
 import styles from './DocumentUploadPage.module.scss';
 

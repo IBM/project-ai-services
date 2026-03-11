@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider } from './contexts/ThemeContext';
+import { ThemeProvider } from './contexts/ThemeProvider';
 import MainLayout from './layouts/MainLayout';
 import JobMonitorPage from './pages/JobMonitorPage';
 import DocumentListPage from './pages/DocumentListPage';

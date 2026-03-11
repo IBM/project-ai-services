@@ -12,22 +12,19 @@ import {
   TableToolbar,
   TableToolbarContent,
   TableToolbarSearch,
-  TableToolbarMenu,
-  TableToolbarAction,
   TableBatchActions,
   TableBatchAction,
   TableSelectAll,
   TableSelectRow,
   Pagination,
   Button,
-  Tag,
   Modal,
   Theme,
   Link,
   Loading,
 } from '@carbon/react';
-import { Renew, TrashCan, View, Download, CheckmarkFilled, ErrorFilled, InProgress } from '@carbon/icons-react';
-import { useTheme } from '../../contexts/ThemeContext';
+import { Renew, TrashCan, Download, CheckmarkFilled, ErrorFilled, InProgress } from '@carbon/icons-react';
+import { useTheme } from '../../contexts/useTheme';
 import { listDocuments, getDocumentContent, deleteDocument, Document } from '../../services/api';
 import styles from './DocumentListPage.module.scss';
 
@@ -226,6 +223,7 @@ const DocumentListPage = () => {
 
   useEffect(() => {
     fetchDocuments();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.page, state.pageSize, state.search]);
 
   const handleViewContent = async (doc: Document) => {
@@ -339,9 +337,10 @@ const DocumentListPage = () => {
     }
   };
 
-  const handleDeleteClick = (docId: string) => {
-    dispatch({ type: 'OPEN_DELETE_MODAL', payload: docId });
-  };
+  // TODO: used later when we integrate delete
+  // const handleDeleteClick = (docId: string) => {
+  //   dispatch({ type: 'OPEN_DELETE_MODAL', payload: docId });
+  // };
 
   const handleDeleteConfirm = async () => {
     if (!state.docToDelete) return;
@@ -384,7 +383,6 @@ const DocumentListPage = () => {
     ),
   }));
 
-  const noDocuments = state.documents.length === 0 && !state.search;
   const noSearchResults = state.documents.length === 0 && state.search;
 
   const handleDeleteJobs = async (selectedRows: any[]) => {
@@ -450,7 +448,7 @@ const DocumentListPage = () => {
                       <TableToolbarSearch
                         persistent
                         placeholder="Search"
-                        onChange={(e: any, value?: string) => dispatch({ type: 'SET_SEARCH', payload: value || '' })}
+                        onChange={(_e: any, value?: string) => dispatch({ type: 'SET_SEARCH', payload: value || '' })}
                         value={state.search}
                       />
                       <Button

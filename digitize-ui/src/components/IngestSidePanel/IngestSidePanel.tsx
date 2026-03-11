@@ -11,7 +11,7 @@ import styles from './IngestSidePanel.module.scss';
 interface IngestSidePanelProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (jobName: string, operation: string, outputFormat: string, files: File[]) => void;
+  onSubmit: (operation: string, outputFormat: string, files: File[]) => void;
 }
 
 const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
@@ -33,7 +33,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
       alert('Please upload at least one file');
       return;
     }
-    onSubmit(jobName, operation, outputFormat, files);
+    onSubmit(operation, outputFormat, files);
     handleClose();
   };
 
