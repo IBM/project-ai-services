@@ -528,8 +528,8 @@ async def delete_document(doc_id: str):
         
         return None
         
-    except HTTPException:
-        logger.error("HTTP error during document deletion")
+    except HTTPException as e:
+        logger.error(f"Failed to delete document {id}, HTTP error: {e}")
         # Re-raise HTTPException as-is
         raise
     except Exception as e:
@@ -617,7 +617,8 @@ async def bulk_delete_documents(confirm: bool = Query(..., description="Required
                     f"Partial deletion: vector database reset but some files failed to delete. {error_summary}"
                 )
 
-        except HTTPException:
+        except HTTPException as e:
+            logger.error(f"Failed to list documents, HTTP error: {e}")
             # Re-raise HTTPException (from APIError.raise_error above)
             raise
         except Exception as e:
@@ -633,8 +634,8 @@ async def bulk_delete_documents(confirm: bool = Query(..., description="Required
         logger.info("✅ Bulk deletion completed successfully")
         return None
 
-    except HTTPException:
-        logger.error("HTTP error during bulk documents deletion")
+    except HTTPException as e:
+        logger.error(f"Failed to bulk delete documents, HTTP error: {e}")
         # Re-raise HTTPException as-is
         raise
     except Exception as e:
