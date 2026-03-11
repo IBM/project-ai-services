@@ -8,6 +8,8 @@ from opensearchpy import OpenSearch, helpers
 
 from common.misc_utils import LOCAL_CACHE_DIR, get_logger
 from common.vector_db import VectorStore
+import digitize.config as config
+
 
 logger = get_logger("OpenSearch")
 
@@ -374,27 +376,6 @@ class OpensearchVectorStore(VectorStore):
         else:
             logger.info(f"Index {self.index_name} does not exist, nothing to clear")
 
-        # Clear local cache
-        cache_pattern = os.path.join(LOCAL_CACHE_DIR, self.index_name+"*")
-        logger.debug(f"Searching for cache files matching pattern: {cache_pattern}")
-
-        files_to_remove = glob(cache_pattern)
-        if files_to_remove:
-            logger.debug(f"Found {len(files_to_remove)} cache files/directories to remove")
-            for file_path in files_to_remove:
-                try:
-                    if os.path.isdir(file_path):
-                        shutil.rmtree(file_path)
-                        logger.debug(f"Removed directory: {file_path}")
-                        continue
-                    os.remove(file_path)
-                    logger.debug(f"Removed file: {file_path}")
-                except OSError as e:
-                    logger.error(f"Error removing {file_path}: {e}")
-            logger.info("Local cache cleaned up successfully")
-        else:
-            logger.info("No cache files found, cache already clean")
-
         logger.info("Reset index operation completed")
 
     def delete_document_by_id(self, doc_id: str):
@@ -408,41 +389,33 @@ class OpensearchVectorStore(VectorStore):
             Number of chunks deleted
         """
         logger.debug(f"Starting delete operation for document {doc_id}")
-        
+
         if not self.client.indices.exists(index=self.index_name):
-            logger.warning(f"Index {self.index_name} does not exist, nothing to delete")
+            logger.error(f"Index {self.index_name} does not exist, nothing to delete")
             return 0
 
         try:
-            try:
-                # STEP 1: Try to find filename corresponding to doc_id to prevent orphans chunks
-                sample = self.client.search(
-                index=self.index_name,
-                body={"size": 1, "_source": ["filename"], "query": {"term": {"doc_id": doc_id}}}
-                )
-                hits = sample.get("hits", {}).get("hits", [])
-            
-                # If we found a filename, we delete by FILENAME (Cleaner)
-                if hits:
-                    filename = hits[0]["_source"]["filename"]
-                    logger.info(f"Resolved doc_id {doc_id} to filename {filename}. Cleaning all versions.")
-                    match_key = "filename"
-                    match_val = filename
-                else:
-                    # If no filename found, fallback to the provided doc_id
-                    match_key = "doc_id"
-                    match_val = doc_id
-            except Exception:
-                match_key = "doc_id"
-                match_val = doc_id
+            # 1. Immediate Refresh (Safety Check)
+            # If a user ingests and then deletes immediately, OpenSearch might not have 'seen' the documents yet
+            self.client.indices.refresh(index=self.index_name)
 
             # STEP 2: Perform the actual deletion
-            delete_query = {"query": {"term": {match_key: match_val}}}
+            delete_query = {
+                "query": {
+                    "term": {
+                        "doc_id": str(doc_id).strip()
+                    }
+                }
+            }
 
             response = self.client.delete_by_query(
                 index=self.index_name,
                 body=delete_query,
-                params={"refresh": "true", "conflicts": "proceed"},  # Ensure changes are immediately visible
+                params={
+                            "refresh": "true",             # Update index stats immediately
+                            "conflicts": "proceed",        # Ignore locks from concurrent indexing
+                            "wait_for_completion": "true"  # Synchronous for the API response
+                        },
             )
 
             deleted_count = response.get("deleted", 0)
@@ -461,7 +434,7 @@ class OpensearchVectorStore(VectorStore):
                 if total_matched == 0:
                     logger.info(f"Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name} (no matching documents found)")
                 else:
-                    logger.warning(f"Matched {total_matched} documents but deleted {deleted_count} for document {doc_id} (possible version conflicts or failures)")
+                    logger.error(f"Matched {total_matched} documents but deleted {deleted_count} for document {doc_id} (possible version conflicts or failures)")
             return deleted_count
         except Exception as e:
             logger.error(f"Failed to delete document {doc_id} from index: {e}")

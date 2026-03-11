@@ -46,7 +46,7 @@ def main():
         
         # Use Path to list all files recursively and store paths as strings
         base_path = Path(command_args.path)
-        filenames = [path.name for path in base_path.rglob('*') if path.is_file()]
+        filenames = [path.name for path in base_path.rglob(pattern='*') if path.is_file()]
             
         doc_id_dict = initialize_job_state(job_id, OperationType.INGESTION, OutputFormat.JSON, filenames)
 

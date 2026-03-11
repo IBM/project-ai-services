@@ -41,19 +41,6 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Application starting up...")
     
-    # Run cleanup for orphaned files from incomplete deletions
-    try:
-        logger.info("Running orphaned files cleanup...")
-        cleanup_stats = dg_util.cleanup_orphaned_files()
-        total_cleaned = cleanup_stats["orphaned_metadata_removed"] + cleanup_stats["orphaned_content_removed"]
-        if total_cleaned > 0:
-            logger.info(f"Startup cleanup: Removed {total_cleaned} orphaned files")
-        if cleanup_stats["errors"]:
-            logger.warning(f"Startup cleanup completed with {len(cleanup_stats['errors'])} errors")
-    except Exception as e:
-        logger.error(f"Error during startup cleanup: {e}", exc_info=True)
-        # Don't fail startup if cleanup fails
-    
     yield
     
     # Shutdown
@@ -453,19 +440,19 @@ async def delete_document(doc_id: str):
     - 409 Conflict if document is part of an active job
     - 500 Internal Server Error on unexpected errors
     """
-    try:        
+    try:
         # 1. Check if document exists by trying to get its metadata
-        doc_metadata = None
         try:
             doc_metadata = dg_util.get_document_by_id(doc_id, include_details=False)
         except FileNotFoundError as e:
-            logger.warning(f"Document {doc_id} not found: {e}")
+            logger.error(f"Document {doc_id} not found: {e}")
             APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(e))
+            return  # This line will never be reached, but helps type checker
         
         # 2. Check if document is part of any active job
-        is_active, job_id = dg_util.is_document_in_active_job(doc_id)
+        is_active, job_id = dg_util.is_document_in_active_job(doc_id, job_id=doc_metadata.job_id)
         if is_active:
-            logger.warning(f"Cannot delete document {doc_id}: part of active job {job_id}")
+            logger.error(f"Cannot delete document {doc_id}: part of active job {job_id}")
             APIError.raise_error(
                 ErrorCode.RESOURCE_LOCKED,
                 f"Document is part of active job '{job_id}' and cannot be deleted"
@@ -478,7 +465,6 @@ async def delete_document(doc_id: str):
         
         # 3. Remove from vector database FIRST (if the document was ingested)
         # This ensures the document is removed from search results even if file deletion fails
-        assert doc_metadata is not None
         # doc_metadata is a DocumentDetailResponse Pydantic model, access attributes directly
         doc_status = doc_metadata.status.lower() if isinstance(doc_metadata.status, str) else doc_metadata.status.value.lower()
         doc_type = doc_metadata.type.lower()
@@ -511,7 +497,7 @@ async def delete_document(doc_id: str):
         except FileNotFoundError as e:
             # Document metadata was found earlier but now missing - possible race condition
             error_msg = f"Document files not found during deletion (possible race condition): {str(e)}"
-            logger.warning(error_msg)
+            logger.error(error_msg)
             errors.append(error_msg)
             # If VDB was deleted, consider this a partial success
             if vdb_deleted:
@@ -538,7 +524,7 @@ async def delete_document(doc_id: str):
             logger.debug(f"✅ Document {doc_id} deleted successfully")
         elif errors:
             # Should not reach here, but log if it does
-            logger.warning(f"Delete completed with warnings: {'; '.join(errors)}")
+            logger.error(f"Delete completed with warnings: {'; '.join(errors)}")
         
         return None
         
@@ -573,7 +559,7 @@ async def bulk_delete_documents(confirm: bool = Query(..., description="Required
     try:
         # 1. Validate confirmation parameter
         if not confirm:
-            logger.warning("Bulk delete rejected: confirm parameter is false")
+            logger.error("Bulk delete rejected: confirm parameter is false")
             APIError.raise_error(
                 ErrorCode.INVALID_REQUEST,
                 "Bulk deletion requires explicit confirmation. Set 'confirm=true' to proceed."
@@ -582,7 +568,7 @@ async def bulk_delete_documents(confirm: bool = Query(..., description="Required
         # 2. Check for active jobs
         has_active, active_job_ids = dg_util.has_active_jobs()
         if has_active:
-            logger.warning(f"Bulk delete rejected: {len(active_job_ids)} active job(s) found")
+            logger.error(f"Bulk delete rejected: {len(active_job_ids)} active job(s) found")
             APIError.raise_error(
                 ErrorCode.RESOURCE_LOCKED,
                 f"Cannot perform bulk deletion while jobs are active. Active jobs: {', '.join(active_job_ids)}"
@@ -593,7 +579,6 @@ async def bulk_delete_documents(confirm: bool = Query(..., description="Required
         # Track deletion progress
         vdb_reset = False
         files_deleted = False
-        errors = []
 
         # 3. Reset vector database index FIRST
         # This ensures documents are removed from search even if file deletion fails
@@ -607,8 +592,8 @@ async def bulk_delete_documents(confirm: bool = Query(..., description="Required
         except Exception as e:
             error_msg = f"Failed to reset vector database: {str(e)}"
             logger.error(f"✗ {error_msg}")
-            errors.append(error_msg)
-            # Don't raise here - continue with file deletion
+            # Raise error immediately - VDB reset is critical
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, error_msg)
 
         # 4. Delete all document files LAST
         try:
@@ -623,40 +608,29 @@ async def bulk_delete_documents(confirm: bool = Query(..., description="Required
                 f"{deletion_stats['content_files_deleted']} content)"
             )
 
-            # Add any file deletion errors to our error list
+            # If there were any file deletion errors, raise an error
             if deletion_stats["errors"]:
-                errors.extend(deletion_stats["errors"])
+                error_summary = "; ".join(deletion_stats["errors"][:3])  # Limit to first 3 errors
+                logger.error(f"File deletion completed with errors: {error_summary}")
+                APIError.raise_error(
+                    ErrorCode.INTERNAL_SERVER_ERROR,
+                    f"Partial deletion: vector database reset but some files failed to delete. {error_summary}"
+                )
 
+        except HTTPException:
+            # Re-raise HTTPException (from APIError.raise_error above)
+            raise
         except Exception as e:
             error_msg = f"Failed to delete document files: {str(e)}"
             logger.error(f"✗ {error_msg}")
-            errors.append(error_msg)
-
-            # If VDB was reset but file deletion failed, report partial success
-            if vdb_reset:
-                logger.warning("Bulk deletion partially completed: VDB reset but file deletion failed")
-                APIError.raise_error(
-                    ErrorCode.INTERNAL_SERVER_ERROR,
-                    f"Partial deletion: vector database reset but file deletion failed. {error_msg}"
-                )
-            else:
-                APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, error_msg)
-
-        # 5. Success - both VDB and files deleted
-        if vdb_reset and files_deleted:
-            if errors:
-                logger.warning(f"✅ Bulk deletion completed with {len(errors)} warnings")
-            else:
-                logger.info("✅ Bulk deletion completed successfully")
-        elif errors:
-            # Should not reach here, but handle gracefully
-            error_summary = "; ".join(errors[:3])  # Limit to first 3 errors
-            logger.error(f"Bulk deletion completed with errors: {error_summary}")
+            # VDB was reset but file deletion failed completely
             APIError.raise_error(
                 ErrorCode.INTERNAL_SERVER_ERROR,
-                f"Bulk deletion completed with errors: {error_summary}"
+                f"Partial deletion: vector database reset but file deletion failed. {error_msg}"
             )
 
+        # 5. Success - both VDB and files deleted without errors
+        logger.info("✅ Bulk deletion completed successfully")
         return None
 
     except HTTPException:
