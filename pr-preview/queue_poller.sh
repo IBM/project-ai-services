@@ -1,36 +1,51 @@
 #!/bin/bash
+# Queue Poller Script for Jenkins PR Preview Pipeline
+# This script monitors the Jenkins queue and aborts duplicate builds
+# to ensure only the latest PR commit is being tested
+
 set -e
 
-jenkins_url="${1%/}"
-current_job_param="$2"
-build_number="$3"
-user_name="$4"
-api_token="$5"
-poller_timeout_in_mins="$6"
+# Parse command line arguments
+JENKINS_URL="${1%/}"
+JENKINS_JOB_PARAM="$2"
+JENKINS_JOB_URL="$3"
+JENKINS_USERNAME="$4"
+JENKINS_API_TOKEN="$5"
+POLLER_TIMEOUT_MINS="$6"
 
-job_name="pr-preview-pipeline"
-creds="$user_name:$api_token"
-job_url="$jenkins_url/job/adarsh/job/$job_name/$build_number"
+# Jenkins job configuration
+JOB_NAME="pr-preview-pipeline"
+JENKINS_CREDENTIALS="$JENKINS_USERNAME:$JENKINS_API_TOKEN"
 
-echo "Started polling jenkins queue to find duplicate $job_name job"
-echo "Jenkins job $job_url running with param: $current_job_param"
+echo "Started polling Jenkins queue to find duplicate $JOB_NAME jobs"
+echo "Jenkins job $JENKINS_JOB_URL running with param: $JENKINS_JOB_PARAM"
 
-# Check the status of current job which is running
+# Function: Check the status of the current running job
+# Returns: "true" if job is in progress, "false" otherwise
 get_job_status() {
-    resp=$(curl -fsS -u "$creds" "$job_url/api/json")
-    progress=$(echo $resp | jq ".inProgress" )
-    echo $progress
+    local response
+    response=$(curl -fsS -u "$JENKINS_CREDENTIALS" "$JENKINS_JOB_URL/api/json")
+    local in_progress
+    in_progress=$(echo "$response" | jq ".inProgress")
+    echo "$in_progress"
 }
 
-# Check if build is in queue, with matching parameter with current build.
+# Function: Check if a duplicate build with matching parameters is queued
+# Returns: "YES" if duplicate found, empty string otherwise
 is_duplicate_build_queued() {
-    queue_list=$(curl -u "$creds" -s "$jenkins_url/queue/api/json")
-    echo $queue_list | jq -c '.items[]' | while read i; do
-        queued_job=$(echo "$i" | jq "select(.task.name==\"$job_name\")")
+    local queue_list
+    queue_list=$(curl -u "$JENKINS_CREDENTIALS" -s "$JENKINS_URL/queue/api/json")
+    
+    echo "$queue_list" | jq -c '.items[]' | while read -r queue_item; do
+        local queued_job
+        queued_job=$(echo "$queue_item" | jq "select(.task.name==\"$JOB_NAME\")")
 
         if [ -n "$queued_job" ]; then
-            job_param=$(echo $queued_job | jq '.params')
-            if [[ "$job_param" == *"$current_job_param"* ]]; then
+            local job_params
+            job_params=$(echo "$queued_job" | jq '.params')
+            
+            # Check if the queued job has the same parameters as current job
+            if [[ "$job_params" == *"$JENKINS_JOB_PARAM"* ]]; then
                 echo "YES"
                 break
             fi
@@ -38,25 +53,36 @@ is_duplicate_build_queued() {
     done
 }
 
+# Main polling loop
 # Continuously monitor the pr-preview pipeline job status
-# If a new Jenkins job with the same parameters is queued, abort the current job.
-# This ensures resources are used only for the latest PR commit.
-for ((i=1; i<=poller_timeout_in_mins; i++)); do
-    echo "Polling status of $job_name in jenkins."
-    status=$(get_job_status)
-    if [[ "$status" == "true" ]]; then
-        echo "Jenkins $job_name job is in progress."
-        is_duplicate_job=$(is_duplicate_build_queued)
-        if [[ "$is_duplicate_job" == *"YES"* ]]; then
-            echo "Aborting duplicate $job_url job."
-            curl -fsS -u "$creds" -X POST "$job_url/stop"
+# If a new Jenkins job with the same parameters is queued, abort the current job
+# This ensures resources are used only for the latest PR commit
+for ((iteration=1; iteration<=POLLER_TIMEOUT_MINS; iteration++)); do
+    echo "Polling iteration $iteration/$POLLER_TIMEOUT_MINS: Checking status of $JOB_NAME in Jenkins"
+    
+    job_status=$(get_job_status)
+    
+    if [[ "$job_status" == "true" ]]; then
+        echo "Jenkins $JOB_NAME job is currently in progress"
+        
+        # Check for duplicate builds in queue
+        duplicate_found=$(is_duplicate_build_queued)
+        
+        if [[ "$duplicate_found" == *"YES"* ]]; then
+            echo "Duplicate job detected in queue. Aborting current job: $JENKINS_JOB_URL"
+            curl -fsS -u "$JENKINS_CREDENTIALS" -X POST "$JENKINS_JOB_URL/stop"
             exit 0
         fi
-        sleep "60s"
+        
+        # Wait before next poll
+        sleep 60s
         continue
     fi
-    echo "Jenkins job $job_url is completed."
+    
+    # Job has completed
+    echo "Jenkins job $JENKINS_JOB_URL has completed"
     exit 0
 done
 
-echo "Queue poller for job $job_url got timedout in $poller_timeout_in_mins minutes."
+# Timeout reached
+echo "Queue poller for job $JENKINS_JOB_URL timed out after $POLLER_TIMEOUT_MINS minutes"
