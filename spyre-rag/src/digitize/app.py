@@ -48,7 +48,18 @@ async def lifespan(app: FastAPI):
     logger.info("Application shutting down...")
 
 
+
 app = FastAPI(title="Digitize Documents Service", lifespan=lifespan)
+
+@app.get("/health", status_code=status.HTTP_200_OK)
+async def health_check():
+    """
+    Health check endpoint for liveness probe.
+    
+    Returns:
+    - 200 OK if the service is healthy
+    """
+    return {"status": "ok"}
 
 async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat):
     status_mgr = StatusManager(job_id)
