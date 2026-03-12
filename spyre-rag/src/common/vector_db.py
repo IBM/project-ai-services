@@ -56,9 +56,9 @@ class VectorStore(ABC):
         pass
 
     @abstractmethod
-    def reset_index(self, doc_ids: list[str]) -> int:
+    def remove_docs_from_index(self, doc_ids: list[str]) -> int:
         """
-        Delete all chunks associated with the specified document IDs from the index.
+        Delete all chunks associated with the specified list of document IDs from the index.
 
         This performs a targeted deletion of documents rather than wiping the entire index.
         Uses batch deletion for efficiency.

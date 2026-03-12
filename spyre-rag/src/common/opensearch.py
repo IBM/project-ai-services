@@ -348,7 +348,7 @@ class OpensearchVectorStore(VectorStore):
         return exists
 
 
-    def reset_index(self, doc_ids: list[str]):
+    def remove_docs_from_index(self, doc_ids: list[str]):
         """
         Delete all chunks associated with the specified document IDs from the index.
 
@@ -362,10 +362,10 @@ class OpensearchVectorStore(VectorStore):
             Number of chunks deleted
         """
         if not doc_ids:
-            logger.warning(f"No document ids provided for reset_index in {self.index_name}. Skipping.")
+            logger.warning(f"No document ids provided to remove from index {self.index_name}. Skipping.")
             return 0
 
-        logger.debug(f"Starting targeted reset for {len(doc_ids)} documents in {self.index_name}")
+        logger.debug(f"Starting targeted cleanup of {len(doc_ids)} documents in {self.index_name}")
 
         if not self.client.indices.exists(index=self.index_name):
             logger.info(f"Index {self.index_name} does not exist.")
@@ -398,7 +398,6 @@ class OpensearchVectorStore(VectorStore):
             logger.error(f"Failed to delete documents from index {self.index_name}: {e}")
             raise
 
-        logger.info("Reset index operation completed")
         return deleted_count
 
 

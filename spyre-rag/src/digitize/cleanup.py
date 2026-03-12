@@ -25,10 +25,10 @@ def reset_db():
     try:
         vector_store = db.get_vector_store()
         if doc_ids:
-            deleted_chunks = vector_store.reset_index(doc_ids)
+            deleted_chunks = vector_store.remove_docs_from_index(doc_ids)
             logger.info(f"✓ Vector database index reset successfully: {deleted_chunks} chunks deleted")
         else:
-            logger.info("✓ No documents to delete from vector database")
+            logger.info(msg="✓ No documents to delete from vector database")
     except Exception as e:
         error_msg = f"Failed to reset vector database: {str(e)}"
         logger.error(f"✗ {error_msg}")
