@@ -13,7 +13,7 @@ from functools import wraps
 import common.db_utils as db
 from common.misc_utils import get_model_endpoints, set_log_level, set_request_id
 from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_non_stream, query_vllm_models, lang_en, \
-    lang_de
+    lang_de, setup_language_detector, detect_language
 from common.settings import get_settings
 from common.perf_utils import perf_registry
 from retrieve.backend_utils import search_only, validate_query_length
@@ -31,7 +31,7 @@ from retrieve.response_utils import (
 )
 import uvicorn
 from starlette.concurrency import iterate_in_threadpool
-from lingua import Language, LanguageDetectorBuilder
+from lingua import Language
 
 log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
@@ -64,17 +64,6 @@ def initialize_vectorstore():
     vectorstore = db.get_vector_store()
 
 
-def setup_language_detector(languages: list[Language]):
-    """Call once at app startup, before serving requests."""
-    global _language_detector
-    if _language_detector is not None:
-        return
-    _language_detector = (
-        LanguageDetectorBuilder
-        .from_languages(*languages)
-        .with_preloaded_language_models()
-        .build()
-    )
 
 @asynccontextmanager
 async def lifespan(app):
@@ -118,22 +107,6 @@ def limit_concurrency(f):
         finally:
             concurrency_limiter.release()
     return wrapper
-
-def detect_language(text: str, min_confidence: float = settings.language_detection_min_confidence) -> str:
-    """
-    Detect the language of a text string.
-
-    Returns a language code (EN, DE) if confidence >= min_confidence, else EN by default.
-    Thread-safe — can be called from any endpoint or background task.
-    """
-    if not _language_detector:
-        raise RuntimeError("Lingua detector not initialized. Call setup_language_detector() at startup.")
-
-    confidences = _language_detector.compute_language_confidence_values(text)
-    if confidences and confidences[0].value >= min_confidence:
-        top = confidences[0]
-        return top.language.iso_code_639_1.name
-    return lang_en
 
 @app.post(
     "/reference",
