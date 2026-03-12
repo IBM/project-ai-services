@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status, Request
-from common.misc_utils import get_logger, set_log_level, validate_pdf_content, set_request_id
+from common.misc_utils import get_logger, set_log_level, validate_pdf_file, set_request_id
 import digitize.digitize_utils as dg_util
 import digitize.types as types
 from digitize.digitize import digitize
@@ -125,45 +125,28 @@ async def validate_pdf_files(
     file_contents_raw: List[bytes | BaseException]
 ) -> tuple[List[str], List[bytes]]:
     """
-    Validate uploaded PDF files.
-
-    Performs four validation checks:
-    1. Filename exists
-    2. File has .pdf extension
-    3. File was read successfully
-    4. File content is valid PDF (magic bytes check)
+    Validate uploaded PDF files using shared validation logic.
 
     Raises APIError on any validation failure.
 
     Returns:
         Tuple of (filenames, file_contents)
     """
+
     filenames: List[str] = []
     file_contents: List[bytes] = []
 
     for idx, file in enumerate(files):
-        if not file.filename:
-            APIError.raise_error(ErrorCode.INVALID_REQUEST, "File must have a filename.")
-
-        assert file.filename is not None
-        filename = file.filename
-
-        # Validate .pdf extension
-        if not filename.lower().endswith('.pdf'):
-            APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, f"Only PDF files are allowed. Invalid file: {filename}")
-
-        # Validate file was read successfully
+        filename = file.filename or ""
         content = file_contents_raw[idx]
-        if isinstance(content, Exception):
-            logger.error(f"Failed to read file {filename}: {content}")
-            APIError.raise_error(ErrorCode.INVALID_REQUEST, f"Failed to read file: {filename}")
 
-        assert isinstance(content, bytes)
+        # Use shared validation function
+        try:
+            await asyncio.to_thread(validate_pdf_file, filename, content)
+        except ValueError as e:
+            APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, str(e))
 
-        # Validate PDF content (magic bytes)
-        if not validate_pdf_content(content):
-            APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, f"File has .pdf extension but unsupported format: {filename}")
-
+        assert isinstance(content, bytes)  # Type narrowing after validation
         filenames.append(filename)
         file_contents.append(content)
 

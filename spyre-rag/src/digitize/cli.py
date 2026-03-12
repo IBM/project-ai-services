@@ -40,21 +40,53 @@ logger = get_logger("Ingest")
 def main():
     if command_args.command == "ingest":
         job_id = generate_uuid()
-        
+        base_path = Path(command_args.path)
+
+        # Check if path exists and is a directory
+        if not base_path.exists():
+            logger.error(f"Path does not exist: {base_path}")
+            return
+
+        if not base_path.is_dir():
+            logger.error(f"Path is not a directory: {base_path}")
+            return
+
+        # Get all files recursively
+        all_files = [path for path in base_path.rglob('*') if path.is_file()]
+
+        # Check if any files exist (matching app.py: "No files provided")
+        if not all_files or len(all_files) == 0:
+            logger.error(f"No files provided. Please ensure at least one file exists in: {base_path}")
+            return
+
+        # Validate each file
+        filenames = []
+        for file_path in all_files:
+            # Read only first 4 bytes for validation
+            try:
+                with open(file_path, 'rb') as f:
+                    content = f.read(4)
+            except Exception as e:
+                logger.error(f"Failed to read file: {file_path.name}: {e}")
+                return
+
+            try:
+                validate_pdf_file(file_path.name, content)
+                filenames.append(file_path.name)
+            except ValueError as e:
+                logger.error(f"File validation failed: {e}")
+                return
+
+        logger.info(f"All {len(filenames)} file(s) validated successfully")
+
         # Loop through all documents in the path and generate UUIDs
         doc_id_dict = {}
-        
-        # Use Path to list all files recursively and store paths as strings
-        base_path = Path(command_args.path)
-        filenames = [path.name for path in base_path.rglob(pattern='*') if path.is_file()]
-            
         doc_id_dict = initialize_job_state(job_id, OperationType.INGESTION, OutputFormat.JSON, filenames)
 
-        
         logger.info(f"Generated UUIDs for {len(doc_id_dict)} document(s)")
-        
+
         # Pass doc_id_dict as the last argument to ingest
-        converted_pdf_stats = ingest(command_args.path, job_id, doc_id_dict)
+        converted_pdf_stats = ingest(base_path, job_id, doc_id_dict)
 
         # Check if ingestion failed
         if converted_pdf_stats is None:

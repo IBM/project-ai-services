@@ -104,18 +104,51 @@ def verify_checksum(file, checksum_file):
         return True
     return False
 
-def validate_pdf_content(content: bytes) -> bool:
+def validate_pdf_file(filename: str, content) -> None:
     """
-    Validate that file content is a valid PDF by checking magic bytes.
+    Validate a PDF file with comprehensive checks.
+
+    Performs validation checks:
+    1. Filename exists
+    2. Content was read successfully (not an Exception)
+    3. Content is not empty
+    4. File has .pdf extension
+    5. File content is valid PDF (magic bytes check)
 
     Args:
-        content: File content as bytes
+        filename: Name of the file
+        content: File content as bytes (at least first 4 bytes), or Exception if read failed
 
-    Returns:
-        True if content starts with PDF signature, False otherwise
+    Raises:
+        ValueError: If validation fails
     """
+    # Check filename exists
+    if not filename:
+        raise ValueError("File must have a filename.")
+
+    # Validate .pdf extension
+    if not filename.lower().endswith('.pdf'):
+        raise ValueError(f"Only PDF files are allowed. Invalid file: {filename}")
+
     pdf_signature = b'%PDF'
-    return content.startswith(pdf_signature)
+    if not content.startswith(pdf_signature):
+        raise ValueError(f"File has .pdf extension but unsupported format: {filename}")
+
+    # Check content is bytes (not an exception from failed read)
+    if isinstance(content, Exception):
+        raise ValueError(f"Failed to read file: {filename}")
+
+    if not isinstance(content, bytes):
+        raise ValueError(f"Invalid file content for: {filename}")
+
+    # Check content is not empty
+    if len(content) == 0:
+        raise ValueError(f"File is empty: {filename}")
+
+
+def get_unprocessed_files(original_files, processed_pdfs):
+    return set(original_files).difference(set(processed_pdfs))
+
 
 def get_unprocessed_files(original_files, processed_pdfs):
     return set(original_files).difference(set(processed_pdfs))
