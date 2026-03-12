@@ -3,7 +3,6 @@ package openshift
 import (
 	"fmt"
 	"maps"
-	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -22,9 +21,9 @@ func GetTemplate(name, namespace string) (*unstructured.Unstructured, error) {
 	return getTemplate(ocClient, name, namespace)
 }
 
-// ProcessTemplateWithParameters processes an OpenShift Template with the given parameters.
-func ProcessTemplateWithParameters(template *unstructured.Unstructured, parameters map[string]string) ([]unstructured.Unstructured, error) {
-	return processTemplate(template, parameters)
+// ProcessTemplate processes an OpenShift Template.
+func ProcessTemplate(template *unstructured.Unstructured) ([]unstructured.Unstructured, error) {
+	return processTemplate(template)
 }
 
 // ApplyObjects applies the processed template objects to the cluster
@@ -67,33 +66,8 @@ func getTemplate(ocClient *OpenshiftClient, name, namespace string) (*unstructur
 	return template, nil
 }
 
-// processTemplate processes an OpenShift Template with the given parameters.
-func processTemplate(template *unstructured.Unstructured, parameters map[string]string) ([]unstructured.Unstructured, error) {
-	// Get the template parameters
-	templateParams, found, err := unstructured.NestedSlice(template.Object, "parameters")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get template parameters: %w", err)
-	}
-
-	// Build parameter map with defaults
-	paramMap := make(map[string]string)
-	if found {
-		for _, param := range templateParams {
-			paramObj, ok := param.(map[string]any)
-			if !ok {
-				continue
-			}
-			name, _ := paramObj["name"].(string)
-			value, hasValue := paramObj["value"].(string)
-			if hasValue {
-				paramMap[name] = value
-			}
-		}
-	}
-
-	// Override with provided parameters
-	maps.Copy(paramMap, parameters)
-
+// processTemplate processes an OpenShift Template.
+func processTemplate(template *unstructured.Unstructured) ([]unstructured.Unstructured, error) {
 	// Get the objects from the template
 	objects, found, err := unstructured.NestedSlice(template.Object, "objects")
 	if err != nil {
@@ -103,7 +77,7 @@ func processTemplate(template *unstructured.Unstructured, parameters map[string]
 		return nil, fmt.Errorf("template has no objects")
 	}
 
-	// Process each object and substitute parameters
+	// Process each object
 	processedObjects := make([]unstructured.Unstructured, 0, len(objects))
 	for _, obj := range objects {
 		objMap, ok := obj.(map[string]any)
@@ -111,67 +85,11 @@ func processTemplate(template *unstructured.Unstructured, parameters map[string]
 			continue
 		}
 
-		// Substitute parameters in the object
-		processedObj := substituteParameters(objMap, paramMap)
-
-		u := unstructured.Unstructured{Object: processedObj}
+		u := unstructured.Unstructured{Object: objMap}
 		processedObjects = append(processedObjects, u)
 	}
 
 	return processedObjects, nil
-}
-
-// substituteParameters recursively substitutes template parameters in an object.
-func substituteParameters(obj map[string]any, params map[string]string) map[string]any {
-	result := make(map[string]any)
-
-	for key, value := range obj {
-		switch v := value.(type) {
-		case string:
-			// Simple parameter substitution: ${PARAM_NAME}
-			result[key] = substituteString(v, params)
-		case map[string]any:
-			result[key] = substituteParameters(v, params)
-		case []any:
-			result[key] = substituteSlice(v, params)
-		default:
-			result[key] = value
-		}
-	}
-
-	return result
-}
-
-// substituteSlice substitutes parameters in a slice.
-func substituteSlice(slice []any, params map[string]string) []any {
-	result := make([]any, len(slice))
-
-	for i, item := range slice {
-		switch v := item.(type) {
-		case string:
-			result[i] = substituteString(v, params)
-		case map[string]any:
-			result[i] = substituteParameters(v, params)
-		case []any:
-			result[i] = substituteSlice(v, params)
-		default:
-			result[i] = item
-		}
-	}
-
-	return result
-}
-
-// substituteString performs simple parameter substitution in a string.
-func substituteString(s string, params map[string]string) string {
-	// Simple implementation - can be enhanced with regex for ${PARAM} syntax
-	result := s
-	for key, value := range params {
-		placeholder := fmt.Sprintf("${%s}", key)
-		result = strings.ReplaceAll(result, placeholder, value)
-	}
-
-	return result
 }
 
 // applyProcessedObjectsWithLabels applies the processed template objects to the cluster with additional labels

@@ -23,12 +23,10 @@ var defaultRuntimeTemplates = []TemplateProcessOptions{
 	{
 		TemplateName:      "vllm-cpu-runtime-template",
 		TemplateNamespace: "redhat-ods-applications",
-		Parameters:        map[string]string{},
 	},
 	{
 		TemplateName:      "vllm-spyre-ppc64le-runtime-template",
 		TemplateNamespace: "redhat-ods-applications",
-		Parameters:        map[string]string{},
 	},
 }
 
@@ -167,7 +165,6 @@ func deployApp(ctx context.Context, chart chart.Charter, timeout time.Duration, 
 type TemplateProcessOptions struct {
 	TemplateName      string
 	TemplateNamespace string
-	Parameters        map[string]string
 }
 
 // processOpenShiftTemplatesWithLabels processes multiple OpenShift templates in sequence and adds labels to all created resources.
@@ -199,8 +196,8 @@ func processOpenShiftTemplateWithLabels(ctx context.Context, opts TemplateProces
 		return fmt.Errorf("failed to get template: %w", err)
 	}
 
-	// Process the template with parameters
-	processedObjects, err := openshift.ProcessTemplateWithParameters(template, opts.Parameters)
+	// Process the template
+	processedObjects, err := openshift.ProcessTemplate(template)
 	if err != nil {
 		s.Fail("failed to process template")
 
