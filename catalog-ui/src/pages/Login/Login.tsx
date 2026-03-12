@@ -10,7 +10,6 @@ import { ArrowRight } from "@carbon/icons-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import styles from "./Login.module.scss";
-
 import { login } from "@/services/auth";
 
 const LoginPage = () => {

@@ -458,7 +458,7 @@ const ApplicationsListPage = () => {
 
             <Modal
               open={state.isDeleteDialogOpen}
-              size="xs"
+              size="sm"
               modalLabel="Delete Case routing"
               modalHeading="Confirm delete"
               primaryButtonText="Delete"

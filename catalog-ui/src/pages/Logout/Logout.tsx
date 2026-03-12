@@ -3,22 +3,10 @@ import styles from "./Logout.module.scss";
 import { Theme } from "@carbon/react";
 import { useNavigate, Link } from "react-router-dom";
 
-import { logout } from "@/services/auth";
-
 const Logout = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const performLogout = async () => {
-      try {
-        await logout();
-      } catch {
-        // ignore errors, still log out locally
-      }
-    };
-
-    performLogout();
-
     const timer = setTimeout(() => {
       navigate("/login", { replace: true });
     }, 5000);
