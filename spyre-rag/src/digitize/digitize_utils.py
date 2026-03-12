@@ -19,7 +19,7 @@ from digitize.status import (
     create_document_metadata,
     create_job_state
 )
-from digitize.job import JobState, JobDocumentSummary, JobStats
+from digitize.job import JobState
 from digitize.document import DocumentMetadata
 from digitize.types import JobStatus
 

@@ -257,9 +257,16 @@ async def summarize(request: Request):
         # ----- Multipart / form-data path -----
         elif "multipart/form-data" in content_type:
             form = await request.form()
-            file: Optional[UploadFile] = form.get("file")
+            file_value = form.get("file")
+            file: Optional[UploadFile] = file_value if isinstance(file_value, UploadFile) else None
 
-            summary_length = validate_summary_length(form.get("length"))
+            length_value = form.get("length")
+            # Convert to string or None, filtering out UploadFile instances and empty strings
+            if length_value and not isinstance(length_value, UploadFile) and str(length_value).strip():
+                length_str = str(length_value)
+            else:
+                length_str = None
+            summary_length = validate_summary_length(length_str)
             stream = str(form.get("stream", "false")).lower() == "true"
 
             if file and hasattr(file, "filename"):
