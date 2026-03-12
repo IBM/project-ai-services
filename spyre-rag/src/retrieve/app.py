@@ -123,14 +123,14 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
         reranker_endpoint = reranker_model_dict['reranker_endpoint']
         
         # Validate query length
-        is_valid, token_count, error_msg = await asyncio.to_thread(
+        is_valid, error_msg = await asyncio.to_thread(
             validate_query_length, req.prompt, emb_endpoint
         )
         if not is_valid:
-            raise HTTPException(
-                status_code=400,
-                detail=f"{error_msg}. Query has {token_count} tokens, maximum allowed is {settings.max_query_token_length} tokens."
-            )
+            return JSONResponse(
+                    status_code=400,
+                    content={"error": error_msg}
+                )
 
         docs, perf_stat_dict = await asyncio.to_thread(
             search_only,
@@ -145,9 +145,6 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
         # Store metrics in registry for reference endpoint
         perf_registry.add_metric(perf_stat_dict)
         
-    except HTTPException:
-        # Re-raise HTTPException without modification
-        raise
     except db.VectorStoreNotReadyError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -235,14 +232,20 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
         reranker_endpoint = reranker_model_dict['reranker_endpoint']
         
         # Validate query length
-        is_valid, token_count, error_msg = await asyncio.to_thread(
+        is_valid, error_msg = await asyncio.to_thread(
             validate_query_length, query, emb_endpoint
         )
         if not is_valid:
-            raise HTTPException(
-                status_code=400,
-                detail=f"{error_msg}. Query has {token_count} tokens, maximum allowed is {settings.max_query_token_length} tokens."
-            )
+            # Return streaming error response for consistency
+            if req.stream:
+                async def stream_query_length_error():
+                    yield f"data: {json.dumps({'choices': [{'delta': {'content': error_msg}}]})}\n\n"
+                return StreamingResponse(stream_query_length_error(), media_type="text/event-stream")
+            else:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": error_msg}
+                )
         
         docs, perf_stat_dict = await asyncio.to_thread(
             search_only,
@@ -254,9 +257,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
             settings.num_chunks_post_reranker,
             vectorstore=vectorstore
         )
-    except HTTPException:
-        # Re-raise HTTPException without modification
-        raise
+        
     except db.VectorStoreNotReadyError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:

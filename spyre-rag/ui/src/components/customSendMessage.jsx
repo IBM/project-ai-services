@@ -169,9 +169,16 @@ async function customSendMessage(request, _options, instance) {
     });
 
     // await for the reference promise to finish
-    const context_response = await referencePromise;
-    // get docs out of context_response
-    const docs = context_response.data?.documents || [];
+    let docs = [];
+    try {
+      const context_response = await referencePromise;
+      // get docs out of context_response
+      docs = context_response.data?.documents || [];
+    } catch (refError) {
+      // If reference call fails (e.g., query too long), continue without docs
+      // The chat response has already been streamed successfully
+      console.warn('Reference document retrieval failed:', refError.response?.data?.detail || refError.message);
+    }
 
     const responseBlocks = [
       {
@@ -184,7 +191,7 @@ async function customSendMessage(request, _options, instance) {
       },
     ];
 
-    if (docs.length > 0) {
+    if (docs?.length > 0) {
       responseBlocks.push({
         response_type: 'user_defined',
         user_defined: {
