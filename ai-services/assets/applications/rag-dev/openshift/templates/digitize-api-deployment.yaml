@@ -73,10 +73,10 @@ spec:
               protocol: TCP
           resources:
             requests:
-              cpu: "2"
+              cpu: "8"
               memory: "50Gi"
             limits:
-              cpu: "4"
+              cpu: "8"
               memory: "50Gi"
           volumeMounts:
             - mountPath: /var/cache
