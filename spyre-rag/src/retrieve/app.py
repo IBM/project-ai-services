@@ -239,7 +239,8 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
             # Return streaming error response for consistency
             if req.stream:
                 async def stream_query_length_error():
-                    yield f"data: {json.dumps({'choices': [{'delta': {'content': error_msg}}]})}\n\n"
+                    message = f"Your query is too long. Please shorten it and try again."
+                    yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
                 return StreamingResponse(stream_query_length_error(), media_type="text/event-stream")
             else:
                 return JSONResponse(

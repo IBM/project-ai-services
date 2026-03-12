@@ -177,7 +177,10 @@ async function customSendMessage(request, _options, instance) {
     } catch (refError) {
       // If reference call fails (e.g., query too long), continue without docs
       // The chat response has already been streamed successfully
-      console.warn('Reference document retrieval failed:', refError.response?.data?.detail || refError.message);
+      console.warn(
+        'Reference document retrieval failed:',
+        refError.response?.data?.detail || refError.message,
+      );
     }
 
     const responseBlocks = [
