@@ -37,20 +37,6 @@ ingestion_semaphore = asyncio.BoundedSemaphore(1)
 
 logger = get_logger("digitize_server")
 
-def mark_all_active_jobs_as_failed():
-    """
-    Mark all jobs with status 'accepted' or 'in_progress' as failed.
-    Called during graceful shutdown to handle in-progress jobs.
-    """
-    try:
-        logger.info("Marking all active jobs as failed due to shutdown...")
-        failed_count = dg_util.scan_and_recover_orphan_jobs()
-        if failed_count > 0:
-            logger.info(f"Marked {failed_count} active job(s) as failed during shutdown")
-    except Exception as e:
-        logger.error(f"Error marking active jobs as failed: {e}", exc_info=True)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan events (startup and shutdown)."""
@@ -59,7 +45,7 @@ async def lifespan(app: FastAPI):
 
     # Scan for orphan jobs and mark them as failed
     try:
-        orphan_count = dg_util.scan_and_recover_orphan_jobs()
+        orphan_count = dg_util.scan_and_recover_orphan_jobs(config.JOBS_DIR)
         if orphan_count > 0:
             logger.info(f"Found {orphan_count} orphan job(s) from previous app server run")
     except Exception as e:
@@ -69,8 +55,6 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Application shutting down...")
-    # Mark any remaining active jobs as failed
-    mark_all_active_jobs_as_failed()
 
 
 
