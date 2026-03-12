@@ -244,10 +244,12 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
         if e.response is not None:
             error_details += f", Response Text: {e.response.text}"
         logger.error(f"Error calling vLLM stream API: {error_details}")
-        return {"error": error_details}
+        yield f"data: {json.dumps({'error': error_details})}\n\n"
+        yield "data: [DONE]\n\n"
     except Exception as e:
         logger.error(f"Error calling vLLM stream API: {e}")
-        return {"error": str(e)}
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        yield "data: [DONE]\n\n"
 
 def query_vllm_summarize(
     llm_endpoint: str,
@@ -346,10 +348,12 @@ def query_vllm_summarize_stream(
         if e.response is not None:
             error_details += f", Response Text: {e.response.text}"
         logger.error(f"Error calling vLLM stream API: {error_details}")
-        yield error_details
+        yield f"data: {json.dumps({'error': error_details})}\n\n"
+        yield "data: [DONE]\n\n"
     except Exception as e:
         logger.error(f"Error calling vLLM stream API: {e}")
-        yield f"Error calling vLLM stream API: {e}"
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        yield "data: [DONE]\n\n"
 
 def tokenize_with_llm(prompt, emb_endpoint):
     if SESSION is None:
