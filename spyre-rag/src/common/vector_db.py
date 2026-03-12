@@ -56,16 +56,44 @@ class VectorStore(ABC):
         pass
 
     @abstractmethod
-    def reset_index(self):
+    def remove_docs_from_index(self, doc_ids: list[str]) -> int:
         """
-        Deletes the existing index/collection and clears any associated local cache.
+        Delete all chunks associated with the specified list of document IDs from the index.
 
-        This is typically used during development or when re-indexing a completely
-        new set of documents. It should remove the index from the database and
-        cleanup any persistent storage artifacts.
+        This performs a targeted deletion of documents rather than wiping the entire index.
+        Uses batch deletion for efficiency.
+
+        Args:
+            doc_ids: List of document IDs whose chunks should be deleted from the index
+
+        Returns:
+            Number of chunks deleted
         """
         pass
 
-class VectorStoreNotReadyError():
+    @abstractmethod
+    def check_db_populated(self) -> bool:
+        """
+        Check if the vector database is populated with data.
+
+        Returns:
+            bool: True if the database contains indexed documents, False otherwise.
+        """
+        pass
+
+    @abstractmethod
+    def delete_document_by_id(self, doc_id: str) -> int:
+        """
+        Delete all chunks associated with a specific document from the index.
+        
+        Args:
+            doc_id: The unique identifier of the document to delete
+            
+        Returns:
+            Number of chunks deleted
+        """
+        pass
+
+class VectorStoreNotReadyError(Exception):
     """Raised when the database is unreachable or initializing."""
     pass

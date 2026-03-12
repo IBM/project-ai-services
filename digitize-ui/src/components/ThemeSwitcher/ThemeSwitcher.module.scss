@@ -1,0 +1,73 @@
+.themeSwitcher {
+  position: relative;
+}
+
+.themeButton {
+  cursor: pointer;
+}
+
+.dropdown {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  min-width: 200px;
+  background-color: var(--cds-layer-01);
+  border: 1px solid var(--cds-border-subtle-01);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  z-index: 9000;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.dropdownHeader {
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--cds-text-primary);
+  border-bottom: 1px solid var(--cds-border-subtle-01);
+  background-color: var(--cds-layer-01);
+}
+
+.dropdownList {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 0;
+}
+
+.dropdownItem {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: none;
+  background: none;
+  color: var(--cds-text-primary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.11s;
+
+  &:hover {
+    background-color: var(--cds-layer-hover-01);
+  }
+
+  &.active {
+    background-color: var(--cds-layer-selected-01);
+    font-weight: 600;
+  }
+}
+
+.optionIcon {
+  flex-shrink: 0;
+  fill: var(--cds-icon-primary);
+}
+
+.checkmark {
+  margin-left: auto;
+  color: var(--cds-support-success);
+  font-weight: bold;
+  font-size: 1rem;
+}
+
+// Made with Bob

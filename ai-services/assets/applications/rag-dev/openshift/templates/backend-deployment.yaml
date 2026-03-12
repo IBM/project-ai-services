@@ -20,13 +20,23 @@ spec:
         ai-services.io/component: backend
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: server
           image: "{{ .Values.backend.image }}"
           command:
             - "/var/venv/bin/python"
             - "-m"
-            - "retrieve.backend_server"
+            - "uvicorn"
+            - "retrieve.app:app"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "5000"
+            - "--loop"
+            - "uvloop"
+            - "--http"
+            - "httptools"
           env:
             - name: EMB_ENDPOINT
               value: http://embedding-predictor:8080

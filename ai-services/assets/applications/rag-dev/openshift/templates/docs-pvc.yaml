@@ -1,3 +1,4 @@
+{{- if not (lookup "v1" "PersistentVolumeClaim" .Release.Namespace "docs") -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -6,9 +7,12 @@ metadata:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+  annotations:
+    "helm.sh/resource-policy": keep
 spec:
   accessModes:
     - ReadWriteMany
   resources:
     requests:
       storage: "1Gi"
+{{- end -}}

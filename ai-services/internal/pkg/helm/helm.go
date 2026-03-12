@@ -79,6 +79,8 @@ func (h *Helm) Upgrade(release string, chart chart.Charter, opts *UpgradeOpts) e
 	upgradeClient.ServerSideApply = "true"
 	upgradeClient.WaitStrategy = kube.StatusWatcherStrategy
 	upgradeClient.Timeout = opts.Timeout
+	upgradeClient.ForceConflicts = true
+	upgradeClient.RollbackOnFailure = true
 
 	// Perform helm upgrade
 	_, err := upgradeClient.Run(release, chart, opts.Values)
@@ -106,4 +108,25 @@ func (h *Helm) IsReleaseExist(release string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+type UninstallOpts struct {
+	Timeout time.Duration
+}
+
+func (h *Helm) Uninstall(release string, opts *UninstallOpts) error {
+	// Configure the Uninstall client
+	uninstallClient := action.NewUninstall(h.actionConfig)
+	uninstallClient.WaitStrategy = kube.StatusWatcherStrategy
+	if opts != nil {
+		uninstallClient.Timeout = opts.Timeout
+	}
+
+	// Perform helm uninstall
+	_, err := uninstallClient.Run(release)
+	if err != nil {
+		return fmt.Errorf("Uninstall failed: %w", err)
+	}
+
+	return nil
 }

@@ -7,6 +7,14 @@ containers:
     format: ".Status"
     alias: BACKEND_STATUS
 
+  - name: "summarize-api"
+    format: ".Status"
+    alias: SUMMARIZE_API_STATUS
+
 hosts:
   - fetch: UI_ROUTE
+    type: route
+  - fetch: BACKEND_ROUTE
+    type: route
+  - fetch: SUMMARIZE_API_ROUTE
     type: route

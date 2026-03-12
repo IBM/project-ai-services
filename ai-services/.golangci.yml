@@ -10,7 +10,6 @@ linters:
     - gocognit
     - godoclint
     - godot
-    - godox
     - misspell
     - mnd
     - nestif
@@ -20,3 +19,6 @@ linters:
   disable:
     - wsl
     - depguard
+  exclusions:
+    paths:
+      - docs/docs.go

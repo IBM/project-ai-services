@@ -5,16 +5,21 @@ from cohere import ClientV2
 
 logger = get_logger("reranker")
 
-def rerank_helper(co2_client: ClientV2, query: str, document: List[dict], model: str) -> Tuple[List[dict], float]:
+def rerank_helper(co2_client: ClientV2, query: str, document: dict, model: str) -> Tuple[dict, float]:
     """
     Rerank a single LangChain Document with respect to the query.
     Returns a (Document, score) tuple.
     """
     try:
+        page_content = document.get("page_content", "")
+        if not page_content:
+            logger.warning("Document has no page_content, assigning score 0.0")
+            return document, 0.0
+        
         result = co2_client.rerank(
             model=model,
             query=query,
-            documents=[document.get("page_content")],
+            documents=[page_content],
             max_tokens_per_doc=512,
         )
         score = result.results[0].relevance_score

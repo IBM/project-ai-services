@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"os/exec"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -526,4 +528,62 @@ func GitVersionCommands(ctx context.Context) (string, string, error) {
 	}
 
 	return voutput, coutput, nil
+}
+
+// ApplicationLogs fetches logs for a specific pod and container.
+func ApplicationLogs(
+	ctx context.Context,
+	cfg *config.Config,
+	appName string,
+	podName string,
+	containerNameOrID string,
+) (string, error) {
+	args := []string{
+		"application",
+		"logs",
+		appName,
+		"--pod", podName,
+	}
+	if containerNameOrID != "" {
+		args = append(args, "--container", containerNameOrID)
+	}
+
+	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
+
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
+
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+	}
+
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	done := make(chan error, 1)
+
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case <-ctx.Done():
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+
+		return buf.String(), nil
+
+	case err := <-done:
+		output := buf.String()
+		if err != nil {
+			return output, fmt.Errorf("application logs failed: %w\n%s", err, output)
+		}
+
+		return output, nil
+	}
 }

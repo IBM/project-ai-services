@@ -97,7 +97,7 @@ func ValidateHelpRandomCommandOutput(command string, output string) error {
 			"ai-services application [command]",
 		},
 		bootstrap: []string{
-			"The bootstrap command configures and validates the environment needed to run AI Services on Power11 systems, ensuring prerequisites are met and initial configuration is completed.",
+			"The bootstrap command configures and validates the environment needed to run AI Services, ensuring prerequisites are met and initial configuration is completed.",
 			"ai-services bootstrap [flags]",
 		},
 		completion: []string{
@@ -495,4 +495,29 @@ func ValidateStartAppOutput(output string) error {
 	}
 
 	return nil
+}
+
+func ValidateApplicationLogs(output, podName, containerNameOrID string) error {
+	required := []string{
+		"Press Ctrl+C to exit the logs",
+		"Fetching logs for",
+	}
+
+	for _, r := range required {
+		if !strings.Contains(output, r) {
+			return fmt.Errorf("application logs validation failed: missing '%s'", r)
+		}
+	}
+
+	return nil
+}
+
+func GetApplicationNameFromPSOutput(psOutput string) (appName string) {
+	lines := strings.Split(psOutput, "\n")
+	parts := strings.Fields(lines[2])
+	if len(parts) > 0 {
+		return parts[0]
+	}
+
+	return ""
 }

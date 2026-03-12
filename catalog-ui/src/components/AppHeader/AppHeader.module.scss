@@ -1,0 +1,76 @@
+@use "@carbon/react/scss/spacing";
+
+.header {
+  font-size: large;
+}
+
+.iconWidth {
+  width: spacing.$spacing-10;
+}
+
+.menuBtn {
+  border: none !important;
+}
+
+.usercircle {
+  width: spacing.$spacing-09;
+  height: spacing.$spacing-09;
+  border-radius: 50%;
+  background-color: #525252;
+  /* grey circle like screenshot */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  /* makes icon white */
+  transition: background-color 0.2s ease;
+}
+
+.usercircle:hover {
+  background-color: #6f6f6f;
+}
+
+.userprofile {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: spacing.$spacing-03;
+  padding: spacing.$spacing-04;
+  font-size: 1.1rem;
+}
+
+.logout {
+  border-top: 1px solid #393939;
+
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: spacing.$spacing-05;
+
+  background-color: #393939;
+  color: #ffffff;
+}
+
+:global(.cds--header-panel--expanded) {
+  max-height: none !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+
+:global(.cds--header-panel) {
+  position: relatives !important;
+  bottom: auto !important;
+  right: 0 !important;
+  left: auto !important;
+  transform: none !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+}

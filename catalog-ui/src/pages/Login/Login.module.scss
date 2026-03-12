@@ -1,0 +1,46 @@
+@use "@carbon/react/scss/type";
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/breakpoint";
+
+.loginPage {
+  min-height: 100vh;
+  padding: 0;
+}
+
+.loginLeft {
+  display: flex;
+  align-items: center;
+
+  @include breakpoint.breakpoint-up(lg) {
+    padding-left: spacing.$spacing-05; // extra 16px only on large screens
+  }
+}
+
+.loginRight {
+  background-color: var(--cds-layer-01);
+  margin: 0;
+}
+
+.loginForm {
+  width: 100%;
+  max-width: 28rem;
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-09;
+}
+
+.heading {
+  @include type.type-style("heading-05");
+}
+
+.inputFields {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-06;
+  width: 100%;
+}
+
+.continueButton {
+  width: 100%;
+  max-width: none;
+}

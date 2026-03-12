@@ -15,3 +15,6 @@ spec:
   to:
     kind: Service
     name: "ui"
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge
