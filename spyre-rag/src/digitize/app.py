@@ -29,7 +29,7 @@ if level != "":
 set_log_level(log_level)
 
 from digitize.ingest import ingest
-from digitize.status import StatusManager, scan_and_recover_orphan_jobs
+from digitize.status import StatusManager
 
 # Semaphores for concurrency limiting
 digitization_semaphore = asyncio.BoundedSemaphore(2)
@@ -44,7 +44,7 @@ def mark_all_active_jobs_as_failed():
     """
     try:
         logger.info("Marking all active jobs as failed due to shutdown...")
-        failed_count = scan_and_recover_orphan_jobs()
+        failed_count = dg_util.scan_and_recover_orphan_jobs()
         if failed_count > 0:
             logger.info(f"Marked {failed_count} active job(s) as failed during shutdown")
     except Exception as e:
@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
 
     # Scan for orphan jobs and mark them as failed
     try:
-        orphan_count = scan_and_recover_orphan_jobs()
+        orphan_count = dg_util.scan_and_recover_orphan_jobs()
         if orphan_count > 0:
             logger.info(f"Recovered {orphan_count} orphan job(s) from previous crash")
     except Exception as e:
