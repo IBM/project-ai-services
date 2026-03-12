@@ -5,7 +5,6 @@ import os
 import uuid
 from pathlib import Path
 import shutil
-import signal
 from typing import List, Optional
 from contextlib import asynccontextmanager
 import uvicorn
@@ -52,36 +51,11 @@ def mark_all_active_jobs_as_failed():
         logger.error(f"Error marking active jobs as failed: {e}", exc_info=True)
 
 
-def setup_signal_handlers():
-    """
-    Setup signal handlers for graceful shutdown.
-    Handles SIGTERM (container stop) and SIGINT (Ctrl+C).
-    """
-    def signal_handler(signum, frame):
-        sig_name = signal.Signals(signum).name
-        logger.warning(f"Received {sig_name} signal, initiating graceful shutdown...")
-
-        # Mark all active jobs as failed
-        mark_all_active_jobs_as_failed()
-
-        # Exit gracefully
-        logger.info("Graceful shutdown complete")
-        os._exit(0)
-
-    # Register handlers for SIGTERM and SIGINT
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
-    logger.info("Signal handlers registered for SIGTERM and SIGINT")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan events (startup and shutdown)."""
     # Startup
     logger.info("Application starting up...")
-
-    # Setup signal handlers for graceful shutdown
-    setup_signal_handlers()
 
     # Scan for orphan jobs and mark them as failed
     try:
@@ -133,13 +107,8 @@ async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: type
         logger.error(f"Error in job {job_id}: {e}")
         status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing digitization pipeline: {str(e)}")
     finally:
-       # Always clean up staging directory, even on crashes
-        try:
-            if job_staging_path.exists():
-                shutil.rmtree(job_staging_path)
-                logger.debug(f"Cleaned up staging directory: {job_staging_path}")
-        except Exception as cleanup_error:
-            logger.warning(f"Failed to clean up staging directory {job_staging_path}: {cleanup_error}")
+        # Always clean up staging directory, even on crashes
+        dg_util.cleanup_staging_directory(job_id, config.STAGING_DIR)
 
         # Crucial: Always release the semaphore slot back to the API
         digitization_semaphore.release()
@@ -159,13 +128,8 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
         status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline: {str(e)}")
     finally:
         # Always clean up staging directory, even on crashes
-        try:
-            if job_staging_path.exists():
-                shutil.rmtree(job_staging_path)
-                logger.debug(f"Cleaned up staging directory: {job_staging_path}")
-        except Exception as cleanup_error:
-            logger.warning(f"Failed to clean up staging directory {job_staging_path}: {cleanup_error}")
-
+        dg_util.cleanup_staging_directory(job_id, config.STAGING_DIR)
+        
         # Mandatory Semaphore Release
         ingestion_semaphore.release()
         logger.debug(f"✅ Job {job_id} done. Semaphore released.")

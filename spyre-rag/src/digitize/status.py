@@ -90,13 +90,8 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = config.JOBS_DIR) -> int:
                         orphan_count += 1
 
                         # Clean up staging directory for this orphan job
-                        staging_dir = config.STAGING_DIR / job_id
-                        if staging_dir.exists():
-                            try:
-                                shutil.rmtree(staging_dir)
-                                logger.info(f"🗑️  Cleaned up staging directory for orphan job: {staging_dir}")
-                            except Exception as cleanup_error:
-                                logger.warning(f"Failed to clean up staging directory {staging_dir}: {cleanup_error}")
+                        import digitize.digitize_utils as dg_util
+                        dg_util.cleanup_staging_directory(job_id, config.STAGING_DIR)
                     except Exception as write_error:
                         logger.error(f"Failed to update orphan job {job_id}: {write_error}")
 
