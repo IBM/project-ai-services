@@ -1,8 +1,6 @@
 name: Scheduled CVE and Licenses Scan
 
 on:
-  # Added pull_request_target to validate PR commit, will remove it.
-  pull_request_target:
   schedule:
     - cron: '0 0 */2 * *'
 
