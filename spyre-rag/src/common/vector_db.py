@@ -56,13 +56,18 @@ class VectorStore(ABC):
         pass
 
     @abstractmethod
-    def reset_index(self):
+    def reset_index(self, doc_ids: list[str]) -> int:
         """
-        Deletes the existing index/collection and clears any associated local cache.
+        Delete all chunks associated with the specified document IDs from the index.
 
-        This is typically used during development or when re-indexing a completely
-        new set of documents. It should remove the index from the database and
-        cleanup any persistent storage artifacts.
+        This performs a targeted deletion of documents rather than wiping the entire index.
+        Uses batch deletion for efficiency.
+
+        Args:
+            doc_ids: List of document IDs whose chunks should be deleted from the index
+
+        Returns:
+            Number of chunks deleted
         """
         pass
 

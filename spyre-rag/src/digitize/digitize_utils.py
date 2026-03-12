@@ -2,6 +2,7 @@ import asyncio
 import json
 from functools import partial
 from pathlib import Path
+import shutil
 from typing import List, Optional
 import uuid
 
@@ -35,6 +36,38 @@ def generate_uuid():
     generated_uuid = uuid.uuid4()
     logger.debug(f"Generated UUID: {generated_uuid}")
     return str(generated_uuid)
+
+
+def get_all_document_ids(docs_dir: Path = DOCS_DIR) -> list[str]:
+    """
+    Read all document IDs from metadata files in the docs directory.
+
+    Args:
+        docs_dir: Directory containing document metadata files
+
+    Returns:
+        List of document IDs found in metadata files
+    """
+    doc_ids = []
+    try:
+        logger.debug(f"Reading document IDs from {docs_dir}")
+        if docs_dir.exists():
+            for metadata_file in docs_dir.glob("*_metadata.json"):
+                try:
+                    with open(metadata_file, 'r') as f:
+                        metadata = json.load(f)
+                        doc_id = metadata.get('id')
+                        if doc_id:
+                            doc_ids.append(doc_id)
+                except Exception as e:
+                    logger.warning(f"Failed to read metadata from {metadata_file.name}: {e}")
+            logger.info(f"Found {len(doc_ids)} document IDs in {docs_dir}")
+        else:
+            logger.warning(f"Directory {docs_dir} does not exist")
+    except Exception as e:
+        logger.error(f"Failed to read document IDs from {docs_dir}: {e}")
+
+    return doc_ids
 
 
 def initialize_job_state(job_id: str, operation: str, output_format:OutputFormat, documents_info: list[str]) -> dict[str, str]:
@@ -535,9 +568,7 @@ def cleanup_digitized_files() -> dict:
     Delete all digitized content files from the cache directory.
     
     This utility function removes all digitized content files (json, md, text)
-    from DIGITIZED_DOCS_DIR (/var/cache/digitized). It can be called from:
-    - CLI mode via clean-db command
-    - API mode via bulk_delete_all_documents
+    from DIGITIZED_DOCS_DIR (/var/cache/digitized).
     
     Returns:
         Dictionary with deletion statistics containing:
@@ -545,35 +576,30 @@ def cleanup_digitized_files() -> dict:
         - errors: List of error messages for failed deletions
     """
     logger.info("Cleaning up digitized content files...")
-    
+
     cleanup_stats = {
         "content_files_deleted": 0,
         "errors": []
     }
-    
-    if DIGITIZED_DOCS_DIR.exists():
-        logger.debug(f"Deleting content files from {DIGITIZED_DOCS_DIR}")
-        # Use OutputFormat enum values for consistency
-        for output_format in OutputFormat:
-            extension = output_format.value
-            content_files = list(DIGITIZED_DOCS_DIR.glob(f"*.{extension}"))
-            logger.debug(f"Found {len(content_files)} .{extension} files to delete")
 
-            for content_file in content_files:
-                try:
-                    content_file.unlink()
-                    cleanup_stats["content_files_deleted"] += 1
-                    logger.debug(f"✓ Deleted content file: {content_file.name}")
-                except Exception as e:
-                    error_msg = f"Failed to delete content file {content_file.name}: {e}"
-                    logger.error(f"✗ {error_msg}")
-                    cleanup_stats["errors"].append(error_msg)
+    if DIGITIZED_DOCS_DIR.exists():
+        try:
+            # Count files before deletion
+            file_count = sum(1 for _ in DIGITIZED_DOCS_DIR.iterdir() if _.is_file())
+            logger.debug(f"Found {file_count} files in {DIGITIZED_DOCS_DIR}")
+
+            # Delete the entire directory and recreate it
+            shutil.rmtree(DIGITIZED_DOCS_DIR)
+            DIGITIZED_DOCS_DIR.mkdir(parents=True, exist_ok=True)
+
+            cleanup_stats["content_files_deleted"] = file_count
+            logger.info(f"✅ Cleanup completed: {file_count} content files deleted")
+        except Exception as e:
+            error_msg = f"Failed to clean up digitized directory: {e}"
+            logger.error(f"✗ {error_msg}")
+            cleanup_stats["errors"].append(error_msg)
     else:
-        logger.error(f"Digitized directory {DIGITIZED_DOCS_DIR} does not exist")
-    
-    logger.info(
-        f"✅ Cleanup completed: {cleanup_stats['content_files_deleted']} content files deleted"
-    )
+        logger.info(f"Digitized directory {DIGITIZED_DOCS_DIR} does not exist")
     
     if cleanup_stats["errors"]:
         logger.error(f"Cleanup completed with {len(cleanup_stats['errors'])} errors")
@@ -611,19 +637,22 @@ def bulk_delete_all_documents(docs_dir: Path = DOCS_DIR) -> dict:
 
     # Step 2: Delete all document metadata files
     if docs_dir.exists():
-        logger.debug(f"Deleting metadata files from {docs_dir}")
-        metadata_files = list(docs_dir.glob("*_metadata.json"))
-        logger.debug(f"Found {len(metadata_files)} metadata files to delete")
+        try:
+            # Count metadata files before deletion
+            metadata_files = list(docs_dir.glob("*_metadata.json"))
+            file_count = len(metadata_files)
+            logger.debug(f"Found {file_count} metadata files in {docs_dir}")
 
-        for meta_file in metadata_files:
-            try:
-                meta_file.unlink()
-                deletion_stats["metadata_files_deleted"] += 1
-                logger.debug(f"✓ Deleted metadata file: {meta_file.name}")
-            except Exception as e:
-                error_msg = f"Failed to delete metadata file {meta_file.name}: {e}"
-                logger.error(f"✗ {error_msg}")
-                deletion_stats["errors"].append(error_msg)
+            # Delete the entire directory and recreate it
+            shutil.rmtree(docs_dir)
+            docs_dir.mkdir(parents=True, exist_ok=True)
+
+            deletion_stats["metadata_files_deleted"] = file_count
+            logger.info(f"✓ Deleted {file_count} metadata files from {docs_dir}")
+        except Exception as e:
+            error_msg = f"Failed to clean up documents directory: {e}"
+            logger.error(f"✗ {error_msg}")
+            deletion_stats["errors"].append(error_msg)
     else:
         logger.error(f"Documents directory {docs_dir} does not exist")
 
@@ -638,4 +667,3 @@ def bulk_delete_all_documents(docs_dir: Path = DOCS_DIR) -> dict:
         logger.error(f"Bulk deletion completed with {len(deletion_stats['errors'])} errors")
 
     return deletion_stats
-
