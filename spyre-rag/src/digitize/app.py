@@ -52,6 +52,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Digitize Documents Service", lifespan=lifespan)
 
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    set_request_id(request_id)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
 @app.get("/health", status_code=status.HTTP_200_OK)
 async def health_check():
     """
@@ -61,14 +69,6 @@ async def health_check():
     - 200 OK if the service is healthy
     """
     return {"status": "ok"}
-
-@app.middleware("http")
-async def add_request_id(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
-    set_request_id(request_id)
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    return response
 
 async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat):
     status_mgr = StatusManager(job_id)
