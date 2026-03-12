@@ -10,7 +10,7 @@ from digitize.types import JobStatus, DocStatus
 
 logger = get_logger("ingest")
 
-def ingest(directory_path: Path, job_id: str = None, doc_id_dict: dict = None):
+def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Optional[dict] = None):
 
     def ingestion_failed():
         logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
