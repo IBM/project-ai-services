@@ -56,11 +56,19 @@ app = FastAPI(title="Digitize Documents Service", lifespan=lifespan)
 async def health_check():
     """
     Health check endpoint for liveness probe.
-    
+
     Returns:
     - 200 OK if the service is healthy
     """
     return {"status": "ok"}
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    set_request_id(request_id)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat):
     status_mgr = StatusManager(job_id)
@@ -70,7 +78,7 @@ async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: type
         logger.info(f"🚀 Digitization started for job: {job_id}")
         # to_thread prevents the heavy 'digitize' process from blocking the main FastAPI event loop and returns the response to request asynchronously.
         await asyncio.to_thread(digitize, job_staging_path, job_id, doc_id_dict, output_format)
-        logger.info(f"Digitization for {job_id} completed successfully")
+        logger.info(f"Digitization for job {job_id} completed successfully")
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
         status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing digitization pipeline: {str(e)}")
@@ -111,14 +119,6 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
         # Mandatory Semaphore Release
         ingestion_semaphore.release()
         logger.debug(f"✅ Job {job_id} done. Semaphore released.")
-
-@app.middleware("http")
-async def add_request_id(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
-    set_request_id(request_id)
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    return response
 
 @app.post("/v1/documents", status_code=status.HTTP_202_ACCEPTED)
 async def digitize_document(
@@ -440,19 +440,19 @@ async def get_document_content(doc_id: str):
 async def delete_document(doc_id: str):
     """
     Delete a single document by ID.
-    
+
     This endpoint implements a robust deletion strategy:
     1. Checks if the document exists
     2. Verifies the document is not part of any active job (in_progress)
     3. Removes the document from the vector database (if ingested) - FIRST
     4. Deletes all associated files from cache - LAST
-    
+
     Deletes document with an 'Always-Clean-VDB' retry strategy.
     Order: 1. VDB (Search) -> 2. Files (Storage) -> 3. Metadata (Record)
-    
+
     Path Parameters:
     - doc_id: Unique identifier of the document to delete
-    
+
     Returns:
     - 204 No Content on successful deletion (HTTP 204)
     - 404 Not Found if document doesn't exist
