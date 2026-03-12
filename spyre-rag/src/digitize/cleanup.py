@@ -1,6 +1,6 @@
 import common.db_utils as db
 from common.misc_utils import get_logger
-from digitize.digitize_utils import bulk_delete_all_documents
+from digitize.digitize_utils import bulk_delete_all_documents, get_all_document_ids
 
 logger = get_logger("cleanup")
 
@@ -9,28 +9,33 @@ def reset_db():
     Reset the vector database and clean up all document files.
 
     This function performs a complete cleanup:
-    1. Resets the vector database index (removes all indexed chunks)
-    2. Deletes all digitized content files from /var/cache/digitized
-    3. Deletes all document metadata files from /var/cache/docs
-
-    Used by the CLI clean-db command.
+    1. Reads all document IDs from metadata files in DOCS_DIR
+    2. Deletes chunks for those documents from the vector database index
+    3. Deletes all digitized content files from /var/cache/digitized
+    4. Deletes all document metadata files from /var/cache/docs
 
     Raises:
         Exception: If vector database reset fails or file deletion fails completely
     """
-    # Step 1: Reset vector database FIRST
+    # Step 1: Read all document IDs from metadata files
+    doc_ids = get_all_document_ids()
+
+    # Step 2: Delete chunks from vector database FIRST
     # This ensures documents are removed from search even if file deletion fails
     try:
         vector_store = db.get_vector_store()
-        vector_store.reset_index()
-        logger.info("✓ Vector database index reset successfully")
+        if doc_ids:
+            deleted_chunks = vector_store.remove_docs_from_index(doc_ids)
+            logger.info(f"✓ Vector database index reset successfully: {deleted_chunks} chunks deleted")
+        else:
+            logger.info(msg="✓ No documents to delete from vector database")
     except Exception as e:
         error_msg = f"Failed to reset vector database: {str(e)}"
         logger.error(f"✗ {error_msg}")
         # Raise error immediately - VDB reset is critical
         raise Exception(error_msg) from e
 
-    # Step 2: Delete all document files LAST
+    # Step 3: Delete all document files LAST
     try:
         logger.debug("Deleting all document files...")
         deletion_stats = bulk_delete_all_documents()

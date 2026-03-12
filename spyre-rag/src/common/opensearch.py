@@ -347,32 +347,59 @@ class OpensearchVectorStore(VectorStore):
         logger.info(f"Database populated check: {exists}")
         return exists
 
-    def reset_index(self):
+
+    def remove_docs_from_index(self, doc_ids: list[str]):
         """
-        Clear all documents from the index while keeping the index structure intact.
-        Also clears local cache files.
+        Delete all chunks associated with the specified document IDs from the index.
+
+        This performs a targeted deletion of documents rather than wiping the entire index.
+        Uses batch deletion for efficiency.
+
+        Args:
+            doc_ids: List of document IDs whose chunks should be deleted from the index
+
+        Returns:
+            Number of chunks deleted
         """
-        logger.debug(f"Starting reset_index operation for {self.index_name}")
+        if not doc_ids:
+            logger.warning(f"No document ids provided to remove from index {self.index_name}. Skipping.")
+            return 0
 
-        if self.client.indices.exists(index=self.index_name):
-            try:
-                # Delete all documents from the index using delete_by_query with match_all
-                delete_query = {"query": {"match_all": {}}}
-                response = self.client.delete_by_query(
-                    index=self.index_name,
-                    body=delete_query,
-                    params={"refresh": "true", "conflicts": "proceed"}
-                )
+        logger.debug(f"Starting targeted cleanup of {len(doc_ids)} documents in {self.index_name}")
 
-                deleted_count = response.get("deleted", 0)
-                logger.info(f"Cleared {deleted_count} documents from index {self.index_name}")
-            except Exception as e:
-                logger.error(f"Failed to clear documents from index {self.index_name}: {e}")
-                raise
-        else:
-            logger.info(f"Index {self.index_name} does not exist, nothing to clear")
+        if not self.client.indices.exists(index=self.index_name):
+            logger.info(f"Index {self.index_name} does not exist.")
+            return 0
 
-        logger.info("Reset index operation completed")
+        try:
+            # Construct terms query for batch deletion
+            # 'doc_id' must be the keyword field in your mapping
+            delete_query = {
+                "query": {
+                    "terms": {
+                        "doc_id": doc_ids
+                    }
+                }
+            }
+
+            response = self.client.delete_by_query(
+                index=self.index_name,
+                body=delete_query,
+                params={
+                    "refresh": "true",
+                    "conflicts": "proceed"
+                }
+            )
+
+            deleted_count = response.get("deleted", 0)
+            logger.info(f"Successfully deleted {deleted_count} chunks for {len(doc_ids)} documents from {self.index_name}")
+
+        except Exception as e:
+            logger.error(f"Failed to delete documents from index {self.index_name}: {e}")
+            raise
+
+        return deleted_count
+
 
     def delete_document_by_id(self, doc_id: str):
         """
