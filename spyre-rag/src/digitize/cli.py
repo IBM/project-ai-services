@@ -46,7 +46,7 @@ def main():
         
         # Use Path to list all files recursively and store paths as strings
         base_path = Path(command_args.path)
-        filenames = [path.name for path in base_path.rglob('*') if path.is_file()]
+        filenames = [path.name for path in base_path.rglob(pattern='*') if path.is_file()]
             
         doc_id_dict = initialize_job_state(job_id, OperationType.INGESTION, OutputFormat.JSON, filenames)
 
@@ -72,7 +72,7 @@ def main():
         total_time = 0
         header_format = f"| {"PDF":<{max_file_len}} | {"Total Pages":^{15}} | {"Total Tables":^{15}} |"
         if logger.isEnabledFor(logging.DEBUG):
-            header_format += f" {"Conversion":^{15}} | {"Processing Text":^{15}} | {"Processing Tables":^{17}} | {"Chunking":^{15}} |"
+            header_format += f" {"Conversion":^{15}} | {"Processing":^{15}} | {"Chunking":^{15}} |"
         header_format += f" {"Total Time (s)":>{15}} |"
 
         print("-" * len(header_format))
@@ -85,7 +85,7 @@ def main():
             if converted_pdf_stats[file]["page_count"] > 0:
                 stats_to_print = f"| {file:<{max_file_len}} | {converted_pdf_stats[file].get("page_count", 0):^{15}} | {converted_pdf_stats[file].get("table_count", 0):^{15}} |"
                 if logger.isEnabledFor(logging.DEBUG):
-                    stats_to_print += f" {timings.get("conversion", 0.0):^{15}.2f} | {timings.get("process_text", 0.0):^{15}.2f} | {timings.get("process_tables", 0.0):^{17}.2f} | {timings.get("chunking", 0.0):^{15}.2f} |"
+                    stats_to_print += f" {timings.get("digitizing", 0.0):^{15}.2f} | {timings.get("processing", 0.0):^{15}.2f} | {timings.get("chunking", 0.0):^{15}.2f} |"
                 stats_to_print += f" {pdf_total_time:>{15}.2f} |"
                 print(stats_to_print)
         print("-" * len(header_format))

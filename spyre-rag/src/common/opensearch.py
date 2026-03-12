@@ -8,8 +8,11 @@ from opensearchpy import OpenSearch, helpers
 
 from common.misc_utils import LOCAL_CACHE_DIR, get_logger
 from common.vector_db import VectorStore
+import digitize.config as config
+
 
 logger = get_logger("OpenSearch")
+
 
 def generate_chunk_id(doc_id: str, page_content: str) -> np.int64:
     """
@@ -116,7 +119,7 @@ class OpensearchVectorStore(VectorStore):
                         "analyzer": "standard"
                     },
                     "filename": {"type": "keyword"},
-                    "doc_id": { "type": "keyword" },
+                    "doc_id": {"type": "keyword"},
                     "type": {"type": "keyword"},
                     "source": {"type": "keyword"},
                     "language": {"type": "keyword"}
@@ -178,7 +181,8 @@ class OpensearchVectorStore(VectorStore):
                 fn = doc.get("filename", "")
                 pc = doc.get("page_content", "")
 
-                # Generate chunk ID
+                # Generate chunk ID based on content + filename (not doc_id)
+                # This allows updating doc_id when re-ingesting the same file
                 doc_id = doc.get("doc_id") or fn # Fallback to filename if UUID missing
                 cid = generate_chunk_id(doc_id, pc)
 
@@ -201,10 +205,12 @@ class OpensearchVectorStore(VectorStore):
             batch_num = i // batch_size + 1
 
             try:
-                _, failed = helpers.bulk(self.client, actions, stats_only=True)
+                success, failed = helpers.bulk(self.client, actions, stats_only=True, refresh=True)
                 if failed:
                     logger.error(f"Failed to insert {failed} chunks in batch {batch_num} starting at index {i}")
                     return
+
+                inserted_doc_ids = list(set([action["_source"]["doc_id"] for action in actions]))
             except Exception as e:
                 logger.error(f"Exception during bulk insert for batch {batch_num}: {e}")
                 raise
@@ -341,38 +347,118 @@ class OpensearchVectorStore(VectorStore):
         logger.info(f"Database populated check: {exists}")
         return exists
 
-    def reset_index(self):
-        logger.debug(f"Starting reset_index operation for {self.index_name}")
 
-        if self.client.indices.exists(index=self.index_name):
-            try:
-                self.client.indices.delete(index=self.index_name)
-                logger.info(f"Index {self.index_name} deleted successfully")
-            except Exception as e:
-                logger.error(f"Failed to delete index {self.index_name}: {e}")
-                raise
-        else:
-            logger.info(f"Index {self.index_name} does not exist, nothing to delete")
+    def remove_docs_from_index(self, doc_ids: list[str]):
+        """
+        Delete all chunks associated with the specified document IDs from the index.
 
-        # Clear local cache
-        cache_pattern = os.path.join(LOCAL_CACHE_DIR, self.index_name+"*")
-        logger.debug(f"Searching for cache files matching pattern: {cache_pattern}")
+        This performs a targeted deletion of documents rather than wiping the entire index.
+        Uses batch deletion for efficiency.
 
-        files_to_remove = glob(cache_pattern)
-        if files_to_remove:
-            logger.debug(f"Found {len(files_to_remove)} cache files/directories to remove")
-            for file_path in files_to_remove:
-                try:
-                    if os.path.isdir(file_path):
-                        shutil.rmtree(file_path)
-                        logger.debug(f"Removed directory: {file_path}")
-                        continue
-                    os.remove(file_path)
-                    logger.debug(f"Removed file: {file_path}")
-                except OSError as e:
-                    logger.error(f"Error removing {file_path}: {e}")
-            logger.info("Local cache cleaned up successfully")
-        else:
-            logger.info("No cache files found, cache already clean")
+        Args:
+            doc_ids: List of document IDs whose chunks should be deleted from the index
 
-        logger.info("Reset index operation completed")
+        Returns:
+            Number of chunks deleted
+        """
+        if not doc_ids:
+            logger.warning(f"No document ids provided to remove from index {self.index_name}. Skipping.")
+            return 0
+
+        logger.debug(f"Starting targeted cleanup of {len(doc_ids)} documents in {self.index_name}")
+
+        if not self.client.indices.exists(index=self.index_name):
+            logger.info(f"Index {self.index_name} does not exist.")
+            return 0
+
+        try:
+            # Construct terms query for batch deletion
+            # 'doc_id' must be the keyword field in your mapping
+            delete_query = {
+                "query": {
+                    "terms": {
+                        "doc_id": doc_ids
+                    }
+                }
+            }
+
+            response = self.client.delete_by_query(
+                index=self.index_name,
+                body=delete_query,
+                params={
+                    "refresh": "true",
+                    "conflicts": "proceed"
+                }
+            )
+
+            deleted_count = response.get("deleted", 0)
+            logger.info(f"Successfully deleted {deleted_count} chunks for {len(doc_ids)} documents from {self.index_name}")
+
+        except Exception as e:
+            logger.error(f"Failed to delete documents from index {self.index_name}: {e}")
+            raise
+
+        return deleted_count
+
+
+    def delete_document_by_id(self, doc_id: str):
+        """
+        Delete all chunks associated with a specific document from the index.
+
+        Args:
+            doc_id: The unique identifier of the document to delete
+
+        Returns:
+            Number of chunks deleted
+        """
+        logger.debug(f"Starting delete operation for document {doc_id}")
+
+        if not self.client.indices.exists(index=self.index_name):
+            logger.error(f"Index {self.index_name} does not exist, nothing to delete")
+            return 0
+
+        try:
+            # 1. Immediate Refresh (Safety Check)
+            # If a user ingests and then deletes immediately, OpenSearch might not have 'seen' the documents yet
+            self.client.indices.refresh(index=self.index_name)
+
+            # STEP 2: Perform the actual deletion
+            delete_query = {
+                "query": {
+                    "term": {
+                        "doc_id": str(doc_id).strip()
+                    }
+                }
+            }
+
+            response = self.client.delete_by_query(
+                index=self.index_name,
+                body=delete_query,
+                params={
+                            "refresh": "true",             # Update index stats immediately
+                            "conflicts": "proceed",        # Ignore locks from concurrent indexing
+                            "wait_for_completion": "true"  # Synchronous for the API response
+                        },
+            )
+
+            deleted_count = response.get("deleted", 0)
+            total_matched = response.get("total", 0)
+            failures = response.get("failures", [])
+
+            # Log detailed response for debugging
+            logger.debug(f"delete_by_query response: took={response.get('took')}ms, total={total_matched}, deleted={deleted_count}, failures={len(failures)}")
+
+            if failures:
+                logger.error(f"Deletion failures for document {doc_id}: {failures}")
+
+            if deleted_count > 0:
+                logger.info(f"✓ Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name}")
+            else:
+                if total_matched == 0:
+                    logger.info(f"Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name} (no matching documents found)")
+                else:
+                    logger.error(f"Matched {total_matched} documents but deleted {deleted_count} for document {doc_id} (possible version conflicts or failures)")
+            return deleted_count
+        except Exception as e:
+            logger.error(f"Failed to delete document {doc_id} from index: {e}")
+            raise

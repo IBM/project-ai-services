@@ -10,10 +10,10 @@ from typing import Callable, Any, Mapping
 from digitize.types import JobStatus, DocStatus, OutputFormat
 from digitize.document import DocumentMetadata
 from digitize.job import JobState, JobDocumentSummary, JobStats
-from digitize import config
+import digitize.config as config
 from common.misc_utils import get_logger
 
-logger = get_logger("digitize_utils")
+logger = get_logger("status")
 
 
 def get_utc_timestamp() -> str:

@@ -30,12 +30,25 @@ class Prompts:
         if not isinstance(data, dict):
             raise ValueError("Prompts element missing or malformed in the settings")
 
+        # Ensure all required fields are present and not None
+        required_fields = [
+            "query_vllm_stream",
+            "table_summary_and_classify",
+            "summarize_system_prompt",
+            "summarize_user_prompt_with_length",
+            "summarize_user_prompt_without_length"
+        ]
+        
+        for field in required_fields:
+            if field not in data or data[field] is None:
+                raise ValueError(f"Required field '{field}' is missing or None in prompts settings")
+
         return cls(
-            query_vllm_stream = data.get("query_vllm_stream"),
-            table_summary_and_classify = data.get("table_summary_and_classify"),
-            summarize_system_prompt = data.get("summarize_system_prompt"),
-            summarize_user_prompt_with_length = data.get("summarize_user_prompt_with_length"),
-            summarize_user_prompt_without_length = data.get("summarize_user_prompt_without_length")
+            query_vllm_stream = data["query_vllm_stream"],
+            table_summary_and_classify = data["table_summary_and_classify"],
+            summarize_system_prompt = data["summarize_system_prompt"],
+            summarize_user_prompt_with_length = data["summarize_user_prompt_with_length"],
+            summarize_user_prompt_without_length = data["summarize_user_prompt_without_length"]
         )
 
 
@@ -54,8 +67,12 @@ class ContextLengths:
         if not isinstance(data, dict):
             raise ValueError("Context length element missing or malformed in the settings")
 
+        key = "ibm-granite/granite-3.3-8b-instruct"
+        if key not in data or data[key] is None:
+            raise ValueError(f"Required field '{key}' is missing or None in context_lengths settings")
+
         return cls(
-            granite_3_3_8b_instruct = data.get("ibm-granite/granite-3.3-8b-instruct")
+            granite_3_3_8b_instruct = data[key]
         )
 
 
@@ -74,8 +91,11 @@ class TokenToWordRatios:
         if not isinstance(data, dict):
             raise ValueError("Token to word ratio element missing or malformed in the settings")
 
+        if "en" not in data or data["en"] is None:
+            raise ValueError("Required field 'en' is missing or None in token_to_word_ratios settings")
+
         return cls(
-            en=data.get("en")
+            en=data["en"]
         )
 
 @dataclass(frozen=True)
@@ -166,22 +186,30 @@ class Settings:
 
     @classmethod
     def from_dict(cls, data: dict):
+        # Validate nested dict fields
+        if "prompts" not in data or not isinstance(data["prompts"], dict):
+            raise ValueError("Required field 'prompts' is missing or not a dict in settings")
+        if "context_lengths" not in data or not isinstance(data["context_lengths"], dict):
+            raise ValueError("Required field 'context_lengths' is missing or not a dict in settings")
+        if "token_to_word_ratios" not in data or not isinstance(data["token_to_word_ratios"], dict):
+            raise ValueError("Required field 'token_to_word_ratios' is missing or not a dict in settings")
+        
         return cls(
-            prompts = Prompts.from_dict(data.get("prompts")),
-            context_lengths=ContextLengths.from_dict(data.get("context_lengths")),
-            token_to_word_ratios=TokenToWordRatios.from_dict(data.get("token_to_word_ratios")),
-            score_threshold = data.get("score_threshold"),
-            max_concurrent_requests = data.get("max_concurrent_requests"),
-            num_chunks_post_search = data.get("num_chunks_post_search"),
-            num_chunks_post_reranker = data.get("num_chunks_post_reranker"),
-            llm_max_tokens = data.get("llm_max_tokens"),
-            temperature = data.get("temperature"),
-            max_input_length = data.get ("max_input_length"),
-            prompt_template_token_count = data.get("prompt_template_token_count"),
-            summarization_coefficient = data.get("summarization_coefficient"),
-            summarization_prompt_token_count = data.get("summarization_prompt_token_count"),
-            summarization_temperature = data.get("summarization_temperature"),
-            summarization_stop_words = data.get("summarization_stop_words")
+            prompts = Prompts.from_dict(data["prompts"]),
+            context_lengths=ContextLengths.from_dict(data["context_lengths"]),
+            token_to_word_ratios=TokenToWordRatios.from_dict(data["token_to_word_ratios"]),
+            score_threshold = data.get("score_threshold", None),  # type: ignore[arg-type]
+            max_concurrent_requests = data.get("max_concurrent_requests", None),  # type: ignore[arg-type]
+            num_chunks_post_search = data.get("num_chunks_post_search", None),  # type: ignore[arg-type]
+            num_chunks_post_reranker = data.get("num_chunks_post_reranker", None),  # type: ignore[arg-type]
+            llm_max_tokens = data.get("llm_max_tokens", None),  # type: ignore[arg-type]
+            temperature = data.get("temperature", None),  # type: ignore[arg-type]
+            max_input_length = data.get("max_input_length", None),  # type: ignore[arg-type]
+            prompt_template_token_count = data.get("prompt_template_token_count", None),  # type: ignore[arg-type]
+            summarization_coefficient = data.get("summarization_coefficient", None),  # type: ignore[arg-type]
+            summarization_prompt_token_count = data.get("summarization_prompt_token_count", None),  # type: ignore[arg-type]
+            summarization_temperature = data.get("summarization_temperature", None),  # type: ignore[arg-type]
+            summarization_stop_words = data.get("summarization_stop_words", None)  # type: ignore[arg-type]
         )
 
     @classmethod

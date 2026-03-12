@@ -15,6 +15,7 @@ import digitize.types as types
 from digitize.digitize import digitize
 from digitize.errors import *
 import digitize.config as config
+from digitize.cleanup import reset_db
 
 log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
@@ -47,7 +48,18 @@ async def lifespan(app: FastAPI):
     logger.info("Application shutting down...")
 
 
+
 app = FastAPI(title="Digitize Documents Service", lifespan=lifespan)
+
+@app.get("/health", status_code=status.HTTP_200_OK)
+async def health_check():
+    """
+    Health check endpoint for liveness probe.
+    
+    Returns:
+    - 200 OK if the service is healthy
+    """
+    return {"status": "ok"}
 
 async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat):
     status_mgr = StatusManager(job_id)
@@ -418,17 +430,138 @@ async def get_document_content(doc_id: str):
 
 @app.delete("/v1/documents/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(doc_id: str):
-    # 1. Check if part of active job (409 Conflict)
-    # 2. Remove from VDB and local cache
-    return
+    """
+    Delete a single document by ID.
+    
+    This endpoint implements a robust deletion strategy:
+    1. Checks if the document exists
+    2. Verifies the document is not part of any active job (in_progress)
+    3. Removes the document from the vector database (if ingested) - FIRST
+    4. Deletes all associated files from cache - LAST
+    
+    Deletes document with an 'Always-Clean-VDB' retry strategy.
+    Order: 1. VDB (Search) -> 2. Files (Storage) -> 3. Metadata (Record)
+    
+    Path Parameters:
+    - doc_id: Unique identifier of the document to delete
+    
+    Returns:
+    - 204 No Content on successful deletion (HTTP 204)
+    - 404 Not Found if document doesn't exist
+    - 409 Conflict if document is part of an active job
+    - 500 Internal Server Error on unexpected errors
+    """
+
+    try:
+        # 1. Fetch Metadata (if it exists)
+        doc_metadata = None
+        try:
+            doc_metadata = dg_util.get_document_by_id(doc_id, include_details=False)
+        except FileNotFoundError:
+            logger.error(f"Metadata for {doc_id} not found. Proceeding with vectorstore cleanup.")
+
+        # 2. Lock Check: Only if metadata exists and indicates an active job
+        if doc_metadata:
+            is_active = dg_util.is_document_in_active_job(doc_id, job_id=doc_metadata.job_id)
+            if is_active:
+                APIError.raise_error(
+                    ErrorCode.RESOURCE_LOCKED,
+                    f"Document part of active job '{doc_metadata.job_id}' and cannot be deleted"
+                )
+
+        # 3. Step A: Vector Database Cleanup (High Priority)
+        # We attempt this regardless of whether metadata exists to fix partial failures.
+        try:
+            import common.db_utils as db
+            vector_store = db.get_vector_store()
+            # This method should use the 'refresh=True' param we discussed earlier
+            deleted_chunks = vector_store.delete_document_by_id(doc_id)
+            logger.info(f"VDB cleanup for {doc_id}: {deleted_chunks} chunks removed.")
+        except Exception as e:
+            logger.error(f"VDB cleanup failed for {doc_id}: {e}")
+            # If metadata is already deleted and VDB fails, we MUST raise to let the user retry
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Document metadata deleted but VDB cleanup failed: {e}")
+
+        # 4. Step B: File & Metadata Cleanup
+        # If metadata is already deleted, we assume files were either deleted or are being handled
+        if doc_metadata:
+            try:
+                # Delete digitized files AND the metadata file last
+                # Pass output_format to delete only the specific format file instead of looping through all
+                dg_util.delete_document_files(doc_id, output_format=doc_metadata.output_format)
+                logger.info(f"Files and metadata for {doc_id} deleted successfully.")
+            except Exception as e:
+                # If VDB succeeded but files failed, we report a 500 so the user retries
+                # even though the document is now 'hidden' from search.
+                logger.error(f"VDB cleaned but file deletion failed for {doc_id}")
+                APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Search data removed but files remain: {e}")
+
+        # 5. Idempotent Success
+        # If we reach here, either everything is deleted, or metadata was already deleted and VDB is now clean.
+        return None
+
+    except HTTPException as e:
+        logger.error(f"Failed to delete document {doc_id}, HTTP error: {e}")
+        # Re-raise HTTPException as-is
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error deleting document {doc_id}: {e}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(e))
+
 
 @app.delete("/v1/documents", status_code=status.HTTP_204_NO_CONTENT)
-async def bulk_delete_documents(confirm: bool = Query(...)):
-    if not confirm:
-        APIError.raise_error("INVALID_REQUEST", "Confirm parameter required.")
-    # 1. Check for active jobs
-    # 2. Truncate VDB and wipe cache
-    return
+async def bulk_delete_documents(confirm: bool = Query(..., description="Required confirmation to proceed with bulk deletion")):
+    """
+    Bulk delete all documents from the system.
+
+    This endpoint performs a complete system cleanup:
+    1. Checks for active jobs and rejects if any exist
+    2. Resets the vector database index (removes all indexed chunks)
+    3. Deletes all digitized content files from /var/cache/digitized
+    4. Deletes all document metadata files from /var/cache/docs
+
+    Query Parameters:
+    - confirm: Must be true to proceed with deletion (required)
+
+    Returns:
+    - 204 No Content on successful deletion
+    - 400 Bad Request if confirm is not true
+    - 409 Conflict if there are active jobs
+    - 500 Internal Server Error on unexpected errors
+    """
+    try:
+        # 1. Validate confirmation parameter
+        if not confirm:
+            logger.error("Bulk delete rejected: confirm parameter is false")
+            APIError.raise_error(
+                ErrorCode.INVALID_REQUEST,
+                "Bulk deletion requires explicit confirmation. Set 'confirm=true' to proceed."
+            )
+
+        # 2. Check for active jobs
+        has_active, active_job_ids = dg_util.has_active_jobs()
+        if has_active:
+            logger.error(f"Bulk delete rejected: {len(active_job_ids)} active job(s) found")
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                f"Cannot perform bulk deletion while jobs are active. Active jobs: {', '.join(active_job_ids)}"
+            )
+
+        logger.info("No active jobs found, proceeding with bulk deletion")
+
+        # 3. Reset vector database and delete all files
+        # Uses reset_db() which handles VDB reset and file deletion with proper error handling
+        reset_db()
+        logger.info("✅ Bulk deletion completed successfully")
+        return None
+
+    except HTTPException as e:
+        logger.error(f"Failed to bulk delete documents, HTTP error: {e}")
+        # Re-raise HTTPException as-is
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during bulk deletion: {e}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(e))
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=4000)

@@ -2,6 +2,7 @@ import asyncio
 import json
 from functools import partial
 from pathlib import Path
+import shutil
 from typing import List, Optional
 import uuid
 
@@ -20,6 +21,7 @@ from digitize.status import (
 )
 from digitize.job import JobState, JobDocumentSummary, JobStats
 from digitize.document import DocumentMetadata
+from digitize.types import JobStatus
 
 logger = get_logger("digitize_utils")
 
@@ -34,6 +36,38 @@ def generate_uuid():
     generated_uuid = uuid.uuid4()
     logger.debug(f"Generated UUID: {generated_uuid}")
     return str(generated_uuid)
+
+
+def get_all_document_ids(docs_dir: Path = DOCS_DIR) -> list[str]:
+    """
+    Read all document IDs from metadata files in the docs directory.
+
+    Args:
+        docs_dir: Directory containing document metadata files
+
+    Returns:
+        List of document IDs found in metadata files
+    """
+    doc_ids = []
+    try:
+        logger.debug(f"Reading document IDs from {docs_dir}")
+        if docs_dir.exists():
+            for metadata_file in docs_dir.glob("*_metadata.json"):
+                try:
+                    with open(metadata_file, 'r') as f:
+                        metadata = json.load(f)
+                        doc_id = metadata.get('id')
+                        if doc_id:
+                            doc_ids.append(doc_id)
+                except Exception as e:
+                    logger.warning(f"Failed to read metadata from {metadata_file.name}: {e}")
+            logger.info(f"Found {len(doc_ids)} document IDs in {docs_dir}")
+        else:
+            logger.warning(f"Directory {docs_dir} does not exist")
+    except Exception as e:
+        logger.error(f"Failed to read document IDs from {docs_dir}: {e}")
+
+    return doc_ids
 
 
 def initialize_job_state(job_id: str, operation: str, output_format:OutputFormat, documents_info: list[str]) -> dict[str, str]:
@@ -117,11 +151,11 @@ def read_job_file(file_path: Path) -> Optional[JobState]:
     """
     # Validate file exists and is readable
     if not file_path.exists():
-        logger.warning(f"Job file does not exist: {file_path}")
+        logger.error(f"Job file does not exist: {file_path}")
         return None
     
     if not file_path.is_file():
-        logger.warning(f"Path is not a file: {file_path}")
+        logger.error(f"Path is not a file: {file_path}")
         return None
     
     try:
@@ -133,10 +167,10 @@ def read_job_file(file_path: Path) -> Optional[JobState]:
         return JobState(**data)
         
     except json.JSONDecodeError as e:
-        logger.warning(f"Invalid JSON in job file {file_path.name}: {e}")
+        logger.error(f"Invalid JSON in job file {file_path.name}: {e}")
         return None
     except (IOError, OSError, PermissionError) as e:
-        logger.warning(f"Failed to read job file {file_path.name}: {e}")
+        logger.error(f"Failed to read job file {file_path.name}: {e}")
         return None
     except Exception as e:
         logger.error(
@@ -259,10 +293,10 @@ def get_all_documents(
             all_documents.append((doc_metadata.submitted_at or "", doc_item))
 
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            logger.warning(f"Failed to read metadata file {meta_file}: {e}")
+            logger.error(f"Failed to read metadata file {meta_file}: {e}")
             continue
         except Exception as e:
-            logger.warning(f"Error reading metadata file {meta_file}: {e}")
+            logger.error(f"Error reading metadata file {meta_file}: {e}")
             continue
 
     # Sort by submitted_at (most recent first) and extract DocumentListItem
@@ -367,3 +401,269 @@ def get_document_content(doc_id: str, docs_dir: Path = DOCS_DIR) -> DocumentCont
         result=content_data,
         output_format=output_format
     )
+
+def is_document_in_active_job(doc_id: str, job_id: Optional[str], jobs_dir: Path = JOBS_DIR) -> bool:
+    """
+    Check if a document is part of any active job (in_progress status).
+    
+    This function efficiently checks by directly accessing the job file
+    at /var/cache/jobs/{job_id}_status.json instead of iterating through all jobs.
+    
+    Args:
+        doc_id: Unique identifier of the document
+        job_id: Job ID from document metadata (can be None if document has no associated job)
+        jobs_dir: Directory containing job status files
+        
+    Returns:
+        True if document is in an active job, False otherwise
+    """
+    logger.debug(f"Checking if document {doc_id} is part of an active job")
+    
+    # If document has no job_id, it's not part of any job
+    if not job_id:
+        logger.debug(f"Document {doc_id} has no associated job_id")
+        return False
+    
+    logger.debug(f"Document {doc_id} is associated with job {job_id}")
+    
+    # Check if the job file exists
+    if not jobs_dir.exists():
+        logger.debug(f"Jobs directory {jobs_dir} does not exist")
+        return False
+    
+    job_file = jobs_dir / f"{job_id}_status.json"
+    if not job_file.exists():
+        logger.debug(f"Job file {job_file} does not exist")
+        return False
+    
+    # Read the job status and check if it's in progress
+    try:
+        with open(job_file, "r") as f:
+            job_data = json.load(f)
+        
+        job_status = job_data.get("status", "").lower()
+        if job_status == JobStatus.IN_PROGRESS.value:
+            logger.info(f"Document {doc_id} is part of active job {job_id}")
+            return True
+        else:
+            logger.debug(f"Job {job_id} exists but is not in progress (status: {job_status})")
+            return False
+            
+    except (json.JSONDecodeError, Exception) as e:
+        logger.error(f"Error reading job file {job_file}: {e}")
+        return False
+
+
+def delete_document_files(doc_id: str, output_format: str, docs_dir: Path = DOCS_DIR) -> None:
+    """
+    Delete all files associated with a document from the cache directories.
+    
+    Deletion order (important for crash recovery):
+    1. FIRST: Delete digitized content file
+    2. LAST: Delete metadata file
+    
+    This ensures that if a crash occurs during deletion, the metadata file
+    remains as a record, allowing for cleanup retry or manual intervention.
+    
+    Files deleted:
+    - /var/cache/digitized/<doc_id>.<extension> (based on output_format)
+    - /var/cache/docs/<doc_id>_metadata.json (LAST)
+    
+    Args:
+        doc_id: Unique identifier of the document
+        output_format: Output format of the document (txt, md, or json)
+        docs_dir: Directory containing document metadata files
+        
+    Raises:
+        FileNotFoundError: If document metadata file doesn't exist
+        ValueError: If output_format is invalid
+    """
+    logger.debug(f"Deleting files for document {doc_id} with format {output_format}")
+    
+    # Check if document exists
+    meta_file = docs_dir / f"{doc_id}_metadata.json"
+    if not meta_file.exists():
+        logger.error(f"Document metadata file not found: {meta_file}")
+        raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
+    
+    # Validate output_format against OutputFormat enum
+    valid_formats = [fmt.value for fmt in OutputFormat]
+    if output_format not in valid_formats:
+        raise ValueError(f"Invalid output_format: '{output_format}'. Must be one of: {', '.join(valid_formats)}")
+
+    files_deleted = []
+    
+    # STEP 1: Delete digitized content file FIRST
+    content_file = DIGITIZED_DOCS_DIR / f"{doc_id}.{output_format}"
+    if content_file.exists():
+        try:
+            content_file.unlink()
+            files_deleted.append(str(content_file))
+            logger.debug(f"✓ Deleted content file: {content_file}")
+        except Exception as e:
+            error_msg = f"Failed to delete content file {content_file}: {e}"
+            logger.error(f"✗ {error_msg}")
+            # Preserve metadata file if content deletion fails
+            raise Exception(f"Failed to delete content file: {error_msg}") from e
+    else:
+        logger.warning(f"Content file not found (may have been deleted already): {content_file}")
+    
+    # STEP 2: Delete metadata file LAST (only after content files are successfully deleted)
+    try:
+        meta_file.unlink()
+        files_deleted.append(str(meta_file))
+        logger.debug(f"✓ Deleted metadata file: {meta_file}")
+    except Exception as e:
+        logger.error(f"✗ Failed to delete metadata file {meta_file}: {e}")
+        raise
+    
+    logger.info(f"✅ Deleted {len(files_deleted)} files for document {doc_id}")
+
+
+def has_active_jobs(jobs_dir: Path = JOBS_DIR) -> tuple[bool, list[str]]:
+    """
+    Check if there are any active jobs (accepted or in_progress status).
+
+    Args:
+        jobs_dir: Directory containing job status files
+
+    Returns:
+        Tuple of (has_active, active_job_ids) where has_active is True if any active jobs exist
+    """
+    logger.debug("Checking for active jobs")
+
+    if not jobs_dir.exists():
+        logger.debug(f"Jobs directory {jobs_dir} does not exist")
+        return False, []
+
+    active_job_ids = []
+    job_files = list(jobs_dir.glob("*_status.json"))
+
+    for job_file in job_files:
+        try:
+            with open(job_file, "r") as f:
+                job_data = json.load(f)
+
+            job_status = job_data.get("status", "").lower()
+            if job_status in [JobStatus.ACCEPTED.value, JobStatus.IN_PROGRESS.value]:
+                job_id = job_data.get("job_id", job_file.stem.replace("_status", ""))
+                active_job_ids.append(job_id)
+                logger.debug(f"Found active job: {job_id} with status {job_status}")
+
+        except (json.JSONDecodeError, Exception) as e:
+            logger.error(f"Error reading job file {job_file}: {e}")
+            continue
+
+    has_active = len(active_job_ids) > 0
+    if has_active:
+        logger.info(f"Found {len(active_job_ids)} active job(s): {active_job_ids}")
+    else:
+        logger.debug("No active jobs found")
+
+    return has_active, active_job_ids
+
+
+def cleanup_digitized_files() -> dict:
+    """
+    Delete all digitized content files from the cache directory.
+    
+    This utility function removes all digitized content files (json, md, text)
+    from DIGITIZED_DOCS_DIR (/var/cache/digitized).
+    
+    Returns:
+        Dictionary with deletion statistics containing:
+        - content_files_deleted: Number of files successfully deleted
+        - errors: List of error messages for failed deletions
+    """
+    logger.info("Cleaning up digitized content files...")
+
+    cleanup_stats = {
+        "content_files_deleted": 0,
+        "errors": []
+    }
+
+    if DIGITIZED_DOCS_DIR.exists():
+        try:
+            # Count files before deletion
+            file_count = sum(1 for _ in DIGITIZED_DOCS_DIR.iterdir() if _.is_file())
+            logger.debug(f"Found {file_count} files in {DIGITIZED_DOCS_DIR}")
+
+            # Delete the entire directory and recreate it
+            shutil.rmtree(DIGITIZED_DOCS_DIR)
+            DIGITIZED_DOCS_DIR.mkdir(parents=True, exist_ok=True)
+
+            cleanup_stats["content_files_deleted"] = file_count
+            logger.info(f"✅ Cleanup completed: {file_count} content files deleted")
+        except Exception as e:
+            error_msg = f"Failed to clean up digitized directory: {e}"
+            logger.error(f"✗ {error_msg}")
+            cleanup_stats["errors"].append(error_msg)
+    else:
+        logger.info(f"Digitized directory {DIGITIZED_DOCS_DIR} does not exist")
+    
+    if cleanup_stats["errors"]:
+        logger.error(f"Cleanup completed with {len(cleanup_stats['errors'])} errors")
+    
+    return cleanup_stats
+
+
+def bulk_delete_all_documents(docs_dir: Path = DOCS_DIR) -> dict:
+    """
+    Delete all documents from the system including:
+    1. All digitized content files from /var/cache/digitized
+    2. All document metadata files from /var/cache/docs
+
+    This function does NOT delete job status files or reset the vector database.
+    Those operations should be handled separately by the caller.
+
+    Args:
+        docs_dir: Directory containing document metadata files
+
+    Returns:
+        Dictionary with deletion statistics
+    """
+    logger.info("Starting bulk deletion of all documents...")
+
+    deletion_stats = {
+        "metadata_files_deleted": 0,
+        "content_files_deleted": 0,
+        "errors": []
+    }
+
+    # Step 1: Delete all digitized content files using the utility function
+    cleanup_stats = cleanup_digitized_files()
+    deletion_stats["content_files_deleted"] = cleanup_stats["content_files_deleted"]
+    deletion_stats["errors"].extend(cleanup_stats["errors"])
+
+    # Step 2: Delete all document metadata files
+    if docs_dir.exists():
+        try:
+            # Count metadata files before deletion
+            metadata_files = list(docs_dir.glob("*_metadata.json"))
+            file_count = len(metadata_files)
+            logger.debug(f"Found {file_count} metadata files in {docs_dir}")
+
+            # Delete the entire directory and recreate it
+            shutil.rmtree(docs_dir)
+            docs_dir.mkdir(parents=True, exist_ok=True)
+
+            deletion_stats["metadata_files_deleted"] = file_count
+            logger.info(f"✓ Deleted {file_count} metadata files from {docs_dir}")
+        except Exception as e:
+            error_msg = f"Failed to clean up documents directory: {e}"
+            logger.error(f"✗ {error_msg}")
+            deletion_stats["errors"].append(error_msg)
+    else:
+        logger.error(f"Documents directory {docs_dir} does not exist")
+
+    # Log summary
+    total_deleted = deletion_stats["metadata_files_deleted"] + deletion_stats["content_files_deleted"]
+    logger.info(
+        f"✅ Bulk deletion completed: {deletion_stats['metadata_files_deleted']} metadata files, "
+        f"{deletion_stats['content_files_deleted']} content files deleted (total: {total_deleted})"
+    )
+
+    if deletion_stats["errors"]:
+        logger.error(f"Bulk deletion completed with {len(deletion_stats['errors'])} errors")
+
+    return deletion_stats

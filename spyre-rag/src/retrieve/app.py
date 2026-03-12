@@ -21,6 +21,8 @@ from retrieve.response_utils import (
     ReferenceResponse,
     ChatCompletionRequest,
     ChatCompletionResponse,
+    ChatChoice,
+    ChatMessage,
     DBStatusResponse,
     HealthResponse,
     ModelsResponse,
@@ -129,7 +131,7 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
         # Store metrics in registry for reference endpoint
         perf_registry.add_metric(perf_stat_dict)
         
-    except db.get_vector_store_not_ready() as e:
+    except db.VectorStoreNotReadyError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=repr(e))
@@ -221,7 +223,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
             settings.num_chunks_post_reranker,
             vectorstore=vectorstore
         )
-    except db.get_vector_store_not_ready() as e:
+    except db.VectorStoreNotReadyError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=repr(e))
@@ -233,11 +235,9 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
                 yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
             return StreamingResponse(stream_docs_not_found(), media_type="text/event-stream")
         else:
-            return JSONResponse(content={
-                "choices": [{
-                    "message": {"content": message}
-                }]
-            })
+            return ChatCompletionResponse(
+                choices=[ChatChoice(message=ChatMessage(content=message))]
+            )
 
     if concurrency_limiter.locked():
         if req.stream:
@@ -262,7 +262,24 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
             )
             # Store metrics in registry for non-stream
             perf_registry.add_metric(perf_stat_dict)
-            return vllm_non_stream
+            
+            # Handle error responses
+            if isinstance(vllm_non_stream, dict) and "error" in vllm_non_stream:
+                raise HTTPException(status_code=500, detail=str(vllm_non_stream["error"]))
+            
+            # Convert vLLM response to ChatCompletionResponse
+            if isinstance(vllm_non_stream, dict) and "choices" in vllm_non_stream:
+                choices = []
+                for choice in vllm_non_stream.get("choices", []):
+                    if isinstance(choice, dict):
+                        message_dict = choice.get("message", {})
+                        if isinstance(message_dict, dict):
+                            message_content = message_dict.get("content", "")
+                            choices.append(ChatChoice(message=ChatMessage(content=message_content)))
+                return ChatCompletionResponse(choices=choices)
+            
+            # If response doesn't match expected structure, raise an error
+            raise HTTPException(status_code=500, detail="Unexpected response format from LLM")
     except Exception as e:
         raise HTTPException(status_code=500, detail=repr(e))
     finally:
@@ -280,10 +297,13 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
 )
 async def db_status() -> DBStatusResponse:
     try:
+        if vectorstore is None:
+            return DBStatusResponse(ready=False, message="Vector store not initialized")
+        
         status = await asyncio.to_thread(
             vectorstore.check_db_populated
         )
-        if status==True:
+        if status:
             return DBStatusResponse(ready=True)
         else:
             return DBStatusResponse(ready=False, message="No data ingested")

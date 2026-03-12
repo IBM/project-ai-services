@@ -1,44 +1,12 @@
 # AI-Services
 
-AI Services, part of the IBM Open-Source AI Foundation for Power, deliver pre-built AI capabilities and integration with inferencing solutions like Red Hat AI Inference Server. Optimized for IBM Spyre™ on Power, they enable fast deployment and support models such as LLMs, embeddings, and re-rankers—helping enterprises scale AI efficiently.
+AI Services, part of the [IBM Open-Source AI Foundation for Power](https://www.ibm.com/docs/en/aiservices), deliver pre-built AI capabilities and integration with inferencing solutions like Red Hat AI Inference Server. Optimized for IBM Spyre™ on Power, they enable fast deployment and support models such as LLMs, embeddings, and re-rankers—helping enterprises scale AI efficiently.
 
 ## 📺 Demo
 
 <video src="https://github.com/user-attachments/assets/958980a7-f653-4474-84a7-28d657b5f7d1" controls="controls" style="max-width: 100%;">
   Your browser does not support the video tag.
 </video>
-
-## 📘 Table of Contents
-
-- [**🗃️ Repository Structure**](#repository-structure)
-
-- [**🌟 Introduction**](https://www.ibm.com/docs/aiservices?topic=services-introduction)
-
-- [**🛠️ Configuration and Installation**](https://www.ibm.com/docs/aiservices?topic=services-configuration-installation)
-  - [Prerequisites](https://www.ibm.com/docs/aiservices?topic=installation-prerequisites)
-  - [Quick Start](#quick-start)
-  - [Set-up AI Services](https://www.ibm.com/docs/aiservices?topic=installation-setup-ai-services)
-  - [Configuring in Air-gapped Environment](https://www.ibm.com/docs/aiservices?topic=installation-configuring-air-gapped-environment)
-
-- [**🤖 RAG Chatbot**](https://www.ibm.com/docs/en/aiservices?topic=services-rag-chatbot)
-  - [Architecture](https://www.ibm.com/docs/en/aiservices?topic=chatbot-architecture)
-  - [Setting up RAG Chatbot](https://www.ibm.com/docs/en/aiservices?topic=chatbot-setting-up-rag)
-
-- **💻 CLI Reference**
-  - [Auto-completion](https://www.ibm.com/docs/aiservices?topic=reference-auto-completion)
-  - [Commands](https://www.ibm.com/docs/aiservices?topic=reference-commands)
-
-- [**🧯 Troubleshooting**](https://www.ibm.com/docs/aiservices?topic=services-troubleshooting)
-
-- [**❓ FAQ**](https://www.ibm.com/docs/aiservices?topic=services-faq)
-
-- [**⚠️ Limitations**](https://www.ibm.com/docs/aiservices?topic=services-limitations)
-
-- [**👩‍💻 Developer Guide**](https://www.ibm.com/docs/en/aiservices?topic=services-developer-guide)
-
-- [**🚀 Contributing**](./CONTRIBUTING.md)
-
----
 
 ## Quick Start
 
