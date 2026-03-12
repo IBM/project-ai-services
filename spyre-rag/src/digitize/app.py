@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
     try:
         orphan_count = dg_util.scan_and_recover_orphan_jobs()
         if orphan_count > 0:
-            logger.info(f"Recovered {orphan_count} orphan job(s) from previous crash")
+            logger.info(f"Found {orphan_count} orphan job(s) from previous app server run")
     except Exception as e:
         logger.error(f"Error during orphan job recovery: {e}", exc_info=True)
     
