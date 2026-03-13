@@ -1,15 +1,54 @@
 from pathlib import Path
 import time
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 import common.db_utils as db
 from common.emb_utils import get_embedder
 from common.misc_utils import *
-from digitize.doc_utils import process_documents
+from digitize.doc_utils import process_documents, clean_intermediate_files
 from digitize.status import StatusManager, get_utc_timestamp
 from digitize.types import JobStatus, DocStatus
 
 logger = get_logger("ingest")
+
+def _index_single_document(doc_id, doc_chunks, vector_store, embedder, status_mgr, out_path):
+    """
+    Index a single document's chunks into the vector store.
+    This function runs in a separate thread for parallel indexing.
+
+    Returns:
+        float: Time taken to index the document in seconds
+    """
+    try:
+        logger.info(f"Indexing document {doc_id} into vector db")
+        index_start_time = time.time()
+
+        # Index the chunks
+        vector_store.insert_chunks(doc_chunks, embedding=embedder)
+
+        index_time = time.time() - index_start_time
+
+        # Update status to COMPLETED after successful indexing
+        status_mgr.update_doc_metadata(doc_id, {
+            "status": DocStatus.COMPLETED,
+            "completed_at": get_utc_timestamp(),
+            "timing_in_secs": {"indexing": round(float(index_time), 2)}
+        })
+        status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
+
+        # Clean up intermediate files after successful indexing
+        clean_intermediate_files(doc_id, out_path)
+        logger.debug(f"Preserved {doc_id}.json for future GET requests")
+
+        return index_time
+
+    except Exception as e:
+        logger.error(f"Failed to index document {doc_id}: {str(e)}", exc_info=True)
+        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Failed to index document: {str(e)}")
+        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"Failed to index document: {str(e)}")
+        raise
 
 def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Optional[dict] = None):
 
@@ -36,40 +75,47 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
 
         emb_model_dict, llm_model_dict, _ = get_model_endpoints()
 
-        # Initialize/reset the database before processing any files
-        vector_store = db.get_vector_store()
+        # Setup output directory for digitized documents
         out_path = setup_digitized_doc_dir()
 
+        # Initialize vector store and embedder for parallel indexing
+        vector_store = db.get_vector_store()
+        embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
+
+        # Thread pool for parallel indexing
+        index_executor = ThreadPoolExecutor(max_workers=4)
+        index_futures = {}
+
+        def index_document(doc_id, doc_chunks):
+            """Callback function to index a document in parallel"""
+            future = index_executor.submit(_index_single_document,
+                                          doc_id, doc_chunks, vector_store, embedder,
+                                          status_mgr, out_path)
+            index_futures[future] = doc_id
+            logger.debug(f"Submitted document {doc_id} for parallel indexing")
+
         start_time = time.time()
-        combined_chunks, converted_pdf_stats = process_documents(
+        converted_pdf_stats = process_documents(
             input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'],  emb_model_dict["emb_endpoint"],
-            max_tokens=emb_model_dict['max_tokens'] - 100, job_id=job_id, doc_id_dict=doc_id_dict)
+            max_tokens=emb_model_dict['max_tokens'] - 100, job_id=job_id, doc_id_dict=doc_id_dict,
+            index_callback=index_document)
         # converted_pdf_stats holds { file_name: {page_count: int, table_count: int, timings: {conversion: time_in_secs, process_text: time_in_secs, process_tables: time_in_secs, chunking: time_in_secs}} }
-        if converted_pdf_stats is None or combined_chunks is None:
+        if converted_pdf_stats is None:
+            index_executor.shutdown(wait=False)
             ingestion_failed()
             return
 
-        if combined_chunks:
-            # Always index documents - treating each request as fresh
-            logger.info("Loading processed documents into DB")
+        # Wait for all indexing operations to complete
+        logger.info("Waiting for all documents to finish indexing...")
+        for future in as_completed(index_futures):
+            doc_id = index_futures[future]
+            try:
+                index_time = future.result()
+                logger.info(f"Document {doc_id} indexed successfully in {index_time:.2f}s")
+            except Exception as e:
+                logger.error(f"Failed to index document {doc_id}: {str(e)}", exc_info=True)
 
-            embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
-            # Insert data into Opensearch
-            vector_store.insert_chunks(
-                combined_chunks,
-                embedding=embedder
-            )
-            logger.info("Processed documents loaded into DB")
-
-            # Update status to COMPLETED for successfully indexed documents
-            if status_mgr and doc_id_dict:
-                for path in converted_pdf_stats.keys():
-                    from pathlib import Path
-                    doc_id = doc_id_dict.get(Path(path).name)
-                    if doc_id:
-                        logger.debug(f"Indexing Done: updating doc & job metadata to COMPLETED for document: {doc_id}")
-                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.COMPLETED, "completed_at": get_utc_timestamp()})
-                        status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
+        index_executor.shutdown(wait=True)
 
         # Log time taken for the file
         end_time = time.time()  # End the timer for the current file
