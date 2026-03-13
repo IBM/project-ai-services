@@ -7,7 +7,7 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
   annotations:
-    ai-services.io/ports: "{{ or .Values.summarize.port "6000" }}:6000"
+    ai-services.io/ports: "{{ or .Values.summarize.port }}:6000"
 spec:
   containers:
     - name: summarize-api

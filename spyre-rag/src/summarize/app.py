@@ -49,11 +49,24 @@ async def lifespan(app):
     create_llm_session(pool_maxsize=settings.max_concurrent_requests)
     yield
 
+# OpenAPI tags metadata for endpoint organization
+tags_metadata = [
+    {
+        "name": "summarization",
+        "description": "Text and document summarization operations"
+    },
+    {
+        "name": "health",
+        "description": "Health check and service status"
+    }
+]
 
-app = FastAPI(lifespan=lifespan,
+app = FastAPI(
+    lifespan=lifespan,
     title="AI-Services Summarization API",
     description="Accepts text or files (.txt / .pdf) and returns AI-generated summaries.",
-    version="1.0.0"
+    version="1.0.0",
+    openapi_tags=tags_metadata
 )
 
 @app.middleware("http")
@@ -306,11 +319,17 @@ async def summarize(request: Request):
         raise SummarizeException(500, "INTERNAL_SERVER_ERROR",
                                  f"Failed to generate summary, error: {e} Please try again later")
 
-@app.get("/health")
+@app.get(
+    "/health",
+    tags=["health"],
+    summary="Health check",
+    description="Check if the service is running and healthy.",
+    response_description="Service health status"
+)
 async def health():
     return {"status": "ok"}
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8000"))
+    port = int(os.getenv("PORT", "6000"))
     uvicorn.run(app, host="0.0.0.0", port=port)
