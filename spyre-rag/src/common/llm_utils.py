@@ -5,8 +5,8 @@ import json
 from requests.adapters import HTTPAdapter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
-from lingua import Language, LanguageDetectorBuilder
 
+from common.lang_utils import prompt_map
 from common.misc_utils import get_logger
 from common.settings import get_settings
 
@@ -24,9 +24,6 @@ def tqdm_wrapper(iterable, **kwargs):
 settings = get_settings()
 
 SESSION = None
-_language_detector = None
-lang_en = "EN"
-lang_de = "DE"
 
 
 def create_llm_session(pool_maxsize, pool_connections: int = 2, pool_block: bool = True):
@@ -145,11 +142,7 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     reamining_tokens = settings.max_input_length - (settings.prompt_template_token_count + question_token_count)
     context = detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:reamining_tokens], llm_endpoint)
     logger.debug(f"Truncated Context: {context}")
-    # this is extensible to more languages easily
-    prompt_map = {
-        lang_de: "query_vllm_stream_de",
-        lang_en: "query_vllm_stream"
-    }
+
     prompt_key = prompt_map.get(lang, "query_vllm_stream")
     prompt = getattr(settings.prompts, prompt_key).format(context=context, question=question)
 
@@ -404,33 +397,3 @@ def detokenize_with_llm(tokens, emb_endpoint):
     except Exception as e:
         logger.error(f"Error decoding tokens: {e}")
         raise e
-
-
-def setup_language_detector(languages: list[Language]):
-    """Call once at app startup, before serving requests."""
-    global _language_detector
-    if _language_detector is not None:
-        return
-    _language_detector = (
-        LanguageDetectorBuilder
-        .from_languages(*languages)
-        .with_preloaded_language_models()
-        .build()
-    )
-
-def detect_language(text: str, min_confidence: float = settings.language_detection_min_confidence) -> str:
-    """
-    Detect the language of a text string.
-
-    Returns a language code (EN, DE) if confidence >= min_confidence, else EN by default.
-    Thread-safe — can be called from any endpoint or background task.
-    """
-    if not _language_detector:
-        logger.warning("Lingua detector not initialized. Call setup_language_detector() at startup.")
-        return lang_en
-
-    confidences = _language_detector.compute_language_confidence_values(text)
-    if confidences and confidences[0].value >= min_confidence:
-        top = confidences[0]
-        return top.language.iso_code_639_1.name
-    return lang_en
