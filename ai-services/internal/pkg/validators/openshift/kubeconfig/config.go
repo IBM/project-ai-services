@@ -41,24 +41,8 @@ func (r *KubeconfigRule) Verify() error {
 		return fmt.Errorf("failed to get namespace %s: %w", key.Name, err)
 	}
 
-	// First, try checking with wildcard permissions (more efficient for cluster-admin users)
-	wildcardPermissions := getWildcardPermissions()
-	allWildcardsPassed := true
-	for _, perm := range wildcardPermissions {
-		if err := r.checkPermission(ctx, client, perm); err != nil {
-			allWildcardsPassed = false
-
-			break
-		}
-	}
-
-	// If wildcard checks passed, user has sufficient permissions
-	if allWildcardsPassed {
-		return nil
-	}
-
 	// If wildcard checks failed, fall back to checking specific resources
-	specificPermissions := getSpecificPermissions()
+	specificPermissions := getBootstrapSpecificPermissions()
 	for _, perm := range specificPermissions {
 		if err := r.checkPermission(ctx, client, perm); err != nil {
 			return err
