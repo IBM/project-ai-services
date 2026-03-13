@@ -439,9 +439,16 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
         # Combine statistics for the final return
         converted_pdf_stats = {**l_stats, **h_stats}
 
-        # Documents are now indexed immediately after chunking (parallel indexing)
-        # No need to return combined_chunks as indexing is already done in the chunking phase
-        logger.debug("All documents are processed")
+        # Clean up intermediate files for all successfully processed documents
+        logger.info("Cleaning up intermediate files for all processed documents")
+        for path in converted_pdf_stats.keys():
+            doc_id = doc_id_dict.get(Path(path).name)
+            if doc_id:
+                try:
+                    clean_intermediate_files(doc_id, out_path)
+                    logger.debug(f"Cleaned up intermediate files for {doc_id}, preserved {doc_id}.json")
+                except Exception as cleanup_error:
+                    logger.warning(f"Error cleaning up intermediate files for {doc_id}: {cleanup_error}")
 
         return converted_pdf_stats
 

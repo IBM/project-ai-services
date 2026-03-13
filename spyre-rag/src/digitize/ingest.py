@@ -2,18 +2,17 @@ from pathlib import Path
 import time
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 
 import common.db_utils as db
 from common.emb_utils import get_embedder
 from common.misc_utils import *
-from digitize.doc_utils import process_documents, clean_intermediate_files
+from digitize.doc_utils import process_documents
 from digitize.status import StatusManager, get_utc_timestamp
 from digitize.types import JobStatus, DocStatus
 
 logger = get_logger("ingest")
 
-def _index_single_document(doc_id, doc_chunks, vector_store, embedder, status_mgr, out_path):
+def _index_single_document(doc_id, doc_chunks, vector_store, embedder, status_mgr):
     """
     Index a single document's chunks into the vector store.
     This function runs in a separate thread for parallel indexing.
@@ -37,10 +36,6 @@ def _index_single_document(doc_id, doc_chunks, vector_store, embedder, status_mg
             "timing_in_secs": {"indexing": round(float(index_time), 2)}
         })
         status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
-
-        # Clean up intermediate files after successful indexing
-        clean_intermediate_files(doc_id, out_path)
-        logger.debug(f"Preserved {doc_id}.json for future GET requests")
 
         return index_time
 
@@ -90,7 +85,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
             """Callback function to index a document in parallel"""
             future = index_executor.submit(_index_single_document,
                                           doc_id, doc_chunks, vector_store, embedder,
-                                          status_mgr, out_path)
+                                          status_mgr)
             index_futures[future] = doc_id
             logger.debug(f"Submitted document {doc_id} for parallel indexing")
 
