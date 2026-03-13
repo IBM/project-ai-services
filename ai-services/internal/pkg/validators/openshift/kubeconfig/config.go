@@ -7,6 +7,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	corev1 "k8s.io/api/core/v1"
+	k8sClient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type KubeconfigRule struct{}
@@ -32,9 +33,11 @@ func (r *KubeconfigRule) Verify() error {
 		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
 
-	// listing namespaces to validate cluster access.
-	if err := client.Client.List(ctx, &corev1.NamespaceList{}); err != nil {
-		return fmt.Errorf("failed to connect to cluster: %w", err)
+	// Validate cluster access by listing namespaces
+	ns := &corev1.Namespace{}
+	key := k8sClient.ObjectKey{Name: "default"}
+	if err := client.Client.Get(ctx, key, ns); err != nil {
+		return fmt.Errorf("failed to get namespace %s: %w", key.Name, err)
 	}
 
 	return nil
