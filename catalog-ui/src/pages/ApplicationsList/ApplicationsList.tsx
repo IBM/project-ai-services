@@ -592,7 +592,7 @@ const ApplicationsListPage = () => {
             <Modal
               open={state.isDeleteDialogOpen}
               size="sm"
-              modalLabel={`Delete ${state.rowsData.find((r) => r.id === state.selectedRowId)?.name || 'Application'}`}
+              modalLabel={`Delete ${state.rowsData.find((r) => r.id === state.selectedRowId)?.name || "Application"}`}
               modalHeading="Confirm delete"
               primaryButtonText="Delete"
               secondaryButtonText="Cancel"
