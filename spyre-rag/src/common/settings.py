@@ -35,7 +35,7 @@ class Prompts:
         # Ensure all required fields are present and not None
         required_fields = [
             "query_vllm_stream",
-            "query_vllm_stream_de"
+            "query_vllm_stream_de",
             "table_summary_and_classify",
             "summarize_system_prompt",
             "summarize_user_prompt_with_length",
@@ -217,7 +217,7 @@ class Settings:
             raise ValueError("Required field 'context_lengths' is missing or not a dict in settings")
         if "token_to_word_ratios" not in data or not isinstance(data["token_to_word_ratios"], dict):
             raise ValueError("Required field 'token_to_word_ratios' is missing or not a dict in settings")
-
+        
         return cls(
             prompts = Prompts.from_dict(data["prompts"]),
             context_lengths=ContextLengths.from_dict(data["context_lengths"]),

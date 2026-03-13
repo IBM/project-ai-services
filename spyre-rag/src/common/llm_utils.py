@@ -25,7 +25,6 @@ settings = get_settings()
 
 SESSION = None
 
-
 def create_llm_session(pool_maxsize, pool_connections: int = 2, pool_block: bool = True):
     global SESSION
 
@@ -49,7 +48,7 @@ def create_llm_session(pool_maxsize, pool_connections: int = 2, pool_block: bool
 def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
     if SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
+    
     payload = {
         "model": gen_model,
         "messages": [{"role": "user", "content": prompt}],
@@ -169,7 +168,7 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
 def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang):
     if SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
+    
     headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False, lang )
     try:
         # Use requests for synchronous HTTP requests
@@ -259,7 +258,7 @@ def query_vllm_summarize(
 ):
     if SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
+    
     headers = {
         "accept": "application/json",
         "Content-type": "application/json",
@@ -313,7 +312,7 @@ def query_vllm_summarize_stream(
     """Stream a summarization request to vLLM, yielding raw SSE lines."""
     if SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
+    
     headers = {
         "accept": "application/json",
         "Content-type": "application/json",
@@ -355,7 +354,7 @@ def query_vllm_summarize_stream(
 def tokenize_with_llm(prompt, emb_endpoint):
     if SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
+    
     payload = {
         "prompt": prompt
     }
@@ -378,7 +377,7 @@ def tokenize_with_llm(prompt, emb_endpoint):
 def detokenize_with_llm(tokens, emb_endpoint):
     if SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
+    
     payload = {
         "tokens": tokens
     }
