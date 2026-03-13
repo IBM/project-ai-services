@@ -11,10 +11,11 @@
   top: calc(100% + 0.5rem);
   right: 0;
   min-width: 200px;
-  background-color: var(--cds-layer-01);
-  border: 1px solid var(--cds-border-subtle-01);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-  z-index: 9000;
+  // Solid white background for clear visibility in dark mode
+  background-color: #ffffff !important;
+  border: 1px solid #e0e0e0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 10000;
   border-radius: 4px;
   overflow: hidden;
 }
@@ -49,11 +50,11 @@
   transition: background-color 0.11s;
 
   &:hover {
-    background-color: var(--cds-layer-hover-01);
+    background-color: #f4f4f4 !important;
   }
 
   &.active {
-    background-color: var(--cds-layer-selected-01);
+    background-color: #e0e0e0 !important;
     font-weight: 600;
   }
 }

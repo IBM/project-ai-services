@@ -66,18 +66,6 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
       size="md"
     >
       <div className={styles.sidePanelContent}>
-        {/* Job Name Input */}
-        <div className={styles.formGroup}>
-          <TextInput
-            id="job-name"
-            size='lg'
-            labelText="Job name"
-            placeholder=""
-            value={jobName}
-            onChange={(e) => setJobName(e.target.value)}
-          />
-        </div>
-
         {/* Operation Type Radio Buttons */}
         <div className={styles.formGroup}>
           <RadioButtonGroup

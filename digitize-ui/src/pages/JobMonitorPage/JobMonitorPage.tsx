@@ -154,7 +154,7 @@ const jobMonitorReducer = (
 };
 
 const headers = [
-  { key: 'job_name', header: 'Job name' },
+  { key: 'job_id', header: 'Job ID' },
   { key: 'type', header: 'Type' },
   { key: 'status', header: 'Status' },
   { key: 'started', header: 'Started' },
@@ -342,10 +342,7 @@ const JobMonitorPage = () => {
     }
   };
 
-  const getJobName = (job: Job) => {
-    if (job.documents && job.documents.length > 0) {
-      return job.documents[0].name || job.job_id;
-    }
+  const getJobById = (job: Job) => {
     return job.job_id;
   };
 
@@ -373,10 +370,10 @@ const JobMonitorPage = () => {
 
   const filteredJobs = state.jobs.filter((job) => {
     if (state.searchValue === '') return true;
-    const jobName = getJobName(job).toLowerCase();
+    const jobId = getJobById(job).toLowerCase();
     const jobType = getJobType(job).toLowerCase();
     const jobStatus = getJobStatus(job).toLowerCase();
-    return jobName.includes(state.searchValue.toLowerCase()) ||
+    return jobId.includes(state.searchValue.toLowerCase()) ||
            jobType.includes(state.searchValue.toLowerCase()) ||
            jobStatus.includes(state.searchValue.toLowerCase());
   });
@@ -387,7 +384,7 @@ const JobMonitorPage = () => {
     
     return {
       id: job.job_id,
-      job_name: getJobName(job),
+      job_id: getJobById(job),
       type: (
         <Tag type={getTypeTagStyle(getJobType(job))} size="md">
           {getJobType(job)}
