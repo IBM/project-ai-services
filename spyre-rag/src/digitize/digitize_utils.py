@@ -736,6 +736,15 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = JOBS_DIR) -> int:
                                             DocStatus.CHUNKED.value}:
                                 doc["status"] = DocStatus.FAILED.value
 
+                                # Update individual document metadata file with failed status and error
+                                doc_id = doc.get("id")
+                                if doc_id:
+                                    status_mgr.update_doc_metadata(
+                                        doc_id,
+                                        {"status": DocStatus.FAILED},
+                                        error=error_message
+                                    )
+
                     # Recalculate stats using StatusManager utility
                     status_mgr._recalculate_stats(job_data)
 
