@@ -92,7 +92,7 @@ spec:
               cpu: "8"
               memory: "50Gi"
             limits:
-              cpu: "8"
+              cpu: "12"
               memory: "50Gi"
           volumeMounts:
             - mountPath: /var/cache
