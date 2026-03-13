@@ -342,7 +342,7 @@ const JobMonitorPage = () => {
     }
   };
 
-  const getJobById = (job: Job) => {
+  const getJobId = (job: Job) => {
     return job.job_id;
   };
 
@@ -370,7 +370,7 @@ const JobMonitorPage = () => {
 
   const filteredJobs = state.jobs.filter((job) => {
     if (state.searchValue === '') return true;
-    const jobId = getJobById(job).toLowerCase();
+    const jobId = getJobId(job).toLowerCase();
     const jobType = getJobType(job).toLowerCase();
     const jobStatus = getJobStatus(job).toLowerCase();
     return jobId.includes(state.searchValue.toLowerCase()) ||
@@ -384,7 +384,7 @@ const JobMonitorPage = () => {
     
     return {
       id: job.job_id,
-      job_id: getJobById(job),
+      job_id: getJobId(job),
       type: (
         <Tag type={getTypeTagStyle(getJobType(job))} size="md">
           {getJobType(job)}

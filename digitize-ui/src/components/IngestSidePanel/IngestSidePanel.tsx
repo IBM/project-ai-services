@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  TextInput,
   RadioButtonGroup,
   RadioButton,
   FileUploader,
@@ -15,7 +14,6 @@ interface IngestSidePanelProps {
 }
 
 const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
-  const [jobName, setJobName] = useState('');
   const [operation, setOperation] = useState('ingestion');
   const [outputFormat, setOutputFormat] = useState('json');
   const [files, setFiles] = useState<File[]>([]);
@@ -38,7 +36,6 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
   };
 
   const handleClose = () => {
-    setJobName('');
     setOperation('ingestion');
     setOutputFormat('json');
     setFiles([]);
