@@ -22,7 +22,6 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
         ai-services.io/component: vectordb
     spec:
-      serviceAccountName: opensearch-sa 
       containers:
         - name: opensearch
           image: "{{ .Values.opensearch.image }}"
@@ -46,8 +45,6 @@ spec:
             limits:
               cpu: "2"
               memory: "{{ .Values.opensearch.memoryLimit }}"
-          securityContext:
-            runAsUser: 1000
           volumeMounts:
             - mountPath: /usr/share/opensearch/data
               name: data
