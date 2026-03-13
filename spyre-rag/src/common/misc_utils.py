@@ -1,7 +1,6 @@
 import hashlib
 import logging
 import os
-from pathlib import Path
 from contextvars import ContextVar
 from digitize.config import DIGITIZED_DOCS_DIR
 
@@ -144,11 +143,6 @@ def validate_pdf_file(filename: str, content) -> None:
     # Check content is not empty
     if len(content) == 0:
         raise ValueError(f"File is empty: {filename}")
-
-
-def get_unprocessed_files(original_files, processed_pdfs):
-    return set(original_files).difference(set(processed_pdfs))
-
 
 def get_unprocessed_files(original_files, processed_pdfs):
     return set(original_files).difference(set(processed_pdfs))
