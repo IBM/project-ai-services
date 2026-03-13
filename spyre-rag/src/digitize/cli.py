@@ -1,7 +1,6 @@
 import logging
 import os
 import argparse
-from glob import glob
 from pathlib import Path
 
 from digitize.digitize_utils import *

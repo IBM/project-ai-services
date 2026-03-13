@@ -11,8 +11,8 @@ import pypdfium2 as pdfium
 from common.misc_utils import get_logger
 
 # To suppress the warnings raised from pdfminer package while extracting the font size
-logging.propagate = False
-logging.getLogger().setLevel(logging.ERROR)
+logging.getLogger("pdfminer").propagate = False
+logging.getLogger("pdfminer").setLevel(logging.ERROR)
 
 logger = get_logger("PDF")
 
@@ -36,6 +36,7 @@ def get_matching_header_lvl(toc, title, threshold=80):
 def get_toc(file):
     toc = {}
     page_count = 0
+    parser = None
     with open(file, "rb") as fp:
         try:
             parser = PDFParser(fp)
@@ -54,10 +55,11 @@ def get_toc(file):
         except PDFSyntaxError:
             logger.debug("Corrupted PDF or non-PDF file.")
         finally:
-            try:
-                parser.close()
-            except NameError:
-                pass  # nothing to do
+            if parser is not None:
+                try:
+                    parser.close()
+                except Exception:
+                    pass  # nothing to do
     return toc, page_count
 
 def load_pdf_pages(pdf_path):

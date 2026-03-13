@@ -5,7 +5,7 @@ import uuid
 from typing import Optional
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 import json
 from contextlib import asynccontextmanager
 from asyncio import BoundedSemaphore
@@ -128,10 +128,7 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
             validate_query_length, req.prompt, emb_endpoint
         )
         if not is_valid:
-            return JSONResponse(
-                    status_code=400,
-                    content={"error": error_msg}
-                )
+            raise HTTPException(status_code=400, detail=error_msg)
 
         docs, perf_stat_dict = await asyncio.to_thread(
             search_only,
@@ -244,10 +241,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
                     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
                 return StreamingResponse(stream_query_length_error(), media_type="text/event-stream")
             else:
-                return JSONResponse(
-                    status_code=400,
-                    content={"error": error_msg}
-                )
+                raise HTTPException(status_code=400, detail=error_msg)
 
         lang = detect_language(query)
 
