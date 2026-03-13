@@ -20,6 +20,11 @@ spec:
     model:
       modelFormat:
         name: vLLM
+      env:
+        - name: VLLM_SPYRE_WARMUP_BATCH_SIZES
+          value: "4"
+        - name: VLLM_SPYRE_WARMUP_PROMPT_LENS
+          value: "1024"
       resources:
         limits:
           ibm.com/spyre_pf: "1"
@@ -29,3 +34,4 @@ spec:
       storageUri: {{ .Values.reranker.storageUri }}
       args:
       - --served-model-name=BAAI/bge-reranker-v2-m3
+      - -tp 1
