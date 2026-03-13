@@ -36,27 +36,7 @@ metadata:
   name: default-dsc
 spec:
   components:
-    codeflare:
-      managementState: Removed
-    dashboard:
-      managementState: Managed
-    datasciencepipelines:
-      managementState: Removed
     kserve:
       managementState: Managed
       nim:
         managementState: Removed
-    kueue:
-      managementState: Removed
-    modelmeshserving:
-      managementState: Removed
-    modelregistry:
-      managementState: Removed
-    ray:
-      managementState: Removed
-    trainingoperator:
-      managementState: Removed
-    trustyai:
-      managementState: Removed
-    workbenches:
-      managementState: Removed

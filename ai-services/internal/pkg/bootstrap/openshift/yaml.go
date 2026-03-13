@@ -24,7 +24,10 @@ func applyYaml(c *openshift.OpenshiftClient, yaml []byte) error {
 		resource := unstructured.Unstructured{}
 		err := decoder.Decode(&resource)
 		if err == nil {
-			resourceList = append(resourceList, &resource)
+			// Skip empty resources
+			if resource.GetKind() != "" {
+				resourceList = append(resourceList, &resource)
+			}
 		} else if err == io.EOF {
 			break
 		} else {
