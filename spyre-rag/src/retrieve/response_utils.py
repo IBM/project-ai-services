@@ -55,7 +55,7 @@ class Message(BaseModel):
 class ChatCompletionRequest(BaseModel):
     """Request model for chat completion"""
     messages: list[Message] = Field(..., description="List of messages in the conversation")
-    max_tokens: int = Field(default=512, description="Maximum number of tokens to generate")
+    max_tokens: int = Field(default=None, description="Maximum number of tokens to generate")
     temperature: float = Field(default=0.1, description="Sampling temperature (0.0 to 2.0)")
     stop: Optional[list[str]] = Field(default=None, description="Stop sequences for generation")
     stream: bool = Field(default=False, description="Whether to stream the response")
