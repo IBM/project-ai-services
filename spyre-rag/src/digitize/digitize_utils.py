@@ -718,7 +718,7 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = JOBS_DIR) -> int:
                     if "documents" in job_data and job_data["documents"]:
                         doc_ids = [doc.get("id") for doc in job_data["documents"] if doc.get("id")]
                         if doc_ids:
-                            error_message += f". Stale documents may exist - use DELETE /v1/documents/{{id}} to clean up: {', '.join(doc_ids)}"
+                            error_message += f". Stale documents may exist. Please use DELETE /v1/documents/{{id}} to remove these documents and re-submit to process again: {', '.join(doc_ids)}"
 
                     # Update job-level fields using StatusManager utility
                     status_mgr._update_job_level_fields(
@@ -742,7 +742,7 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = JOBS_DIR) -> int:
                                     status_mgr.update_doc_metadata(
                                         doc_id,
                                         {"status": DocStatus.FAILED},
-                                        error=error_message
+                                        error=f"System restarted during processing, Use DELETE /v1/documents/{doc_id} to remove the stale document and re-submit the document to process again"
                                     )
 
                     # Recalculate stats using StatusManager utility
