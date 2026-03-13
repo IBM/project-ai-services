@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from asyncio import BoundedSemaphore
 from functools import wraps
 import common.db_utils as db
-from common.lang_utils import setup_language_detector, detect_language, lang_en, lang_de
+from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
 from common.misc_utils import get_model_endpoints, set_log_level, set_request_id
 from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_non_stream, query_vllm_models
 from common.settings import get_settings
@@ -61,8 +61,6 @@ def initialize_models():
 def initialize_vectorstore():
     global vectorstore
     vectorstore = db.get_vector_store()
-
-
 
 @asynccontextmanager
 async def lifespan(app):
@@ -256,10 +254,6 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
         max_tokens = req.max_tokens
         # giving priority to max_tokens passed in the request, otherwise according to detected language of query
         if not max_tokens:
-            max_tokens_map = {
-                lang_en: settings.llm_max_tokens,
-                lang_de: settings.llm_max_tokens_de
-            }
             max_tokens = max_tokens_map.get(lang, settings.llm_max_tokens)
 
         docs, perf_stat_dict = await asyncio.to_thread(

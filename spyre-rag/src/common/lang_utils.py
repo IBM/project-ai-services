@@ -5,7 +5,6 @@ from common.settings import get_settings
 from common.misc_utils import get_logger
 
 logger = get_logger("LANG")
-is_debug = logger.isEnabledFor(logging.DEBUG)
 
 _language_detector = None
 lang_en = "EN"
@@ -17,6 +16,11 @@ prompt_map = {
         lang_de: "query_vllm_stream_de",
         lang_en: "query_vllm_stream"
         }
+
+max_tokens_map = {
+                lang_en: settings.llm_max_tokens,
+                lang_de: settings.llm_max_tokens_de
+            }
 
 def setup_language_detector(languages: list[Language]):
     """Call once at app startup, before serving requests."""
