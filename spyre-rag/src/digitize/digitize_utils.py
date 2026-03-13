@@ -19,7 +19,7 @@ from digitize.status import (
     create_document_metadata,
     create_job_state
 )
-from digitize.job import JobState, JobDocumentSummary, JobStats
+from digitize.job import JobState
 from digitize.document import DocumentMetadata
 from digitize.types import JobStatus
 
@@ -667,3 +667,137 @@ def bulk_delete_all_documents(docs_dir: Path = DOCS_DIR) -> dict:
         logger.error(f"Bulk deletion completed with {len(deletion_stats['errors'])} errors")
 
     return deletion_stats
+
+
+def scan_and_recover_orphan_jobs(jobs_dir: Path = JOBS_DIR) -> int:
+    """
+    Boot-up scan to identify and mark orphan jobs as failed.
+
+    An orphan job is one with status 'accepted' or 'in_progress' that exists
+    when the application starts, indicating the previous instance crashed
+    while processing it.
+
+    Args:
+        jobs_dir: Directory containing job status JSON files
+
+    Returns:
+        Number of orphan jobs recovered
+    """
+    from digitize.status import StatusManager
+    from digitize.types import JobStatus, DocStatus
+    import digitize.config as config
+
+    if not jobs_dir.exists():
+        logger.warning(f"Jobs directory does not exist: {jobs_dir}")
+        return 0
+
+    orphan_count = 0
+    orphan_statuses = {JobStatus.ACCEPTED.value, JobStatus.IN_PROGRESS.value}
+
+    try:
+        # Scan all job statuses(*_status.json) files in the jobs directory
+        for job_file in jobs_dir.glob("*_status.json"):
+            try:
+                with open(job_file, "r") as f:
+                    job_data = json.load(f)
+
+                current_status = job_data.get("status")
+
+                # Check if this is an orphan job
+                if current_status in orphan_statuses:
+                    job_id = job_data.get("job_id", job_file.stem.replace("_status", ""))
+                    logger.warning(f"Found orphan job: {job_id} with status '{current_status}'")
+
+                    # Create StatusManager instance for this job
+                    status_mgr = StatusManager(job_id)
+
+                    # Build error message with cleanup instructions
+                    error_message = "System restarted during processing"
+
+                    # Check for documents that may need cleanup
+                    if "documents" in job_data and job_data["documents"]:
+                        doc_ids = [doc.get("id") for doc in job_data["documents"] if doc.get("id")]
+                        if doc_ids:
+                            error_message += f". Stale documents may exist. Please use DELETE /v1/documents/{{id}} to remove these documents and re-submit to process again: {', '.join(doc_ids)}"
+
+                    # Update job-level fields using StatusManager utility
+                    status_mgr._update_job_level_fields(
+                        job_data,
+                        JobStatus.FAILED,
+                        error_message
+                    )
+
+                    # Update all in-progress documents to failed
+                    if "documents" in job_data:
+                        for doc in job_data["documents"]:
+                            doc_status = doc.get("status")
+                            if doc_status in {DocStatus.ACCEPTED.value, DocStatus.IN_PROGRESS.value,
+                                            DocStatus.DIGITIZED.value, DocStatus.PROCESSED.value,
+                                            DocStatus.CHUNKED.value}:
+                                doc["status"] = DocStatus.FAILED.value
+
+                                # Update individual document metadata file with failed status and error
+                                doc_id = doc.get("id")
+                                if doc_id:
+                                    status_mgr.update_doc_metadata(
+                                        doc_id,
+                                        {"status": DocStatus.FAILED},
+                                        error=f"System restarted during processing, Use DELETE /v1/documents/{doc_id} to remove the stale document and re-submit the document to process again"
+                                    )
+
+                    # Recalculate stats using StatusManager utility
+                    status_mgr._recalculate_stats(job_data)
+
+                    # Atomically write the updated job file using StatusManager utility
+                    try:
+                        status_mgr._atomic_write_json(job_file, job_data)
+                        logger.info(f"✅ Marked orphan job {job_id} as failed")
+                        orphan_count += 1
+
+                        # Clean up staging directory for this orphan job
+                        cleanup_staging_directory(job_id, config.STAGING_DIR)
+                    except Exception as write_error:
+                        logger.error(f"Failed to update orphan job {job_id}: {write_error}")
+
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse job file {job_file}: {e}")
+            except Exception as e:
+                logger.error(f"Error processing job file {job_file}: {e}")
+
+    except Exception as e:
+        logger.error(f"Error scanning jobs directory: {e}")
+
+    if orphan_count > 0:
+        logger.debug(f"🔄 Recovered {orphan_count} orphan job(s) on startup")
+    else:
+        logger.debug("✅ No orphan jobs found on startup")
+    return orphan_count
+
+
+def cleanup_staging_directory(job_id: str, staging_base_dir: Path) -> bool:
+    """
+    Clean up the staging directory for a specific job.
+
+    This helper function safely removes the staging directory and all its contents.
+    It's used across multiple places in the codebase to ensure consistent cleanup behavior.
+
+    Args:
+        job_id: Unique identifier of the job
+        staging_base_dir: Base directory where staging directories are created
+
+    Returns:
+        True if cleanup was successful or directory didn't exist, False if cleanup failed
+    """
+    staging_dir = staging_base_dir / job_id
+
+    if not staging_dir.exists():
+        logger.debug(f"Staging directory does not exist (already cleaned up): {staging_dir}")
+        return True
+
+    try:
+        shutil.rmtree(staging_dir)
+        logger.info(f"🗑️  Cleaned up staging directory: {staging_dir}")
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to clean up staging directory {staging_dir}: {e}")
+        return False

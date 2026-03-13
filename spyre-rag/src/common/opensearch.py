@@ -1,15 +1,11 @@
-from glob import glob
 import os
-import shutil
 import numpy as np
 import hashlib
 from tqdm import tqdm
 from opensearchpy import OpenSearch, helpers
 
-from common.misc_utils import LOCAL_CACHE_DIR, get_logger
-from common.vector_db import VectorStore
-import digitize.config as config
-
+from common.misc_utils import get_logger
+from common.vector_db import VectorStore, VectorStoreNotReadyError
 
 logger = get_logger("OpenSearch")
 
@@ -26,7 +22,8 @@ def generate_chunk_id(doc_id: str, page_content: str) -> np.int64:
     chunk_id = chunk_int % (2**63)           # Fit into signed 64-bit range
     return np.int64(chunk_id)
 
-class OpensearchNotReadyError(Exception):
+class OpensearchNotReadyError(VectorStoreNotReadyError):
+    """Raised when OpenSearch is unreachable or initializing."""
     pass
 
 class OpensearchVectorStore(VectorStore):

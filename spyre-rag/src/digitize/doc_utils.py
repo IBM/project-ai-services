@@ -3,7 +3,6 @@ import time
 import logging
 import os
 import shutil
-from typing import Any
 
 from tqdm import tqdm
 os.environ['GRPC_VERBOSITY'] = 'ERROR'

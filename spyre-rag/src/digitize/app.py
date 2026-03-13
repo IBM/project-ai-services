@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import uuid
-from pathlib import Path
 import shutil
 from typing import List, Optional
 from contextlib import asynccontextmanager
@@ -43,6 +42,14 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Application starting up...")
 
+    # Scan for orphan jobs and mark them as failed
+    try:
+        orphan_count = dg_util.scan_and_recover_orphan_jobs(config.JOBS_DIR)
+        if orphan_count > 0:
+            logger.info(f"Found {orphan_count} orphan job(s) from previous app server run")
+    except Exception as e:
+        logger.error(f"Error during orphan job recovery: {e}", exc_info=True)
+    
     yield
 
     # Shutdown
@@ -83,13 +90,8 @@ async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: type
         logger.error(f"Error in job {job_id}: {e}")
         status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing digitization pipeline: {str(e)}")
     finally:
-       # Always clean up staging directory, even on crashes
-        try:
-            if job_staging_path.exists():
-                shutil.rmtree(job_staging_path)
-                logger.debug(f"Cleaned up staging directory: {job_staging_path}")
-        except Exception as cleanup_error:
-            logger.warning(f"Failed to clean up staging directory {job_staging_path}: {cleanup_error}")
+        # Always clean up staging directory, even on crashes
+        dg_util.cleanup_staging_directory(job_id, config.STAGING_DIR)
 
         # Crucial: Always release the semaphore slot back to the API
         digitization_semaphore.release()
@@ -109,13 +111,8 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
         status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline: {str(e)}")
     finally:
         # Always clean up staging directory, even on crashes
-        try:
-            if job_staging_path.exists():
-                shutil.rmtree(job_staging_path)
-                logger.debug(f"Cleaned up staging directory: {job_staging_path}")
-        except Exception as cleanup_error:
-            logger.warning(f"Failed to clean up staging directory {job_staging_path}: {cleanup_error}")
-
+        dg_util.cleanup_staging_directory(job_id, config.STAGING_DIR)
+        
         # Mandatory Semaphore Release
         ingestion_semaphore.release()
         logger.debug(f"✅ Job {job_id} done. Semaphore released.")

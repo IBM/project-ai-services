@@ -1,4 +1,3 @@
-from glob import glob
 from common.misc_utils import *
 from pathlib import Path
 from digitize.status import StatusManager,get_utc_timestamp
