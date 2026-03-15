@@ -33,7 +33,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
         if (inputRef.current) {
           inputRef.current.focus();
         }
-      }, 350);
+      }, 200);
       
       return () => clearTimeout(timer);
     }
