@@ -154,7 +154,7 @@ const jobMonitorReducer = (
 };
 
 const headers = [
-  { key: 'job_id', header: 'Job ID' },
+  { key: 'job_name', header: 'Job Name' },
   { key: 'type', header: 'Type' },
   { key: 'status', header: 'Status' },
   { key: 'started', header: 'Started' },
@@ -342,7 +342,10 @@ const JobMonitorPage = () => {
     }
   };
 
-  const getJobId = (job: Job) => {
+  const getJobName = (job: Job) => {
+    if (job.documents && job.documents.length > 0) {
+      return job.documents[0].name || job.job_id;
+    }
     return job.job_id;
   };
 
@@ -370,7 +373,7 @@ const JobMonitorPage = () => {
 
   const filteredJobs = state.jobs.filter((job) => {
     if (state.searchValue === '') return true;
-    const jobId = getJobId(job).toLowerCase();
+    const jobId = getJobName(job).toLowerCase();
     const jobType = getJobType(job).toLowerCase();
     const jobStatus = getJobStatus(job).toLowerCase();
     return jobId.includes(state.searchValue.toLowerCase()) ||
@@ -384,7 +387,7 @@ const JobMonitorPage = () => {
     
     return {
       id: job.job_id,
-      job_id: getJobId(job),
+      job_name: getJobName(job),
       type: (
         <Tag type={getTypeTagStyle(getJobType(job))} size="md">
           {getJobType(job)}

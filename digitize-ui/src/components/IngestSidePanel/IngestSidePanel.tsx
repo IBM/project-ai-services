@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
+  TextInput,
   RadioButtonGroup,
   RadioButton,
   FileUploader,
@@ -14,9 +15,29 @@ interface IngestSidePanelProps {
 }
 
 const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
+  const [jobName, setJobName] = useState('');
   const [operation, setOperation] = useState('ingestion');
   const [outputFormat, setOutputFormat] = useState('json');
   const [files, setFiles] = useState<File[]>([]);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Callback ref to capture the actual input element
+  const setInputRef = useCallback((node: HTMLInputElement | null) => {
+    inputRef.current = node;
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      // Delay to allow SidePanel animation to complete
+      const timer = setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+        }
+      }, 350);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [open]);
 
   const handleFileAdd = (event: any) => {
     const addedFiles = event.target.files;
@@ -36,6 +57,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
   };
 
   const handleClose = () => {
+    setJobName('');
     setOperation('ingestion');
     setOutputFormat('json');
     setFiles([]);
@@ -63,6 +85,19 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
       size="md"
     >
       <div className={styles.sidePanelContent}>
+        {/* Job Name Input */}
+        <div className={styles.formGroup}>
+          <TextInput
+            id="job-name"
+            size="lg"
+            labelText="Job name"
+            placeholder="Enter job name"
+            value={jobName}
+            onChange={(e) => setJobName(e.target.value)}
+            ref={setInputRef}
+          />
+        </div>
+
         {/* Operation Type Radio Buttons */}
         <div className={styles.formGroup}>
           <RadioButtonGroup
