@@ -33,14 +33,6 @@ spec:
         periodSeconds: 30
         timeoutSeconds: 5
         failureThreshold: 3
-      readinessProbe:
-        httpGet:
-          path: /
-          port: 4001
-        initialDelaySeconds: 10
-        periodSeconds: 30
-        timeoutSeconds: 5
-        failureThreshold: 3
     - name: backend-server
       image: "{{ .Values.digitize.image }}"
       command:

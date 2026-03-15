@@ -40,7 +40,7 @@ Day N:
 {{- end }}
 {{- end }}
 
-- If you want to serve any more new documents via this RAG application, add them inside "/var/lib/ai-services/applications/{{ .AppName }}/docs" directory
+- If you want to serve any more new documents via this RAG application using CLI, add them inside "/var/lib/ai-services/applications/{{ .AppName }}/docs" directory
 
 - If you want to do the ingestion again, execute below command and wait for the ingestion to be completed before accessing the chatbot to query the new data.
 `ai-services application start {{ .AppName }} --pod={{ .AppName }}--ingest-docs`

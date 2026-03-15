@@ -20,7 +20,27 @@ Day N:
 {{- end }}
 {{- end }}
 
-- If you want to serve any more new documents via this RAG application, add them inside "/var/lib/ai-services/applications/{{ .AppName }}/docs" directory
+{{- if ne .DIGITIZE_UI_PORT "" }}
+{{- if eq .DIGITIZE_UI_STATUS "running" }}
+
+- Digitize UI is available to use at http://{{ .HOST_IP }}:{{ .DIGITIZE_UI_PORT }}. Use this web interface to upload and manage documents for the RAG application.
+{{- else }}
+
+- Digitize UI is unavailable to use. Please make sure '{{ .AppName }}--digitize' pod is running.
+{{- end }}
+{{- end }}
+
+{{- if ne .DIGITIZE_API_PORT "" }}
+{{- if eq .DIGITIZE_API_STATUS "running" }}
+
+- Digitize API is available to use at http://{{ .HOST_IP }}:{{ .DIGITIZE_API_PORT }}. Use this endpoint for programmatic access and direct API integration.
+{{- else }}
+
+- Digitize API is unavailable to use. Please make sure '{{ .AppName }}--digitize' pod is running.
+{{- end }}
+{{- end }}
+
+- If you want to serve any more new documents via this RAG application using CLI, add them inside "/var/lib/ai-services/applications/{{ .AppName }}/docs" directory
 
 - If you want to do the ingestion again, execute below command and wait for the ingestion to be completed before accessing the chatbot to query the new data.
 `ai-services application start {{ .AppName }} --pod={{ .AppName }}--ingest-docs`

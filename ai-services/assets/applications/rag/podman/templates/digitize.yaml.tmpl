@@ -1,17 +1,39 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "{{ .AppName }}--digitize-api"
+  name: "{{ .AppName }}--digitize"
   labels:
     ai-services.io/application: "{{ .AppName }}"
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
-    ai-services.io/component: "digitize-api"
   annotations:
-    ai-services.io/ports: "{{ .Values.digitize.port }}:4000"
+    ai-services.io/ports: "{{ .Values.digitizeUi.port }}:4001, {{ .Values.digitize.port }}:4000"
 spec:
   containers:
-    - name: digitize-api
+    - name: ui
+      image: "{{ .Values.digitizeUi.image }}"
+      resources:
+        requests:
+          memory: "512Mi"
+        limits:
+          memory: "512Mi"
+      env:
+        - name: BACKEND_HOST
+          value: "{{ .AppName }}--digitize"
+        - name: BACKEND_PORT
+          value: "4000"
+      ports:
+        - containerPort: 4001
+          protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /
+          port: 4001
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+    - name: backend-server
       image: "{{ .Values.digitize.image }}"
       command:
         - "/var/venv/bin/python"
