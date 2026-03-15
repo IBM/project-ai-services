@@ -373,10 +373,10 @@ const JobMonitorPage = () => {
 
   const filteredJobs = state.jobs.filter((job) => {
     if (state.searchValue === '') return true;
-    const jobId = getJobName(job).toLowerCase();
+    const jobName = getJobName(job).toLowerCase();
     const jobType = getJobType(job).toLowerCase();
     const jobStatus = getJobStatus(job).toLowerCase();
-    return jobId.includes(state.searchValue.toLowerCase()) ||
+    return jobName.includes(state.searchValue.toLowerCase()) ||
            jobType.includes(state.searchValue.toLowerCase()) ||
            jobStatus.includes(state.searchValue.toLowerCase());
   });
