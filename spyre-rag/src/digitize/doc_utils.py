@@ -734,7 +734,7 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn):
             #     metadata={"filename": orig_fn, "type": "table", "source": block.get('html'), "chunk_id": tab_id}
             # ))
             tab_docs.append({
-                "page_content": block.get("summary"),
+                "page_content": f"{block.get('caption')}\n\n{block.get('summary')}" if block.get("caption") else block.get("summary"),
                 "filename": orig_fn,
                 "type": "table",
                 "source": block.get("html"),
