@@ -22,5 +22,10 @@ http {
             index index.html;
             try_files $uri /index.html;
         }
+
+        location /api/ {
+            proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};
+            proxy_set_header Host $host;
+        }
     }
 }

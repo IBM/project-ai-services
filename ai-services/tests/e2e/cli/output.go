@@ -97,7 +97,7 @@ func ValidateHelpRandomCommandOutput(command string, output string) error {
 			"ai-services application [command]",
 		},
 		bootstrap: []string{
-			"The bootstrap command configures and validates the environment needed to run AI Services on Power11 systems, ensuring prerequisites are met and initial configuration is completed.",
+			"The bootstrap command configures and validates the environment needed to run AI Services, ensuring prerequisites are met and initial configuration is completed.",
 			"ai-services bootstrap [flags]",
 		},
 		completion: []string{

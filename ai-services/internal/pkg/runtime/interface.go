@@ -30,6 +30,9 @@ type Runtime interface {
 	// Network operations
 	ListRoutes() ([]types.Route, error)
 
+	// PVC operations
+	DeletePVCs(appLabel string) error
+
 	// Runtime type identification
 	Type() types.RuntimeType
 }

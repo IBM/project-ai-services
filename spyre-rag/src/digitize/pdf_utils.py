@@ -11,8 +11,8 @@ import pypdfium2 as pdfium
 from common.misc_utils import get_logger
 
 # To suppress the warnings raised from pdfminer package while extracting the font size
-logging.propagate = False
-logging.getLogger().setLevel(logging.ERROR)
+logging.getLogger("pdfminer").propagate = False
+logging.getLogger("pdfminer").setLevel(logging.ERROR)
 
 logger = get_logger("PDF")
 
@@ -36,6 +36,7 @@ def get_matching_header_lvl(toc, title, threshold=80):
 def get_toc(file):
     toc = {}
     page_count = 0
+    parser = None
     with open(file, "rb") as fp:
         try:
             parser = PDFParser(fp)
@@ -54,10 +55,11 @@ def get_toc(file):
         except PDFSyntaxError:
             logger.debug("Corrupted PDF or non-PDF file.")
         finally:
-            try:
-                parser.close()
-            except NameError:
-                pass  # nothing to do
+            if parser is not None:
+                try:
+                    parser.close()
+                except Exception:
+                    pass  # nothing to do
     return toc, page_count
 
 def load_pdf_pages(pdf_path):
@@ -138,14 +140,27 @@ def convert_doc(path):
     return doc
 
 def get_doc_converter():
+    import os
+    from pathlib import Path
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions
     from docling.document_converter import DocumentConverter, PdfFormatOption
 
     # Accelerator & pipeline options
     pipeline_options = PdfPipelineOptions()
-    # Docling model files are getting downloaded to this /var/docling-models dir by this project-ai-services/images/rag-base/download_docling_models.py script in project-ai-services/images/rag-base/Containerfile
-    pipeline_options.artifacts_path = "/var/docling-models"
+    
+    # Only set artifacts_path if DOCLING_MODELS_PATH environment variable is set
+    docling_models_path = os.environ.get('DOCLING_MODELS_PATH')
+    if docling_models_path:
+        artifacts_path = Path(docling_models_path)
+        if artifacts_path.exists():
+            pipeline_options.artifacts_path = artifacts_path
+            logger.debug(f"Using docling models from: {artifacts_path}")
+        else:
+            logger.warning(f"DOCLING_MODELS_PATH set to {artifacts_path} but directory does not exist")
+    else:
+        logger.debug("DOCLING_MODELS_PATH not set. Docling will use default model loading behavior.")
+    
     pipeline_options.do_table_structure = True
     pipeline_options.table_structure_options.do_cell_matching = True
     pipeline_options.do_ocr = False

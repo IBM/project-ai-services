@@ -15,6 +15,7 @@ COPY --from=docling-builder /usr/local/lib64/*.so* /usr/local/lib64/
 COPY --from=docling-builder /usr/include/tree_sitter /usr/include/tree_sitter
 
 ENV LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH
+ENV DOCLING_MODELS_PATH=/var/docling-models
 
 WORKDIR /opt/wheels
 

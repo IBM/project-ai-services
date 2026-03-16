@@ -262,6 +262,12 @@ func (pc *PodmanClient) ListRoutes() ([]types.Route, error) {
 	return nil, fmt.Errorf("unsupported method")
 }
 
+func (pc *PodmanClient) DeletePVCs(appLabel string) error {
+	logger.Errorf("unsupported method called!")
+
+	return fmt.Errorf("unsupported method")
+}
+
 // Type returns the runtime type for PodmanClient.
 func (pc *PodmanClient) Type() types.RuntimeType {
 	return types.RuntimeTypePodman

@@ -1,0 +1,52 @@
+@use '@carbon/react/scss/themes';
+@use '@carbon/react/scss/theme' with (
+  $theme: themes.$white
+);
+@use '@carbon/react';
+@use '@carbon/ibm-products/css/index.min.css';
+
+html,
+body {
+  margin: 0;
+  transition: background-color 0.2s ease;
+}
+
+// Light theme (default)
+html,
+body,
+[data-carbon-theme='white'] {
+  background-color: var(--cds-background);
+}
+
+// Dark theme
+[data-carbon-theme='g100'] {
+  background-color: var(--cds-background);
+  
+  body {
+    background-color: var(--cds-background);
+  }
+}
+
+.appLayout {
+  min-height: 100vh;
+  padding-top: 3rem;
+  padding-left: 3rem;
+  transition: background-color 0.2s ease;
+  background-color: var(--cds-background);
+  
+  main {
+    transition: margin-left 0.11s cubic-bezier(0.2, 0, 1, 0.9);
+  }
+}
+
+@media (min-width: 42rem) {
+  .cds--css-grid--full-width {
+    padding: 0;
+  }
+
+  .cds--css-grid-column {
+    margin-inline: 0;
+  }
+}
+
+// Made with Bob

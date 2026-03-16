@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "summarize-api"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: summarize-api
+  template:
+    metadata:
+      labels:
+        ai-services.io/application: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/component: summarize-api
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: summarize-api
+          image: "{{ .Values.summarize.image }}"
+          command:
+            - "/var/venv/bin/python"
+            - "-m"
+            - "uvicorn"
+            - "summarize.app:app"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "6000"
+            - "--loop"
+            - "uvloop"
+            - "--http"
+            - "httptools"
+          env:
+            - name: PORT
+              value: "6000"
+            - name: LLM_ENDPOINT
+              value: http://instruct-predictor:8000
+            - name: LLM_MODEL
+              value: ibm-granite/granite-3.3-8b-instruct
+            - name: LOG_LEVEL
+              value: "{{ .Values.summarize.log_level }}"
+          ports:
+            - containerPort: 6000
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 6000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 6000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "1"
+              memory: "1Gi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"

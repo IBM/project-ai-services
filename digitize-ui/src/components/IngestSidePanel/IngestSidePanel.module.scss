@@ -1,0 +1,141 @@
+.ingestSidePanel {
+  :global {
+    .cds--side-panel {
+      background-color: var(--cds-layer-01);
+    }
+
+    .cds--side-panel__header {
+      background-color: var(--cds-layer-01);
+      border-bottom: 1px solid var(--cds-border-subtle-01);
+    }
+
+    .cds--side-panel__title {
+      color: var(--cds-text-primary);
+      font-size: 1.25rem;
+      font-weight: 400;
+    }
+
+    .cds--side-panel__body {
+      background-color: var(--cds-layer-01);
+      padding: 1rem;
+    }
+
+    .cds--side-panel__actions {
+      background-color: var(--cds-layer-01);
+      border-top: 1px solid var(--cds-border-subtle-01);
+      padding: 1rem;
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+    }
+  }
+}
+
+.sidePanelContent {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+
+  :global {
+    .cds--text-input-wrapper {
+      width: 100%;
+    }
+
+    .cds--text-input {
+      background-color: var(--cds-field-01);
+      color: var(--cds-text-primary);
+      border: none;
+      border-bottom: 1px solid var(--cds-border-strong-01);
+      width: 100%;
+      padding: 0.5rem 1rem;
+      font-size: 0.875rem;
+
+      &:focus {
+        outline: 2px solid var(--cds-focus);
+        outline-offset: -2px;
+      }
+
+      &::placeholder {
+        color: var(--cds-text-placeholder);
+      }
+    }
+
+    .cds--label {
+      color: var(--cds-text-secondary);
+      font-size: 0.75rem;
+      font-weight: 400;
+      margin-bottom: 0.5rem;
+      letter-spacing: 0.16px;
+    }
+
+    .cds--radio-button-group {
+      display: flex;
+      gap: 1rem;
+      margin-top: 0.5rem;
+    }
+
+    .cds--radio-button__label {
+      color: var(--cds-text-primary);
+      font-size: 0.875rem;
+      padding-left: 1.5rem;
+    }
+
+    .cds--radio-button__appearance {
+      border-color: var(--cds-icon-primary);
+    }
+
+    .cds--radio-button:checked + .cds--radio-button__label .cds--radio-button__appearance {
+      border-color: var(--cds-icon-primary);
+      
+      &::before {
+        background-color: var(--cds-icon-primary);
+      }
+    }
+  }
+}
+
+.formLabel {
+  color: var(--cds-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 400;
+  margin-bottom: 0.5rem;
+  display: block;
+  letter-spacing: 0.16px;
+}
+
+.fileUploader {
+  :global {
+    .cds--file__container {
+      margin-top: 0;
+    }
+
+    .cds--label {
+      color: var(--cds-text-secondary);
+      font-size: 0.75rem;
+      font-weight: 400;
+      margin-bottom: 0.5rem;
+      letter-spacing: 0.16px;
+    }
+
+    .cds--label-description {
+      color: var(--cds-text-secondary);
+      font-size: 0.875rem;
+      line-height: 1.43;
+      margin-bottom: 1rem;
+      white-space: pre-line;
+    }
+
+    .cds--file-browse-btn {
+      max-width: none;
+      width: auto;
+    }
+  }
+}
+
+// Made with Bob

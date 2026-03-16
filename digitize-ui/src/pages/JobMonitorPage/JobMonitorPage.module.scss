@@ -1,0 +1,342 @@
+@use '@carbon/react/scss/spacing' as *;
+
+.jobMonitorPage {
+  background-color: var(--cds-background);
+  min-height: 100vh;
+  padding: 0;
+}
+
+.notificationWrapper {
+  position: fixed;
+  top: 3rem;
+  right: 1rem;
+  z-index: 9000;
+  max-width: 400px;
+  
+  :global {
+    .cds--inline-notification {
+      margin-bottom: 0;
+    }
+  }
+}
+
+.pageHeader {
+  background-color: var(--cds-background);
+  padding: 2rem 2rem 1.5rem 2rem;
+  border-bottom: 1px solid var(--cds-border-subtle-01);
+}
+
+.headerContent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 100%;
+}
+
+.pageTitle {
+  font-size: 2rem;
+  font-weight: 400;
+  color: var(--cds-text-primary);
+  margin: 0;
+  line-height: 1.25;
+}
+
+.learnMore {
+  color: var(--cds-link-primary);
+  text-decoration: none;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.tableWrapper {
+  background-color: var(--cds-layer-01);
+}
+
+.tableContainer {
+  background-color: var(--cds-layer-01);
+  
+  :global {
+    .cds--data-table-container {
+      padding-top: 0;
+    }
+    
+    .cds--table-toolbar {
+      background-color: var(--cds-layer-01);
+      border-bottom: 1px solid var(--cds-border-subtle-01);
+    }
+    
+    .cds--toolbar-content {
+      background-color: var(--cds-layer-01);
+      justify-content: flex-start;
+    }
+    
+    .cds--batch-actions {
+      background-color: var(--cds-background-brand);
+    }
+    
+    .cds--toolbar-search-container-persistent {
+      width: 100%;
+      max-width: 400px;
+      margin-right: auto;
+    }
+  }
+}
+
+.table {
+  :global {
+    thead {
+      background-color: var(--cds-layer-accent-01);
+      
+      th {
+        background-color: var(--cds-layer-accent-01);
+        color: var(--cds-text-primary);
+        font-weight: 600;
+        font-size: 0.875rem;
+        padding: 1rem;
+        border-bottom: 1px solid var(--cds-border-subtle-01);
+        vertical-align: middle;
+      }
+    }
+    
+    tbody {
+      tr {
+        border-bottom: 1px solid var(--cds-border-subtle-01);
+        background-color: var(--cds-layer-01);
+        
+        &:hover {
+          background-color: var(--cds-layer-hover-01);
+        }
+        
+        td {
+          padding: 1rem;
+          color: var(--cds-text-primary);
+          font-size: 0.875rem;
+          vertical-align: middle;
+          background-color: transparent;
+        }
+      }
+    }
+  }
+}
+
+.statusCell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.statusText {
+  color: var(--cds-text-primary);
+}
+
+.statusIconSuccess {
+  fill: var(--cds-support-success);
+}
+
+.statusIconError {
+  fill: var(--cds-support-error);
+}
+
+.statusIconProgress {
+  fill: var(--cds-support-info);
+}
+
+.errorMessage {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--cds-text-primary);
+  font-size: 0.875rem;
+}
+
+.errorIcon {
+  fill: var(--cds-support-error);
+  flex-shrink: 0;
+}
+
+.modalContent {
+  padding: 1rem 0;
+}
+
+.modalRow {
+  margin-bottom: 1rem;
+  
+  strong {
+    font-weight: 600;
+    margin-right: 0.5rem;
+  }
+}
+
+.documentsList {
+  margin-top: $spacing-03;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-05;
+}
+
+.documentItem {
+  padding: $spacing-05;
+  border: 1px solid var(--cds-border-subtle-01);
+  border-radius: 4px;
+  background-color: var(--cds-layer-02);
+}
+
+.documentInfo {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+}
+
+.documentName {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--cds-text-primary);
+}
+
+.documentStatus {
+  display: flex;
+  align-items: center;
+  gap: $spacing-03;
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $spacing-05;
+  margin-top: $spacing-03;
+}
+
+.statItem {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-02;
+}
+
+.statLabel {
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+}
+
+.statValue {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--cds-text-primary);
+}
+
+.errorText {
+  font-size: 0.875rem;
+  color: var(--cds-support-error);
+  margin: 0;
+  padding: $spacing-05;
+  background-color: var(--cds-notification-background-error);
+  border-left: 3px solid var(--cds-support-error);
+  border-radius: 4px;
+}
+
+.emptyStateCell {
+  padding: $spacing-09 $spacing-05 !important;
+  border-bottom: none !important;
+  background-color: var(--cds-layer-01) !important;
+  
+  :global {
+    tr:hover & {
+      background-color: var(--cds-layer-01) !important;
+    }
+  }
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-09 $spacing-07;
+  min-height: 350px;
+  text-align: center;
+  background-color: var(--cds-layer-01);
+}
+
+.emptyStateIcon {
+  margin-bottom: $spacing-05;
+  opacity: 0.3;
+  
+  svg {
+    fill: var(--cds-icon-secondary);
+    width: 48px;
+    height: 48px;
+  }
+}
+
+.emptyStateTitle {
+  font-size: 1.125rem;
+  font-weight: 400;
+  color: var(--cds-text-primary);
+  margin: 0 0 $spacing-03 0;
+  line-height: 1.5;
+}
+
+.emptyStateDescription {
+  font-size: 0.875rem;
+  color: var(--cds-text-secondary);
+  margin: 0;
+  line-height: 1.43;
+}
+
+.sidePanelContent {
+  padding: $spacing-05;
+}
+
+.sidePanelSection {
+  margin-bottom: $spacing-07;
+}
+
+.sectionLabel {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--cds-text-secondary);
+  margin: 0 0 $spacing-03 0;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.sectionValue {
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: var(--cds-text-primary);
+  margin: 0;
+  line-height: 1.43;
+}
+
+.documentTagsList {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+}
+
+.documentTag {
+  width: fit-content;
+  max-width: 100%;
+  
+  :global {
+    .cds--tag__label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}
+
+.noDocuments {
+  font-size: 0.875rem;
+  color: var(--cds-text-secondary);
+  margin: 0;
+  font-style: italic;
+}
+
+// Made with Bob

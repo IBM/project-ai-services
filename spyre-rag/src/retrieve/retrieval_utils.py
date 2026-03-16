@@ -50,7 +50,7 @@ def show_document_content(retrieved_documents, scores):
 
 def retrieve_documents(query, emb_model, emb_endpoint, max_tokens, vectorstore, top_k, mode="hybrid", language='en'):
     embedding = get_embedder(emb_model, emb_endpoint, max_tokens)
-    results = vectorstore.search(query, embedder=embedding, top_k=top_k, mode=mode, language=language)
+    results = vectorstore.search(query, embedding=embedding, top_k=top_k, mode=mode, language=language)
 
     retrieved_documents = []
     scores = []
