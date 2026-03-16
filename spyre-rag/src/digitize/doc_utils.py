@@ -251,11 +251,9 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
     def _run_batch(batch_paths, convert_worker, max_worker, doc_id_dict):
         batch_stats = {}
-        batch_chunk_paths = []
-        batch_table_paths = []
 
         if not batch_paths:
-            return batch_stats, batch_chunk_paths, batch_table_paths
+            return batch_stats
 
         with ProcessPoolExecutor(max_workers=convert_worker) as converter_executor, \
              ThreadPoolExecutor(max_workers=max_worker) as processor_executor, \
@@ -338,7 +336,6 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         "table_count": tabs
                     })
                     batch_stats[path]["timings"]["processing"] = round(float(total_processing_time or 0), 2)
-                    batch_table_paths.append(tab_json)
 
                     if doc_id is not None:
                         logger.debug(f"Processing Done: updating doc & job metadata for document: {doc_id}")
@@ -382,7 +379,6 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         continue
 
                     batch_stats[path]["timings"]["chunking"] = round(float(chunk_time or 0), 2)
-                    batch_chunk_paths.append(chunk_json)
                     # Capture chunk counts in real time and update <doc_id>_metadata.json
                     chunk_count = count_chunks(chunk_json, tab_json)
                     batch_stats[path]["chunk_count"] = chunk_count
@@ -419,20 +415,20 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"failed to chunk document: {str(e)}")
                     batch_stats.pop(path, {})
 
-        return batch_stats, batch_chunk_paths, batch_table_paths
+        return batch_stats
 
     # Trigger the batches
     try:
         # Process Light Batch
         l_worker = min(WORKER_SIZE, len(light_files)) if light_files else 0
-        l_stats, l_chunks_json, l_tabs_json = _run_batch(
+        l_stats = _run_batch(
             light_files, convert_worker=l_worker, max_worker=l_worker, doc_id_dict=doc_id_dict
         )
 
         # Process Heavy Batch
         h_worker = min(WORKER_SIZE, len(heavy_files)) if heavy_files else 0
         h_conv_worker = min(HEAVY_PDF_CONVERT_WORKER_SIZE, len(heavy_files)) if heavy_files else 0
-        h_stats, h_chunks_json, h_tabs_json = _run_batch(
+        h_stats = _run_batch(
             heavy_files, convert_worker=h_conv_worker, max_worker=h_worker, doc_id_dict=doc_id_dict
         )
 
