@@ -2,18 +2,29 @@ package openshift
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 
+	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
+	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/wait"
 	apiyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
 	yamlDecoderBufSz = 4096
+)
+
+var (
+	s *spinner.Spinner
+	// cachedSubscriptionList holds the subscription list to avoid multiple API calls.
+	cachedSubscriptionList *operatorsv1alpha1.SubscriptionList
 )
 
 func applyYaml(c *openshift.OpenshiftClient, yaml []byte) error {
@@ -35,9 +46,27 @@ func applyYaml(c *openshift.OpenshiftClient, yaml []byte) error {
 		}
 	}
 
+	// Fetch subscription list once before processing resources
+	if err := loadSubscriptionList(c); err != nil {
+		return fmt.Errorf("failed to load subscription list: %v", err)
+	}
+
 	for _, object := range resourceList {
 		if err := applyObject(c, object); err != nil {
 			return fmt.Errorf("error applying object %v", err.Error())
+		}
+	}
+
+	return nil
+}
+
+// loadSubscriptionList fetches and caches the subscription list if not already loaded.
+func loadSubscriptionList(c *openshift.OpenshiftClient) error {
+	if cachedSubscriptionList == nil {
+		cachedSubscriptionList = &operatorsv1alpha1.SubscriptionList{}
+		err := c.Client.List(c.Ctx, cachedSubscriptionList)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to list subscriptions: %w", err)
 		}
 	}
 
@@ -55,6 +84,16 @@ func applyObject(c *openshift.OpenshiftClient, object *unstructured.Unstructured
 
 	groupVersionKind := object.GroupVersionKind()
 
+	// Special handling for Subscription objects - check if package already exists
+	if groupVersionKind.Kind == "Subscription" {
+		s = spinner.New("Applying operator configurations")
+		s.Start(c.Ctx)
+
+		if shouldSkipSubscription(c, object) {
+			return nil
+		}
+	}
+
 	objDesc := fmt.Sprintf("(%s) %s/%s", groupVersionKind.String(), namespace, name)
 
 	// Apply the k8s object with provided version kind in given namespace.
@@ -63,5 +102,129 @@ func applyObject(c *openshift.OpenshiftClient, object *unstructured.Unstructured
 		return fmt.Errorf("could not create %s. Error: %v", objDesc, err.Error())
 	}
 
+	// If this is a subscription, wait for the operator to be ready
+	if groupVersionKind.Kind == "Subscription" {
+		packageName, found, err := unstructured.NestedString(object.Object, "spec", "name")
+		if err == nil && found && packageName != "" {
+			if err := waitForOperator(c, packageName, namespace); err != nil {
+				return fmt.Errorf("operator %s not ready: %w", packageName, err)
+			}
+			// Print success message
+			operatorLabel := getOperatorLabel(packageName)
+			s.Stop(fmt.Sprintf("%s is up and ready", operatorLabel))
+		}
+	}
+
 	return nil
+}
+
+// shouldSkipSubscription checks if a subscription should be skipped because it already exists.
+// If it exists and is ready, prints a message. Returns true if the subscription should be skipped.
+func shouldSkipSubscription(c *openshift.OpenshiftClient, object *unstructured.Unstructured) bool {
+	packageName, found, err := unstructured.NestedString(object.Object, "spec", "name")
+	if err != nil || !found || packageName == "" || cachedSubscriptionList == nil {
+		return false
+	}
+
+	// Check if any subscription has the same package name
+	for _, sub := range cachedSubscriptionList.Items {
+		if sub.Spec.Package != packageName {
+			continue
+		}
+
+		// Found existing subscription, check its status
+		if sub.Status.InstalledCSV == "" {
+			return true
+		}
+
+		// Get the CSV to check if it's ready
+		csv := &operatorsv1alpha1.ClusterServiceVersion{}
+		if err := c.Client.Get(c.Ctx, client.ObjectKey{
+			Name:      sub.Status.InstalledCSV,
+			Namespace: sub.Namespace,
+		}, csv); err == nil && csv.Status.Phase == operatorsv1alpha1.CSVPhaseSucceeded {
+			// Get operator label from constants
+			operatorLabel := getOperatorLabel(packageName)
+			s.Stop(fmt.Sprintf("%s is already installed and ready", operatorLabel))
+		}
+
+		return true
+	}
+
+	return false
+}
+
+// fetchOperatorByPackage fetches the CSV for an operator by package name.
+func fetchOperatorByPackage(c *openshift.OpenshiftClient, packageName string, opNS string) (*operatorsv1alpha1.ClusterServiceVersion, error) {
+	// List all subscriptions in the namespace
+	subList := &operatorsv1alpha1.SubscriptionList{}
+	if err := c.Client.List(c.Ctx, subList, client.InNamespace(opNS)); err != nil {
+		return nil, err
+	}
+
+	// Find subscription with matching package name
+	var sub *operatorsv1alpha1.Subscription
+	for i := range subList.Items {
+		if subList.Items[i].Spec.Package == packageName {
+			sub = &subList.Items[i]
+
+			break
+		}
+	}
+
+	if sub == nil {
+		return nil, apierrors.NewNotFound(operatorsv1alpha1.Resource("subscription"), packageName)
+	}
+
+	// Use installedCSV from status instead of startingCSV from spec
+	if sub.Status.InstalledCSV == "" {
+		return nil, apierrors.NewNotFound(operatorsv1alpha1.Resource("clusterserviceversion"), "")
+	}
+
+	csv := &operatorsv1alpha1.ClusterServiceVersion{}
+	if err := c.Client.Get(c.Ctx, client.ObjectKey{
+		Name:      sub.Status.InstalledCSV,
+		Namespace: opNS,
+	}, csv); err != nil {
+		return nil, err
+	}
+
+	return csv, nil
+}
+
+// waitForOperator waits for an operator to be ready after installation.
+func waitForOperator(c *openshift.OpenshiftClient, packageName string, opNS string) error {
+	return wait.PollUntilContextTimeout(c.Ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
+		csv, err := fetchOperatorByPackage(c, packageName, opNS)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				// keep waiting until timeout
+				return false, nil
+			}
+
+			return false, err
+		}
+
+		// Check if CSV is in Succeeded phase
+		if csv.Status.Phase == operatorsv1alpha1.CSVPhaseSucceeded {
+			return true, nil
+		}
+
+		return false, nil
+	})
+}
+
+// getOperatorLabel returns the label for a given package name from constants.
+func getOperatorLabel(packageName string) string {
+	for _, op := range constants.RequiredOperators {
+		pkgName := op.Package
+		if pkgName == "" {
+			pkgName = op.Name
+		}
+		if pkgName == packageName {
+			return op.Label
+		}
+	}
+
+	return packageName
 }

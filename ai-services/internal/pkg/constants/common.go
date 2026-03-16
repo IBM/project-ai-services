@@ -14,6 +14,7 @@ const (
 // OperatorConfig defines configuration for an operator.
 type OperatorConfig struct {
 	Name      string
+	Package   string
 	Namespace string
 	Label     string
 }
@@ -22,6 +23,7 @@ type OperatorConfig struct {
 var RequiredOperators = []OperatorConfig{
 	{
 		Name:      "secondary-scheduler-operator",
+		Package:   "openshift-secondary-scheduler-operator",
 		Namespace: "openshift-secondary-scheduler-operator",
 		Label:     "Secondary Scheduler Operator for Red Hat OpenShift",
 	},
