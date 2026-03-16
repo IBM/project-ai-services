@@ -270,7 +270,23 @@ const JobMonitorPage = () => {
       }, 3000);
     } catch (error: any) {
       console.error('Error uploading documents:', error);
-      const errorMessage = error.response?.data?.detail || error.response?.data?.message || error.message || 'An error occurred';
+      
+      // Handle FastAPI validation errors (422) which return detail as an array
+      let errorMessage = 'An error occurred';
+      if (error.response?.data?.detail) {
+        const detail = error.response.data.detail;
+        if (Array.isArray(detail)) {
+          // FastAPI validation error format
+          errorMessage = detail.map((err: any) => err.msg || JSON.stringify(err)).join(', ');
+        } else if (typeof detail === 'string') {
+          errorMessage = detail;
+        }
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       dispatch({
         type: 'SET_UPLOAD_STATUS',
         payload: {

@@ -169,7 +169,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
               />
               <RadioButton
                 labelText="Text"
-                value="text"
+                value="txt"
                 id="format-text"
               />
             </RadioButtonGroup>
