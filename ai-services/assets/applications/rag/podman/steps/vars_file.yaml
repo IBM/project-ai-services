@@ -9,6 +9,21 @@ pods:
     default: ""
     alias: BACKEND_PORT
 
+  - name: "{{ .AppName }}--digitize"
+    format: "index .Ports \"4000/tcp\" 0"
+    default: ""
+    alias: DIGITIZE_API_PORT
+
+  - name: "{{ .AppName }}--digitize"
+    format: "index .Ports \"4001/tcp\" 0"
+    default: ""
+    alias: DIGITIZE_UI_PORT
+
+  - name: "{{ .AppName }}--summarize-api"
+    format: "index .Ports \"6000/tcp\" 0"
+    default: ""
+    alias: SUMMARIZE_API_PORT
+
 containers:
   - name: "{{ .AppName }}--chat-bot-ui"
     format: ".Status"
@@ -17,6 +32,18 @@ containers:
   - name: "{{ .AppName }}--chat-bot-backend-server"
     format: ".Status"
     alias: BACKEND_STATUS
+
+  - name: "{{ .AppName }}--digitize-ui"
+    format: ".Status"
+    alias: DIGITIZE_API_STATUS
+
+  - name: "{{ .AppName }}--digitize-backend-server"
+    format: ".Status"
+    alias: DIGITIZE_UI_STATUS
+
+  - name: "{{ .AppName }}--summarize-api-summarize-api"
+    format: ".Status"
+    alias: SUMMARIZE_API_STATUS
 
 hosts:
   - fetch: HOST_IP
