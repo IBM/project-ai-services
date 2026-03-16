@@ -106,11 +106,13 @@ func applyObject(c *openshift.OpenshiftClient, object *unstructured.Unstructured
 	if groupVersionKind.Kind == "Subscription" {
 		packageName, found, err := unstructured.NestedString(object.Object, "spec", "name")
 		if err == nil && found && packageName != "" {
+			operatorLabel := getOperatorLabel(packageName)
 			if err := waitForOperator(c, packageName, namespace); err != nil {
+				s.Fail(fmt.Sprintf("%s is not ready", operatorLabel))
+
 				return fmt.Errorf("operator %s not ready: %w", packageName, err)
 			}
 			// Print success message
-			operatorLabel := getOperatorLabel(packageName)
 			s.Stop(fmt.Sprintf("%s is up and ready", operatorLabel))
 		}
 	}

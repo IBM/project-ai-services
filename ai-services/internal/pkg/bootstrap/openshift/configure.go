@@ -50,7 +50,6 @@ func (o *OpenshiftBootstrap) Configure() error {
 
 	// 2. Apply operators (namespaces, operatorgroups, subscriptions)
 	if err := applyYamlsFromFolder(client, operatorFolder); err != nil {
-		s.Fail("failed to apply operator configurations")
 
 		return fmt.Errorf("error occurred while applying operator configurations: %w", err)
 	}
