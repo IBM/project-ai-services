@@ -60,16 +60,16 @@ async def lifespan(app: FastAPI):
 # OpenAPI tags metadata for endpoint organization
 tags_metadata = [
     {
-        "name": "documents",
-        "description": "Job tracking and management for document processing(Ingestion | Digitization) operations"
+        "name": "health",
+        "description": "Health check and service status endpoints"
     },
     {
         "name": "jobs",
-        "description": "Job tracking and management for document processing operations"
+        "description": "Job tracking and management for document processing(Ingestion | Digitization) operations"
     },
     {
-        "name": "health",
-        "description": "Health check and service status endpoints"
+        "name": "documents",
+        "description": "Document management operations including retrieval and deletion"
     }
 ]
 
