@@ -237,7 +237,8 @@ const JobMonitorPage = () => {
   const handleIngestSubmit = async (
     operation: string,
     outputFormat: string,
-    files: File[]
+    files: File[],
+    jobName: string
   ) => {
     try {
       dispatch({
@@ -250,7 +251,7 @@ const JobMonitorPage = () => {
         },
       });
 
-      const response = await uploadDocuments(files, operation, outputFormat);
+      const response = await uploadDocuments(files, operation, outputFormat, jobName);
 
       dispatch({
         type: 'SET_UPLOAD_STATUS',
@@ -343,9 +344,15 @@ const JobMonitorPage = () => {
   };
 
   const getJobName = (job: Job) => {
+    // First priority: use job_name if available
+    if (job.job_name) {
+      return job.job_name;
+    }
+    // Fallback: use first document name if available
     if (job.documents && job.documents.length > 0) {
       return job.documents[0].name || job.job_id;
     }
+    // Last resort: use job_id
     return job.job_id;
   };
 

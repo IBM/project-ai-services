@@ -30,6 +30,7 @@ export interface JobStats {
 
 export interface Job {
   job_id: string;
+  job_name?: string;
   operation: string;
   status: string;
   submitted_at?: string;
@@ -78,15 +79,21 @@ export interface ListDocumentsParams {
 export const uploadDocuments = async (
   files: File[],
   operation: string = 'ingestion',
-  outputFormat: string = 'json'
+  outputFormat: string = 'json',
+  jobName?: string
 ): Promise<UploadResponse> => {
   const formData = new FormData();
   files.forEach(file => {
     formData.append('files', file);
   });
 
+  let url = `/documents?operation=${operation}&output_format=${outputFormat}`;
+  if (jobName) {
+    url += `&job_name=${encodeURIComponent(jobName)}`;
+  }
+
   const response: AxiosResponse<UploadResponse> = await api.post(
-    `/documents?operation=${operation}&output_format=${outputFormat}`,
+    url,
     formData,
     {
       headers: {

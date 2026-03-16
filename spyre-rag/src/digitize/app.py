@@ -154,7 +154,8 @@ async def digitize_document(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     operation: types.OperationType = Query(types.OperationType.INGESTION),
-    output_format: types.OutputFormat = Query(types.OutputFormat.JSON)
+    output_format: types.OutputFormat = Query(types.OutputFormat.JSON),
+    job_name: Optional[str] = Query(None, description="Optional human-readable name for the job")
 ):
     try:
         # 1. Early exit if no files submitted
@@ -182,7 +183,7 @@ async def digitize_document(
             # Upload the file byte stream to files in staging directory
             # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
             await dg_util.stage_upload_files(job_id, filenames, str(config.STAGING_DIR / job_id), file_contents)
-            doc_id_dict = dg_util.initialize_job_state(job_id, operation, output_format, filenames)
+            doc_id_dict = dg_util.initialize_job_state(job_id, operation, output_format, filenames, job_name)
             if operation == types.OperationType.INGESTION:
                 background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
             else:
@@ -206,7 +207,8 @@ async def get_all_jobs(
     limit: int = Query(20, ge=1, le=100, description="Number of records per page"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
     status: Optional[types.JobStatus] = Query(None, description="Filter by job status"),
-    operation: Optional[types.OperationType] = Query(None, description="Filter by operation type")
+    operation: Optional[types.OperationType] = Query(None, description="Filter by operation type"),
+    job_name: Optional[str] = Query(None, description="Filter by job name (partial match, case-insensitive)")
 ):
     """Retrieve information about all submitted jobs with pagination and filtering."""
     try:
@@ -217,7 +219,8 @@ async def get_all_jobs(
         filtered_jobs = [
             j for j in all_jobs
             if (status is None or j.status == status) and
-               (operation is None or j.operation == operation.value)
+               (operation is None or j.operation == operation.value) and
+               (job_name is None or (j.job_name and job_name.lower() in j.job_name.lower()))
         ]
 
         # sorting by submitted_at

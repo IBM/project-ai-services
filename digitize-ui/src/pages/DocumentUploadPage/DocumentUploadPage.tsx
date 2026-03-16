@@ -16,6 +16,7 @@ import {
   Accordion,
   AccordionItem,
   Theme,
+  TextInput,
 } from '@carbon/react';
 import { Upload, DocumentPdf, Close, Checkmark, Renew, View } from '@carbon/icons-react';
 import { useTheme } from '../../contexts/useTheme';
@@ -24,6 +25,7 @@ import styles from './DocumentUploadPage.module.scss';
 
 interface DocumentUploadState {
   files: File[];
+  jobName: string;
   operation: string;
   outputFormat: string;
   loading: boolean;
@@ -38,6 +40,7 @@ interface DocumentUploadState {
 
 type DocumentUploadAction =
   | { type: 'SET_FILES'; payload: File[] }
+  | { type: 'SET_JOB_NAME'; payload: string }
   | { type: 'SET_OPERATION'; payload: string }
   | { type: 'SET_OUTPUT_FORMAT'; payload: string }
   | { type: 'SET_LOADING'; payload: boolean }
@@ -56,6 +59,7 @@ type DocumentUploadAction =
 
 const initialState: DocumentUploadState = {
   files: [],
+  jobName: '',
   operation: 'ingestion',
   outputFormat: 'json',
   loading: false,
@@ -79,7 +83,14 @@ const documentUploadReducer = (
         files: action.payload,
         error: null,
         success: null,
-        currentStep: action.payload.length > 0 ? 2 : state.currentStep,
+        currentStep: action.payload.length > 0 ? 3 : state.currentStep,
+      };
+    case 'SET_JOB_NAME':
+      return {
+        ...state,
+        jobName: action.payload,
+        error: null,
+        success: null,
       };
     case 'SET_OPERATION':
       return {
@@ -146,7 +157,8 @@ const documentUploadReducer = (
         jobId: action.payload.jobId,
         success: action.payload.message,
         files: [],
-        currentStep: 3,
+        jobName: '',
+        currentStep: 4,
         isCompleted: true,
       };
     case 'UPLOAD_ERROR':
@@ -164,7 +176,7 @@ const documentUploadReducer = (
       return {
         ...state,
         files: [],
-        currentStep: 1,
+        currentStep: 2,
         fileUploaderKey: state.fileUploaderKey + 1,
       };
     default:
@@ -189,6 +201,11 @@ const DocumentUploadPage = () => {
   };
 
   const handleUpload = async () => {
+    if (!state.jobName.trim()) {
+      dispatch({ type: 'SET_ERROR', payload: 'Please enter a job name' });
+      return;
+    }
+
     if (state.files.length === 0) {
       dispatch({ type: 'SET_ERROR', payload: 'Please select at least one file to upload' });
       return;
@@ -202,7 +219,7 @@ const DocumentUploadPage = () => {
     dispatch({ type: 'UPLOAD_START' });
 
     try {
-      const result = await uploadDocuments(state.files, state.operation, state.outputFormat);
+      const result = await uploadDocuments(state.files, state.operation, state.outputFormat, state.jobName);
       dispatch({
         type: 'UPLOAD_SUCCESS',
         payload: {
@@ -242,6 +259,10 @@ const DocumentUploadPage = () => {
                 <ProgressStep
                   label="Select operation"
                   description="Choose processing type"
+                />
+                <ProgressStep
+                  label="Enter job name"
+                  description="Provide a name for this job"
                 />
                 <ProgressStep
                   label="Upload files"
@@ -328,6 +349,31 @@ const DocumentUploadPage = () => {
                   </RadioButtonGroup>
                 </Tile>
 
+                {/* Job Name Input */}
+                <Tile className={styles.formTile}>
+                  <div className={styles.tileHeader}>
+                    <h4>Step 2: Enter Job Name</h4>
+                    <p className={styles.tileDescription}>
+                      Provide a descriptive name for this processing job
+                    </p>
+                  </div>
+                  <TextInput
+                    id="job-name-input"
+                    labelText="Job Name"
+                    placeholder="e.g., Q4 Financial Reports"
+                    value={state.jobName}
+                    onChange={(e) => {
+                      dispatch({ type: 'SET_JOB_NAME', payload: e.target.value });
+                      if (e.target.value.trim()) {
+                        dispatch({ type: 'SET_CURRENT_STEP', payload: 2 });
+                      }
+                    }}
+                    invalid={state.error?.includes('job name')}
+                    invalidText={state.error?.includes('job name') ? state.error : ''}
+                    size="lg"
+                  />
+                </Tile>
+
                 {/* Output Format (only for digitization) */}
                 {state.operation === 'digitization' && (
                   <Tile className={styles.formTile}>
@@ -366,7 +412,7 @@ const DocumentUploadPage = () => {
                 {/* File Upload */}
                 <Tile className={styles.formTile}>
                   <div className={styles.tileHeader}>
-                    <h4>Step 2: Upload Files</h4>
+                    <h4>Step 3: Upload Files</h4>
                     <p className={styles.tileDescription}>
                       {state.operation === 'ingestion'
                         ? 'Upload one or more PDF files (max 500MB each)'
@@ -463,7 +509,7 @@ const DocumentUploadPage = () => {
                     kind="primary"
                     renderIcon={Upload}
                     onClick={handleUpload}
-                    disabled={state.loading || state.files.length === 0}
+                    disabled={state.loading || state.files.length === 0 || !state.jobName.trim()}
                     size="lg"
                   >
                     {state.loading ? 'Processing...' : 'Upload and Process'}
