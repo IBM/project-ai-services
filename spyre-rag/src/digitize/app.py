@@ -207,8 +207,7 @@ async def get_all_jobs(
     limit: int = Query(20, ge=1, le=100, description="Number of records per page"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
     status: Optional[types.JobStatus] = Query(None, description="Filter by job status"),
-    operation: Optional[types.OperationType] = Query(None, description="Filter by operation type"),
-    job_name: Optional[str] = Query(None, description="Filter by job name (partial match, case-insensitive)")
+    operation: Optional[types.OperationType] = Query(None, description="Filter by operation type")
 ):
     """Retrieve information about all submitted jobs with pagination and filtering."""
     try:
@@ -219,8 +218,7 @@ async def get_all_jobs(
         filtered_jobs = [
             j for j in all_jobs
             if (status is None or j.status == status) and
-               (operation is None or j.operation == operation.value) and
-               (job_name is None or (j.job_name and job_name.lower() in j.job_name.lower()))
+               (operation is None or j.operation == operation.value)
         ]
 
         # sorting by submitted_at
