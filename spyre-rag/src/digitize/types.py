@@ -49,6 +49,7 @@ class DocumentListItem(BaseModel):
     name: str
     type: str
     status: str
+    submitted_at: Optional[str] = None
 
 
 class DocumentsListResponse(BaseModel):
