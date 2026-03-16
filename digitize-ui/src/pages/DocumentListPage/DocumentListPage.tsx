@@ -2,6 +2,7 @@ import { useReducer, useEffect } from 'react';
 import { NoDataEmptyState } from '@carbon/ibm-products';
 import {
   DataTable,
+  DataTableSkeleton,
   Table,
   TableHead,
   TableRow,
@@ -12,26 +13,30 @@ import {
   TableToolbar,
   TableToolbarContent,
   TableToolbarSearch,
-  TableBatchActions,
-  TableBatchAction,
-  TableSelectAll,
-  TableSelectRow,
   Pagination,
   Button,
   Modal,
   Theme,
   Link,
   Loading,
+  Checkbox,
+  CheckboxGroup,
+  ActionableNotification,
+  TextInput,
+  InlineLoading,
 } from '@carbon/react';
 import { Renew, TrashCan, Download, CheckmarkFilled, ErrorFilled, InProgress } from '@carbon/icons-react';
 import { useTheme } from '../../contexts/useTheme';
 import { listDocuments, getDocumentContent, deleteDocument, Document } from '../../services/api';
+import { exportToCSV, validateFilename } from '../../utils/csvExport';
 import styles from './DocumentListPage.module.scss';
 
 interface DocumentContentData {
   result: any;
   output_format: string;
 }
+
+export type ExportStatus = 'idle' | 'exporting' | 'success' | 'error';
 
 interface DocumentListState {
   documents: Document[];
@@ -46,6 +51,15 @@ interface DocumentListState {
   loadingContent: boolean;
   showDeleteModal: boolean;
   docToDelete: string | null;
+  isConfirmed: boolean;
+  toastOpen: boolean;
+  errorMessage: string;
+  errorDocName: string;
+  isDeleting: boolean;
+  isExportDialogOpen: boolean;
+  csvFileName: string;
+  exportStatus: ExportStatus;
+  exportErrorMessage: string;
 }
 
 type DocumentListAction =
@@ -63,7 +77,18 @@ type DocumentListAction =
   | { type: 'OPEN_CONTENT_MODAL'; payload: { doc: Document; content: DocumentContentData } }
   | { type: 'CLOSE_CONTENT_MODAL' }
   | { type: 'OPEN_DELETE_MODAL'; payload: string }
-  | { type: 'CLOSE_DELETE_MODAL' };
+  | { type: 'CLOSE_DELETE_MODAL' }
+  | { type: 'SET_CONFIRMED'; payload: boolean }
+  | { type: 'SHOW_ERROR'; payload: { message: string; docName?: string } }
+  | { type: 'HIDE_ERROR' }
+  | { type: 'SET_IS_DELETING'; payload: boolean }
+  | { type: 'DELETE_DOCUMENT'; payload: string }
+  | { type: 'OPEN_EXPORT_DIALOG' }
+  | { type: 'CLOSE_EXPORT_DIALOG' }
+  | { type: 'SET_CSV_FILENAME'; payload: string }
+  | { type: 'SET_EXPORT_STATUS'; payload: ExportStatus }
+  | { type: 'SET_EXPORT_ERROR'; payload: string }
+  | { type: 'CLEAR_EXPORT_ERROR' };
 
 const initialState: DocumentListState = {
   documents: [],
@@ -78,6 +103,15 @@ const initialState: DocumentListState = {
   loadingContent: false,
   showDeleteModal: false,
   docToDelete: null,
+  isConfirmed: false,
+  toastOpen: false,
+  errorMessage: '',
+  errorDocName: '',
+  isDeleting: false,
+  isExportDialogOpen: false,
+  csvFileName: '',
+  exportStatus: 'idle',
+  exportErrorMessage: '',
 };
 
 const documentListReducer = (
@@ -161,13 +195,65 @@ const documentListReducer = (
         ...state,
         docToDelete: action.payload,
         showDeleteModal: true,
+        toastOpen: false,
       };
     case 'CLOSE_DELETE_MODAL':
       return {
         ...state,
         showDeleteModal: false,
+        isConfirmed: false,
         docToDelete: null,
       };
+    case 'SET_CONFIRMED':
+      return { ...state, isConfirmed: action.payload };
+    case 'DELETE_DOCUMENT':
+      return {
+        ...state,
+        documents: state.documents.filter((d) => d.id !== action.payload),
+        showDeleteModal: false,
+        isConfirmed: false,
+      };
+    case 'SHOW_ERROR':
+      return {
+        ...state,
+        errorMessage: action.payload.message,
+        errorDocName: action.payload.docName ?? '',
+        toastOpen: true,
+        isDeleting: false,
+      };
+    case 'HIDE_ERROR':
+      return {
+        ...state,
+        toastOpen: false,
+        docToDelete: null,
+        errorDocName: '',
+      };
+    case 'SET_IS_DELETING':
+      return { ...state, isDeleting: action.payload };
+    case 'OPEN_EXPORT_DIALOG':
+      return {
+        ...state,
+        isExportDialogOpen: true,
+        csvFileName: '',
+        exportErrorMessage: '',
+        exportStatus: 'idle',
+      };
+    case 'CLOSE_EXPORT_DIALOG':
+      return {
+        ...state,
+        isExportDialogOpen: false,
+      };
+    case 'SET_CSV_FILENAME':
+      return { ...state, csvFileName: action.payload };
+    case 'SET_EXPORT_STATUS':
+      return { ...state, exportStatus: action.payload };
+    case 'SET_EXPORT_ERROR':
+      return {
+        ...state,
+        exportErrorMessage: action.payload,
+      };
+    case 'CLEAR_EXPORT_ERROR':
+      return { ...state, exportErrorMessage: '' };
     default:
       return state;
   }
@@ -177,7 +263,8 @@ const headers = [
   { key: 'name', header: 'Document name' },
   { key: 'status', header: 'Status' },
   { key: 'created_at', header: 'Created' },
-  { key: 'actions', header: '' },
+  { key: 'view_action', header: '' },
+  { key: 'delete_action', header: '' },
 ];
 
 const getStatusIcon = (status: string) => {
@@ -339,12 +426,89 @@ const DocumentListPage = () => {
 
   const handleDeleteConfirm = async () => {
     if (!state.docToDelete) return;
+
+    dispatch({ type: 'SET_IS_DELETING', payload: true });
+
     try {
       await deleteDocument(state.docToDelete);
-      dispatch({ type: 'CLOSE_DELETE_MODAL' });
+      dispatch({ type: 'DELETE_DOCUMENT', payload: state.docToDelete });
       fetchDocuments();
-    } catch (error) {
-      console.error('Error deleting document:', error);
+    } catch (error: any) {
+      const msg = error.response?.data?.detail || error.message || 'Failed deleting document';
+      const name = state.documents.find((d) => d.id === state.docToDelete)?.name || '';
+      dispatch({
+        type: 'SHOW_ERROR',
+        payload: { message: msg, docName: name },
+      });
+    } finally {
+      dispatch({ type: 'SET_IS_DELETING', payload: false });
+      dispatch({ type: 'CLOSE_DELETE_MODAL' });
+    }
+  };
+
+  const handleExportCSV = async () => {
+    const filename = state.csvFileName.trim();
+    const validationError = validateFilename(filename);
+
+    if (validationError) {
+      dispatch({
+        type: 'SET_EXPORT_ERROR',
+        payload: validationError,
+      });
+      return;
+    }
+
+    if (state.documents.length === 0) {
+      dispatch({
+        type: 'SET_EXPORT_ERROR',
+        payload: 'No data available to export',
+      });
+      return;
+    }
+
+    dispatch({
+      type: 'SET_EXPORT_STATUS',
+      payload: 'exporting',
+    });
+
+    try {
+      // Create rows for export (excluding action columns)
+      const exportRows = state.documents.map((doc) => ({
+        name: doc.name || doc.filename || 'N/A',
+        status: doc.status,
+        created_at: doc.created_at
+          ? new Date(doc.created_at).toLocaleString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+              hour12: true,
+            })
+          : 'N/A',
+      }));
+
+      exportToCSV({
+        filename,
+        headers,
+        rows: exportRows,
+        excludeColumns: ['view_action', 'delete_action'],
+      });
+
+      dispatch({
+        type: 'SET_EXPORT_STATUS',
+        payload: 'success',
+      });
+    } catch (error: any) {
+      dispatch({
+        type: 'SET_EXPORT_STATUS',
+        payload: 'error',
+      });
+
+      dispatch({
+        type: 'SET_EXPORT_ERROR',
+        payload: error.message || 'An error occurred while exporting the CSV file. Please try again.',
+      });
     }
   };
 
@@ -367,7 +531,7 @@ const DocumentListPage = () => {
           hour12: true,
         })
       : 'N/A',
-    actions: (
+    view_action: (
       <Button
         kind="ghost"
         size="sm"
@@ -376,32 +540,47 @@ const DocumentListPage = () => {
         View content
       </Button>
     ),
+    delete_action: (
+      <Button
+        hasIconOnly
+        kind="ghost"
+        size="sm"
+        renderIcon={TrashCan}
+        iconDescription="Delete"
+        onClick={() => dispatch({ type: 'OPEN_DELETE_MODAL', payload: doc.id })}
+      />
+    ),
   }));
 
   const noSearchResults = state.documents.length === 0 && state.search;
 
-  const handleDeleteJobs = async (selectedRows: any[]) => {
-    try {
-      const docIds = selectedRows.map(row => row.id);
-      
-      for (const docId of docIds) {
-        await deleteDocument(docId);
-      }
-      
-      fetchDocuments();
-    } catch (error) {
-      console.error('Error deleting documents:', error);
-    }
-  };
-
   return (
     <Theme theme={effectiveTheme}>
       <div className={styles.documentListPage}>
+        {state.toastOpen && (
+          <ActionableNotification
+            actionButtonLabel="Try again"
+            aria-label="close notification"
+            kind="error"
+            closeOnEscape
+            title={`Delete document ${state.errorDocName} failed`}
+            subtitle={state.errorMessage}
+            onCloseButtonClick={() => {
+              dispatch({ type: 'HIDE_ERROR' });
+            }}
+            style={{
+              position: 'fixed',
+              top: '4rem',
+              right: '2rem',
+              zIndex: 9999,
+            }}
+          />
+        )}
         {/* Page Header */}
         <div className={styles.pageHeader}>
           <div className={styles.headerContent}>
             <h1 className={styles.pageTitle}>Documents</h1>
-            <Link href="#" className={styles.learnMore}>
+            <Link href="https://www.ibm.com/docs/en/aiservices/2025.12.0?topic=services-introduction" className={styles.learnMore} target="_blank" rel="noopener noreferrer">
               Learn more →
             </Link>
           </div>
@@ -409,119 +588,112 @@ const DocumentListPage = () => {
 
         {/* Data Table with Enhanced Toolbar */}
         <div className={styles.tableWrapper}>
-          <DataTable rows={rows} headers={headers} size="lg">
-            {({
-              rows,
-              headers,
-              getHeaderProps,
-              getRowProps,
-              getTableProps,
-              getSelectionProps,
-              getToolbarProps,
-              getBatchActionProps,
-              selectedRows,
-              getTableContainerProps,
-            }) => {
-              const batchActionProps = getBatchActionProps();
-              
-              return (
-                <TableContainer
-                  {...getTableContainerProps()}
-                  className={styles.tableContainer}
-                >
-                  <TableToolbar {...getToolbarProps()}>
-                    <TableBatchActions {...batchActionProps}>
-                      <TableBatchAction
-                        tabIndex={batchActionProps.shouldShowBatchActions ? 0 : -1}
-                        renderIcon={TrashCan}
-                        onClick={() => handleDeleteJobs(selectedRows)}
-                      >
-                        Delete
-                      </TableBatchAction>
-                    </TableBatchActions>
-                    <TableToolbarContent>
-                      <TableToolbarSearch
-                        persistent
-                        placeholder="Search"
-                        onChange={(_e: any, value?: string) => dispatch({ type: 'SET_SEARCH', payload: value || '' })}
-                        value={state.search}
-                      />
-                      <Button
-                        kind="ghost"
-                        hasIconOnly
-                        renderIcon={Download}
-                        iconDescription="Download"
-                        tooltipPosition="bottom"
-                      />
-                      <Button
-                        kind="ghost"
-                        hasIconOnly
-                        renderIcon={Renew}
-                        iconDescription="Refresh"
-                        onClick={fetchDocuments}
-                        disabled={state.loading}
-                        tooltipPosition="bottom"
-                      />
-                    </TableToolbarContent>
-                  </TableToolbar>
-                  <Table {...getTableProps()} className={styles.table}>
-                    <TableHead>
-                      <TableRow>
-                        <TableSelectAll {...getSelectionProps()} />
-                        {headers.map((header) => {
-                          const { key, ...rest } = getHeaderProps({ header });
-                          return (
-                            <TableHeader key={key} {...rest}>
-                              {header.header}
-                            </TableHeader>
-                          );
-                        })}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {rows.length === 0 ? (
+          {state.loading && state.documents.length === 0 ? (
+            <DataTableSkeleton
+              headers={headers}
+              aria-label="Loading documents"
+              showHeader={false}
+              showToolbar={false}
+            />
+          ) : (
+            <DataTable rows={rows} headers={headers} size="lg">
+              {({
+                rows,
+                headers,
+                getHeaderProps,
+                getRowProps,
+                getTableProps,
+                getTableContainerProps,
+              }) => {
+                return (
+                  <TableContainer
+                    {...getTableContainerProps()}
+                    className={styles.tableContainer}
+                  >
+                    <TableToolbar>
+                      <TableToolbarContent>
+                        <TableToolbarSearch
+                          persistent
+                          placeholder="Search"
+                          onChange={(_e: any, value?: string) => dispatch({ type: 'SET_SEARCH', payload: value || '' })}
+                          value={state.search}
+                        />
+                        <Button
+                          kind="ghost"
+                          hasIconOnly
+                          renderIcon={Download}
+                          iconDescription="Download"
+                          tooltipPosition="bottom"
+                          onClick={() => dispatch({ type: 'OPEN_EXPORT_DIALOG' })}
+                        />
+                        <Button
+                          kind="ghost"
+                          hasIconOnly
+                          renderIcon={Renew}
+                          iconDescription="Refresh"
+                          onClick={fetchDocuments}
+                          disabled={state.loading}
+                          tooltipPosition="bottom"
+                        />
+                      </TableToolbarContent>
+                    </TableToolbar>
+                    <Table {...getTableProps()} className={styles.table}>
+                      <TableHead>
                         <TableRow>
-                          <TableCell colSpan={headers.length + 1} className={styles.emptyStateCell}>
-                            <NoDataEmptyState
-                              illustrationTheme="light"
-                              size="lg"
-                              title={noSearchResults ? "No data" : "No documents found"}
-                              subtitle={noSearchResults ? "Try adjusting your search." : "Start ingesting the document to get started"}
-                            />
-                          </TableCell>
+                          {headers.map((header) => {
+                            const { key, ...rest } = getHeaderProps({ header });
+                            return (
+                              <TableHeader key={key} {...rest}>
+                                {header.header}
+                              </TableHeader>
+                            );
+                          })}
                         </TableRow>
-                      ) : (
-                        rows.map((row) => {
-                          const { key: rowKey, ...rowProps } = getRowProps({ row });
-                          return (
-                            <TableRow key={rowKey} {...rowProps}>
-                              <TableSelectRow {...getSelectionProps({ row })} />
-                              {row.cells.map((cell) => (
-                                <TableCell key={cell.id}>{cell.value}</TableCell>
-                              ))}
-                            </TableRow>
-                          );
-                        })
-                      )}
-                    </TableBody>
-                  </Table>
-                  {rows.length > 0 && (
-                    <Pagination
-                      page={state.page}
-                      pageSize={state.pageSize}
-                      pageSizes={[10, 25, 50, 100]}
-                      totalItems={state.totalItems}
-                      onChange={({ page, pageSize }) => {
-                        dispatch({ type: 'SET_PAGE', payload: page });
-                        dispatch({ type: 'SET_PAGE_SIZE', payload: pageSize });
-                      }}
-                      itemsPerPageText="Items per page:"
-                    />
-                  )}
-                </TableContainer>
-              );
-            }}
-          </DataTable>
+                      </TableHead>
+                      <TableBody>
+                        {rows.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={headers.length} className={styles.emptyStateCell}>
+                              <NoDataEmptyState
+                                illustrationTheme="light"
+                                size="lg"
+                                title={noSearchResults ? "No data" : "No documents found"}
+                                subtitle={noSearchResults ? "Try adjusting your search." : "Start ingesting the document to get started"}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          rows.map((row) => {
+                            const { key: rowKey, ...rowProps } = getRowProps({ row });
+                            return (
+                              <TableRow key={rowKey} {...rowProps}>
+                                {row.cells.map((cell) => (
+                                  <TableCell key={cell.id}>{cell.value}</TableCell>
+                                ))}
+                              </TableRow>
+                            );
+                          })
+                        )}
+                      </TableBody>
+                    </Table>
+                    {rows.length > 0 && (
+                      <Pagination
+                        page={state.page}
+                        pageSize={state.pageSize}
+                        pageSizes={[10, 25, 50, 100]}
+                        totalItems={state.totalItems}
+                        onChange={({ page, pageSize }) => {
+                          dispatch({ type: 'SET_PAGE', payload: page });
+                          dispatch({ type: 'SET_PAGE_SIZE', payload: pageSize });
+                        }}
+                        itemsPerPageText="Items per page:"
+                      />
+                    )}
+                  </TableContainer>
+                );
+              }}
+            </DataTable>
+          )}
         </div>
 
       {/* Content Modal */}
@@ -545,14 +717,97 @@ const DocumentListPage = () => {
       <Modal
         open={state.showDeleteModal}
         danger
-        onRequestClose={() => dispatch({ type: 'CLOSE_DELETE_MODAL' })}
-        modalHeading="Delete Document"
+        size="sm"
+        modalLabel="Delete Document"
+        modalHeading="Confirm delete"
         primaryButtonText="Delete"
         secondaryButtonText="Cancel"
+        primaryButtonDisabled={!state.isConfirmed}
+        onRequestClose={() => dispatch({ type: 'CLOSE_DELETE_MODAL' })}
         onRequestSubmit={handleDeleteConfirm}
-        onSecondarySubmit={() => dispatch({ type: 'CLOSE_DELETE_MODAL' })}
       >
-        <p>Are you sure you want to delete this document? This action cannot be undone.</p>
+        <p>
+          Deleting a document permanently removes it from the system. This action cannot be undone.
+        </p>
+        <div>
+          <CheckboxGroup
+            legendText="Confirm document to be deleted"
+          >
+            <Checkbox
+              id="checkbox-delete-doc"
+              labelText={
+                <strong>
+                  {state.docToDelete
+                    ? state.documents.find((d) => d.id === state.docToDelete)?.name || 'Document'
+                    : ''}
+                </strong>
+              }
+              checked={state.isConfirmed}
+              onChange={(_, { checked }) =>
+                dispatch({
+                  type: 'SET_CONFIRMED',
+                  payload: checked,
+                })
+              }
+            />
+          </CheckboxGroup>
+        </div>
+      </Modal>
+
+      {/* Export CSV Modal */}
+      <Modal
+        open={state.isExportDialogOpen}
+        size="sm"
+        modalHeading="Export as CSV"
+        passiveModal={state.exportStatus !== 'idle'}
+        preventCloseOnClickOutside
+        {...(state.exportStatus === 'idle' && {
+          primaryButtonText: 'Export',
+          secondaryButtonText: 'Cancel',
+          onRequestSubmit: handleExportCSV,
+        })}
+        onRequestClose={() => dispatch({ type: 'CLOSE_EXPORT_DIALOG' })}
+      >
+        {state.exportStatus === 'idle' && (
+          <TextInput
+            id="csv-file-name"
+            labelText="File name"
+            value={state.csvFileName}
+            invalid={!!state.exportErrorMessage}
+            invalidText={state.exportErrorMessage}
+            onChange={(e) => {
+              dispatch({
+                type: 'SET_CSV_FILENAME',
+                payload: e.target.value,
+              });
+              dispatch({ type: 'CLEAR_EXPORT_ERROR' });
+            }}
+          />
+        )}
+
+        {state.exportStatus === 'exporting' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <InlineLoading status="active" description="Exporting..." />
+          </div>
+        )}
+
+        {state.exportStatus === 'success' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <InlineLoading
+              status="finished"
+              description="The file has been exported"
+            />
+          </div>
+        )}
+
+        {state.exportStatus === 'error' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <InlineLoading
+              status="error"
+              description={state.exportErrorMessage}
+            />
+          </div>
+        )}
       </Modal>
     </div>
     </Theme>

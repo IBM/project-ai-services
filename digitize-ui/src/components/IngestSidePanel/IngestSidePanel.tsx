@@ -86,7 +86,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
         },
         {
           kind: 'primary',
-          label: 'Ingest',
+          label: 'Submit',
           onClick: handleSubmit,
         },
       ]}
