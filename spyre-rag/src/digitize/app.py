@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
             logger.info(f"Found {orphan_count} orphan job(s) from previous app server run")
     except Exception as e:
         logger.error(f"Error during orphan job recovery: {e}", exc_info=True)
-    
+
     yield
 
     # Shutdown
@@ -60,16 +60,16 @@ async def lifespan(app: FastAPI):
 # OpenAPI tags metadata for endpoint organization
 tags_metadata = [
     {
-        "name": "health",
-        "description": "Health check and service status endpoints"
-    },
-    {
         "name": "documents",
-        "description": "Document management operations including upload, retrieval, and deletion"
+        "description": "Job tracking and management for document processing(Ingestion | Digitization) operations"
     },
     {
         "name": "jobs",
         "description": "Job tracking and management for document processing operations"
+    },
+    {
+        "name": "health",
+        "description": "Health check and service status endpoints"
     }
 ]
 
@@ -151,7 +151,7 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
     finally:
         # Always clean up staging directory, even on crashes
         dg_util.cleanup_staging_directory(job_id, config.STAGING_DIR)
-        
+
         # Mandatory Semaphore Release
         ingestion_semaphore.release()
         logger.debug(f"✅ Job {job_id} done. Semaphore released.")
@@ -191,8 +191,9 @@ async def validate_pdf_files(
 @app.post(
     "/v1/jobs",
     status_code=status.HTTP_202_ACCEPTED,
-    tags=["documents"],
-    summary="Upload and process documents",
+    response_model=types.JobCreatedResponse,
+    tags=["jobs"],
+    summary="Create async jobs to upload and process documents",
     description=(
         "Upload PDF documents for processing. Supports two operation types:\n\n"
         "- **ingestion**: Process and index documents into vector database for semantic search\n"

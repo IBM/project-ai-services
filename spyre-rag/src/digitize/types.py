@@ -39,6 +39,9 @@ class JobsListResponse(BaseModel):
     pagination: PaginationInfo
     data: List[dict]
 
+class JobCreatedResponse(BaseModel):
+    """Response model for job creation."""
+    job_id: str
 
 class DocumentListItem(BaseModel):
     """Minimal document information for list responses."""
