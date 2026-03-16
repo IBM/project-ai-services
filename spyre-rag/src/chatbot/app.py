@@ -16,8 +16,8 @@ from common.misc_utils import get_model_endpoints, set_log_level, set_request_id
 from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_non_stream, query_vllm_models
 from common.settings import get_settings
 from common.perf_utils import perf_registry
-from retrieve.backend_utils import search_only, validate_query_length
-from retrieve.response_utils import (
+from chatbot.backend_utils import search_only, validate_query_length
+from chatbot.response_utils import (
     ReferenceRequest,
     ReferenceResponse,
     ChatCompletionRequest,

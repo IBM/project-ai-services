@@ -1,8 +1,8 @@
 from common.misc_utils import get_logger
 from common.settings import get_settings
 from common.llm_utils import tokenize_with_llm
-from retrieve.reranker_utils import rerank_documents
-from retrieve.retrieval_utils import retrieve_documents
+from chatbot.reranker_utils import rerank_documents
+from chatbot.retrieval_utils import retrieve_documents
 import time
 
 logger = get_logger("backend_utils")

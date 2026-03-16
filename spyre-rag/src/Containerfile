@@ -4,6 +4,6 @@ WORKDIR /opt/rag
 
 COPY common common
 COPY digitize digitize
-COPY retrieve retrieve
+COPY chatbot chatbot
 COPY summarize summarize
 COPY settings.json .
