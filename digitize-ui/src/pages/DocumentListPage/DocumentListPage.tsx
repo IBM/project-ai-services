@@ -2,6 +2,7 @@ import { useReducer, useEffect } from 'react';
 import { NoDataEmptyState } from '@carbon/ibm-products';
 import {
   DataTable,
+  DataTableSkeleton,
   Table,
   TableHead,
   TableRow,
@@ -587,103 +588,112 @@ const DocumentListPage = () => {
 
         {/* Data Table with Enhanced Toolbar */}
         <div className={styles.tableWrapper}>
-          <DataTable rows={rows} headers={headers} size="lg">
-            {({
-              rows,
-              headers,
-              getHeaderProps,
-              getRowProps,
-              getTableProps,
-              getTableContainerProps,
-            }) => {
-              return (
-                <TableContainer
-                  {...getTableContainerProps()}
-                  className={styles.tableContainer}
-                >
-                  <TableToolbar>
-                    <TableToolbarContent>
-                      <TableToolbarSearch
-                        persistent
-                        placeholder="Search"
-                        onChange={(_e: any, value?: string) => dispatch({ type: 'SET_SEARCH', payload: value || '' })}
-                        value={state.search}
-                      />
-                      <Button
-                        kind="ghost"
-                        hasIconOnly
-                        renderIcon={Download}
-                        iconDescription="Download"
-                        tooltipPosition="bottom"
-                        onClick={() => dispatch({ type: 'OPEN_EXPORT_DIALOG' })}
-                      />
-                      <Button
-                        kind="ghost"
-                        hasIconOnly
-                        renderIcon={Renew}
-                        iconDescription="Refresh"
-                        onClick={fetchDocuments}
-                        disabled={state.loading}
-                        tooltipPosition="bottom"
-                      />
-                    </TableToolbarContent>
-                  </TableToolbar>
-                  <Table {...getTableProps()} className={styles.table}>
-                    <TableHead>
-                      <TableRow>
-                        {headers.map((header) => {
-                          const { key, ...rest } = getHeaderProps({ header });
-                          return (
-                            <TableHeader key={key} {...rest}>
-                              {header.header}
-                            </TableHeader>
-                          );
-                        })}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {rows.length === 0 ? (
+          {state.loading && state.documents.length === 0 ? (
+            <DataTableSkeleton
+              headers={headers}
+              aria-label="Loading documents"
+              showHeader={false}
+              showToolbar={false}
+            />
+          ) : (
+            <DataTable rows={rows} headers={headers} size="lg">
+              {({
+                rows,
+                headers,
+                getHeaderProps,
+                getRowProps,
+                getTableProps,
+                getTableContainerProps,
+              }) => {
+                return (
+                  <TableContainer
+                    {...getTableContainerProps()}
+                    className={styles.tableContainer}
+                  >
+                    <TableToolbar>
+                      <TableToolbarContent>
+                        <TableToolbarSearch
+                          persistent
+                          placeholder="Search"
+                          onChange={(_e: any, value?: string) => dispatch({ type: 'SET_SEARCH', payload: value || '' })}
+                          value={state.search}
+                        />
+                        <Button
+                          kind="ghost"
+                          hasIconOnly
+                          renderIcon={Download}
+                          iconDescription="Download"
+                          tooltipPosition="bottom"
+                          onClick={() => dispatch({ type: 'OPEN_EXPORT_DIALOG' })}
+                        />
+                        <Button
+                          kind="ghost"
+                          hasIconOnly
+                          renderIcon={Renew}
+                          iconDescription="Refresh"
+                          onClick={fetchDocuments}
+                          disabled={state.loading}
+                          tooltipPosition="bottom"
+                        />
+                      </TableToolbarContent>
+                    </TableToolbar>
+                    <Table {...getTableProps()} className={styles.table}>
+                      <TableHead>
                         <TableRow>
-                          <TableCell colSpan={headers.length} className={styles.emptyStateCell}>
-                            <NoDataEmptyState
-                              illustrationTheme="light"
-                              size="lg"
-                              title={noSearchResults ? "No data" : "No documents found"}
-                              subtitle={noSearchResults ? "Try adjusting your search." : "Start ingesting the document to get started"}
-                            />
-                          </TableCell>
+                          {headers.map((header) => {
+                            const { key, ...rest } = getHeaderProps({ header });
+                            return (
+                              <TableHeader key={key} {...rest}>
+                                {header.header}
+                              </TableHeader>
+                            );
+                          })}
                         </TableRow>
-                      ) : (
-                        rows.map((row) => {
-                          const { key: rowKey, ...rowProps } = getRowProps({ row });
-                          return (
-                            <TableRow key={rowKey} {...rowProps}>
-                              {row.cells.map((cell) => (
-                                <TableCell key={cell.id}>{cell.value}</TableCell>
-                              ))}
-                            </TableRow>
-                          );
-                        })
-                      )}
-                    </TableBody>
-                  </Table>
-                  {rows.length > 0 && (
-                    <Pagination
-                      page={state.page}
-                      pageSize={state.pageSize}
-                      pageSizes={[10, 25, 50, 100]}
-                      totalItems={state.totalItems}
-                      onChange={({ page, pageSize }) => {
-                        dispatch({ type: 'SET_PAGE', payload: page });
-                        dispatch({ type: 'SET_PAGE_SIZE', payload: pageSize });
-                      }}
-                      itemsPerPageText="Items per page:"
-                    />
-                  )}
-                </TableContainer>
-              );
-            }}
-          </DataTable>
+                      </TableHead>
+                      <TableBody>
+                        {rows.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={headers.length} className={styles.emptyStateCell}>
+                              <NoDataEmptyState
+                                illustrationTheme="light"
+                                size="lg"
+                                title={noSearchResults ? "No data" : "No documents found"}
+                                subtitle={noSearchResults ? "Try adjusting your search." : "Start ingesting the document to get started"}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          rows.map((row) => {
+                            const { key: rowKey, ...rowProps } = getRowProps({ row });
+                            return (
+                              <TableRow key={rowKey} {...rowProps}>
+                                {row.cells.map((cell) => (
+                                  <TableCell key={cell.id}>{cell.value}</TableCell>
+                                ))}
+                              </TableRow>
+                            );
+                          })
+                        )}
+                      </TableBody>
+                    </Table>
+                    {rows.length > 0 && (
+                      <Pagination
+                        page={state.page}
+                        pageSize={state.pageSize}
+                        pageSizes={[10, 25, 50, 100]}
+                        totalItems={state.totalItems}
+                        onChange={({ page, pageSize }) => {
+                          dispatch({ type: 'SET_PAGE', payload: page });
+                          dispatch({ type: 'SET_PAGE_SIZE', payload: pageSize });
+                        }}
+                        itemsPerPageText="Items per page:"
+                      />
+                    )}
+                  </TableContainer>
+                );
+              }}
+            </DataTable>
+          )}
         </div>
 
       {/* Content Modal */}
