@@ -270,10 +270,12 @@ const headers = [
 const getStatusIcon = (status: string) => {
   switch (status) {
     case 'chunked':
+    case 'completed':
       return <CheckmarkFilled size={16} className={styles.statusIconSuccess} />;
     case 'failed':
       return <ErrorFilled size={16} className={styles.statusIconError} />;
     case 'processing':
+    case 'in_progress':
       return <InProgress size={16} className={styles.statusIconProgress} />;
     default:
       return null;
