@@ -232,7 +232,8 @@ async function customSendMessage(request, _options, instance) {
     if (err.status === 429) {
       errorMessage = '⚠️ Server busy. Try again shortly.';
     } else if (err.status >= 500 && err.status < 600) {
-      errorMessage = '⚠️ Something went wrong on the server. Please try again later.';
+      errorMessage =
+        '⚠️ Something went wrong on the server. Please try again later.';
     } else if (err.message) {
       // Extract error message from exception
       errorMessage = `⚠️ ${err.message}`;
