@@ -204,8 +204,6 @@ async def validate_pdf_files(
 )
 async def digitize_document(
     background_tasks: BackgroundTasks,
-    files: List[UploadFile] = File(...),
-    operation: types.OperationType = Query(types.OperationType.INGESTION),
     files: List[UploadFile] = File(..., description="PDF files to process (multiple for ingestion, single for digitization)"),
     operation: types.OperationType = Query(
         types.OperationType.INGESTION,
