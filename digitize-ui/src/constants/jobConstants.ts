@@ -1,12 +1,14 @@
-// Job status constants
+// Job status constants (matching backend enum values)
 export const JOB_STATUS = {
+  ACCEPTED: 'accepted',
+  IN_PROGRESS: 'in_progress',
   COMPLETED: 'completed',
   FAILED: 'failed',
-  IN_PROGRESS: 'in_progress',
 } as const;
 
 // Display status constants
 export const DISPLAY_STATUS = {
+  ACCEPTED: 'Accepted',
   INGESTED: 'Ingested',
   DIGITIZED: 'Digitized',
   INGESTION_ERROR: 'Ingestion error',

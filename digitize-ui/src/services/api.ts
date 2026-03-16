@@ -66,6 +66,7 @@ export interface GetJobsParams {
   limit?: number;
   offset?: number;
   status?: string | null;
+  operation?: string | null;
 }
 
 export interface ListDocumentsParams {
@@ -87,7 +88,13 @@ export const uploadDocuments = async (
     formData.append('files', file);
   });
 
-  let url = `/documents?operation=${operation}&output_format=${outputFormat}`;
+  let url = `/jobs?operation=${operation}`;
+  
+  // Only include output_format for digitization operations
+  if (operation === 'digitization') {
+    url += `&output_format=${outputFormat}`;
+  }
+  
   if (jobName) {
     url += `&job_name=${encodeURIComponent(jobName)}`;
   }
@@ -106,7 +113,7 @@ export const uploadDocuments = async (
 
 // Job Management
 export const getAllJobs = async (params: GetJobsParams = {}): Promise<JobsResponse> => {
-  const { latest = false, limit = 20, offset = 0, status = null } = params;
+  const { latest = false, limit = 20, offset = 0, status = null, operation = null } = params;
   const queryParams = new URLSearchParams({
     latest: latest.toString(),
     limit: limit.toString(),
@@ -115,6 +122,9 @@ export const getAllJobs = async (params: GetJobsParams = {}): Promise<JobsRespon
   
   if (status) {
     queryParams.append('status', status);
+  }
+  if (operation) {
+    queryParams.append('operation', operation);
   }
 
   const response: AxiosResponse<JobsResponse> = await api.get(`/jobs?${queryParams}`);

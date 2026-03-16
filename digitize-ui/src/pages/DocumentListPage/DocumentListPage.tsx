@@ -331,13 +331,13 @@ const DocumentListPage = () => {
   };
 
   const getFileExtensionAndMimeType = (outputFormat: string) => {
-    // Backend supports: json, md, text
+    // Backend supports: json, md, txt
     switch (outputFormat.toLowerCase()) {
       case 'json':
         return { extension: 'json', mimeType: 'application/json' };
       case 'md':
         return { extension: 'md', mimeType: 'text/markdown' };
-      case 'text':
+      case 'txt':
         return { extension: 'txt', mimeType: 'text/plain' };
       default:
         return { extension: 'json', mimeType: 'application/json' };

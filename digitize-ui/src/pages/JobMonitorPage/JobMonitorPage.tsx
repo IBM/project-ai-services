@@ -276,7 +276,9 @@ const getStatusIcon = (status: string) => {
     case DISPLAY_STATUS.INGESTION_ERROR:
     case DISPLAY_STATUS.DIGITIZATION_ERROR:
       return <ErrorFilled size={16} className={styles.statusIconError} />;
+    case JOB_STATUS.ACCEPTED:
     case JOB_STATUS.IN_PROGRESS:
+    case DISPLAY_STATUS.ACCEPTED:
     case DISPLAY_STATUS.INGESTING:
     case DISPLAY_STATUS.DIGITIZING:
       return <InProgress size={16} className={styles.statusIconProgress} />;
@@ -454,6 +456,8 @@ const JobMonitorPage = () => {
       return job.operation === JOB_OPERATION.INGESTION ? DISPLAY_STATUS.INGESTION_ERROR : DISPLAY_STATUS.DIGITIZATION_ERROR;
     } else if (job.status === JOB_STATUS.IN_PROGRESS) {
       return job.operation === JOB_OPERATION.INGESTION ? DISPLAY_STATUS.INGESTING : DISPLAY_STATUS.DIGITIZING;
+    } else if (job.status === JOB_STATUS.ACCEPTED) {
+      return DISPLAY_STATUS.ACCEPTED;
     }
     return job.status;
   };
