@@ -36,6 +36,7 @@ class JobState(BaseModel):
     Persisted as <job_id>_status.json under JOBS_DIR.
     """
     job_id: str
+    job_name: Optional[str] = None
     operation: str
     status: JobStatus
     submitted_at: str

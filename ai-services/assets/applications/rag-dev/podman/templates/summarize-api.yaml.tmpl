@@ -7,7 +7,7 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
   annotations:
-    ai-services.io/ports: "{{ or .Values.summarize.port "6000" }}:6000"
+    ai-services.io/ports: "{{ or .Values.summarize.port }}:6000"
 spec:
   containers:
     - name: summarize-api
@@ -34,6 +34,11 @@ spec:
           value: "ibm-granite/granite-3.3-8b-instruct"
         - name: LOG_LEVEL
           value: "{{ .Values.summarize.log_level}}"
+      resources:
+        requests:
+          memory: "512Mi"
+        limits:
+          memory: "1Gi"
       ports:
         - containerPort: 6000
           protocol: TCP

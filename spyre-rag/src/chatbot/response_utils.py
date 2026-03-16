@@ -1,5 +1,5 @@
 """
-Utility models and functions for the retrieve API.
+Utility models and functions for the chatbot API.
 Contains all Pydantic models for request/response validation and Swagger documentation.
 """
 

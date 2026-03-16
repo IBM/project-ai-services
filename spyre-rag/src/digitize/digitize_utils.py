@@ -70,14 +70,16 @@ def get_all_document_ids(docs_dir: Path = DOCS_DIR) -> list[str]:
     return doc_ids
 
 
-def initialize_job_state(job_id: str, operation: str, output_format:OutputFormat, documents_info: list[str]) -> dict[str, str]:
+def initialize_job_state(job_id: str, operation: str, output_format:OutputFormat, documents_info: list[str], job_name: Optional[str] = None) -> dict[str, str]:
     """
     Creates the job status file and individual document metadata files.
 
     Args:
         job_id: Unique identifier for the job
         operation: Type of operation (e.g., 'ingestion', 'digitization')
+        output_format: Output format for the documents
         documents_info: List of filenames to be processed under this job
+        job_name: Optional human-readable name for the job
 
     Returns:
         dict[str, str]: Mapping of filename -> document_id
@@ -94,7 +96,7 @@ def initialize_job_state(job_id: str, operation: str, output_format:OutputFormat
         create_document_metadata(doc, doc_id, job_id, output_format, operation, submitted_at, DOCS_DIR)
 
     # Create and persist the job state file
-    create_job_state(job_id, operation, submitted_at, doc_id_dict, documents_info, JOBS_DIR)
+    create_job_state(job_id, operation, submitted_at, doc_id_dict, documents_info, JOBS_DIR, job_name)
 
     return doc_id_dict
 

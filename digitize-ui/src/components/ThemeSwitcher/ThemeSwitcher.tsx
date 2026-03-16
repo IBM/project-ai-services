@@ -52,6 +52,7 @@ const ThemeSwitcher = () => {
     <div className={styles.themeSwitcher} ref={dropdownRef}>
       <HeaderGlobalAction
         aria-label="Theme settings"
+        aria-expanded={isOpen}
         onClick={() => setIsOpen(!isOpen)}
         className={styles.themeButton}
       >
