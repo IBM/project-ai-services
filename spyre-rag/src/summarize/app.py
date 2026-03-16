@@ -279,7 +279,13 @@ async def summarize(request: Request):
                         raise SummarizeException(400, "PDF_EXTRACTION_ERROR",
                                                  "Failed to extract text from PDF file.")
                 else:
-                    content_text = raw.decode("utf-8", errors="replace")
+                    try:
+                        content_text = raw.decode("utf-8", errors="strict")
+                    except UnicodeDecodeError as e:
+                        logger.error(f"Failed to decode text file as UTF-8: {e}")
+                        raise SummarizeException(415, "UNSUPPORTED_CONTENT_TYPE",
+                                                 "File is not a valid UTF-8 text file. It may be a binary "
+                                                 "file with renamed extension.")
             else:
                 raise SummarizeException(400, "MISSING_INPUT",
                                          "Either 'text' or 'file' parameter is required")
