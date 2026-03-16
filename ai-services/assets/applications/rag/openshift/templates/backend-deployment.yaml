@@ -28,7 +28,7 @@ spec:
             - "/var/venv/bin/python"
             - "-m"
             - "uvicorn"
-            - "chatbot.app:app"
+            - "retrieve.app:app"
             - "--host"
             - "0.0.0.0"
             - "--port"
@@ -49,7 +49,7 @@ spec:
             - name: LLM_MODEL
               value: ibm-granite/granite-3.3-8b-instruct
             - name: RERANKER_ENDPOINT
-              value: http://reranker-predictor:8080
+              value: http://reranker-predictor:8000
             - name: RERANKER_MODEL
               value: BAAI/bge-reranker-v2-m3
             - name: OPENSEARCH_HOST

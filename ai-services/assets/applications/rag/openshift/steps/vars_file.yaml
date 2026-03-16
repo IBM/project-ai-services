@@ -1,0 +1,32 @@
+containers:
+  - name: "ui"
+    format: ".Status"
+    alias: UI_STATUS
+
+  - name: "server"
+    format: ".Status"
+    alias: BACKEND_STATUS
+
+  - name: "digitize-api"
+    format: ".Status"
+    alias: DIGITIZE_API_STATUS
+
+  - name: "digitize-ui"
+    format: ".Status"
+    alias: DIGITIZE_UI_STATUS
+
+  - name: "summarize-api"
+    format: ".Status"
+    alias: SUMMARIZE_API_STATUS
+
+hosts:
+  - fetch: UI_ROUTE
+    type: route
+  - fetch: BACKEND_ROUTE
+    type: route
+  - fetch: DIGITIZE_API_ROUTE
+    type: route
+  - fetch: DIGITIZE_UI_ROUTE
+    type: route
+  - fetch: SUMMARIZE_API_ROUTE
+    type: route

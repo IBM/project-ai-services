@@ -6,7 +6,8 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
-	corev1 "k8s.io/api/core/v1"
+	authv1 "k8s.io/api/authorization/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type KubeconfigRule struct{}
@@ -32,9 +33,31 @@ func (r *KubeconfigRule) Verify() error {
 		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
 
-	// listing namespaces to validate cluster access.
-	if err := client.Client.List(ctx, &corev1.NamespaceList{}); err != nil {
-		return fmt.Errorf("failed to connect to cluster: %w", err)
+	// Check if the current user has permission to create namespaces
+	sar := &authv1.SelfSubjectAccessReview{
+		Spec: authv1.SelfSubjectAccessReviewSpec{
+			ResourceAttributes: &authv1.ResourceAttributes{
+				Verb:     "create",
+				Group:    "",
+				Resource: "namespaces",
+			},
+		},
+	}
+
+	result, err := client.KubeClient.AuthorizationV1().
+		SelfSubjectAccessReviews().
+		Create(ctx, sar, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to check namespace creation permissions: %w", err)
+	}
+
+	if !result.Status.Allowed {
+		reason := "insufficient permissions"
+		if result.Status.Reason != "" {
+			reason = result.Status.Reason
+		}
+
+		return fmt.Errorf("user does not have permission to create namespaces: %s", reason)
 	}
 
 	return nil

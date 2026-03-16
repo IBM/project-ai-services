@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: "backend"
+  name: "digitize-api"
   labels:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
@@ -11,28 +11,28 @@ spec:
   selector:
     matchLabels:
       ai-services.io/application: {{ .Release.Name }}
-      ai-services.io/component: backend
+      ai-services.io/component: digitize-api
   template:
     metadata:
       labels:
         ai-services.io/application: {{ .Release.Name }}
         ai-services.io/template: {{ .Chart.Name }}
-        ai-services.io/component: backend
+        ai-services.io/component: digitize-api
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
       automountServiceAccountToken: false
       containers:
-        - name: server
-          image: "{{ .Values.backend.image }}"
+        - name: digitize-api
+          image: "{{ .Values.digitize.image }}"
           command:
             - "/var/venv/bin/python"
             - "-m"
             - "uvicorn"
-            - "chatbot.app:app"
+            - "digitize.app:app"
             - "--host"
             - "0.0.0.0"
             - "--port"
-            - "5000"
+            - "4000"
             - "--loop"
             - "uvloop"
             - "--http"
@@ -48,10 +48,6 @@ spec:
               value: http://instruct-predictor:8000
             - name: LLM_MODEL
               value: ibm-granite/granite-3.3-8b-instruct
-            - name: RERANKER_ENDPOINT
-              value: http://reranker-predictor:8080
-            - name: RERANKER_MODEL
-              value: BAAI/bge-reranker-v2-m3
             - name: OPENSEARCH_HOST
               value: "opensearch"
             - name: OPENSEARCH_PORT
@@ -71,14 +67,14 @@ spec:
                   name: "opensearch-credentials"
                   key: password
             - name: LOG_LEVEL
-              value: "{{ .Values.backend.log_level }}"
+              value: "{{ .Values.digitize.log_level }}"
           ports:
-            - containerPort: 5000
+            - containerPort: 4000
               protocol: TCP
           livenessProbe:
             httpGet:
               path: /health
-              port: 5000
+              port: 4000
             initialDelaySeconds: 10
             periodSeconds: 30
             timeoutSeconds: 5
@@ -86,15 +82,22 @@ spec:
           readinessProbe:
             httpGet:
               path: /health
-              port: 5000
+              port: 4000
             initialDelaySeconds: 10
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
           resources:
             requests:
-              cpu: "1"
-              memory: "1Gi"
+              cpu: "8"
+              memory: "50Gi"
             limits:
-              cpu: "1"
-              memory: "1Gi"
+              cpu: "12"
+              memory: "50Gi"
+          volumeMounts:
+            - mountPath: /var/cache
+              name: cache
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: cache
