@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -12,6 +13,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -296,7 +298,12 @@ func waitForSpyreClusterPolicy(client *openshift.OpenshiftClient) error {
 func waitForRHODSResource(client *openshift.OpenshiftClient, kind string) error {
 	return wait.PollUntilContextTimeout(client.Ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
 		// Get the existing resource from the cluster
-		resource, exists, err := getExistingRHODSResource(client, kind)
+		gvk := schema.GroupVersionKind{
+			Group:   strings.ToLower(kind) + ".opendatahub.io",
+			Version: constants.VersionV2,
+			Kind:    kind,
+		}
+		resource, exists, err := utils.GetExistingCustomResource(client, gvk)
 		if err != nil {
 			return false, fmt.Errorf("failed to get %s: %w", kind, err)
 		}

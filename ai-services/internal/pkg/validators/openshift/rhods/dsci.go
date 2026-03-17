@@ -11,11 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-const (
-	dsciVersion = "v2"
-	dsciKind    = "DSCInitialization"
-)
-
 type DSCInitialization struct{}
 
 func NewDSCInitializationRule() *DSCInitialization {
@@ -37,9 +32,9 @@ func (r *DSCInitialization) Verify() error {
 		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
 	gvk := schema.GroupVersionKind{
-		Group:   strings.ToLower(dsciKind) + ".opendatahub.io",
-		Version: dsciVersion,
-		Kind:    dsciKind,
+		Group:   strings.ToLower(constants.DSCIKind) + ".opendatahub.io",
+		Version: constants.VersionV2,
+		Kind:    constants.DSCIKind,
 	}
 
 	obj, exists, err := utils.GetExistingCustomResource(client, gvk)

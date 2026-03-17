@@ -306,21 +306,21 @@ func checkParamsInValues(param string, values map[string]any) bool {
 }
 
 // GetExistingCustomResource checks if a single instance resource exists and return the object.
-func GetExistingCustomResource(client *openshift.OpenshiftClient, gvk schema.GroupVersionKind) (unstructured.Unstructured, bool, error) {
+func GetExistingCustomResource(client *openshift.OpenshiftClient, gvk schema.GroupVersionKind) (*unstructured.Unstructured, bool, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(gvk)
 
 	if err := client.Client.List(client.Ctx, list); err != nil {
 		if apierrors.IsNotFound(err) {
-			return unstructured.Unstructured{}, false, nil
+			return nil, false, nil
 		}
 
-		return unstructured.Unstructured{}, false, fmt.Errorf("error listing %s: %w", gvk.Kind, err)
+		return nil, false, fmt.Errorf("error listing %s: %w", gvk.Kind, err)
 	}
 
 	if len(list.Items) == 0 {
-		return unstructured.Unstructured{}, false, nil
+		return nil, false, nil
 	}
 
-	return list.Items[0], true, nil
+	return &list.Items[0], true, nil
 }

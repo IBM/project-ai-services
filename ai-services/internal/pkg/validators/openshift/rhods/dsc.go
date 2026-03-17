@@ -12,8 +12,7 @@ import (
 )
 
 const (
-	dscVersion = "v2"
-	dscKind    = "DataScienceCluster"
+	dscKind = "DataScienceCluster"
 )
 
 type DataScienceCluster struct{}
@@ -38,8 +37,8 @@ func (r *DataScienceCluster) Verify() error {
 	}
 	gvk := schema.GroupVersionKind{
 		Group:   strings.ToLower(dscKind) + ".opendatahub.io",
-		Version: dscVersion,
-		Kind:    dscKind,
+		Version: constants.VersionV2,
+		Kind:    constants.DSCKind,
 	}
 
 	obj, exists, err := utils.GetExistingCustomResource(client, gvk)

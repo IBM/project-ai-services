@@ -9,6 +9,9 @@ const (
 	ApplicationsPath     = "/var/lib/ai-services/applications"
 	OperatorPollInterval = 5 * time.Second
 	OperatorPollTimeout  = 2 * time.Minute
+	VersionV2            = "v2"
+	DSCKind              = "DataScienceCluster"
+	DSCIKind             = "DSCInitialization"
 )
 
 // OperatorConfig defines configuration for an operator.

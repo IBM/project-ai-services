@@ -12,6 +12,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -277,7 +278,12 @@ func shouldSkipOrUpdateRHODSResource(c *openshift.OpenshiftClient, object *unstr
 	kind := object.GetKind()
 
 	// Check if resource already exists
-	existingResource, exists, err := getExistingRHODSResource(c, kind)
+	gvk := schema.GroupVersionKind{
+		Group:   strings.ToLower(kind) + ".opendatahub.io",
+		Version: constants.VersionV2,
+		Kind:    kind,
+	}
+	existingResource, exists, err := utils.GetExistingCustomResource(c, gvk)
 	if err != nil {
 		logger.Infof("Error checking for existing %s: %v", kind, err, logger.VerbosityLevelDebug)
 
@@ -306,28 +312,4 @@ func shouldSkipOrUpdateRHODSResource(c *openshift.OpenshiftClient, object *unstr
 	object.SetName(existingName)
 
 	return false
-}
-
-// getExistingRHODSResource checks if a single instance RHODS resource exists and returns the resource object.
-func getExistingRHODSResource(c *openshift.OpenshiftClient, kind string) (*unstructured.Unstructured, bool, error) {
-	list := &unstructured.UnstructuredList{}
-	list.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   strings.ToLower(kind) + ".opendatahub.io",
-		Version: "v2",
-		Kind:    kind,
-	})
-
-	if err := c.Client.List(c.Ctx, list); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, false, nil
-		}
-
-		return nil, false, fmt.Errorf("error listing %s: %w", kind, err)
-	}
-
-	if len(list.Items) == 0 {
-		return nil, false, nil
-	}
-
-	return &list.Items[0], true, nil
 }
