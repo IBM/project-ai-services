@@ -38,6 +38,15 @@ logger = get_logger("Ingest")
 
 def main():
     if command_args.command == "ingest":
+        # Check for active ingestion jobs before proceeding (cross-process coordination)
+        has_active, active_job_id = has_active_ingestion_job()
+        if has_active:
+            error_msg = "Cannot start ingestion: An ingestion job is already running"
+            if active_job_id:
+                error_msg += f" (job_id: {active_job_id})"
+            logger.error(error_msg)
+            return
+        
         job_id = generate_uuid()
         base_path = Path(command_args.path)
 
