@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 from common.lang_utils import prompt_map
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, get_llm_session
 from common.settings import get_settings
 
 logger = get_logger("LLM")
@@ -23,31 +23,8 @@ def tqdm_wrapper(iterable, **kwargs):
     
 settings = get_settings()
 
-SESSION = None
-
-def create_llm_session(pool_maxsize, pool_connections: int = 2, pool_block: bool = True):
-    global SESSION
-
-    # SESSION object will be used by instruct and embedding endpoints. Hence keeping pool_connections = 2
-    # Need to use SESSION object for following reasons:
-    # - To limit the number of concurrent requests getting created to instruct vLLM's API to 32
-    # - To fix the ephemeral port exhaustion issue during chunking, since numerous tokenize calls are made to embedding server
-    if SESSION is None:
-        adapter = HTTPAdapter(
-            pool_connections=pool_connections,
-            pool_maxsize=pool_maxsize,
-            pool_block=pool_block
-        )
-
-        session = requests.Session()
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-
-        SESSION = session
-
 def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
-    if SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+    session = get_llm_session()
     
     payload = {
         "model": gen_model,
@@ -58,7 +35,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
     }
 
     try:
-        response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
+        response = session.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
         response.raise_for_status()
         data = response.json() or {}
         choices = data.get("choices", [])
@@ -111,12 +88,11 @@ def summarize_and_classify_tables(table_htmls, gen_model, llm_endpoint, pdf_path
     return summaries, decisions
 
 def query_vllm_models(llm_endpoint):
-    if SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+    session = get_llm_session()
 
     logger.debug('Querying VLLM models')
     try:
-        response = SESSION.get(f"{llm_endpoint}/v1/models")
+        response = session.get(f"{llm_endpoint}/v1/models")
         response.raise_for_status()
         resp_json = response.json()
     except requests.exceptions.RequestException as e:
@@ -166,14 +142,13 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     return headers, payload
 
 def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang):
-    if SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+    session = get_llm_session()
     
     headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False, lang )
     try:
         # Use requests for synchronous HTTP requests
         start_time = time.time()
-        response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=False)
+        response = session.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=False)
         request_time = time.time() - start_time
         perf_stat_dict["inference_time"] = request_time
         response.raise_for_status()
@@ -193,8 +168,7 @@ def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_wor
     return response_json
 
 def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang):
-    if SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+    session = get_llm_session()
 
     headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens,
                                           temperature, True, lang)
@@ -205,7 +179,7 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
         start_time = time.time()
         last_token_time = start_time
         
-        with SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=True) as r:
+        with session.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=True) as r:
             for raw_line in r.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
@@ -258,8 +232,7 @@ def query_vllm_summarize(
     max_tokens: int,
     temperature: float,
 ):
-    if SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+    session = get_llm_session()
     
     headers = {
         "accept": "application/json",
@@ -276,7 +249,7 @@ def query_vllm_summarize(
         payload["stop"] = stop_words
 
     try:
-        response = SESSION.post(
+        response = session.post(
             f"{llm_endpoint}/v1/chat/completions",
             json=payload,
             headers=headers,
@@ -312,8 +285,7 @@ def query_vllm_summarize_stream(
     temperature: float,
 ):
     """Stream a summarization request to vLLM, yielding raw SSE lines."""
-    if SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+    session = get_llm_session()
     
     headers = {
         "accept": "application/json",
@@ -332,7 +304,7 @@ def query_vllm_summarize_stream(
 
     try:
         logger.debug("STREAMING SUMMARIZE RESPONSE")
-        with SESSION.post(
+        with session.post(
             f"{llm_endpoint}/v1/chat/completions",
             json=payload,
             headers=headers,
@@ -356,14 +328,13 @@ def query_vllm_summarize_stream(
         yield "data: [DONE]\n\n"
 
 def tokenize_with_llm(prompt, emb_endpoint):
-    if SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+    session = get_llm_session()
     
     payload = {
         "prompt": prompt
     }
     try:
-        response = SESSION.post(f"{emb_endpoint}/tokenize", json=payload)
+        response = session.post(f"{emb_endpoint}/tokenize", json=payload)
         response.raise_for_status()
         result = response.json()
         tokens = result.get("tokens", [])
@@ -379,14 +350,13 @@ def tokenize_with_llm(prompt, emb_endpoint):
         raise e
 
 def detokenize_with_llm(tokens, emb_endpoint):
-    if SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+    session = get_llm_session()
     
     payload = {
         "tokens": tokens
     }
     try:
-        response = SESSION.post(f"{emb_endpoint}/detokenize", json=payload)
+        response = session.post(f"{emb_endpoint}/detokenize", json=payload)
         response.raise_for_status()
         result = response.json()
         prompt = result.get("prompt", "")

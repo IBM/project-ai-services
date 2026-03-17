@@ -12,8 +12,8 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
-from common.llm_utils import create_llm_session, query_vllm_summarize, query_vllm_summarize_stream
-from common.misc_utils import get_model_endpoints
+from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream
+from common.misc_utils import get_model_endpoints, create_llm_session
 from common.settings import get_settings
 from common.misc_utils import set_log_level, get_logger, set_request_id
 from summarize.summ_utils import (

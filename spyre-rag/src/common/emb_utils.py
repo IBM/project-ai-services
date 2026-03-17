@@ -1,11 +1,7 @@
 import json
 import requests
 import numpy as np
-from common.misc_utils import get_logger
-
-logger = get_logger("embed")
-
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, get_llm_session
 
 logger = get_logger("Embedding")
 
@@ -24,6 +20,7 @@ class Embedding:
         return self._post_embedding([text])[0]
 
     def _post_embedding(self, texts):
+        session = get_llm_session()
         try:
             payload = {
                 "input": texts,
@@ -34,9 +31,9 @@ class Embedding:
                 "accept": "application/json",
                 "Content-type": "application/json"
             }
-            response = requests.post(
+            response = session.post(
                 f"{self.emb_endpoint}/v1/embeddings",
-                data=json.dumps(payload),
+                json=payload,
                 headers=headers
             )
             response.raise_for_status()

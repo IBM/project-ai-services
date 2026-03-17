@@ -1,11 +1,58 @@
 import hashlib
 import logging
 import os
+import requests
 from contextvars import ContextVar
+from requests.adapters import HTTPAdapter
 from digitize.config import DIGITIZED_DOCS_DIR
 
 # ContextVar to store the request ID for each request
 request_id_ctx = ContextVar("request_id", default="-")
+
+# Global LLM session for connection pooling
+# Used by both LLM and embedding endpoints to limit concurrent connections
+LLM_SESSION = None
+
+
+def create_llm_session(pool_maxsize, pool_connections: int = 2, pool_block: bool = True):
+    """
+    Create a shared HTTP session with connection pooling for LLM and embedding endpoints.
+    
+    This session is used by both llm_utils and emb_utils to:
+    - Limit concurrent requests to LLM/embedding servers
+    - Prevent ephemeral port exhaustion during heavy tokenization
+    - Reuse connections for better performance
+    
+    Args:
+        pool_maxsize: Maximum number of connections in the pool
+        pool_connections: Number of connection pools (default: 2 for LLM + embedding)
+        pool_block: Whether to block when pool is full (default: True)
+    """
+    global LLM_SESSION
+    
+    # SESSION object will be used by instruct and embedding endpoints. Hence keeping pool_connections = 2
+    # Need to use SESSION object for following reasons:
+    # - To limit the number of concurrent requests getting created to instruct vLLM's API
+    # - To fix the ephemeral port exhaustion issue during chunking, since numerous tokenize calls are made to embedding server
+    if LLM_SESSION is None:
+        adapter = HTTPAdapter(
+            pool_connections=pool_connections,
+            pool_maxsize=pool_maxsize,
+            pool_block=pool_block
+        )
+        
+        session = requests.Session()
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        
+        LLM_SESSION = session
+
+
+def get_llm_session():
+    """Get the global LLM session. Raises error if not initialized."""
+    if LLM_SESSION is None:
+        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+    return LLM_SESSION
 
 class RequestIDFilter(logging.Filter):
     #Filter to inject request_id from ContextVar into log records.

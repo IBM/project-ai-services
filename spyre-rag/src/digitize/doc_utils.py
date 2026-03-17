@@ -13,8 +13,8 @@ from docling_core.types.doc.document import DoclingDocument
 from concurrent.futures import as_completed, ProcessPoolExecutor, ThreadPoolExecutor
 from sentence_splitter import SentenceSplitter
 
-from common.llm_utils import create_llm_session, summarize_and_classify_tables, tokenize_with_llm
-from common.misc_utils import get_logger, text_suffix, table_suffix, chunk_suffix
+from common.llm_utils import summarize_and_classify_tables, tokenize_with_llm
+from common.misc_utils import get_logger, text_suffix, table_suffix, chunk_suffix, create_llm_session
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.status import StatusManager
 from digitize.types import DocStatus, JobStatus, OutputFormat
