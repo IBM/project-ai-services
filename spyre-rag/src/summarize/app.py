@@ -289,16 +289,15 @@ async def summarize(request: Request):
                         logger.debug(f"PDF extraction took {(time.time() - start) * 1000:.0f}ms")
                     except Exception as e:
                         logger.error(f"PDF extraction failed: {e}")
-                        raise SummarizeException(400, "PDF_EXTRACTION_ERROR",
-                                                 "Failed to extract text from PDF file.")
+                        raise SummarizeException(415, "UNSUPPORTED_CONTENT_TYPE",
+                                                 "File is not a valid txt/pdf file.")
                 else:
                     try:
                         content_text = raw.decode("utf-8", errors="strict")
                     except UnicodeDecodeError as e:
                         logger.error(f"Failed to decode text file as UTF-8: {e}")
                         raise SummarizeException(415, "UNSUPPORTED_CONTENT_TYPE",
-                                                 "File is not a valid UTF-8 text file. It may be a binary "
-                                                 "file with renamed extension.")
+                                                 "File is not a valid txt/pdf file.")
             else:
                 raise SummarizeException(400, "MISSING_INPUT",
                                          "Either 'text' or 'file' parameter is required")
