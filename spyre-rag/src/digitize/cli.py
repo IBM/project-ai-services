@@ -39,11 +39,11 @@ logger = get_logger("Ingest")
 def main():
     if command_args.command == "ingest":
         # Check for active ingestion jobs before proceeding (cross-process coordination)
-        has_active, active_job_id = has_active_ingestion_job()
+        has_active, active_job_ids = has_active_jobs(operation=OperationType.INGESTION.value)
         if has_active:
             error_msg = "Cannot start ingestion: An ingestion job is already running"
-            if active_job_id:
-                error_msg += f" (job_id: {active_job_id})"
+            if active_job_ids:
+                error_msg += f" (job_id: {active_job_ids[0]})"
             logger.error(error_msg)
             return
         

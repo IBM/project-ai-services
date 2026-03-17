@@ -522,17 +522,20 @@ def delete_document_files(doc_id: str, output_format: str, docs_dir: Path = DOCS
     logger.info(f"✅ Deleted {len(files_deleted)} files for document {doc_id}")
 
 
-def has_active_jobs(jobs_dir: Path = JOBS_DIR) -> tuple[bool, list[str]]:
+def has_active_jobs(operation: Optional[str] = None, jobs_dir: Path = JOBS_DIR) -> tuple[bool, list[str]]:
     """
     Check if there are any active jobs (accepted or in_progress status).
+    Optionally filter by operation type.
 
     Args:
+        operation: Optional operation type to filter by (e.g., 'ingestion', 'digitization')
         jobs_dir: Directory containing job status files
 
     Returns:
         Tuple of (has_active, active_job_ids) where has_active is True if any active jobs exist
     """
-    logger.debug("Checking for active jobs")
+    filter_msg = f" for operation '{operation}'" if operation else ""
+    logger.debug(f"Checking for active jobs{filter_msg}")
 
     if not jobs_dir.exists():
         logger.debug(f"Jobs directory {jobs_dir} does not exist")
@@ -546,6 +549,12 @@ def has_active_jobs(jobs_dir: Path = JOBS_DIR) -> tuple[bool, list[str]]:
             with open(job_file, "r") as f:
                 job_data = json.load(f)
 
+            # Filter by operation if specified
+            if operation:
+                job_operation = job_data.get("operation", "").lower()
+                if job_operation != operation.lower():
+                    continue
+
             job_status = job_data.get("status", "").lower()
             if job_status in [JobStatus.ACCEPTED.value, JobStatus.IN_PROGRESS.value]:
                 job_id = job_data.get("job_id", job_file.stem.replace("_status", ""))
@@ -558,65 +567,11 @@ def has_active_jobs(jobs_dir: Path = JOBS_DIR) -> tuple[bool, list[str]]:
 
     has_active = len(active_job_ids) > 0
     if has_active:
-        logger.info(f"Found {len(active_job_ids)} active job(s): {active_job_ids}")
+        logger.info(f"Found {len(active_job_ids)} active job(s){filter_msg}: {active_job_ids}")
     else:
-        logger.debug("No active jobs found")
+        logger.debug(f"No active jobs found{filter_msg}")
 
     return has_active, active_job_ids
-
-def has_active_ingestion_job(jobs_dir: Path = JOBS_DIR) -> tuple[bool, Optional[str]]:
-    """
-    Check if there's any active ingestion job (accepted or in_progress status).
-    
-    This function scans all job status files to find ingestion jobs that are
-    currently being processed. It's used to ensure only one ingestion job runs
-    at a time across both CLI and API services.
-    
-    Args:
-        jobs_dir: Directory containing job status files
-        
-    Returns:
-        Tuple of (has_active_job, job_id_if_active) where:
-        - has_active_job: True if an active ingestion job exists
-        - job_id_if_active: The job_id of the active ingestion job, or None
-    """
-    logger.debug("Checking for active ingestion jobs")
-    
-    if not jobs_dir.exists():
-        logger.debug(f"Jobs directory {jobs_dir} does not exist")
-        return False, None
-    
-    try:
-        for job_file in jobs_dir.glob("*_status.json"):
-            try:
-                with open(job_file, "r") as f:
-                    job_data = json.load(f)
-                
-                # Check if it's an ingestion job
-                operation = job_data.get("operation", "").lower()
-                if operation != "ingestion":
-                    continue
-                
-                # Check if status is ACCEPTED or IN_PROGRESS
-                status = job_data.get("status", "").lower()
-                if status in [JobStatus.ACCEPTED.value, JobStatus.IN_PROGRESS.value]:
-                    job_id = job_data.get("job_id", job_file.stem.replace("_status", ""))
-                    logger.info(f"Found active ingestion job: {job_id} with status: {status}")
-                    return True, job_id
-                    
-            except (json.JSONDecodeError, IOError) as e:
-                logger.warning(f"Failed to read job file {job_file.name}: {e}")
-                continue
-        
-        logger.debug("No active ingestion jobs found")
-        return False, None
-        
-    except Exception as e:
-        logger.error(f"Error checking for active ingestion jobs: {e}")
-        # Fail-safe: assume there might be an active job to prevent race conditions
-        return True, None
-
-
 
 def cleanup_digitized_files() -> dict:
     """
