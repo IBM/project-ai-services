@@ -16,7 +16,7 @@ from sentence_splitter import SentenceSplitter
 from common.llm_utils import create_llm_session, summarize_and_classify_tables, tokenize_with_llm
 from common.misc_utils import get_logger, text_suffix, table_suffix, chunk_suffix
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
-from digitize.status import StatusManager
+from digitize.status import StatusManager, get_utc_timestamp
 from digitize.types import DocStatus, JobStatus, OutputFormat
 import digitize.config as config
 
@@ -230,10 +230,13 @@ def clean_intermediate_files(doc_id, out_path):
             except Exception as e:
                 logger.warning(f"Failed to clean up {file_path}: {e}")
 
-def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoint, max_tokens, job_id, doc_id_dict):
+def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoint, max_tokens, job_id, doc_id_dict, index_callback=None):
     """
     Process documents for ingestion pipeline.
     Each request is treated as fresh.
+
+    Args:
+        index_callback: Optional callback function(doc_id, doc_chunks) called when a document is ready for indexing
     """
     # Partition files into light and heavy based on page count
     light_files, heavy_files = [], []
@@ -248,11 +251,9 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
     def _run_batch(batch_paths, convert_worker, max_worker, doc_id_dict):
         batch_stats = {}
-        batch_chunk_paths = []
-        batch_table_paths = []
 
         if not batch_paths:
-            return batch_stats, batch_chunk_paths, batch_table_paths
+            return batch_stats
 
         with ProcessPoolExecutor(max_workers=convert_worker) as converter_executor, \
              ThreadPoolExecutor(max_workers=max_worker) as processor_executor, \
@@ -335,8 +336,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         "table_count": tabs
                     })
                     batch_stats[path]["timings"]["processing"] = round(float(total_processing_time or 0), 2)
-                    batch_table_paths.append(tab_json)
-                   
+
                     if doc_id is not None:
                         logger.debug(f"Processing Done: updating doc & job metadata for document: {doc_id}")
                         status_mgr.update_doc_metadata(doc_id, {
@@ -379,7 +379,6 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         continue
 
                     batch_stats[path]["timings"]["chunking"] = round(float(chunk_time or 0), 2)
-                    batch_chunk_paths.append(chunk_json)
                     # Capture chunk counts in real time and update <doc_id>_metadata.json
                     chunk_count = count_chunks(chunk_json, tab_json)
                     batch_stats[path]["chunk_count"] = chunk_count
@@ -392,6 +391,23 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                             "timing_in_secs": {**batch_stats[path]["timings"]}
                         })
                         status_mgr.update_job_progress(doc_id, DocStatus.CHUNKED, JobStatus.IN_PROGRESS)
+
+                        # Invoke callback for parallel indexing if provided
+                        if index_callback:
+                            try:
+                                # Create chunk documents for this single file
+                                doc_chunks = create_chunk_documents(chunk_json, tab_json, path)
+                                # Inject the doc_id into every chunk
+                                for chunk in doc_chunks:
+                                    chunk["doc_id"] = doc_id
+                                
+                                # Call the indexing callback (non-blocking)
+                                index_callback(doc_id, doc_chunks)
+                                logger.debug(f"Document {doc_id} submitted for indexing")
+                            except Exception as callback_error:
+                                logger.error(f"Error preparing document {doc_id} for indexing: {str(callback_error)}", exc_info=True)
+                                status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Failed to prepare document for indexing: {str(callback_error)}")
+                                status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS, error=f"Failed to prepare document for indexing: {str(callback_error)}")
                 except Exception as e:
                     if doc_id is not None:
                         logger.error(f"Error from chunking for {path}: {str(e)}", exc_info=True)
@@ -399,75 +415,38 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"failed to chunk document: {str(e)}")
                     batch_stats.pop(path, {})
 
-        return batch_stats, batch_chunk_paths, batch_table_paths
+        return batch_stats
 
     # Trigger the batches
     try:
         # Process Light Batch
         l_worker = min(WORKER_SIZE, len(light_files)) if light_files else 0
-        l_stats, l_chunks_json, l_tabs_json = _run_batch(
+        l_stats = _run_batch(
             light_files, convert_worker=l_worker, max_worker=l_worker, doc_id_dict=doc_id_dict
         )
 
         # Process Heavy Batch
         h_worker = min(WORKER_SIZE, len(heavy_files)) if heavy_files else 0
         h_conv_worker = min(HEAVY_PDF_CONVERT_WORKER_SIZE, len(heavy_files)) if heavy_files else 0
-        h_stats, h_chunks_json, h_tabs_json = _run_batch(
+        h_stats = _run_batch(
             heavy_files, convert_worker=h_conv_worker, max_worker=h_worker, doc_id_dict=doc_id_dict
         )
 
         # Combine statistics for the final return
         converted_pdf_stats = {**l_stats, **h_stats}
-        all_chunk_json_paths = l_chunks_json + h_chunks_json
-        all_table_json_paths = l_tabs_json + h_tabs_json
 
-        chunk_filenames = {p.name for p in all_chunk_json_paths}
-        table_filenames = {p.name for p in all_table_json_paths}
-
-        combined_chunks = []
-        # Final assembly: create_chunk_documents merges text/table outputs
-        succeeded_files = converted_pdf_stats.keys()
-
-        for path in succeeded_files:
+        # Clean up intermediate files for all successfully processed documents
+        logger.info("Cleaning up intermediate files for all processed documents")
+        for path in converted_pdf_stats.keys():
             doc_id = doc_id_dict.get(Path(path).name)
-            if not doc_id:
-                logger.error(f"No document id found for file: {Path(path).name}.pdf")
-                continue
-
-            c_json = f"{doc_id}{chunk_suffix}"
-            t_json = f"{doc_id}{table_suffix}"
-            c_path = Path(out_path) / f"{c_json}"
-            t_path = Path(out_path) / f"{t_json}"
-
-            # Verify the file was actually processed in the batch
-            if c_json in chunk_filenames and t_json in table_filenames:
-                # Re-invoke assembly if not already done in _run_batch
-                # or use the combined_docs gathered during the batchs
-                doc_chunks = create_chunk_documents(c_path, t_path, path)
-                # Inject the doc_id into every chunk so insert_chunks can find it
-                for chunk in doc_chunks:
-                    chunk["doc_id"] = doc_id
-                combined_chunks.extend(doc_chunks)
-
-                logger.debug(f"Assembling chunks: updating doc metadata for document: {doc_id}")
-                # Final Status "Seal" for the document
-                status_mgr.update_doc_metadata(doc_id, {
-                    "status": DocStatus.CHUNKED,
-                    "chunks": len(doc_chunks)
-                })
-
-                # Clean up intermediate files after successful processing
-                # Preserve <doc_id>.json for GET requests, clean up other intermediate files
+            if doc_id:
                 try:
                     clean_intermediate_files(doc_id, out_path)
-                    # Keep <doc_id>.json persisted for GET requests
-                    logger.debug(f"Preserved {doc_id}.json for future GET requests")
+                    logger.debug(f"Cleaned up intermediate files for {doc_id}, preserved {doc_id}.json")
                 except Exception as cleanup_error:
                     logger.warning(f"Error cleaning up intermediate files for {doc_id}: {cleanup_error}")
-            else:
-                logger.warning(f"Path mismatch for {path}: expected outputs not found in batch results.")
 
-        return combined_chunks, converted_pdf_stats
+        return converted_pdf_stats
 
     except Exception as e:
         logger.error(f"Error while processing the documents in job {job_id}: {e}", exc_info=True)
@@ -483,7 +462,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
         except Exception as cleanup_error:
             logger.warning(f"Error during cleanup of failed job {job_id}: {cleanup_error}")
 
-        return [], {}
+        return {}
 
 def collect_header_font_sizes(elements):
     """
