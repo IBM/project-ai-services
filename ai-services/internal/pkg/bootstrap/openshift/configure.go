@@ -14,6 +14,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -319,9 +320,18 @@ func handleExistingOperands(client *openshift.OpenshiftClient, yamls [][]byte) (
 
 	existingResources := make(map[string]string)
 	for _, kind := range resources {
-		if name, exists, err := getExistingResourceName(client, kind); err != nil {
+		gvk := schema.GroupVersionKind{
+			Group:   strings.ToLower(kind) + ".opendatahub.io",
+			Version: "v2",
+			Kind:    kind,
+		}
+		if obj, exists, err := utils.GetExistingCustomResource(client, gvk); err != nil {
 			return nil, fmt.Errorf("error checking for existing %s: %w", kind, err)
 		} else if exists {
+			name := obj.GetName()
+			if name == "" {
+				return nil, fmt.Errorf("existing %s has no name", kind)
+			}
 			existingResources[kind] = name
 			logger.Infof("\nFound existing %s named '%s'", kind, name, logger.VerbosityLevelDebug)
 		}

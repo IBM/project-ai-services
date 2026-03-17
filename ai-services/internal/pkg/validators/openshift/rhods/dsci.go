@@ -2,20 +2,18 @@ package rhods
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 const (
-	dsciGroup   = "dscinitialization.opendatahub.io"
 	dsciVersion = "v2"
 	dsciKind    = "DSCInitialization"
-	dsciName    = "default-dsci"
 )
 
 type DSCInitialization struct{}
@@ -32,26 +30,24 @@ func (r *DSCInitialization) Description() string {
 	return "Validates that DSC Initialization is in ready state"
 }
 
-// Verify performs a direct check without polling.
+// Verify checks DSCInitialization is in Ready phase.
 func (r *DSCInitialization) Verify() error {
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
 		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
-
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   dsciGroup,
+	gvk := schema.GroupVersionKind{
+		Group:   strings.ToLower(dsciKind) + ".opendatahub.io",
 		Version: dsciVersion,
 		Kind:    dsciKind,
-	})
+	}
 
-	if err := client.Client.Get(client.Ctx, types.NamespacedName{Name: dsciName}, obj); err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("DSCInitialization %s not found", dsciName)
-		}
-
-		return fmt.Errorf("failed to find %s: %w", dsciName, err)
+	obj, exists, err := utils.GetExistingCustomResource(client, gvk)
+	if err != nil {
+		return fmt.Errorf("failed to get existing DSCInitialization: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("DSCInitialization not found")
 	}
 
 	phase, found, err := unstructured.NestedString(obj.Object, "status", "phase")
