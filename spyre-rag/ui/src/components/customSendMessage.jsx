@@ -120,6 +120,11 @@ async function customSendMessage(request, _options, instance) {
     for await (const chunk of stream) {
       if (isCanceled) break;
 
+      // Check for error in the chunk
+      if (chunk.error) {
+        throw new Error(chunk.error);
+      }
+
       // to extract the content from the parsed JSON chunk
       const textChunk = chunk.choices[0]?.delta?.content || '';
 
@@ -221,10 +226,20 @@ async function customSendMessage(request, _options, instance) {
   } catch (err) {
     instance.updateIsMessageLoadingCounter('decrease');
 
-    let errorMessage = 'Error occurred during active stream.';
+    let errorMessage = '⚠️ Error occurred during active stream.';
 
+    // Handle specific HTTP status codes
     if (err.status === 429) {
       errorMessage = '⚠️ Server busy. Try again shortly.';
+    } else if (err.status >= 500 && err.status < 600) {
+      errorMessage =
+        '⚠️ Something went wrong on the server. Please try again later.';
+    } else if (err.message) {
+      // Extract error message from exception
+      errorMessage = `⚠️ ${err.message}`;
+    } else if (err.error?.message) {
+      // Extract error from OpenAI error format
+      errorMessage = `⚠️ ${err.error.message}`;
     }
 
     await instance.messaging.addMessageChunk({

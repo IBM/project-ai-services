@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   TextInput,
   RadioButtonGroup,
   RadioButton,
   FileUploader,
+  InlineNotification,
 } from '@carbon/react';
 import { SidePanel } from '@carbon/ibm-products';
 import styles from './IngestSidePanel.module.scss';
@@ -11,7 +12,7 @@ import styles from './IngestSidePanel.module.scss';
 interface IngestSidePanelProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (operation: string, outputFormat: string, files: File[]) => void;
+  onSubmit: (operation: string, outputFormat: string, files: File[], jobName: string) => void;
 }
 
 const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
@@ -19,6 +20,26 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
   const [operation, setOperation] = useState('ingestion');
   const [outputFormat, setOutputFormat] = useState('json');
   const [files, setFiles] = useState<File[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Callback ref to capture the actual input element
+  const setInputRef = useCallback((node: HTMLInputElement | null) => {
+    inputRef.current = node;
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      // Delay to allow SidePanel animation to complete
+      const timer = setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+        }
+      }, 200);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [open]);
 
   const handleFileAdd = (event: any) => {
     const addedFiles = event.target.files;
@@ -29,11 +50,17 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
   };
 
   const handleSubmit = () => {
-    if (files.length === 0) {
-      alert('Please upload at least one file');
+    setError(null);
+    
+    if (!jobName.trim()) {
+      setError('Please enter a job name');
       return;
     }
-    onSubmit(operation, outputFormat, files);
+    if (files.length === 0) {
+      setError('Please upload at least one file');
+      return;
+    }
+    onSubmit(operation, outputFormat, files, jobName);
     handleClose();
   };
 
@@ -42,6 +69,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
     setOperation('ingestion');
     setOutputFormat('json');
     setFiles([]);
+    setError(null);
     onClose();
   };
 
@@ -58,7 +86,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
         },
         {
           kind: 'primary',
-          label: 'Ingest',
+          label: 'Submit',
           onClick: handleSubmit,
         },
       ]}
@@ -66,15 +94,35 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
       size="md"
     >
       <div className={styles.sidePanelContent}>
+        {/* Error Notification */}
+        {error && (
+          <InlineNotification
+            kind="error"
+            title="Validation Error"
+            subtitle={error}
+            onCloseButtonClick={() => setError(null)}
+            lowContrast
+            hideCloseButton={false}
+            style={{ marginBottom: '1rem' }}
+          />
+        )}
+
         {/* Job Name Input */}
         <div className={styles.formGroup}>
           <TextInput
             id="job-name"
-            size='lg'
-            labelText="Job name"
-            placeholder=""
+            size="lg"
+            labelText="Job name *"
+            placeholder="Enter job name (required)"
             value={jobName}
-            onChange={(e) => setJobName(e.target.value)}
+            onChange={(e) => {
+              setJobName(e.target.value);
+              if (error) setError(null);
+            }}
+            ref={setInputRef}
+            required
+            invalid={error?.includes('job name')}
+            invalidText={error?.includes('job name') ? error : ''}
           />
         </div>
 
@@ -121,7 +169,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
               />
               <RadioButton
                 labelText="Text"
-                value="text"
+                value="txt"
                 id="format-text"
               />
             </RadioButtonGroup>

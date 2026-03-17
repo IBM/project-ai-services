@@ -91,7 +91,8 @@ def create_job_state(
     submitted_at: str,
     doc_id_dict: dict[str, str],
     documents_info: list[str],
-    jobs_dir: Path = config.JOBS_DIR
+    jobs_dir: Path = config.JOBS_DIR,
+    job_name: str | None = None
 ) -> JobState:
     """
     Create and persist the job state file.
@@ -103,6 +104,7 @@ def create_job_state(
         doc_id_dict: Mapping of document names to their IDs
         documents_info: List of document filenames
         jobs_dir: Directory where job status files are stored
+        job_name: Optional human-readable name for the job
         
     Returns:
         The created JobState object
@@ -114,6 +116,7 @@ def create_job_state(
     
     job_state = JobState(
         job_id=job_id,
+        job_name=job_name,
         operation=operation,
         status=JobStatus.ACCEPTED,
         submitted_at=submitted_at,

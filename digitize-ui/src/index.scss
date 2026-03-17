@@ -35,7 +35,12 @@ body,
   background-color: var(--cds-background);
   
   main {
+    margin-left: 0;
     transition: margin-left 0.11s cubic-bezier(0.2, 0, 1, 0.9);
+    
+    &.sideNavExpanded {
+      margin-left: 13rem; // 16rem (expanded nav width) - 3rem (base padding-left)
+    }
   }
 }
 

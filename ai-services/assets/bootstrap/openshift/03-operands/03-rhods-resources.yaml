@@ -1,11 +1,8 @@
 apiVersion: dscinitialization.opendatahub.io/v1
 kind: DSCInitialization
 metadata:
-  labels:
-    app.kubernetes.io/created-by: rhods-operator
-    app.kubernetes.io/instance: default-dsci
-    app.kubernetes.io/name: dscinitialization
-    app.kubernetes.io/part-of: rhods-operator
+  annotations:
+    ai-services.io/re-apply: "false"
   name: default-dsci
 spec:
   applicationsNamespace: redhat-ods-applications
@@ -28,35 +25,10 @@ spec:
 kind: DataScienceCluster
 apiVersion: datasciencecluster.opendatahub.io/v1
 metadata:
-  labels:
-    app.kubernetes.io/created-by: rhods-operator
-    app.kubernetes.io/instance: default-dsc
-    app.kubernetes.io/name: datasciencecluster
-    app.kubernetes.io/part-of: rhods-operator
   name: default-dsc
 spec:
   components:
-    codeflare:
-      managementState: Removed
-    dashboard:
-      managementState: Managed
-    datasciencepipelines:
-      managementState: Removed
     kserve:
       managementState: Managed
       nim:
         managementState: Removed
-    kueue:
-      managementState: Removed
-    modelmeshserving:
-      managementState: Removed
-    modelregistry:
-      managementState: Removed
-    ray:
-      managementState: Removed
-    trainingoperator:
-      managementState: Removed
-    trustyai:
-      managementState: Removed
-    workbenches:
-      managementState: Removed

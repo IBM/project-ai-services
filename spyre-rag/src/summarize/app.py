@@ -49,11 +49,24 @@ async def lifespan(app):
     create_llm_session(pool_maxsize=settings.max_concurrent_requests)
     yield
 
+# OpenAPI tags metadata for endpoint organization
+tags_metadata = [
+    {
+        "name": "summarization",
+        "description": "Text and document summarization operations"
+    },
+    {
+        "name": "health",
+        "description": "Health check and service status"
+    }
+]
 
-app = FastAPI(lifespan=lifespan,
+app = FastAPI(
+    lifespan=lifespan,
     title="AI-Services Summarization API",
     description="Accepts text or files (.txt / .pdf) and returns AI-generated summaries.",
-    version="1.0.0"
+    version="1.0.0",
+    openapi_tags=tags_metadata
 )
 
 @app.middleware("http")
@@ -257,8 +270,7 @@ async def summarize(request: Request):
         # ----- Multipart / form-data path -----
         elif "multipart/form-data" in content_type:
             form = await request.form()
-            file_value = form.get("file")
-            file: Optional[UploadFile] = file_value if isinstance(file_value, UploadFile) else None
+            file: Optional[UploadFile] = form.get("file")  # type: ignore[assignment]
 
             summary_length = validate_summary_length(form.get("length"))
             stream = str(form.get("stream", "false")).lower() == "true"
@@ -277,10 +289,15 @@ async def summarize(request: Request):
                         logger.debug(f"PDF extraction took {(time.time() - start) * 1000:.0f}ms")
                     except Exception as e:
                         logger.error(f"PDF extraction failed: {e}")
-                        raise SummarizeException(400, "PDF_EXTRACTION_ERROR",
-                                                 "Failed to extract text from PDF file.")
+                        raise SummarizeException(415, "UNSUPPORTED_CONTENT_TYPE",
+                                                 "File is not a valid txt/pdf file.")
                 else:
-                    content_text = raw.decode("utf-8", errors="replace")
+                    try:
+                        content_text = raw.decode("utf-8", errors="strict")
+                    except UnicodeDecodeError as e:
+                        logger.error(f"Failed to decode text file as UTF-8: {e}")
+                        raise SummarizeException(415, "UNSUPPORTED_CONTENT_TYPE",
+                                                 "File is not a valid txt/pdf file.")
             else:
                 raise SummarizeException(400, "MISSING_INPUT",
                                          "Either 'text' or 'file' parameter is required")
@@ -301,11 +318,17 @@ async def summarize(request: Request):
         raise SummarizeException(500, "INTERNAL_SERVER_ERROR",
                                  f"Failed to generate summary, error: {e} Please try again later")
 
-@app.get("/health")
+@app.get(
+    "/health",
+    tags=["health"],
+    summary="Health check",
+    description="Check if the service is running and healthy.",
+    response_description="Service health status"
+)
 async def health():
     return {"status": "ok"}
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8000"))
+    port = int(os.getenv("PORT", "6000"))
     uvicorn.run(app, host="0.0.0.0", port=port)

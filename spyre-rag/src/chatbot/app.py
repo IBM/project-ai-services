@@ -16,8 +16,8 @@ from common.misc_utils import get_model_endpoints, set_log_level, set_request_id
 from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_non_stream, query_vllm_models
 from common.settings import get_settings
 from common.perf_utils import perf_registry
-from retrieve.backend_utils import search_only, validate_query_length
-from retrieve.response_utils import (
+from chatbot.backend_utils import search_only, validate_query_length
+from chatbot.response_utils import (
     ReferenceRequest,
     ReferenceResponse,
     ChatCompletionRequest,
@@ -70,11 +70,32 @@ async def lifespan(app):
     create_llm_session(pool_maxsize=POOL_SIZE)
     yield
 
+# OpenAPI tags metadata for endpoint organization
+tags_metadata = [
+    {
+        "name": "retrieval",
+        "description": "Document retrieval and search operations using semantic search"
+    },
+    {
+        "name": "chat",
+        "description": "Chat completion with RAG (Retrieval-Augmented Generation)"
+    },
+    {
+        "name": "models",
+        "description": "LLM model information and management"
+    },
+    {
+        "name": "monitoring",
+        "description": "Performance metrics, health checks, and database status"
+    }
+]
+
 app = FastAPI(
     lifespan=lifespan,
     title="AI-Services Chatbot API",
     description="RAG-based chatbot API with document retrieval, reranking, and LLM-powered responses.",
-    version="1.0.0"
+    version="1.0.0",
+    openapi_tags=tags_metadata
 )
 
 @app.middleware("http")
@@ -108,6 +129,7 @@ def limit_concurrency(f):
 @app.post(
     "/reference",
     response_model=ReferenceResponse,
+    tags=["retrieval"],
     summary="Retrieve reference documents",
     description="Search the vector store using the prompt, rerank results, and return relevant document chunks with performance metrics."
 )
@@ -115,14 +137,14 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
     # Validate query is not empty
     if not req.prompt or not req.prompt.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
-    
+
     try:
         emb_model = emb_model_dict['emb_model']
         emb_endpoint = emb_model_dict['emb_endpoint']
         emb_max_tokens = emb_model_dict['max_tokens']
         reranker_model = reranker_model_dict['reranker_model']
         reranker_endpoint = reranker_model_dict['reranker_endpoint']
-        
+
         # Validate query length
         is_valid, error_msg = await asyncio.to_thread(
             validate_query_length, req.prompt, emb_endpoint
@@ -142,18 +164,19 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
         )
         # Store metrics in registry for reference endpoint
         perf_registry.add_metric(perf_stat_dict)
-        
+
     except db.VectorStoreNotReadyError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=repr(e))
-    
+
     return ReferenceResponse(documents=docs, perf_metrics=perf_stat_dict)
 
 
 @app.get(
     "/v1/models",
     response_model=ModelsResponse,
+    tags=["models"],
     summary="List LLM models",
     description="List available models from the configured vLLM endpoint."
 )
@@ -169,20 +192,21 @@ async def list_models():
 @app.get(
     "/v1/perf_metrics",
     response_model=PerfMetricsResponse,
+    tags=["monitoring"],
     summary="Get performance metrics",
     description="Return collected performance metrics for recent chat completion and retrieval calls. If request ID is provided, returns only that metric"
 )
 def get_perf_metrics(request_id: Optional[str] = None) -> PerfMetricsResponse:
     """
     Retrieve performance metrics for API requests.
-    
+
     Query Parameters:
         request_id: Optional request ID to filter metrics. If provided, returns only that metric.
                    If omitted, returns all recent metrics (up to 1000 most recent).
-    
+
     Returns:
         PerfMetricsResponse containing a list of performance metrics.
-    
+
     Raises:
         HTTPException: 404 if request_id is specified but not found.
     """
@@ -207,15 +231,41 @@ async def locked_stream(stream_g, perf_stat_dict):
 @app.post(
     "/v1/chat/completions",
     response_model=ChatCompletionResponse,
+    tags=["chat"],
     summary="Chat with RAG",
-    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON. For detailed request and response structure, see: https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create"
+    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON.",
+    responses={
+        200: {
+            "description": "Successful Response",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": "Based on the retrieved documents, artificial intelligence..."
+                                }
+                            }
+                        ]
+                    }
+                },
+                "text/event-stream": {
+                    "schema": {
+                        "type": "string",
+                        "description": "Server-Sent Events stream. Each event is formatted as: data: {JSON}\\n\\n"
+                    },
+                    "example": 'data: {"choices":[{"delta":{"content":"Based on"}}]}\n\ndata: {"choices":[{"delta":{"content":" the retrieved"}}]}\n\ndata: {"choices":[{"delta":{"content":" documents..."}}]}\n\n'
+                }
+            }
+        }
+    }
 )
 async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse | StreamingResponse:
     if not req.messages:
         raise HTTPException(status_code=400, detail="messages can't be empty")
 
     query = req.messages[0].content
-    
+
     # Validate query is not empty
     if not query or not query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
@@ -228,7 +278,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
         llm_endpoint = llm_model_dict['llm_endpoint']
         reranker_model = reranker_model_dict['reranker_model']
         reranker_endpoint = reranker_model_dict['reranker_endpoint']
-        
+
         # Validate query length
         is_valid, error_msg = await asyncio.to_thread(
             validate_query_length, query, emb_endpoint
@@ -260,7 +310,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
             settings.num_chunks_post_reranker,
             vectorstore=vectorstore
         )
-        
+
     except db.VectorStoreNotReadyError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -302,11 +352,11 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
             )
             # Store metrics in registry for non-stream
             perf_registry.add_metric(perf_stat_dict)
-            
+
             # Handle error responses
             if isinstance(vllm_non_stream, dict) and "error" in vllm_non_stream:
                 raise HTTPException(status_code=500, detail=str(vllm_non_stream["error"]))
-            
+
             # Convert vLLM response to ChatCompletionResponse
             if isinstance(vllm_non_stream, dict) and "choices" in vllm_non_stream:
                 choices = []
@@ -317,7 +367,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
                             message_content = message_dict.get("content", "")
                             choices.append(ChatChoice(message=ChatMessage(content=message_content)))
                 return ChatCompletionResponse(choices=choices)
-            
+
             # If response doesn't match expected structure, raise an error
             raise HTTPException(status_code=500, detail="Unexpected response format from LLM")
     except Exception as e:
@@ -332,6 +382,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
     "/db-status",
     response_model=DBStatusResponse,
     response_model_exclude_none=True,
+    tags=["monitoring"],
     summary="Vector DB status",
     description="Check whether the vector store is initialized and populated."
 )
@@ -339,7 +390,7 @@ async def db_status() -> DBStatusResponse:
     try:
         if vectorstore is None:
             return DBStatusResponse(ready=False, message="Vector store not initialized")
-        
+
         status = await asyncio.to_thread(
             vectorstore.check_db_populated
         )
@@ -347,7 +398,7 @@ async def db_status() -> DBStatusResponse:
             return DBStatusResponse(ready=True)
         else:
             return DBStatusResponse(ready=False, message="No data ingested")
-        
+
     except Exception as e:
         return DBStatusResponse(ready=False, message=str(e))
 
@@ -355,6 +406,7 @@ async def db_status() -> DBStatusResponse:
     "/health",
     response_model=HealthResponse,
     status_code=200,
+    tags=["monitoring"],
     summary="Health check",
     description="Check if the service is running."
 )

@@ -17,7 +17,7 @@ export interface Document {
   name: string;
   filename?: string;
   status: string;
-  created_at?: string;
+  submitted_at?: string;
   output_format?: string;
 }
 
@@ -30,6 +30,7 @@ export interface JobStats {
 
 export interface Job {
   job_id: string;
+  job_name?: string;
   operation: string;
   status: string;
   submitted_at?: string;
@@ -65,6 +66,7 @@ export interface GetJobsParams {
   limit?: number;
   offset?: number;
   status?: string | null;
+  operation?: string | null;
 }
 
 export interface ListDocumentsParams {
@@ -78,15 +80,27 @@ export interface ListDocumentsParams {
 export const uploadDocuments = async (
   files: File[],
   operation: string = 'ingestion',
-  outputFormat: string = 'json'
+  outputFormat: string = 'json',
+  jobName?: string
 ): Promise<UploadResponse> => {
   const formData = new FormData();
   files.forEach(file => {
     formData.append('files', file);
   });
 
+  let url = `/jobs?operation=${operation}`;
+  
+  // Only include output_format for digitization operations
+  if (operation === 'digitization') {
+    url += `&output_format=${outputFormat}`;
+  }
+  
+  if (jobName) {
+    url += `&job_name=${encodeURIComponent(jobName)}`;
+  }
+
   const response: AxiosResponse<UploadResponse> = await api.post(
-    `/documents?operation=${operation}&output_format=${outputFormat}`,
+    url,
     formData,
     {
       headers: {
@@ -99,7 +113,7 @@ export const uploadDocuments = async (
 
 // Job Management
 export const getAllJobs = async (params: GetJobsParams = {}): Promise<JobsResponse> => {
-  const { latest = false, limit = 20, offset = 0, status = null } = params;
+  const { latest = false, limit = 20, offset = 0, status = null, operation = null } = params;
   const queryParams = new URLSearchParams({
     latest: latest.toString(),
     limit: limit.toString(),
@@ -108,6 +122,9 @@ export const getAllJobs = async (params: GetJobsParams = {}): Promise<JobsRespon
   
   if (status) {
     queryParams.append('status', status);
+  }
+  if (operation) {
+    queryParams.append('operation', operation);
   }
 
   const response: AxiosResponse<JobsResponse> = await api.get(`/jobs?${queryParams}`);
