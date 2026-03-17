@@ -8,7 +8,11 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"go.yaml.in/yaml/v3"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 const (
@@ -299,4 +303,28 @@ func checkParamsInValues(param string, values map[string]any) bool {
 	}
 
 	return false
+}
+
+// GetExistingCustomResource checks if a single instance resource exists and return the object.
+func GetExistingCustomResource(client *openshift.OpenshiftClient, kind string) (unstructured.Unstructured, bool, error) {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   strings.ToLower(kind) + ".opendatahub.io",
+		Version: "v2",
+		Kind:    kind,
+	})
+
+	if err := client.Client.List(client.Ctx, list); err != nil {
+		if apierrors.IsNotFound(err) {
+			return list.Items[0], false, nil
+		}
+
+		return list.Items[0], false, fmt.Errorf("error listing %s: %w", kind, err)
+	}
+
+	if len(list.Items) == 0 {
+		return list.Items[0], false, nil
+	}
+
+	return list.Items[0], true, nil
 }

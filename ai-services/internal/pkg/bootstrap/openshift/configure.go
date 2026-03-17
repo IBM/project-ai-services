@@ -14,6 +14,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -313,9 +314,13 @@ func handleExistingOperands(client *openshift.OpenshiftClient, yamls [][]byte) (
 
 	existingResources := make(map[string]string)
 	for _, kind := range resources {
-		if name, exists, err := getExistingResourceName(client, kind); err != nil {
+		if obj, exists, err := utils.GetExistingCustomResource(client, kind); err != nil {
 			return nil, fmt.Errorf("error checking for existing %s: %w", kind, err)
 		} else if exists {
+			name := obj.GetName()
+			if name == "" {
+				return nil, fmt.Errorf("existing %s has no name", kind)
+			}
 			existingResources[kind] = name
 			logger.Infof("\nFound existing %s named '%s'", kind, name, logger.VerbosityLevelDebug)
 		}
@@ -372,30 +377,6 @@ func updateRHODSResourceNames(yamlBytes []byte, existingResources map[string]str
 	}
 
 	return updatedYaml, nil
-}
-
-// getExistingResourceName checks if a single instance resource exists and returns its name.
-func getExistingResourceName(client *openshift.OpenshiftClient, kind string) (string, bool, error) {
-	list := &unstructured.UnstructuredList{}
-	list.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   strings.ToLower(kind) + ".opendatahub.io",
-		Version: "v2",
-		Kind:    kind,
-	})
-
-	if err := client.Client.List(client.Ctx, list); err != nil {
-		if apierrors.IsNotFound(err) {
-			return "", false, nil
-		}
-
-		return "", false, fmt.Errorf("error listing %s: %w", kind, err)
-	}
-
-	if len(list.Items) == 0 {
-		return "", false, nil
-	}
-
-	return list.Items[0].GetName(), true, nil
 }
 
 func waitForRHODSResource(client *openshift.OpenshiftClient, kind, name string) error {
