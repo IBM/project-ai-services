@@ -4,23 +4,27 @@ import logging
 import os
 import shutil
 
-from tqdm import tqdm
+# Set environment variables before importing third-party libraries
 os.environ['GRPC_VERBOSITY'] = 'ERROR'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
+from tqdm import tqdm
 from pathlib import Path
 from docling_core.types.doc.document import DoclingDocument
 from concurrent.futures import as_completed, ProcessPoolExecutor, ThreadPoolExecutor
 from sentence_splitter import SentenceSplitter
 
+# Set third-party library log levels before importing project modules
+logging.getLogger('docling').setLevel(logging.CRITICAL)
+
+# Import project modules after setting log levels
+from common.thread_utils import ContextAwareThreadPoolExecutor
 from common.llm_utils import create_llm_session, summarize_and_classify_tables, tokenize_with_llm
 from common.misc_utils import get_logger, text_suffix, table_suffix, chunk_suffix
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.status import StatusManager
 from digitize.types import DocStatus, JobStatus, OutputFormat
 import digitize.config as config
-
-logging.getLogger('docling').setLevel(logging.CRITICAL)
 
 logger = get_logger("doc_utils")
 
@@ -255,8 +259,8 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
             return batch_stats, batch_chunk_paths, batch_table_paths
 
         with ProcessPoolExecutor(max_workers=convert_worker) as converter_executor, \
-             ThreadPoolExecutor(max_workers=max_worker) as processor_executor, \
-             ThreadPoolExecutor(max_workers=max_worker) as chunker_executor:
+             ContextAwareThreadPoolExecutor(max_workers=max_worker) as processor_executor, \
+             ContextAwareThreadPoolExecutor(max_workers=max_worker) as chunker_executor:
 
             # A. Submit Conversions
             conversion_futures = {}

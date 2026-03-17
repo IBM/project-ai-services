@@ -28,6 +28,13 @@ if level != "":
 
 set_log_level(log_level)
 
+from common.misc_utils import get_logger, validate_pdf_file, set_request_id
+import digitize.digitize_utils as dg_util
+import digitize.types as types
+from digitize.digitize import digitize
+from digitize.errors import *
+import digitize.config as config
+from digitize.cleanup import reset_db
 from digitize.ingest import ingest
 from digitize.status import StatusManager
 
