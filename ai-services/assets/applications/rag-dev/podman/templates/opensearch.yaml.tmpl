@@ -24,6 +24,8 @@ spec:
           value: "single-node"
         - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
           value: "{{ .Values.opensearch.password }}"
+        - name: OPENSEARCH_JAVA_OPTS
+          value: "-XX:-UseSuperWord -XX:TieredStopAtLevel=1"
         
       ports: 
         - name: os-client-port

@@ -33,7 +33,9 @@ spec:
                 secretKeyRef:
                   name: "opensearch-credentials"
                   key: password
-          ports: 
+            - name: OPENSEARCH_JAVA_OPTS
+              value: "-XX:-UseSuperWord -XX:TieredStopAtLevel=1"
+          ports:
             - name: os-client-port
               containerPort: 9200
             - name: os-metrics-port
