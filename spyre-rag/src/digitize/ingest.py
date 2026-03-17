@@ -76,10 +76,10 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         file_processing_time = end_time - start_time
 
         unprocessed_files = get_unprocessed_files(input_file_paths, converted_pdf_stats.keys())
-        
+
         ingested = total_pdfs - len(unprocessed_files)
         percentage = (ingested / total_pdfs * 100) if total_pdfs else 0.0
-        
+
         if len(unprocessed_files):
             failed_files_list = "\n".join(unprocessed_files)
             error_message = (
@@ -93,7 +93,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                 f"Ingestion summary: {ingested}/{total_pdfs} files ingested "
                 f"({percentage:.2f}% of total PDF files)"
             )
-            
+
             # Update job status to FAILED if there are unprocessed files
             if status_mgr:
                 logger.info(f"Some documents failed to process, updating job {job_id} status to FAILED")
@@ -104,7 +104,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                 f"Ingestion summary: {ingested}/{total_pdfs} files ingested "
                 f"({percentage:.2f}% of total PDF files)"
             )
-            
+
             # Update job status to COMPLETED if all documents processed successfully
             if status_mgr:
                 logger.info(f"All documents processed successfully, updating job {job_id} status to COMPLETED")

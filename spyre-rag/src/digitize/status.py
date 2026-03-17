@@ -217,9 +217,17 @@ class StatusManager:
     def _update_job_level_fields(self, data: dict, job_status: JobStatus, error: str) -> None:
         """Update job-level status, timestamp, and error fields."""
         data["status"] = job_status.value
-        
+
+        # Only set completed_at if job is truly finished (all documents processed)
         if job_status in [JobStatus.COMPLETED, JobStatus.FAILED]:
-            data["completed_at"] = get_utc_timestamp()
+            stats = data.get("stats", {})
+            total_docs = stats.get("total_documents", 0)
+            completed_docs = stats.get("completed", 0)
+            failed_docs = stats.get("failed", 0)
+
+            # Job is truly complete when all documents are either completed or failed
+            if total_docs > 0 and (completed_docs + failed_docs) == total_docs:
+                data["completed_at"] = get_utc_timestamp()
 
         if error and job_status == JobStatus.FAILED:
             data["error"] = str(error)
@@ -238,7 +246,7 @@ class StatusManager:
         """Recalculate job stats based on document statuses."""
         if "documents" not in data or "stats" not in data:
             return
-        
+
         status_counts = Counter(doc.get("status") for doc in data["documents"])
         data["stats"]["completed"] = status_counts[DocStatus.COMPLETED.value]
         data["stats"]["failed"] = status_counts[DocStatus.FAILED.value]
@@ -258,17 +266,17 @@ class StatusManager:
     def _categorize_fields(details: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         """Separate fields into metadata wrapper and top-level categories."""
         METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs"}
-        
+
         metadata_fields = {
             k: v if k == "timing_in_secs" and isinstance(v, dict) else StatusManager._extract_value(v)
             for k, v in details.items() if k in METADATA_KEYS
         }
-        
+
         top_level_fields = {
             k: StatusManager._extract_value(v)
             for k, v in details.items() if k not in METADATA_KEYS
         }
-        
+
         return metadata_fields, top_level_fields
 
     @staticmethod
@@ -343,15 +351,17 @@ class StatusManager:
                 # Read existing data
                 with open(self.job_status_file, "r") as f:
                     data = json.load(f)
-                
-                # Apply all updates
-                self._update_job_level_fields(data, job_status, error)
-                
+
+                # Update document status first
                 if doc_id and "documents" in data:
                     self._update_document_status(data["documents"], doc_id, doc_status)
-                
+
+                # Recalculate stats based on updated document statuses
                 self._recalculate_stats(data)
-                
+
+                # Update job-level fields (status, completed_at, error) after stats are current
+                self._update_job_level_fields(data, job_status, error)
+
                 # Atomic write using shared helper
                 self._atomic_write_json(self.job_status_file, data)
 
