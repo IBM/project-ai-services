@@ -1,11 +1,6 @@
 apiVersion: dscinitialization.opendatahub.io/v1
 kind: DSCInitialization
 metadata:
-  labels:
-    app.kubernetes.io/created-by: rhods-operator
-    app.kubernetes.io/instance: default-dsci
-    app.kubernetes.io/name: dscinitialization
-    app.kubernetes.io/part-of: rhods-operator
   annotations:
     ai-services.io/re-apply: "false"
   name: default-dsci
@@ -26,3 +21,14 @@ spec:
   trustedCABundle:
     customCABundle: ''
     managementState: Managed
+---
+kind: DataScienceCluster
+apiVersion: datasciencecluster.opendatahub.io/v1
+metadata:
+  name: default-dsc-custom
+spec:
+  components:
+    kserve:
+      managementState: Managed
+      nim:
+        managementState: Removed

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -95,7 +94,7 @@ func waitForAllCRs(client *openshift.OpenshiftClient) error {
 	s = spinner.New("Waiting for DSCInitialization to be ready")
 	s.Start(client.Ctx)
 
-	err = waitForRHODSResource(client, "DSCInitialization", "default-dsci")
+	err = waitForRHODSResource(client, "DSCInitialization")
 	if err != nil {
 		s.Fail("DSCInitialization not ready")
 
@@ -107,7 +106,7 @@ func waitForAllCRs(client *openshift.OpenshiftClient) error {
 	s = spinner.New("Waiting for DataScienceCluster to be ready")
 	s.Start(client.Ctx)
 
-	err = waitForRHODSResource(client, "DataScienceCluster", "default-dsc")
+	err = waitForRHODSResource(client, "DataScienceCluster")
 	if err != nil {
 		s.Fail("DataScienceCluster not ready")
 
@@ -294,26 +293,22 @@ func waitForSpyreClusterPolicy(client *openshift.OpenshiftClient) error {
 	})
 }
 
-func waitForRHODSResource(client *openshift.OpenshiftClient, kind, name string) error {
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   strings.ToLower(kind) + ".opendatahub.io",
-		Version: "v2",
-		Kind:    kind,
-	})
-
+func waitForRHODSResource(client *openshift.OpenshiftClient, kind string) error {
 	return wait.PollUntilContextTimeout(client.Ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
-		if err := client.Client.Get(ctx, k8stypes.NamespacedName{Name: name}, obj); err != nil {
-			if apierrors.IsNotFound(err) {
-				logger.Infof("%s not found yet, waiting...", kind, logger.VerbosityLevelDebug)
-
-				return false, nil
-			}
-
+		// Get the existing resource from the cluster
+		resource, exists, err := getExistingRHODSResource(client, kind)
+		if err != nil {
 			return false, fmt.Errorf("failed to get %s: %w", kind, err)
 		}
 
-		phase, found, err := unstructured.NestedString(obj.Object, "status", "phase")
+		if !exists {
+			logger.Infof("%s not found yet, waiting...", kind, logger.VerbosityLevelDebug)
+
+			return false, nil
+		}
+
+		// Check the status.phase of the resource
+		phase, found, err := unstructured.NestedString(resource.Object, "status", "phase")
 		if err != nil {
 			return false, fmt.Errorf("failed to parse status.phase: %w", err)
 		}

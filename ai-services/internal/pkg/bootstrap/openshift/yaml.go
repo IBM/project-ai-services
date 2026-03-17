@@ -133,10 +133,16 @@ func handlePreApply(c *openshift.OpenshiftClient, object *unstructured.Unstructu
 
 // handlePostApply performs post-apply actions based on resource kind.
 func handlePostApply(c *openshift.OpenshiftClient, object *unstructured.Unstructured, kind, namespace string) error {
-	if kind != "Subscription" {
+	switch kind {
+	case "Subscription":
+		return handleSubscriptionPostApply(c, object, namespace)
+	default:
 		return nil
 	}
+}
 
+// handleSubscriptionPostApply waits for an operator to be ready after subscription is applied.
+func handleSubscriptionPostApply(c *openshift.OpenshiftClient, object *unstructured.Unstructured, namespace string) error {
 	packageName, found, err := unstructured.NestedString(object.Object, "spec", "name")
 	if err != nil || !found || packageName == "" {
 		return nil
@@ -271,7 +277,7 @@ func shouldSkipOrUpdateRHODSResource(c *openshift.OpenshiftClient, object *unstr
 	kind := object.GetKind()
 
 	// Check if resource already exists
-	existingName, exists, err := getExistingRHODSResourceName(c, kind)
+	existingResource, exists, err := getExistingRHODSResource(c, kind)
 	if err != nil {
 		logger.Infof("Error checking for existing %s: %v", kind, err, logger.VerbosityLevelDebug)
 
@@ -283,6 +289,7 @@ func shouldSkipOrUpdateRHODSResource(c *openshift.OpenshiftClient, object *unstr
 		return false
 	}
 
+	existingName := existingResource.GetName()
 	logger.Infof("Found existing %s named '%s'", kind, existingName, logger.VerbosityLevelDebug)
 
 	// Check if resource has re-apply annotation set to false
@@ -301,8 +308,8 @@ func shouldSkipOrUpdateRHODSResource(c *openshift.OpenshiftClient, object *unstr
 	return false
 }
 
-// getExistingRHODSResourceName checks if a single instance RHODS resource exists and returns its name.
-func getExistingRHODSResourceName(c *openshift.OpenshiftClient, kind string) (string, bool, error) {
+// getExistingRHODSResource checks if a single instance RHODS resource exists and returns the resource object.
+func getExistingRHODSResource(c *openshift.OpenshiftClient, kind string) (*unstructured.Unstructured, bool, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   strings.ToLower(kind) + ".opendatahub.io",
@@ -312,15 +319,15 @@ func getExistingRHODSResourceName(c *openshift.OpenshiftClient, kind string) (st
 
 	if err := c.Client.List(c.Ctx, list); err != nil {
 		if apierrors.IsNotFound(err) {
-			return "", false, nil
+			return nil, false, nil
 		}
 
-		return "", false, fmt.Errorf("error listing %s: %w", kind, err)
+		return nil, false, fmt.Errorf("error listing %s: %w", kind, err)
 	}
 
 	if len(list.Items) == 0 {
-		return "", false, nil
+		return nil, false, nil
 	}
 
-	return list.Items[0].GetName(), true, nil
+	return &list.Items[0], true, nil
 }
