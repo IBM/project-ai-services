@@ -93,6 +93,6 @@ Validate - Checks below system prerequisites:
 - For Podman:
 %s
 
-- For Openshift:
+- For OpenShift:
 %s`, podmanList, openshiftList)
 }
