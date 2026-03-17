@@ -2,18 +2,18 @@ package rhods
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 const (
-	dsciGroup   = "dscinitialization.opendatahub.io"
 	dsciVersion = "v2"
 	dsciKind    = "DSCInitialization"
-	dsciName    = "default-dsci"
 )
 
 type DSCInitialization struct{}
@@ -36,8 +36,13 @@ func (r *DSCInitialization) Verify() error {
 	if err != nil {
 		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
+	gvk := schema.GroupVersionKind{
+		Group:   strings.ToLower(dsciKind) + ".opendatahub.io",
+		Version: dsciVersion,
+		Kind:    dsciKind,
+	}
 
-	obj, exists, err := utils.GetExistingCustomResource(client, dsciKind)
+	obj, exists, err := utils.GetExistingCustomResource(client, gvk)
 	if err != nil {
 		return fmt.Errorf("failed to get existing DSCInitialization: %w", err)
 	}

@@ -2,18 +2,18 @@ package rhods
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 const (
-	dscGroup   = "datasciencecluster.opendatahub.io"
 	dscVersion = "v2"
 	dscKind    = "DataScienceCluster"
-	dscName    = "default-dsc"
 )
 
 type DataScienceCluster struct{}
@@ -36,7 +36,13 @@ func (r *DataScienceCluster) Verify() error {
 	if err != nil {
 		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
-	obj, exists, err := utils.GetExistingCustomResource(client, dscKind)
+	gvk := schema.GroupVersionKind{
+		Group:   strings.ToLower(dscKind) + ".opendatahub.io",
+		Version: dscVersion,
+		Kind:    dscKind,
+	}
+
+	obj, exists, err := utils.GetExistingCustomResource(client, gvk)
 	if err != nil {
 		return fmt.Errorf("failed to get existing DataScienceCluster: %w", err)
 	}
@@ -54,7 +60,7 @@ func (r *DataScienceCluster) Verify() error {
 	}
 
 	if phase != "Ready" {
-		return fmt.Errorf("DataScienceCluster not ready (status.phase: %s)", phase)
+		return fmt.Errorf("\nDataScienceCluster not ready (status.phase: %s)", phase)
 	}
 
 	return nil

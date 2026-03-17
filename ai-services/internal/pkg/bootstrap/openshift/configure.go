@@ -314,7 +314,12 @@ func handleExistingOperands(client *openshift.OpenshiftClient, yamls [][]byte) (
 
 	existingResources := make(map[string]string)
 	for _, kind := range resources {
-		if obj, exists, err := utils.GetExistingCustomResource(client, kind); err != nil {
+		gvk := schema.GroupVersionKind{
+			Group:   strings.ToLower(kind) + ".opendatahub.io",
+			Version: "v2",
+			Kind:    kind,
+		}
+		if obj, exists, err := utils.GetExistingCustomResource(client, gvk); err != nil {
 			return nil, fmt.Errorf("error checking for existing %s: %w", kind, err)
 		} else if exists {
 			name := obj.GetName()
