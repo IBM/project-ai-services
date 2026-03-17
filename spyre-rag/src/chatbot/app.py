@@ -233,7 +233,23 @@ async def locked_stream(stream_g, perf_stat_dict):
     response_model=ChatCompletionResponse,
     tags=["chat"],
     summary="Chat with RAG",
-    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON."
+    description=(
+        "Generate chat completions grounded in retrieved documents. "
+        "Returns streaming response if stream=true, otherwise returns structured JSON.\n\n"
+        "**Examples:**\n\n"
+        "Non-streaming request:\n"
+        "```bash\n"
+        "curl -X POST 'http://localhost:5000/v1/chat/completions' \\\n"
+        "  -H 'Content-Type: application/json' \\\n"
+        "  -d '{\"messages\": [{\"role\": \"user\", \"content\": \"What is RAG?\"}], \"stream\": false}'\n"
+        "```\n\n"
+        "Streaming request:\n"
+        "```bash\n"
+        "curl -X POST 'http://localhost:5000/v1/chat/completions' \\\n"
+        "  -H 'Content-Type: application/json' \\\n"
+        "  -d '{\"messages\": [{\"role\": \"user\", \"content\": \"What is RAG?\"}], \"stream\": true}'\n"
+        "```\n\n"
+    )
 )
 async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse | StreamingResponse:
     if not req.messages:
