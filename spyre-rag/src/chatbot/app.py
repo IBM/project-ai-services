@@ -233,23 +233,32 @@ async def locked_stream(stream_g, perf_stat_dict):
     response_model=ChatCompletionResponse,
     tags=["chat"],
     summary="Chat with RAG",
-    description=(
-        "Generate chat completions grounded in retrieved documents. "
-        "Returns streaming response if stream=true, otherwise returns structured JSON.\n\n"
-        "**Examples:**\n\n"
-        "Non-streaming request:\n"
-        "```bash\n"
-        "curl -X POST 'http://localhost:5000/v1/chat/completions' \\\n"
-        "  -H 'Content-Type: application/json' \\\n"
-        "  -d '{\"messages\": [{\"role\": \"user\", \"content\": \"What is RAG?\"}], \"stream\": false}'\n"
-        "```\n\n"
-        "Streaming request:\n"
-        "```bash\n"
-        "curl -X POST 'http://localhost:5000/v1/chat/completions' \\\n"
-        "  -H 'Content-Type: application/json' \\\n"
-        "  -d '{\"messages\": [{\"role\": \"user\", \"content\": \"What is RAG?\"}], \"stream\": true}'\n"
-        "```\n\n"
-    )
+    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON.",
+    responses={
+        200: {
+            "description": "Successful Response",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": "Based on the retrieved documents, artificial intelligence..."
+                                }
+                            }
+                        ]
+                    }
+                },
+                "text/event-stream": {
+                    "schema": {
+                        "type": "string",
+                        "description": "Server-Sent Events stream. Each event is formatted as: data: {JSON}\\n\\n"
+                    },
+                    "example": 'data: {"choices":[{"delta":{"content":"Based on"}}]}\n\ndata: {"choices":[{"delta":{"content":" the retrieved"}}]}\n\ndata: {"choices":[{"delta":{"content":" documents..."}}]}\n\n'
+                }
+            }
+        }
+    }
 )
 async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse | StreamingResponse:
     if not req.messages:
