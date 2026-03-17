@@ -25,7 +25,7 @@ spec:
 kind: DataScienceCluster
 apiVersion: datasciencecluster.opendatahub.io/v1
 metadata:
-  name: default-dsc-custom
+  name: default-dsc
 spec:
   components:
     kserve:
