@@ -30,11 +30,11 @@ func BootstrapCmd() *cobra.Command {
 			}
 
 			if configureErr := bootstrapInstance.Configure(); configureErr != nil {
-				return fmt.Errorf("failed to bootstrap the LPAR: %w", configureErr)
+				return fmt.Errorf("failed to run bootstrap configure: %w", configureErr)
 			}
 
 			if err := factory.Validate(nil); err != nil {
-				return fmt.Errorf("failed to bootstrap the LPAR: %w", err)
+				return fmt.Errorf("failed to run bootstrap validate: %w", err)
 			}
 
 			if rt == types.RuntimeTypePodman {

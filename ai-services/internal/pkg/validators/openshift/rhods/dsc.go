@@ -2,20 +2,17 @@ package rhods
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 const (
-	dscGroup   = "datasciencecluster.opendatahub.io"
-	dscVersion = "v2"
-	dscKind    = "DataScienceCluster"
-	dscName    = "default-dsc"
+	dscKind = "DataScienceCluster"
 )
 
 type DataScienceCluster struct{}
@@ -32,26 +29,24 @@ func (r *DataScienceCluster) Description() string {
 	return "Validates that Data Science Cluster is in ready phase"
 }
 
-// Verify performs a direct check without polling.
+// Verify checks if DataScienceCluster is in ready phase.
 func (r *DataScienceCluster) Verify() error {
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
 		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
+	gvk := schema.GroupVersionKind{
+		Group:   strings.ToLower(dscKind) + ".opendatahub.io",
+		Version: constants.VersionV2,
+		Kind:    constants.DSCKind,
+	}
 
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   dscGroup,
-		Version: dscVersion,
-		Kind:    dscKind,
-	})
-
-	if err := client.Client.Get(client.Ctx, types.NamespacedName{Name: dscName}, obj); err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("DataScienceCluster %s not found", dscName)
-		}
-
-		return fmt.Errorf("failed to find %s: %w", dscName, err)
+	obj, exists, err := utils.GetExistingCustomResource(client, gvk)
+	if err != nil {
+		return fmt.Errorf("failed to get existing DataScienceCluster: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("DataScienceCluster not found")
 	}
 
 	phase, found, err := unstructured.NestedString(obj.Object, "status", "phase")
@@ -64,7 +59,7 @@ func (r *DataScienceCluster) Verify() error {
 	}
 
 	if phase != "Ready" {
-		return fmt.Errorf("DataScienceCluster not ready (status.phase: %s)", phase)
+		return fmt.Errorf("\nDataScienceCluster not ready (status.phase: %s)", phase)
 	}
 
 	return nil

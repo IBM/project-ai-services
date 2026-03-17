@@ -13,8 +13,8 @@ import (
 func configureCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "configure",
-		Short:  "Configures the LPAR environment",
-		Long:   `Configure and initialize the LPAR.`,
+		Short:  "Configures the environment",
+		Long:   `Configure and initialize the environment.`,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Once precheck passes, silence usage for any *later* internal errors.

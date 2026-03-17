@@ -24,6 +24,7 @@ import {
   ActionableNotification,
   TextInput,
   InlineLoading,
+  Tooltip,
 } from '@carbon/react';
 import { Renew, TrashCan, Download, CheckmarkFilled, ErrorFilled, InProgress } from '@carbon/icons-react';
 import { useTheme } from '../../contexts/useTheme';
@@ -260,20 +261,24 @@ const documentListReducer = (
 };
 
 const headers = [
-  { key: 'name', header: 'Document name' },
+  { key: 'name', header: 'Document Name' },
   { key: 'status', header: 'Status' },
-  { key: 'created_at', header: 'Created' },
+  { key: 'submitted_at', header: 'Submitted' },
   { key: 'view_action', header: '' },
   { key: 'delete_action', header: '' },
 ];
 
 const getStatusIcon = (status: string) => {
   switch (status) {
+    case 'accepted':
+    case 'chunked':
     case 'completed':
+    case 'digitized':
+    case 'processed':
       return <CheckmarkFilled size={16} className={styles.statusIconSuccess} />;
     case 'failed':
       return <ErrorFilled size={16} className={styles.statusIconError} />;
-    case 'processing':
+    case 'in_progress':
       return <InProgress size={16} className={styles.statusIconProgress} />;
     default:
       return null;
@@ -301,8 +306,29 @@ const DocumentListPage = () => {
           totalItems: response.pagination?.total || 0,
         },
       });
-    } catch (error) {
-      console.error('Error fetching documents:', error);
+    } catch (error: any) {
+      
+      // Handle 5xx server errors with appropriate user-facing messages
+      if (error.response && error.response.status >= 500 && error.response.status < 600) {
+        const errorMessage = error.response.status === 503
+          ? 'The service is temporarily unavailable. Please try again in a few moments.'
+          : 'A server error occurred while fetching documents. Please try again later.';
+        
+        dispatch({
+          type: 'SHOW_ERROR',
+          payload: {
+            message: errorMessage,
+          },
+        });
+      } else if (error.code === 'ECONNABORTED' || error.message === 'Network Error') {
+        // Handle network/timeout errors
+        dispatch({
+          type: 'SHOW_ERROR',
+          payload: {
+            message: 'Unable to connect to the server. Please check your network connection and try again.',
+          },
+        });
+      }
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
     }
@@ -331,13 +357,13 @@ const DocumentListPage = () => {
   };
 
   const getFileExtensionAndMimeType = (outputFormat: string) => {
-    // Backend supports: json, md, text
+    // Backend supports: json, md, txt
     switch (outputFormat.toLowerCase()) {
       case 'json':
         return { extension: 'json', mimeType: 'application/json' };
       case 'md':
         return { extension: 'md', mimeType: 'text/markdown' };
-      case 'text':
+      case 'txt':
         return { extension: 'txt', mimeType: 'text/plain' };
       default:
         return { extension: 'json', mimeType: 'application/json' };
@@ -476,8 +502,8 @@ const DocumentListPage = () => {
       const exportRows = state.documents.map((doc) => ({
         name: doc.name || doc.filename || 'N/A',
         status: doc.status,
-        created_at: doc.created_at
-          ? new Date(doc.created_at).toLocaleString('en-US', {
+        submitted_at: doc.submitted_at
+          ? new Date(doc.submitted_at).toLocaleString('en-US', {
               month: 'short',
               day: 'numeric',
               year: 'numeric',
@@ -512,45 +538,64 @@ const DocumentListPage = () => {
     }
   };
 
-  const rows = state.documents.map((doc) => ({
-    id: doc.id,
-    name: doc.name || doc.filename || 'N/A',
-    status: (
-      <div className={styles.statusCell}>
-        {getStatusIcon(doc.status)}
-        <span className={styles.statusText}>{doc.status}</span>
-      </div>
-    ),
-    created_at: doc.created_at
-      ? new Date(doc.created_at).toLocaleString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true,
-        })
-      : 'N/A',
-    view_action: (
-      <Button
-        kind="ghost"
-        size="sm"
-        onClick={() => handleViewContent(doc)}
-      >
-        View content
-      </Button>
-    ),
-    delete_action: (
-      <Button
-        hasIconOnly
-        kind="ghost"
-        size="sm"
-        renderIcon={TrashCan}
-        iconDescription="Delete"
-        onClick={() => dispatch({ type: 'OPEN_DELETE_MODAL', payload: doc.id })}
-      />
-    ),
-  }));
+  const rows = state.documents.map((doc) => {
+    const hasError = doc.status === 'failed';
+    
+    return {
+      id: doc.id,
+      name: doc.name || doc.filename || 'N/A',
+      status: (
+        <div className={styles.statusCell}>
+          {getStatusIcon(doc.status)}
+          <span className={styles.statusText}>{doc.status}</span>
+          {hasError && (
+            <Tooltip
+              align="top"
+              label="Document processing failed. Please try re-uploading the document."
+              className={styles.errorTooltip}
+            >
+              <button
+                type="button"
+                className={styles.errorInfoButton}
+                aria-label="Error details"
+              >
+                <ErrorFilled size={16} className={styles.errorInfoIcon} />
+              </button>
+            </Tooltip>
+          )}
+        </div>
+      ),
+      submitted_at: doc.submitted_at
+        ? new Date(doc.submitted_at).toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+          })
+        : 'N/A',
+      view_action: (
+        <Button
+          kind="ghost"
+          size="sm"
+          onClick={() => handleViewContent(doc)}
+        >
+          View content
+        </Button>
+      ),
+      delete_action: (
+        <Button
+          hasIconOnly
+          kind="ghost"
+          size="sm"
+          renderIcon={TrashCan}
+          iconDescription="Delete"
+          onClick={() => dispatch({ type: 'OPEN_DELETE_MODAL', payload: doc.id })}
+        />
+      ),
+    };
+  });
 
   const noSearchResults = state.documents.length === 0 && state.search;
 
@@ -563,8 +608,12 @@ const DocumentListPage = () => {
             aria-label="close notification"
             kind="error"
             closeOnEscape
-            title={`Delete document ${state.errorDocName} failed`}
+            title={state.errorDocName ? `Delete document ${state.errorDocName} failed` : 'Error loading documents'}
             subtitle={state.errorMessage}
+            onActionButtonClick={() => {
+              dispatch({ type: 'HIDE_ERROR' });
+              fetchDocuments();
+            }}
             onCloseButtonClick={() => {
               dispatch({ type: 'HIDE_ERROR' });
             }}

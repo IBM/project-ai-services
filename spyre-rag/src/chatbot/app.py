@@ -233,7 +233,32 @@ async def locked_stream(stream_g, perf_stat_dict):
     response_model=ChatCompletionResponse,
     tags=["chat"],
     summary="Chat with RAG",
-    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON."
+    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON.",
+    responses={
+        200: {
+            "description": "Successful Response",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": "Based on the retrieved documents, artificial intelligence..."
+                                }
+                            }
+                        ]
+                    }
+                },
+                "text/event-stream": {
+                    "schema": {
+                        "type": "string",
+                        "description": "Server-Sent Events stream. Each event is formatted as: data: {JSON}\\n\\n"
+                    },
+                    "example": 'data: {"choices":[{"delta":{"content":"Based on"}}]}\n\ndata: {"choices":[{"delta":{"content":" the retrieved"}}]}\n\ndata: {"choices":[{"delta":{"content":" documents..."}}]}\n\n'
+                }
+            }
+        }
+    }
 )
 async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse | StreamingResponse:
     if not req.messages:
