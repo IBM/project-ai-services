@@ -73,7 +73,7 @@ func loadSubscriptionList(c *openshift.OpenshiftClient) error {
 			return fmt.Errorf("failed to list subscriptions: %w", err)
 		}
 		if apierrors.IsForbidden(err) {
-			return fmt.Errorf("RBAC error: missing required permissions to list subscriptions: %w", err)
+			return fmt.Errorf("missing required permissions to list subscriptions: %w", err)
 		}
 	}
 
@@ -248,7 +248,7 @@ func waitForOperator(c *openshift.OpenshiftClient, packageName string, opNS stri
 				return false, nil
 			}
 			if apierrors.IsForbidden(err) {
-				return false, fmt.Errorf("RBAC error: missing required permissions to get ClusterServiceVersion: %w", err)
+				return false, fmt.Errorf("missing required permissions to get ClusterServiceVersion: %w", err)
 			}
 
 			return false, err
