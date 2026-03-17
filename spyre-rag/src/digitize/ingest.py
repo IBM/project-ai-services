@@ -117,22 +117,39 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         file_processing_time = end_time - start_time
 
         unprocessed_files = get_unprocessed_files(input_file_paths, converted_pdf_stats.keys())
-        if len(unprocessed_files):
-            logger.info(f"Ingestion completed partially, please re-run the ingestion again to ingest the following files.\n{"\n".join(unprocessed_files)}\nIf the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
-        else:
-            logger.info(f"✅ Ingestion completed successfully, Time taken: {file_processing_time:.2f} seconds. You can query your documents via chatbot")
-
+        
         ingested = total_pdfs - len(unprocessed_files)
         percentage = (ingested / total_pdfs * 100) if total_pdfs else 0.0
-        logger.info(
-            f"Ingestion summary: {ingested}/{total_pdfs} files ingested "
-            f"({percentage:.2f}% of total PDF files)"
-        )
-
-        # Update job status to COMPLETED if all documents processed successfully
-        if status_mgr and not unprocessed_files:
-            logger.info(f"All documents processed successfully, updating job {job_id} status to COMPLETED")
-            status_mgr.update_job_progress("", DocStatus.COMPLETED, JobStatus.COMPLETED)
+        
+        if len(unprocessed_files):
+            failed_files_list = "\n".join(unprocessed_files)
+            error_message = (
+                f"Ingestion completed partially. {len(unprocessed_files)} document(s) failed to process.\n"
+                f"Failed documents:\n{failed_files_list}\n"
+                f"Please submit a new ingestion job to process these documents. "
+                f"If the issue persists, please report at https://github.com/IBM/project-ai-services/issues"
+            )
+            logger.warning(error_message)
+            logger.info(
+                f"Ingestion summary: {ingested}/{total_pdfs} files ingested "
+                f"({percentage:.2f}% of total PDF files)"
+            )
+            
+            # Update job status to FAILED if there are unprocessed files
+            if status_mgr:
+                logger.info(f"Some documents failed to process, updating job {job_id} status to FAILED")
+                status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=error_message)
+        else:
+            logger.info(f"✅ Ingestion completed successfully, Time taken: {file_processing_time:.2f} seconds. You can query your documents via chatbot")
+            logger.info(
+                f"Ingestion summary: {ingested}/{total_pdfs} files ingested "
+                f"({percentage:.2f}% of total PDF files)"
+            )
+            
+            # Update job status to COMPLETED if all documents processed successfully
+            if status_mgr:
+                logger.info(f"All documents processed successfully, updating job {job_id} status to COMPLETED")
+                status_mgr.update_job_progress("", DocStatus.COMPLETED, JobStatus.COMPLETED)
 
         return converted_pdf_stats
 
