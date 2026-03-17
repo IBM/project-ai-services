@@ -31,6 +31,12 @@ COMPONENTS = {
         ("ai-services/assets/applications/rag-dev/podman/values.yaml", "ui"),
         ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "ui"),
     ],
+    "digitize-ui/Makefile": [
+        ("ai-services/assets/applications/rag/openshift/values.yaml", "digitizeUi"),
+        ("ai-services/assets/applications/rag/podman/values.yaml", "digitizeUi"),
+        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "digitizeUi"),
+        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "digitizeUi"),
+    ],
 }
 
 
