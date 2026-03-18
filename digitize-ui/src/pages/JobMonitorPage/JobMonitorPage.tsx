@@ -752,7 +752,7 @@ const JobMonitorPage = () => {
                           renderIcon={Add}
                           onClick={() => dispatch({ type: 'SET_INGEST_SIDE_PANEL_OPEN', payload: true })}
                         >
-                          Ingest
+                          Create
                         </Button>
                       </TableToolbarContent>
                     </TableToolbar>
