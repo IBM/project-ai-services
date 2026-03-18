@@ -148,10 +148,6 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                 status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=f"Ingestion failed: {str(e)}")
             except FileNotFoundError as fnf_error:
                 logger.error(f"Job status file not found during error handling: {fnf_error}")
-                # If job status file is missing, mark all documents as failed
-                for doc_id in doc_id_dict.values():
-                    logger.debug(f"Catastrophic error (no status file): marking document {doc_id} as FAILED")
-                    status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Ingestion failed: {str(e)}")
 
                 # Re-raise the exception to propagate to app server
                 raise fnf_error
