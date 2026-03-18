@@ -108,7 +108,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                     f"Perform GET /v1/documents/{{id}} to know the reason for failure. Failed document ids: {failed_doc_ids_list}"
                 )
 
-                logger.info(f"Some documents failed to process, updating job {job_id} status to FAILED")
+                logger.debug(f"Some documents failed to process, updating job {job_id} status to FAILED")
                 status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=job_error_message)
             else:
                 # All documents completed successfully
@@ -118,7 +118,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                     f"(100.00% of total PDF files)"
                 )
 
-                logger.info(f"All documents processed successfully, updating job {job_id} status to COMPLETED")
+                logger.debug(f"All documents processed successfully, updating job {job_id} status to COMPLETED")
                 status_mgr.update_job_progress("", DocStatus.COMPLETED, JobStatus.COMPLETED)
 
         return converted_pdf_stats
@@ -129,21 +129,23 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
 
         # Update status to FAILED only for documents that haven't been processed yet
         if status_mgr and doc_id_dict and job_id:
-            doc_stats = get_job_document_stats(job_id)
-            processed_doc_ids = set(
-                [doc["id"] for doc in doc_stats["completed_docs"]] +
-                [doc["id"] for doc in doc_stats["failed_docs"]]
-            )
-            
-            # Only mark unprocessed documents as failed
-            for doc_id in doc_id_dict.values():
-                if doc_id not in processed_doc_ids:
-                    logger.debug(f"Catastrophic error: marking unprocessed document {doc_id} as FAILED")
+            try:
+                doc_stats = get_job_document_stats(job_id)
+                processed_doc_ids = set(
+                    [doc["id"] for doc in doc_stats["completed_docs"]] +
+                    [doc["id"] for doc in doc_stats["failed_docs"]]
+                )
+
+                # Only mark unprocessed documents as failed
+                for doc_id in doc_id_dict.values():
+                    if doc_id not in processed_doc_ids:
+                        logger.debug(f"Catastrophic error: marking unprocessed document {doc_id} as FAILED")
+                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Ingestion failed: {str(e)}")
+                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+            except FileNotFoundError as fnf_error:
+                logger.error(f"Job status file not found during error handling: {fnf_error}")
+                # If job status file is missing, mark all documents as failed
+                for doc_id in doc_id_dict.values():
+                    logger.debug(f"Catastrophic error (no status file): marking document {doc_id} as FAILED")
                     status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Ingestion failed: {str(e)}")
-                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
-
-            # Update job status to FAILED once after all unprocessed documents are marked
-            logger.error(f"Catastrophic ingestion error, updating job {job_id} status to FAILED")
-            status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=f"Ingestion failed: {str(e)}")
-
         return None

@@ -154,14 +154,9 @@ def get_job_document_stats(job_id: str, jobs_dir: Path = config.JOBS_DIR) -> dic
     job_status_file = jobs_dir / f"{job_id}_status.json"
 
     if not job_status_file.exists():
-        logger.warning(f"Job status file not found: {job_status_file}")
-        return {
-            "failed_docs": [],
-            "completed_docs": [],
-            "total_docs": 0,
-            "failed_count": 0,
-            "completed_count": 0
-        }
+        error_msg = f"Job status file not found: {job_status_file}"
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
 
     try:
         with open(job_status_file, "r") as f:
@@ -180,14 +175,7 @@ def get_job_document_stats(job_id: str, jobs_dir: Path = config.JOBS_DIR) -> dic
         }
     except Exception as e:
         logger.error(f"Error reading job status file {job_status_file}: {e}")
-        return {
-            "failed_docs": [],
-            "completed_docs": [],
-            "total_docs": 0,
-            "failed_count": 0,
-            "completed_count": 0
-        }
-
+        raise e
 
 def retry_on_failure(
     func: Callable,
