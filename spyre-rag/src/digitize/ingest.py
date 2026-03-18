@@ -104,7 +104,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                 f"({percentage:.2f}% of total PDF files)"
             )
 
-            # User-friendly error message for job status
+            # User-friendly error message for overall job status
             job_error_message = (
                 f"{len(unprocessed_files)} document(s) failed to ingest. "
                 f"Perform GET /v1/documents/{{id}} to know the reason for failure for the docs: {failed_doc_ids_list}"
@@ -140,7 +140,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                 status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
             
             # Update job status to FAILED once after all documents are marked
-            logger.info(f"Catastrophic ingestion error, updating job {job_id} status to FAILED")
+            logger.error(f"Catastrophic ingestion error, updating job {job_id} status to FAILED")
             status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=f"Ingestion failed: {str(e)}")
 
         return None

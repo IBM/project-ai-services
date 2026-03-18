@@ -71,8 +71,6 @@ def digitize(directory_path: Path, job_id: str, doc_id_dict: dict, output_format
                 "completed_at": get_utc_timestamp(),
                 "timing_in_secs": {"digitizing": round(conversion_time, 2)}
             })
-            # For single-document digitization jobs, mark job as COMPLETED
-            # The status.py logic will set completed_at only when all docs are done
             status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.COMPLETED)
 
     except Exception as e:
@@ -80,7 +78,5 @@ def digitize(directory_path: Path, job_id: str, doc_id_dict: dict, output_format
         logger.error(f"Conversion failed for {filename}: {str(e)}", exc_info=True)
         if status_mgr:
             status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Failed to convert document: {str(e)}")
-            # For single-document digitization jobs, mark job as FAILED
-            # The status.py logic will set completed_at only when all docs are done
             status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"Digitization failed: {str(e)}")
         raise

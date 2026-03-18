@@ -475,8 +475,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
     except Exception as e:
         logger.error(f"Error while processing the documents in job {job_id}: {e}", exc_info=True)
-        # Don't update job status here - let ingest.py handle final job status determination
-        # Just log the error and let it propagate
+        # Final job status will be determined based on the overall documents processed in ingest.py, hence skipping job status update
 
         # Clean up intermediate files for failed documents
         # Preserve <doc_id>.json even for failed jobs for debugging/GET requests
