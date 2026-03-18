@@ -82,12 +82,12 @@ Configure - Configure performs below actions
  - Initializes the AI Services infrastructure
 
 - For OpenShift:
- - Apply machine configs required for Spyre operator
+ - Applies required machine configs for Spyre operator
  - Installs required operators and operands
- - Create and configures SpyreClusterPolicy
- - Create DSCInitialization if does not exist
- - Create or update DataScienceCluster enabling kserve component
- - Wait for all required components to be ready
+ - Creates and configures SpyreClusterPolicy
+ - Creates DSCInitialization if it does not exist
+ - Creates or updates DataScienceCluster with kserve enabled
+ - Waits for all required components to become ready
 
 Validate - Checks below system prerequisites:
 - For Podman:
