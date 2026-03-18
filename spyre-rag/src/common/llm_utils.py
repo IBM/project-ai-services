@@ -355,48 +355,170 @@ def query_vllm_summarize_stream(
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
         yield "data: [DONE]\n\n"
 
-def tokenize_with_llm(prompt, emb_endpoint):
+def tokenize_with_llm(prompt, emb_endpoint, max_retries=3):
+    """
+    Tokenize text using the LLM embedding endpoint with retry logic.
+    
+    Args:
+        prompt: Text to tokenize
+        emb_endpoint: Embedding endpoint URL
+        max_retries: Maximum number of retry attempts (default: 3)
+        
+    Returns:
+        List of tokens
+        
+    Raises:
+        RuntimeError: If SESSION is not initialized
+        requests.exceptions.RequestException: If all retries fail
+    """
     if SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
     
     payload = {
         "prompt": prompt
     }
-    try:
-        response = SESSION.post(f"{emb_endpoint}/tokenize", json=payload)
-        response.raise_for_status()
-        result = response.json()
-        tokens = result.get("tokens", [])
-        return tokens
-    except requests.exceptions.RequestException as e:
-        error_details = str(e)
-        if e.response is not None:
-            error_details += f", Response Text: {e.response.text}"
-        logger.error(f"Error encoding prompt: {error_details}")
-        raise e
-    except Exception as e:
-        logger.error(f"Error encoding prompt: {e}")
-        raise e
+    
+    last_exception = None
+    for attempt in range(max_retries):
+        try:
+            response = SESSION.post(f"{emb_endpoint}/tokenize", json=payload)
+            response.raise_for_status()
+            result = response.json()
+            tokens = result.get("tokens", [])
+            
+            # Log successful retry if it wasn't the first attempt
+            if attempt > 0:
+                logger.info(f"Tokenization succeeded on attempt {attempt + 1}/{max_retries}")
+            
+            return tokens
+            
+        except requests.exceptions.HTTPError as e:
+            last_exception = e
+            # Check for "Already borrowed" error (connection pool exhaustion)
+            if e.response is not None and e.response.status_code == 500:
+                response_text = e.response.text
+                if "Already borrowed" in response_text or "Internal Server Error" in response_text:
+                    if attempt < max_retries - 1:
+                        # Exponential backoff: 0.1s, 0.2s, 0.4s
+                        backoff_time = 0.1 * (2 ** attempt)
+                        logger.warning(
+                            f"Connection pool exhaustion detected (attempt {attempt + 1}/{max_retries}). "
+                            f"Retrying in {backoff_time:.2f}s... Response: {response_text[:100]}"
+                        )
+                        time.sleep(backoff_time)
+                        continue
+            
+            # For other HTTP errors or last attempt, log and raise
+            error_details = str(e)
+            if e.response is not None:
+                error_details += f", Response Text: {e.response.text}"
+            logger.error(f"Error encoding prompt (attempt {attempt + 1}/{max_retries}): {error_details}")
+            
+            if attempt == max_retries - 1:
+                raise
+                
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+            error_details = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                error_details += f", Response Text: {e.response.text}"
+            logger.error(f"Error encoding prompt (attempt {attempt + 1}/{max_retries}): {error_details}")
+            
+            if attempt == max_retries - 1:
+                raise
+                
+        except Exception as e:
+            last_exception = e
+            logger.error(f"Unexpected error encoding prompt (attempt {attempt + 1}/{max_retries}): {e}")
+            
+            if attempt == max_retries - 1:
+                raise
+    
+    # This should not be reached, but just in case
+    if last_exception:
+        raise last_exception
+    raise RuntimeError("Tokenization failed after all retries")
 
-def detokenize_with_llm(tokens, emb_endpoint):
+def detokenize_with_llm(tokens, emb_endpoint, max_retries=3):
+    """
+    Detokenize tokens using the LLM embedding endpoint with retry logic.
+    
+    Args:
+        tokens: List of tokens to detokenize
+        emb_endpoint: Embedding endpoint URL
+        max_retries: Maximum number of retry attempts (default: 3)
+        
+    Returns:
+        Detokenized text string
+        
+    Raises:
+        RuntimeError: If SESSION is not initialized
+        requests.exceptions.RequestException: If all retries fail
+    """
     if SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
     
     payload = {
         "tokens": tokens
     }
-    try:
-        response = SESSION.post(f"{emb_endpoint}/detokenize", json=payload)
-        response.raise_for_status()
-        result = response.json()
-        prompt = result.get("prompt", "")
-        return prompt
-    except requests.exceptions.RequestException as e:
-        error_details = str(e)
-        if e.response is not None:
-            error_details += f", Response Text: {e.response.text}"
-        logger.error(f"Error decoding tokens: {error_details}")
-        raise e
-    except Exception as e:
-        logger.error(f"Error decoding tokens: {e}")
-        raise e
+    
+    last_exception = None
+    for attempt in range(max_retries):
+        try:
+            response = SESSION.post(f"{emb_endpoint}/detokenize", json=payload)
+            response.raise_for_status()
+            result = response.json()
+            prompt = result.get("prompt", "")
+            
+            # Log successful retry if it wasn't the first attempt
+            if attempt > 0:
+                logger.info(f"Detokenization succeeded on attempt {attempt + 1}/{max_retries}")
+            
+            return prompt
+            
+        except requests.exceptions.HTTPError as e:
+            last_exception = e
+            # Check for "Already borrowed" error (connection pool exhaustion)
+            if e.response is not None and e.response.status_code == 500:
+                response_text = e.response.text
+                if "Already borrowed" in response_text or "Internal Server Error" in response_text:
+                    if attempt < max_retries - 1:
+                        # Exponential backoff: 0.1s, 0.2s, 0.4s
+                        backoff_time = 0.1 * (2 ** attempt)
+                        logger.warning(
+                            f"Connection pool exhaustion detected (attempt {attempt + 1}/{max_retries}). "
+                            f"Retrying in {backoff_time:.2f}s... Response: {response_text[:100]}"
+                        )
+                        time.sleep(backoff_time)
+                        continue
+            
+            # For other HTTP errors or last attempt, log and raise
+            error_details = str(e)
+            if e.response is not None:
+                error_details += f", Response Text: {e.response.text}"
+            logger.error(f"Error decoding tokens (attempt {attempt + 1}/{max_retries}): {error_details}")
+            
+            if attempt == max_retries - 1:
+                raise
+                
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+            error_details = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                error_details += f", Response Text: {e.response.text}"
+            logger.error(f"Error decoding tokens (attempt {attempt + 1}/{max_retries}): {error_details}")
+            
+            if attempt == max_retries - 1:
+                raise
+                
+        except Exception as e:
+            last_exception = e
+            logger.error(f"Unexpected error decoding tokens (attempt {attempt + 1}/{max_retries}): {e}")
+            
+            if attempt == max_retries - 1:
+                raise
+    
+    # This should not be reached, but just in case
+    if last_exception:
+        raise last_exception
+    raise RuntimeError("Detokenization failed after all retries")
