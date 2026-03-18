@@ -259,7 +259,7 @@ func validateParamsFlag(cmd *cobra.Command) error {
 
 	// Validate params against template values
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{Runtime: vars.RuntimeFactory.GetRuntimeType()})
-	_, err = tp.LoadValues(templateName, valuesFiles, argParams)
+	_, err = tp.LoadValues(templateName, nil, argParams)
 	if err != nil {
 		return fmt.Errorf("failed to load params: %w", err)
 	}
@@ -276,12 +276,10 @@ func validateValuesFlag(cmd *cobra.Command) error {
 	}
 
 	// Validate parameters in values files
-	if len(valuesFiles) > 0 {
-		tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{Runtime: vars.RuntimeFactory.GetRuntimeType()})
-		_, err := tp.LoadValues(templateName, valuesFiles, nil)
-		if err != nil {
-			return fmt.Errorf("failed to validate values files: %w", err)
-		}
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{Runtime: vars.RuntimeFactory.GetRuntimeType()})
+	_, err := tp.LoadValues(templateName, valuesFiles, nil)
+	if err != nil {
+		return fmt.Errorf("failed to validate values files: %w", err)
 	}
 
 	return nil
