@@ -757,7 +757,7 @@ const JobMonitorPage = () => {
         {/* Page Header */}
         <div className={styles.pageHeader}>
           <div className={styles.headerContent}>
-            <h1 className={styles.pageTitle}>Ingested documents log</h1>
+            <h1 className={styles.pageTitle}>Jobs</h1>
             <Link href="https://www.ibm.com/docs/en/aiservices/2025.12.0?topic=services-introduction" className={styles.learnMore} target="_blank" rel="noopener noreferrer">
               Learn more →
             </Link>

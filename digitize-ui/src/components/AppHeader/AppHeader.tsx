@@ -38,7 +38,7 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
   
   return (
     <>
-      <Header aria-label="IBM AI Services" className={styles.header}>
+      <Header aria-label="IBM Digitize Service" className={styles.header}>
           <HeaderMenuButton
             aria-label="Open menu"
             onClick={(e) => {
@@ -51,7 +51,7 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
           />
 
           <HeaderName prefix="IBM" href="#" onClick={handleLogoClick} className={styles.headerName}>
-            AI Services
+            Digitize Service
           </HeaderName>
 
           <HeaderGlobalBar>
@@ -91,9 +91,9 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
 
             <h5>Getting Started:</h5>
             <ol>
-              <li>Navigate to the <strong>Document Upload</strong> page to upload your documents</li>
-              <li>Monitor processing status in the <strong>Job Monitor</strong> page</li>
-              <li>View processed documents in the <strong>Document List</strong> page</li>
+              <li>Navigate to the <strong>Jobs</strong> page to upload your documents</li>
+              <li>Monitor processing status in the <strong>Jobs</strong> page</li>
+              <li>View processed documents in the <strong>Documents</strong> page</li>
             </ol>
 
             <h5>Need More Help?</h5>
