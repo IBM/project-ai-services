@@ -316,7 +316,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     batch_stats.pop(path, {})
                     if doc_id is not None:
                         status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to convert document: {str(e)}")
-                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"failed to convert document: {str(e)}")
+                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
 
             # C. Handle Processing -> Submit Chunking
             for fut in as_completed(process_futures):
@@ -329,7 +329,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         if doc_id is not None:
                             logger.error(f"Processing failed for {path}: txt_json or tab_json is None")
                             status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Failed to process document {doc_id}: processing returned None")
-                            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"Failed to extract text and tables from document {doc_id}: processing returned None")
+                            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
                         batch_stats.pop(path, {})
                         continue
 
@@ -364,7 +364,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     if doc_id is not None:
                         logger.error(f"Error from processing for {path}: {str(e)}", exc_info=True)
                         status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to process document: {str(e)}")
-                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"failed to extract text and tables from document: {str(e)}")
+                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
                     batch_stats.pop(path, {})
 
             # D. Handle Chunking
@@ -378,7 +378,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         if doc_id is not None:
                             logger.error(f"Chunking failed for {path}: chunk_json is None")
                             status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to chunk document {doc_id}: chunk_json returned is None")
-                            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"failed to chunk document {doc_id}: chunk_json returned is None")
+                            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
                         batch_stats.pop(path, {})
                         continue
 
@@ -400,7 +400,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     if doc_id is not None:
                         logger.error(f"Error from chunking for {path}: {str(e)}", exc_info=True)
                         status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to chunk document: {str(e)}")
-                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"failed to chunk document: {str(e)}")
+                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
                     batch_stats.pop(path, {})
 
         return batch_stats, batch_chunk_paths, batch_table_paths
@@ -475,7 +475,8 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
     except Exception as e:
         logger.error(f"Error while processing the documents in job {job_id}: {e}", exc_info=True)
-        status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=f"failed to merge chunked text and tables: {str(e)}")
+        # Don't update job status here - let ingest.py handle final job status determination
+        # Just log the error and let it propagate
 
         # Clean up intermediate files for failed documents
         # Preserve <doc_id>.json even for failed jobs for debugging/GET requests

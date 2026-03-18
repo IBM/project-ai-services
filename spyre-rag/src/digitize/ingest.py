@@ -81,23 +81,39 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         percentage = (ingested / total_pdfs * 100) if total_pdfs else 0.0
 
         if len(unprocessed_files):
+            # Get document IDs for failed documents
+            failed_doc_ids = []
+            if doc_id_dict:
+                from pathlib import Path
+                failed_doc_ids = [doc_id_dict.get(Path(file).name) for file in unprocessed_files if Path(file).name in doc_id_dict]
+                failed_doc_ids = [doc_id for doc_id in failed_doc_ids if doc_id]  # Filter out None values
+            
             failed_files_list = "\n".join(unprocessed_files)
-            error_message = (
+            failed_doc_ids_list = ", ".join(failed_doc_ids) if failed_doc_ids else "N/A"
+            
+            # Detailed error message for logs
+            detailed_error_message = (
                 f"Ingestion completed partially. {len(unprocessed_files)} document(s) failed to process.\n"
                 f"Failed documents:\n{failed_files_list}\n"
                 f"Please submit a new ingestion job to process these documents. "
                 f"If the issue persists, please report at https://github.com/IBM/project-ai-services/issues"
             )
-            logger.warning(error_message)
+            logger.warning(detailed_error_message)
             logger.info(
                 f"Ingestion summary: {ingested}/{total_pdfs} files ingested "
                 f"({percentage:.2f}% of total PDF files)"
             )
 
+            # User-friendly error message for job status
+            job_error_message = (
+                f"{len(unprocessed_files)} document(s) failed to ingest. "
+                f"Perform GET /v1/documents/{{id}} to know the reason for failure for the docs: {failed_doc_ids_list}"
+            )
+
             # Update job status to FAILED if there are unprocessed files
             if status_mgr:
                 logger.info(f"Some documents failed to process, updating job {job_id} status to FAILED")
-                status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=error_message)
+                status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=job_error_message)
         else:
             logger.info(f"✅ Ingestion completed successfully, Time taken: {file_processing_time:.2f} seconds. You can query your documents via chatbot")
             logger.info(
@@ -119,8 +135,12 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         # Update status to FAILED for all documents in this job
         if status_mgr and doc_id_dict:
             for doc_id in doc_id_dict.values():
-                logger.debug(f"Ingestion failed: updating doc & job metadata to FAILED for document: {doc_id}")
+                logger.debug(f"Ingestion failed: updating doc metadata to FAILED for document: {doc_id}")
                 status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Ingestion failed: {str(e)}")
-                status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error=f"Ingestion failed: {str(e)}")
+                status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+            
+            # Update job status to FAILED once after all documents are marked
+            logger.info(f"Catastrophic ingestion error, updating job {job_id} status to FAILED")
+            status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=f"Ingestion failed: {str(e)}")
 
         return None
