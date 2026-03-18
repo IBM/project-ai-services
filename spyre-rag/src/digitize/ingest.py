@@ -62,6 +62,16 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
             )
             logger.info("Processed documents loaded into Vector DB")
 
+            # Mark successfully indexed documents as COMPLETED
+            if status_mgr and doc_id_dict:
+                for path in converted_pdf_stats.keys():
+                    from pathlib import Path
+                    doc_id = doc_id_dict.get(Path(path).name)
+                    if doc_id:
+                        logger.debug(f"Indexing Done: updating doc metadata to COMPLETED for document: {doc_id}")
+                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.COMPLETED, "completed_at": get_utc_timestamp()})
+                        status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
+
         # Log time taken for the file
         end_time: float = time.time()  # End the timer for the current file
         file_processing_time = end_time - start_time
@@ -101,16 +111,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                 logger.info(f"Some documents failed to process, updating job {job_id} status to FAILED")
                 status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=job_error_message)
             else:
-                # All documents completed successfully - update their status to COMPLETED
-                if doc_id_dict:
-                    for path in converted_pdf_stats.keys():
-                        from pathlib import Path
-                        doc_id = doc_id_dict.get(Path(path).name)
-                        if doc_id:
-                            logger.debug(f"Indexing Done: updating doc metadata to COMPLETED for document: {doc_id}")
-                            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.COMPLETED, "completed_at": get_utc_timestamp()})
-                            status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
-
+                # All documents completed successfully
                 logger.info(f"✅ Ingestion completed successfully, Time taken: {file_processing_time:.2f} seconds. You can query your documents via chatbot")
                 logger.info(
                     f"Ingestion summary: {len(completed_docs)}/{total_pdfs} files ingested "
