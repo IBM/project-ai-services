@@ -19,7 +19,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -357,6 +359,50 @@ func (kc *OpenshiftClient) DeletePVCs(appLabel string) error {
 	}
 
 	return nil
+}
+
+// DeleteServingRuntimesByLabels deletes all ServingRuntimes matching the given label selector.
+func (kc *OpenshiftClient) DeleteServingRuntimesByLabels(labelSelector string) error {
+	// List ServingRuntimes with the given label selector
+	servingRuntimes := &unstructured.UnstructuredList{}
+	servingRuntimes.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "serving.kserve.io",
+		Version: "v1alpha1",
+		Kind:    "ServingRuntimeList",
+	})
+
+	err := kc.Client.List(kc.Ctx, servingRuntimes, client.InNamespace(kc.Namespace), client.MatchingLabels(parseLabelSelector(labelSelector)))
+	if err != nil {
+		return fmt.Errorf("failed to list ServingRuntimes for cleanup: %w", err)
+	}
+
+	// Delete each ServingRuntime
+	for _, sr := range servingRuntimes.Items {
+		if err := kc.Client.Delete(kc.Ctx, &sr); err != nil {
+			logger.Warningf("Failed to delete ServingRuntime '%s': %v\n", sr.GetName(), err)
+
+			continue
+		}
+
+		logger.Infof("Deleted ServingRuntime '%s'\n", sr.GetName(), logger.VerbosityLevelDebug)
+	}
+
+	return nil
+}
+
+// parseLabelSelector parses a label selector string in the format "key=value" into a map.
+func parseLabelSelector(labelSelector string) map[string]string {
+	labels := make(map[string]string)
+	if labelSelector == "" {
+		return labels
+	}
+
+	parts := strings.SplitN(labelSelector, "=", labelPartsCount)
+	if len(parts) == labelPartsCount {
+		labels[parts[0]] = parts[1]
+	}
+
+	return labels
 }
 
 // Type returns the runtime type.

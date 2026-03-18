@@ -12,9 +12,23 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
+
+// defaultRuntimeTemplates contains the default OpenShift templates to be processed
+// for runtime configuration during application creation.
+var defaultRuntimeTemplates = []TemplateProcessOptions{
+	{
+		TemplateName:      "vllm-cpu-runtime-template",
+		TemplateNamespace: "redhat-ods-applications",
+	},
+	{
+		TemplateName:      "vllm-spyre-ppc64le-runtime-template",
+		TemplateNamespace: "redhat-ods-applications",
+	},
+}
 
 func (o *OpenshiftApplication) Create(ctx context.Context, opts types.CreateOptions) error {
 	logger.Infof("Creating application '%s' using template '%s'\n", opts.Name, opts.TemplateName)
@@ -39,14 +53,23 @@ func (o *OpenshiftApplication) Create(ctx context.Context, opts types.CreateOpti
 		return fmt.Errorf("failed to prepare values: %w", err)
 	}
 
-	// Step4: Deploy Application
+	// Step4: Process default runtime templates with application labels
+	runtimeLabels := map[string]string{
+		"ai-services.io/application": opts.Name,
+		"ai-services.io/template":    opts.TemplateName,
+	}
+	if err := processOpenShiftTemplatesWithLabels(ctx, defaultRuntimeTemplates, opts.Name, runtimeLabels); err != nil {
+		return fmt.Errorf("failed to process runtime templates: %w", err)
+	}
+
+	// Step5: Deploy Application
 	if err := deployApp(ctx, chart, timeout, values, opts); err != nil {
 		return err
 	}
 
 	logger.Infoln("-------")
 
-	// Step5: Print the next steps to be performed at the end of create
+	// Step6: Print the next steps to be performed at the end of create
 	if err := helpers.PrintNextSteps(o.runtime, opts.Name, opts.TemplateName); err != nil {
 		// do not want to fail the overall create if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)
@@ -134,6 +157,61 @@ func deployApp(ctx context.Context, chart chart.Charter, timeout time.Duration, 
 	}
 
 	s.Stop("Application '" + app + "' deployed successfully")
+
+	return nil
+}
+
+// TemplateProcessOptions contains options for processing OpenShift templates.
+type TemplateProcessOptions struct {
+	TemplateName      string
+	TemplateNamespace string
+}
+
+// processOpenShiftTemplatesWithLabels processes multiple OpenShift templates in sequence and adds labels to all created resources.
+func processOpenShiftTemplatesWithLabels(ctx context.Context, templates []TemplateProcessOptions, targetNamespace string, labels map[string]string) error {
+	for i, tmpl := range templates {
+		logger.Infof("Processing template %d of %d: %s\n", i+1, len(templates), tmpl.TemplateName)
+
+		if err := processOpenShiftTemplateWithLabels(ctx, tmpl, targetNamespace, labels); err != nil {
+			return fmt.Errorf("failed to process template '%s': %w", tmpl.TemplateName, err)
+		}
+	}
+
+	logger.Infof("Successfully processed all %d templates\n", len(templates))
+
+	return nil
+}
+
+// processOpenShiftTemplateWithLabels checks if an OpenShift Template exists, processes it, and adds labels to all resources.
+func processOpenShiftTemplateWithLabels(ctx context.Context, opts TemplateProcessOptions, targetNamespace string, labels map[string]string) error {
+	s := spinner.New(fmt.Sprintf("Processing Template '%s'...", opts.TemplateName))
+	s.Start(ctx)
+
+	// Check if template exists
+	// Get the template - will error if not found
+	template, err := openshift.GetTemplate(opts.TemplateName, opts.TemplateNamespace)
+	if err != nil {
+		s.Fail("failed to get template")
+
+		return fmt.Errorf("failed to get template: %w", err)
+	}
+
+	// Process the template
+	processedObjects, err := openshift.ProcessTemplate(template)
+	if err != nil {
+		s.Fail("failed to process template")
+
+		return fmt.Errorf("failed to process template: %w", err)
+	}
+
+	// Apply the processed objects to the target namespace with labels (idempotent operation)
+	if err := openshift.ApplyObjectsWithLabels(processedObjects, targetNamespace, labels); err != nil {
+		s.Fail("failed to apply processed objects")
+
+		return fmt.Errorf("failed to apply processed objects: %w", err)
+	}
+
+	s.Stop(fmt.Sprintf("Template '%s' processed and applied successfully", opts.TemplateName))
 
 	return nil
 }
