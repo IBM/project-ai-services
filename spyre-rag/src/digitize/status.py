@@ -134,6 +134,61 @@ def create_job_state(
     logger.debug(f"Created job status file: {job_status_path}")
     return job_state
 
+
+def get_job_document_stats(job_id: str, jobs_dir: Path = config.JOBS_DIR) -> dict:
+    """
+    Get statistics about documents in a job by reading the job status file.
+
+    Args:
+        job_id: Unique identifier for the job
+        jobs_dir: Directory where job status files are stored
+
+    Returns:
+        Dictionary containing:
+        - failed_docs: List of failed document objects with id, name, status
+        - completed_docs: List of completed document objects with id, name, status
+        - total_docs: Total number of documents
+        - failed_count: Number of failed documents
+        - completed_count: Number of completed documents
+    """
+    job_status_file = jobs_dir / f"{job_id}_status.json"
+
+    if not job_status_file.exists():
+        logger.warning(f"Job status file not found: {job_status_file}")
+        return {
+            "failed_docs": [],
+            "completed_docs": [],
+            "total_docs": 0,
+            "failed_count": 0,
+            "completed_count": 0
+        }
+
+    try:
+        with open(job_status_file, "r") as f:
+            job_data = json.load(f)
+
+        documents = job_data.get("documents", [])
+        failed_docs = [doc for doc in documents if doc.get("status") == DocStatus.FAILED.value]
+        completed_docs = [doc for doc in documents if doc.get("status") == DocStatus.COMPLETED.value]
+
+        return {
+            "failed_docs": failed_docs,
+            "completed_docs": completed_docs,
+            "total_docs": len(documents),
+            "failed_count": len(failed_docs),
+            "completed_count": len(completed_docs)
+        }
+    except Exception as e:
+        logger.error(f"Error reading job status file {job_status_file}: {e}")
+        return {
+            "failed_docs": [],
+            "completed_docs": [],
+            "total_docs": 0,
+            "failed_count": 0,
+            "completed_count": 0
+        }
+
+
 def retry_on_failure(
     func: Callable,
     max_retries: int = config.RETRY_MAX_ATTEMPTS,
