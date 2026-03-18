@@ -97,6 +97,18 @@ func doBootstrapValidate() error {
 	if len(skip) > 0 {
 		logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
 	}
+	// Build valid checks dynamically from runtime.
+	validChecksMap := make(map[string]bool)
+	for _, r := range bootstrap.GetRulesForRuntime() {
+		validChecksMap[r.Name()] = true
+	}
+
+	// Validate skip checks against valid checks for the runtime.
+	for s := range skip {
+		if !validChecksMap[s] {
+			return fmt.Errorf("invalid skip-validation value '%s' for runtime '%s'", s, vars.RuntimeFactory.GetRuntimeType())
+		}
+	}
 
 	// Create bootstrap instance based on runtime
 	factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
