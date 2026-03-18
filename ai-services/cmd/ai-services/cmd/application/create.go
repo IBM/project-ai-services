@@ -275,6 +275,15 @@ func validateValuesFlag(cmd *cobra.Command) error {
 		}
 	}
 
+	// Validate parameters in values files
+	if len(valuesFiles) > 0 {
+		tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{Runtime: vars.RuntimeFactory.GetRuntimeType()})
+		_, err := tp.LoadValues(templateName, valuesFiles, nil)
+		if err != nil {
+			return fmt.Errorf("failed to validate values files: %w", err)
+		}
+	}
+
 	return nil
 }
 

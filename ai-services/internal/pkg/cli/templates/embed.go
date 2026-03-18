@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -181,7 +182,7 @@ func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []str
 		return nil, fmt.Errorf("failed to parse values.yaml: %w", err)
 	}
 
-	// Load user provided file overrides
+	// Load user provided file overrides and validate them
 	for _, overridePath := range valuesFileOverrides {
 		overrideData, err := os.ReadFile(overridePath)
 		if err != nil {
@@ -191,6 +192,13 @@ func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []str
 		if err := yaml.Unmarshal(overrideData, &overrideValues); err != nil {
 			return nil, fmt.Errorf("failed to parse override file %s: %w", overridePath, err)
 		}
+
+		// Validate that all parameters in the override file are supported
+		overrideParamsMap := flattenMapToKeys(overrideValues, "")
+		if err := utils.ValidateParams(overrideParamsMap, values); err != nil {
+			return nil, fmt.Errorf("validation failed for override file %s: %w", overridePath, err)
+		}
+
 		for key, val := range overrideValues {
 			utils.SetNestedValue(values, key, val)
 		}
@@ -207,6 +215,29 @@ func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []str
 	}
 
 	return values, nil
+}
+
+// flattenMapToKeys converts a nested map into a flat map with dotted keys
+// Example: {"ui": {"port": "8080"}} -> {"ui.port": ""}.
+func flattenMapToKeys(m map[string]any, prefix string) map[string]string {
+	result := make(map[string]string)
+	for key, val := range m {
+		fullKey := key
+		if prefix != "" {
+			fullKey = prefix + "." + key
+		}
+
+		// If the value is a nested map, recurse
+		if nestedMap, ok := val.(map[string]any); ok {
+			nestedKeys := flattenMapToKeys(nestedMap, fullKey)
+			maps.Copy(result, nestedKeys)
+		} else {
+			// For leaf values, add the key
+			result[fullKey] = ""
+		}
+	}
+
+	return result
 }
 
 // LoadMetadata loads the metadata for a given application template.
