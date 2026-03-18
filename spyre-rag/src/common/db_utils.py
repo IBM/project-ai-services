@@ -1,6 +1,7 @@
 import os
 from common.vector_db import VectorStore, VectorStoreNotReadyError
 
+
 def get_vector_store() -> VectorStore:
     """
     Factory method to initialize the configured Vector Store.
