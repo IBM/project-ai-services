@@ -123,7 +123,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
     <SidePanel
       open={open}
       onRequestClose={handleClose}
-      title="Ingest"
+      title="Trigger a job"
       actions={[
         {
           kind: 'secondary',
