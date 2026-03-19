@@ -79,11 +79,17 @@ func validateExample() string {
 	return `  # Run all validation checks
   ai-services bootstrap validate
 
+  # Run all validation checks for openshift runtime
+  ai-services bootstrap validate --runtime openshift
+
   # Skip RHN registration check
   ai-services bootstrap validate --skip-validation rhn
 
   # Skip multiple checks
   ai-services bootstrap validate --skip-validation rhn,power
+
+  # Skip operators check for openshift runtime
+  ai-services bootstrap validate --runtime openshift --skip-validation opertors
   
   # Run with verbose output
   ai-services bootstrap validate --verbose`

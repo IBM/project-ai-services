@@ -60,8 +60,14 @@ func bootstrapExample() string {
 	return `  # Validate the environment
   ai-services bootstrap validate
 
+  # Validate the environment for openshift runtime
+  ai-services bootstrap validate --runtime openshift
+
   # Configure the infrastructure
   ai-services bootstrap configure
+
+  # Configure the infrastructure for openshift runtime
+  ai-services bootstrap configure --runtime openshift
 
   # Get help on a specific subcommand
   ai-services bootstrap validate --help`
