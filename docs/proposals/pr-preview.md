@@ -19,6 +19,7 @@ The architecture integrates GitHub's event-driven workflow system with Jenkins' 
 * **GitHub Actions (Event Trigger)**: Listens to pull request events and posts deployment entry points as commit statuses, providing a seamless developer experience within the GitHub UI.
 * **Jenkins Pipeline (Orchestrator)**: Executes the complete deployment lifecycle including code checkout, image building, application deployment, and environment cleanup on a dedicated RHEL agent.
 * **Notification Layer**: Delivers real-time status updates to GitHub commit statuses and Slack channels for comprehensive observability.
+* **Handle multiple PR**: When a developer triggers a PR preview deployment while another PR's deployment is already running, Jenkins automatically queues the new build request and waits for the previous job to complete. Once the queue is clear, Jenkins initiates the deployment for the next PR in sequence. We have used `Do not allow concurrent builds` option in Jenkins to ensure that only one deployment is running at a time.
 
 ```mermaid
 flowchart TD
