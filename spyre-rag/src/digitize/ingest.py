@@ -104,8 +104,8 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
 
                 # User-friendly error message for job status
                 job_error_message = (
-                    f"{len(failed_docs)} document(s) failed to ingest. "
-                    f"Perform GET /v1/documents/{{id}} to know the reason for failure. Failed document ids: {failed_doc_ids_list}"
+                    f"{len(failed_docs)} of {total_pdfs} document(s) failed to ingest. "
+                    f"Check the document status for details on the failures."
                 )
 
                 logger.debug(f"Some documents failed to process, updating job {job_id} status to FAILED")
