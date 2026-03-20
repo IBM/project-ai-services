@@ -131,17 +131,27 @@ class OpensearchVectorStore(VectorStore):
             logger.error(f"Failed to create index {self.index_name}: {e}")
             raise
 
-    def insert_chunks(self, chunks, vectors=None, embedding=None, batch_size=10):
+    def insert_chunks(self, chunks, doc_id_to_chunks, vectors=None, embedding=None, batch_size=10):
         """
         Supports 2 modes of insertion
         1. Pure embedding: pass 'chunks' and 'vectors'
         2. Text chunks: pass 'chunks' and 'embedding' (class instance)
+
+        Args:
+            chunks: List of chunk documents to insert
+            doc_id_to_chunks: Dict mapping doc_id to list of chunk indices, used to track which documents failed during bulk insertion
+            vectors: Pre-computed embeddings (optional)
+            embedding: Embedding instance to generate embeddings (optional)
+            batch_size: Number of chunks to insert per batch
+
+        Returns:
+            List of doc_ids that failed to index (empty list if all succeeded)
         """
-        logger.info("Starting insert_chunks operation")
+        logger.debug("Starting insert_chunks operation")
 
         if not chunks:
             logger.debug("Nothing to chunk!")
-            return
+            return []
 
         logger.debug(f"Inserting {len(chunks)} chunks into OpenSearch with batch_size={batch_size}")
 
@@ -153,6 +163,12 @@ class OpensearchVectorStore(VectorStore):
             self._setup_index(len(vectors[0]))
         else:
             logger.debug("Will generate embeddings using provided embedding instance")
+
+        # Track failed doc_ids
+        failed_doc_ids = set()
+
+        # Build mapping from chunk_id to doc_id for direct failure tracking
+        chunk_id_to_doc_id = {}
 
         # Iterate through chunks in batches and insert in bulk
         for i in tqdm(range(0, len(chunks), batch_size)):
@@ -183,6 +199,9 @@ class OpensearchVectorStore(VectorStore):
                 doc_id = doc.get("doc_id") or fn # Fallback to filename if UUID missing
                 cid = generate_chunk_id(doc_id, pc)
 
+                # Map chunk_id to doc_id for direct failure tracking
+                chunk_id_to_doc_id[str(cid)] = doc_id
+
                 actions.append({
                     "_index": self.index_name,
                     "_id": str(cid),
@@ -202,17 +221,51 @@ class OpensearchVectorStore(VectorStore):
             batch_num = i // batch_size + 1
 
             try:
-                success, failed = helpers.bulk(self.client, actions, stats_only=True, refresh=True)
-                if failed:
-                    logger.error(f"Failed to insert {failed} chunks in batch {batch_num} starting at index {i}")
-                    return
+                # Use detailed bulk response to track failures per document
+                # raise_on_error=False ensures indexing continues even if some chunks fail
+                success_count, errors = helpers.bulk(
+                    self.client,
+                    actions,
+                    stats_only=False,            # Get detailed error information for failed chunks
+                    raise_on_error=False,        # Continue indexing other chunks even if some fail
+                    refresh=True
+                )
 
-                inserted_doc_ids = list(set([action["_source"]["doc_id"] for action in actions]))
+                # Process errors to identify the documents failed to index
+                if errors:
+                    logger.debug(f"Batch {batch_num}: {len(errors)} chunks failed to insert")
+                    for error_item in errors:
+                        # OpenSearch returns errors in a dict format: {'index': {'_id': '...', 'error': ...}}
+                        action_type = list(error_item.keys())[0]  # 'index', 'create', etc.
+                        error_detail = error_item[action_type]
+
+                        # Get the failed chunk_id and map it directly to doc_id
+                        failed_chunk_id = error_detail.get('_id')
+                        failed_doc_id = chunk_id_to_doc_id.get(failed_chunk_id)
+
+                        if failed_doc_id:
+                            failed_doc_ids.add(failed_doc_id)
+                            logger.error(f"Failed to insert chunk for doc_id {failed_doc_id}: {error_detail.get('error', 'Unknown error')}")
+
+                logger.debug(f"Batch {batch_num}: {success_count} chunks inserted successfully")
             except Exception as e:
                 logger.error(f"Exception during bulk insert for batch {batch_num}: {e}")
-                raise
+                # Mark all docs in this batch as failed by extracting doc_ids from actions
+                for action in actions:
+                    failed_chunk_id = action['_id']
+                    failed_doc_id = chunk_id_to_doc_id.get(failed_chunk_id)
 
-        logger.info(f"Insert operation completed: {len(chunks)} chunks inserted into index {self.index_name}")
+                    if failed_doc_id:
+                        failed_doc_ids.add(failed_doc_id)
+
+                logger.error(f"Marked {len(failed_doc_ids)} documents as failed due to batch exception")
+
+        if failed_doc_ids:
+            logger.error(f"Insert operation completed with failures: {len(failed_doc_ids)} document(s) failed to index")
+        else:
+            logger.info(f"Insert operation completed successfully: {len(chunks)} chunks inserted into index {self.index_name}")
+
+        return list(failed_doc_ids)
 
 
     def search(self, query_text, vector=None, embedding=None, top_k=5, mode=None, doc_id=None, language='en'):

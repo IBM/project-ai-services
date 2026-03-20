@@ -6,10 +6,11 @@ class VectorStore(ABC):
     def insert_chunks(
         self,
         chunks: List[Dict],
+        doc_id_to_chunks: Dict[str, List[int]],
         vectors: Optional[List[List[float]]] = None,
         embedding: Optional[Any] = None,
         batch_size: int = 10
-    ):
+    ) -> List[str]:
         """
         Inserts document chunks and their corresponding embeddings into the vector database.
 
@@ -20,9 +21,14 @@ class VectorStore(ABC):
 
         Args:
             chunks: A list of dictionaries containing text content and metadata.
+            doc_id_to_chunks: Dict mapping doc_id to list of chunk indices in the chunks list.
+                            Used to track which documents failed during bulk insertion.
             vectors: A list of pre-computed vector arrays.
             embedding: An instance of the Embedding class to generate vectors.
             batch_size: Number of documents to process in a single bulk operation.
+
+        Returns:
+            List of doc_ids that failed to index (empty list if all succeeded)
         """
         pass
 
