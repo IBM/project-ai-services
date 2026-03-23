@@ -9,7 +9,7 @@ class VectorStore(ABC):
         vectors: Optional[List[List[float]]] = None,
         embedding: Optional[Any] = None,
         batch_size: int = 10
-    ):
+    ) -> bool:
         """
         Inserts document chunks and their corresponding embeddings into the vector database.
 
@@ -19,10 +19,13 @@ class VectorStore(ABC):
            instance to generate embeddings from the 'page_content' within the chunks.
 
         Args:
-            chunks: A list of dictionaries containing text content and metadata.
+            chunks: A list of dictionaries containing text content and metadata for a single document.
             vectors: A list of pre-computed vector arrays.
             embedding: An instance of the Embedding class to generate vectors.
-            batch_size: Number of documents to process in a single bulk operation.
+            batch_size: Number of chunks to process in a single bulk operation.
+
+        Returns:
+            bool: True if indexing succeeded, False if it failed
         """
         pass
 
