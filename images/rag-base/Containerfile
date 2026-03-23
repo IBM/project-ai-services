@@ -1,4 +1,4 @@
-FROM localhost/docling:v2.60.1 as docling-builder
+FROM localhost/prebuilder as prebuilder
 
 FROM registry.access.redhat.com/ubi9/ubi:9.7
 
@@ -11,20 +11,16 @@ RUN yum install -y --setopt=tsflags=nodocs python3.12-devel python3.12-pip \
     ln -s /usr/bin/pip3.12 /usr/bin/pip && ln -s /usr/bin/pip3.12 /usr/bin/pip3 && \
     ln -s /usr/bin/python3.12 /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python3
 
-COPY --from=docling-builder /usr/local/lib64/*.so* /usr/local/lib64/
-COPY --from=docling-builder /usr/include/tree_sitter /usr/include/tree_sitter
-
-ENV LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH
 ENV DOCLING_MODELS_PATH=/var/docling-models
-
-WORKDIR /opt/wheels
 
 COPY requirements.txt .
 COPY download_docling_models.py .
 
-RUN --mount=type=bind,from=docling-builder,source=/tmp,target=/tmp,ro \
-    python3 -m venv /var/venv && source /var/venv/bin/activate && \
+RUN --mount=type=bind,from=prebuilder,source=/tmp,target=/tmp,ro \
+    python -m venv /var/venv && source /var/venv/bin/activate && \
     pip install --upgrade pip && \
-    pip install -r requirements.txt --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux /tmp/*.whl && \
+    pip install  /tmp/*.whl -r requirements.txt \
+        --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
+        --prefer-binary && \
     pip cache purge && \
     python download_docling_models.py
