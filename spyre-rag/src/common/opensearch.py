@@ -136,12 +136,21 @@ class OpensearchVectorStore(VectorStore):
         Supports 2 modes of insertion
         1. Pure embedding: pass 'chunks' and 'vectors'
         2. Text chunks: pass 'chunks' and 'embedding' (class instance)
+
+        Args:
+            chunks: List of document chunks to insert (for a single document)
+            vectors: Pre-computed embeddings (optional)
+            embedding: Embedding instance to generate embeddings (optional)
+            batch_size: Number of chunks to insert per batch
+
+        Returns:
+            bool: True if indexing succeeded, False if it failed
         """
-        logger.info("Starting insert_chunks operation")
+        logger.debug("Starting insert_chunks operation")
 
         if not chunks:
             logger.debug("Nothing to chunk!")
-            return
+            return True
 
         logger.debug(f"Inserting {len(chunks)} chunks into OpenSearch with batch_size={batch_size}")
 
@@ -149,24 +158,26 @@ class OpensearchVectorStore(VectorStore):
         final_embeddings = vectors
         if vectors is not None and len(vectors) > 0:
             logger.debug(f"Using pre-computed vectors, dimension: {len(vectors[0])}")
-            # Initialize index using pre-computed vector dimension
+            # Initialize index using pre-computed vector dimension (only once)
             self._setup_index(len(vectors[0]))
-        else:
+        elif embedding is not None:
             logger.debug("Will generate embeddings using provided embedding instance")
+            # Generate first batch to get dimension and setup index once
+            first_batch = chunks[:min(batch_size, len(chunks))]
+            first_page_contents = [doc.get("page_content") for doc in first_batch]
+            first_embeddings = embedding.embed_documents(first_page_contents)
+            dim = len(first_embeddings[0])
+            self._setup_index(dim)
+            logger.debug(f"Index setup completed with dimension: {dim}")
 
         # Iterate through chunks in batches and insert in bulk
         for i in tqdm(range(0, len(chunks), batch_size)):
             batch = chunks[i:i + batch_size]
             page_contents = [doc.get("page_content") for doc in batch]
 
-            # Generate embeddings only for this specific batch
+            # Generate embeddings for this batch
             if vectors is None and embedding is not None:
                 current_batch_embeddings = embedding.embed_documents(page_contents)
-
-                # Initialize index on the first batch if not already done
-                if i == 0:
-                    dim = len(current_batch_embeddings[0])
-                    self._setup_index(dim)
             else:
                 # Use the relevant slice from pre-computed vectors
                 assert final_embeddings is not None, "final_embeddings must be set when vectors is provided"
@@ -202,17 +213,33 @@ class OpensearchVectorStore(VectorStore):
             batch_num = i // batch_size + 1
 
             try:
-                success, failed = helpers.bulk(self.client, actions, stats_only=True, refresh=True)
-                if failed:
-                    logger.error(f"Failed to insert {failed} chunks in batch {batch_num} starting at index {i}")
-                    return
+                # Use bulk insert with error handling
+                success_count, errors = helpers.bulk(
+                    self.client,
+                    actions,
+                    stats_only=False,               # Get detailed error information for failed chunks
+                    raise_on_error=False,           # Continue indexing other chunks even if some fail
+                    refresh=True
+                )
 
-                inserted_doc_ids = list(set([action["_source"]["doc_id"] for action in actions]))
+                # If any errors occurred in this batch, the document failed
+                if errors:
+                    logger.debug(f"Batch {batch_num}: {len(errors)} chunks failed to insert")
+                    for error_item in errors:
+                        # OpenSearch returns errors in a dict format: {'index': {'_id': '...', 'error': ...}}
+                        action_type = list(error_item.keys())[0]
+                        error_detail = error_item[action_type]
+                        logger.error(f"Chunk insertion error: {error_detail.get('error', 'Unknown error')}")
+                    return False
+
+                logger.debug(f"Batch {batch_num}: {success_count} chunks inserted successfully")
+
             except Exception as e:
                 logger.error(f"Exception during bulk insert for batch {batch_num}: {e}")
-                raise
+                return False
 
-        logger.info(f"Insert operation completed: {len(chunks)} chunks inserted into index {self.index_name}")
+        logger.info(f"Insert operation completed successfully: {len(chunks)} chunks inserted into index {self.index_name}")
+        return True
 
 
     def search(self, query_text, vector=None, embedding=None, top_k=5, mode=None, doc_id=None, language='en'):

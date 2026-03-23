@@ -42,35 +42,49 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         out_path = setup_digitized_doc_dir()
 
         start_time = time.time()
-        combined_chunks, converted_pdf_stats = process_documents(
+        doc_chunks_dict, converted_pdf_stats = process_documents(
             input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'],  emb_model_dict["emb_endpoint"],
             max_tokens=emb_model_dict['max_tokens'] - 100, job_id=job_id, doc_id_dict=doc_id_dict)
         # converted_pdf_stats holds { file_name: {page_count: int, table_count: int, timings: {conversion: time_in_secs, process_text: time_in_secs, process_tables: time_in_secs, chunking: time_in_secs}} }
-        if converted_pdf_stats is None or combined_chunks is None:
+        if converted_pdf_stats is None or doc_chunks_dict is None:
             ingestion_failed()
             return
 
-        if combined_chunks:
+        if doc_chunks_dict:
             # Always index documents - treating each request as fresh
             logger.info("Loading processed documents into vector DB")
 
             embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
-            # Insert data into Opensearch
-            vector_store.insert_chunks(
-                combined_chunks,
-                embedding=embedder
-            )
-            logger.info("Processed documents loaded into Vector DB")
 
-            # Mark successfully indexed documents as COMPLETED
-            if status_mgr and doc_id_dict:
-                for path in converted_pdf_stats.keys():
-                    from pathlib import Path
-                    doc_id = doc_id_dict.get(Path(path).name)
-                    if doc_id:
+            # Track failed document count for summary logging
+            failed_count = 0
+            total_count = len(doc_chunks_dict)
+
+            # Index each document separately and update status
+            for doc_id, chunks in doc_chunks_dict.items():
+                logger.debug(f"Indexing {len(chunks)} chunks for document: {doc_id}")
+                success = vector_store.insert_chunks(chunks, embedding=embedder)
+
+                # Update document status immediately after indexing attempt
+                if status_mgr and doc_id_dict:
+                    if not success:
+                        # Mark as FAILED if indexing failed
+                        failed_count += 1
+                        logger.error(f"Failed to index document: {doc_id}")
+                        logger.error(f"Indexing failed: updating doc metadata to FAILED for document: {doc_id}")
+                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error="Failed to index document chunks into vector database")
+                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+                    else:
+                        # Mark as COMPLETED if indexing succeeded
                         logger.debug(f"Indexing Done: updating doc metadata to COMPLETED for document: {doc_id}")
                         status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.COMPLETED, "completed_at": get_utc_timestamp()})
                         status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
+
+            # Summary logging
+            if failed_count > 0:
+                logger.error(f"Indexing failed for {failed_count}/{total_count} document(s)")
+            else:
+                logger.info(f"All {total_count} processed document(s) loaded into Vector DB successfully")
 
         # Log time taken for the file
         end_time: float = time.time()  # End the timer for the current file
