@@ -1,5 +1,5 @@
 """
-Generic retry utility module for handling transient failures in HTTP requests.
+Generic retry utility module for handling transient failures in HTTP requests and local operations.
 
 This module provides decorators and functions to retry operations that may fail
 due to temporary issues like:
@@ -7,6 +7,7 @@ due to temporary issues like:
 - Connection timeouts
 - Connection aborted/reset errors
 - Connection pool exhaustion
+- Transient resource issues (memory, file locks, etc.)
 
 The retry logic uses exponential backoff to avoid overwhelming the server.
 """
@@ -23,12 +24,15 @@ logger = get_logger("retry_utils")
 T = TypeVar('T')
 
 
-def is_retryable_error(exception: Exception) -> bool:
+def is_retryable_error(exception: Exception, allow_local_retries: bool = False) -> bool:
     """
     Determine if an exception is retryable.
     
     Args:
         exception: The exception to check
+        allow_local_retries: If True, allows retrying certain local operation errors
+                           (e.g., MemoryError, OSError with specific codes).
+                           Default is False for safety.
         
     Returns:
         True if the error is retryable, False otherwise
@@ -83,6 +87,34 @@ def is_retryable_error(exception: Exception) -> bool:
         ]):
             return True
     
+    # Local operation errors (only if explicitly allowed)
+    # These are typically for PDF processing or other local operations
+    if allow_local_retries:
+        # Memory errors might be transient if system is under load
+        if isinstance(exception, MemoryError):
+            return True
+        
+        # Certain OSError codes that might be transient
+        if isinstance(exception, OSError):
+            # errno 11: Resource temporarily unavailable
+            # errno 12: Cannot allocate memory
+            # errno 24: Too many open files
+            # errno 28: No space left on device (might be transient if cleanup happens)
+            if hasattr(exception, 'errno') and exception.errno in [11, 12, 24]:
+                return True
+        
+        # For generic exceptions when allow_local_retries is True,
+        # check for transient error patterns in the message
+        error_str = str(exception).lower()
+        if any(pattern in error_str for pattern in [
+            "temporarily unavailable",
+            "resource temporarily unavailable",
+            "too many open files",
+            "cannot allocate memory",
+            "memory error"
+        ]):
+            return True
+    
     return False
 
 
@@ -91,7 +123,8 @@ def retry_on_transient_error(
     initial_delay: float = 1.0,
     backoff_multiplier: float = 2.0,
     max_delay: float = 10.0,
-    retryable_exceptions: Optional[Tuple[Type[Exception], ...]] = None
+    retryable_exceptions: Optional[Tuple[Type[Exception], ...]] = None,
+    allow_local_retries: bool = False
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """
     Decorator to retry a function on transient errors with exponential backoff.
@@ -102,17 +135,26 @@ def retry_on_transient_error(
         backoff_multiplier: Multiplier for delay after each retry (default: 2.0)
         max_delay: Maximum delay between retries in seconds (default: 10.0)
         retryable_exceptions: Tuple of exception types to retry on. If None, uses
-                            requests.exceptions.RequestException
+                            requests.exceptions.RequestException for HTTP operations
+        allow_local_retries: If True, allows retrying certain local operation errors
+                           (e.g., MemoryError, resource temporarily unavailable).
+                           Use this for local operations like PDF processing. (default: False)
     
     Returns:
         Decorated function with retry logic
         
     Example:
+        # For HTTP operations (default):
         @retry_on_transient_error(max_retries=3, initial_delay=1.0)
         def call_api(url):
             response = requests.get(url)
             response.raise_for_status()
             return response.json()
+        
+        # For local operations (PDF processing, etc.):
+        @retry_on_transient_error(max_retries=3, retryable_exceptions=(Exception,), allow_local_retries=True)
+        def process_pdf(path):
+            return convert_document(path)
     """
     if retryable_exceptions is None:
         retryable_exceptions = (
@@ -143,7 +185,7 @@ def retry_on_transient_error(
                     last_exception = e
                     
                     # Check if this is a retryable error
-                    if not is_retryable_error(e):
+                    if not is_retryable_error(e, allow_local_retries=allow_local_retries):
                         # Not retryable, raise immediately
                         logger.error(
                             f"{func.__name__} failed with non-retryable error: {e}"

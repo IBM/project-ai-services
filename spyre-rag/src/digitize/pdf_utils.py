@@ -148,7 +148,7 @@ def find_text_font_size(
 
     return matches
 
-@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0, retryable_exceptions=(Exception,))
+@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0, retryable_exceptions=(Exception,), allow_local_retries=True)
 def convert_chunk(doc_converter: DocumentConverter, path: Path, chunk_num: int, start_page: int, end_page: int, chunk_cache_dir: Path):
     # Convert this chunk
     conv_res: ConversionResult = doc_converter.convert(source=path, page_range=(start_page, end_page))
@@ -187,7 +187,7 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
     if total_pages <= PDF_CHUNK_SIZE:
         logger.debug(f"Converting {path} document with {total_pages} pages in single pass")
         
-        @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0, retryable_exceptions=(Exception,))
+        @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0, retryable_exceptions=(Exception,), allow_local_retries=True)
         def _convert_single_doc():
             return doc_converter.convert(source=path).document
         
