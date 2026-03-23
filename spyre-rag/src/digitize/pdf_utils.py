@@ -1,17 +1,25 @@
-from docling.document_converter import DocumentConverter
-from docling.datamodel.document import ConversionResult
-from docling_core.types.doc.document import DoclingDocument
+# Standard library imports
 import logging
+import shutil
+import tempfile
+from collections import Counter, defaultdict
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-import pdfplumber
-from rapidfuzz import fuzz
-from collections import defaultdict, Counter
-from pdfminer.pdfdocument import PDFDocument, PDFNoOutlines
-from pdfminer.pdfparser import PDFParser, PDFSyntaxError
-from pdfminer.pdfpage import PDFPage
-import pypdfium2 as pdfium
+from typing import Any, Dict, List, Optional
 
+# Third-party PDF processing libraries
+import pdfplumber
+import pypdfium2 as pdfium
+from pdfminer.pdfdocument import PDFDocument, PDFNoOutlines
+from pdfminer.pdfpage import PDFPage
+from pdfminer.pdfparser import PDFParser, PDFSyntaxError
+from rapidfuzz import fuzz
+
+# Docling document conversion libraries
+from docling.datamodel.document import ConversionResult
+from docling.document_converter import DocumentConverter
+from docling_core.types.doc.document import DoclingDocument
+
+# Local application imports
 from common.misc_utils import get_logger
 from digitize.config import PDF_CHUNK_SIZE
 
@@ -167,8 +175,6 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
     Returns:
         DoclingDocument containing the concatenated result
     """
-    import tempfile
-    import shutil
     
     # Input validation
     path = Path(path)
