@@ -24,6 +24,9 @@ LLM_POOL_SIZE = int(os.getenv("LLM_POOL_SIZE", "32"))
 DEFAULT_MAX_TOKENS = int(os.getenv("CHUNK_MAX_TOKENS", "512"))
 DEFAULT_OVERLAP_TOKENS = int(os.getenv("CHUNK_OVERLAP_TOKENS", "50"))
 
+# Document conversion parameters
+PDF_CHUNK_SIZE = int(os.getenv("PDF_CHUNK_SIZE", "100"))  # Pages per chunk for large PDF processing
+
 # Batch processing
 OPENSEARCH_BATCH_SIZE = int(os.getenv("OPENSEARCH_BATCH_SIZE", "10"))
 
