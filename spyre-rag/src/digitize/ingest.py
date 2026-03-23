@@ -80,7 +80,6 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                         status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.COMPLETED, "completed_at": get_utc_timestamp()})
                         status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
 
-            # Summary logging
             if failed_count > 0:
                 logger.error(f"Indexing failed for {failed_count}/{total_count} document(s)")
             else:
@@ -96,25 +95,24 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
             failed_docs = doc_stats["failed_docs"]
             completed_docs = doc_stats["completed_docs"]
 
+            logger.info(
+                    f"Ingestion summary: {len(completed_docs)}/{total_pdfs} files ingested "
+                    f"({len(completed_docs) / total_pdfs * 100:.2f}% of total PDF files)"
+                )
+
             if len(failed_docs) > 0:
                 # At least one document failed
-                failed_doc_ids = [doc["id"] for doc in failed_docs]
-                failed_doc_ids_list = ", ".join(failed_doc_ids)
                 failed_doc_names = [doc["name"] for doc in failed_docs]
                 failed_files_list = "\n".join(failed_doc_names)
 
                 # Detailed error message for logs
                 detailed_error_message = (
-                    f"Ingestion completed partially. {len(failed_docs)} document(s) failed to process.\n"
+                    f"{len(failed_docs)} document(s) failed to process.\n"
                     f"Failed documents:\n{failed_files_list}\n"
                     f"Please submit a new ingestion job to process these documents. "
                     f"If the issue persists, please report at https://github.com/IBM/project-ai-services/issues"
                 )
                 logger.warning(detailed_error_message)
-                logger.info(
-                    f"Ingestion summary: {len(completed_docs)}/{total_pdfs} files ingested "
-                    f"({len(completed_docs) / total_pdfs * 100:.2f}% of total PDF files)"
-                )
 
                 # User-friendly error message for job status
                 job_error_message = (
@@ -122,7 +120,6 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                     f"Check the document status for details on the failures."
                 )
 
-                logger.debug(f"Some documents failed to process, updating job {job_id} status to FAILED")
                 status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=job_error_message)
             else:
                 # All documents completed successfully
@@ -132,7 +129,6 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                     f"(100.00% of total PDF files)"
                 )
 
-                logger.debug(f"All documents processed successfully, updating job {job_id} status to COMPLETED")
                 status_mgr.update_job_progress("", DocStatus.COMPLETED, JobStatus.COMPLETED)
 
         return converted_pdf_stats
