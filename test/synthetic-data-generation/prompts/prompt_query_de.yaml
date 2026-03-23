@@ -1,0 +1,12 @@
+- role: user
+  content: | 
+    Sie erhalten ein technisches Dokument. Dieses Dokument enthält Informationen zur Installation von IBM Cognos Analytics. \n\nFormulieren Sie eine Frage, die ein Benutzer wahrscheinlich stellen würde.
+    \n\nGeneriere eine Frage, die ein Benutzer wahrscheinlich stellen würde.
+    Die Antwort sollte im Dokument enthalten sein. Falls Sie keine passende Frage formulieren können, geben Sie „NICHT ZUTREFFEND“ ein. Die Frage sollte maximal 50 Wörter umfassen. Hier finden Sie ein Beispieldokument und eine Beispielfrage.\n[Start of Document]Kapitel 2. Easy Install
+    Diese Installationsoption soll Ihnen bei der schnellen Einrichtung und Inbetriebnahme von IBM Cognos
+    Analytics helfen, ohne dass eine zusätzliche Konfiguration erforderlich ist und ohne dass eine unterstüt-
+    zende Software installiert werden muss. Diese Option wird nicht für die Produktion empfohlen.
+    Easy Install ist nur unter Windows verfügbar. Wenn Sie eine der unterstützten Datenbanken für den
+    Content Store, Audits und Benachrichtigungen in Produktionsumgebungen verwenden möchten, müssen
+    Sie die Konfiguration entsprechend ändern. Die im Produktpaket enthaltene und vorkonfigurierte Infor-
+    mix-Datenbank ist nicht für den Einsatz in Produktionsumgebungen vorgesehen.[End of Document]\n[Start of Question]Warum wird die Easy Install-Option von IBM Cognos Analytics nicht für Produktionsumgebungen empfohlen, und was muss getan werden, wenn man sie dennoch produktiv nutzen möchte?[End of Question]\n[Start of Document]{{document}}[End of Document]. Ihre Ausgabe sollte folgendes Format haben: [Start of Question]Frage[End of Question]

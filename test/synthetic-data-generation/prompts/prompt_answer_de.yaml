@@ -1,0 +1,21 @@
+- role: user
+  content: | 
+    Sie erhalten ein Dokument aus dem technischen Bereich und eine Anfrage eines IBM-Systembenutzers. Ihre Aufgabe ist es, die Anfrage ausschließlich anhand der Informationen im Dokument zu beantworten. Hier finden Sie ein Beispieldokument, eine Beispielfrage und eine Beispielantwort.\n[Start of Document]Kapitel 2. Easy Install
+    Diese Installationsoption soll Ihnen bei der schnellen Einrichtung und Inbetriebnahme von IBM Cognos
+    Analytics helfen, ohne dass eine zusätzliche Konfiguration erforderlich ist und ohne dass eine unterstüt-
+    zende Software installiert werden muss. Diese Option wird nicht für die Produktion empfohlen.
+    Easy Install ist nur unter Windows verfügbar. Wenn Sie eine der unterstützten Datenbanken für den
+    Content Store, Audits und Benachrichtigungen in Produktionsumgebungen verwenden möchten, müssen
+    Sie die Konfiguration entsprechend ändern. Die im Produktpaket enthaltene und vorkonfigurierte Infor-
+    mix-Datenbank ist nicht für den Einsatz in Produktionsumgebungen vorgesehen.[End of Document]\n
+    [Start of Question]Warum wird die Easy Install-Option von IBM Cognos Analytics nicht für 
+    Produktionsumgebungen empfohlen, und was muss getan werden, wenn man sie dennoch produktiv nutzen möchte?
+    [End of Question]\n[Start of Answer]Die Easy Install-Option ist nicht für den produktiven Einsatz vorgesehen,
+    da die mitgelieferte und vorkonfigurierte Informix-Datenbank nicht für Produktionsumgebungen geeignet ist. 
+    Sie dient lediglich der schnellen Einrichtung und Inbetriebnahme ohne zusätzliche Konfiguration. Wer IBM 
+    Cognos Analytics in einer Produktionsumgebung betreiben möchte, muss die Konfiguration entsprechend anpassen 
+    und eine der unterstützten Datenbanken für den Content Store, Audits und Benachrichtigungen einrichten. 
+    Zudem ist Easy Install ausschließlich unter Windows verfügbar, was den Einsatz auf anderen Betriebssystemen 
+    ausschließt.[End of Answer]\n[Start of Document]{{document}}[End of Document]\n
+    [Start of Question]{{question}}[End of Question]\n. Ihre Ausgabe sollte folgendes Format haben:
+    [Start of Answer]Antwort[End of Answer]

@@ -32,7 +32,7 @@ def clean_line(line: str) -> str:
     return line
 
 def heading_level(line: str):
-    if re.match(r"^Chapter\s+\d+\.", line):
+    if re.match(r"^(Chapter|Kapitel)\s+\d+\.", line):
         return 1
     if re.match(r"^\d+\.\d+\.\d+\s+", line):
         return 3
@@ -118,9 +118,10 @@ def convert_pdf_to_markdown_chunks(pdf_path: Path, chunks_per_pdf: int):
     chunks = split_into_chunks(full_content, chunk_size)
 
     for i, chunk in enumerate(chunks, 1):
-        output_md = OUTPUT_DIR / f"{pdf_path.stem}_chunk{i}.md"
-        output_md.write_text(chunk, encoding="utf-8")
-        print(f"  Created {output_md.name} ({len(chunk)} chars)")
+        if i <= chunks_per_pdf:
+            output_md = OUTPUT_DIR / f"{pdf_path.stem}_chunk{i}.md"
+            output_md.write_text(chunk, encoding="utf-8")
+            print(f"  Created {output_md.name} ({len(chunk)} chars)")
 
     return len(chunks)
 

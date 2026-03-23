@@ -24,7 +24,7 @@ blocks:
     - document
     output_cols:
     - query_prompt
-    prompt_config_path: prompts/prompt_query.yaml
+    prompt_config_path: prompts/prompt_query_de.yaml
     format_as_messages: true
 # Generate Scenario
 - block_type: LLMChatBlock
@@ -34,11 +34,11 @@ blocks:
     - query_prompt
     output_cols:
     - raw_query
-    max_tokens: 4000
-    temperature: 0.8
+    max_tokens: 1024
+    temperature: 0.6
     top_p: 1.0
     async_mode: false
-    n: 10
+    n: 2
     return_text_only: true
     stop_sequences: #  Force LLM to stop after [End of Answer]
       - "[End of Question]"
@@ -67,7 +67,7 @@ blocks:
     - question
     output_cols:
     - answer_prompt
-    prompt_config_path: prompts/prompt_answer.yaml
+    prompt_config_path: prompts/prompt_answer_de.yaml
     format_as_messages: true
 # Generate Answer
 - block_type: "LLMChatBlock"
@@ -77,8 +77,8 @@ blocks:
     - answer_prompt
     output_cols:
     - raw_answer
-    max_tokens: 4000
-    temperature: 0.8
+    max_tokens: 1024
+    temperature: 0.6
     async_mode: false
     stop_sequences: #  Force LLM to stop after [End of Answer]
       - "[End of Answer]"
@@ -107,7 +107,7 @@ blocks:
     - question
     output_cols:
     - question_answerable_prompt
-    prompt_config_path: prompts/prompt_question_answerable.yaml
+    prompt_config_path: prompts/prompt_question_answerable_de.yaml
     format_as_messages: true
 - block_type: "LLMChatBlock"
   block_config:
@@ -116,8 +116,8 @@ blocks:
     - question_answerable_prompt
     output_cols:
     - raw_question_answerable
-    max_tokens: 4000
-    temperature: 0.8
+    max_tokens: 1024
+    temperature: 0.6
     async_mode: false
     stop_sequences: #  Force LLM to stop after [End of Answer]
       - "[End of Answer]"
@@ -159,7 +159,7 @@ blocks:
     - answer
     output_cols:
     - answer_faithful_prompt
-    prompt_config_path: prompts/prompt_answer_faithful.yaml
+    prompt_config_path: prompts/prompt_answer_faithful_de.yaml
     format_as_messages: true
 - block_type: "LLMChatBlock"
   block_config:
@@ -168,9 +168,11 @@ blocks:
     - answer_faithful_prompt
     output_cols:
     - answer_faithful
-    max_tokens: 4000
-    temperature: 0.8
+    max_tokens: 1024
+    temperature: 0.6
     async_mode: false
+    stop_sequences: #  Force LLM to stop after [End of Answer]
+      - "[End of Label]"
 # Extract faithful answer  response
 - block_type: LLMResponseExtractorBlock
   block_config:
