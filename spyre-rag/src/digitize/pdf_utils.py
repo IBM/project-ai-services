@@ -186,6 +186,8 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
         return doc_converter.convert(source=path).document
     
     # Process in chunks
+    # Calculate total chunks using ceiling division: equivalent to math.ceil(total_pages / PDF_CHUNK_SIZE)
+    # This ensures all pages are covered even if the last chunk is smaller
     total_chunks = (total_pages + PDF_CHUNK_SIZE - 1) // PDF_CHUNK_SIZE
     logger.debug(f"Converting {path} document with {total_pages} pages in {total_chunks} chunks of {PDF_CHUNK_SIZE}")
     
