@@ -10,10 +10,10 @@ from typing import Callable, Any, Mapping
 from digitize.types import JobStatus, DocStatus, OutputFormat
 from digitize.document import DocumentMetadata
 from digitize.job import JobState, JobDocumentSummary, JobStats
-from digitize import config
+import digitize.config as config
 from common.misc_utils import get_logger
 
-logger = get_logger("digitize_utils")
+logger = get_logger("status")
 
 
 def get_utc_timestamp() -> str:
@@ -91,7 +91,8 @@ def create_job_state(
     submitted_at: str,
     doc_id_dict: dict[str, str],
     documents_info: list[str],
-    jobs_dir: Path = config.JOBS_DIR
+    jobs_dir: Path = config.JOBS_DIR,
+    job_name: str | None = None
 ) -> JobState:
     """
     Create and persist the job state file.
@@ -103,6 +104,7 @@ def create_job_state(
         doc_id_dict: Mapping of document names to their IDs
         documents_info: List of document filenames
         jobs_dir: Directory where job status files are stored
+        job_name: Optional human-readable name for the job
         
     Returns:
         The created JobState object
@@ -114,6 +116,7 @@ def create_job_state(
     
     job_state = JobState(
         job_id=job_id,
+        job_name=job_name,
         operation=operation,
         status=JobStatus.ACCEPTED,
         submitted_at=submitted_at,
@@ -130,6 +133,49 @@ def create_job_state(
     job_status_path = job_state.save(jobs_dir)
     logger.debug(f"Created job status file: {job_status_path}")
     return job_state
+
+
+def get_job_document_stats(job_id: str, jobs_dir: Path = config.JOBS_DIR) -> dict:
+    """
+    Get statistics about documents in a job by reading the job status file.
+
+    Args:
+        job_id: Unique identifier for the job
+        jobs_dir: Directory where job status files are stored
+
+    Returns:
+        Dictionary containing:
+        - failed_docs: List of failed document objects with id, name, status
+        - completed_docs: List of completed document objects with id, name, status
+        - total_docs: Total number of documents
+        - failed_count: Number of failed documents
+        - completed_count: Number of completed documents
+    """
+    job_status_file = jobs_dir / f"{job_id}_status.json"
+
+    if not job_status_file.exists():
+        error_msg = f"Job status file not found: {job_status_file}"
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+
+    try:
+        with open(job_status_file, "r") as f:
+            job_data = json.load(f)
+
+        documents = job_data.get("documents", [])
+        failed_docs = [doc for doc in documents if doc.get("status") == DocStatus.FAILED.value]
+        completed_docs = [doc for doc in documents if doc.get("status") == DocStatus.COMPLETED.value]
+
+        return {
+            "failed_docs": failed_docs,
+            "completed_docs": completed_docs,
+            "total_docs": len(documents),
+            "failed_count": len(failed_docs),
+            "completed_count": len(completed_docs)
+        }
+    except Exception as e:
+        logger.error(f"Error reading job status file {job_status_file}: {e}")
+        raise e
 
 def retry_on_failure(
     func: Callable,
@@ -214,9 +260,17 @@ class StatusManager:
     def _update_job_level_fields(self, data: dict, job_status: JobStatus, error: str) -> None:
         """Update job-level status, timestamp, and error fields."""
         data["status"] = job_status.value
-        
+
+        # Only set completed_at if job is truly finished (all documents processed)
         if job_status in [JobStatus.COMPLETED, JobStatus.FAILED]:
-            data["completed_at"] = get_utc_timestamp()
+            stats = data.get("stats", {})
+            total_docs = stats.get("total_documents", 0)
+            completed_docs = stats.get("completed", 0)
+            failed_docs = stats.get("failed", 0)
+
+            # Job is truly complete when all documents are either completed or failed
+            if total_docs > 0 and (completed_docs + failed_docs) == total_docs:
+                data["completed_at"] = get_utc_timestamp()
 
         if error and job_status == JobStatus.FAILED:
             data["error"] = str(error)
@@ -235,7 +289,7 @@ class StatusManager:
         """Recalculate job stats based on document statuses."""
         if "documents" not in data or "stats" not in data:
             return
-        
+
         status_counts = Counter(doc.get("status") for doc in data["documents"])
         data["stats"]["completed"] = status_counts[DocStatus.COMPLETED.value]
         data["stats"]["failed"] = status_counts[DocStatus.FAILED.value]
@@ -255,17 +309,17 @@ class StatusManager:
     def _categorize_fields(details: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         """Separate fields into metadata wrapper and top-level categories."""
         METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs"}
-        
+
         metadata_fields = {
             k: v if k == "timing_in_secs" and isinstance(v, dict) else StatusManager._extract_value(v)
             for k, v in details.items() if k in METADATA_KEYS
         }
-        
+
         top_level_fields = {
             k: StatusManager._extract_value(v)
             for k, v in details.items() if k not in METADATA_KEYS
         }
-        
+
         return metadata_fields, top_level_fields
 
     @staticmethod
@@ -340,15 +394,17 @@ class StatusManager:
                 # Read existing data
                 with open(self.job_status_file, "r") as f:
                     data = json.load(f)
-                
-                # Apply all updates
-                self._update_job_level_fields(data, job_status, error)
-                
+
+                # Update document status first
                 if doc_id and "documents" in data:
                     self._update_document_status(data["documents"], doc_id, doc_status)
-                
+
+                # Recalculate stats based on updated document statuses
                 self._recalculate_stats(data)
-                
+
+                # Update job-level fields (status, completed_at, error) after stats are current
+                self._update_job_level_fields(data, job_status, error)
+
                 # Atomic write using shared helper
                 self._atomic_write_json(self.job_status_file, data)
 

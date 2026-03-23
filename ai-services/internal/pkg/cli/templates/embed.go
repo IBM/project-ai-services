@@ -181,7 +181,7 @@ func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []str
 		return nil, fmt.Errorf("failed to parse values.yaml: %w", err)
 	}
 
-	// Load user provided file overrides
+	// Load user provided file overrides and validate them
 	for _, overridePath := range valuesFileOverrides {
 		overrideData, err := os.ReadFile(overridePath)
 		if err != nil {
@@ -191,6 +191,13 @@ func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []str
 		if err := yaml.Unmarshal(overrideData, &overrideValues); err != nil {
 			return nil, fmt.Errorf("failed to parse override file %s: %w", overridePath, err)
 		}
+
+		// Validate that all parameters in the override file are supported
+		overrideParamsMap := utils.FlattenMapToKeys(overrideValues, "")
+		if err := utils.ValidateParams(overrideParamsMap, values); err != nil {
+			return nil, fmt.Errorf("validation failed for override file %s: %w", overridePath, err)
+		}
+
 		for key, val := range overrideValues {
 			utils.SetNestedValue(values, key, val)
 		}

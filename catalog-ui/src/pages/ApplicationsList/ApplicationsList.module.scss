@@ -1,26 +1,27 @@
+@use "@carbon/react/scss/spacing";
+
 .rowActions {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem;
+  gap: spacing.$spacing-03;
+  padding: spacing.$spacing-03;
 }
 
 .noDataContent {
-  padding: 2rem;
+  padding: spacing.$spacing-07;
 }
 
 .tableContent {
-  padding: 1rem;
+  padding: spacing.$spacing-07;
 }
 
-@media (min-width: 42rem) {
-  .tableContent {
-    padding: 2rem;
-  }
+.tableColumn {
+  margin: 0;
 }
+
 .deleteConfirmation {
-  margin-top: 16px;
+  margin-top: spacing.$spacing-07;
   font-weight: bolder;
   border: none;
 }
@@ -42,34 +43,49 @@
   transition: background-color 0.2s ease;
 }
 
+.deleteButton:hover {
+  background-color: var(--cds-button-danger-primary) !important;
+  color: var(--cds-background) !important;
+}
+
+.deleteButton:hover svg {
+  fill: var(--cds-icon-on-color);
+}
+
 .selectedDelete {
-  background-color: #d6d7d8 !important;
+  background-color: var(--cds-layer-hover) !important;
 }
 
 .customToast {
   :global(.cds--actionable-notification__action-button) {
-    border: 1px solid white !important;
-    color: white !important;
+    border: 1px solid var(--cds-text-on-color) !important;
+    color: var(--cds-text-on-color) !important;
     font-weight: lighter;
     background-color: transparent !important;
 
     &:hover {
-      border: 1px solid white !important;
-      color: white !important;
+      border: 1px solid var(--cds-text-on-color) !important;
+      color: var(--cds-text-on-color) !important;
       background-color: transparent !important;
     }
 
     &:focus {
-      border: 1px solid white !important;
-      color: white !important;
+      border: 1px solid var(--cds-text-on-color) !important;
+      color: var(--cds-text-on-color) !important;
       background-color: transparent !important;
       outline-offset: 2px !important;
     }
 
     &:active {
-      border: 1px solid white !important;
-      color: white !important;
-      background-color: rgba(90, 90, 90, 0.486) !important;
+      border: 1px solid var(--cds-text-on-color) !important;
+      color: var(--cds-text-on-color) !important;
+      background-color: var(--cds-layer-active) !important;
     }
   }
+}
+
+.exportStatus {
+  display: flex;
+  align-items: center;
+  gap: spacing.$spacing-02;
 }

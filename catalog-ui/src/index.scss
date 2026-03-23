@@ -1,3 +1,5 @@
+@use "@carbon/react/scss/spacing";
+
 html,
 body {
   margin: 0;
@@ -6,17 +8,17 @@ body {
 .appLayout {
   min-height: 100vh;
   background-color: var(--cds-background);
-  padding-top: 3rem;
+  padding-top: spacing.$spacing-09;
 }
 
-@media (min-width: 42rem) {
-  // grid gutters
-  .cds--css-grid--full-width {
-    padding: 0;
-  }
+.mainContent {
+  transition: margin-left 0.2s ease;
+}
 
-  // grid column margin
-  .cds--css-grid-column {
-    margin-inline: 0;
-  }
+.mainContent.shifted {
+  margin-left: 16rem; // Carbon SideNav width (256px)
+}
+
+.cds--css-grid--full-width {
+  padding: 0;
 }

@@ -35,8 +35,18 @@ func (r *OperatorRule) Verify() error {
 		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
 
+	// Prefetch all subscriptions across all namespaces
+	allSubscriptions := &operatorsv1alpha1.SubscriptionList{}
+	if err := client.Client.List(client.Ctx, allSubscriptions); err != nil {
+		return fmt.Errorf("failed to list subscriptions: %w", err)
+	}
+
 	for _, op := range constants.RequiredOperators {
-		if err := validateOperator(client, op.Name, op.Namespace); err != nil {
+		opPackage := op.Package
+		if opPackage == "" {
+			opPackage = op.Name
+		}
+		if err := validateOperatorByPackage(client, opPackage, op.Namespace, allSubscriptions); err != nil {
 			failed = append(failed, fmt.Sprintf("  - %s: %s", op.Label, err.Error()))
 		} else {
 			r.passed = append(r.passed, fmt.Sprintf("  - %s installed", op.Label))
@@ -59,21 +69,22 @@ func (r *OperatorRule) Level() constants.ValidationLevel {
 }
 
 func (r *OperatorRule) Hint() string {
-	return "This tool requires certain operators to be up and running, please run `ai-services bootstrap configure` to install required operators"
+	return "This tool requires certain operators to be up and running, please run `ai-services bootstrap configure --runtime openshift` to install required operators"
 }
 
-func validateOperator(c *openshift.OpenshiftClient, opName, opNamespace string) error {
-	// Get subscription
-	sub := &operatorsv1alpha1.Subscription{}
-	if err := c.Client.Get(c.Ctx, k8sClient.ObjectKey{
-		Name:      opName,
-		Namespace: opNamespace,
-	}, sub); err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("subscription not found")
-		}
+func validateOperatorByPackage(c *openshift.OpenshiftClient, packageName, opNamespace string, allSubscriptions *operatorsv1alpha1.SubscriptionList) error {
+	// Find subscription with matching package name in the specified namespace
+	var sub *operatorsv1alpha1.Subscription
+	for i := range allSubscriptions.Items {
+		if allSubscriptions.Items[i].Spec.Package == packageName && allSubscriptions.Items[i].Namespace == opNamespace {
+			sub = &allSubscriptions.Items[i]
 
-		return fmt.Errorf("failed to get subscription: %w", err)
+			break
+		}
+	}
+
+	if sub == nil {
+		return fmt.Errorf("subscription with package '%s' not found", packageName)
 	}
 
 	// Check if CSV is installed

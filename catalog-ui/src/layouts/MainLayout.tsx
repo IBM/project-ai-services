@@ -19,7 +19,7 @@ const MainLayout = () => {
         setIsSideNavOpen={setIsSideNavOpen}
       />
 
-      <main>
+      <main className={isSideNavOpen ? "mainContent shifted" : "mainContent"}>
         <Outlet />
       </main>
     </div>

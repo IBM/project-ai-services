@@ -1,15 +1,14 @@
-from glob import glob
 import os
-import shutil
 import numpy as np
 import hashlib
 from tqdm import tqdm
 from opensearchpy import OpenSearch, helpers
 
-from common.misc_utils import LOCAL_CACHE_DIR, get_logger
-from common.vector_db import VectorStore
+from common.misc_utils import get_logger
+from common.vector_db import VectorStore, VectorStoreNotReadyError
 
 logger = get_logger("OpenSearch")
+
 
 def generate_chunk_id(doc_id: str, page_content: str) -> np.int64:
     """
@@ -23,7 +22,8 @@ def generate_chunk_id(doc_id: str, page_content: str) -> np.int64:
     chunk_id = chunk_int % (2**63)           # Fit into signed 64-bit range
     return np.int64(chunk_id)
 
-class OpensearchNotReadyError(Exception):
+class OpensearchNotReadyError(VectorStoreNotReadyError):
+    """Raised when OpenSearch is unreachable or initializing."""
     pass
 
 class OpensearchVectorStore(VectorStore):
@@ -116,7 +116,7 @@ class OpensearchVectorStore(VectorStore):
                         "analyzer": "standard"
                     },
                     "filename": {"type": "keyword"},
-                    "doc_id": { "type": "keyword" },
+                    "doc_id": {"type": "keyword"},
                     "type": {"type": "keyword"},
                     "source": {"type": "keyword"},
                     "language": {"type": "keyword"}
@@ -136,12 +136,21 @@ class OpensearchVectorStore(VectorStore):
         Supports 2 modes of insertion
         1. Pure embedding: pass 'chunks' and 'vectors'
         2. Text chunks: pass 'chunks' and 'embedding' (class instance)
+
+        Args:
+            chunks: List of document chunks to insert (for a single document)
+            vectors: Pre-computed embeddings (optional)
+            embedding: Embedding instance to generate embeddings (optional)
+            batch_size: Number of chunks to insert per batch
+
+        Returns:
+            bool: True if indexing succeeded, False if it failed
         """
-        logger.info("Starting insert_chunks operation")
+        logger.debug("Starting insert_chunks operation")
 
         if not chunks:
             logger.debug("Nothing to chunk!")
-            return
+            return True
 
         logger.debug(f"Inserting {len(chunks)} chunks into OpenSearch with batch_size={batch_size}")
 
@@ -149,24 +158,26 @@ class OpensearchVectorStore(VectorStore):
         final_embeddings = vectors
         if vectors is not None and len(vectors) > 0:
             logger.debug(f"Using pre-computed vectors, dimension: {len(vectors[0])}")
-            # Initialize index using pre-computed vector dimension
+            # Initialize index using pre-computed vector dimension (only once)
             self._setup_index(len(vectors[0]))
-        else:
+        elif embedding is not None:
             logger.debug("Will generate embeddings using provided embedding instance")
+            # Generate first batch to get dimension and setup index once
+            first_batch = chunks[:min(batch_size, len(chunks))]
+            first_page_contents = [doc.get("page_content") for doc in first_batch]
+            first_embeddings = embedding.embed_documents(first_page_contents)
+            dim = len(first_embeddings[0])
+            self._setup_index(dim)
+            logger.debug(f"Index setup completed with dimension: {dim}")
 
         # Iterate through chunks in batches and insert in bulk
         for i in tqdm(range(0, len(chunks), batch_size)):
             batch = chunks[i:i + batch_size]
             page_contents = [doc.get("page_content") for doc in batch]
 
-            # Generate embeddings only for this specific batch
+            # Generate embeddings for this batch
             if vectors is None and embedding is not None:
                 current_batch_embeddings = embedding.embed_documents(page_contents)
-
-                # Initialize index on the first batch if not already done
-                if i == 0:
-                    dim = len(current_batch_embeddings[0])
-                    self._setup_index(dim)
             else:
                 # Use the relevant slice from pre-computed vectors
                 assert final_embeddings is not None, "final_embeddings must be set when vectors is provided"
@@ -178,7 +189,8 @@ class OpensearchVectorStore(VectorStore):
                 fn = doc.get("filename", "")
                 pc = doc.get("page_content", "")
 
-                # Generate chunk ID
+                # Generate chunk ID based on content + filename (not doc_id)
+                # This allows updating doc_id when re-ingesting the same file
                 doc_id = doc.get("doc_id") or fn # Fallback to filename if UUID missing
                 cid = generate_chunk_id(doc_id, pc)
 
@@ -201,15 +213,33 @@ class OpensearchVectorStore(VectorStore):
             batch_num = i // batch_size + 1
 
             try:
-                _, failed = helpers.bulk(self.client, actions, stats_only=True)
-                if failed:
-                    logger.error(f"Failed to insert {failed} chunks in batch {batch_num} starting at index {i}")
-                    return
+                # Use bulk insert with error handling
+                success_count, errors = helpers.bulk(
+                    self.client,
+                    actions,
+                    stats_only=False,               # Get detailed error information for failed chunks
+                    raise_on_error=False,           # Continue indexing other chunks even if some fail
+                    refresh=True
+                )
+
+                # If any errors occurred in this batch, the document failed
+                if errors:
+                    logger.debug(f"Batch {batch_num}: {len(errors)} chunks failed to insert")
+                    for error_item in errors:
+                        # OpenSearch returns errors in a dict format: {'index': {'_id': '...', 'error': ...}}
+                        action_type = list(error_item.keys())[0]
+                        error_detail = error_item[action_type]
+                        logger.error(f"Chunk insertion error: {error_detail.get('error', 'Unknown error')}")
+                    return False
+
+                logger.debug(f"Batch {batch_num}: {success_count} chunks inserted successfully")
+
             except Exception as e:
                 logger.error(f"Exception during bulk insert for batch {batch_num}: {e}")
-                raise
+                return False
 
-        logger.info(f"Insert operation completed: {len(chunks)} chunks inserted into index {self.index_name}")
+        logger.info(f"Insert operation completed successfully: {len(chunks)} chunks inserted into index {self.index_name}")
+        return True
 
 
     def search(self, query_text, vector=None, embedding=None, top_k=5, mode=None, doc_id=None, language='en'):
@@ -341,38 +371,118 @@ class OpensearchVectorStore(VectorStore):
         logger.info(f"Database populated check: {exists}")
         return exists
 
-    def reset_index(self):
-        logger.debug(f"Starting reset_index operation for {self.index_name}")
 
-        if self.client.indices.exists(index=self.index_name):
-            try:
-                self.client.indices.delete(index=self.index_name)
-                logger.info(f"Index {self.index_name} deleted successfully")
-            except Exception as e:
-                logger.error(f"Failed to delete index {self.index_name}: {e}")
-                raise
-        else:
-            logger.info(f"Index {self.index_name} does not exist, nothing to delete")
+    def remove_docs_from_index(self, doc_ids: list[str]):
+        """
+        Delete all chunks associated with the specified document IDs from the index.
 
-        # Clear local cache
-        cache_pattern = os.path.join(LOCAL_CACHE_DIR, self.index_name+"*")
-        logger.debug(f"Searching for cache files matching pattern: {cache_pattern}")
+        This performs a targeted deletion of documents rather than wiping the entire index.
+        Uses batch deletion for efficiency.
 
-        files_to_remove = glob(cache_pattern)
-        if files_to_remove:
-            logger.debug(f"Found {len(files_to_remove)} cache files/directories to remove")
-            for file_path in files_to_remove:
-                try:
-                    if os.path.isdir(file_path):
-                        shutil.rmtree(file_path)
-                        logger.debug(f"Removed directory: {file_path}")
-                        continue
-                    os.remove(file_path)
-                    logger.debug(f"Removed file: {file_path}")
-                except OSError as e:
-                    logger.error(f"Error removing {file_path}: {e}")
-            logger.info("Local cache cleaned up successfully")
-        else:
-            logger.info("No cache files found, cache already clean")
+        Args:
+            doc_ids: List of document IDs whose chunks should be deleted from the index
 
-        logger.info("Reset index operation completed")
+        Returns:
+            Number of chunks deleted
+        """
+        if not doc_ids:
+            logger.warning(f"No document ids provided to remove from index {self.index_name}. Skipping.")
+            return 0
+
+        logger.debug(f"Starting targeted cleanup of {len(doc_ids)} documents in {self.index_name}")
+
+        if not self.client.indices.exists(index=self.index_name):
+            logger.info(f"Index {self.index_name} does not exist.")
+            return 0
+
+        try:
+            # Construct terms query for batch deletion
+            # 'doc_id' must be the keyword field in your mapping
+            delete_query = {
+                "query": {
+                    "terms": {
+                        "doc_id": doc_ids
+                    }
+                }
+            }
+
+            response = self.client.delete_by_query(
+                index=self.index_name,
+                body=delete_query,
+                params={
+                    "refresh": "true",
+                    "conflicts": "proceed"
+                }
+            )
+
+            deleted_count = response.get("deleted", 0)
+            logger.info(f"Successfully deleted {deleted_count} chunks for {len(doc_ids)} documents from {self.index_name}")
+
+        except Exception as e:
+            logger.error(f"Failed to delete documents from index {self.index_name}: {e}")
+            raise
+
+        return deleted_count
+
+
+    def delete_document_by_id(self, doc_id: str):
+        """
+        Delete all chunks associated with a specific document from the index.
+
+        Args:
+            doc_id: The unique identifier of the document to delete
+
+        Returns:
+            Number of chunks deleted
+        """
+        logger.debug(f"Starting delete operation for document {doc_id}")
+
+        if not self.client.indices.exists(index=self.index_name):
+            logger.error(f"Index {self.index_name} does not exist, nothing to delete")
+            return 0
+
+        try:
+            # 1. Immediate Refresh (Safety Check)
+            # If a user ingests and then deletes immediately, OpenSearch might not have 'seen' the documents yet
+            self.client.indices.refresh(index=self.index_name)
+
+            # STEP 2: Perform the actual deletion
+            delete_query = {
+                "query": {
+                    "term": {
+                        "doc_id": str(doc_id).strip()
+                    }
+                }
+            }
+
+            response = self.client.delete_by_query(
+                index=self.index_name,
+                body=delete_query,
+                params={
+                            "refresh": "true",             # Update index stats immediately
+                            "conflicts": "proceed",        # Ignore locks from concurrent indexing
+                            "wait_for_completion": "true"  # Synchronous for the API response
+                        },
+            )
+
+            deleted_count = response.get("deleted", 0)
+            total_matched = response.get("total", 0)
+            failures = response.get("failures", [])
+
+            # Log detailed response for debugging
+            logger.debug(f"delete_by_query response: took={response.get('took')}ms, total={total_matched}, deleted={deleted_count}, failures={len(failures)}")
+
+            if failures:
+                logger.error(f"Deletion failures for document {doc_id}: {failures}")
+
+            if deleted_count > 0:
+                logger.info(f"✓ Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name}")
+            else:
+                if total_matched == 0:
+                    logger.info(f"Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name} (no matching documents found)")
+                else:
+                    logger.error(f"Matched {total_matched} documents but deleted {deleted_count} for document {doc_id} (possible version conflicts or failures)")
+            return deleted_count
+        except Exception as e:
+            logger.error(f"Failed to delete document {doc_id} from index: {e}")
+            raise

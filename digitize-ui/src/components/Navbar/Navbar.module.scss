@@ -1,0 +1,54 @@
+.navLink {
+  outline: none !important;
+  color: unset;
+  text-decoration: none !important;
+}
+
+.sideNavItem:active {
+  border-left: 5px solid var(--cds-link-primary);
+  outline: none !important;
+  background-color: var(--cds-layer-selected-01) !important;
+  color: unset;
+  text-decoration: none;
+}
+
+:global {
+  .cds--side-nav {
+    position: fixed !important;
+    top: 3rem;
+    bottom: 0;
+    left: 0;
+    z-index: 8000;
+    background-color: var(--cds-layer-01);
+    border-right: 1px solid var(--cds-border-subtle-01);
+  }
+
+  .cds--side-nav:not(.cds--side-nav--expanded) {
+    width: 3rem !important;
+    transform: translate3d(0, 0, 0) !important;
+  }
+
+  .cds--side-nav--expanded {
+    width: 16rem !important;
+  }
+
+  .cds--side-nav__link {
+    color: var(--cds-text-primary);
+    
+    &:hover {
+      background-color: var(--cds-layer-hover-01);
+      color: var(--cds-text-primary);
+    }
+
+    &.cds--side-nav__link--current {
+      background-color: var(--cds-layer-selected-01);
+      border-left: 3px solid var(--cds-link-primary);
+    }
+  }
+
+  .cds--side-nav__icon {
+    fill: var(--cds-icon-primary);
+  }
+}
+
+// Made with Bob

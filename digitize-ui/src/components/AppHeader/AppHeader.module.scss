@@ -1,0 +1,85 @@
+@use '@carbon/react/scss/spacing' as *;
+
+.header {
+  :global {
+    .cds--header__name {
+      font-size: 0.875rem;
+      font-weight: 600;
+      
+      &--prefix {
+        font-weight: 600;
+      }
+    }
+  }
+}
+
+.iconWidth {
+  width: 48px;
+}
+
+.menuBtn {
+  border: none !important;
+}
+
+.headerName {
+  cursor: pointer;
+  transition: opacity 0.2s ease-in-out;
+  
+  &:hover {
+    opacity: 0.8;
+  }
+  
+  &:active {
+    opacity: 0.6;
+  }
+}
+
+.helpModal {
+  :global(.cds--modal-content) {
+    padding: $spacing-05 $spacing-06;
+  }
+}
+
+.helpContent {
+  h4 {
+    margin-bottom: $spacing-05;
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+
+  h5 {
+    margin-top: $spacing-06;
+    margin-bottom: $spacing-04;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  p {
+    margin-bottom: $spacing-05;
+    line-height: 1.6;
+  }
+
+  ul, ol {
+    margin-bottom: $spacing-05;
+    padding-left: $spacing-06;
+    
+    li {
+      margin-bottom: $spacing-03;
+      line-height: 1.6;
+
+      strong {
+        font-weight: 600;
+      }
+    }
+  }
+
+  ul {
+    list-style-type: disc;
+  }
+
+  ol {
+    list-style-type: decimal;
+  }
+}
+
+// Made with Bob

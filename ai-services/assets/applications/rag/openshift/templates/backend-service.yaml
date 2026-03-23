@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: "backend"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  selector:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/component: backend
+  ports:
+    - name: backend
+      port: 5000
+      targetPort: 5000
+      protocol: TCP

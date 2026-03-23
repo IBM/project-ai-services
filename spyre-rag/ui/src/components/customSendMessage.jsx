@@ -120,6 +120,11 @@ async function customSendMessage(request, _options, instance) {
     for await (const chunk of stream) {
       if (isCanceled) break;
 
+      // Check for error in the chunk
+      if (chunk.error) {
+        throw new Error(chunk.error);
+      }
+
       // to extract the content from the parsed JSON chunk
       const textChunk = chunk.choices[0]?.delta?.content || '';
 
@@ -169,9 +174,19 @@ async function customSendMessage(request, _options, instance) {
     });
 
     // await for the reference promise to finish
-    const context_response = await referencePromise;
-    // get docs out of context_response
-    const docs = context_response.data?.documents || [];
+    let docs = [];
+    try {
+      const context_response = await referencePromise;
+      // get docs out of context_response
+      docs = context_response.data?.documents || [];
+    } catch (refError) {
+      // If reference call fails (e.g., query too long), continue without docs
+      // The chat response has already been streamed successfully
+      console.warn(
+        'Reference document retrieval failed:',
+        refError.response?.data?.detail || refError.message,
+      );
+    }
 
     const responseBlocks = [
       {
@@ -184,7 +199,7 @@ async function customSendMessage(request, _options, instance) {
       },
     ];
 
-    if (docs.length > 0) {
+    if (docs?.length > 0) {
       responseBlocks.push({
         response_type: 'user_defined',
         user_defined: {
@@ -211,10 +226,20 @@ async function customSendMessage(request, _options, instance) {
   } catch (err) {
     instance.updateIsMessageLoadingCounter('decrease');
 
-    let errorMessage = 'Error occurred during active stream.';
+    let errorMessage = '⚠️ Error occurred during active stream.';
 
+    // Handle specific HTTP status codes
     if (err.status === 429) {
       errorMessage = '⚠️ Server busy. Try again shortly.';
+    } else if (err.status >= 500 && err.status < 600) {
+      errorMessage =
+        '⚠️ Something went wrong on the server. Please try again later.';
+    } else if (err.message) {
+      // Extract error message from exception
+      errorMessage = `⚠️ ${err.message}`;
+    } else if (err.error?.message) {
+      // Extract error from OpenAI error format
+      errorMessage = `⚠️ ${err.error.message}`;
     }
 
     await instance.messaging.addMessageChunk({

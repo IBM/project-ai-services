@@ -1,7 +1,6 @@
 import hashlib
 import logging
 import os
-from pathlib import Path
 from contextvars import ContextVar
 from digitize.config import DIGITIZED_DOCS_DIR
 
@@ -43,7 +42,7 @@ def get_logger(name):
 
     console_handler = logging.StreamHandler()
     console_handler.setLevel(LOG_LEVEL)
-    
+
     # Update formatter to include request_id
     formatter = logging.Formatter(
         '%(asctime)s - %(name)-18s - %(levelname)-8s - [%(request_id)s] - %(message)s',
@@ -104,20 +103,46 @@ def verify_checksum(file, checksum_file):
         return True
     return False
 
+def validate_pdf_file(filename: str, content) -> None:
+    """
+    Validate a PDF file with comprehensive checks.
 
-def has_allowed_extension(path, allowed_file_types):
-    return path.lower().split('.')[-1] in allowed_file_types
+    Performs validation checks:
+    1. Filename exists
+    2. Content was read successfully (not an Exception)
+    3. Content is not empty
+    4. File has .pdf extension
+    5. File content is valid PDF (magic bytes check)
 
-def is_supported_file(path,allowed_file_types):
-    try:
-        with open(path, "rb") as f:
-            header = f.read(8)
-        for signature in allowed_file_types.values():
-            if header.startswith(signature):
-                return True
-        return False
-    except Exception as e:
-        return False
+    Args:
+        filename: Name of the file
+        content: File content as bytes (at least first 4 bytes), or Exception if read failed
+
+    Raises:
+        ValueError: If validation fails
+    """
+    # Check filename exists
+    if not filename:
+        raise ValueError("File must have a filename.")
+
+    # Validate .pdf extension
+    if not filename.lower().endswith('.pdf'):
+        raise ValueError(f"Only PDF files are allowed. Invalid file: {filename}")
+
+    pdf_signature = b'%PDF'
+    if not content.startswith(pdf_signature):
+        raise ValueError(f"File has .pdf extension but unsupported format: {filename}")
+
+    # Check content is bytes (not an exception from failed read)
+    if isinstance(content, Exception):
+        raise ValueError(f"Failed to read file: {filename}")
+
+    if not isinstance(content, bytes):
+        raise ValueError(f"Invalid file content for: {filename}")
+
+    # Check content is not empty
+    if len(content) == 0:
+        raise ValueError(f"File is empty: {filename}")
 
 def get_unprocessed_files(original_files, processed_pdfs):
     return set(original_files).difference(set(processed_pdfs))

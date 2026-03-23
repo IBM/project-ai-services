@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 
 	routeclient "github.com/openshift/client-go/route/clientset/versioned"
@@ -28,7 +29,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var scheme = runtime.NewScheme()
+var (
+	scheme = runtime.NewScheme()
+
+	// Singleton instances for all three clients, initialized together.
+	clientsOnce sync.Once
+	clientsErr  error
+
+	controllerRuntimeClient client.Client
+	kubeClient              *kubernetes.Clientset
+	routeClient             *routeclient.Clientset
+)
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -48,43 +59,65 @@ type OpenshiftClient struct {
 	Ctx         context.Context
 }
 
-// NewOpenshiftClient creates and returns a new OpenshiftClient instance.
+// NewOpenshiftClient creates and returns an OpenshiftClient instance.
+// The underlying clients (Client, KubeClient, RouteClient) are reused across all instances.
 func NewOpenshiftClient() (*OpenshiftClient, error) {
 	return NewOpenshiftClientWithNamespace("default")
 }
 
-// NewOpenshiftClientWithNamespace creates a OpenshiftClient with a specific namespace.
+// NewOpenshiftClientWithNamespace creates an OpenshiftClient with a specific namespace.
+// The underlying clients (Client, KubeClient, RouteClient) are singletons and reused.
 func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error) {
-	config, err := getKubeConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get openshift config: %w", err)
-	}
-
-	kcc, err := client.New(config, client.Options{
-		Scheme: scheme,
-	})
-	if err != nil {
+	// Initialize all three clients together (singleton pattern)
+	if err := initializeClients(); err != nil {
 		return nil, err
 	}
 
-	kc, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create openshift clientset: %w", err)
-	}
-
-	// OpenShift Route client
-	routeClient, err := routeclient.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create route clientset: %w", err)
-	}
-
 	return &OpenshiftClient{
-		Client:      kcc,
-		KubeClient:  kc,
+		Client:      controllerRuntimeClient,
+		KubeClient:  kubeClient,
 		RouteClient: routeClient,
 		Namespace:   namespace,
 		Ctx:         context.Background(),
 	}, nil
+}
+
+// initializeClients initializes all three clients once using sync.Once.
+func initializeClients() error {
+	clientsOnce.Do(func() {
+		config, err := getKubeConfig()
+		if err != nil {
+			clientsErr = fmt.Errorf("failed to get openshift config: %w", err)
+
+			return
+		}
+
+		// Initialize controller-runtime client
+		controllerRuntimeClient, err = client.New(config, client.Options{Scheme: scheme})
+		if err != nil {
+			clientsErr = fmt.Errorf("failed to create controller-runtime client: %w", err)
+
+			return
+		}
+
+		// Initialize Kubernetes clientset
+		kubeClient, err = kubernetes.NewForConfig(config)
+		if err != nil {
+			clientsErr = fmt.Errorf("failed to create openshift clientset: %w", err)
+
+			return
+		}
+
+		// Initialize OpenShift Route client
+		routeClient, err = routeclient.NewForConfig(config)
+		if err != nil {
+			clientsErr = fmt.Errorf("failed to create openshift route clientset: %w", err)
+
+			return
+		}
+	})
+
+	return clientsErr
 }
 
 // getKubeConfig attempts to get openshift config from in-cluster or kubeconfig file.

@@ -1,0 +1,237 @@
+@use '@carbon/react/scss/spacing' as *;
+
+.documentListPage {
+  background-color: var(--cds-background);
+  min-height: 100vh;
+  padding: 0;
+}
+
+.pageHeader {
+  background-color: var(--cds-background);
+  padding: 2rem 2rem 1.5rem 2rem;
+  border-bottom: 1px solid var(--cds-border-subtle-01);
+}
+
+.headerContent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 100%;
+}
+
+.pageTitle {
+  font-size: 2rem;
+  font-weight: 400;
+  color: var(--cds-text-primary);
+  margin: 0;
+  line-height: 1.25;
+}
+
+.learnMore {
+  color: var(--cds-link-primary);
+  text-decoration: none;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.tableWrapper {
+  background-color: var(--cds-layer-01);
+}
+
+.tableContainer {
+  background-color: var(--cds-layer-01);
+  
+  :global {
+    .cds--data-table-container {
+      padding-top: 0;
+    }
+    
+    .cds--table-toolbar {
+      background-color: var(--cds-layer-01);
+      border-bottom: 1px solid var(--cds-border-subtle-01);
+    }
+    
+    .cds--toolbar-content {
+      background-color: var(--cds-layer-01);
+      justify-content: flex-start;
+    }
+    
+    .cds--batch-actions {
+      background-color: var(--cds-background-brand);
+    }
+    
+    .cds--toolbar-search-container-persistent {
+      width: 100%;
+      max-width: 400px;
+      margin-right: auto;
+    }
+  }
+}
+
+.table {
+  :global {
+    thead {
+      background-color: var(--cds-layer-accent-01);
+      
+      th {
+        background-color: var(--cds-layer-accent-01);
+        color: var(--cds-text-primary);
+        font-weight: 600;
+        font-size: 0.875rem;
+        padding: 1rem;
+        border-bottom: 1px solid var(--cds-border-subtle-01);
+        vertical-align: middle;
+      }
+    }
+    
+    tbody {
+      tr {
+        border-bottom: 1px solid var(--cds-border-subtle-01);
+        background-color: var(--cds-layer-01);
+        
+        &:hover {
+          background-color: var(--cds-layer-hover-01);
+        }
+        
+        td {
+          padding: 1rem;
+          color: var(--cds-text-primary);
+          font-size: 0.875rem;
+          vertical-align: middle;
+          background-color: transparent;
+        }
+      }
+    }
+  }
+}
+
+.statusCell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.statusText {
+  color: var(--cds-text-primary);
+}
+
+.statusIconSuccess {
+  fill: var(--cds-support-success);
+}
+
+.statusIconError {
+  fill: var(--cds-support-error);
+}
+
+.statusIconProgress {
+  fill: var(--cds-support-info);
+}
+
+.errorInfoButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 0.25rem;
+  cursor: pointer;
+  outline: none;
+  
+  &:hover .errorInfoIcon {
+    fill: var(--cds-icon-primary);
+  }
+  
+  &:focus {
+    outline: 2px solid var(--cds-focus);
+    outline-offset: 2px;
+  }
+}
+
+.errorInfoIcon {
+  fill: var(--cds-icon-secondary);
+  flex-shrink: 0;
+  transition: fill 0.11s cubic-bezier(0.2, 0, 0.38, 0.9);
+}
+
+.errorTooltip {
+  :global {
+    .cds--tooltip-content {
+      max-width: 18rem;
+      max-height: 12rem;
+      overflow-y: auto;
+      word-wrap: break-word;
+      
+      /* Custom scrollbar styling */
+      &::-webkit-scrollbar {
+        width: 6px;
+      }
+      
+      &::-webkit-scrollbar-track {
+        background: var(--cds-layer-02);
+        border-radius: 3px;
+      }
+      
+      &::-webkit-scrollbar-thumb {
+        background: var(--cds-border-subtle-01);
+        border-radius: 3px;
+        
+        &:hover {
+          background: var(--cds-border-strong-01);
+        }
+      }
+      
+      /* Firefox scrollbar styling */
+      scrollbar-width: thin;
+      scrollbar-color: var(--cds-border-subtle-01) var(--cds-layer-02);
+    }
+  }
+}
+
+.emptyStateCell {
+  padding: $spacing-09 $spacing-05 !important;
+  border-bottom: none !important;
+  background-color: var(--cds-layer-01) !important;
+  
+  :global {
+    tr:hover & {
+      background-color: var(--cds-layer-01) !important;
+    }
+  }
+}
+
+.modalContent {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.loadingContainer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
+  padding: 2rem;
+}
+
+.contentPreview {
+  width: 100%;
+}
+
+.contentPre {
+  background-color: var(--cds-layer-02);
+  padding: 1rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  color: var(--cds-text-primary);
+  margin: 0;
+  font-family: 'IBM Plex Mono', 'Menlo', 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', Courier, monospace;
+  line-height: 1.5;
+}
+
+// Made with Bob

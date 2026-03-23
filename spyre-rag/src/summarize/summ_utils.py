@@ -1,7 +1,7 @@
 import logging
 import os
 import re
-from typing import Optional
+from typing import Any, Dict, Optional
 import pypdfium2 as pdfium
 from pydantic import BaseModel, Field
 
@@ -227,7 +227,7 @@ class SummarizeErrorResponseInternalServiceError(BaseModel):
         }
     }
 
-error_responses = {
+error_responses: Dict[int | str, Dict[str, Any]] = {
     400: {"description": "Bad request (missing input, unsupported file type, invalid params)", "model": SummarizeErrorResponseBadRequest},
     413: {"description": "Input exceeds context window limit", "model": SummarizeErrorResponseContextLimitExceeded},
     415: {"description": "Unsupported Content-Type", "model": SummarizeErrorResponseUnsupportedContentType},
@@ -244,4 +244,5 @@ def validate_summary_length(summary_length):
         if summary_length <=0 or summary_length > MAX_INPUT_WORDS:
             raise SummarizeException(400, "INVALID_PARAMETER",
                                      "Length is out of bounds")
-    return summary_length
+        return summary_length
+    return None

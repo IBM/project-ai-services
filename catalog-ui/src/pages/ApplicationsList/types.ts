@@ -9,6 +9,8 @@ export interface ApplicationRow {
   actions: string;
 }
 
+export type ExportStatus = "idle" | "exporting" | "success" | "error";
+
 export interface AppState {
   search: string;
   page: number;
@@ -18,9 +20,14 @@ export interface AppState {
   rowsData: ApplicationRow[];
   selectedRowId: string | null;
   toastOpen: boolean;
-  errorMessage: string;
-  errorRowName: string;
+  deleteErrorMessage: string;
+  deleteErrorRowName: string;
   isDeleting: boolean;
+  isExportDialogOpen: boolean;
+  csvFileName: string;
+  exportStatus: ExportStatus;
+  exportErrorMessage: string;
+  hasError: boolean;
 }
 
 export const ACTION_TYPES = {
@@ -34,6 +41,13 @@ export const ACTION_TYPES = {
   SHOW_ERROR: "SHOW_ERROR",
   HIDE_ERROR: "HIDE_ERROR",
   SET_IS_DELETING: "SET_IS_DELETING",
+  OPEN_EXPORT_DIALOG: "OPEN_EXPORT_DIALOG",
+  CLOSE_EXPORT_DIALOG: "CLOSE_EXPORT_DIALOG",
+  SET_CSV_FILENAME: "SET_CSV_FILENAME",
+  SET_EXPORT_STATUS: "SET_EXPORT_STATUS",
+  SET_EXPORT_ERROR: "SET_EXPORT_ERROR",
+  CLEAR_EXPORT_ERROR: "CLEAR_EXPORT_ERROR",
+  SET_SELECTED_ROW_ID: "SET_SELECTED_ROW_ID",
 } as const;
 
 export type AppAction =
@@ -49,4 +63,12 @@ export type AppAction =
       payload: { message: string; rowName?: string };
     }
   | { type: typeof ACTION_TYPES.HIDE_ERROR }
+  | { type: typeof ACTION_TYPES.SET_IS_DELETING; payload: boolean }
+  | { type: typeof ACTION_TYPES.OPEN_EXPORT_DIALOG }
+  | { type: typeof ACTION_TYPES.CLOSE_EXPORT_DIALOG }
+  | { type: typeof ACTION_TYPES.SET_CSV_FILENAME; payload: string }
+  | { type: typeof ACTION_TYPES.SET_EXPORT_STATUS; payload: ExportStatus }
+  | { type: typeof ACTION_TYPES.SET_EXPORT_ERROR; payload: string }
+  | { type: typeof ACTION_TYPES.CLEAR_EXPORT_ERROR }
+  | { type: typeof ACTION_TYPES.SET_SELECTED_ROW_ID; payload: string | null }
   | { type: typeof ACTION_TYPES.SET_IS_DELETING; payload: boolean };

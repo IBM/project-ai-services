@@ -1,9 +1,11 @@
+@use "@carbon/react/scss/spacing";
+
 .header {
   font-size: large;
 }
 
 .iconWidth {
-  width: 60px;
+  width: spacing.$spacing-10;
 }
 
 .menuBtn {
@@ -11,8 +13,8 @@
 }
 
 .usercircle {
-  width: 45px;
-  height: 45px;
+  width: spacing.$spacing-09;
+  height: spacing.$spacing-09;
   border-radius: 50%;
   background-color: #525252;
   /* grey circle like screenshot */
@@ -32,8 +34,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin: 0.5rem;
-  padding: 0.7rem;
+  margin: spacing.$spacing-03;
+  padding: spacing.$spacing-04;
   font-size: 1.1rem;
 }
 
@@ -49,7 +51,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem;
+  padding: spacing.$spacing-05;
 
   background-color: #393939;
   color: #ffffff;

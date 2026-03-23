@@ -19,10 +19,12 @@
     "@carbon/ibm-products": "^2.84.0",
     "@carbon/icons-react": "^11.75.0",
     "@carbon/react": "^1.101.0",
+    "axios": "^1.13.6",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-is": "^19.2.4",
-    "react-router-dom": "^7.13.0"
+    "react-router-dom": "^7.13.0",
+    "zustand": "^5.0.11"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -40,10 +42,6 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",
     "vite": "^7.3.1"
-  },
-  "overrides": {
-    "immutable": "^5.1.5",
-    "minimatch": "^3.1.3"
   },
   "description": "Frontend application built with **React 19**, **Vite 7**, **TypeScript**, and **IBM Carbon Design System**.",
   "main": "eslint.config.js",

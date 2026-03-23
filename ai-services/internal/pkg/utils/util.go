@@ -8,7 +8,11 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"go.yaml.in/yaml/v3"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 const (
@@ -299,4 +303,47 @@ func checkParamsInValues(param string, values map[string]any) bool {
 	}
 
 	return false
+}
+
+// GetExistingCustomResource checks if a single instance resource exists and return the object.
+func GetExistingCustomResource(client *openshift.OpenshiftClient, gvk schema.GroupVersionKind) (*unstructured.Unstructured, bool, error) {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(gvk)
+
+	if err := client.Client.List(client.Ctx, list); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, false, nil
+		}
+
+		return nil, false, fmt.Errorf("error listing %s: %w", gvk.Kind, err)
+	}
+
+	if len(list.Items) == 0 {
+		return nil, false, nil
+	}
+
+	return &list.Items[0], true, nil
+}
+
+// FlattenMapToKeys converts a nested map into a flat map with dotted keys
+// Example: {"ui": {"port": "8080"}} -> {"ui.port": ""}.
+func FlattenMapToKeys(m map[string]any, prefix string) map[string]string {
+	result := make(map[string]string)
+	for key, val := range m {
+		fullKey := key
+		if prefix != "" {
+			fullKey = prefix + "." + key
+		}
+
+		// If the value is a nested map, recurse
+		if nestedMap, ok := val.(map[string]any); ok {
+			nestedKeys := FlattenMapToKeys(nestedMap, fullKey)
+			maps.Copy(result, nestedKeys)
+		} else {
+			// For leaf values, add the key
+			result[fullKey] = ""
+		}
+	}
+
+	return result
 }

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import styles from "./Logout.module.scss";
 import { Theme } from "@carbon/react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 
 const Logout = () => {
   const navigate = useNavigate();
@@ -23,9 +23,10 @@ const Logout = () => {
           </span>
           <span>You are now logged out.</span>
         </h1>
-        <a className={styles.loginLink} href="/login">
+
+        <Link to="/login" className={styles.loginLink}>
           Return to the log in page now
-        </a>
+        </Link>
       </div>
     </Theme>
   );

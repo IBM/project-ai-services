@@ -8,7 +8,7 @@ import {
   Theme,
   Modal,
 } from "@carbon/react";
-import { Help, Notification, User, Logout } from "@carbon/icons-react";
+import { User, Logout } from "@carbon/icons-react";
 import styles from "./AppHeader.module.scss";
 import { useReducer, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -65,6 +65,17 @@ const AppHeader = (props: AppHeaderProps) => {
   const userIconRef = useRef<HTMLButtonElement | null>(null);
   const navigate = useNavigate();
 
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch (err) {
+      console.error("Logout API failed:", err);
+    } finally {
+      dispatch({ type: "CLOSE_LOGOUT_MODAL" });
+      navigate("/logout", { replace: true });
+    }
+  };
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -106,17 +117,6 @@ const AppHeader = (props: AppHeaderProps) => {
 
         {!minimal && (
           <HeaderGlobalBar>
-            <HeaderGlobalAction aria-label="Help" className={styles.iconWidth}>
-              <Help size={20} />
-            </HeaderGlobalAction>
-
-            <HeaderGlobalAction
-              aria-label="Notifications"
-              className={styles.iconWidth}
-            >
-              <Notification size={20} />
-            </HeaderGlobalAction>
-
             <HeaderGlobalAction
               aria-label="User"
               aria-haspopup="menu"
@@ -154,35 +154,16 @@ const AppHeader = (props: AppHeaderProps) => {
             <Theme theme="g10">
               <Modal
                 open={state.isLogoutModalOpen}
-                size="xs"
+                size="sm"
                 primaryButtonText="Log out"
                 secondaryButtonText="Cancel"
+                modalHeading="Are you sure you want to log out of IBM Open-Source AI
+                  Foundation for Power?"
                 onRequestClose={() => {
                   dispatch({ type: "CLOSE_LOGOUT_MODAL" });
                 }}
-                onRequestSubmit={async () => {
-                  dispatch({ type: "CLOSE_LOGOUT_MODAL" });
-
-                  const token = localStorage.getItem("access_token");
-
-                  try {
-                    if (token) {
-                      await logout(token);
-                    }
-                  } catch (err) {
-                    console.error("Logout API failed:", err);
-                  } finally {
-                    localStorage.removeItem("access_token");
-                    localStorage.removeItem("refresh_token");
-                    navigate("/logout", { replace: true });
-                  }
-                }}
-              >
-                <p>
-                  Are you sure you want to log out of IBM Open-Source AI
-                  Foundation for Power?
-                </p>
-              </Modal>
+                onRequestSubmit={handleLogout}
+              ></Modal>
             </Theme>
           </HeaderGlobalBar>
         )}

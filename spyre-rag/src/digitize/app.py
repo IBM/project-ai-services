@@ -2,19 +2,16 @@ import asyncio
 import json
 import logging
 import os
-from pathlib import Path
+import uuid
 import shutil
 from typing import List, Optional
 from contextlib import asynccontextmanager
 import uvicorn
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status
-from common.misc_utils import get_logger, set_log_level, has_allowed_extension
-import digitize.digitize_utils as dg_util
-import digitize.types as types
-from digitize.digitize import digitize
-from digitize.errors import *
-import digitize.config as config
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status, Request
+from fastapi.openapi.docs import get_swagger_ui_html
+
+from common.misc_utils import set_log_level
 
 log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
@@ -26,6 +23,13 @@ if level != "":
 
 set_log_level(log_level)
 
+from common.misc_utils import get_logger, validate_pdf_file, set_request_id
+import digitize.digitize_utils as dg_util
+import digitize.types as types
+from digitize.digitize import digitize
+from digitize.errors import *
+import digitize.config as config
+from digitize.cleanup import reset_db
 from digitize.ingest import ingest
 from digitize.status import StatusManager
 
@@ -40,14 +44,79 @@ async def lifespan(app: FastAPI):
     """Manage application lifespan events (startup and shutdown)."""
     # Startup
     logger.info("Application starting up...")
-    
+
+    # Scan for orphan jobs and mark them as failed
+    try:
+        orphan_count = dg_util.scan_and_recover_orphan_jobs(config.JOBS_DIR)
+        if orphan_count > 0:
+            logger.info(f"Found {orphan_count} orphan job(s) from previous app server run")
+    except Exception as e:
+        logger.error(f"Error during orphan job recovery: {e}", exc_info=True)
+
     yield
-    
+
     # Shutdown
     logger.info("Application shutting down...")
 
 
-app = FastAPI(title="Digitize Documents Service", lifespan=lifespan)
+# OpenAPI tags metadata for endpoint organization
+tags_metadata = [
+    {
+        "name": "health",
+        "description": "Health check and service status endpoints"
+    },
+    {
+        "name": "jobs",
+        "description": "Job tracking and management for document processing(Ingestion | Digitization) operations"
+    },
+    {
+        "name": "documents",
+        "description": "Document management operations including retrieval and deletion"
+    }
+]
+
+app = FastAPI(
+    title="Digitize Documents Service",
+    description="Document digitization and ingestion API for processing PDFs into searchable content. "
+                "Supports both digitization (converting PDFs to text/markdown/JSON) and ingestion "
+                "(processing and indexing documents into a vector database for semantic search).",
+    version="1.0.0",
+    lifespan=lifespan,
+    openapi_tags=tags_metadata
+)
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    set_request_id(request_id)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+@app.get("/", include_in_schema=False)
+def swagger_root():
+    """Expose Swagger UI at the root path (/)"""
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title="Digitize Documents Service - Swagger UI",
+    )
+
+@app.get(
+    "/health",
+    status_code=status.HTTP_200_OK,
+    tags=["health"],
+    summary="Health check",
+    description="Check if the service is running and healthy. Used for liveness probes.",
+    response_description="Service health status"
+)
+async def health_check():
+    """
+    Health check endpoint for liveness probe.
+
+    Returns:
+    - 200 OK if the service is healthy
+    """
+    return {"status": "ok"}
 
 async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat):
     status_mgr = StatusManager(job_id)
@@ -57,18 +126,13 @@ async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: type
         logger.info(f"🚀 Digitization started for job: {job_id}")
         # to_thread prevents the heavy 'digitize' process from blocking the main FastAPI event loop and returns the response to request asynchronously.
         await asyncio.to_thread(digitize, job_staging_path, job_id, doc_id_dict, output_format)
-        logger.info(f"Digitization for {job_id} completed successfully")
+        logger.info(f"Digitization for job {job_id} completed successfully")
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
         status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing digitization pipeline: {str(e)}")
     finally:
-       # Always clean up staging directory, even on crashes
-        try:
-            if job_staging_path.exists():
-                shutil.rmtree(job_staging_path)
-                logger.debug(f"Cleaned up staging directory: {job_staging_path}")
-        except Exception as cleanup_error:
-            logger.warning(f"Failed to clean up staging directory {job_staging_path}: {cleanup_error}")
+        # Always clean up staging directory, even on crashes
+        dg_util.cleanup_staging_directory(job_id, config.STAGING_DIR)
 
         # Crucial: Always release the semaphore slot back to the API
         digitization_semaphore.release()
@@ -88,80 +152,100 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
         status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline: {str(e)}")
     finally:
         # Always clean up staging directory, even on crashes
-        try:
-            if job_staging_path.exists():
-                shutil.rmtree(job_staging_path)
-                logger.debug(f"Cleaned up staging directory: {job_staging_path}")
-        except Exception as cleanup_error:
-            logger.warning(f"Failed to clean up staging directory {job_staging_path}: {cleanup_error}")
-        
+        dg_util.cleanup_staging_directory(job_id, config.STAGING_DIR)
+
         # Mandatory Semaphore Release
         ingestion_semaphore.release()
         logger.debug(f"✅ Job {job_id} done. Semaphore released.")
 
+async def validate_pdf_files(
+    files: List[UploadFile],
+    file_contents_raw: List[bytes | BaseException]
+) -> tuple[List[str], List[bytes]]:
+    """
+    Validate uploaded PDF files using shared validation logic.
 
-@app.post("/v1/documents", status_code=status.HTTP_202_ACCEPTED)
+    Raises APIError on any validation failure.
+
+    Returns:
+        Tuple of (filenames, file_contents)
+    """
+
+    filenames: List[str] = []
+    file_contents: List[bytes] = []
+
+    for idx, file in enumerate(files):
+        filename = file.filename or ""
+        content = file_contents_raw[idx]
+
+        # Use shared validation function
+        try:
+            await asyncio.to_thread(validate_pdf_file, filename, content)
+        except ValueError as e:
+            APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, str(e))
+
+        assert isinstance(content, bytes)  # Type narrowing after validation
+        filenames.append(filename)
+        file_contents.append(content)
+
+    return filenames, file_contents
+
+@app.post(
+    "/v1/jobs",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=types.JobCreatedResponse,
+    tags=["jobs"],
+    summary="Create async jobs to upload and process documents",
+    description=(
+        "Upload PDF documents for processing. Supports two operation types:\n\n"
+        "- **ingestion**: Process and index documents into vector database for semantic search\n"
+        "- **digitization**: Convert PDF to text/markdown/JSON format (single file only)\n\n"
+        "The operation runs asynchronously in the background. Use the returned `job_id` to track progress."
+    ),
+    response_description="Job ID for tracking the processing status"
+)
 async def digitize_document(
     background_tasks: BackgroundTasks,
-    files: List[UploadFile] = File(...),
-    operation: types.OperationType = Query(types.OperationType.INGESTION),
-    output_format: types.OutputFormat = Query(types.OutputFormat.JSON)
+    files: List[UploadFile] = File(..., description="PDF files to process (multiple for ingestion, single for digitization)"),
+    operation: types.OperationType = Query(
+        types.OperationType.INGESTION,
+        description="Operation type: 'ingestion' (index into vector DB) or 'digitization' (convert to text/md/json)"
+    ),
+    output_format: types.OutputFormat = Query(
+        types.OutputFormat.JSON,
+        description="Output format for digitization: 'json', 'md', or 'txt' (only applies to digitization operation)"
+    ),
+    job_name: Optional[str] = Query(None, description="Optional human-readable name for the job")
 ):
     try:
-        # 0. Early exit if no files submitted
+        # 1. Early exit if no files submitted
         if not files or len(files) == 0:
             APIError.raise_error(ErrorCode.INVALID_REQUEST, "No files provided. Please submit at least one file.")
 
-        sem = ingestion_semaphore if operation == types.OperationType.INGESTION else digitization_semaphore
-
-        # 1. Fail fast if limit reached
-        if sem.locked():
-            APIError.raise_error(ErrorCode.RATE_LIMIT_EXCEEDED, f"Too many concurrent {operation} requests.")
-
-        # 2. Validation
-        # Validate that all files are PDFs
-        allowed_file_types = {'pdf': b'%PDF'}
-        for file in files:
-            if not file.filename:
-                APIError.raise_error(ErrorCode.INVALID_REQUEST, "File must have a filename.")
-
-            if not has_allowed_extension(file.filename, allowed_file_types):
-                APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, f"Only PDF files are allowed. Invalid file: {file.filename}")
-
-            # Check content type if provided
-            if file.content_type and file.content_type not in ['application/pdf', 'application/x-pdf']:
-                APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, f"Only PDF files are allowed. Invalid content type for {file.filename}: {file.content_type}")
-
-        # Validate only one file is allowed for digitization
         if operation == types.OperationType.DIGITIZATION and len(files) > 1:
             APIError.raise_error(ErrorCode.INVALID_REQUEST, "Only 1 file allowed for digitization.")
 
-        job_id = dg_util.generate_uuid()
-        # Filter out None filenames and ensure all files have valid names
-        filenames = [f.filename for f in files if f.filename]
-        if len(filenames) != len(files):
-            APIError.raise_error(ErrorCode.INVALID_REQUEST, "All files must have valid filenames.")
-        
-        # Read all file buffers concurrently with error handling
-        # return_exceptions=True ensures partial failures don't cancel other reads
-        file_contents_raw = await asyncio.gather(*[f.read() for f in files], return_exceptions=True)
-        
-        # Validate all file reads succeeded and filter to bytes only
-        failed_reads = []
-        file_contents: List[bytes] = []
-        for idx, content in enumerate(file_contents_raw):
-            if isinstance(content, Exception):
-                filename = filenames[idx]
-                logger.error(f"Failed to read file {filename}: {content}")
-                failed_reads.append(f"{filename}: {str(content)}")
-            elif isinstance(content, bytes):
-                file_contents.append(content)
-        
-        if failed_reads:
-            error_details = "; ".join(failed_reads)
-            APIError.raise_error(ErrorCode.INVALID_REQUEST, f"Failed to read files: {error_details}")
+        # 2. Check for active ingestion jobs BEFORE semaphore check (cross-process coordination)
+        if operation == types.OperationType.INGESTION:
+            has_active, active_job_ids = dg_util.has_active_jobs(operation=operation.value)
+            if has_active:
+                error_msg = "An ingestion job is already running"
+                if active_job_ids:
+                    error_msg += f" (job_id: {active_job_ids[0]})"
+                logger.error(f"Rejected ingestion request: {error_msg}")
+                APIError.raise_error(ErrorCode.RATE_LIMIT_EXCEEDED, error_msg)
 
-        # 4. acquire the semaphore
+        # 3. Check semaphore availability (for digitization or as backup for ingestion)
+        sem = ingestion_semaphore if operation == types.OperationType.INGESTION else digitization_semaphore
+        if sem.locked():
+            APIError.raise_error(ErrorCode.RATE_LIMIT_EXCEEDED, f"Too many concurrent {operation} requests.")
+
+        # 3. Generate job ID and validate PDF files
+        job_id = dg_util.generate_uuid()
+        file_contents_raw = await asyncio.gather(*[f.read() for f in files], return_exceptions=True)
+        filenames, file_contents = await validate_pdf_files(files, file_contents_raw)
+
+        # 4. Acquire the semaphore
         await sem.acquire()
 
         # 5. Schedule the background pipeline
@@ -169,7 +253,7 @@ async def digitize_document(
             # Upload the file byte stream to files in staging directory
             # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
             await dg_util.stage_upload_files(job_id, filenames, str(config.STAGING_DIR / job_id), file_contents)
-            doc_id_dict = dg_util.initialize_job_state(job_id, operation, output_format, filenames)
+            doc_id_dict = dg_util.initialize_job_state(job_id, operation, output_format, filenames, job_name)
             if operation == types.OperationType.INGESTION:
                 background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
             else:
@@ -187,7 +271,14 @@ async def digitize_document(
         logger.error(f"Unexpected error in digitize_document: {e}")
         APIError.raise_error("INTERNAL_SERVER_ERROR", str(e))
 
-@app.get("/v1/jobs", response_model=types.JobsListResponse)
+@app.get(
+    "/v1/jobs",
+    response_model=types.JobsListResponse,
+    tags=["jobs"],
+    summary="List all jobs",
+    description="Retrieve information about all submitted jobs with pagination and filtering options.",
+    response_description="Paginated list of jobs with their current status"
+)
 async def get_all_jobs(
     latest: bool = Query(False, description="Return only the latest job"),
     limit: int = Query(20, ge=1, le=100, description="Number of records per page"),
@@ -238,7 +329,13 @@ async def get_all_jobs(
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to retrieve jobs")
 
 
-@app.get("/v1/jobs/{job_id}")
+@app.get(
+    "/v1/jobs/{job_id}",
+    tags=["jobs"],
+    summary="Get job by ID",
+    description="Retrieve detailed status and progress information for a specific job.",
+    response_description="Detailed job information including document statuses and statistics"
+)
 async def get_job_by_id(job_id: str):
     """Retrieve detailed status of a specific job by its ID."""
     try:
@@ -265,7 +362,16 @@ async def get_job_by_id(job_id: str):
         logger.error(f"Failed to retrieve job {job_id}: {e}", exc_info=True)
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to retrieve job information for '{job_id}'")
 
-@app.delete("/v1/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete(
+    "/v1/jobs/{job_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["jobs"],
+    summary="Delete job",
+    description="Delete a job status record. Only completed or failed jobs can be deleted. "
+                "Active jobs (accepted or in_progress) cannot be deleted. "
+                "Note: This only deletes the job record, not the associated document data.",
+    response_description="No content on successful deletion"
+)
 async def delete_job(job_id: str):
     """Deletes a job status file. Does not touch associated document metadata."""
     try:
@@ -298,12 +404,20 @@ async def delete_job(job_id: str):
 
 
 
-@app.get("/v1/documents", response_model=List[types.DocumentListItem])
+@app.get(
+    "/v1/documents",
+    response_model=types.DocumentsListResponse,
+    tags=["documents"],
+    summary="List all documents",
+    description="Get high-level information of all documents with pagination and filtering. "
+                "Documents are sorted by submission time (newest first).",
+    response_description="Paginated list of documents with basic metadata"
+)
 async def list_documents(
     limit: int = Query(20, ge=1, le=100, description="Number of records to return per page"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
     status: Optional[str] = Query(None, description="Filter by status: accepted/in_progress/completed/failed"),
-    name: Optional[str] = Query(None, description="Filter by document name")
+    name: Optional[str] = Query(None, description="Filter by document name (partial match, case-insensitive)")
 ):
     """
     Get high-level information of all documents sorted by submitted_time.
@@ -340,15 +454,11 @@ async def list_documents(
 
         logger.debug(f"Returning {len(paginated_documents)} documents out of {total} total (offset={offset}, limit={limit})")
 
-        # Convert Pydantic models to dicts for response
-        return {
-            "pagination": {
-                "total": total,
-                "limit": limit,
-                "offset": offset
-            },
-            "data": [doc.model_dump() for doc in paginated_documents]
-        }
+        # Return properly typed response
+        return types.DocumentsListResponse(
+            pagination=types.PaginationInfo(total=total, limit=limit, offset=offset),
+            data=paginated_documents
+        )
 
     except HTTPException as e:
         logger.error(f"Failed to list documents, HTTP error: {e}")
@@ -358,8 +468,16 @@ async def list_documents(
         logger.error(f"Unexpected error in list_documents: {e}", exc_info=True)
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(e))
 
-@app.get("/v1/documents/{doc_id}", response_model=types.DocumentDetailResponse)
-async def get_document_metadata(doc_id: str, details: bool = Query(False, description="Include detailed metadata")):
+@app.get(
+    "/v1/documents/{doc_id}",
+    response_model=types.DocumentDetailResponse,
+    tags=["documents"],
+    summary="Get document metadata",
+    description="Retrieve detailed metadata for a specific document by its ID. "
+                "Optionally include processing details like page count, table count, and timing information.",
+    response_description="Document metadata with optional detailed processing information"
+)
+async def get_document_metadata(doc_id: str, details: bool = Query(False, description="Include detailed metadata (pages, tables, timing)")):
     """
     Get details of a specific document by ID.
 
@@ -388,7 +506,16 @@ async def get_document_metadata(doc_id: str, details: bool = Query(False, descri
         logger.error(f"Unexpected error in get_document_metadata: {e}", exc_info=True)
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(e))
 
-@app.get("/v1/documents/{doc_id}/content", response_model=types.DocumentContentResponse)
+@app.get(
+    "/v1/documents/{doc_id}/content",
+    response_model=types.DocumentContentResponse,
+    tags=["documents"],
+    summary="Get document content",
+    description="Retrieve the digitized/processed content of a document. "
+                "For digitization operations, returns content in the requested format (text/markdown/JSON). "
+                "For ingestion operations, returns the extracted JSON representation.",
+    response_description="Document content in the specified output format"
+)
 async def get_document_content(doc_id: str):
     """
     Get the digitized content of a specific document.
@@ -420,19 +547,158 @@ async def get_document_content(doc_id: str):
         logger.error(f"Unexpected error in get_document_content: {e}", exc_info=True)
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(e))
 
-@app.delete("/v1/documents/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete(
+    "/v1/documents/{doc_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["documents"],
+    summary="Delete document",
+    description="Delete a single document by ID. Removes the document from the vector database (if ingested), "
+                "deletes all associated files, and removes metadata. "
+                "Documents that are part of active jobs cannot be deleted.",
+    response_description="No content on successful deletion"
+)
 async def delete_document(doc_id: str):
-    # 1. Check if part of active job (409 Conflict)
-    # 2. Remove from VDB and local cache
-    return
+    """
+    Delete a single document by ID.
 
-@app.delete("/v1/documents", status_code=status.HTTP_204_NO_CONTENT)
-async def bulk_delete_documents(confirm: bool = Query(...)):
-    if not confirm:
-        APIError.raise_error("INVALID_REQUEST", "Confirm parameter required.")
-    # 1. Check for active jobs
-    # 2. Truncate VDB and wipe cache
-    return
+    This endpoint implements a robust deletion strategy:
+    1. Checks if the document exists
+    2. Verifies the document is not part of any active job (in_progress)
+    3. Removes the document from the vector database (if ingested) - FIRST
+    4. Deletes all associated files from cache - LAST
+
+    Deletes document with an 'Always-Clean-VDB' retry strategy.
+    Order: 1. VDB (Search) -> 2. Files (Storage) -> 3. Metadata (Record)
+
+    Path Parameters:
+    - doc_id: Unique identifier of the document to delete
+
+    Returns:
+    - 204 No Content on successful deletion (HTTP 204)
+    - 404 Not Found if document doesn't exist
+    - 409 Conflict if document is part of an active job
+    - 500 Internal Server Error on unexpected errors
+    """
+
+    try:
+        # 1. Fetch Metadata (if it exists)
+        doc_metadata = None
+        try:
+            doc_metadata = dg_util.get_document_by_id(doc_id, include_details=False)
+        except FileNotFoundError:
+            logger.error(f"Metadata for {doc_id} not found. Proceeding with vectorstore cleanup.")
+
+        # 2. Lock Check: Only if metadata exists and indicates an active job
+        if doc_metadata:
+            is_active = dg_util.is_document_in_active_job(doc_id, job_id=doc_metadata.job_id)
+            if is_active:
+                APIError.raise_error(
+                    ErrorCode.RESOURCE_LOCKED,
+                    f"Document part of active job '{doc_metadata.job_id}' and cannot be deleted"
+                )
+
+        # 3. Step A: Vector Database Cleanup (High Priority)
+        # We attempt this regardless of whether metadata exists to fix partial failures.
+        try:
+            import common.db_utils as db
+            vector_store = db.get_vector_store()
+            # This method should use the 'refresh=True' param we discussed earlier
+            deleted_chunks = vector_store.delete_document_by_id(doc_id)
+            logger.info(f"VDB cleanup for {doc_id}: {deleted_chunks} chunks removed.")
+        except Exception as e:
+            logger.error(f"VDB cleanup failed for {doc_id}: {e}")
+            # If metadata is already deleted and VDB fails, we MUST raise to let the user retry
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Document metadata deleted but VDB cleanup failed: {e}")
+
+        # 4. Step B: File & Metadata Cleanup
+        # If metadata is already deleted, we assume files were either deleted or are being handled
+        if doc_metadata:
+            try:
+                # Delete digitized files AND the metadata file last
+                # Pass output_format to delete only the specific format file instead of looping through all
+                dg_util.delete_document_files(doc_id, output_format=doc_metadata.output_format)
+                logger.info(f"Files and metadata for {doc_id} deleted successfully.")
+            except Exception as e:
+                # If VDB succeeded but files failed, we report a 500 so the user retries
+                # even though the document is now 'hidden' from search.
+                logger.error(f"VDB cleaned but file deletion failed for {doc_id}")
+                APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Search data removed but files remain: {e}")
+
+        # 5. Idempotent Success
+        # If we reach here, either everything is deleted, or metadata was already deleted and VDB is now clean.
+        return None
+
+    except HTTPException as e:
+        logger.error(f"Failed to delete document {doc_id}, HTTP error: {e}")
+        # Re-raise HTTPException as-is
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error deleting document {doc_id}: {e}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(e))
+
+
+@app.delete(
+    "/v1/documents",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["documents"],
+    summary="Bulk delete all documents",
+    description="⚠️ **DANGER**: Delete ALL documents from the system. "
+                "This performs a complete cleanup including vector database reset and file deletion. "
+                "Requires explicit confirmation and will fail if any jobs are active.",
+    response_description="No content on successful deletion"
+)
+async def bulk_delete_documents(confirm: bool = Query(..., description="Must be true to proceed with bulk deletion")):
+    """
+    Bulk delete all documents from the system.
+
+    This endpoint performs a complete system cleanup:
+    1. Checks for active jobs and rejects if any exist
+    2. Resets the vector database index (removes all indexed chunks)
+    3. Deletes all digitized content files from /var/cache/digitized
+    4. Deletes all document metadata files from /var/cache/docs
+
+    Query Parameters:
+    - confirm: Must be true to proceed with deletion (required)
+
+    Returns:
+    - 204 No Content on successful deletion
+    - 400 Bad Request if confirm is not true
+    - 409 Conflict if there are active jobs
+    - 500 Internal Server Error on unexpected errors
+    """
+    try:
+        # 1. Validate confirmation parameter
+        if not confirm:
+            logger.error("Bulk delete rejected: confirm parameter is false")
+            APIError.raise_error(
+                ErrorCode.INVALID_REQUEST,
+                "Bulk deletion requires explicit confirmation. Set 'confirm=true' to proceed."
+            )
+
+        # 2. Check for active jobs
+        has_active, active_job_ids = dg_util.has_active_jobs()
+        if has_active:
+            logger.error(f"Bulk delete rejected: {len(active_job_ids)} active job(s) found")
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                f"Cannot perform bulk deletion while jobs are active. Active jobs: {', '.join(active_job_ids)}"
+            )
+
+        logger.info("No active jobs found, proceeding with bulk deletion")
+
+        # 3. Reset vector database and delete all files
+        # Uses reset_db() which handles VDB reset and file deletion with proper error handling
+        reset_db()
+        logger.info("✅ Bulk deletion completed successfully")
+        return None
+
+    except HTTPException as e:
+        logger.error(f"Failed to bulk delete documents, HTTP error: {e}")
+        # Re-raise HTTPException as-is
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during bulk deletion: {e}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, str(e))
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=4000)

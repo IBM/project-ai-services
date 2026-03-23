@@ -10,9 +10,7 @@ import { ArrowRight } from "@carbon/icons-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import styles from "./Login.module.scss";
-
-import { login } from "../../services/auth";
-import type { LoginResponse } from "../../types/auth";
+import { login } from "@/services/auth";
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -28,13 +26,10 @@ const LoginPage = () => {
     setLoading(true);
 
     try {
-      const data: LoginResponse = await login({
+      await login({
         username,
         password,
       });
-
-      localStorage.setItem("access_token", data.access_token);
-      localStorage.setItem("refresh_token", data.refresh_token);
 
       navigate("/applications");
     } catch {
@@ -72,7 +67,6 @@ const LoginPage = () => {
               <TextInput
                 id="user-id"
                 labelText="User ID"
-                placeholder="username@example.com"
                 value={username}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   setUsername(e.target.value)
@@ -98,7 +92,7 @@ const LoginPage = () => {
                 className={styles.continueButton}
                 disabled={loading}
               >
-                {loading ? "Logging in..." : "Continue"}
+                {loading ? "Logging in..." : "Log in"}
               </Button>
             </form>
           </div>

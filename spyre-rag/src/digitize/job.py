@@ -36,6 +36,7 @@ class JobState(BaseModel):
     Persisted as <job_id>_status.json under JOBS_DIR.
     """
     job_id: str
+    job_name: Optional[str] = None
     operation: str
     status: JobStatus
     submitted_at: str
@@ -97,7 +98,7 @@ class JobState(BaseModel):
         Returns:
             Dictionary representation of the job state
         """
-        return self.dict()
+        return self.model_dump()
 
     def save(self, jobs_dir: Path = config.JOBS_DIR) -> Path:
         """
