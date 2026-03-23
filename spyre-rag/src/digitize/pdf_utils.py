@@ -155,7 +155,7 @@ def convert_chunk(doc_converter: DocumentConverter, path: Path, chunk_num: int, 
         # Save chunk result to cache
         chunk_filename = chunk_cache_dir / f"chunk_{chunk_num:04d}.json"
         conv_res.document.save_as_json(str(chunk_filename))        
-        logger.debug(f"Saved chunk of {path} {chunk_num} to {chunk_filename}")
+        logger.debug(f"Saved chunk of {path}'s chunk {chunk_num} to {chunk_filename}")
         
     except Exception as e:
         logger.error(f"Error processing {path}'s chunk {chunk_num} (pages {start_page}-{end_page}): {e}")
@@ -221,7 +221,7 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
         docs = [DoclingDocument.load_from_json(filename=f) for f in chunk_files]
         concatenated_doc = DoclingDocument.concatenate(docs=docs)
         
-        logger.debug(f"Successfully concatenated {len(docs)} chunks into single document of {path}")
+        logger.debug(f"Successfully concatenated {path}'s {len(docs)} chunks into single document")
         
         return concatenated_doc
     
