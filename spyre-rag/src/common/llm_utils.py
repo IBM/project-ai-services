@@ -9,6 +9,7 @@ from tqdm import tqdm
 from common.lang_utils import prompt_map
 from common.misc_utils import get_logger
 from common.settings import get_settings
+from common.retry_utils import retry_on_transient_error
 
 logger = get_logger("LLM")
 
@@ -45,6 +46,7 @@ def create_llm_session(pool_maxsize, pool_connections: int = 2, pool_block: bool
 
         SESSION = session
 
+@retry_on_transient_error(max_retries=3, initial_delay=0.1, backoff_multiplier=2.0)
 def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
     if SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
@@ -57,27 +59,22 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
         "stream": False,
     }
 
-    try:
-        response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
-        response.raise_for_status()
-        data = response.json() or {}
-        choices = data.get("choices", [])
-        text = ""
-        if choices:
-            text = (choices[0].get("message", {}).get("content") or "").strip()
-        summary = ""
-        decision = True
-        for line in text.splitlines():
-            if line.lower().startswith("summary:"):
-                summary = line[len("summary:"):].strip()
-            elif line.lower().startswith("decision:"):
-                decision = "yes" in line.lower()
+    response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
+    response.raise_for_status()
+    data = response.json() or {}
+    choices = data.get("choices", [])
+    text = ""
+    if choices:
+        text = (choices[0].get("message", {}).get("content") or "").strip()
+    summary = ""
+    decision = True
+    for line in text.splitlines():
+        if line.lower().startswith("summary:"):
+            summary = line[len("summary:"):].strip()
+        elif line.lower().startswith("decision:"):
+            decision = "yes" in line.lower()
 
-        return summary or "No summary.", decision
-
-    except Exception as e:
-        logger.error(f"Error summarizing/classifying table: {e}")
-        return "No summary.", True
+    return summary or "No summary.", decision
 
 def summarize_and_classify_tables(table_htmls, gen_model, llm_endpoint, pdf_path, max_workers=32):
     prompts = [
@@ -110,24 +107,15 @@ def summarize_and_classify_tables(table_htmls, gen_model, llm_endpoint, pdf_path
 
     return summaries, decisions
 
+@retry_on_transient_error(max_retries=3, initial_delay=0.1, backoff_multiplier=2.0)
 def query_vllm_models(llm_endpoint):
     if SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     logger.debug('Querying VLLM models')
-    try:
-        response = SESSION.get(f"{llm_endpoint}/v1/models")
-        response.raise_for_status()
-        resp_json = response.json()
-    except requests.exceptions.RequestException as e:
-        error_details = str(e)
-        if e.response is not None:
-            error_details += f", Response Text: {e.response.text}"
-        logger.error(f"Error calling vLLM models API: {error_details}")
-        return {"error": error_details}, 0.
-    except Exception as e:
-        logger.error(f"Error calling vLLM models API: {e}")
-        return {"error": str(e)}, 0.
+    response = SESSION.get(f"{llm_endpoint}/v1/models")
+    response.raise_for_status()
+    resp_json = response.json()
     return resp_json
 
 def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
@@ -165,31 +153,24 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
         payload["stream_options"] = {"include_usage": True}
     return headers, payload
 
+@retry_on_transient_error(max_retries=3, initial_delay=0.1, backoff_multiplier=2.0)
 def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang):
     if SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
     
     headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False, lang )
-    try:
-        # Use requests for synchronous HTTP requests
-        start_time = time.time()
-        response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=False)
-        request_time = time.time() - start_time
-        perf_stat_dict["inference_time"] = request_time
-        response.raise_for_status()
-        response_json = response.json()
-        if 'usage' in response_json:
-            perf_stat_dict["completion_tokens"] = response_json['usage'].get('completion_tokens', 0)
-            perf_stat_dict["prompt_tokens"] = response_json['usage'].get('prompt_tokens', 0)
-    except requests.exceptions.RequestException as e:
-        error_details = str(e)
-        if e.response is not None:
-            error_details += f", Response Text: {e.response.text}"
-        logger.error(f"Error calling vLLM API: {error_details}")
-        return {"error": error_details}
-    except Exception as e:
-        logger.error(f"Error calling vLLM API: {e}")
-        return {"error": str(e)}
+    
+    # Use requests for synchronous HTTP requests
+    start_time = time.time()
+    response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=False)
+    request_time = time.time() - start_time
+    perf_stat_dict["inference_time"] = request_time
+    response.raise_for_status()
+    response_json = response.json()
+    if 'usage' in response_json:
+        perf_stat_dict["completion_tokens"] = response_json['usage'].get('completion_tokens', 0)
+        perf_stat_dict["prompt_tokens"] = response_json['usage'].get('prompt_tokens', 0)
+    
     return response_json
 
 def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang):
@@ -251,6 +232,7 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
         yield "data: [DONE]\n\n"
 
+@retry_on_transient_error(max_retries=3, initial_delay=0.1, backoff_multiplier=2.0)
 def query_vllm_summarize(
     llm_endpoint: str,
     messages: list,
@@ -275,23 +257,13 @@ def query_vllm_summarize(
     if stop_words:
         payload["stop"] = stop_words
 
-    try:
-        response = SESSION.post(
-            f"{llm_endpoint}/v1/chat/completions",
-            json=payload,
-            headers=headers,
-            stream=False,
-        )
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        error_details = str(e)
-        if e.response is not None:
-            error_details += f", Response Text: {e.response.text}"
-        logger.error(f"Error calling vLLM API: {error_details}")
-        return error_details, 0, 0
-    except Exception as e:
-        logger.error(f"Error calling vLLM API: {e}")
-        return str(e), 0, 0
+    response = SESSION.post(
+        f"{llm_endpoint}/v1/chat/completions",
+        json=payload,
+        headers=headers,
+        stream=False,
+    )
+    response.raise_for_status()
 
     result = response.json()
     logger.debug(f"vLLM response: {result}")
@@ -355,6 +327,7 @@ def query_vllm_summarize_stream(
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
         yield "data: [DONE]\n\n"
 
+@retry_on_transient_error(max_retries=3, initial_delay=0.1, backoff_multiplier=2.0)
 def tokenize_with_llm(prompt, emb_endpoint, max_retries=3):
     """
     Tokenize text using the LLM embedding endpoint with retry logic.
@@ -378,67 +351,14 @@ def tokenize_with_llm(prompt, emb_endpoint, max_retries=3):
         "prompt": prompt
     }
     
-    last_exception = None
-    for attempt in range(max_retries):
-        try:
-            response = SESSION.post(f"{emb_endpoint}/tokenize", json=payload)
-            response.raise_for_status()
-            result = response.json()
-            tokens = result.get("tokens", [])
-            
-            # Log successful retry if it wasn't the first attempt
-            if attempt > 0:
-                logger.info(f"Tokenization succeeded on attempt {attempt + 1}/{max_retries}")
-            
-            return tokens
-            
-        except requests.exceptions.HTTPError as e:
-            last_exception = e
-            # Check for "Already borrowed" error (connection pool exhaustion)
-            if e.response is not None and e.response.status_code == 500:
-                response_text = e.response.text
-                if "Already borrowed" in response_text or "Internal Server Error" in response_text:
-                    if attempt < max_retries - 1:
-                        # Exponential backoff: 0.1s, 0.2s, 0.4s
-                        backoff_time = 0.1 * (2 ** attempt)
-                        logger.warning(
-                            f"Connection pool exhaustion detected (attempt {attempt + 1}/{max_retries}). "
-                            f"Retrying in {backoff_time:.2f}s... Response: {response_text[:100]}"
-                        )
-                        time.sleep(backoff_time)
-                        continue
-            
-            # For other HTTP errors or last attempt, log and raise
-            error_details = str(e)
-            if e.response is not None:
-                error_details += f", Response Text: {e.response.text}"
-            logger.error(f"Error encoding prompt (attempt {attempt + 1}/{max_retries}): {error_details}")
-            
-            if attempt == max_retries - 1:
-                raise
-                
-        except requests.exceptions.RequestException as e:
-            last_exception = e
-            error_details = str(e)
-            if hasattr(e, 'response') and e.response is not None:
-                error_details += f", Response Text: {e.response.text}"
-            logger.error(f"Error encoding prompt (attempt {attempt + 1}/{max_retries}): {error_details}")
-            
-            if attempt == max_retries - 1:
-                raise
-                
-        except Exception as e:
-            last_exception = e
-            logger.error(f"Unexpected error encoding prompt (attempt {attempt + 1}/{max_retries}): {e}")
-            
-            if attempt == max_retries - 1:
-                raise
+    response = SESSION.post(f"{emb_endpoint}/tokenize", json=payload)
+    response.raise_for_status()
+    result = response.json()
+    tokens = result.get("tokens", [])
     
-    # This should not be reached, but just in case
-    if last_exception:
-        raise last_exception
-    raise RuntimeError("Tokenization failed after all retries")
+    return tokens
 
+@retry_on_transient_error(max_retries=3, initial_delay=0.1, backoff_multiplier=2.0)
 def detokenize_with_llm(tokens, emb_endpoint, max_retries=3):
     """
     Detokenize tokens using the LLM embedding endpoint with retry logic.
@@ -462,63 +382,9 @@ def detokenize_with_llm(tokens, emb_endpoint, max_retries=3):
         "tokens": tokens
     }
     
-    last_exception = None
-    for attempt in range(max_retries):
-        try:
-            response = SESSION.post(f"{emb_endpoint}/detokenize", json=payload)
-            response.raise_for_status()
-            result = response.json()
-            prompt = result.get("prompt", "")
-            
-            # Log successful retry if it wasn't the first attempt
-            if attempt > 0:
-                logger.info(f"Detokenization succeeded on attempt {attempt + 1}/{max_retries}")
-            
-            return prompt
-            
-        except requests.exceptions.HTTPError as e:
-            last_exception = e
-            # Check for "Already borrowed" error (connection pool exhaustion)
-            if e.response is not None and e.response.status_code == 500:
-                response_text = e.response.text
-                if "Already borrowed" in response_text or "Internal Server Error" in response_text:
-                    if attempt < max_retries - 1:
-                        # Exponential backoff: 0.1s, 0.2s, 0.4s
-                        backoff_time = 0.1 * (2 ** attempt)
-                        logger.warning(
-                            f"Connection pool exhaustion detected (attempt {attempt + 1}/{max_retries}). "
-                            f"Retrying in {backoff_time:.2f}s... Response: {response_text[:100]}"
-                        )
-                        time.sleep(backoff_time)
-                        continue
-            
-            # For other HTTP errors or last attempt, log and raise
-            error_details = str(e)
-            if e.response is not None:
-                error_details += f", Response Text: {e.response.text}"
-            logger.error(f"Error decoding tokens (attempt {attempt + 1}/{max_retries}): {error_details}")
-            
-            if attempt == max_retries - 1:
-                raise
-                
-        except requests.exceptions.RequestException as e:
-            last_exception = e
-            error_details = str(e)
-            if hasattr(e, 'response') and e.response is not None:
-                error_details += f", Response Text: {e.response.text}"
-            logger.error(f"Error decoding tokens (attempt {attempt + 1}/{max_retries}): {error_details}")
-            
-            if attempt == max_retries - 1:
-                raise
-                
-        except Exception as e:
-            last_exception = e
-            logger.error(f"Unexpected error decoding tokens (attempt {attempt + 1}/{max_retries}): {e}")
-            
-            if attempt == max_retries - 1:
-                raise
+    response = SESSION.post(f"{emb_endpoint}/detokenize", json=payload)
+    response.raise_for_status()
+    result = response.json()
+    prompt = result.get("prompt", "")
     
-    # This should not be reached, but just in case
-    if last_exception:
-        raise last_exception
-    raise RuntimeError("Detokenization failed after all retries")
+    return prompt
