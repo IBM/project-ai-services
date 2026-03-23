@@ -253,6 +253,9 @@ func frameAndApply(client *openshift.OpenshiftClient, spec map[string]any, s *sp
 
 			return nil
 		}
+		if apierrors.IsForbidden(err) {
+			return fmt.Errorf("missing required permissions to create SpyreClusterPolicy")
+		}
 	}
 
 	return err
@@ -272,6 +275,9 @@ func waitForSpyreClusterPolicy(client *openshift.OpenshiftClient) error {
 				logger.Infof("SpyreClusterPolicy not found yet, waiting...", logger.VerbosityLevelDebug)
 
 				return false, nil
+			}
+			if apierrors.IsForbidden(err) {
+				return false, fmt.Errorf("missing required permissions to get SpyreClusterPolicy")
 			}
 
 			return false, fmt.Errorf("failed to get SpyreClusterPolicy: %w", err)

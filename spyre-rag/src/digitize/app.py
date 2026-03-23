@@ -10,13 +10,8 @@ import uvicorn
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status, Request
 from fastapi.openapi.docs import get_swagger_ui_html
-from common.misc_utils import get_logger, set_log_level, validate_pdf_file, set_request_id
-import digitize.digitize_utils as dg_util
-import digitize.types as types
-from digitize.digitize import digitize
-from digitize.errors import *
-import digitize.config as config
-from digitize.cleanup import reset_db
+
+from common.misc_utils import set_log_level
 
 log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
@@ -28,6 +23,13 @@ if level != "":
 
 set_log_level(log_level)
 
+from common.misc_utils import get_logger, validate_pdf_file, set_request_id
+import digitize.digitize_utils as dg_util
+import digitize.types as types
+from digitize.digitize import digitize
+from digitize.errors import *
+import digitize.config as config
+from digitize.cleanup import reset_db
 from digitize.ingest import ingest
 from digitize.status import StatusManager
 
@@ -223,7 +225,17 @@ async def digitize_document(
         if operation == types.OperationType.DIGITIZATION and len(files) > 1:
             APIError.raise_error(ErrorCode.INVALID_REQUEST, "Only 1 file allowed for digitization.")
 
-        # 2. Check semaphore availability early
+        # 2. Check for active ingestion jobs BEFORE semaphore check (cross-process coordination)
+        if operation == types.OperationType.INGESTION:
+            has_active, active_job_ids = dg_util.has_active_jobs(operation=operation.value)
+            if has_active:
+                error_msg = "An ingestion job is already running"
+                if active_job_ids:
+                    error_msg += f" (job_id: {active_job_ids[0]})"
+                logger.error(f"Rejected ingestion request: {error_msg}")
+                APIError.raise_error(ErrorCode.RATE_LIMIT_EXCEEDED, error_msg)
+
+        # 3. Check semaphore availability (for digitization or as backup for ingestion)
         sem = ingestion_semaphore if operation == types.OperationType.INGESTION else digitization_semaphore
         if sem.locked():
             APIError.raise_error(ErrorCode.RATE_LIMIT_EXCEEDED, f"Too many concurrent {operation} requests.")

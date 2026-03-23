@@ -3,10 +3,16 @@ import os
 import argparse
 from pathlib import Path
 
-from digitize.digitize_utils import *
-from common.misc_utils import *
-from digitize.types import *
+from common.misc_utils import set_log_level
 
+# Setting log level, 1st priority is to the flag received via cli, 2nd priority to the LOG_LEVEL env var.
+log_level = logging.INFO
+
+env_log_level = os.getenv("LOG_LEVEL", "")
+if "debug" in env_log_level.lower():
+    log_level = logging.DEBUG
+
+# Parse args early to check for debug flag
 common_parser = argparse.ArgumentParser(add_help=False)
 common_parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
@@ -18,19 +24,15 @@ ingest_parser.add_argument("--path", type=str, default="/var/docs", help="Path t
 
 command_parser.add_parser("clean-db", help="Clean the DB", description="Clean the Milvus DB\n", formatter_class=argparse.RawTextHelpFormatter, parents=[common_parser])
 
-# Setting log level, 1st priority is to the flag received via cli, 2nd priority to the LOG_LEVEL env var.
-log_level = logging.INFO
-
-env_log_level = os.getenv("LOG_LEVEL", "")
-if "debug" in env_log_level.lower():
-    log_level = logging.DEBUG
-
 command_args = parser.parse_args()
 if command_args.debug:
     log_level = logging.DEBUG
 
 set_log_level(log_level)
 
+from digitize.digitize_utils import generate_uuid, initialize_job_state, has_active_jobs
+from common.misc_utils import get_logger, validate_pdf_file
+from digitize.types import OperationType, OutputFormat
 from digitize.ingest import ingest
 from digitize.cleanup import reset_db
 
@@ -38,6 +40,15 @@ logger = get_logger("Ingest")
 
 def main():
     if command_args.command == "ingest":
+        # Check for active ingestion jobs before proceeding (cross-process coordination)
+        has_active, active_job_ids = has_active_jobs(operation=OperationType.INGESTION.value)
+        if has_active:
+            error_msg = "Cannot start ingestion: An ingestion job is already running"
+            if active_job_ids:
+                error_msg += f" (job_id: {active_job_ids[0]})"
+            logger.error(error_msg)
+            return
+        
         job_id = generate_uuid()
         base_path = Path(command_args.path)
 

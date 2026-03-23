@@ -217,7 +217,7 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 
 	// Register common flags with their validation functions
 	builder.
-		AddCommonFlag(appFlags.Create.SkipValidation, nil).
+		AddCommonFlag(appFlags.Create.SkipValidation, validateSkipChecksFlag).
 		AddCommonFlag(appFlags.Create.Template, validateTemplateFlag).
 		AddCommonFlag(appFlags.Create.Params, validateParamsFlag).
 		AddCommonFlag(appFlags.Create.Values, validateValuesFlag)
@@ -259,7 +259,7 @@ func validateParamsFlag(cmd *cobra.Command) error {
 
 	// Validate params against template values
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{Runtime: vars.RuntimeFactory.GetRuntimeType()})
-	_, err = tp.LoadValues(templateName, valuesFiles, argParams)
+	_, err = tp.LoadValues(templateName, nil, argParams)
 	if err != nil {
 		return fmt.Errorf("failed to load params: %w", err)
 	}
@@ -275,6 +275,13 @@ func validateValuesFlag(cmd *cobra.Command) error {
 		}
 	}
 
+	// Validate parameters in values files
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{Runtime: vars.RuntimeFactory.GetRuntimeType()})
+	_, err := tp.LoadValues(templateName, valuesFiles, nil)
+	if err != nil {
+		return fmt.Errorf("failed to validate values files: %w", err)
+	}
+
 	return nil
 }
 
@@ -285,6 +292,28 @@ func validateImagePullPolicyFlag(cmd *cobra.Command) error {
 			"invalid value %q: must be one of %q, %q, %q",
 			image.ImagePullPolicy(rawArgImagePullPolicy), image.PullAlways, image.PullNever, image.PullIfNotPresent,
 		)
+	}
+
+	return nil
+}
+
+// validateSkipChecksFlag validates the skipChecks flag for the current runtime.
+func validateSkipChecksFlag(cmd *cobra.Command) error {
+	if len(skipChecks) == 0 {
+		return nil
+	}
+
+	// Build valid checks dynamically from runtime
+	validChecks := make(map[string]bool, len(bootstrap.GetRulesForRuntime()))
+	for _, r := range bootstrap.GetRulesForRuntime() {
+		validChecks[r.Name()] = true
+	}
+
+	// Validate each skip check
+	for _, s := range skipChecks {
+		if !validChecks[s] {
+			return fmt.Errorf("invalid skip-validation value '%s' for runtime '%s'", s, vars.RuntimeFactory.GetRuntimeType())
+		}
 	}
 
 	return nil

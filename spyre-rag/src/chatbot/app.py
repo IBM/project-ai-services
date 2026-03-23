@@ -10,9 +10,24 @@ import json
 from contextlib import asynccontextmanager
 from asyncio import BoundedSemaphore
 from functools import wraps
+import uvicorn
+from starlette.concurrency import iterate_in_threadpool
+from lingua import Language
+
+from common.misc_utils import set_log_level
+log_level = logging.INFO
+level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
+if level != "":
+    if "debug" in level:
+        log_level = logging.DEBUG
+    elif not "info" in level:
+        logging.warning(f"Unknown LOG_LEVEL passed: '{level}', using default INFO level")
+
+set_log_level(log_level)
+
 import common.db_utils as db
 from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
-from common.misc_utils import get_model_endpoints, set_log_level, set_request_id
+from common.misc_utils import get_model_endpoints, set_request_id
 from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_non_stream, query_vllm_models
 from common.settings import get_settings
 from common.perf_utils import perf_registry
@@ -29,18 +44,6 @@ from chatbot.response_utils import (
     ModelsResponse,
     PerfMetricsResponse,
 )
-import uvicorn
-from starlette.concurrency import iterate_in_threadpool
-from lingua import Language
-
-log_level = logging.INFO
-level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
-if level != "":
-    if "debug" in level:
-        log_level = logging.DEBUG
-    elif not "info" in level:
-        logging.warning(f"Unknown LOG_LEVEL passed: '{level}', using default INFO level")
-set_log_level(log_level)
 
 vectorstore = None
 # Globals to be set dynamically

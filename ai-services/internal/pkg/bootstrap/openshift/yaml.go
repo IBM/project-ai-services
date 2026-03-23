@@ -72,6 +72,9 @@ func loadSubscriptionList(c *openshift.OpenshiftClient) error {
 		if err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to list subscriptions: %w", err)
 		}
+		if apierrors.IsForbidden(err) {
+			return fmt.Errorf("missing required permissions to list subscriptions")
+		}
 	}
 
 	return nil
@@ -103,6 +106,10 @@ func applyObject(c *openshift.OpenshiftClient, object *unstructured.Unstructured
 	// Apply the k8s object with provided version kind in given namespace.
 	err = c.Client.Apply(c.Ctx, client.ApplyConfigurationFromUnstructured(object), &client.ApplyOptions{FieldManager: constants.AIServices})
 	if err != nil {
+		if apierrors.IsForbidden(err) {
+			return fmt.Errorf("missing required permissions to create %s", objDesc)
+		}
+
 		return fmt.Errorf("could not create %s. Error: %v", objDesc, err.Error())
 	}
 
@@ -202,6 +209,10 @@ func fetchOperatorByPackage(c *openshift.OpenshiftClient, packageName string, op
 	// List all subscriptions in the namespace
 	subList := &operatorsv1alpha1.SubscriptionList{}
 	if err := c.Client.List(c.Ctx, subList, client.InNamespace(opNS)); err != nil {
+		if apierrors.IsForbidden(err) {
+			return nil, fmt.Errorf("missing required permissions to list subscriptions")
+		}
+
 		return nil, err
 	}
 
@@ -229,6 +240,10 @@ func fetchOperatorByPackage(c *openshift.OpenshiftClient, packageName string, op
 		Name:      sub.Status.InstalledCSV,
 		Namespace: opNS,
 	}, csv); err != nil {
+		if apierrors.IsForbidden(err) {
+			return nil, fmt.Errorf("missing required permissions to get ClusterServiceVersion")
+		}
+
 		return nil, err
 	}
 
@@ -243,6 +258,9 @@ func waitForOperator(c *openshift.OpenshiftClient, packageName string, opNS stri
 			if apierrors.IsNotFound(err) {
 				// keep waiting until timeout
 				return false, nil
+			}
+			if apierrors.IsForbidden(err) {
+				return false, fmt.Errorf("missing required permissions to get ClusterServiceVersion")
 			}
 
 			return false, err

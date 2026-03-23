@@ -324,3 +324,26 @@ func GetExistingCustomResource(client *openshift.OpenshiftClient, gvk schema.Gro
 
 	return &list.Items[0], true, nil
 }
+
+// FlattenMapToKeys converts a nested map into a flat map with dotted keys
+// Example: {"ui": {"port": "8080"}} -> {"ui.port": ""}.
+func FlattenMapToKeys(m map[string]any, prefix string) map[string]string {
+	result := make(map[string]string)
+	for key, val := range m {
+		fullKey := key
+		if prefix != "" {
+			fullKey = prefix + "." + key
+		}
+
+		// If the value is a nested map, recurse
+		if nestedMap, ok := val.(map[string]any); ok {
+			nestedKeys := FlattenMapToKeys(nestedMap, fullKey)
+			maps.Copy(result, nestedKeys)
+		} else {
+			// For leaf values, add the key
+			result[fullKey] = ""
+		}
+	}
+
+	return result
+}

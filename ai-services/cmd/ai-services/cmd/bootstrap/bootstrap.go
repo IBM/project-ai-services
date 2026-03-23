@@ -60,8 +60,14 @@ func bootstrapExample() string {
 	return `  # Validate the environment
   ai-services bootstrap validate
 
+  # Validate the environment for openshift runtime
+  ai-services bootstrap validate --runtime openshift
+
   # Configure the infrastructure
   ai-services bootstrap configure
+
+  # Configure the infrastructure for openshift runtime
+  ai-services bootstrap configure --runtime openshift
 
   # Get help on a specific subcommand
   ai-services bootstrap validate --help`
@@ -76,19 +82,23 @@ to run AI Services, ensuring prerequisites are met and initial configuration is 
 Available subcommands:
 
 Configure - Configure performs below actions
- - For Podman:
-   - Installs podman on host if not installed
-   - Runs servicereport tool to configure required spyre cards
-   - Initializes the AI Services infrastructure
+- For Podman:
+ - Installs podman on host if not installed
+ - Runs servicereport tool to configure required spyre cards
+ - Initializes the AI Services infrastructure
 
- - For OpenShift:
-   - Installs machine config, and dependant operators
-   - Installs and configures SpyreClusterPolicy	
+- For OpenShift:
+ - Applies required machine configs for Spyre operator
+ - Installs required operators and operands
+ - Creates and configures SpyreClusterPolicy
+ - Creates DSCInitialization if it does not exist
+ - Creates or updates DataScienceCluster with kserve enabled
+ - Waits for all required components to become ready
 
 Validate - Checks below system prerequisites:
 - For Podman:
 %s
 
-- For Openshift:
+- For OpenShift:
 %s`, podmanList, openshiftList)
 }
