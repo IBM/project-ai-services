@@ -80,8 +80,7 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: 1
           ignore-unfixed: ${{ inputs.ignore-unfixed }}
-          skip-dirs:
-            - "**/site-packages/docs"
+          skip-dirs: '**/site-packages/docs'
 
 
   license:
