@@ -175,7 +175,7 @@ def retry_on_transient_error(
                     
                     # Log successful retry if it wasn't the first attempt
                     if attempt > 0:
-                        logger.info(
+                        logger.debug(
                             f"{func.__name__} succeeded on attempt {attempt + 1}/{max_retries}"
                         )
                     
@@ -187,14 +187,14 @@ def retry_on_transient_error(
                     # Check if this is a retryable error
                     if not is_retryable_error(e, allow_local_retries=allow_local_retries):
                         # Not retryable, raise immediately
-                        logger.error(
+                        logger.debug(
                             f"{func.__name__} failed with non-retryable error: {e}"
                         )
                         raise
                     
                     # Last attempt, don't retry
                     if attempt == max_retries - 1:
-                        logger.error(
+                        logger.debug(
                             f"{func.__name__} failed after {max_retries} attempts: {e}"
                         )
                         raise
@@ -210,7 +210,7 @@ def retry_on_transient_error(
                     if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
                         error_details = f"HTTP {e.response.status_code}: {e.response.text[:100]}"
                     
-                    logger.warning(
+                    logger.debug(
                         f"{func.__name__} failed (attempt {attempt + 1}/{max_retries}). "
                         f"Retrying in {backoff_time:.2f}s... Error: {error_details}"
                     )
@@ -219,7 +219,7 @@ def retry_on_transient_error(
                     
                 except Exception as e:
                     # Unexpected error, log and raise
-                    logger.error(
+                    logger.debug(
                         f"{func.__name__} failed with unexpected error: {e}",
                         exc_info=True
                     )
