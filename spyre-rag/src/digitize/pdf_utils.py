@@ -141,7 +141,6 @@ def find_text_font_size(
 
 def convert_chunk(doc_converter: DocumentConverter, path: Path, chunk_num: int, start_page: int, end_page: int, chunk_cache_dir: Path):
     try:
-        logger.debug(f"Processing {path}'s chunk {chunk_num}: pages {start_page}-{end_page}")
         # Convert this chunk
         conv_res: ConversionResult = doc_converter.convert(source=path, page_range=(start_page, end_page))
         
@@ -206,7 +205,7 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
             end_page = min(start_page + PDF_CHUNK_SIZE - 1, total_pages)
             chunk_num = (start_page - 1) // PDF_CHUNK_SIZE + 1
             
-            logger.debug(f"Processing chunk {chunk_num}/{total_chunks} (pages {start_page}-{end_page})")
+            logger.debug(f"Processing {path}'s chunk {chunk_num}/{total_chunks} (pages {start_page}-{end_page})")
             chunk_file = convert_chunk(doc_converter, path, chunk_num, start_page, end_page, chunk_cache_dir)
             chunk_files.append(chunk_file)
         
@@ -214,7 +213,7 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
         docs = [DoclingDocument.load_from_json(filename=f) for f in chunk_files]
         concatenated_doc = DoclingDocument.concatenate(docs=docs)
         
-        logger.debug(f"Successfully concatenated {len(docs)} chunks into single document for {path}")
+        logger.debug(f"Successfully concatenated {len(docs)} chunks into single document of {path}")
         
         return concatenated_doc
     
