@@ -211,7 +211,7 @@ def convert_document(pdf_path, out_path, file_name):
         logger.debug(f"Converting '{pdf_path}'")
         t0 = time.time()
 
-        converted_doc = convert_doc(pdf_path).document
+        converted_doc: DoclingDocument = convert_doc(pdf_path, cache_dir=out_path / file_name)
         converted_doc.save_as_json(str(converted_json_f))
 
         conversion_time = time.time() - t0
@@ -762,7 +762,7 @@ def convert_document_format(pdf_path: str, out_path: Path, doc_id: str, output_f
     t0 = time.time()
 
     # Convert PDF → DoclingDocument
-    doc_obj = convert_doc(pdf_path).document
+    doc_obj = convert_doc(pdf_path, cache_dir=out_path / doc_id)
 
     conversion_time = time.time() - t0
 
