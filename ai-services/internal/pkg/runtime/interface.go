@@ -33,6 +33,9 @@ type Runtime interface {
 	// PVC operations
 	DeletePVCs(appLabel string) error
 
+	// Serving runtime operations
+	DeleteServingRuntimesByLabels(labelSelector string) error
+
 	// Runtime type identification
 	Type() types.RuntimeType
 }

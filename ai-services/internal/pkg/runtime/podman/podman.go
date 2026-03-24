@@ -268,6 +268,12 @@ func (pc *PodmanClient) DeletePVCs(appLabel string) error {
 	return fmt.Errorf("unsupported method")
 }
 
+func (pc *PodmanClient) DeleteServingRuntimesByLabels(labelSelector string) error {
+	logger.Errorf("unsupported method called!")
+
+	return fmt.Errorf("unsupported method")
+}
+
 // Type returns the runtime type for PodmanClient.
 func (pc *PodmanClient) Type() types.RuntimeType {
 	return types.RuntimeTypePodman

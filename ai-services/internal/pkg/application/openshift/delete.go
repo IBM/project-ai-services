@@ -59,6 +59,14 @@ func (o *OpenshiftApplication) Delete(ctx context.Context, opts types.DeleteOpti
 		return fmt.Errorf("failed to perform app deletion: %w", err)
 	}
 
+	// Delete ServingRuntimes created by the application
+	logger.Infoln("Cleaning up ServingRuntimes...", logger.VerbosityLevelDebug)
+	if err := o.runtime.DeleteServingRuntimesByLabels(fmt.Sprintf("ai-services.io/application=%s", app)); err != nil {
+		s.Fail("failed to delete application")
+
+		return fmt.Errorf("failed to cleanup ServingRuntimes: %w", err)
+	}
+
 	s.Stop("Application '" + app + "' deleted successfully")
 
 	if !opts.SkipCleanup {
