@@ -8,6 +8,9 @@ RUN yum install -y --setopt=tsflags=nodocs gcc-c++ python3.12-devel python3.12-p
 
 COPY pre-requirements.txt .
 
+# Build/Download wheels to the specific folder
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install -r pre-requirements.txt --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ --prefer-binary && \
-    find /root/.cache/pip/wheels -name '*.whl' -exec cp "{}" /tmp  \;
+    pip wheel -r pre-requirements.txt \
+    --wheel-dir=/wheels \
+    --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \
+    --prefer-binary

@@ -16,10 +16,10 @@ ENV DOCLING_MODELS_PATH=/var/docling-models
 COPY requirements.txt .
 COPY download_docling_models.py .
 
-RUN --mount=type=bind,from=prebuilder,source=/tmp,target=/tmp,ro \
+RUN --mount=type=bind,from=prebuilder,source=/wheels,target=/wheels,ro \
     python -m venv /var/venv && source /var/venv/bin/activate && \
     pip install --upgrade pip && \
-    pip install  /tmp/*.whl -r requirements.txt \
+    pip install  /wheels/*.whl -r requirements.txt \
         --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
         --prefer-binary && \
     pip cache purge && \
