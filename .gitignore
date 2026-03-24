@@ -1,6 +1,7 @@
 /site
 __pycache__
 nohup.out
+.DS_Store
 .env
 .venv
 env

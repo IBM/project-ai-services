@@ -397,15 +397,16 @@ func ValidateModelDownloadOutput(output string, templateName string) error {
 }
 
 func ValidateApplicationsTemplateCommandOutput(output string) error {
-	type RequiredOutputs struct {
-		rag []string
-	}
-	requiredOutputs := RequiredOutputs{
-		rag: []string{
+	requiredOutputs := map[string][]string{
+		"rag": {
 			"Description: Retrieval Augmented Generation (RAG) application that combines a vector database, a large language model, and a retrieval mechanism to provide accurate and context-aware responses based on ingested documents.",
 			"ui.port:  Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
 			"backend.port:  Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.",
-			//"milvus.memoryLimit:  Sets the memory limit for the Milvus service(Default: 4Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).",   --commented as currently switch to opensearch is in-progress
+		},
+		"rag-cpu": {
+			"Description: Retrieval Augmented Generation (RAG) application that combines a vector database, a large language model, and a retrieval mechanism to provide accurate and context-aware responses based on ingested documents.",
+			"ui.port:  Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
+			"backend.port:  Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.",
 		},
 	}
 
@@ -413,11 +414,12 @@ func ValidateApplicationsTemplateCommandOutput(output string) error {
 	for _, value := range arrOutput {
 		appName := getFirstWord(value)
 		appName = strings.TrimSpace(appName)
-		v := reflect.ValueOf(requiredOutputs)
-		required := v.FieldByName(appName)
+		required, ok := requiredOutputs[appName]
+		if !ok {
+			continue
+		}
 
-		for i := 0; i < required.Len(); i++ {
-			r := required.Index(i).String()
+		for _, r := range required {
 			if !strings.Contains(output, r) {
 				return fmt.Errorf("application template command validation failed for app:%s missing '%s'", appName, r)
 			}

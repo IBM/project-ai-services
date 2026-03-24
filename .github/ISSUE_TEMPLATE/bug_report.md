@@ -36,9 +36,9 @@ Steps to reproduce the behavior:
 Please run the following commands and paste their output:
 
 ```bash
-ai-services bootstrap configure
-ai-services bootstrap validate
-ai-services application ps -o wide
+ai-services bootstrap configure --runtime <runtime>
+ai-services bootstrap validate --runtime <runtime>
+ai-services application ps --runtime <runtime> -o wide
 ```
 
 ## 📸 Screenshots / Logs

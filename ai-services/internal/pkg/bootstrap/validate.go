@@ -21,7 +21,7 @@ type validationResult struct {
 // Validate runs all validation checks.
 func (p *BootstrapFactory) Validate(skip map[string]bool) error {
 	ctx := context.Background()
-	rules := getRulesForRuntime()
+	rules := GetRulesForRuntime()
 
 	var validationErrors []error
 
@@ -55,8 +55,8 @@ func (p *BootstrapFactory) Validate(skip map[string]bool) error {
 	return nil
 }
 
-// getRulesForRuntime returns the appropriate validation rules based on the runtime type.
-func getRulesForRuntime() []validators.Rule {
+// GetRulesForRuntime returns the appropriate validation rules based on the runtime type.
+func GetRulesForRuntime() []validators.Rule {
 	rt := vars.RuntimeFactory.GetRuntimeType()
 	switch rt {
 	case types.RuntimeTypePodman:

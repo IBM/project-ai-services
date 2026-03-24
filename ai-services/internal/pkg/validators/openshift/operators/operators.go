@@ -69,7 +69,7 @@ func (r *OperatorRule) Level() constants.ValidationLevel {
 }
 
 func (r *OperatorRule) Hint() string {
-	return "This tool requires certain operators to be up and running, please run `ai-services bootstrap configure` to install required operators"
+	return "This tool requires certain operators to be up and running, please run `ai-services bootstrap configure --runtime openshift` to install required operators"
 }
 
 func validateOperatorByPackage(c *openshift.OpenshiftClient, packageName, opNamespace string, allSubscriptions *operatorsv1alpha1.SubscriptionList) error {
