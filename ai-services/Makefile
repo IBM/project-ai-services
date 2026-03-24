@@ -19,8 +19,22 @@ VERSION ?= $(shell git describe --tags --always)
 GITCOMMIT ?= $(shell git rev-parse --short HEAD)
 BUILDDATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-BUILD_CMD = CGO_ENABLED=0 $(GO) build $(BUILDFLAGS) \
-     -o $(BIN)/ai-services \
+# Multi-architecture build configuration
+# Supported OS: darwin, linux
+# Supported architectures: amd64 (x86), ppc64le, arm64
+GOOS ?= $(shell go env GOOS)
+GOARCH ?= $(shell go env GOARCH)
+
+# Define all target platforms
+PLATFORMS := \
+	darwin/amd64 \
+	darwin/arm64 \
+	linux/amd64 \
+	linux/ppc64le \
+	linux/arm64
+
+BUILD_CMD = CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build $(BUILDFLAGS) \
+     -o $(BIN)/ai-services-$(GOOS)-$(GOARCH) \
      -tags "$(BUILDTAGS)" \
      -ldflags " \
     -X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.Version=$(VERSION)' \
@@ -53,6 +67,37 @@ endif
 .PHONY: bin
 bin:
 	$(BUILD_CMD)
+
+# Build binaries for all supported platforms
+.PHONY: binaries
+binaries:
+	@echo "Building ai-services for all platforms..."
+	@mkdir -p $(BIN)
+	@$(foreach platform,$(PLATFORMS), \
+		$(eval OS := $(word 1,$(subst /, ,$(platform)))) \
+		$(eval ARCH := $(word 2,$(subst /, ,$(platform)))) \
+		echo "Building for $(OS)/$(ARCH)..." && \
+		CGO_ENABLED=0 GOOS=$(OS) GOARCH=$(ARCH) $(GO) build $(BUILDFLAGS) \
+			-o $(BIN)/ai-services-$(OS)-$(ARCH) \
+			-tags "$(BUILDTAGS)" \
+			-ldflags " \
+				-X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.Version=$(VERSION)' \
+				-X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.GitCommit=$(GITCOMMIT)' \
+				-X 'github.com/project-ai-services/ai-services/cmd/ai-services/cmd/version.BuildDate=$(BUILDDATE)' \
+			" \
+			./cmd/ai-services || exit 1; \
+	)
+	@echo "All binaries built successfully in $(BIN)/"
+	@ls -lh $(BIN)/
+
+# Build binary for specific OS and architecture
+# Usage: make binary GOOS=linux GOARCH=ppc64le
+.PHONY: binary
+binary:
+	@echo "Building ai-services for $(GOOS)/$(GOARCH)..."
+	@mkdir -p $(BIN)
+	$(BUILD_CMD)
+	@echo "Binary built: $(BIN)/ai-services-$(GOOS)-$(GOARCH)"
 
 # Container image build - catalog API enabled by default for containers
 # Override with: make image ENABLE_CATALOG_API=false
