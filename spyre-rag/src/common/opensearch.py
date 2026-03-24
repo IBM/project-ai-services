@@ -6,6 +6,7 @@ from opensearchpy import OpenSearch, helpers
 
 from common.misc_utils import get_logger
 from common.vector_db import VectorStore, VectorStoreNotReadyError
+from common.retry_utils import retry_on_transient_error
 
 logger = get_logger("OpenSearch")
 
@@ -54,6 +55,7 @@ class OpensearchVectorStore(VectorStore):
         hash_part = hashlib.md5(name.encode()).hexdigest()
         return f"{self.db_prefix}_{hash_part}"
 
+    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
     def _create_pipeline(self):
         logger.debug("Creating hybrid search pipeline")
 
@@ -78,7 +80,9 @@ class OpensearchVectorStore(VectorStore):
             logger.debug("Hybrid search pipeline created successfully")
         except Exception as e:
             logger.error(f"Failed to create hybrid search pipeline: {e}")
+            raise
 
+    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
     def _setup_index(self, dim):
         logger.debug(f"Setting up index {self.index_name} with dimension {dim}")
 
@@ -112,7 +116,7 @@ class OpensearchVectorStore(VectorStore):
                         }
                     },
                      "page_content": {
-                        "type": "text", 
+                        "type": "text",
                         "analyzer": "standard"
                     },
                     "filename": {"type": "keyword"},
@@ -131,9 +135,10 @@ class OpensearchVectorStore(VectorStore):
             logger.error(f"Failed to create index {self.index_name}: {e}")
             raise
 
+    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
     def insert_chunks(self, chunks, vectors=None, embedding=None, batch_size=10):
         """
-        Supports 2 modes of insertion
+        Supports 2 modes of insertion with retry logic for transient failures.
         1. Pure embedding: pass 'chunks' and 'vectors'
         2. Text chunks: pass 'chunks' and 'embedding' (class instance)
 
@@ -236,16 +241,18 @@ class OpensearchVectorStore(VectorStore):
 
             except Exception as e:
                 logger.error(f"Exception during bulk insert for batch {batch_num}: {e}")
-                return False
+                raise
 
         logger.info(f"Insert operation completed successfully: {len(chunks)} chunks inserted into index {self.index_name}")
         return True
 
 
+    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
     def search(self, query_text, vector=None, embedding=None, top_k=5, mode=None, doc_id=None, language='en'):
         """
         Supported search modes: dense(semantic search), sparse(keyword match) and hybrid(combination of dense and sparse).
         Accepts either a pre-computed 'vector' OR an 'embedding' instance.
+        Includes retry logic for transient failures.
         """
         logger.debug(f"Starting search operation: query='{query_text[:50]}...', top_k={top_k}, mode={mode}, language={language}")
 
@@ -364,7 +371,12 @@ class OpensearchVectorStore(VectorStore):
         logger.debug(f"Search operation completed successfully with {len(results)} results")
         return results
 
+    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
     def check_db_populated(self):
+        """
+        Check if the database index exists and is populated.
+        Includes retry logic for transient failures.
+        """
         logger.debug(f"Checking if database is populated for index {self.index_name}")
 
         exists = self.client.indices.exists(index=self.index_name)
@@ -372,12 +384,13 @@ class OpensearchVectorStore(VectorStore):
         return exists
 
 
+    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
     def remove_docs_from_index(self, doc_ids: list[str]):
         """
         Delete all chunks associated with the specified document IDs from the index.
 
         This performs a targeted deletion of documents rather than wiping the entire index.
-        Uses batch deletion for efficiency.
+        Uses batch deletion for efficiency. Includes retry logic for transient failures.
 
         Args:
             doc_ids: List of document IDs whose chunks should be deleted from the index
@@ -395,39 +408,36 @@ class OpensearchVectorStore(VectorStore):
             logger.info(f"Index {self.index_name} does not exist.")
             return 0
 
-        try:
-            # Construct terms query for batch deletion
-            # 'doc_id' must be the keyword field in your mapping
-            delete_query = {
-                "query": {
-                    "terms": {
-                        "doc_id": doc_ids
-                    }
+        # Construct terms query for batch deletion
+        # 'doc_id' must be the keyword field in your mapping
+        delete_query = {
+            "query": {
+                "terms": {
+                    "doc_id": doc_ids
                 }
             }
+        }
 
-            response = self.client.delete_by_query(
-                index=self.index_name,
-                body=delete_query,
-                params={
-                    "refresh": "true",
-                    "conflicts": "proceed"
-                }
-            )
+        response = self.client.delete_by_query(
+            index=self.index_name,
+            body=delete_query,
+            params={
+                "refresh": "true",
+                "conflicts": "proceed"
+            }
+        )
 
-            deleted_count = response.get("deleted", 0)
-            logger.info(f"Successfully deleted {deleted_count} chunks for {len(doc_ids)} documents from {self.index_name}")
-
-        except Exception as e:
-            logger.error(f"Failed to delete documents from index {self.index_name}: {e}")
-            raise
+        deleted_count = response.get("deleted", 0)
+        logger.info(f"Successfully deleted {deleted_count} chunks for {len(doc_ids)} documents from {self.index_name}")
 
         return deleted_count
 
 
+    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
     def delete_document_by_id(self, doc_id: str):
         """
         Delete all chunks associated with a specific document from the index.
+        Includes retry logic for transient failures.
 
         Args:
             doc_id: The unique identifier of the document to delete
@@ -441,48 +451,44 @@ class OpensearchVectorStore(VectorStore):
             logger.error(f"Index {self.index_name} does not exist, nothing to delete")
             return 0
 
-        try:
-            # 1. Immediate Refresh (Safety Check)
-            # If a user ingests and then deletes immediately, OpenSearch might not have 'seen' the documents yet
-            self.client.indices.refresh(index=self.index_name)
+        # 1. Immediate Refresh (Safety Check)
+        # If a user ingests and then deletes immediately, OpenSearch might not have 'seen' the documents yet
+        self.client.indices.refresh(index=self.index_name)
 
-            # STEP 2: Perform the actual deletion
-            delete_query = {
-                "query": {
-                    "term": {
-                        "doc_id": str(doc_id).strip()
-                    }
+        # STEP 2: Perform the actual deletion
+        delete_query = {
+            "query": {
+                "term": {
+                    "doc_id": str(doc_id).strip()
                 }
             }
+        }
 
-            response = self.client.delete_by_query(
-                index=self.index_name,
-                body=delete_query,
-                params={
-                            "refresh": "true",             # Update index stats immediately
-                            "conflicts": "proceed",        # Ignore locks from concurrent indexing
-                            "wait_for_completion": "true"  # Synchronous for the API response
-                        },
-            )
+        response = self.client.delete_by_query(
+            index=self.index_name,
+            body=delete_query,
+            params={
+                        "refresh": "true",             # Update index stats immediately
+                        "conflicts": "proceed",        # Ignore locks from concurrent indexing
+                        "wait_for_completion": "true"  # Synchronous for the API response
+                    },
+        )
 
-            deleted_count = response.get("deleted", 0)
-            total_matched = response.get("total", 0)
-            failures = response.get("failures", [])
+        deleted_count = response.get("deleted", 0)
+        total_matched = response.get("total", 0)
+        failures = response.get("failures", [])
 
-            # Log detailed response for debugging
-            logger.debug(f"delete_by_query response: took={response.get('took')}ms, total={total_matched}, deleted={deleted_count}, failures={len(failures)}")
+        # Log detailed response for debugging
+        logger.debug(f"delete_by_query response: took={response.get('took')}ms, total={total_matched}, deleted={deleted_count}, failures={len(failures)}")
 
-            if failures:
-                logger.error(f"Deletion failures for document {doc_id}: {failures}")
+        if failures:
+            logger.error(f"Deletion failures for document {doc_id}: {failures}")
 
-            if deleted_count > 0:
-                logger.info(f"✓ Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name}")
+        if deleted_count > 0:
+            logger.info(f"✓ Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name}")
+        else:
+            if total_matched == 0:
+                logger.info(f"Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name} (no matching documents found)")
             else:
-                if total_matched == 0:
-                    logger.info(f"Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name} (no matching documents found)")
-                else:
-                    logger.error(f"Matched {total_matched} documents but deleted {deleted_count} for document {doc_id} (possible version conflicts or failures)")
-            return deleted_count
-        except Exception as e:
-            logger.error(f"Failed to delete document {doc_id} from index: {e}")
-            raise
+                logger.error(f"Matched {total_matched} documents but deleted {deleted_count} for document {doc_id} (possible version conflicts or failures)")
+        return deleted_count
