@@ -17,7 +17,6 @@ import {
   Tag,
   Theme,
   Link,
-  InlineNotification,
   ToastNotification,
   Modal,
   Checkbox,
@@ -703,13 +702,12 @@ const JobMonitorPage = () => {
         {/* Upload Status Notification */}
         {state.uploadStatus.show && (
           <div className={styles.notificationWrapper}>
-            <InlineNotification
+            <ToastNotification
               kind={state.uploadStatus.kind}
               title={state.uploadStatus.title}
               subtitle={state.uploadStatus.subtitle}
               onClose={() => dispatch({ type: 'HIDE_UPLOAD_STATUS' })}
-              hideCloseButton={false}
-              lowContrast
+              timeout={state.uploadStatus.kind === 'success' ? 3000 : 5000}
             />
           </div>
         )}
