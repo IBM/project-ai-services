@@ -22,6 +22,7 @@ import {
   Checkbox,
   CheckboxGroup,
   ActionableNotification,
+  InlineNotification,
   TextInput,
   InlineLoading,
   Tooltip,
@@ -35,6 +36,13 @@ import styles from './DocumentListPage.module.scss';
 interface DocumentContentData {
   result: any;
   output_format: string;
+}
+
+interface NotificationStatus {
+  show: boolean;
+  kind: 'success' | 'error' | 'info';
+  title: string;
+  subtitle?: string;
 }
 
 export type ExportStatus = 'idle' | 'exporting' | 'success' | 'error';
@@ -57,6 +65,7 @@ interface DocumentListState {
   errorMessage: string;
   errorDocName: string;
   isDeleting: boolean;
+  deleteStatus: NotificationStatus;
   isExportDialogOpen: boolean;
   csvFileName: string;
   exportStatus: ExportStatus;
@@ -84,6 +93,8 @@ type DocumentListAction =
   | { type: 'HIDE_ERROR' }
   | { type: 'SET_IS_DELETING'; payload: boolean }
   | { type: 'DELETE_DOCUMENT'; payload: string }
+  | { type: 'SET_DELETE_STATUS'; payload: NotificationStatus }
+  | { type: 'HIDE_DELETE_STATUS' }
   | { type: 'OPEN_EXPORT_DIALOG' }
   | { type: 'CLOSE_EXPORT_DIALOG' }
   | { type: 'SET_CSV_FILENAME'; payload: string }
@@ -109,6 +120,7 @@ const initialState: DocumentListState = {
   errorMessage: '',
   errorDocName: '',
   isDeleting: false,
+  deleteStatus: { show: false, kind: 'info', title: '' },
   isExportDialogOpen: false,
   csvFileName: '',
   exportStatus: 'idle',
@@ -231,6 +243,16 @@ const documentListReducer = (
       };
     case 'SET_IS_DELETING':
       return { ...state, isDeleting: action.payload };
+    case 'SET_DELETE_STATUS':
+      return {
+        ...state,
+        deleteStatus: action.payload,
+      };
+    case 'HIDE_DELETE_STATUS':
+      return {
+        ...state,
+        deleteStatus: { show: false, kind: 'info', title: '' },
+      };
     case 'OPEN_EXPORT_DIALOG':
       return {
         ...state,
@@ -453,19 +475,48 @@ const DocumentListPage = () => {
   const handleDeleteConfirm = async () => {
     if (!state.docToDelete) return;
 
+    const docName = state.documents.find((d) => d.id === state.docToDelete)?.name || '';
     dispatch({ type: 'SET_IS_DELETING', payload: true });
 
     try {
       await deleteDocument(state.docToDelete);
       dispatch({ type: 'DELETE_DOCUMENT', payload: state.docToDelete });
+      
+      // Show success notification
+      dispatch({
+        type: 'SET_DELETE_STATUS',
+        payload: {
+          show: true,
+          kind: 'success',
+          title: 'Document deleted successfully',
+          subtitle: `"${docName}" has been removed`,
+        },
+      });
+
+      // Hide success notification after 3 seconds
+      setTimeout(() => {
+        dispatch({ type: 'HIDE_DELETE_STATUS' });
+      }, 3000);
+
       fetchDocuments();
     } catch (error: any) {
       const msg = error.response?.data?.detail || error.message || 'Failed deleting document';
-      const name = state.documents.find((d) => d.id === state.docToDelete)?.name || '';
+      
+      // Show error notification
       dispatch({
-        type: 'SHOW_ERROR',
-        payload: { message: msg, docName: name },
+        type: 'SET_DELETE_STATUS',
+        payload: {
+          show: true,
+          kind: 'error',
+          title: 'Failed to delete document',
+          subtitle: `${docName}: ${msg}`,
+        },
       });
+
+      // Hide error notification after 5 seconds
+      setTimeout(() => {
+        dispatch({ type: 'HIDE_DELETE_STATUS' });
+      }, 5000);
     } finally {
       dispatch({ type: 'SET_IS_DELETING', payload: false });
       dispatch({ type: 'CLOSE_DELETE_MODAL' });
@@ -626,6 +677,27 @@ const DocumentListPage = () => {
             }}
           />
         )}
+
+        {/* Delete Status Notification */}
+        {state.deleteStatus.show && (
+          <div style={{
+            position: 'fixed',
+            top: '3rem',
+            right: '1rem',
+            zIndex: 9000,
+            maxWidth: '400px',
+          }}>
+            <InlineNotification
+              kind={state.deleteStatus.kind}
+              title={state.deleteStatus.title}
+              subtitle={state.deleteStatus.subtitle}
+              onClose={() => dispatch({ type: 'HIDE_DELETE_STATUS' })}
+              hideCloseButton={false}
+              lowContrast
+            />
+          </div>
+        )}
+
         {/* Page Header */}
         <div className={styles.pageHeader}>
           <div className={styles.headerContent}>

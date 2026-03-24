@@ -434,19 +434,48 @@ const JobMonitorPage = () => {
   const handleDeleteConfirm = async () => {
     if (!state.jobToDelete) return;
 
+    const jobName = getJobName(state.jobs.find((j) => j.job_id === state.jobToDelete)!);
     dispatch({ type: 'SET_IS_DELETING', payload: true });
 
     try {
       await deleteJob(state.jobToDelete);
       dispatch({ type: 'DELETE_JOB', payload: state.jobToDelete });
+      
+      // Show success notification
+      dispatch({
+        type: 'SET_DELETE_STATUS',
+        payload: {
+          show: true,
+          kind: 'success',
+          title: 'Job deleted successfully',
+          subtitle: `"${jobName}" has been removed`,
+        },
+      });
+
+      // Hide success notification after 3 seconds
+      setTimeout(() => {
+        dispatch({ type: 'HIDE_DELETE_STATUS' });
+      }, 3000);
+
       fetchJobs();
     } catch (error: any) {
       const msg = error.response?.data?.detail || error.message || 'Failed deleting job';
-      const name = getJobName(state.jobs.find((j) => j.job_id === state.jobToDelete)!);
+      
+      // Show error notification
       dispatch({
-        type: 'SHOW_ERROR',
-        payload: { message: msg, jobName: name },
+        type: 'SET_DELETE_STATUS',
+        payload: {
+          show: true,
+          kind: 'error',
+          title: 'Failed to delete job',
+          subtitle: `${jobName}: ${msg}`,
+        },
       });
+
+      // Hide error notification after 5 seconds
+      setTimeout(() => {
+        dispatch({ type: 'HIDE_DELETE_STATUS' });
+      }, 5000);
     } finally {
       dispatch({ type: 'SET_IS_DELETING', payload: false });
       dispatch({ type: 'CLOSE_DELETE_MODAL' });
