@@ -5,6 +5,7 @@ import {
   RadioButton,
   FileUploader,
   InlineNotification,
+  ToastNotification,
 } from '@carbon/react';
 import { SidePanel } from '@carbon/ibm-products';
 import styles from './IngestSidePanel.module.scss';
@@ -12,7 +13,7 @@ import styles from './IngestSidePanel.module.scss';
 interface IngestSidePanelProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (operation: string, outputFormat: string, files: File[], jobName: string) => void;
+  onSubmit: (operation: string, outputFormat: string, files: File[], jobName: string) => Promise<void>;
 }
 
 const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
@@ -21,6 +22,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
   const [outputFormat, setOutputFormat] = useState('json');
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Callback ref to capture the actual input element
@@ -49,7 +51,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setError(null);
     
     if (!jobName.trim()) {
@@ -60,16 +62,26 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
       setError('Please upload at least one file');
       return;
     }
-    onSubmit(operation, outputFormat, files, jobName);
-    handleClose();
+    
+    setIsSubmitting(true);
+    try {
+      await onSubmit(operation, outputFormat, files, jobName);
+      handleClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred during submission');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleClose = () => {
+    if (isSubmitting) return; // Prevent closing while submitting
     setJobName('');
     setOperation('ingestion');
     setOutputFormat('json');
     setFiles([]);
     setError(null);
+    setIsSubmitting(false);
     onClose();
   };
 
@@ -83,17 +95,32 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
           kind: 'secondary',
           label: 'Cancel',
           onClick: handleClose,
+          disabled: isSubmitting,
         },
         {
           kind: 'primary',
-          label: 'Submit',
+          label: isSubmitting ? 'Submitting...' : 'Submit',
           onClick: handleSubmit,
+          disabled: isSubmitting,
         },
       ]}
       className={styles.ingestSidePanel}
       size="md"
     >
       <div className={styles.sidePanelContent}>
+        {/* Submitting Toast Notification */}
+        {isSubmitting && (
+          <ToastNotification
+            kind="info"
+            title="Processing request"
+            subtitle="Your job is being submitted. Please wait..."
+            timeout={0}
+            lowContrast
+            hideCloseButton
+            style={{ marginBottom: '1rem' }}
+          />
+        )}
+
         {/* Error Notification */}
         {error && (
           <InlineNotification
