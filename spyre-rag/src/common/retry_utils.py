@@ -8,6 +8,7 @@ due to temporary issues like:
 - Connection aborted/reset errors
 - Connection pool exhaustion
 - Transient resource issues (memory, file locks, etc.)
+- Document conversion errors (Docling)
 
 The retry logic uses exponential backoff to avoid overwhelming the server.
 """
@@ -17,7 +18,7 @@ import functools
 import requests
 from typing import Callable, TypeVar, Any, Optional, Tuple, Type
 from opensearchpy import OpenSearchException, ConnectionError as OSConnectionError, TransportError
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, DoclingConversionError
 
 logger = get_logger("retry_utils")
 
@@ -86,6 +87,10 @@ def is_retryable_error(exception: Exception, allow_local_retries: bool = False) 
             "Gateway Timeout"
         ]):
             return True
+    
+    # Docling conversion errors (always retryable when they occur)
+    if isinstance(exception, DoclingConversionError):
+        return True
     
     # Local operation errors (only if explicitly allowed)
     # These are typically for PDF processing or other local operations
