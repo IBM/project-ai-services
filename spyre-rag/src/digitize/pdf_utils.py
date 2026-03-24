@@ -20,7 +20,7 @@ from docling.document_converter import DocumentConverter
 from docling_core.types.doc.document import DoclingDocument
 
 # Local application imports
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, DoclingConversionError
 from common.retry_utils import retry_on_transient_error
 from digitize.config import PDF_CHUNK_SIZE
 
@@ -148,17 +148,39 @@ def find_text_font_size(
 
     return matches
 
-@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0, retryable_exceptions=(Exception,), allow_local_retries=True)
+@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def convert_chunk(doc_converter: DocumentConverter, path: Path, chunk_num: int, start_page: int, end_page: int, chunk_cache_dir: Path):
-    # Convert this chunk
-    conv_res: ConversionResult = doc_converter.convert(source=path, page_range=(start_page, end_page))
+    """Convert a single chunk of a PDF document.
     
-    # Save chunk result to cache
-    chunk_filename = chunk_cache_dir / f"chunk_{chunk_num:04d}.json"
-    conv_res.document.save_as_json(str(chunk_filename))
-    logger.debug(f"Saved chunk of {path}'s chunk {chunk_num} to {chunk_filename}")
+    Args:
+        doc_converter: DocumentConverter instance
+        path: Path to the PDF file
+        chunk_num: Chunk number for logging
+        start_page: Starting page number (1-based)
+        end_page: Ending page number (1-based, inclusive)
+        chunk_cache_dir: Directory to save chunk results
+        
+    Returns:
+        Path to the saved chunk JSON file
+        
+    Raises:
+        DoclingConversionError: If conversion or saving fails
+    """
+    try:
+        # Convert this chunk
+        conv_res: ConversionResult = doc_converter.convert(source=path, page_range=(start_page, end_page))
+        
+        # Save chunk result to cache
+        chunk_filename = chunk_cache_dir / f"chunk_{chunk_num:04d}.json"
+        conv_res.document.save_as_json(str(chunk_filename))
+        logger.debug(f"Saved chunk of {path}'s chunk {chunk_num} to {chunk_filename}")
 
-    return chunk_filename
+        return chunk_filename
+    except Exception as e:
+        # Wrap any exception in DoclingConversionError for retry handling
+        error_msg = f"Failed to convert chunk {chunk_num} (pages {start_page}-{end_page}) of {path}: {str(e)}"
+        logger.error(error_msg)
+        raise DoclingConversionError(error_msg) from e
 
 def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDocument:
     """
@@ -187,9 +209,14 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
     if total_pages <= PDF_CHUNK_SIZE:
         logger.debug(f"Converting {path} document with {total_pages} pages in single pass")
         
-        @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0, retryable_exceptions=(Exception,), allow_local_retries=True)
+        @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
         def _convert_single_doc():
-            return doc_converter.convert(source=path).document
+            try:
+                return doc_converter.convert(source=path).document
+            except Exception as e:
+                error_msg = f"Failed to convert document {path}: {str(e)}"
+                logger.error(error_msg)
+                raise DoclingConversionError(error_msg) from e
         
         return _convert_single_doc()
     
