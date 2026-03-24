@@ -6,6 +6,40 @@
   padding: 0;
 }
 
+.notificationWrapper {
+  position: fixed;
+  top: 3rem;
+  right: 1rem;
+  z-index: 9000;
+  max-width: 400px;
+  
+  :global {
+    .cds--inline-notification {
+      margin-bottom: 0;
+    }
+    
+    .cds--toast-notification {
+      margin-bottom: 0;
+      background-color: var(--cds-notification-background-success);
+      color: var(--cds-text-primary);
+      
+      .cds--toast-notification__title {
+        color: var(--cds-text-primary);
+      }
+      
+      .cds--toast-notification__subtitle {
+        color: var(--cds-text-secondary);
+      }
+      
+      .cds--toast-notification__close-button {
+        svg {
+          fill: var(--cds-icon-primary);
+        }
+      }
+    }
+  }
+}
+
 .pageHeader {
   background-color: var(--cds-background);
   padding: 2rem 2rem 1.5rem 2rem;

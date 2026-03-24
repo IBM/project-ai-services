@@ -17,6 +17,26 @@
     .cds--inline-notification {
       margin-bottom: 0;
     }
+    
+    .cds--toast-notification {
+      margin-bottom: 0;
+      background-color: var(--cds-notification-background-success);
+      color: var(--cds-text-primary);
+      
+      .cds--toast-notification__title {
+        color: var(--cds-text-primary);
+      }
+      
+      .cds--toast-notification__subtitle {
+        color: var(--cds-text-secondary);
+      }
+      
+      .cds--toast-notification__close-button {
+        svg {
+          fill: var(--cds-icon-primary);
+        }
+      }
+    }
   }
 }
 

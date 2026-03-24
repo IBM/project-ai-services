@@ -22,7 +22,7 @@ import {
   Checkbox,
   CheckboxGroup,
   ActionableNotification,
-  InlineNotification,
+  ToastNotification,
   TextInput,
   InlineLoading,
   Tooltip,
@@ -88,6 +88,7 @@ type DocumentListAction =
   | { type: 'CLOSE_CONTENT_MODAL' }
   | { type: 'OPEN_DELETE_MODAL'; payload: string }
   | { type: 'CLOSE_DELETE_MODAL' }
+  | { type: 'CLOSE_DELETE_MODAL_KEEP_DOC' }
   | { type: 'SET_CONFIRMED'; payload: boolean }
   | { type: 'SHOW_ERROR'; payload: { message: string; docName?: string } }
   | { type: 'HIDE_ERROR' }
@@ -216,6 +217,12 @@ const documentListReducer = (
         showDeleteModal: false,
         isConfirmed: false,
         docToDelete: null,
+      };
+    case 'CLOSE_DELETE_MODAL_KEEP_DOC':
+      return {
+        ...state,
+        showDeleteModal: false,
+        isConfirmed: false,
       };
     case 'SET_CONFIRMED':
       return { ...state, isConfirmed: action.payload };
@@ -499,6 +506,10 @@ const DocumentListPage = () => {
       }, 3000);
 
       fetchDocuments();
+      
+      // Close modal and clear state on success
+      dispatch({ type: 'SET_IS_DELETING', payload: false });
+      dispatch({ type: 'CLOSE_DELETE_MODAL' });
     } catch (error: any) {
       const msg = error.response?.data?.detail || error.message || 'Failed deleting document';
       
@@ -517,9 +528,10 @@ const DocumentListPage = () => {
       setTimeout(() => {
         dispatch({ type: 'HIDE_DELETE_STATUS' });
       }, 5000);
-    } finally {
+      
+      // Close modal but keep docToDelete for retry
       dispatch({ type: 'SET_IS_DELETING', payload: false });
-      dispatch({ type: 'CLOSE_DELETE_MODAL' });
+      dispatch({ type: 'CLOSE_DELETE_MODAL_KEEP_DOC' });
     }
   };
 
@@ -655,45 +667,60 @@ const DocumentListPage = () => {
     <Theme theme={effectiveTheme}>
       <div className={styles.documentListPage}>
         {state.toastOpen && (
-          <ActionableNotification
-            actionButtonLabel="Try again"
-            aria-label="close notification"
-            kind="error"
-            closeOnEscape
-            title={state.errorDocName ? `Delete document ${state.errorDocName} failed` : 'Error loading documents'}
-            subtitle={state.errorMessage}
-            onActionButtonClick={() => {
-              dispatch({ type: 'HIDE_ERROR' });
-              fetchDocuments();
-            }}
-            onCloseButtonClick={() => {
-              dispatch({ type: 'HIDE_ERROR' });
-            }}
-            style={{
-              position: 'fixed',
-              top: '4rem',
-              right: '2rem',
-              zIndex: 9999,
-            }}
-          />
+          <div className={styles.notificationWrapper}>
+            <ActionableNotification
+              actionButtonLabel="Try again"
+              aria-label="close notification"
+              kind="error"
+              closeOnEscape
+              title={state.errorDocName ? `Delete document ${state.errorDocName} failed` : 'Error loading documents'}
+              subtitle={state.errorMessage}
+              onActionButtonClick={() => {
+                dispatch({ type: 'HIDE_ERROR' });
+                fetchDocuments();
+              }}
+              onCloseButtonClick={() => {
+                dispatch({ type: 'HIDE_ERROR' });
+              }}
+              lowContrast
+            />
+          </div>
         )}
 
-        {/* Delete Status Notification */}
-        {state.deleteStatus.show && (
-          <div style={{
-            position: 'fixed',
-            top: '3rem',
-            right: '1rem',
-            zIndex: 9000,
-            maxWidth: '400px',
-          }}>
-            <InlineNotification
-              kind={state.deleteStatus.kind}
+        {/* Delete Error Notification with Retry */}
+        {state.deleteStatus.show && state.deleteStatus.kind === 'error' && (
+          <div className={styles.notificationWrapper}>
+            <ActionableNotification
+              actionButtonLabel="Try again"
+              aria-label="close notification"
+              kind="error"
+              closeOnEscape
+              title={state.deleteStatus.title}
+              subtitle={state.deleteStatus.subtitle}
+              onActionButtonClick={() => {
+                dispatch({ type: 'HIDE_DELETE_STATUS' });
+                // Re-open the delete modal with the last document
+                if (state.docToDelete) {
+                  dispatch({ type: 'OPEN_DELETE_MODAL', payload: state.docToDelete });
+                }
+              }}
+              onCloseButtonClick={() => {
+                dispatch({ type: 'HIDE_DELETE_STATUS' });
+              }}
+              lowContrast
+            />
+          </div>
+        )}
+
+        {/* Delete Success Notification */}
+        {state.deleteStatus.show && state.deleteStatus.kind === 'success' && (
+          <div className={styles.notificationWrapper}>
+            <ToastNotification
+              kind="success"
               title={state.deleteStatus.title}
               subtitle={state.deleteStatus.subtitle}
               onClose={() => dispatch({ type: 'HIDE_DELETE_STATUS' })}
-              hideCloseButton={false}
-              lowContrast
+              timeout={3000}
             />
           </div>
         )}

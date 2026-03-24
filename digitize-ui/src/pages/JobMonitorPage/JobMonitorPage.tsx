@@ -18,6 +18,7 @@ import {
   Theme,
   Link,
   InlineNotification,
+  ToastNotification,
   Modal,
   Checkbox,
   CheckboxGroup,
@@ -85,6 +86,7 @@ type JobMonitorAction =
   | { type: 'HIDE_DELETE_STATUS' }
   | { type: 'OPEN_DELETE_MODAL'; payload: string }
   | { type: 'CLOSE_DELETE_MODAL' }
+  | { type: 'CLOSE_DELETE_MODAL_KEEP_JOB' }
   | { type: 'SET_CONFIRMED'; payload: boolean }
   | { type: 'SHOW_ERROR'; payload: { message: string; jobName?: string } }
   | { type: 'HIDE_ERROR' }
@@ -201,6 +203,12 @@ const jobMonitorReducer = (
         showDeleteModal: false,
         isConfirmed: false,
         jobToDelete: null,
+      };
+    case 'CLOSE_DELETE_MODAL_KEEP_JOB':
+      return {
+        ...state,
+        showDeleteModal: false,
+        isConfirmed: false,
       };
     case 'SET_CONFIRMED':
       return { ...state, isConfirmed: action.payload };
@@ -458,6 +466,10 @@ const JobMonitorPage = () => {
       }, 3000);
 
       fetchJobs();
+      
+      // Close modal and clear state on success
+      dispatch({ type: 'SET_IS_DELETING', payload: false });
+      dispatch({ type: 'CLOSE_DELETE_MODAL' });
     } catch (error: any) {
       const msg = error.response?.data?.detail || error.message || 'Failed deleting job';
       
@@ -476,9 +488,10 @@ const JobMonitorPage = () => {
       setTimeout(() => {
         dispatch({ type: 'HIDE_DELETE_STATUS' });
       }, 5000);
-    } finally {
+      
+      // Close modal but keep jobToDelete for retry
       dispatch({ type: 'SET_IS_DELETING', payload: false });
-      dispatch({ type: 'CLOSE_DELETE_MODAL' });
+      dispatch({ type: 'CLOSE_DELETE_MODAL_KEEP_JOB' });
     }
   };
 
@@ -668,27 +681,24 @@ const JobMonitorPage = () => {
     <Theme theme={effectiveTheme}>
       <div className={styles.jobMonitorPage}>
         {state.toastOpen && (
-          <ActionableNotification
-            actionButtonLabel="Try again"
-            aria-label="close notification"
-            kind="error"
-            closeOnEscape
-            title={state.errorJobName ? `Delete job ${state.errorJobName} failed` : 'Error loading jobs'}
-            subtitle={state.errorMessage}
-            onActionButtonClick={() => {
-              dispatch({ type: 'HIDE_ERROR' });
-              fetchJobs();
-            }}
-            onCloseButtonClick={() => {
-              dispatch({ type: 'HIDE_ERROR' });
-            }}
-            style={{
-              position: 'fixed',
-              top: '4rem',
-              right: '2rem',
-              zIndex: 9999,
-            }}
-          />
+          <div className={styles.notificationWrapper}>
+            <ActionableNotification
+              actionButtonLabel="Try again"
+              aria-label="close notification"
+              kind="error"
+              closeOnEscape
+              title={state.errorJobName ? `Delete job ${state.errorJobName} failed` : 'Error loading jobs'}
+              subtitle={state.errorMessage}
+              onActionButtonClick={() => {
+                dispatch({ type: 'HIDE_ERROR' });
+                fetchJobs();
+              }}
+              onCloseButtonClick={() => {
+                dispatch({ type: 'HIDE_ERROR' });
+              }}
+              lowContrast
+            />
+          </div>
         )}
         {/* Upload Status Notification */}
         {state.uploadStatus.show && (
@@ -704,16 +714,40 @@ const JobMonitorPage = () => {
           </div>
         )}
 
-        {/* Delete Status Notification */}
-        {state.deleteStatus.show && (
+        {/* Delete Error Notification with Retry */}
+        {state.deleteStatus.show && state.deleteStatus.kind === 'error' && (
           <div className={styles.notificationWrapper}>
-            <InlineNotification
-              kind={state.deleteStatus.kind}
+            <ActionableNotification
+              actionButtonLabel="Try again"
+              aria-label="close notification"
+              kind="error"
+              closeOnEscape
+              title={state.deleteStatus.title}
+              subtitle={state.deleteStatus.subtitle}
+              onActionButtonClick={() => {
+                dispatch({ type: 'HIDE_DELETE_STATUS' });
+                // Re-open the delete modal with the last job
+                if (state.jobToDelete) {
+                  dispatch({ type: 'OPEN_DELETE_MODAL', payload: state.jobToDelete });
+                }
+              }}
+              onCloseButtonClick={() => {
+                dispatch({ type: 'HIDE_DELETE_STATUS' });
+              }}
+              lowContrast
+            />
+          </div>
+        )}
+
+        {/* Delete Success Notification */}
+        {state.deleteStatus.show && state.deleteStatus.kind === 'success' && (
+          <div className={styles.notificationWrapper}>
+            <ToastNotification
+              kind="success"
               title={state.deleteStatus.title}
               subtitle={state.deleteStatus.subtitle}
               onClose={() => dispatch({ type: 'HIDE_DELETE_STATUS' })}
-              hideCloseButton={false}
-              lowContrast
+              timeout={3000}
             />
           </div>
         )}
