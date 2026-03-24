@@ -104,7 +104,7 @@ func applyObject(c *openshift.OpenshiftClient, object *unstructured.Unstructured
 	objDesc := fmt.Sprintf("(%s) %s/%s", groupVersionKind.String(), namespace, name)
 
 	// Apply the k8s object with provided version kind in given namespace.
-	err = c.Client.Apply(c.Ctx, client.ApplyConfigurationFromUnstructured(object), &client.ApplyOptions{FieldManager: constants.AIServices})
+	err = c.Client.Apply(c.Ctx, client.ApplyConfigurationFromUnstructured(object), &client.ApplyOptions{FieldManager: constants.AIServices, Force: utils.BoolPtr(true)})
 	if err != nil {
 		if apierrors.IsForbidden(err) {
 			return fmt.Errorf("missing required permissions to create %s", objDesc)
