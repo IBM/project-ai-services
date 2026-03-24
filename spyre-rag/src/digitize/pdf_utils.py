@@ -21,6 +21,7 @@ from docling_core.types.doc.document import DoclingDocument
 
 # Local application imports
 from common.misc_utils import get_logger
+from common.retry_utils import retry_on_transient_error
 from digitize.config import PDF_CHUNK_SIZE
 
 # To suppress the warnings raised from pdfminer package while extracting the font size
@@ -147,19 +148,15 @@ def find_text_font_size(
 
     return matches
 
+@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0, retryable_exceptions=(Exception,), allow_local_retries=True)
 def convert_chunk(doc_converter: DocumentConverter, path: Path, chunk_num: int, start_page: int, end_page: int, chunk_cache_dir: Path):
-    try:
-        # Convert this chunk
-        conv_res: ConversionResult = doc_converter.convert(source=path, page_range=(start_page, end_page))
-        
-        # Save chunk result to cache
-        chunk_filename = chunk_cache_dir / f"chunk_{chunk_num:04d}.json"
-        conv_res.document.save_as_json(str(chunk_filename))        
-        logger.debug(f"Saved chunk of {path}'s chunk {chunk_num} to {chunk_filename}")
-        
-    except Exception as e:
-        logger.error(f"Error processing {path}'s chunk {chunk_num} (pages {start_page}-{end_page}): {e}")
-        raise e
+    # Convert this chunk
+    conv_res: ConversionResult = doc_converter.convert(source=path, page_range=(start_page, end_page))
+    
+    # Save chunk result to cache
+    chunk_filename = chunk_cache_dir / f"chunk_{chunk_num:04d}.json"
+    conv_res.document.save_as_json(str(chunk_filename))
+    logger.debug(f"Saved chunk of {path}'s chunk {chunk_num} to {chunk_filename}")
 
     return chunk_filename
 
@@ -189,7 +186,12 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
     # If document has PDF_CHUNK_SIZE pages or fewer, convert normally
     if total_pages <= PDF_CHUNK_SIZE:
         logger.debug(f"Converting {path} document with {total_pages} pages in single pass")
-        return doc_converter.convert(source=path).document
+        
+        @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0, retryable_exceptions=(Exception,), allow_local_retries=True)
+        def _convert_single_doc():
+            return doc_converter.convert(source=path).document
+        
+        return _convert_single_doc()
     
     # Process in chunks
     # Calculate total chunks using ceiling division: equivalent to math.ceil(total_pages / PDF_CHUNK_SIZE)
