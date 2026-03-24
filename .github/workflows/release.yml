@@ -7,28 +7,8 @@ on:
 
 jobs:
   build:
-    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        include:
-          # Darwin builds
-          - goos: darwin
-            goarch: amd64
-            runner: macos-latest
-          - goos: darwin
-            goarch: arm64
-            runner: macos-latest
-          # Linux builds
-          - goos: linux
-            goarch: amd64
-            runner: ubuntu-latest
-          - goos: linux
-            goarch: ppc64le
-            runner: ubuntu-24.04-ppc64le
-          - goos: linux
-            goarch: arm64
-            runner: ubuntu-latest
+    name: Build all platforms
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -43,19 +23,16 @@ jobs:
 
       - run: go version
 
-      - name: Build Go binary for ${{ matrix.goos }}/${{ matrix.goarch }}
+      - name: Build Go binaries for all platforms (cross-compilation)
         working-directory: ai-services
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
         run: |
-          make binary GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }}
+          make binaries
 
-      - name: Archive binary
+      - name: Archive all binaries
         uses: actions/upload-artifact@v4
         with:
-          name: ai-services-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: ai-services/bin/ai-services-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: ai-services-binaries
+          path: ai-services/bin/ai-services-*
 
   release:
     needs: build
@@ -65,13 +42,11 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v6
         with:
-          path: ./artifacts
+          name: ai-services-binaries
+          path: ./release-assets
 
-      - name: Prepare release assets
+      - name: Create checksums
         run: |
-          mkdir -p ./release-assets
-          # Move all binaries to release-assets directory and create checksums
-          find ./artifacts -type f -name "ai-services-*" -exec cp {} ./release-assets/ \;
           cd ./release-assets
           sha256sum ai-services-* > checksums.txt
           ls -lh
