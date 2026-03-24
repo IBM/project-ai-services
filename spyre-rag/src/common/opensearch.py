@@ -241,7 +241,7 @@ class OpensearchVectorStore(VectorStore):
 
             except Exception as e:
                 logger.error(f"Exception during bulk insert for batch {batch_num}: {e}")
-                return False
+                raise
 
         logger.info(f"Insert operation completed successfully: {len(chunks)} chunks inserted into index {self.index_name}")
         return True
