@@ -550,7 +550,8 @@ const DocumentListPage = () => {
           <span className={styles.statusText}>{doc.status}</span>
           {hasError && (
             <Tooltip
-              align="top"
+              align="bottom"
+              autoAlign={true}
               label="Document processing failed. Please try re-uploading the document."
               className={styles.errorTooltip}
             >

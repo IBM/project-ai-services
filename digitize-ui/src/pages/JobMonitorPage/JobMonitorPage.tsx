@@ -586,7 +586,8 @@ const JobMonitorPage = () => {
           <span className={styles.statusText}>{jobStatus}</span>
           {hasError && (
             <Tooltip
-              align="top"
+              align="bottom"
+              autoAlign={true}
               label={getErrorMessage(job)}
               className={styles.errorTooltip}
             >
