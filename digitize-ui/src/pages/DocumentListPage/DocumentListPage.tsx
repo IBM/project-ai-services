@@ -299,15 +299,15 @@ const headers = [
 
 const getStatusIcon = (status: string) => {
   switch (status) {
-    case 'accepted':
-    case 'chunked':
     case 'completed':
-    case 'digitized':
-    case 'processed':
       return <CheckmarkFilled size={16} className={styles.statusIconSuccess} />;
     case 'failed':
       return <ErrorFilled size={16} className={styles.statusIconError} />;
+    case 'accepted':
     case 'in_progress':
+    case 'digitized':
+    case 'processed':
+    case 'chunked':
       return <InProgress size={16} className={styles.statusIconProgress} />;
     default:
       return null;
