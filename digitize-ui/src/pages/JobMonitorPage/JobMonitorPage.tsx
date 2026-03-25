@@ -482,11 +482,6 @@ const JobMonitorPage = () => {
           subtitle: `${jobName}: ${msg}`,
         },
       });
-
-      // Hide error notification after 5 seconds
-      setTimeout(() => {
-        dispatch({ type: 'HIDE_DELETE_STATUS' });
-      }, 5000);
       
       // Close modal but keep jobToDelete for retry
       dispatch({ type: 'SET_IS_DELETING', payload: false });
@@ -707,7 +702,7 @@ const JobMonitorPage = () => {
               title={state.uploadStatus.title}
               subtitle={state.uploadStatus.subtitle}
               onClose={() => dispatch({ type: 'HIDE_UPLOAD_STATUS' })}
-              timeout={state.uploadStatus.kind === 'success' ? 3000 : 5000}
+              timeout={state.uploadStatus.kind === 'success' ? 3000 : 0}
             />
           </div>
         )}

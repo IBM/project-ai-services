@@ -523,11 +523,6 @@ const DocumentListPage = () => {
           subtitle: `${docName}: ${msg}`,
         },
       });
-
-      // Hide error notification after 5 seconds
-      setTimeout(() => {
-        dispatch({ type: 'HIDE_DELETE_STATUS' });
-      }, 5000);
       
       // Close modal but keep docToDelete for retry
       dispatch({ type: 'SET_IS_DELETING', payload: false });
