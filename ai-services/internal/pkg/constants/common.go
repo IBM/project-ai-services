@@ -8,7 +8,7 @@ const (
 	PodStartOff          = "off"
 	ApplicationsPath     = "/var/lib/ai-services/applications"
 	OperatorPollInterval = 5 * time.Second
-	OperatorPollTimeout  = 2 * time.Minute
+	OperatorPollTimeout  = 3 * time.Minute
 	VersionV2            = "v2"
 	DSCKind              = "DataScienceCluster"
 	DSCIKind             = "DSCInitialization"

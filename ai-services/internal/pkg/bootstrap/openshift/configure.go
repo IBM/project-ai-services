@@ -279,6 +279,12 @@ func waitForSpyreClusterPolicy(client *openshift.OpenshiftClient) error {
 			if apierrors.IsForbidden(err) {
 				return false, fmt.Errorf("missing required permissions to get SpyreClusterPolicy")
 			}
+			// Handle rate limiting and other transient errors as retryable
+			if utils.IsTransientK8sError(err) {
+				logger.Infof("Transient error getting SpyreClusterPolicy (rate limit or timeout), retrying...", logger.VerbosityLevelDebug)
+
+				return false, nil
+			}
 
 			return false, fmt.Errorf("failed to get SpyreClusterPolicy: %w", err)
 		}
@@ -311,6 +317,13 @@ func waitForRHODSResource(client *openshift.OpenshiftClient, kind string) error 
 		}
 		resource, exists, err := utils.GetExistingCustomResource(client, gvk)
 		if err != nil {
+			// Handle rate limiting and other transient errors as retryable
+			if utils.IsTransientK8sError(err) {
+				logger.Infof("Transient error getting %s (rate limit or timeout), retrying...", kind, logger.VerbosityLevelDebug)
+
+				return false, nil
+			}
+
 			return false, fmt.Errorf("failed to get %s: %w", kind, err)
 		}
 
