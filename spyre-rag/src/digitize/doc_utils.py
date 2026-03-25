@@ -710,9 +710,12 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn):
     with open(in_tab_f, "r") as f:
         tab_data = json.load(f)
 
+    from datetime import datetime
+    created_at = datetime.utcnow().isoformat() + "Z"
+
     txt_docs = []
     if len(txt_data):
-        for _, block in enumerate(txt_data):
+        for txt_idx, block in enumerate(txt_data):
             meta_info = ''
             if block.get('chapter_title'):
                 meta_info += f"Chapter: {block.get('chapter_title')} "
@@ -722,34 +725,49 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn):
                 meta_info += f"Subsection: {block.get('subsection_title')} "
             if block.get('subsubsection_title'):
                 meta_info += f"Subsubsection: {block.get('subsubsection_title')} "
+            
+            # Extract page number from page_range (use first page if multiple)
+            page_range = block.get("page_range", [])
+            page_number = page_range[0] if page_range and len(page_range) > 0 else None
+            
             txt_docs.append({
-                # "chunk_id": txt_id,
                 "page_content": f'{meta_info}\n{block.get("content")}' if meta_info != '' else block.get("content"),
                 "filename": orig_fn,
                 "type": "text",
                 "source": meta_info,
-                "language": "en"
+                "language": "en",
+                "page_number": page_number,
+                "chunk_index": txt_idx,
+                "created_at": created_at
             })
 
     tab_docs = []
     if len(tab_data):
         tab_data = list(tab_data.values())
-        for tab_id, block in enumerate(tab_data):
-            # tab_docs.append(Document(
-            #     page_content=block.get('summary'),
-            #     metadata={"filename": orig_fn, "type": "table", "source": block.get('html'), "chunk_id": tab_id}
-            # ))
+        txt_count = len(txt_docs)
+        for tab_idx, block in enumerate(tab_data):
+            # Extract page number from page field
+            page_number = block.get("page")
+            
             tab_docs.append({
                 "page_content": f"{block.get('caption')}\n\n{block.get('summary')}" if block.get("caption") else block.get("summary"),
                 "filename": orig_fn,
                 "type": "table",
                 "source": block.get("html"),
-                "language": "en"
+                "language": "en",
+                "page_number": page_number,
+                "chunk_index": txt_count + tab_idx,
+                "created_at": created_at
             })
 
     combined_docs = txt_docs + tab_docs
+    
+    # Add total_chunks to all documents
+    total_chunks = len(combined_docs)
+    for doc in combined_docs:
+        doc["total_chunks"] = total_chunks
 
-    logger.debug(f"Combined chunk documents created")
+    logger.debug(f"Combined chunk documents created: {total_chunks} total chunks")
 
     return combined_docs
 
