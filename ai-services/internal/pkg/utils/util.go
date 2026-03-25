@@ -19,6 +19,11 @@ const (
 	maxKeyValueParts = 2
 )
 
+// IsTransientK8sError checks if a Kubernetes API error is transient and should be retried.
+func IsTransientK8sError(err error) bool {
+	return apierrors.IsTooManyRequests(err) || apierrors.IsServerTimeout(err) || apierrors.IsTimeout(err)
+}
+
 // BoolPtr -> converts to bool ptr.
 func BoolPtr(v bool) *bool {
 	return &v
@@ -313,6 +318,11 @@ func GetExistingCustomResource(client *openshift.OpenshiftClient, gvk schema.Gro
 	if err := client.Client.List(client.Ctx, list); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, false, nil
+		}
+		// Handle rate limiting and other transient errors as retryable by returning them
+		// The caller's polling loop will retry
+		if IsTransientK8sError(err) {
+			return nil, false, err
 		}
 
 		return nil, false, fmt.Errorf("error listing %s: %w", gvk.Kind, err)
