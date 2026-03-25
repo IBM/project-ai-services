@@ -138,4 +138,28 @@
   }
 }
 
+.fileUploaderLabel {
+  color: var(--cds-text-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  display: block;
+  letter-spacing: 0.16px;
+}
+
+.fileUploaderDescription {
+  color: var(--cds-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.43;
+  margin-bottom: 1rem;
+  margin-top: 0;
+}
+
+.fileContainer {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 // Made with Bob

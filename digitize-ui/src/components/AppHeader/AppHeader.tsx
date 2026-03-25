@@ -84,7 +84,7 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
             
             <h5>Key Features:</h5>
             <ul>
-              <li><strong>Document Upload:</strong> Upload PDF, images, and text documents for processing</li>
+              <li><strong>Document Upload:</strong> Upload PDF files for processing</li>
               <li><strong>Document List:</strong> View and manage all your uploaded documents</li>
               <li><strong>Job Monitor:</strong> Track the status of document processing jobs</li>
             </ul>

@@ -3,7 +3,8 @@ import {
   TextInput,
   RadioButtonGroup,
   RadioButton,
-  FileUploader,
+  FileUploaderButton,
+  FileUploaderItem,
   InlineNotification,
   ToastNotification,
 } from '@carbon/react';
@@ -16,11 +17,27 @@ interface IngestSidePanelProps {
   onSubmit: (operation: string, outputFormat: string, files: File[], jobName: string) => Promise<void>;
 }
 
+interface FileItem {
+  uuid: string;
+  name: string;
+  filesize: number;
+  status: 'edit' | 'complete' | 'uploading';
+  iconDescription: string;
+  invalid: boolean;
+  file: File;
+}
+
+let lastId = 0;
+function uid(prefix = 'file') {
+  lastId++;
+  return `${prefix}-${lastId}`;
+}
+
 const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
   const [jobName, setJobName] = useState('');
   const [operation, setOperation] = useState('ingestion');
   const [outputFormat, setOutputFormat] = useState('json');
-  const [files, setFiles] = useState<File[]>([]);
+  const [fileItems, setFileItems] = useState<FileItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -43,13 +60,25 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
     }
   }, [open]);
 
-  const handleFileAdd = (event: any) => {
+  const handleFileAdd = useCallback((event: any) => {
     const addedFiles = event.target.files;
     if (addedFiles && addedFiles.length > 0) {
-      const newFiles = Array.from(addedFiles) as File[];
-      setFiles((prevFiles) => [...prevFiles, ...newFiles]);
+      const newFileItems = Array.from(addedFiles).map((file: any) => ({
+        uuid: uid(),
+        name: file.name,
+        filesize: file.size,
+        status: 'edit' as const,
+        iconDescription: 'Delete file',
+        invalid: false,
+        file: file,
+      }));
+      setFileItems((prev) => [...prev, ...newFileItems]);
     }
-  };
+  }, []);
+
+  const handleFileDelete = useCallback((_event: any, { uuid }: { uuid: string }) => {
+    setFileItems((prev) => prev.filter((item) => item.uuid !== uuid));
+  }, []);
 
   const handleSubmit = async () => {
     setError(null);
@@ -58,13 +87,14 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
       setError('Please enter a job name');
       return;
     }
-    if (files.length === 0) {
+    if (fileItems.length === 0) {
       setError('Please upload at least one file');
       return;
     }
     
     setIsSubmitting(true);
     try {
+      const files = fileItems.map((item) => item.file);
       await onSubmit(operation, outputFormat, files, jobName);
       handleClose();
     } catch (err) {
@@ -79,7 +109,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
     setJobName('');
     setOperation('ingestion');
     setOutputFormat('json');
-    setFiles([]);
+    setFileItems([]);
     setError(null);
     setIsSubmitting(false);
     onClose();
@@ -205,23 +235,42 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
 
         {/* Upload Files Section */}
         <div className={styles.formGroup}>
-          <FileUploader
-            labelTitle="Upload files"
-            labelDescription={`Supported file types are .pdf only,
-
-Supported languages are English, German, Italian and French.
-
-Supported content are text, tables`}
-            buttonLabel="Upload"
+          <strong className={styles.fileUploaderLabel}>Upload files</strong>
+          <p className={styles.fileUploaderDescription}>
+            Supported file types are .pdf only,
+            <br /><br />
+            Supported languages are English and German.
+            <br /><br />
+            Supported content are text, tables
+          </p>
+          <FileUploaderButton
+            labelText="Upload"
             buttonKind="tertiary"
             size="md"
-            filenameStatus="edit"
             accept={['.pdf']}
             multiple
             onChange={handleFileAdd}
-            iconDescription="Upload files"
-            className={styles.fileUploader}
+            disableLabelChanges
           />
+          <div className={styles.fileContainer}>
+            {fileItems.map((item) => (
+              <FileUploaderItem
+                key={item.uuid}
+                uuid={item.uuid}
+                name={item.name}
+                size="md"
+                status={item.status}
+                iconDescription={item.iconDescription}
+                invalid={item.invalid}
+                onDelete={handleFileDelete}
+              />
+            ))}
+          </div>
+          {fileItems.length > 0 && (
+            <div style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--cds-text-secondary)' }}>
+              {fileItems.length} file{fileItems.length !== 1 ? 's' : ''} selected
+            </div>
+          )}
         </div>
       </div>
     </SidePanel>
