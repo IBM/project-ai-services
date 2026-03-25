@@ -35,9 +35,10 @@ opensearch:
   image: icr.io/ppc64le-oss/opensearch-ppc64le:3.3.0
   # @description Sets the memory limit for the Opensearch service(Default: 4Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
   memoryLimit: 4Gi
-  # authentication credentials, can be overridden by the deployer
-  username: "admin"
-  password: "AiServices@1234"
+  auth:
+    username: "admin"
+    # @description Password for OpenSearch authentication. Use this to override the default admin password.
+    password: "AiServices@1234"
 
 instruct:
   # @hidden

@@ -49,4 +49,5 @@ opensearch:
   storage: 10Gi
   auth:
     username: "admin"
+    # @description Password for OpenSearch authentication. Use this to override the default admin password.
     password: "AiServices@1234"

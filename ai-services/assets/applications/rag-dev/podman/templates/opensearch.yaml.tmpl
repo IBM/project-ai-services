@@ -23,7 +23,7 @@ spec:
         - name: "discovery.type"
           value: "single-node"
         - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
-          value: "{{ .Values.opensearch.password }}"
+          value: "{{ .Values.opensearch.auth.password }}"
         - name: OPENSEARCH_JAVA_OPTS
           value: "-XX:-UseSuperWord -XX:TieredStopAtLevel=1"
         
@@ -49,7 +49,7 @@ spec:
           - curl
           - -fk
           - -u
-          - {{ .Values.opensearch.username }}:{{ .Values.opensearch.password }}
+          - {{ .Values.opensearch.auth.username }}:{{ .Values.opensearch.auth.password }}
           - https://localhost:9200/_cluster/health
         initialDelaySeconds: 90
         periodSeconds: 30
