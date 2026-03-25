@@ -73,10 +73,7 @@ app = FastAPI(
     title="AI-Services Similarity Search API",
     description=(
         "Pure dense k-NN cosine similarity search against the vector store.\n\n"
-        "Unlike `/reference` and `/v1/chat/completions` (which always use hybrid "
-        "search + reranking), this endpoint gives consumers direct control:\n"
-        "- **`rerank: false`** (default) — fast, cosine similarity scores\n"
-        "- **`rerank: true`** — Cohere reranker applied on top of dense results"
+        "Gives users the option to use rerank or not."
     ),
     version="1.0.0",
     openapi_tags=tags_metadata,
@@ -182,25 +179,6 @@ async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchRes
 )
 async def health():
     return {"status": "ok"}
-
-
-@app.get(
-    "/db-status",
-    tags=["monitoring"],
-    summary="Vector DB status",
-    description="Check whether the vector store is initialised and populated.",
-)
-async def db_status():
-    try:
-        if vectorstore is None:
-            return {"ready": False, "message": "Vector store not initialized"}
-        status = await asyncio.to_thread(vectorstore.check_db_populated)
-        if status:
-            return {"ready": True}
-        return {"ready": False, "message": "No data ingested"}
-    except Exception as e:
-        return {"ready": False, "message": str(e)}
-
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "7000"))
