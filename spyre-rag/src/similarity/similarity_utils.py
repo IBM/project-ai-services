@@ -1,13 +1,3 @@
-"""
-Utility models and core logic for the similarity search service.
-
-Why this file exists:
-- Mirrors the pattern from summarize/summ_utils.py: keep models + core logic
-  separate from the FastAPI wiring in app.py.
-- `app.py` stays thin (just HTTP plumbing); this file holds everything
-  that could be unit-tested without starting a server.
-"""
-
 from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
@@ -137,16 +127,6 @@ error_responses: Dict[int | str, Dict[str, Any]] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Core logic
-# ---------------------------------------------------------------------------
-# Why extract perform_similarity_search() here instead of inlining in app.py?
-# - Unit-testable without HTTP: call it directly with mock deps in tests.
-# - app.py stays focused on HTTP concerns (auth headers, status codes, request
-#   parsing). Business logic stays here.
-# - Same reason summ_utils.py has build_messages() / compute_target_and_max_tokens()
-#   instead of inlining them in handle_summarize().
-
 def perform_similarity_search(
     query: str,
     emb_model: str,
@@ -167,7 +147,7 @@ def perform_similarity_search(
         score_type - "cosine" or "relevance"
 
     Why mode="dense" only?
-    - Dense search returns cosine similarity scores (0–1), which are meaningful
+    - Dense search returns cosine similarity scores (0-1), which are meaningful
       on their own without an LLM or keyword pass.
     - Hybrid mixes in BM25 scores via RRF fusion, producing scores that don't
       map cleanly to cosine similarity — wrong for this endpoint's contract.
@@ -185,7 +165,6 @@ def perform_similarity_search(
     score_type = "cosine"
 
     if rerank:
-        # Reranking re-scores by query relevance replacing cosine similarity
         reranked = rerank_documents(query, docs, reranker_model, reranker_endpoint)
         docs = [d for d, _ in reranked]
         scores = [s for _, s in reranked]

@@ -18,11 +18,6 @@ image-tag:
 	@echo $(TAG)
 .PHONY: image-tag
 
-# ── Local dev: run each service directly (no container) ─────────────────────
-# Each service is a standalone FastAPI app started via its module entry point.
-# PORT can be overridden:  make run-similarity PORT=8080
-# LOG_LEVEL can be overridden: make run-chatbot LOG_LEVEL=debug
-
 run-similarity:
 	PORT=$${PORT:-7000} python -m similarity.app
 .PHONY: run-similarity
