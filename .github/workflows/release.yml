@@ -7,8 +7,8 @@ on:
 
 jobs:
   build:
-    name: Build
-    runs-on: ubuntu-24.04-ppc64le
+    name: Build all platforms
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -17,34 +17,39 @@ jobs:
           fetch-depth: 0
       
       - name: Setup Go
-        run: |
-          GO_VERSION="1.25.5"
-          wget https://go.dev/dl/go${GO_VERSION}.linux-ppc64le.tar.gz
-          sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-ppc64le.tar.gz
-          echo "/usr/local/go/bin" >> $GITHUB_PATH
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
 
       - run: go version
 
-      - name: Build Go binary
+      - name: Build Go binaries for all platforms (cross-compilation)
         working-directory: ai-services
         run: |
-          make bin
+          make binaries
 
-      - name: Archive binary
+      - name: Archive all binaries
         uses: actions/upload-artifact@v4
         with:
-          name: ai-services-binary
-          path: ai-services/bin/ai-services
+          name: ai-services-binaries
+          path: ai-services/bin/ai-services-*
 
   release:
     needs: build
-    runs-on: ubuntu-24.04-ppc64le
+    runs-on: ubuntu-latest
     if: ${{ success() }}
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v6
         with:
-          path: ./downloaded-artifacts
+          name: ai-services-binaries
+          path: ./release-assets
+
+      - name: Create checksums
+        run: |
+          cd ./release-assets
+          sha256sum ai-services-* > checksums.txt
+          ls -lh
 
       - name: Get the target release version
         id: get_version
@@ -61,5 +66,29 @@ jobs:
           draft: true
           prerelease: true
           generate_release_notes: true
+          body: |
+            ## AI Services Release ${{ steps.get_version.outputs.VERSION }}
+            
+            ### Binaries
+            This release includes pre-built binaries for multiple platforms:
+            
+            **macOS:**
+            - `ai-services-darwin-amd64` - Intel-based Macs
+            - `ai-services-darwin-arm64` - Apple Silicon Macs (M1/M2/M3)
+            
+            **Linux:**
+            - `ai-services-linux-amd64` - x86_64 Linux
+            - `ai-services-linux-ppc64le` - PowerPC 64-bit Little Endian Linux (Podman runtime supported)
+            - `ai-services-linux-arm64` - ARM64 Linux
+            
+            ### Platform Support
+            - **Podman runtime**: Only supported on `linux/ppc64le`
+            - **OpenShift runtime**: Supported on all platforms
+            
+            ### Verification
+            Download `checksums.txt` to verify the integrity of the binaries:
+            ```bash
+            sha256sum -c checksums.txt
+            ```
           files: |
-            ./downloaded-artifacts/**
+            ./release-assets/*

@@ -7,6 +7,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
@@ -18,6 +19,10 @@ func BootstrapCmd() *cobra.Command {
 		Short:   "Initializes AI Services infrastructure",
 		Long:    bootstrapDescription(),
 		Example: bootstrapExample(),
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			// Check if podman runtime is being used on unsupported platform
+			return utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType())
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 

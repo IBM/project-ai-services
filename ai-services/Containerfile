@@ -1,13 +1,20 @@
-FROM registry.access.redhat.com/ubi9/go-toolset:1.25 AS builder
+FROM registry.access.redhat.com/ubi9/ubi:9.7 AS builder
 
 ARG CMD_VERSION
 ARG GITCOMMIT
 ARG BUILDDATE
 ARG BUILDTAGS
+ARG GO_VERSION=1.25.8
 
 WORKDIR /go/src/github.com/project-ai-services/ai-services
 
 USER root
+
+RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-ppc64le.tar.gz -o go.tar.gz && \
+    tar -C /usr/local -xzf go.tar.gz && \
+    rm go.tar.gz
+
+ENV PATH="/usr/local/go/bin:${PATH}"
 
 COPY go.mod go.sum ./
 RUN go mod download

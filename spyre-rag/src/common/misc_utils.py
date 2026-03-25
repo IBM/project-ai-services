@@ -7,6 +7,15 @@ from digitize.config import DIGITIZED_DOCS_DIR
 # ContextVar to store the request ID for each request
 request_id_ctx = ContextVar("request_id", default="-")
 
+
+class DoclingConversionError(Exception):
+    """Exception raised when Docling document conversion fails.
+    
+    This exception wraps any errors that occur during PDF conversion
+    using the Docling library, making them identifiable for retry logic.
+    """
+    pass
+
 class RequestIDFilter(logging.Filter):
     #Filter to inject request_id from ContextVar into log records.
     def filter(self, record):

@@ -49,6 +49,11 @@ var createCmd = &cobra.Command{
 	`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// Check if podman runtime is being used on unsupported platform
+		if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
+			return err
+		}
+
 		// Build and run flag validator
 		flagValidator := buildFlagValidator()
 		if err := flagValidator.Validate(cmd); err != nil {

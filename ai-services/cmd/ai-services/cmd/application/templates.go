@@ -1,6 +1,7 @@
 package application
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 
@@ -39,6 +40,11 @@ var templatesCmd = &cobra.Command{
 		for _, name := range appTemplateNames {
 			appTemplatesParametersWithDescription, err := tp.ListApplicationTemplateValues(name)
 			if err != nil {
+				// Skip applications that don't support the current runtime (silently)
+				if errors.Is(err, templates.ErrRuntimeNotSupported) {
+					continue
+				}
+				// Log other errors
 				logger.Errorf("failed to list application template values: %v", err)
 
 				continue
