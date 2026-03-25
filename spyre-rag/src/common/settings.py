@@ -52,8 +52,8 @@ class Prompts:
         return cls(
             query_vllm_stream = data["query_vllm_stream"],
             query_vllm_stream_de = data["query_vllm_stream_de"],
-            llm_classify = data.get("llm_classify"),
-            table_summary = data.get("table_summary"),
+            llm_classify = data["llm_classify"],
+            table_summary = data["table_summary"],
             summarize_system_prompt = data["summarize_system_prompt"],
             summarize_user_prompt_with_length = data["summarize_user_prompt_with_length"],
             summarize_user_prompt_without_length = data["summarize_user_prompt_without_length"]

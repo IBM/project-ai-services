@@ -46,28 +46,42 @@ def create_llm_session(pool_maxsize, pool_connections: int = 2, pool_block: bool
 
         SESSION = session
 
-@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, pdf_path, batch_size=32):
+    if SESSION is None:
+        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+
     all_prompts = [settings.prompts.llm_classify.format(text=item.strip()) for item in text_blocks]
-
     decisions = []
-    for i in tqdm_wrapper(range(0, len(all_prompts), batch_size), desc=f"Classifying table summaries of '{pdf_path}'"):
-        batch_prompts = all_prompts[i:i + batch_size]
 
-        payload = {
-            "model": gen_model,
-            "messages": [{"role": "user", "content": batch_prompts}],
-            "temperature": 0,
-            "max_tokens": 3,
+    # Process in batches using ThreadPoolExecutor for parallelism
+    with ThreadPoolExecutor(max_workers=batch_size) as executor:
+        futures = {
+            executor.submit(classify_single_text, prompt, gen_model, llm_endpoint): idx
+            for idx, prompt in enumerate(all_prompts)
         }
-        response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
-        response.raise_for_status()
-        result = response.json()
-        choices = result.get("choices", [])
-        for choice in choices:
-            reply = choice.get("text", "").strip().lower()
-            decisions.append("yes" in reply)
+
+        for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts),
+                                   desc=f"Classifying table summaries of '{pdf_path}'"):
+            decisions.append(future.result())
+
     return decisions
+
+@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
+def classify_single_text(prompt, gen_model, llm_endpoint):
+    if SESSION is None:
+        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+
+    payload = {
+        "model": gen_model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0,
+        "max_tokens": 3,
+    }
+    response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
+    response.raise_for_status()
+    result = response.json()
+    reply = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip().lower()
+    return "yes" in reply
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def summarize_single_table(prompt, gen_model, llm_endpoint):
@@ -85,16 +99,15 @@ def summarize_single_table(prompt, gen_model, llm_endpoint):
     response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
     response.raise_for_status()
     result = response.json()
-    reply = result.get("choices", [{}])[0].get("text", "").strip()
+    reply = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip().lower()
     return reply
 
 def summarize_table(table_html, gen_model, llm_endpoint, pdf_path, max_workers=32):
     all_prompts = [settings.prompts.table_summary.format(content=html) for html in table_html]
 
-    summaries = [None] * len(prompts)
-    decisions = [True] * len(prompts)
+    summaries = [None] * len(all_prompts)
 
-    with ThreadPoolExecutor(max_workers=min(max_workers, len(prompts))) as executor:
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(all_prompts))) as executor:
         futures = {
             executor.submit(summarize_single_table, prompt, gen_model, llm_endpoint): idx
             for idx, prompt in enumerate(all_prompts)
@@ -103,9 +116,9 @@ def summarize_table(table_html, gen_model, llm_endpoint, pdf_path, max_workers=3
         completed_futures = as_completed(futures)
         for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts), desc=f"Summarizing tables of '{pdf_path}'"):
             idx = futures[future]
-            summaries[idx], decisions[idx] = future.result()
+            summaries[idx] = future.result()
 
-    return summaries, decisions
+    return summaries
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def query_vllm_models(llm_endpoint):
