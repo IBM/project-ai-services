@@ -55,7 +55,7 @@ class OpensearchVectorStore(VectorStore):
         hash_part = hashlib.md5(name.encode()).hexdigest()
         return f"{self.db_prefix}_{hash_part}"
 
-    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def _create_pipeline(self):
         logger.debug("Creating hybrid search pipeline")
 
@@ -82,7 +82,7 @@ class OpensearchVectorStore(VectorStore):
             logger.error(f"Failed to create hybrid search pipeline: {e}")
             raise
 
-    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def _setup_index(self, dim):
         logger.debug(f"Setting up index {self.index_name} with dimension {dim}")
 
@@ -135,7 +135,7 @@ class OpensearchVectorStore(VectorStore):
             logger.error(f"Failed to create index {self.index_name}: {e}")
             raise
 
-    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def insert_chunks(self, chunks, vectors=None, embedding=None, batch_size=10):
         """
         Supports 2 modes of insertion with retry logic for transient failures.
@@ -247,7 +247,7 @@ class OpensearchVectorStore(VectorStore):
         return True
 
 
-    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def search(self, query_text, vector=None, embedding=None, top_k=5, mode=None, doc_id=None, language='en'):
         """
         Supported search modes: dense(semantic search), sparse(keyword match) and hybrid(combination of dense and sparse).
@@ -371,7 +371,7 @@ class OpensearchVectorStore(VectorStore):
         logger.debug(f"Search operation completed successfully with {len(results)} results")
         return results
 
-    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def check_db_populated(self):
         """
         Check if the database index exists and is populated.
@@ -384,7 +384,7 @@ class OpensearchVectorStore(VectorStore):
         return exists
 
 
-    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def remove_docs_from_index(self, doc_ids: list[str]):
         """
         Delete all chunks associated with the specified document IDs from the index.
@@ -433,7 +433,7 @@ class OpensearchVectorStore(VectorStore):
         return deleted_count
 
 
-    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def delete_document_by_id(self, doc_id: str):
         """
         Delete all chunks associated with a specific document from the index.
