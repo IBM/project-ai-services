@@ -47,9 +47,9 @@ spec:
         - name: OPENSEARCH_INDEX_NAME
           value: "RAG_INDEX"
         - name: OPENSEARCH_USERNAME
-          value: "{{ .Values.opensearch.username }}"
+          value: "{{ .Values.opensearch.auth.username }}"
         - name: OPENSEARCH_PASSWORD
-          value: "{{ .Values.opensearch.password }}"
+          value: "{{ .Values.opensearch.auth.password }}"
         - name: LOG_LEVEL
           value: "{{ .Values.similarity.log_level}}"
       resources:
