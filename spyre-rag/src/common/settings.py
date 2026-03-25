@@ -10,7 +10,8 @@ logger = get_logger("settings")
 class Prompts:
     query_vllm_stream: str
     query_vllm_stream_de:str
-    table_summary_and_classify: str
+    llm_classify: str
+    table_summary: str
     summarize_system_prompt: str
     summarize_user_prompt_with_length: str
     summarize_user_prompt_without_length: str
@@ -19,7 +20,8 @@ class Prompts:
         if any(prompt in (None, "") for prompt in (
             self.query_vllm_stream,
             self.query_vllm_stream_de,
-            self.table_summary_and_classify,
+            self.llm_classify,
+            self.table_summary,
             self.summarize_system_prompt,
             self.summarize_user_prompt_with_length,
             self.summarize_user_prompt_without_length
@@ -36,7 +38,8 @@ class Prompts:
         required_fields = [
             "query_vllm_stream",
             "query_vllm_stream_de",
-            "table_summary_and_classify",
+            "llm_classify",
+            "table_summary",
             "summarize_system_prompt",
             "summarize_user_prompt_with_length",
             "summarize_user_prompt_without_length"
@@ -49,7 +52,8 @@ class Prompts:
         return cls(
             query_vllm_stream = data["query_vllm_stream"],
             query_vllm_stream_de = data["query_vllm_stream_de"],
-            table_summary_and_classify = data["table_summary_and_classify"],
+            llm_classify = data.get("llm_classify"),
+            table_summary = data.get("table_summary"),
             summarize_system_prompt = data["summarize_system_prompt"],
             summarize_user_prompt_with_length = data["summarize_user_prompt_with_length"],
             summarize_user_prompt_without_length = data["summarize_user_prompt_without_length"]
@@ -217,7 +221,7 @@ class Settings:
             raise ValueError("Required field 'context_lengths' is missing or not a dict in settings")
         if "token_to_word_ratios" not in data or not isinstance(data["token_to_word_ratios"], dict):
             raise ValueError("Required field 'token_to_word_ratios' is missing or not a dict in settings")
-        
+
         return cls(
             prompts = Prompts.from_dict(data["prompts"]),
             context_lengths=ContextLengths.from_dict(data["context_lengths"]),
