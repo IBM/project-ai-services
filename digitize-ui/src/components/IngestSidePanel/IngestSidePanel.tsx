@@ -237,11 +237,11 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
         <div className={styles.formGroup}>
           <strong className={styles.fileUploaderLabel}>Upload files</strong>
           <p className={styles.fileUploaderDescription}>
-            Supported file types are .pdf only,
+            Supported file type is .pdf only.
             <br /><br />
             Supported languages are English and German.
             <br /><br />
-            Supported content are text, tables
+            Supported contents are text and tables.
           </p>
           <FileUploaderButton
             labelText="Upload"
