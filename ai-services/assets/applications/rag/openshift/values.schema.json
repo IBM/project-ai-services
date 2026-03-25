@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "opensearch": {
+      "type": "object",
+      "properties": {
+        "memoryLimit": {
+          "type": "string",
+          "pattern": "^[0-9]+(Ki|Mi|Gi|Ti|Pi|Ei)$"
+        },
+        "storage": {
+          "type": "string",
+          "pattern": "^[0-9]+(Ki|Mi|Gi|Ti|Pi|Ei)$"
+        }
+      }
+    }
+  }
+}
