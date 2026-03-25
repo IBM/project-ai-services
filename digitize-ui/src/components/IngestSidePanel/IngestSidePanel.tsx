@@ -15,6 +15,7 @@ interface IngestSidePanelProps {
   open: boolean;
   onClose: () => void;
   onSubmit: (operation: string, outputFormat: string, files: File[], jobName: string) => Promise<void>;
+  onSubmittingChange?: (isSubmitting: boolean) => void;
 }
 
 interface FileItem {
@@ -33,7 +34,7 @@ function uid(prefix = 'file') {
   return `${prefix}-${lastId}`;
 }
 
-const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
+const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: IngestSidePanelProps) => {
   const [jobName, setJobName] = useState('');
   const [operation, setOperation] = useState('ingestion');
   const [outputFormat, setOutputFormat] = useState('json');
@@ -77,8 +78,9 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
   }, []);
 
   const handleFileDelete = useCallback((_event: any, { uuid }: { uuid: string }) => {
+    if (isSubmitting) return; // Prevent deletion during submission
     setFileItems((prev) => prev.filter((item) => item.uuid !== uuid));
-  }, []);
+  }, [isSubmitting]);
 
   const handleSubmit = async () => {
     setError(null);
@@ -93,6 +95,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
     }
     
     setIsSubmitting(true);
+    onSubmittingChange?.(true);
     try {
       const files = fileItems.map((item) => item.file);
       await onSubmit(operation, outputFormat, files, jobName);
@@ -101,6 +104,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
       setError(err instanceof Error ? err.message : 'An error occurred during submission');
     } finally {
       setIsSubmitting(false);
+      onSubmittingChange?.(false);
     }
   };
 
@@ -180,6 +184,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
             required
             invalid={error?.includes('job name')}
             invalidText={error?.includes('job name') ? error : ''}
+            disabled={isSubmitting}
           />
         </div>
 
@@ -190,16 +195,19 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
             valueSelected={operation}
             onChange={(value) => setOperation(value as string)}
             orientation="horizontal"
+            disabled={isSubmitting}
           >
             <RadioButton
               labelText="Ingestion"
               value="ingestion"
               id="operation-ingestion"
+              disabled={isSubmitting}
             />
             <RadioButton
               labelText="Digitization only"
               value="digitization"
               id="operation-digitization"
+              disabled={isSubmitting}
             />
           </RadioButtonGroup>
         </div>
@@ -213,21 +221,25 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
               valueSelected={outputFormat}
               onChange={(value) => setOutputFormat(value as string)}
               orientation="horizontal"
+              disabled={isSubmitting}
             >
               <RadioButton
                 labelText="JSON"
                 value="json"
                 id="format-json"
+                disabled={isSubmitting}
               />
               <RadioButton
                 labelText="Markdown"
                 value="md"
                 id="format-markdown"
+                disabled={isSubmitting}
               />
               <RadioButton
                 labelText="Text"
                 value="txt"
                 id="format-text"
+                disabled={isSubmitting}
               />
             </RadioButtonGroup>
           </div>
@@ -251,6 +263,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit }: IngestSidePanelProps) => {
             multiple
             onChange={handleFileAdd}
             disableLabelChanges
+            disabled={isSubmitting}
           />
           <div className={styles.fileContainer}>
             {fileItems.map((item) => (

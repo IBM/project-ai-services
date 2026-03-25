@@ -68,6 +68,7 @@ interface JobMonitorState {
   csvFileName: string;
   exportStatus: ExportStatus;
   exportErrorMessage: string;
+  isIngestSubmitting: boolean;
 }
 
 type JobMonitorAction =
@@ -96,7 +97,8 @@ type JobMonitorAction =
   | { type: 'SET_CSV_FILENAME'; payload: string }
   | { type: 'SET_EXPORT_STATUS'; payload: ExportStatus }
   | { type: 'SET_EXPORT_ERROR'; payload: string }
-  | { type: 'CLEAR_EXPORT_ERROR' };
+  | { type: 'CLEAR_EXPORT_ERROR' }
+  | { type: 'SET_INGEST_SUBMITTING'; payload: boolean };
 
 const initialState: JobMonitorState = {
   jobs: [],
@@ -121,6 +123,7 @@ const initialState: JobMonitorState = {
   csvFileName: '',
   exportStatus: 'idle',
   exportErrorMessage: '',
+  isIngestSubmitting: false,
 };
 
 const jobMonitorReducer = (
@@ -259,6 +262,8 @@ const jobMonitorReducer = (
       };
     case 'CLEAR_EXPORT_ERROR':
       return { ...state, exportErrorMessage: '' };
+    case 'SET_INGEST_SUBMITTING':
+      return { ...state, isIngestSubmitting: action.payload };
     default:
       return state;
   }
@@ -674,6 +679,10 @@ const JobMonitorPage = () => {
   return (
     <Theme theme={effectiveTheme}>
       <div className={styles.jobMonitorPage}>
+        {/* Overlay when submitting */}
+        {state.isIngestSubmitting && (
+          <div className={styles.submittingOverlay} />
+        )}
         {state.toastOpen && (
           <div className={styles.notificationWrapper}>
             <ActionableNotification
@@ -877,6 +886,9 @@ const JobMonitorPage = () => {
           open={state.isIngestSidePanelOpen}
           onClose={() => dispatch({ type: 'SET_INGEST_SIDE_PANEL_OPEN', payload: false })}
           onSubmit={handleIngestSubmit}
+          onSubmittingChange={(isSubmitting) =>
+            dispatch({ type: 'SET_INGEST_SUBMITTING', payload: isSubmitting })
+          }
         />
 
         {/* Job Details Side Panel */}
