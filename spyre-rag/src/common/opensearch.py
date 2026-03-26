@@ -307,14 +307,14 @@ class OpensearchVectorStore(VectorStore):
             mode = "hybrid"
             logger.debug("Mode not specified, defaulting to 'hybrid'")
 
-        limit = top_k * 3
+        limit = top_k * 3 
         logger.debug(f"Search mode: {mode}, limit: {limit}")
         params = {}
 
         if mode == "dense":
             # 1. Define the k-NN search body
             search_body = {
-                "size": limit,
+                "size": top_k,
                 "_source": ["chunk_id", "text", "metadata"],
                 "query": {
                     "knn": {
@@ -333,7 +333,7 @@ class OpensearchVectorStore(VectorStore):
             # OpenSearch native Sparse Search (BM25 or Neural Sparse)
             # Standard full-text match for sparse/keyword logic
             search_body = {
-                "size": limit,
+                "size": top_k,
                 "_source": ["chunk_id", "text", "metadata"],
                 "query": {
                     "bool": {
