@@ -38,7 +38,7 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
   
   return (
     <>
-      <Header aria-label="IBM Digitize Service" className={styles.header}>
+      <Header aria-label="IBM AI Services" className={styles.header}>
           <HeaderMenuButton
             aria-label="Open menu"
             onClick={(e) => {
@@ -51,7 +51,7 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
           />
 
           <HeaderName prefix="IBM" href="#" onClick={handleLogoClick} className={styles.headerName}>
-            Digitize Service
+            AI Services
           </HeaderName>
 
           <HeaderGlobalBar>
