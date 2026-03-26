@@ -47,9 +47,6 @@ def create_llm_session(pool_maxsize, pool_connections: int = 2, pool_block: bool
         SESSION = session
 
 def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, pdf_path, batch_size=32):
-    if SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
     all_prompts = [settings.prompts.llm_classify.format(text=item.strip()) for item in text_blocks]
     decisions = []
 
@@ -112,8 +109,6 @@ def summarize_table(table_html, gen_model, llm_endpoint, pdf_path, max_workers=3
             executor.submit(summarize_single_table, prompt, gen_model, llm_endpoint): idx
             for idx, prompt in enumerate(all_prompts)
         }
-
-        completed_futures = as_completed(futures)
         for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts), desc=f"Summarizing tables of '{pdf_path}'"):
             idx = futures[future]
             summaries[idx] = future.result()
