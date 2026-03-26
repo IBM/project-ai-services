@@ -95,13 +95,16 @@ class OpensearchVectorStore(VectorStore):
         index_body = {
             "settings": {
                 "index": {
-                    "knn": True,
-                    "knn.algo_param.ef_search": 100
+                    "knn": True,  # Enable k-NN search functionality
+                    "knn.algo_param.ef_search": 100  # Number of candidates to consider during search (higher = more accurate but slower)
                 }
             },
             "mappings": {
                 "properties": {
+                    # Unique identifier for each chunk, generated from doc_id and content hash
                     "chunk_id": {"type": "long"},
+                    
+                    # Vector embedding field for semantic search
                     "embedding": {
                         "type": "knn_vector",
                         "dimension": dim,
@@ -115,15 +118,28 @@ class OpensearchVectorStore(VectorStore):
                             }
                         }
                     },
-                     "page_content": {
+                    
+                    # The actual text content of the chunk for keyword search and retrieval
+                    "text": {
                         "type": "text",
                         "analyzer": "standard"
                     },
-                    "filename": {"type": "keyword"},
-                    "doc_id": {"type": "keyword"},
-                    "type": {"type": "keyword"},
-                    "source": {"type": "keyword"},
-                    "language": {"type": "keyword"}
+                    
+                    # Metadata container for document attributes
+                    "metadata": {
+                        "dynamic": "true",  # Allow additional metadata fields to be added dynamically
+                        "properties": {
+                            "filename": {"type": "keyword"},  # Original filename
+                            "doc_id": {"type": "keyword"},  # Unique document identifier (UUID)
+                            "type": {"type": "keyword"},  # Document type (e.g., text, table)
+                            "source": {"type": "keyword"},  # Source of the text e.g: Chapter -> Section etc..
+                            "language": {"type": "keyword"},  # Language code (e.g., 'en', 'de') for language-specific filtering
+                            "page_number": {"type": "integer"},  # Page number where this chunk originated
+                            "chunk_index": {"type": "integer"},  # Sequential index of this chunk within the document
+                            "total_chunks": {"type": "integer"},  # Total number of chunks in the parent document
+                            "created_at": {"type": "date"}  # Timestamp when the chunk was indexed
+                        }
+                    }
                 }
             }
         }
@@ -199,18 +215,33 @@ class OpensearchVectorStore(VectorStore):
                 doc_id = doc.get("doc_id") or fn # Fallback to filename if UUID missing
                 cid = generate_chunk_id(doc_id, pc)
 
+                # Build metadata object with all fields
+                metadata = {
+                    "filename": fn,
+                    "doc_id": doc_id,
+                    "type": doc.get("type", ""),
+                    "source": doc.get("source", ""),
+                    "language": doc.get("language", "")
+                }
+                
+                # Add optional fields if they exist
+                if doc.get("page_number") is not None:
+                    metadata["page_number"] = doc.get("page_number")
+                if doc.get("chunk_index") is not None:
+                    metadata["chunk_index"] = doc.get("chunk_index")
+                if doc.get("total_chunks") is not None:
+                    metadata["total_chunks"] = doc.get("total_chunks")
+                if doc.get("created_at") is not None:
+                    metadata["created_at"] = doc.get("created_at")
+
                 actions.append({
                     "_index": self.index_name,
                     "_id": str(cid),
                     "_source": {
                         "chunk_id": cid,
                         "embedding": emb.tolist() if isinstance(emb, np.ndarray) else emb,
-                        "page_content": pc,
-                        "filename": fn,
-                        "doc_id": doc_id,
-                        "type": doc.get("type", ""),
-                        "source": doc.get("source", ""),
-                        "language": doc.get("language", "")
+                        "text": pc,
+                        "metadata": metadata
                     }
                 })
 
@@ -284,7 +315,7 @@ class OpensearchVectorStore(VectorStore):
             # 1. Define the k-NN search body
             search_body = {
                 "size": limit,
-                "_source": ["chunk_id", "page_content", "filename", "doc_id", "type", "source", "language"],
+                "_source": ["chunk_id", "text", "metadata"],
                 "query": {
                     "knn": {
                         "embedding": {
@@ -292,7 +323,7 @@ class OpensearchVectorStore(VectorStore):
                             "k": limit,
                             # Efficient pre-filtering
                             "filter": {
-                                "term": {"language": language}
+                                "term": {"metadata.language": language}
                             } if language else {"match_all": {}}
                         }
                     }
@@ -303,14 +334,14 @@ class OpensearchVectorStore(VectorStore):
             # Standard full-text match for sparse/keyword logic
             search_body = {
                 "size": limit,
-                "_source": ["chunk_id", "page_content", "filename", "doc_id", "type", "source", "language"],
+                "_source": ["chunk_id", "text", "metadata"],
                 "query": {
                     "bool": {
                         "must": [
-                            {"match": {"page_content": query}}
+                            {"match": {"text": query}}
                         ],
                         "filter": [
-                            {"term": {"language": language}}
+                            {"term": {"metadata.language": language}}
                         ] if language else []
                     }
                 }
@@ -319,7 +350,7 @@ class OpensearchVectorStore(VectorStore):
             # OpenSearch Hybrid Query combines Dense (k-NN) and Sparse (Match)
             search_body = {
                 "size": top_k, # Final number of results after fusion
-                "_source": ["chunk_id", "page_content", "filename", "doc_id", "type", "source", "language"],
+                "_source": ["chunk_id", "text", "metadata"],
                 "query": {
                     "hybrid": {
                         "queries": [
@@ -329,15 +360,15 @@ class OpensearchVectorStore(VectorStore):
                                     "embedding": {
                                         "vector": query_vector.tolist() if isinstance(query_vector, np.ndarray) else query_vector,
                                         "k": limit,
-                                        "filter": {"term": {"language": language}} if language else None
+                                        "filter": {"term": {"metadata.language": language}} if language else None
                                     }
                                 }
                             },
                             # 2. Sparse Component (BM25 Lexical)
                             {
                                 "bool": {
-                                    "must": [{"match": {"page_content": query}}],
-                                    "filter": [{"term": {"language": language}}] if language else []
+                                    "must": [{"match": {"text": query}}],
+                                    "filter": [{"term": {"metadata.language": language}}] if language else []
                                 }
                             }
                         ]
@@ -363,10 +394,21 @@ class OpensearchVectorStore(VectorStore):
         # Format results
         results = []
         for idx, hit in enumerate(response["hits"]["hits"]):
-            metadata = hit["_source"]
-            metadata["score"] = hit["_score"] # unified search score
-            results.append(metadata)
-            logger.debug(f"Result {idx+1}: doc_id={metadata.get('doc_id', 'N/A')}, score={hit['_score']:.4f}")
+            source = hit["_source"]
+            # Flatten the structure for backward compatibility
+            result = {
+                "chunk_id": source.get("chunk_id"),
+                "text": source.get("text"),
+                "page_content": source.get("text"),  # Alias for backward compatibility
+                "score": hit["_score"]
+            }
+            # Add metadata fields
+            if "metadata" in source:
+                result.update(source["metadata"])
+                result["metadata"] = source["metadata"]  # Keep nested structure too
+            
+            results.append(result)
+            logger.debug(f"Result {idx+1}: doc_id={result.get('doc_id', 'N/A')}, score={hit['_score']:.4f}")
 
         logger.debug(f"Search operation completed successfully with {len(results)} results")
         return results
@@ -409,11 +451,11 @@ class OpensearchVectorStore(VectorStore):
             return 0
 
         # Construct terms query for batch deletion
-        # 'doc_id' must be the keyword field in your mapping
+        # 'metadata.doc_id' is the nested keyword field in the mapping
         delete_query = {
             "query": {
                 "terms": {
-                    "doc_id": doc_ids
+                    "metadata.doc_id": doc_ids
                 }
             }
         }
@@ -459,7 +501,7 @@ class OpensearchVectorStore(VectorStore):
         delete_query = {
             "query": {
                 "term": {
-                    "doc_id": str(doc_id).strip()
+                    "metadata.doc_id": str(doc_id).strip()
                 }
             }
         }
