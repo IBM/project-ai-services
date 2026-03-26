@@ -33,8 +33,8 @@ ingest:
 opensearch:
   # @hidden
   image: icr.io/ppc64le-oss/opensearch-ppc64le:3.3.0
-  # @description Sets the memory limit for the Opensearch service(Default: 4Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
-  memoryLimit: 4Gi
+  # @description Sets the memory limit for the Opensearch service(Default: 8Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
+  memoryLimit: 8Gi
   auth:
     username: "admin"
     # @description Password for OpenSearch authentication. Must be at least 15 characters and contain at least one uppercase letter, one lowercase letter, one digit, and one special character. Avoid common words, predictable patterns, or dictionary terms. Use this to override the default admin password.

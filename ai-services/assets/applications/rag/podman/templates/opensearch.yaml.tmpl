@@ -25,7 +25,7 @@ spec:
         - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
           value: "{{ .Values.opensearch.auth.password }}"
         - name: OPENSEARCH_JAVA_OPTS
-          value: "-XX:-UseSuperWord -XX:TieredStopAtLevel=1"
+          value: "-Xms4g -Xmx4g -XX:MaxDirectMemorySize=2g -XX:-UseSuperWord -XX:TieredStopAtLevel=1"
         
       ports:
         - name: os-client-port
