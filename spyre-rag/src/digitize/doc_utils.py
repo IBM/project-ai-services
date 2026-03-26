@@ -19,7 +19,7 @@ logging.getLogger('docling').setLevel(logging.CRITICAL)
 
 # Import project modules after setting log levels
 from common.thread_utils import ContextAwareThreadPoolExecutor
-from common.llm_utils import create_llm_session, summarize_and_classify_tables, tokenize_with_llm
+from common.llm_utils import create_llm_session, classify_text_with_llm, summarize_table, tokenize_with_llm
 from common.misc_utils import get_logger, text_suffix, table_suffix, chunk_suffix
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.status import (
@@ -131,7 +131,7 @@ def process_text(converted_doc, pdf_path, out_path):
 
     process_time = time.time() - t0
     out_path.write_text(json.dumps(structured_output, indent=2), encoding="utf-8")
-        
+
     return page_count, process_time
 
 def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
@@ -144,7 +144,7 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
         logger.debug(f"No tables found in '{pdf_path}'")
         out_path.write_text(json.dumps({}, indent=2), encoding="utf-8")
         return table_count, process_time
-    
+
     table_dict = {}
     for table_ix, table in enumerate(tqdm_wrapper(converted_doc.tables, desc=f"Processing table content of '{pdf_path}'")):
         table_dict[table_ix] = {}
@@ -154,7 +154,9 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
     table_htmls = [table_dict[key]["html"] for key in sorted(table_dict)]
     table_captions_list = [table_dict[key]["caption"] for key in sorted(table_dict)]
 
-    table_summaries, decisions = summarize_and_classify_tables(table_htmls, gen_model, gen_endpoint, pdf_path)
+    table_summaries = summarize_table(table_htmls, gen_model, gen_endpoint, pdf_path)
+    decisions = classify_text_with_llm(table_summaries, gen_model, gen_endpoint, pdf_path)
+
     filtered_table_dicts = {
         idx: {
             'html': html,
@@ -343,7 +345,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     })
                     batch_stats[path]["timings"]["processing"] = round(float(total_processing_time or 0), 2)
                     batch_table_paths.append(tab_json)
-                   
+
                     if doc_id is not None:
                         logger.debug(f"Processing Done: updating doc & job metadata for document: {doc_id}")
                         status_mgr.update_doc_metadata(doc_id, {
@@ -607,7 +609,7 @@ def chunk_single_file(input_path, pdf_path, out_path, emb_endpoint, max_tokens=5
     try:
         with open(input_path, "r") as f:
             data = json.load(f)
-            
+
             font_size_levels = collect_header_font_sizes(data)
 
             chunks = []

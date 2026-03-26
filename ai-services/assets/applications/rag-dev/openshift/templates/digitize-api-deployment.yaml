@@ -68,6 +68,14 @@ spec:
                   key: password
             - name: LOG_LEVEL
               value: "{{ .Values.digitize.log_level }}"
+            - name: OMP_NUM_THREADS
+              value: "4"
+            - name: MKL_NUM_THREADS
+              value: "4"
+            - name: DOCLING_NUM_THREADS
+              value: "4"
+            - name: OPENBLAS_NUM_THREADS
+              value: "1"
           ports:
             - containerPort: 4000
               protocol: TCP
@@ -89,10 +97,10 @@ spec:
             failureThreshold: 3
           resources:
             requests:
-              cpu: "8"
+              cpu: "16"
               memory: "50Gi"
             limits:
-              cpu: "12"
+              cpu: "16"
               memory: "50Gi"
           volumeMounts:
             - mountPath: /var/cache

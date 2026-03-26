@@ -25,3 +25,10 @@ spec:
       storageUri: {{ .Values.embedding.storageUri }}
       args:
       - --served-model-name=ibm-granite/granite-embedding-278m-multilingual
+    resources:
+      limits:
+        cpu: "8"
+        memory: "4Gi"
+      requests:
+        cpu: "8"
+        memory: "4Gi"

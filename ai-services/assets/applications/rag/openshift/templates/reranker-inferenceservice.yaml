@@ -27,8 +27,12 @@ spec:
           value: "1024"
       resources:
         limits:
+          cpu: "8"
+          memory: "4Gi"
           ibm.com/spyre_pf: "1"
         requests:
+          cpu: "8"
+          memory: "4Gi"
           ibm.com/spyre_pf: "1"
       runtime: spyre-temp
       storageUri: {{ .Values.reranker.storageUri }}

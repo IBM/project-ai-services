@@ -12,6 +12,34 @@
         "storage": {
           "type": "string",
           "pattern": "^[0-9]+(Ki|Mi|Gi|Ti|Pi|Ei)$"
+        },
+        "auth": {
+          "type": "object",
+          "properties": {
+            "password": {
+              "type": "string",
+              "minLength": 15,
+              "allOf": [
+                {
+                  "pattern": ".*[a-z].*",
+                  "description": "Must contain at least one lowercase letter"
+                },
+                {
+                  "pattern": ".*[A-Z].*",
+                  "description": "Must contain at least one uppercase letter"
+                },
+                {
+                  "pattern": ".*[0-9].*",
+                  "description": "Must contain at least one digit"
+                },
+                {
+                  "pattern": ".*[@$!%*?&#^()_+\\-=\\[\\]{};':\"\\\\|,.<>/`~].*",
+                  "description": "Must contain at least one special character"
+                }
+              ],
+              "description": "Password must be at least 15 characters and contain at least one uppercase letter, one lowercase letter, one digit, and one special character"
+            }
+          }
         }
       }
     }
