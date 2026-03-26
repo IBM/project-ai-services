@@ -23,7 +23,7 @@ Day N:
 {{- if ne .DIGITIZE_UI_PORT "" }}
 {{- if eq .DIGITIZE_UI_STATUS "running" }}
 
-- Digitize UI is available to use at http://{{ .HOST_IP }}:{{ .DIGITIZE_UI_PORT }}. Use this web interface to upload and manage documents for the RAG application.
+- Add documents to your RAG application using the Digitize UI: http://{{ .HOST_IP }}:{{ .DIGITIZE_UI_PORT }}.
 {{- else }}
 
 - Digitize UI is unavailable to use. Please make sure '{{ .AppName }}--digitize-api' pod is running.
