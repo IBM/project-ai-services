@@ -6,6 +6,8 @@ metadata:
     ai-services.io/application: "{{ .AppName }}"
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
+  annotations:
+    io.podman.annotations.pids-limit/opensearch: "4096"
 spec:
   initContainers:
     - name: fix-permissions
