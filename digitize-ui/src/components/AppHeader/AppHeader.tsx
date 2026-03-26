@@ -98,7 +98,15 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
 
             <h5>Need More Help?</h5>
             <p>
-              For detailed documentation and support, please refer to the project repository or contact your system administrator.
+              For detailed documentation and support, please visit the{' '}
+              <a
+                href="https://www.ibm.com/docs/en/aiservices/2025.12.0?topic=services-introduction"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                IBM AI Services documentation
+              </a>{' '}
+              or contact your system administrator.
             </p>
           </div>
         </Modal>
