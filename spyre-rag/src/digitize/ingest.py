@@ -71,12 +71,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                     # Mark this document as failed and continue with remaining documents
                     success = False
                     failed_count += 1
-                    logger.error(f"Exception during indexing for document {doc_id}: {str(e)}")
-                    logger.error(f"Indexing failed: updating doc metadata to FAILED for document: {doc_id}")
-
-                    if status_mgr and doc_id_dict:
-                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Failed to index document chunks: {str(e)}")
-                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+                    logger.error(f"Failed to index document {doc_id}: {str(e)}")
 
                     # Reinitialize vector store and embedder after a failure to ensure clean state for next document
                     # This prevents cascading failures due to corrupted connection state
