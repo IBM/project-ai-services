@@ -22,7 +22,10 @@ from common.thread_utils import ContextAwareThreadPoolExecutor
 from common.llm_utils import create_llm_session, summarize_and_classify_tables, tokenize_with_llm
 from common.misc_utils import get_logger, text_suffix, table_suffix, chunk_suffix
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
-from digitize.status import StatusManager
+from digitize.status import (
+    StatusManager,
+    get_utc_timestamp
+)
 from digitize.types import DocStatus, JobStatus, OutputFormat
 import digitize.config as config
 
@@ -710,8 +713,7 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn):
     with open(in_tab_f, "r") as f:
         tab_data = json.load(f)
 
-    from datetime import datetime
-    created_at = datetime.utcnow().isoformat() + "Z"
+    created_at = get_utc_timestamp()
 
     txt_docs = []
     if len(txt_data):
@@ -746,16 +748,13 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn):
         tab_data = list(tab_data.values())
         txt_count = len(txt_docs)
         for tab_idx, block in enumerate(tab_data):
-            # Extract page number from page field
-            page_number = block.get("page")
-            
+            # TODO: add page_number for the tables content            
             tab_docs.append({
                 "page_content": f"{block.get('caption')}\n\n{block.get('summary')}" if block.get("caption") else block.get("summary"),
                 "filename": orig_fn,
                 "type": "table",
                 "source": block.get("html"),
                 "language": "en",
-                "page_number": page_number,
                 "chunk_index": txt_count + tab_idx,
                 "created_at": created_at
             })

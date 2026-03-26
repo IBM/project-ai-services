@@ -95,13 +95,16 @@ class OpensearchVectorStore(VectorStore):
         index_body = {
             "settings": {
                 "index": {
-                    "knn": True,
-                    "knn.algo_param.ef_search": 100
+                    "knn": True,  # Enable k-NN search functionality
+                    "knn.algo_param.ef_search": 100  # Number of candidates to consider during search (higher = more accurate but slower)
                 }
             },
             "mappings": {
                 "properties": {
+                    # Unique identifier for each chunk, generated from doc_id and content hash
                     "chunk_id": {"type": "long"},
+                    
+                    # Vector embedding field for semantic search
                     "embedding": {
                         "type": "knn_vector",
                         "dimension": dim,
@@ -115,22 +118,26 @@ class OpensearchVectorStore(VectorStore):
                             }
                         }
                     },
+                    
+                    # The actual text content of the chunk for keyword search and retrieval
                     "text": {
                         "type": "text",
                         "analyzer": "standard"
                     },
+                    
+                    # Metadata container for document attributes
                     "metadata": {
-                        "dynamic": "true",
+                        "dynamic": "true",  # Allow additional metadata fields to be added dynamically
                         "properties": {
-                            "filename": {"type": "keyword"},
-                            "doc_id": {"type": "keyword"},
-                            "type": {"type": "keyword"},
-                            "source": {"type": "keyword"},
-                            "language": {"type": "keyword"},
-                            "page_number": {"type": "integer"},
-                            "chunk_index": {"type": "integer"},
-                            "total_chunks": {"type": "integer"},
-                            "created_at": {"type": "date"}
+                            "filename": {"type": "keyword"},  # Original filename
+                            "doc_id": {"type": "keyword"},  # Unique document identifier (UUID)
+                            "type": {"type": "keyword"},  # Document type (e.g., text, table)
+                            "source": {"type": "keyword"},  # Source of the text e.g: Chapter -> Section etc..
+                            "language": {"type": "keyword"},  # Language code (e.g., 'en', 'de') for language-specific filtering
+                            "page_number": {"type": "integer"},  # Page number where this chunk originated
+                            "chunk_index": {"type": "integer"},  # Sequential index of this chunk within the document
+                            "total_chunks": {"type": "integer"},  # Total number of chunks in the parent document
+                            "created_at": {"type": "date"}  # Timestamp when the chunk was indexed
                         }
                     }
                 }
