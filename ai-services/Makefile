@@ -30,8 +30,7 @@ PLATFORMS := \
 	darwin/amd64 \
 	darwin/arm64 \
 	linux/amd64 \
-	linux/ppc64le \
-	linux/arm64
+	linux/ppc64le
 
 BUILD_CMD = CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build $(BUILDFLAGS) \
      -o $(BIN)/ai-services-$(GOOS)-$(GOARCH) \
