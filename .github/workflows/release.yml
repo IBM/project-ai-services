@@ -72,7 +72,7 @@ jobs:
             
             **macOS:**
             - `ai-services-darwin-amd64` - Intel-based Macs
-            - `ai-services-darwin-arm64` - Apple Silicon Macs (M1/M2/M3)
+            - `ai-services-darwin-arm64` - Apple Silicon Macs (M1/M2/M3/M4 and later)
             
             **Linux:**
             - `ai-services-linux-amd64` - x86_64 Linux
