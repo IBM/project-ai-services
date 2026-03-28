@@ -77,11 +77,10 @@ jobs:
             **Linux:**
             - `ai-services-linux-amd64` - x86_64 Linux
             - `ai-services-linux-ppc64le` - PowerPC 64-bit Little Endian Linux (Podman runtime supported)
-            - `ai-services-linux-arm64` - ARM64 Linux
             
             ### Platform Support
             - **Podman runtime**: Only supported on `linux/ppc64le`
-            - **OpenShift runtime**: Supported on all platforms
+            - **OpenShift runtime**: Supported on all platforms (Client)
             
             ### 🔐 Signature Verification
             
