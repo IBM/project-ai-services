@@ -96,7 +96,7 @@ RapidFuzz==3.13.0
 rapidocr==3.7.0
 referencing==0.37.0
 regex==2024.11.6
-requests==2.32.5
+requests==2.33.0
 rich==14.3.3
 rich-toolkit==0.19.7
 rignore==0.7.6
