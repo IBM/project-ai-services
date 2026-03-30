@@ -19,21 +19,9 @@ RUN dnf update ${DNF_FLAGS} -y \
   fi \
   && rm -rf /var/cache/dnf && dnf clean all -y
 
-FROM registry.access.redhat.com/ubi9/ubi:9.7 as servicereport_builder
-
-ARG SR_COMMIT=2a57a3a4b14d23981b4add77670bcea90cf69d77
-ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
-
-RUN dnf update ${DNF_FLAGS} -y && \
-  dnf install ${DNF_FLAGS} -y git make && \
-  git clone https://github.com/linux-ras/ServiceReport.git /tmp/servicereport && \
-  cd /tmp/servicereport && \
-  git checkout ${SR_COMMIT} && \
-  make && \
-  rm -rf /var/cache/dnf && dnf clean all -y
-
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
 
+ARG SR_COMMIT=2a57a3a4b14d23981b4add77670bcea90cf69d77
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 
 ENV VIRTUAL_ENV=/opt/venv
@@ -42,12 +30,17 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 COPY --from=tools_builder /opt/venv /opt/venv
 
 RUN microdnf update ${DNF_FLAGS} -y && \
-  microdnf install ${DNF_FLAGS} -y python3.12 && \
+  microdnf install ${DNF_FLAGS} -y python3.12 python3.12-pip && \
   ARCH=$(uname -m) && \
   if [ "$ARCH" = "ppc64le" ]; then \
-  echo "Installing ServiceReport runtime dependencies for ppc64le..." && \
-  microdnf install ${DNF_FLAGS} -y systemd kmod sos python3-pyudev; \
+  echo "Building and installing ServiceReport for ppc64le..." && \
+  microdnf install ${DNF_FLAGS} -y systemd kmod sos python3-pyudev git make && \
+  pip3.12 install setuptools && \
+  git clone https://github.com/linux-ras/ServiceReport.git /tmp/servicereport && \
+  cd /tmp/servicereport && \
+  git checkout ${SR_COMMIT} && \
+  make && \
+  make install && \
+  cd / && rm -rf /tmp/servicereport; \
   fi && \
   microdnf clean all
-
-COPY --from=servicereport_builder /tmp/servicereport/servicereport /usr/local/bin/servicereport
