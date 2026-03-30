@@ -72,32 +72,22 @@ jobs:
             
             **macOS:**
             - `ai-services-darwin-amd64` - Intel-based Macs
-            - `ai-services-darwin-arm64` - Apple Silicon Macs (M1/M2/M3)
+            - `ai-services-darwin-arm64` - Apple Silicon Macs (M1/M2/M3/M4 and later)
             
             **Linux:**
             - `ai-services-linux-amd64` - x86_64 Linux
             - `ai-services-linux-ppc64le` - PowerPC 64-bit Little Endian Linux (Podman runtime supported)
-            - `ai-services-linux-arm64` - ARM64 Linux
             
             ### Platform Support
             - **Podman runtime**: Only supported on `linux/ppc64le`
-            - **OpenShift runtime**: Supported on all platforms
+            - **OpenShift runtime**: Supported on all platforms (Client)
             
             ### 🔐 Signature Verification
             
-            All binaries are signed with Cosign. To verify the authenticity of a binary:
+            All binaries and container images are signed with Cosign for enhanced security and supply chain integrity.
             
-            1. Download the binary, its signature (`.sig` file), and the public key (`cosign.pub`)
-            2. Install [Cosign](https://docs.sigstore.dev/cosign/overview/)
-            3. Verify the signature:
-            ```bash
-            cosign verify-blob \
-              --key cosign.pub \
-              --signature <binary-name>.sig \
-              --insecure-ignore-tlog=true \
-              <binary-name>
-            ```
-            
-            See the [Installation Guide](https://github.com/IBM/project-ai-services/blob/main/docs/INSTALLATION.md) for platform-specific verification examples.
+            📖 **See the [Installation Guide](https://github.com/IBM/project-ai-services/blob/main/docs/INSTALLATION.md) for:**
+            - Binary signature verification instructions
+            - Container image signature verification
           files: |
             ./release-assets/*

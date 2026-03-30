@@ -6,11 +6,10 @@ Complete installation instructions for AI Services across all supported platform
 
 1. [Supported Platforms](#supported-platforms)
 2. [Prerequisites](#prerequisites)
-3. [Installation by Platform](#installation-by-platform)
-   - [macOS (Intel)](#macos-intel)
-   - [macOS (Apple Silicon)](#macos-apple-silicon)
-   - [Linux (x86_64/AMD64)](#linux-x86_64amd64)
-   - [Linux (ppc64le/Power)](#linux-ppc64lepower)
+3. [Quick Installation](#quick-installation)
+4. [Verified Installation with Cosign](#verified-installation-with-cosign)
+5. [Container Image Verification](#container-image-verification)
+6. [Additional Resources](#additional-resources)
 
 ---
 
@@ -48,214 +47,146 @@ AI Services provides pre-built binaries for the following platforms:
 
 ---
 
-## Installation by Platform
+## Quick Installation
+
+Choose your platform and run the appropriate commands:
 
 ### macOS (Intel)
 
-#### Quick Install
-
-```bash
-# Set version (check latest at https://github.com/IBM/project-ai-services/releases)
-VERSION="v0.0.2"
-
-# Download binary
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-amd64"
-
-# Make executable
-chmod +x ai-services-darwin-amd64
-
-# Move to system path
-sudo mv ai-services-darwin-amd64 /usr/local/bin/ai-services
-
-# Verify installation
-ai-services version
-```
-
-#### Verified Install (with Cosign)
-
 ```bash
 VERSION="v0.0.2"
-
-# Download binary, signature, and public key
 curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-amd64"
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-amd64.sig"
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/cosign.pub"
-
-# Install Cosign (if not already installed)
-brew install cosign
-
-# Verify signature using public key
-cosign verify-blob \
-  --key cosign.pub \
-  --signature ai-services-darwin-amd64.sig \
-  --insecure-ignore-tlog=true \
-  ai-services-darwin-amd64
-
-# Install
 chmod +x ai-services-darwin-amd64
 sudo mv ai-services-darwin-amd64 /usr/local/bin/ai-services
-
-# Verify
 ai-services version
 ```
-
-
----
 
 ### macOS (Apple Silicon)
 
-#### Quick Install
-
 ```bash
 VERSION="v0.0.2"
-
-# Download binary
 curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-arm64"
-
-# Make executable
-chmod +x ai-services-darwin-arm64
-
-# Move to system path
-sudo mv ai-services-darwin-arm64 /usr/local/bin/ai-services
-
-# Verify installation
-ai-services version
-```
-
-#### Verified Install (with Cosign)
-
-```bash
-VERSION="v0.0.2"
-
-# Download binary, signature, and public key
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-arm64"
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-arm64.sig"
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/cosign.pub"
-
-# Install Cosign
-brew install cosign
-
-# Verify signature using public key
-cosign verify-blob \
-  --key cosign.pub \
-  --signature ai-services-darwin-arm64.sig \
-  --insecure-ignore-tlog=true \
-  ai-services-darwin-arm64
-
-# Install
 chmod +x ai-services-darwin-arm64
 sudo mv ai-services-darwin-arm64 /usr/local/bin/ai-services
-
-# Verify
 ai-services version
 ```
-
----
 
 ### Linux (x86_64/AMD64)
 
-#### Quick Install
-
 ```bash
 VERSION="v0.0.2"
-
-# Download binary
 curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-linux-amd64"
-
-# Make executable
-chmod +x ai-services-linux-amd64
-
-# Move to system path
-sudo mv ai-services-linux-amd64 /usr/local/bin/ai-services
-
-# Verify installation
-ai-services version
-```
-
-#### Verified Install (with Cosign)
-
-```bash
-VERSION="v0.0.2"
-
-# Download binary, signature, and public key
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-linux-amd64"
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-linux-amd64.sig"
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/cosign.pub"
-
-# Install Cosign
-curl -LO https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
-chmod +x cosign-linux-amd64
-sudo mv cosign-linux-amd64 /usr/local/bin/cosign
-
-# Verify signature using public key
-cosign verify-blob \
-  --key cosign.pub \
-  --signature ai-services-linux-amd64.sig \
-  --insecure-ignore-tlog=true \
-  ai-services-linux-amd64
-
-# Install
 chmod +x ai-services-linux-amd64
 sudo mv ai-services-linux-amd64 /usr/local/bin/ai-services
-
-# Verify
 ai-services version
 ```
-
----
 
 ### Linux (ppc64le/Power)
 
 **Optimized for IBM Power Systems and IBM Spyre™**
 
-#### Quick Install
-
 ```bash
 VERSION="v0.0.2"
-
-# Download binary
 curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-linux-ppc64le"
-
-# Make executable
 chmod +x ai-services-linux-ppc64le
-
-# Move to system path
 sudo mv ai-services-linux-ppc64le /usr/local/bin/ai-services
-
-# Verify installation
 ai-services version
 ```
 
-#### Verified Install (with Cosign)
+---
 
+## Verified Installation with Cosign
+
+For enhanced security, verify binary signatures before installation.
+
+### Step 1: Install Cosign
+
+**macOS:**
 ```bash
-VERSION="v0.0.2"
+brew install cosign
+```
 
-# Download binary, signature, and public key
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-linux-ppc64le"
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-linux-ppc64le.sig"
-curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/cosign.pub"
+**Linux (x86_64/AMD64):**
+```bash
+curl -LO https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
+chmod +x cosign-linux-amd64
+sudo mv cosign-linux-amd64 /usr/local/bin/cosign
+```
 
-# Install Cosign
+**Linux (ppc64le/Power):**
+```bash
 curl -LO https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-ppc64le
 chmod +x cosign-linux-ppc64le
 sudo mv cosign-linux-ppc64le /usr/local/bin/cosign
+```
 
-# Verify signature using public key
+### Step 2: Download and Verify Binary
+
+Replace `BINARY_NAME` with your platform's binary from the table above:
+
+```bash
+VERSION="v0.0.2"
+BINARY_NAME="ai-services-darwin-amd64"  # Change based on your platform
+
+# Download binary, signature, and public key
+curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/${BINARY_NAME}"
+curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/${BINARY_NAME}.sig"
+curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/cosign.pub"
+
+# Verify signature
 cosign verify-blob \
   --key cosign.pub \
-  --signature ai-services-linux-ppc64le.sig \
+  --signature ${BINARY_NAME}.sig \
   --insecure-ignore-tlog=true \
-  ai-services-linux-ppc64le
+  ${BINARY_NAME}
 
-# Install
-chmod +x ai-services-linux-ppc64le
-sudo mv ai-services-linux-ppc64le /usr/local/bin/ai-services
-
-# Verify
+# Install if verification succeeds
+chmod +x ${BINARY_NAME}
+sudo mv ${BINARY_NAME} /usr/local/bin/ai-services
 ai-services version
 ```
 
+---
+
+## Container Image Verification
+
+All AI Services container images are signed with Cosign for enhanced security and supply chain integrity.
+
+### List Available Container Images
+
+To see all available container images for a specific application:
+
+```bash
+# List images for RAG application
+ai-services application image list --runtime podman -t rag
+
+# List images for other applications
+ai-services application image list --runtime podman -t rag-cpu
+```
+
+### Verify Container Images
+
+Ensure Cosign is installed (see [Verified Installation with Cosign](#verified-installation-with-cosign) section).
+
+**Basic verification:**
+```bash
+# Download public key if needed
+curl -LO https://github.com/IBM/project-ai-services/releases/latest/download/cosign.pub
+
+# Verify any image (replace with your image:tag)
+cosign verify \
+  --key cosign.pub \
+  --insecure-ignore-tlog=true \
+  icr.io/ai-services/tools:0.6
+```
+
+**Expected output on success:**
+```
+Verification for icr.io/ai-services/tools:0.6 --
+The following checks were performed on each of these signatures:
+  - The cosign claims were validated
+  - The signatures were verified against the specified public key
+```
 
 ---
 
@@ -265,4 +196,4 @@ ai-services version
 - [Main README](../README.md) - Project overview and quick start
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - Contributing guidelines
 - [GitHub Releases](https://github.com/IBM/project-ai-services/releases) - Download binaries
-- [Cosign Documentation](https://docs.sigstore.dev/cosign/overview/) - Signature verification tool
+- [Cosign Documentation](https://docs.sigstore.dev/about/overview/) - Signature verification tool
