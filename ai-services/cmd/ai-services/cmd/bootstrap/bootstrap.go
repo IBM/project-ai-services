@@ -6,10 +6,16 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
+)
+
+var (
+	// Runtime type flag for bootstrap command.
+	runtimeType string
 )
 
 // BootstrapCmd represents the bootstrap command.
@@ -19,7 +25,17 @@ func BootstrapCmd() *cobra.Command {
 		Short:   "Initializes AI Services infrastructure",
 		Long:    bootstrapDescription(),
 		Example: bootstrapExample(),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
+			// Initialize runtime factory based on flag
+			rt := types.RuntimeType(runtimeType)
+			if !rt.Valid() {
+				return fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift'). Please specify runtime using --runtime flag", runtimeType)
+			}
+
+			vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
+			logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
+
 			// Check if podman runtime is being used on unsupported platform
 			return utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType())
 		},
@@ -53,6 +69,10 @@ func BootstrapCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	// Add runtime flag as required
+	bootstrapCmd.PersistentFlags().StringVar(&runtimeType, "runtime", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
+	_ = bootstrapCmd.MarkPersistentFlagRequired("runtime")
 
 	// subcommands
 	bootstrapCmd.AddCommand(validateCmd())

@@ -6,6 +6,8 @@ metadata:
     ai-services.io/application: "{{ .AppName }}"
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
+  annotations:
+    io.podman.annotations.pids-limit/opensearch: "4096"
 spec:
   initContainers:
     - name: fix-permissions
@@ -25,7 +27,7 @@ spec:
         - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
           value: "{{ .Values.opensearch.auth.password }}"
         - name: OPENSEARCH_JAVA_OPTS
-          value: "-XX:-UseSuperWord -XX:TieredStopAtLevel=1"
+          value: "-Xms4g -Xmx4g -XX:MaxDirectMemorySize=2g -XX:-UseSuperWord -XX:TieredStopAtLevel=1"
         
       ports: 
         - name: os-client-port

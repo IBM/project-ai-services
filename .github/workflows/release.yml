@@ -45,12 +45,6 @@ jobs:
           name: ai-services-binaries
           path: ./release-assets
 
-      - name: Create checksums
-        run: |
-          cd ./release-assets
-          sha256sum ai-services-* > checksums.txt
-          ls -lh
-
       - name: Get the target release version
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
@@ -69,26 +63,40 @@ jobs:
           body: |
             ## AI Services Release ${{ steps.get_version.outputs.VERSION }}
             
+            ### 📦 Installation
+            
+            For detailed platform-specific installation instructions, see the [Installation Guide](https://github.com/IBM/project-ai-services/blob/main/docs/INSTALLATION.md).
+            
             ### Binaries
             This release includes pre-built binaries for multiple platforms:
             
             **macOS:**
             - `ai-services-darwin-amd64` - Intel-based Macs
-            - `ai-services-darwin-arm64` - Apple Silicon Macs (M1/M2/M3)
+            - `ai-services-darwin-arm64` - Apple Silicon Macs (M1/M2/M3/M4 and later)
             
             **Linux:**
             - `ai-services-linux-amd64` - x86_64 Linux
             - `ai-services-linux-ppc64le` - PowerPC 64-bit Little Endian Linux (Podman runtime supported)
-            - `ai-services-linux-arm64` - ARM64 Linux
             
             ### Platform Support
             - **Podman runtime**: Only supported on `linux/ppc64le`
-            - **OpenShift runtime**: Supported on all platforms
+            - **OpenShift runtime**: Supported on all platforms (Client)
             
-            ### Verification
-            Download `checksums.txt` to verify the integrity of the binaries:
+            ### 🔐 Signature Verification
+            
+            All binaries are signed with Cosign. To verify the authenticity of a binary:
+            
+            1. Download the binary, its signature (`.sig` file), and the public key (`cosign.pub`)
+            2. Install [Cosign](https://docs.sigstore.dev/cosign/overview/)
+            3. Verify the signature:
             ```bash
-            sha256sum -c checksums.txt
+            cosign verify-blob \
+              --key cosign.pub \
+              --signature <binary-name>.sig \
+              --insecure-ignore-tlog=true \
+              <binary-name>
             ```
+            
+            See the [Installation Guide](https://github.com/IBM/project-ai-services/blob/main/docs/INSTALLATION.md) for platform-specific verification examples.
           files: |
             ./release-assets/*

@@ -91,14 +91,22 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
 
             <h5>Getting Started:</h5>
             <ol>
-              <li>Navigate to the <strong>Document Upload</strong> page to upload your documents</li>
-              <li>Monitor processing status in the <strong>Job Monitor</strong> page</li>
-              <li>View processed documents in the <strong>Document List</strong> page</li>
+              <li>Navigate to the <strong>Jobs</strong> page to upload your documents</li>
+              <li>Monitor processing status in the <strong>Jobs</strong> page</li>
+              <li>View processed documents in the <strong>Documents</strong> page</li>
             </ol>
 
             <h5>Need More Help?</h5>
             <p>
-              For detailed documentation and support, please refer to the project repository or contact your system administrator.
+              For detailed documentation and support, please visit the{' '}
+              <a
+                href="https://www.ibm.com/docs/en/aiservices/2025.12.0?topic=services-introduction"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                IBM AI Services documentation
+              </a>{' '}
+              or contact your system administrator.
             </p>
           </div>
         </Modal>

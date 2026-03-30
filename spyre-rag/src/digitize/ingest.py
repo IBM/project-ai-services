@@ -84,10 +84,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                         logger.error(f"Failed to reinitialize connections: {reinit_error}")
                         # Continue anyway - the next document will try with existing connections
 
-                    # Continue with next document
-                    continue
-
-                # Update document status immediately after indexing attempt
+                # Update document status immediately after indexing attempt, regardless of success or failure
                 if status_mgr and doc_id_dict:
                     if not success:
                         # Mark as FAILED if indexing failed
