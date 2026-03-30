@@ -196,4 +196,4 @@ The following checks were performed on each of these signatures:
 - [Main README](../README.md) - Project overview and quick start
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - Contributing guidelines
 - [GitHub Releases](https://github.com/IBM/project-ai-services/releases) - Download binaries
-- [Cosign Documentation](https://docs.sigstore.dev/cosign/overview/) - Signature verification tool
+- [Cosign Documentation](https://docs.sigstore.dev/about/overview/) - Signature verification tool
