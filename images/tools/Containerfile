@@ -11,6 +11,7 @@ RUN dnf update ${DNF_FLAGS} -y \
   && dnf install ${DNF_FLAGS} -y gcc \
   python3.12-pip python3.12 python3.12-devel python3-pexpect python3-ptyprocess python3-pyyaml python3-file-magic \
   && python3.12 -m venv ${VIRTUAL_ENV} \
+  && ARCH=$(uname -m) \
   && if [ "$ARCH" = "ppc64le" ]; then \
   pip install -r requirements.txt --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ --prefer-binary; \
   else \
