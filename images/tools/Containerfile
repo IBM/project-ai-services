@@ -14,9 +14,21 @@ RUN dnf update ${DNF_FLAGS} -y \
   && pip install -r requirements.txt \
   && rm -rf /var/cache/dnf && dnf clean all -y
 
+FROM registry.access.redhat.com/ubi9/ubi:9.7 as servicereport_builder
+
+ARG SR_COMMIT=2a57a3a4b14d23981b4add77670bcea90cf69d77
+ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
+
+RUN dnf update ${DNF_FLAGS} -y && \
+  dnf install ${DNF_FLAGS} -y git make && \
+  git clone https://github.com/linux-ras/ServiceReport.git /tmp/servicereport && \
+  cd /tmp/servicereport && \
+  git checkout ${SR_COMMIT} && \
+  make && \
+  rm -rf /var/cache/dnf && dnf clean all -y
+
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
 
-ARG SR_VERSION
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 
 ENV VIRTUAL_ENV=/opt/venv
@@ -28,10 +40,9 @@ RUN microdnf update ${DNF_FLAGS} -y && \
   microdnf install ${DNF_FLAGS} -y python3.12 && \
   ARCH=$(uname -m) && \
   if [ "$ARCH" = "ppc64le" ]; then \
-  echo "Installing ServiceReport for ppc64le..." && \
-  microdnf install ${DNF_FLAGS} -y systemd kmod sos python3-pyudev && \
-  curl -LO https://public.dhe.ibm.com/software/server/POWER/Linux/yum/OSS/RHEL/9/ppc64le/ServiceReport-${SR_VERSION}.ppc64le.rpm && \
-  rpm -ivh ServiceReport-${SR_VERSION}.ppc64le.rpm && \
-  rm ServiceReport-${SR_VERSION}.ppc64le.rpm; \
+  echo "Installing ServiceReport runtime dependencies for ppc64le..." && \
+  microdnf install ${DNF_FLAGS} -y systemd kmod sos python3-pyudev; \
   fi && \
   microdnf clean all
+
+COPY --from=servicereport_builder /tmp/servicereport/servicereport /usr/local/bin/servicereport
