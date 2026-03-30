@@ -11,7 +11,11 @@ RUN dnf update ${DNF_FLAGS} -y \
   && dnf install ${DNF_FLAGS} -y gcc \
   python3.12-pip python3.12 python3.12-devel python3-pexpect python3-ptyprocess python3-pyyaml python3-file-magic \
   && python3.12 -m venv ${VIRTUAL_ENV} \
-  && pip install -r requirements.txt \
+  && if [ "$ARCH" = "ppc64le" ]; then \
+  pip install -r requirements.txt --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ --prefer-binary; \
+  else \
+  pip install -r requirements.txt; \
+  fi \
   && rm -rf /var/cache/dnf && dnf clean all -y
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
