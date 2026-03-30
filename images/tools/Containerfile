@@ -19,28 +19,43 @@ RUN dnf update ${DNF_FLAGS} -y \
   fi \
   && rm -rf /var/cache/dnf && dnf clean all -y
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
+FROM registry.access.redhat.com/ubi9/ubi:9.7 as servicereport_builder
 
 ARG SR_COMMIT=2a57a3a4b14d23981b4add77670bcea90cf69d77
+ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
+
+RUN ARCH=$(uname -m) && mkdir -p /rpms && \
+  if [ "$ARCH" = "ppc64le" ]; then \
+  dnf update ${DNF_FLAGS} -y && \
+  dnf install ${DNF_FLAGS} -y git rpm-build rpmdevtools python3-devel && \
+  git clone https://github.com/linux-ras/ServiceReport.git /tmp/servicereport && \
+  cd /tmp/servicereport && \
+  git checkout ${SR_COMMIT} && \
+  python3 setup.py sdist && \
+  rpmdev-setuptree && \
+  cp dist/*.tar.gz ~/rpmbuild/SOURCES/ && \
+  rpmbuild -ba ServiceReport.spec && \
+  cp ~/rpmbuild/RPMS/*/*.rpm /rpms/ && \
+  rm -rf /var/cache/dnf && dnf clean all -y; \
+  fi
+
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
+
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 COPY --from=tools_builder /opt/venv /opt/venv
+COPY --from=servicereport_builder /rpms/ /tmp/rpms/
 
 RUN microdnf update ${DNF_FLAGS} -y && \
-  microdnf install ${DNF_FLAGS} -y python3.12 python3.12-pip && \
+  microdnf install ${DNF_FLAGS} -y python3.12 && \
   ARCH=$(uname -m) && \
   if [ "$ARCH" = "ppc64le" ]; then \
-  echo "Building and installing ServiceReport for ppc64le..." && \
-  microdnf install ${DNF_FLAGS} -y systemd kmod sos python3-pyudev git make && \
-  pip3.12 install setuptools && \
-  git clone https://github.com/linux-ras/ServiceReport.git /tmp/servicereport && \
-  cd /tmp/servicereport && \
-  git checkout ${SR_COMMIT} && \
-  make && \
-  make install && \
-  cd / && rm -rf /tmp/servicereport; \
+  echo "Installing ServiceReport for ppc64le..." && \
+  microdnf install ${DNF_FLAGS} -y systemd kmod sos python3-pyudev && \
+  rpm -ivh /tmp/rpms/*.rpm && \
+  rm -rf /tmp/rpms; \
   fi && \
   microdnf clean all
