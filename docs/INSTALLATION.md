@@ -177,12 +177,12 @@ curl -LO https://github.com/IBM/project-ai-services/releases/latest/download/cos
 cosign verify \
   --key cosign.pub \
   --insecure-ignore-tlog=true \
-  icr.io/ai-services/tools:0.6
+  icr.io/ai-services/tools:0.7
 ```
 
 **Expected output on success:**
 ```
-Verification for icr.io/ai-services/tools:0.6 --
+Verification for icr.io/ai-services/tools:0.7 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - The signatures were verified against the specified public key
