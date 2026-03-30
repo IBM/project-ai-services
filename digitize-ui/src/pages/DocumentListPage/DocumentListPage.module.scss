@@ -20,8 +20,18 @@
     
     .cds--toast-notification {
       margin-bottom: 0;
-      background-color: var(--cds-notification-background-success);
-      color: var(--cds-text-primary);
+
+      &.cds--toast-notification--success {
+        background-color: var(--cds-notification-background-success);
+      }
+      
+      &.cds--toast-notification--error {
+        background-color: var(--cds-notification-background-error);
+      }
+      
+      &.cds--toast-notification--info {
+        background-color: var(--cds-notification-background-info);
+      }
       
       .cds--toast-notification__title {
         color: var(--cds-text-primary);
