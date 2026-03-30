@@ -1,0 +1,75 @@
+# Release v0.2.0
+
+## Highlights
+
+### 🚀 Major Features
+
+**OpenShift Support**
+- Full runtime support with Helm charts for RAG usecase
+- Bootstrap configuration for operators (RHOAI, Spyre, Service Mesh, NFD)
+- Application lifecycle management (create, delete, logs, ps)
+- Multi-architecture build support for ai-services client CLI (Linux : amd64 & ppc64le, MacOS: amd64 & arm64)
+
+**Q&A Service**
+- Multi-language support with Lingua library for language detection (including German)
+- Performance metrics collection for Q&A APIs
+
+**Document Digitization Service**
+- Asynchronous document ingestion & conversion with digitize API Server
+- Digitize UI with job management and document tracking
+- Document ingestion pipeline using Docling v0.0.77 with pypdfium backend
+- Collaboration with devpi team to add Docling in devpi registry
+- Table captions included in chunk documents for improved context
+- Document management APIs (list, delete, bulk operations)
+- OpenSearch integration for document storage
+- Optimizations in ingestion orchestration pipeline
+
+**Summarization Service**
+- Context-aware summarization with configurable parameters (supports TXT and PDF files, and direct text input)
+- Streaming summarization API endpoint
+
+**CPU-Only Support**
+- RAG-CPU template for environments without GPU acceleration
+
+
+### 🔧 Key Improvements
+
+**Performance & Reliability**
+- Context-aware thread pool for resource management
+- Orphan job recovery mechanism
+- Performance metrics collection and retrieval for digitization and Q&A services
+- Request traceability using UUID
+- Generic exponential backoff retry logic for Vector DB operations, embedding llm operations, reranking
+- Per document indexing and error handling
+
+**Backend Enhancements**
+- Migrated to FastAPI framework
+- Improved error handling with exception streaming
+- Enhanced file validation for multiple formats
+- Health endpoints and liveness probes
+- Swagger API documentation
+
+**Security & Compliance**
+- TLS enabled for all Routes
+- Restricted security contexts (nonroot-v2, restricted-v2 SCCs)
+- Disabled automountServiceAccountToken for non-cluster services
+- CVE fixes: Pillow, pdfminer.six, urllib3, wheel, flatted, rollup, picomatch
+- Scheduled CVE scanning for all images
+- Go version bump to fix CVE-2026-25679
+
+**Developer Experience**
+- Improved CLI help messages and validation
+- Enhanced logging with configurable log levels
+- Helm values validation for OpenShift
+- Flag validation based on runtime
+- Better error messages and user feedback
+
+### 🐛 Notable Fixes
+- Job status updates after document processing completion
+- Text file validation issues
+- Timing columns in statistics output
+- OpenSearch configuration for restricted environments
+- Streaming abort handling in UI
+- Rate limit errors in bootstrap configure
+- Missing app for given runtime
+
