@@ -5,7 +5,7 @@
 ### 🚀 Major Features
 
 **OpenShift Support**
-- Full runtime support with Helm charts for RAG usecase
+- Runtime support with Helm charts for RAG usecase
 - Bootstrap configuration for operators (RHOAI, Spyre, Service Mesh, NFD)
 - Application lifecycle management (create, delete, logs, ps)
 - Multi-architecture build support for ai-services client CLI (Linux : amd64 & ppc64le, MacOS: amd64 & arm64)
@@ -18,7 +18,7 @@
 - Asynchronous document ingestion & conversion with digitize API Server
 - Digitize UI with job management and document tracking
 - Document ingestion pipeline using Docling v0.0.77 with pypdfium backend
-- Collaboration with devpi team to add Docling in devpi registry
+- Consuming Python packages from https://wheels.developerfirst.ibm.com/ppc64le/linux devpi index
 - Table captions included in chunk documents for improved context
 - Document management APIs (list, delete, bulk operations)
 - OpenSearch integration for document storage
@@ -50,7 +50,7 @@
 - Swagger API documentation
 
 **Security & Compliance**
-- TLS enabled for all Routes
+- TLS enabled for all Routes for OpenShift
 - Restricted security contexts (nonroot-v2, restricted-v2 SCCs)
 - Disabled automountServiceAccountToken for non-cluster services
 - CVE fixes: Pillow, pdfminer.six, urllib3, wheel, flatted, rollup, picomatch
