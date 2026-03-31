@@ -18,7 +18,7 @@ For detailed platform-specific installation instructions, see [Installation Guid
 
 ```bash
 # Set version
-VERSION="v0.0.2"
+VERSION="v0.2.0"
 
 # macOS (Intel)
 curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-amd64"
