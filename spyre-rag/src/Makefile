@@ -8,8 +8,6 @@ build:
 	$(CONTAINER_BUILDER) build $(CREDS_ARG) -t $(REGISTRY)/$(IMAGE):$(TAG) .
 .PHONY: build
 
-GOOS=linux GOARCH=ppc64le
-
 push:
 	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(TAG)
 .PHONY: push
