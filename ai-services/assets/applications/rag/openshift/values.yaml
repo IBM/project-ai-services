@@ -47,7 +47,7 @@ opensearch:
   memoryLimit: 8Gi
   # @description Sets the storage limit for the Opensearch service(Default: 10Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
   storage: 10Gi
-  # @hidden
+  # @description Number of OpenSearch replicas for the cluster (Default: 3). This value is used for cluster formation, index shards, and index replicas configuration.
   replicas: 3
   auth:
     username: "admin"

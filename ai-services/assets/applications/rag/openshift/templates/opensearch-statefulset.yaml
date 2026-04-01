@@ -35,7 +35,7 @@ spec:
                   apiVersion: v1
                   fieldPath: metadata.name
             - name: cluster.initial_master_nodes
-              value: opensearch-0,opensearch-1,opensearch-2
+              value: "{{ range $i := until (int (.Values.opensearch.replicas | default 3)) }}{{ if $i }},{{ end }}opensearch-{{ $i }}{{ end }}"
             - name: discovery.seed_hosts
               value: opensearch-headless
             - name: network.host

@@ -67,9 +67,9 @@ spec:
                   name: "opensearch-credentials"
                   key: password
             - name: OPENSEARCH_NUM_SHARDS
-              value: "3"
+              value: {{ .Values.opensearch.replicas | default 3 | quote }}
             - name: OPENSEARCH_NUM_REPLICAS
-              value: "2"
+              value: {{ sub (.Values.opensearch.replicas | default 3) 1 | quote }}
             - name: LOG_LEVEL
               value: "{{ .Values.digitize.log_level }}"
             - name: OMP_NUM_THREADS
