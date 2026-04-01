@@ -28,6 +28,10 @@ spec:
           value: "{{ .Values.opensearch.auth.password }}"
         - name: OPENSEARCH_JAVA_OPTS
           value: "-Xms4g -Xmx4g -XX:MaxDirectMemorySize=2g -XX:-UseSuperWord -XX:TieredStopAtLevel=1"
+        - name: OPENSEARCH_NUM_SHARDS
+          value: "{{ .Values.opensearch.numShards | default "1" }}"
+        - name: OPENSEARCH_NUM_REPLICAS
+          value: "{{ .Values.opensearch.numReplicas | default "0" }}"
         
       ports: 
         - name: os-client-port
