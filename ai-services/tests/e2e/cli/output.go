@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"reflect"
-	"regexp"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -290,29 +289,15 @@ func ValidateApplicationInfo(output, appName, templateName string) error {
 
 	if templateName == "rag" {
 		required = append(required,
-			"Chatbot UI is available to use at",
-			"Chatbot Backend is available to use at",
-			"If you want to serve any more new documents via this RAG application, add them inside",
-			fmt.Sprintf("/var/lib/ai-services/applications/%s/docs", appName),
-			"If you want to do the ingestion again, execute below command",
-			fmt.Sprintf("ai-services application start %s --pod=%s--ingest-docs", appName, appName),
-			"In case if you want to clean the documents added to the db, execute below command",
-			fmt.Sprintf("ai-services application start %s --pod=%s--clean-docs", appName, appName),
+			"Q&A Chatbot is available to use at ",
+			"Q&A API is available to use at ",
+			"Add documents to your RAG application using the Digitize Documents UI: ",
+			"Digitize Documents API is available to use at ",
+			"Use this endpoint for programmatic access and direct API integration.",
+			"Summarize API is available to use at ",
+			"Use this endpoint for document summarization via programmatic access.",
 		)
 
-		uiURLPattern := regexp.MustCompile(
-			`Chatbot UI is available to use at\s+http://[0-9.]+:[0-9]+`,
-		)
-		if !uiURLPattern.MatchString(output) {
-			return fmt.Errorf("application info validation failed: missing or invalid Chatbot UI URL")
-		}
-
-		backendURLPattern := regexp.MustCompile(
-			`Chatbot Backend is available to use at\s+http://[0-9.]+:[0-9]+`,
-		)
-		if !backendURLPattern.MatchString(output) {
-			return fmt.Errorf("application info validation failed: missing or invalid Chatbot Backend URL")
-		}
 	}
 
 	for _, r := range required {

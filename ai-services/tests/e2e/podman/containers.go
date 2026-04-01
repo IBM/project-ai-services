@@ -183,9 +183,9 @@ func waitForPodRunningNoCrash(appName, podName string) error {
 }
 
 // VerifyContainers checks if application pods are healthy and their restart counts are zero.
-func VerifyContainers(appName string) error {
+func VerifyContainers(appName string, appRuntime string) error {
 	logger.Infof("[Podman] verifying containers for app: %s", appName)
-	res, err := common.RunCommand("ai-services", "application", "ps", appName, "-o", "wide")
+	res, err := common.RunCommand("ai-services", "application", "ps", appName, "-o", "wide", "--runtime", appRuntime)
 	if err != nil {
 		return fmt.Errorf("failed to run ai-services application ps: %w", err)
 	}
@@ -224,8 +224,8 @@ func VerifyContainers(appName string) error {
 	return nil
 }
 
-func VerifyExposedPorts(appName string, expectedPorts []string) error {
-	res, err := common.RunCommand("ai-services", "application", "ps", appName, "-o", "wide")
+func VerifyExposedPorts(appName string, expectedPorts []string, appRuntime string) error {
+	res, err := common.RunCommand("ai-services", "application", "ps", appName, "-o", "wide", "--runtime", appRuntime)
 	if err != nil {
 		return fmt.Errorf("failed to run ai-services application ps: %w", err)
 	}
@@ -252,9 +252,9 @@ func VerifyExposedPorts(appName string, expectedPorts []string) error {
 			}
 		}
 	}
-	gomega.Expect(ports).NotTo(gomega.BeEmpty(),"no exposed ports found for application %s", appName)
-	gomega.Expect(ports).To(gomega.HaveLen(len(expectedPorts)),"expected %d exposed ports, found %d",len(expectedPorts), len(ports))
-	gomega.Expect(ports).To(gomega.ConsistOf(expectedPorts),"exposed ports do not match expected ports")
+	gomega.Expect(ports).NotTo(gomega.BeEmpty(), "no exposed ports found for application %s", appName)
+	gomega.Expect(ports).To(gomega.HaveLen(len(expectedPorts)), "expected %d exposed ports, found %d", len(expectedPorts), len(ports))
+	gomega.Expect(ports).To(gomega.ConsistOf(expectedPorts), "exposed ports do not match expected ports")
 
 	return nil
 }
