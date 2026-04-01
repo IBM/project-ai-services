@@ -212,6 +212,22 @@ class SummarizeErrorResponseUnsupportedContentType(BaseModel):
     }
 
 
+class SummarizeErrorResponseRateLimit(BaseModel):
+    error: ErrorDetail
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "error": {
+                    "code": "SERVER_BUSY",
+                    "message": "Server is busy. Please try again later.",
+                    "status": 429,
+                }
+            }
+        }
+    }
+
+
 class SummarizeErrorResponseInternalServiceError(BaseModel):
     error: ErrorDetail
 
@@ -231,6 +247,7 @@ error_responses: Dict[int | str, Dict[str, Any]] = {
     400: {"description": "Bad request (missing input, unsupported file type, invalid params)", "model": SummarizeErrorResponseBadRequest},
     413: {"description": "Input exceeds context window limit", "model": SummarizeErrorResponseContextLimitExceeded},
     415: {"description": "Unsupported Content-Type", "model": SummarizeErrorResponseUnsupportedContentType},
+    429: {"description": "Too many concurrent requests", "model": SummarizeErrorResponseRateLimit},
     500: {"description": "LLM service error", "model": SummarizeErrorResponseInternalServiceError},
 }
 

@@ -43,6 +43,7 @@ from chatbot.response_utils import (
     HealthResponse,
     ModelsResponse,
     PerfMetricsResponse,
+    common_error_responses,
 )
 
 vectorstore = None
@@ -69,7 +70,7 @@ def initialize_vectorstore():
 
 async def ensure_vectorstore_initialized():
     """Lazy initialization of vectorstore on first request.
-    
+
     Note: This lazy initialization approach is used to facilitate OpenShift deployments,
     allowing the application to start successfully even when the vector store is not
     immediately available.
@@ -151,6 +152,7 @@ def limit_concurrency(f):
 @app.post(
     "/reference",
     response_model=ReferenceResponse,
+    responses={400: common_error_responses[400], 500: common_error_responses[500], 503: common_error_responses[503]},
     tags=["retrieval"],
     summary="Retrieve reference documents",
     description="Search the vector store using the prompt, rerank results, and return relevant document chunks with performance metrics."
@@ -202,6 +204,7 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
 @app.get(
     "/v1/models",
     response_model=ModelsResponse,
+    responses={500: common_error_responses[500]},
     tags=["models"],
     summary="List LLM models",
     description="List available models from the configured vLLM endpoint."
@@ -218,6 +221,7 @@ async def list_models():
 @app.get(
     "/v1/perf_metrics",
     response_model=PerfMetricsResponse,
+    responses={404: common_error_responses[404]},
     tags=["monitoring"],
     summary="Get performance metrics",
     description="Return collected performance metrics for recent chat completion and retrieval calls. If request ID is provided, returns only that metric"
@@ -283,7 +287,11 @@ async def locked_stream(stream_g, perf_stat_dict):
                     "example": 'data: {"choices":[{"delta":{"content":"Based on"}}]}\n\ndata: {"choices":[{"delta":{"content":" the retrieved"}}]}\n\ndata: {"choices":[{"delta":{"content":" documents..."}}]}\n\n'
                 }
             }
-        }
+        },
+        400: common_error_responses[400],
+        429: common_error_responses[429],
+        500: common_error_responses[500],
+        503: common_error_responses[503]
     }
 )
 async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse | StreamingResponse:
@@ -412,6 +420,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
     "/db-status",
     response_model=DBStatusResponse,
     response_model_exclude_none=True,
+    responses={500: common_error_responses[500]},
     tags=["monitoring"],
     summary="Vector DB status",
     description="Check whether the vector store is initialized and populated."

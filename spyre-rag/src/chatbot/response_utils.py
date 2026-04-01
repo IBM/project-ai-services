@@ -4,7 +4,7 @@ Contains all Pydantic models for request/response validation and Swagger documen
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Dict, Any
 
 
 class ReferenceRequest(BaseModel):
@@ -156,7 +156,7 @@ class PerfMetric(BaseModel):
 class PerfMetricsResponse(BaseModel):
     """
     Response containing list of performance metrics.
-    
+
     Supports filtering by request_id via query parameter.
     """
     metrics: list[PerfMetric] = Field(..., description="List of performance metrics from recent requests")
@@ -216,3 +216,78 @@ class HealthResponse(BaseModel):
             }
         }
     }
+
+
+class BadRequestErrorResponse(BaseModel):
+    """400 Bad Request error response"""
+    detail: str = Field(..., description="Error message")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "detail": "Query cannot be empty"
+            }
+        }
+    }
+
+
+class NotFoundErrorResponse(BaseModel):
+    """404 Not Found error response"""
+    detail: str = Field(..., description="Error message")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "detail": "No metric found for request_id: abc123"
+            }
+        }
+    }
+
+
+class RateLimitErrorResponse(BaseModel):
+    """429 Too Many Requests error response"""
+    detail: str = Field(..., description="Error message")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "detail": "Server busy. Try again shortly."
+            }
+        }
+    }
+
+
+class InternalServerErrorResponse(BaseModel):
+    """500 Internal Server Error response"""
+    detail: str = Field(..., description="Error message")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "detail": "An unexpected error occurred"
+            }
+        }
+    }
+
+
+class ServiceUnavailableErrorResponse(BaseModel):
+    """503 Service Unavailable error response"""
+    detail: str = Field(..., description="Error message")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "detail": "Vector store not initialized"
+            }
+        }
+    }
+
+
+# Common error responses dictionary for use in endpoint decorators
+common_error_responses: Dict[int | str, Dict[str, Any]] = {
+    400: {"description": "Bad Request - Invalid input or validation error", "model": BadRequestErrorResponse},
+    404: {"description": "Not Found - Resource does not exist", "model": NotFoundErrorResponse},
+    429: {"description": "Too Many Requests - Rate limit exceeded", "model": RateLimitErrorResponse},
+    500: {"description": "Internal Server Error - Unexpected error occurred", "model": InternalServerErrorResponse},
+    503: {"description": "Service Unavailable - Vector store not ready", "model": ServiceUnavailableErrorResponse},
+}
