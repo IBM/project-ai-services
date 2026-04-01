@@ -297,7 +297,6 @@ func ValidateApplicationInfo(output, appName, templateName string) error {
 			"Summarize API is available to use at ",
 			"Use this endpoint for document summarization via programmatic access.",
 		)
-
 	}
 
 	for _, r := range required {
