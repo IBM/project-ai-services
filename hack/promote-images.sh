@@ -38,17 +38,35 @@ Usage: $0 [OPTIONS]
 Promote container images from CI/CD registry to production registry.
 
 OPTIONS:
-    -s, --source-image      Source image (e.g., icr.io/ai-services-cicd/tools:0.7)
-    -d, --dest-image        Destination image (e.g., icr.io/ai-services/tools:0.7)
-    -u, --username          Registry username (default: iamapikey)
-    -p, --password          Registry password (required)
-    -h, --help              Display this help message
+    -s, --source-image          Source image (e.g., icr.io/ai-services-cicd/tools:0.7)
+    -d, --dest-image            Destination image (e.g., icr.io/ai-services/tools:0.7)
+    -u, --username              Registry username (default: iamapikey)
+    -p, --password              Registry password (required)
+    --on-conflict <action>      Action when destination exists: prompt (default), override, fail
+    --authenticated-verify      Use authentication for signature verification
+                                (required only when destination is in private registry)
+    -h, --help                  Display this help message
 
 EXAMPLES:
-    # Promote an image with credentials
+    # Promote an image with credentials (prompts if exists)
     $0 -s icr.io/ai-services-cicd/tools:0.7 \\
        -d icr.io/ai-services/tools:0.7 \\
        -p YOUR_API_KEY
+
+    # Force override existing image without prompt
+    $0 -s icr.io/ai-services-cicd/tools:0.7 \\
+       -d icr.io/ai-services/tools:0.7 \\
+       -p YOUR_API_KEY --on-conflict override
+
+    # Fail immediately if destination exists (for CI/CD pipelines)
+    $0 -s icr.io/ai-services-cicd/tools:0.7 \\
+       -d icr.io/ai-services/tools:0.7 \\
+       -p YOUR_API_KEY --on-conflict fail
+
+    # Verify with authentication (for private registry destinations)
+    $0 -s icr.io/ai-services-cicd/tools:0.7 \\
+       -d icr.io/ai-services/tools:0.7 \\
+       -p YOUR_API_KEY --authenticated-verify
 
     # Using environment variables
     export REGISTRY_PASSWORD=YOUR_API_KEY
@@ -64,6 +82,8 @@ USERNAME="iamapikey"
 PASSWORD=""
 SOURCE_IMAGE=""
 DEST_IMAGE=""
+ON_CONFLICT="prompt"  # Options: prompt, override, fail
+AUTHENTICATED_VERIFY=false  # Use authentication for signature verification
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -83,6 +103,18 @@ while [[ $# -gt 0 ]]; do
         -p|--password)
             PASSWORD="$2"
             shift 2
+            ;;
+        --on-conflict)
+            ON_CONFLICT="$2"
+            if [[ ! "$ON_CONFLICT" =~ ^(prompt|override|fail)$ ]]; then
+                print_error "Invalid --on-conflict value: $ON_CONFLICT (must be: prompt, override, or fail)"
+                usage
+            fi
+            shift 2
+            ;;
+        --authenticated-verify)
+            AUTHENTICATED_VERIFY=true
+            shift
             ;;
         -h|--help)
             usage
@@ -155,6 +187,36 @@ check_signature() {
 copy_image() {
     print_info "Copying image from $SOURCE_IMAGE to $DEST_IMAGE"
     
+    # Check if destination image already exists to avoid accidentally overriding
+    print_info "Checking if destination image already exists"
+    if skopeo inspect --creds "$USERNAME:$PASSWORD" "docker://$DEST_IMAGE" &> /dev/null; then
+        print_warning "Destination image already exists: $DEST_IMAGE"
+        
+        case "$ON_CONFLICT" in
+            fail)
+                print_error "Destination image exists and --on-conflict is set to 'fail'"
+                print_error "Terminating to prevent accidental override"
+                exit 1
+                ;;
+            override)
+                print_warning "Destination image exists but --on-conflict is set to 'override'"
+                print_warning "Proceeding with override as specified"
+                ;;
+            prompt)
+                print_info "This check prevents accidentally overriding an existing image"
+                read -p "Do you want to override the existing image? (y/N): " -n 1 -r
+                echo
+                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                    print_info "Image promotion cancelled to prevent override"
+                    exit 0
+                fi
+                print_warning "Proceeding with override as confirmed by user"
+                ;;
+        esac
+    else
+        print_info "Destination image does not exist, proceeding with copy"
+    fi
+    
     if skopeo copy --all \
         --src-creds "$USERNAME:$PASSWORD" \
         --dest-creds "$USERNAME:$PASSWORD" \
@@ -208,7 +270,14 @@ copy_signature() {
 verify_promoted_image() {
     print_info "Verifying promoted image: $DEST_IMAGE"
     
-    if cosign tree "$DEST_IMAGE"; then
+    # Build cosign command with optional authentication
+    local cosign_cmd="cosign tree"
+    if [ "$AUTHENTICATED_VERIFY" = true ]; then
+        print_info "Using authenticated verification for private registry"
+        cosign_cmd="$cosign_cmd --registry-username=\"$USERNAME\" --registry-password=\"$PASSWORD\""
+    fi
+    
+    if eval "$cosign_cmd \"$DEST_IMAGE\""; then
         print_success "Promoted image verification completed"
     else
         print_warning "Verification completed with warnings (signature may not be present)"
