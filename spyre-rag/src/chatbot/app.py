@@ -27,7 +27,31 @@ set_log_level(log_level)
 
 import common.db_utils as db
 from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
-from common.misc_utils import get_model_endpoints, set_request_id
+from common.misc_utils import get_model_endpoints, set_request_id, EndpointFilter, RequestIDFormatter
+
+# Configure uvicorn loggers at module level (for when app is run via uvicorn CLI)
+# This will be applied after uvicorn sets up its logging
+def configure_uvicorn_logging():
+    # Custom formatter matching application log format (without request_id for uvicorn logs)
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)-18s - %(levelname)-8s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Configure uvicorn main logger (startup messages, etc.)
+    uvicorn_logger = logging.getLogger("uvicorn")
+    uvicorn_logger.setLevel(log_level)
+    for handler in uvicorn_logger.handlers:
+        handler.setFormatter(formatter)
+    
+    # Configure uvicorn.access logger (HTTP access logs)
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.setLevel(log_level)
+    for handler in uvicorn_access_logger.handlers:
+        handler.setFormatter(formatter)
+    
+    # Apply endpoint filter to access logger only
+    uvicorn_access_logger.addFilter(EndpointFilter(log_level))
 from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_non_stream, query_vllm_models
 from common.settings import get_settings
 from common.perf_utils import perf_registry
@@ -85,6 +109,7 @@ async def ensure_vectorstore_initialized():
 
 @asynccontextmanager
 async def lifespan(app):
+    configure_uvicorn_logging()
     initialize_models()
     setup_language_detector([Language.ENGLISH, Language.GERMAN])
     create_llm_session(pool_maxsize=POOL_SIZE)

@@ -24,7 +24,30 @@ if level != "":
 set_log_level(log_level)
 
 from common.llm_utils import create_llm_session, query_vllm_summarize, query_vllm_summarize_stream
-from common.misc_utils import get_model_endpoints, set_request_id
+from common.misc_utils import get_model_endpoints, set_request_id, EndpointFilter, RequestIDFormatter
+
+# Configure uvicorn loggers (applied in lifespan after uvicorn sets up logging)
+def configure_uvicorn_logging():
+    # Custom formatter matching application log format (without request_id for uvicorn logs)
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)-18s - %(levelname)-8s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Configure uvicorn main logger (startup messages, etc.)
+    uvicorn_logger = logging.getLogger("uvicorn")
+    uvicorn_logger.setLevel(log_level)
+    for handler in uvicorn_logger.handlers:
+        handler.setFormatter(formatter)
+    
+    # Configure uvicorn.access logger (HTTP access logs)
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.setLevel(log_level)
+    for handler in uvicorn_access_logger.handlers:
+        handler.setFormatter(formatter)
+    
+    # Apply endpoint filter to access logger only
+    uvicorn_access_logger.addFilter(EndpointFilter(log_level))
 from common.settings import get_settings
 from summarize.summ_utils import (
     SummarizeException,
@@ -47,6 +70,7 @@ concurrency_limiter = asyncio.BoundedSemaphore(settings.max_concurrent_requests)
 
 @asynccontextmanager
 async def lifespan(app):
+    configure_uvicorn_logging()
     initialize_models()
     create_llm_session(pool_maxsize=settings.max_concurrent_requests)
     yield
