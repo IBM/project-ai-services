@@ -5,6 +5,7 @@ import (
 	"maps"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -248,9 +249,24 @@ func SetNestedValue(out map[string]any, dottedKey string, value any) {
 	current[last] = value
 }
 
+// rfc1035HostnameRegex validates RFC 1035 hostname format:
+// - 1-63 characters
+// - lowercase letters, numbers, and hyphens only
+// - must start with a letter
+// - must end with a letter or number
+var rfc1035HostnameRegex = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
 func VerifyAppName(appName string) error {
-	if appName == "" || strings.Contains(appName, "..") || strings.ContainsAny(appName, "/\\") {
-		return fmt.Errorf("invalid application name: %s", appName)
+	if appName == "" {
+		return fmt.Errorf("application name cannot be empty")
+	}
+
+	if len(appName) > 63 {
+		return fmt.Errorf("invalid application name '%s': must be 63 characters or less", appName)
+	}
+
+	if !rfc1035HostnameRegex.MatchString(appName) {
+		return fmt.Errorf("invalid application name '%s': must be a valid RFC 1035 hostname (lowercase letters, numbers, and hyphens only; must start with a letter and end with a letter or number)", appName)
 	}
 
 	return nil
