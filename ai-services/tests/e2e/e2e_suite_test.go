@@ -507,7 +507,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 
 	})
-	ginkgo.XContext("Ingestion Tests", func() {
+	ginkgo.Context("Ingestion Tests", func() {
 		ginkgo.BeforeEach(func() {
 			err := ingestion.CleanDocsFolder(appName)
 			if err != nil {
@@ -587,7 +587,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] Invalid File Ingestion completed successfully for application %s", appName)
 		})
 	})
-	ginkgo.XContext("RAG Golden Dataset Validation", ginkgo.Label("golden-dataset-validation"), func() {
+	ginkgo.Context("RAG Golden Dataset Validation", ginkgo.Label("golden-dataset-validation"), func() {
 		ginkgo.BeforeAll(func() {
 			if appName == "" {
 				ginkgo.Fail("Application name is not set")
@@ -714,7 +714,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[RAG] Golden dataset validation completed")
 		})
 	})
-	ginkgo.XContext("Clean Ingestion Docs", func() {
+	ginkgo.Context("Clean Ingestion Docs", func() {
 		ginkgo.It("cleans the ingestion docs from the db", ginkgo.Label("spyre-dependent"), func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 			defer cancel()
