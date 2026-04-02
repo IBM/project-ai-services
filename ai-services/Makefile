@@ -130,3 +130,6 @@ swagger:
 swagger-fmt:
 	@echo "Formatting Swagger comments..."
 	@swag fmt --exclude tests
+
+image-tag:
+	@echo $(TAG)
