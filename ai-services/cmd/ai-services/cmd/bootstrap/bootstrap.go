@@ -25,6 +25,7 @@ func BootstrapCmd() *cobra.Command {
 		Short:   "Initializes AI Services infrastructure",
 		Long:    bootstrapDescription(),
 		Example: bootstrapExample(),
+		Args:    cobra.NoArgs,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 			// Initialize runtime factory based on flag
