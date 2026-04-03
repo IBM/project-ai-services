@@ -1,6 +1,7 @@
 package podman
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -11,7 +12,9 @@ import (
 	ginkgo "github.com/onsi/ginkgo/v2"
 	gomega "github.com/onsi/gomega"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/tests/e2e/cli"
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
+	"github.com/project-ai-services/ai-services/tests/e2e/config"
 )
 
 func TestPodman(t *testing.T) {
@@ -35,13 +38,25 @@ type ContainerInspect struct {
 	} `json:"Config"`
 }
 
+type OpenShiftPod struct {
+	Spec struct {
+		RestartPolicy string `json:"restartPolicy"`
+	} `json:"spec"`
+	Status struct {
+		ContainerStatuses []struct {
+			Name         string `json:"name"`
+			RestartCount int    `json:"restartCount"`
+		} `json:"containerStatuses"`
+	} `json:"status"`
+}
+
 var (
 	separatorRe = regexp.MustCompile(`^[\s─-]+$`)
 	headerRe    = regexp.MustCompile(`^APPLICATION\s+NAME\s+POD\s+ID\s+POD\s+NAME\s+STATUS\s+CREATED\s+EXPOSED\s+PORTS\s$`)
 
 	rowRe = regexp.MustCompile(
 		`^\s*(?:\S+\s+)?` + // optional APPLICATION NAME
-			`[a-f0-9]{12}\s+` + // POD ID
+			`[a-f0-9]{8,12}(?:-[a-f0-9]{3,4})?\s+` + // POD ID (supports both formats: 12 hex chars or 8-12 hex + hyphen + 3-4 hex)
 			`(?P<pod>\S+)\s{2,}` + // POD NAME
 			`(?P<status>Running\s+\((?:healthy|unhealthy)\)|Created)\s{2,}` +
 			`(?P<created>\d+\s+\w+\s+ago)\s{2,}` +
@@ -84,11 +99,22 @@ func parsePodRows(lines []string) ([]PodRow, error) {
 }
 
 // getRestartCount inspects a pod and its containers and returns the total restart count.
-func getRestartCount(podName string) (int, error) {
+func getRestartCount(podName string, appRuntime string) (int, error) {
+	if appRuntime == "openshift" {
+		// OpenShift: use oc get pod with JSON output
+		return getOpenshiftRestartCount(podName)
+	}
+
+	// Podman: use podman pod inspect
+	return getPodmanRestartCount(podName)
+}
+
+func getPodmanRestartCount(podName string) (int, error) {
 	podRes, err := common.RunCommand("podman", "pod", "inspect", podName)
 	if err != nil {
 		return 0, fmt.Errorf("failed to inspect pod %s: %w", podName, err)
 	}
+
 	var podData []PodInspect
 	if err := json.Unmarshal([]byte(podRes), &podData); err != nil {
 		return 0, fmt.Errorf("failed to parse pod inspect for %s: %w", podName, err)
@@ -96,10 +122,12 @@ func getRestartCount(podName string) (int, error) {
 	if len(podData) == 0 {
 		return 0, fmt.Errorf("no pod inspect data for %s", podName)
 	}
+
 	pod := podData[0]
 	if pod.RestartPolicy == "no" {
 		return 0, nil
 	}
+
 	ctrIDs := make([]string, 0, len(pod.Containers))
 	for _, ctr := range pod.Containers {
 		ctrIDs = append(ctrIDs, ctr.Id)
@@ -119,6 +147,31 @@ func getRestartCount(podName string) (int, error) {
 	totalRestarts := 0
 	for _, ctr := range allContainers {
 		totalRestarts += ctr.State.RestartCount
+	}
+
+	return totalRestarts, nil
+}
+
+func getOpenshiftRestartCount(podName string) (int, error) {
+	podRes, err := common.RunCommand("oc", "get", "pod", podName, "-o", "json")
+	if err != nil {
+		return 0, fmt.Errorf("failed to get pod %s: %w", podName, err)
+	}
+
+	var osPod OpenShiftPod
+	if err := json.Unmarshal([]byte(podRes), &osPod); err != nil {
+		return 0, fmt.Errorf("failed to parse OpenShift pod JSON for %s: %w", podName, err)
+	}
+
+	// Check restart policy
+	if osPod.Spec.RestartPolicy == "Never" {
+		return 0, nil
+	}
+
+	// Sum restart counts from all containers
+	totalRestarts := 0
+	for _, ctr := range osPod.Status.ContainerStatuses {
+		totalRestarts += ctr.RestartCount
 	}
 
 	return totalRestarts, nil
@@ -145,12 +198,14 @@ func waitUntil(
 	}
 }
 
-func waitForPodRunningNoCrash(appName, podName string) error {
+func waitForPodRunningNoCrash(ctx context.Context, cfg *config.Config, appName, podName string, appRuntime string) error {
 	min := 5
 	sec := 30
 
 	return waitUntil(time.Duration(min)*time.Minute, time.Duration(sec)*time.Second, func() (bool, error) {
-		res, err := common.RunCommand("ai-services", "application", "ps", appName, "-o", "wide")
+		psWideArgs := []string{"-o", "wide"}
+		res, err := cli.ApplicationPS(ctx, cfg, appName, appRuntime, psWideArgs...)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		if err != nil {
 			return false, err
 		}
@@ -167,7 +222,7 @@ func waitForPodRunningNoCrash(appName, podName string) error {
 			if !healthy {
 				return false, nil
 			}
-			restarts, err := getRestartCount(podName)
+			restarts, err := getRestartCount(podName, appRuntime)
 			if err != nil {
 				return false, err
 			}
@@ -183,27 +238,67 @@ func waitForPodRunningNoCrash(appName, podName string) error {
 }
 
 // VerifyContainers checks if application pods are healthy and their restart counts are zero.
-func VerifyContainers(appName string, appRuntime string) error {
+func VerifyContainers(ctx context.Context, cfg *config.Config, widePSOutput string, appName string, appRuntime string) error {
 	logger.Infof("[Podman] verifying containers for app: %s", appName)
-	res, err := common.RunCommand("ai-services", "application", "ps", appName, "-o", "wide", "--runtime", appRuntime)
-	if err != nil {
-		return fmt.Errorf("failed to run ai-services application ps: %w", err)
-	}
-	if strings.TrimSpace(res) == "" {
+
+	if strings.TrimSpace(widePSOutput) == "" {
 		ginkgo.Skip("No pods found — skipping pod health validation")
 
 		return nil
 	}
-	lines := strings.Split(strings.TrimSpace(res), "\n")
+	actualPods, err := extractActualPods(ctx, widePSOutput, cfg, appName, appRuntime)
+	if err != nil {
+		return err
+	}
+	for _, suffix := range common.ExpectedPodSuffixes[appRuntime] {
+		var expectedPodName string
+		var found bool
+
+		if appRuntime == "openshift" {
+			// For OpenShift, pod names have dynamic suffixes (e.g., backend-58c65dd449-pc6np)
+			// Check if any actual pod starts with the expected prefix
+			podName := ""
+			expectedPrefix := suffix + "-"
+			for podName = range actualPods {
+				if strings.HasPrefix(podName, expectedPrefix) {
+					expectedPodName = podName
+					found = true
+
+					break
+				}
+			}
+			gomega.Expect(found).To(gomega.BeTrue(), "expected pod with prefix %s to exist", expectedPrefix)
+			restartCount, err := getRestartCount(podName, appRuntime)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			ginkgo.GinkgoWriter.Printf("[RestartCount] pod=%s restarts=%d\n", expectedPodName, restartCount)
+			gomega.Expect(restartCount).To(gomega.BeNumerically("<=", 0),
+				fmt.Sprintf("pod %s restarted %d times", expectedPodName, restartCount))
+		} else {
+			// For podman, use exact pod name matching
+			expectedPodName = appName + "--" + suffix
+			gomega.Expect(actualPods).To(gomega.HaveKey(expectedPodName), "expected pod %s to exist", expectedPodName)
+			restartCount, err := getRestartCount(expectedPodName, appRuntime)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			ginkgo.GinkgoWriter.Printf("[RestartCount] pod=%s restarts=%d\n", expectedPodName, restartCount)
+			gomega.Expect(restartCount).To(gomega.BeNumerically("<=", 0),
+				fmt.Sprintf("pod %s restarted %d times", expectedPodName, restartCount))
+		}
+	}
+
+	return nil
+}
+
+func extractActualPods(ctx context.Context, widePSOutput string, cfg *config.Config, appName string, appRuntime string) (map[string]bool, error) {
+	lines := strings.Split(strings.TrimSpace(widePSOutput), "\n")
 	rows, err := parsePodRows(lines)
 	if err != nil {
-		return fmt.Errorf("failed to parse pod rows: %w", err)
+		return nil, fmt.Errorf("failed to parse pod rows: %w", err)
 	}
 	for _, row := range rows {
 		ok := strings.HasPrefix(row.Status, "Running (healthy)") || row.Status == "Created"
 		if !ok {
-			if err := waitForPodRunningNoCrash(appName, row.PodName); err != nil {
-				return fmt.Errorf("pod %s is not healthy (status=%s)", row.PodName, row.Status)
+			if err := waitForPodRunningNoCrash(ctx, cfg, appName, row.PodName, appRuntime); err != nil {
+				return nil, fmt.Errorf("pod %s is not healthy (status=%s)", row.PodName, row.Status)
 			}
 		}
 	}
@@ -211,29 +306,15 @@ func VerifyContainers(appName string, appRuntime string) error {
 	for _, row := range rows {
 		actualPods[row.PodName] = true
 	}
-	for _, suffix := range common.ExpectedPodSuffixes {
-		expectedPodName := appName + "--" + suffix
-		gomega.Expect(actualPods).To(gomega.HaveKey(expectedPodName), "expected pod %s to exist", expectedPodName)
-		restartCount, err := getRestartCount(expectedPodName)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		ginkgo.GinkgoWriter.Printf("[RestartCount] pod=%s restarts=%d\n", expectedPodName, restartCount)
-		gomega.Expect(restartCount).To(gomega.BeNumerically("<=", 0),
-			fmt.Sprintf("pod %s restarted %d times", expectedPodName, restartCount))
-	}
 
-	return nil
+	return actualPods, nil
 }
 
-func VerifyExposedPorts(appName string, expectedPorts []string, appRuntime string) error {
-	res, err := common.RunCommand("ai-services", "application", "ps", appName, "-o", "wide", "--runtime", appRuntime)
-	if err != nil {
-		return fmt.Errorf("failed to run ai-services application ps: %w", err)
-	}
-
-	if strings.TrimSpace(res) == "" {
+func VerifyExposedPorts(appName string, expectedPorts []string, appRuntime string, widePsOutput string) error {
+	if strings.TrimSpace(widePsOutput) == "" {
 		return nil
 	}
-	lines := strings.Split(strings.TrimSpace(res), "\n")
+	lines := strings.Split(strings.TrimSpace(widePsOutput), "\n")
 	rows, err := parsePodRows(lines)
 	if err != nil {
 		return fmt.Errorf("failed to parse pod rows: %w", err)
@@ -257,4 +338,13 @@ func VerifyExposedPorts(appName string, expectedPorts []string, appRuntime strin
 	gomega.Expect(ports).To(gomega.ConsistOf(expectedPorts), "exposed ports do not match expected ports")
 
 	return nil
+}
+
+func GetOpenshiftRoutes() (string, error) {
+	response, err := common.RunCommand("oc", "get", "routes")
+	if err != nil {
+		return "", fmt.Errorf("failed to get routes: %w", err)
+	}
+
+	return response, nil
 }

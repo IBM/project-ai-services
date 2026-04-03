@@ -155,7 +155,7 @@ func buildUsingMake(
 		return "", fmt.Errorf("make bin failed: %w", err)
 	}
 
-	srcBinPath := filepath.Join(moduleRoot, "bin", "ai-services")
+	srcBinPath := filepath.Join(moduleRoot, "bin", "ai-services-linux-ppc64le")
 	if _, err := os.Stat(srcBinPath); err != nil {
 		return "", fmt.Errorf("binary not found after make bin: %w", err)
 	}
