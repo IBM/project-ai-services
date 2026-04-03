@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -323,7 +322,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] Application %s created, healthy, and RAG endpoints validated", appName)
 		})
 	})
-	ginkgo.Context("Application Observability", ginkgo.Label("test1"), func() {
+	ginkgo.Context("Application Observability", func() {
 		ginkgo.It("verifies application ps output", ginkgo.Label("spyre-dependent"), func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
@@ -387,67 +386,8 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			widePsOutput, err := cli.ApplicationPS(ctx, cfg, appName, appRuntime, psWideArgs...)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			wideLines := strings.Split(widePsOutput, "\n")
-
-			type PodInfo struct {
-				PodID      string
-				Containers []string
-			}
-
-			pods := make(map[string]*PodInfo)
-			inTargetApp := false
-
-			for _, line := range wideLines {
-				line = strings.TrimSpace(line)
-				if line == "" ||
-					strings.HasPrefix(line, "APPLICATION") ||
-					strings.HasPrefix(line, "──") {
-					continue
-				}
-
-				fields := strings.Fields(line)
-
-				var podID, podName string
-				var containerStartIdx int
-
-				// First row of the application
-				if len(fields) >= 3 && fields[0] == appName {
-					inTargetApp = true
-					podID = fields[1]
-					podName = fields[2]
-					containerStartIdx = 3
-
-					// Subsequent rows of the same application
-				} else if inTargetApp && len(fields) >= 2 && strings.HasPrefix(fields[1], appName+"--") {
-					podID = fields[0]
-					podName = fields[1]
-					containerStartIdx = 2
-
-				} else if inTargetApp {
-					break
-				} else {
-					continue
-				}
-
-				pod := &PodInfo{
-					PodID: podID,
-				}
-
-				for _, tok := range fields[containerStartIdx:] {
-					tok = strings.TrimSuffix(tok, ",")
-
-					if strings.HasSuffix(tok, "-infra") {
-						continue
-					}
-
-					if strings.HasPrefix(tok, podName+"-") {
-						pod.Containers = append(pod.Containers, tok)
-					}
-				}
-
-				pods[podName] = pod
-			}
-
+			pods, err := podman.ExtractPodInfo(widePsOutput)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(pods).NotTo(gomega.BeEmpty(), "No pods found for application %s", appName)
 
 			for podName, pod := range pods {
@@ -486,7 +426,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 		})
 	})
-	ginkgo.Context("Runtime Operations", ginkgo.Label("test1"), func() {
+	ginkgo.Context("Runtime Operations", func() {
 		ginkgo.It("stops the application", ginkgo.Label("spyre-dependent"), func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()

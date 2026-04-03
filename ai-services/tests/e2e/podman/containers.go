@@ -70,6 +70,103 @@ type PodRow struct {
 	ExposedPorts string
 }
 
+// PodInfo represents detailed information about a pod including its containers.
+type PodInfo struct {
+	PodID      string
+	PodName    string
+	Containers []string
+}
+
+// ExtractPodInfo parses the output from `ai-services application ps -o wide` and extracts a map of pod names to PodInfo containing pod ID and containers.
+func ExtractPodInfo(output string) (map[string]PodInfo, error) {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	podInfoMap := make(map[string]PodInfo)
+
+	podRowRe := regexp.MustCompile(
+		`^\s*(?:\S+\s+)?` + // optional APPLICATION NAME
+			`(?P<podid>[a-f0-9]{8,12}(?:-[a-f0-9]{3,4})?)\s+` + // POD ID (both formats)
+			`(?P<podname>\S+)\s{2,}` + // POD NAME
+			`(?P<status>Running\s+\((?:healthy|unhealthy)\)|Created)\s{2,}` +
+			`(?P<created>\d+\s+\w+\s+ago)\s{2,}` +
+			`(?P<exposed>none|\d+(?:,\s*\d+)*)\s+` + // EXPOSED (supports multiple ports)
+			`(?P<containers>.+)$`, // CONTAINERS
+	)
+
+	containerLineRe := regexp.MustCompile(`^\s+(?P<containers>.+)$`)
+
+	var currentPodName string
+	var currentPodInfo *PodInfo
+
+	for _, raw := range lines {
+		line := strings.TrimRight(raw, " \t")
+		if line == "" {
+			continue
+		}
+
+		// Skip header and separator lines
+		if headerRe.MatchString(line) || separatorRe.MatchString(line) {
+			continue
+		}
+
+		if m := podRowRe.FindStringSubmatch(line); m != nil {
+			podID := m[podRowRe.SubexpIndex("podid")]
+			podName := m[podRowRe.SubexpIndex("podname")]
+			containersStr := strings.TrimSpace(m[podRowRe.SubexpIndex("containers")])
+
+			// Parse containers from the line
+			containers := parseContainers(containersStr)
+
+			currentPodName = podName
+			currentPodInfo = &PodInfo{
+				PodID:      podID,
+				PodName:    podName,
+				Containers: containers,
+			}
+			podInfoMap[podName] = *currentPodInfo
+
+			continue
+		}
+
+		if currentPodInfo != nil {
+			if m := containerLineRe.FindStringSubmatch(line); m != nil {
+				containersStr := strings.TrimSpace(m[containerLineRe.SubexpIndex("containers")])
+				containers := parseContainers(containersStr)
+
+				// Append to current pod's containers
+				currentPodInfo.Containers = append(currentPodInfo.Containers, containers...)
+				podInfoMap[currentPodName] = *currentPodInfo
+			}
+		}
+	}
+
+	return podInfoMap, nil
+}
+
+// parseContainers extracts container names from a container string.
+func parseContainers(containersStr string) []string {
+	if containersStr == "" {
+		return []string{}
+	}
+
+	var containers []string
+	// Split by comma to handle multiple containers
+	parts := strings.Split(containersStr, ",")
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if idx := strings.Index(part, "("); idx != -1 {
+			containerName := strings.TrimSpace(part[:idx])
+			if containerName != "" {
+				containers = append(containers, containerName)
+			}
+		} else if part != "" {
+			containers = append(containers, part)
+		}
+	}
+
+	return containers
+}
+
 // parsePodRows parses the output lines from `ai-services application ps` into PodRow structs.
 func parsePodRows(lines []string) ([]PodRow, error) {
 	rows := []PodRow{}
