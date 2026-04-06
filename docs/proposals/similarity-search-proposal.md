@@ -219,3 +219,90 @@ embedding:
    - `mode="hybrid"`, `rerank=false`: results ordered by combined score, `score_type: "hybrid"`
    - `rerank=true` (any mode): results ordered by descending reranker relevance, `score_type: "relevance"`
 4. **Regression:** Ensure `/reference` and `/v1/chat/completions` behavior is unchanged
+
+## Future Work: Replacing `/reference` Endpoint
+
+After the `/v1/similarity-search` endpoint is implemented and validated, the `/reference` endpoint can be replaced. Since this is an internal API, the migration can be straightforward:
+
+### Changes Required
+
+1. **Backend API** (`spyre-rag/src/chatbot/app.py`)
+   - Remove `/reference` route handler
+   - Remove `ReferenceRequest` and `ReferenceResponse` models if not used elsewhere
+   - Remove `search_only()` function if it's `/reference`-specific
+
+2. **Chatbot UI Frontend** (`spyre-rag/ui/`)
+   - **React Component** (`src/components/customSendMessage.jsx`):
+     - Change `/reference` POST to `/v1/similarity-search`
+     - Update request body from `{ prompt: userInput }` to `{ query: userInput, mode: "hybrid", rerank: true }`
+
+   - **Nginx Config** (`nginx.conf.tmpl`):
+     - Change `location /reference` block to `location /v1/similarity-search`
+     - Update proxy target to use new environment variables (see deployment configuration below)
+
+   - **Vite Dev Config** (`vite.config.js`):
+     - Change `"/reference"` proxy to `"/v1/similarity-search"`
+
+   - **Express Dev Server** (`src/server/server.js`):
+     - Change route from `app.post('/reference', ...)` to `app.post('/v1/similarity-search', ...)`
+     - Change target URL from `${targetURL}/reference` to `${targetURL}/v1/similarity-search`
+     - Update request body from `{ prompt: prompt }` to `{ query: prompt, mode: "hybrid", rerank: true }`
+     - Note: This file is only used during local development
+
+3. **Deployment Configuration** (`ai-services/assets/applications/rag/`)
+
+   Since the similarity-search service will be deployed separately from the chatbot backend, the UI needs new environment variables to route requests to it:
+
+   - **Podman Template** (`podman/templates/chat-bot.yaml.tmpl`):
+     - Add environment variables to the `ui` container:
+       ```yaml
+       - name: SIMILARITY_SEARCH_HOST
+         value: "{{ .AppName }}--similarity-api"
+       - name: SIMILARITY_SEARCH_PORT
+         value: "5000"
+       ```
+
+   - **OpenShift Template** (`openshift/templates/ui-deployment.yaml`):
+     - Add environment variables to the `ui` container:
+       ```yaml
+       - name: SIMILARITY_SEARCH_HOST
+         value: "similarity-api"
+       - name: SIMILARITY_SEARCH_PORT
+         value: "5000"
+       ```
+
+   - **UI Nginx Config** (`spyre-rag/ui/nginx.conf.tmpl`):
+     - Update the `/v1/similarity-search` location block to use the new variables:
+       ```nginx
+       location /v1/similarity-search {
+         proxy_pass http://${SIMILARITY_SEARCH_HOST}:${SIMILARITY_SEARCH_PORT};
+         proxy_http_version 1.1;
+         proxy_set_header Upgrade $http_upgrade;
+         proxy_set_header Connection 'upgrade';
+         proxy_set_header Host $host;
+         proxy_cache_bypass $http_upgrade;
+       }
+       ```
+
+   - **UI Containerfile** (`spyre-rag/ui/Containerfile`):
+     - Update the `envsubst` command to include the new variables:
+       ```bash
+       CMD /bin/bash -c "envsubst '\$BACKEND_HOST \$BACKEND_PORT \$SIMILARITY_SEARCH_HOST \$SIMILARITY_SEARCH_PORT' < /etc/nginx.conf.tmpl > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"
+       ```
+
+4. **Documentation**
+   - Update API documentation and examples to reference new endpoint
+   - Document search mode options and reranking behavior
+
+### Equivalent Behavior
+
+To replicate current `/reference` behavior, use:
+```json
+{
+  "query": "search text",
+  "mode": "hybrid",
+  "rerank": true
+}
+```
+
+**Note:** The request field changes from `prompt` to `query` to match the new API specification.
