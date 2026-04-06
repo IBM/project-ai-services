@@ -1,3 +1,4 @@
+import groovy.json.JsonOutput
 // Jenkins Pipeline for PR Preview Deployment
 // This pipeline deploys AI services applications for PR testing and validation
 pipeline {
@@ -26,6 +27,21 @@ pipeline {
         POLLER_LOGS = '/root/cicd/queue_poller.logs'
         POLLER_SCRIPT = '/root/cicd/queue_poller.sh'
         POLLER_TIMEOUT_IN_MINS = '150'
+        
+        // ---- Repos -------------------------------------------------------
+        // We could use AI_SERVICES_REPO_URL, but it has ".git"extension
+        // https://github.com/IBM/project-ai-services
+        AI_SERVICES_GITHUB_REPO = "https://github.com/IBM/${PROJECT_NAME}"
+        
+        // Always post statuses to the REPO_FOR_STATUS (PR UI reads from base)
+        // IBM/project-ai-services
+        REPO_FOR_STATUS = "IBM/${PROJECT_NAME}"
+        
+        // API base for GitHub.com
+        GITHUB_API_BASE = 'https://api.github.com'
+        
+        // icr.io auth file
+        REGISTRY_AUTH_FILE = "/run/containers/0/auth.json"
     }
 
     // Prevent concurrent builds to ensure only one deployment at a time
@@ -44,21 +60,31 @@ pipeline {
             choices: ['auto', 'rag-dev'],
             description: 'Select the application to deploy'
         )
+
+        // For Github actions. Controls whether we post GitHub status from this job
+        booleanParam(name: 'updateGitStatus', defaultValue: false, description: 'Post GitHub status updates from this job')
+
     }
 
     stages {
         stage('Pre Steps') {
             steps {
+                script {
+                    env.JOB_NAME_SHORT = env.JOB_NAME?.tokenize('/')?.last() ?: ''
+                }
                 // Start queue poller to detect and abort duplicate builds
                 withCredentials([usernamePassword(
                     credentialsId: 'jenkins-api',
                     usernameVariable: 'username',
                     passwordVariable: 'password'
                 )]) {
-                    sh '''
-                    nohup $POLLER_SCRIPT $JENKINS_URL CHECKOUT=$CHECKOUT $BUILD_URL $username $password $POLLER_TIMEOUT_IN_MINS >> $POLLER_LOGS 2>&1 &
-                    echo "Queue poller process id: $!"
-                    '''
+                    sh """
+                    pwd
+                    whoami
+                    
+                    nohup "\${POLLER_SCRIPT}" "\${JENKINS_URL}" CHECKOUT="${params.CHECKOUT}" "\${BUILD_URL}" "\${username}" "\${password}" "\${POLLER_TIMEOUT_IN_MINS}" "\${JOB_NAME_SHORT}" >> "\${POLLER_LOGS}" 2>&1 &
+                    echo "Queue poller process id: \$!"
+                    """
                 }
 
                 script {
@@ -74,6 +100,68 @@ pipeline {
                 }
                 // Clean workspace before starting
                 deleteDir()
+
+                // Get Commit SHA from the provided PR
+                script {
+                    if (params.updateGitStatus) {
+                        // Input validation
+                        if (!params.CHECKOUT?.trim()) {
+                            error("CHECKOUT is required (PR number or commit SHA).")
+                        }
+
+                        // Resolve the commit SHA from PR number or accept SHA/prefix
+                        String repoUrl = env.AI_SERVICES_GITHUB_REPO ?: 'https://github.com/IBM/project-ai-services'
+                        String resolvedSha = resolveCommitShaFromCheckout(params.CHECKOUT.trim(), repoUrl)
+
+                        if (!resolvedSha) {
+                            error("Failed to resolve commit SHA from CHECKOUT='${params.CHECKOUT}'.")
+                        }
+
+                        // Export the resolved SHA for downstream usage (e.g., GitHub status)
+                        env.GIT_SHA = resolvedSha
+                        echo "Resolved commit SHA for '${params.CHECKOUT}': ${env.GIT_SHA}"
+                    }
+                }
+
+                // Diag: Verify GitHub App access to BASE repo
+                script {
+                    if (params.updateGitStatus) {
+                        withCredentials([
+                            string(credentialsId: 'github_app_id',  variable: 'APP_ID'),
+                            file(credentialsId: 'github_app_key', variable: 'APP_KEY')   // .pem
+                        ]) {
+                            // Create a short-lived App JWT
+                            def jwt = generateAppJWT(APP_ID)
+
+                            // Discover installation ID for BASE repo
+                            def instId = getInstallationIdForRepo(jwt, env.REPO_FOR_STATUS, env.GITHUB_API_BASE)
+                            echo "Resolved installation id for ${env.REPO_FOR_STATUS}: ${instId}"
+
+                            // Mint installation access token
+                            def instToken = getInstallationToken(jwt, instId, env.GITHUB_API_BASE)
+
+                            // Probe: can the installation token see the base repo?
+                            withEnv([
+                                "GH_INST_TOKEN=${instToken}",
+                                "TARGET_URL=${env.GITHUB_API_BASE}/repos/${env.REPO_FOR_STATUS}"
+                            ]) {
+                                sh('''#!/usr/bin/env bash
+set -euo pipefail
+curl -i -sS -H "Authorization: token $GH_INST_TOKEN" -H "Accept: application/vnd.github+json" "$TARGET_URL"
+''')
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---------- POST "Deployment started" TO BASE (Github App) ----------
+        stage('Posting Deployment started status (GitHub App)') {
+            steps {
+                script {
+                    ghStatus('pending', 'Deployment in-progress')
+                }
             }
         }
 
@@ -105,7 +193,7 @@ pipeline {
                 }
             }
         }
-
+        
         stage('Build Images') {
             steps {
                 script {
@@ -140,15 +228,29 @@ pipeline {
             }
         }
 
+        stage('Registry Login') {
+          steps {
+            script {
+              icrLogin('icr-iam-creds')
+              redHatRegistryLogin('rh-registry-cred')
+
+              // Mirror auth file into root’s default lookup location to support tools
+              // that don’t preserve REGISTRY_AUTH_FILE / don’t pass --authfile.
+              mirrorAuthFileForRoot()
+            }
+          }
+        }
+
         stage('Deploy Application') {
             steps {
                 script {
                     dir("${env.PROJECT_NAME}/${env.AI_SERVICES_DIR}") {
                         // List current applications
                         sh "${env.AI_SERVICES_BINARY} application ps"
-                        
+                        sh "whoami"
+                        sh "pwd"
                         // Create and deploy the application
-                        sh "${env.AI_SERVICES_BINARY} application create ${env.APP_NAME} -t ${env.DEPLOY_APP} --params ui.port=${env.RAG_CHAT_BOT_PORT} --skip-validation numa"
+                        sh "sudo --preserve-env=REGISTRY_AUTH_FILE ${env.AI_SERVICES_BINARY} application create ${env.APP_NAME} -t ${env.DEPLOY_APP} --params ui.port=${env.RAG_CHAT_BOT_PORT} --skip-validation numa"
                     }
                 }
             }
@@ -178,6 +280,8 @@ pipeline {
                             *Chat bot URL:* http://${hostname}:${env.RAG_CHAT_BOT_PORT}
                         """
                         sendSlackNotification('good', message)
+                        // Posting Deployment & ingestion succeeded message.
+                        ghStatus('success', 'Deployment & ingestion succeeded')
                     }
                 }
             }
@@ -211,6 +315,7 @@ pipeline {
         failure {
             script {
                 sendSlackNotification('danger', 'Jenkins PR preview pipeline job has failed with an error.')
+                ghStatus('failure', 'Deployment or ingestion failed')
             }
         }
         success {
@@ -221,6 +326,7 @@ pipeline {
         aborted {
             script {
                 sendSlackNotification('warning', 'Jenkins PR preview pipeline job has been aborted.')
+                ghStatus('failure', 'Warning. Deployment or ingestion aborted')
             }
         }
     }
@@ -392,4 +498,343 @@ def updateApplicationYamlFile(String appName, String imageValue, String yamlPath
         sh "yq e '${yamlPath} = \"${imageValue}\"' -i ${valuesFilePath}"
         println "Updated values.yaml for ${appName}: ${yamlPath} = ${imageValue}"
     }
+}
+
+// Helper function to resolve the Commit SHA based on PR number
+def resolveCommitShaFromCheckout(String checkoutValue, String repoUrl) {
+    checkoutValue = (checkoutValue ?: '').trim()
+    repoUrl       = (repoUrl ?: '').trim()
+
+    if (!checkoutValue) {
+        error("resolveCommitShaFromCheckout: checkoutValue cannot be empty.")
+    }
+    if (!repoUrl) {
+        error("resolveCommitShaFromCheckout: repoUrl cannot be empty.")
+    }
+
+    // Case 1: PR number (digits only)
+    if (checkoutValue ==~ /^\d+$/) {
+        def prNum = checkoutValue
+        def sha = sh(
+            script: """#!/usr/bin/env bash
+set -euo pipefail
+git ls-remote "${repoUrl}" "refs/pull/${prNum}/head" | awk '{print \$1}'
+""",
+            returnStdout: true
+        ).trim()
+
+        if (!sha) {
+            error("Could not find HEAD commit for PR #${prNum} in ${repoUrl}.")
+        }
+        return sha
+    }
+
+    // Case 2: Looks like a SHA (short or full)
+    if (checkoutValue ==~ /^[0-9a-fA-F]{7,40}$/) {
+        def prefix = checkoutValue
+        // Try to expand to a full 40-char SHA by scanning remote refs
+        def sha = sh(
+            script: """#!/usr/bin/env bash
+set -euo pipefail
+git ls-remote "${repoUrl}" | awk '{print \$1}' | grep -i "^${prefix}" | head -n1 || true
+""",
+            returnStdout: true
+        ).trim()
+
+        if (sha) {
+            return sha
+        } else {
+            // Fall back to the provided value if we can't resolve (might still be valid)
+            if (!(prefix ==~ /^[0-9a-fA-F]{40}$/)) {
+                echo "Warning: Using provided commit prefix '${prefix}' (not resolved to full 40-char SHA)."
+            }
+            return prefix
+        }
+    }
+
+    // Otherwise invalid
+    error("CHECKOUT value '${checkoutValue}' is neither a PR number nor a commit SHA/prefix.")
+}
+
+// ========== Helper: Build a GitHub App JWT (RS256) ==========
+def generateAppJWT(String appId) {
+  // Short-lived token: iat = now-60s, exp = now+5m
+  def nowSec = (System.currentTimeMillis() / 1000) as long
+  def iat    = (nowSec - 60) as long
+  def exp    = (nowSec + 300) as long
+
+  // Header & payload JSON in memory
+  def headerJson  = groovy.json.JsonOutput.toJson([alg: 'RS256', typ: 'JWT'])
+  def payloadJson = groovy.json.JsonOutput.toJson([iat: iat, exp: exp, iss: appId])
+
+  // Base64URL encode in Groovy (no padding, URL-safe)
+  def b64url = { byte[] bytes ->
+    java.util.Base64.encoder
+      .withoutPadding()
+      .encodeToString(bytes)
+      .replace('+','-')
+      .replace('/','_')
+  }
+
+  def headerB64  = b64url(headerJson.getBytes('UTF-8'))
+  def payloadB64 = b64url(payloadJson.getBytes('UTF-8'))
+  def unsigned   = "${headerB64}.${payloadB64}"
+
+  // Pass ONLY the non-secret 'unsigned' via environment; keep script single-quoted so $APP_KEY is not Groovy-interpolated.
+  def signatureB64 = withEnv(["UNSIGNED=${unsigned}"]) {
+    sh(
+      script: '''#!/usr/bin/env bash
+set -euo pipefail
+printf '%s' "$UNSIGNED" \
+  | openssl dgst -sha256 -sign "$APP_KEY" \
+  | openssl base64 -A \
+  | tr '+/' '-_' | tr -d '='
+''',
+      returnStdout: true
+    ).trim()
+  }
+
+  return "${unsigned}.${signatureB64}"
+}
+
+// ========== Helper: Resolve installation id for a given repo ==========
+def getInstallationIdForRepo(String jwt, String repoFull, String apiBase) {
+  def url = "${apiBase}/repos/${repoFull}/installation"
+  def rsp = withEnv(["GH_JWT=${jwt}", "URL=${url}"]) {
+    sh(script: '''#!/usr/bin/env bash
+set -euo pipefail
+curl -sS -H "Authorization: Bearer $GH_JWT" -H "Accept: application/vnd.github+json" "$URL"
+''', returnStdout: true).trim()
+  }
+
+  def json = new groovy.json.JsonSlurper().parseText(rsp)
+  if (!json?.id) {
+    error "Could not resolve installation id for repo='${repoFull}'. Response: ${rsp}"
+  }
+  return json.id as String
+}
+
+// ========== Helper: Create an installation access token ==========
+def getInstallationToken(String jwt, String installationId, String apiBase) {
+  def url = "${apiBase}/app/installations/${installationId}/access_tokens"
+  def rsp = withEnv(["GH_JWT=${jwt}", "URL=${url}"]) {
+    sh(script: '''#!/usr/bin/env bash
+set -euo pipefail
+curl -sS -X POST -H "Authorization: Bearer $GH_JWT" -H "Accept: application/vnd.github+json" "$URL"
+''', returnStdout: true).trim()
+  }
+
+  def json = new groovy.json.JsonSlurper().parseText(rsp)
+  if (!json?.token) {
+    error "Could not fetch installation token (installationId='${installationId}'). Response: ${rsp}"
+  }
+  return json.token as String
+}
+
+def inferRepoFull() {
+    def repo = (env.REPO_FOR_STATUS ).trim()
+    if (repo) return repo
+      error "postGitStatusViaApp: REPO_FOR_STATUS must be set to 'owner/repo'."
+}
+
+def inferCommitSha() {
+    def sha = (env.GIT_SHA ?: env.GIT_COMMIT ?: '').trim()
+    if (sha) return sha
+      error "postGitStatusViaApp: commit SHA not set. Provide params.COMMIT or set env.GIT_SHA/env.GIT_COMMIT."
+}
+
+def ghStatus(String state, String description, String context = 'Manual Deployment') {
+  if (params.updateGitStatus) {
+    postGitStatusViaApp(state: state, description: description, context: context)
+  }
+}
+
+// helper function to post a GitHub commit status updates.
+def postGitStatusViaApp(Map args = [:]) {
+    // Inputs with sensible defaults (caller can still override)
+    def state       = (args.state       ?: 'pending').trim()         // pending|success|failure|error
+    def description = (args.description ?: '').trim()
+    def context     = (args.context     ?: 'Manual Deployment').trim()
+    def targetUrl   = (args.targetUrl   ?: env.BUILD_URL ?: '').trim()
+    def apiBase     = (args.apiBase     ?: env.GITHUB_API_BASE ?: 'https://api.github.com').trim()
+    def dryRun      = (args.dryRun      ?: false) as boolean
+
+    // Use minimal inference only
+    def repoFull    = (args.repo   ?: inferRepoFull()).trim()
+    def commitSha   = (args.commit ?: inferCommitSha()).trim()
+
+    // Conform to GH Statuses API character limits
+    description = description.take(140)
+    context     = context.take(100)
+
+    echo "Posting (GitHub App): repo='${repoFull}', commit='${commitSha}', state='${state}', context='${context}', description='${description}', target='${targetUrl}'"
+    echo "Endpoint: ${apiBase}/repos/${repoFull}/statuses/${commitSha}"
+
+    // Prepare JSON payload on disk (safe, no secrets)
+    def payloadObj = [
+        state      : state,
+        target_url : targetUrl,
+        description: description,
+        context    : context
+    ]
+    def payload = groovy.json.JsonOutput.toJson(payloadObj)
+    writeFile file: 'payload.json', text: payload
+
+    if (dryRun) {
+        echo "DRY-RUN → Would POST to ${apiBase}/repos/${repoFull}/statuses/${commitSha}"
+        echo "Payload: ${payload}"
+        return
+    }
+
+    // Pull GitHub App credentials INSIDE the function
+    withCredentials([
+        string(credentialsId: 'github_app_id',  variable: 'APP_ID'),
+        file  (credentialsId: 'github_app_key', variable: 'APP_KEY') // PEM file path
+    ]) {
+        // 1) Build App JWT (generateAppJWT reads APP_KEY inside its shell)
+        def jwt = generateAppJWT(APP_ID)
+
+        // 2) Resolve installation id for the BASE repo
+        def instId = getInstallationIdForRepo(jwt, repoFull, apiBase)
+
+        // 3) Create installation token
+        def instToken = getInstallationToken(jwt, instId, apiBase)
+
+        // 4) POST the status with the installation token (with retry for transient errors)
+        withEnv([
+            "GH_INST_TOKEN=${instToken}",
+            "TARGET_URL=${apiBase}/repos/${repoFull}/statuses/${commitSha}"
+        ]) {
+            retry(2) {
+                sh('''#!/usr/bin/env bash
+set -euo pipefail
+
+HTTP=$(curl -sS -o resp_status.json -w "%{http_code}" \
+  -H "Authorization: token $GH_INST_TOKEN" \
+  -H "Accept: application/vnd.github+json" \
+  -H "Content-Type: application/json" \
+  -X POST \
+  -d @payload.json \
+  "$TARGET_URL")
+
+echo "GitHub Status HTTP: $HTTP"
+# echo "Response body:"
+# cat resp_status.json || true
+
+if [ "$HTTP" != "201" ] && [ "$HTTP" != "200" ]; then
+  if [ "$HTTP" = "401" ]; then
+    echo "HINT: 401 → App not installed on repo or wrong key/appId."
+  elif [ "$HTTP" = "404" ]; then
+    echo "HINT: 404 → Wrong repo or commit SHA not visible in base."
+  elif [ "$HTTP" = "422" ]; then
+    echo "HINT: 422 → Invalid payload or non-existent/short SHA."
+  fi
+  exit 1
+fi
+''')
+            }
+        }
+    }
+}
+
+/**
+ * Logs into IBM Container Registry (icr.io) using Podman
+ * with per-build authfile isolation
+ */
+/**
+ *
+ * @param credentialsId Jenkins credentials ID (username/password)
+ * @param registry      Container registry (default: icr.io)
+ */
+def icrLogin(String credentialsId, String registry = 'icr.io') {
+  echo "Forcing fresh Podman login for ${registry} using ${env.REGISTRY_AUTH_FILE}"
+
+  withCredentials([usernamePassword(
+    credentialsId: credentialsId,
+    usernameVariable: 'ICR_USERNAME',
+    passwordVariable: 'ICR_PASSWORD'
+  )]) {
+    sh '''#!/usr/bin/env bash
+set -euo pipefail
+
+sudo --preserve-env=REGISTRY_AUTH_FILE,ICR_USERNAME,ICR_PASSWORD bash -lc '
+  set -euo pipefail
+
+  # Deterministic: remove any existing credential entry for this registry
+  podman logout --authfile "$REGISTRY_AUTH_FILE" icr.io >/dev/null 2>&1 || true
+
+  # Fresh login
+  echo "$ICR_PASSWORD" | podman login icr.io \
+    --authfile "$REGISTRY_AUTH_FILE" \
+    -u "$ICR_USERNAME" \
+    --password-stdin
+
+  # Optional: show which auth file podman store is using (no secrets)
+  podman info --format "ConfigFile={{ .Store.ConfigFile }}"
+'
+'''
+  }
+
+  echo "ICR login completed (fresh)"
+}
+
+/**
+ * Logs into Red Hat Container Registry (registry.redhat.io) using Podman
+ * - Skips login if already authenticated
+ *
+ * @param credentialsId Jenkins credentials ID (username/password)
+ * @param registry      Container registry (default: registry.redhat.io)
+ */
+def redHatRegistryLogin(String credentialsId, String registry = 'registry.redhat.io') {
+  echo "Forcing fresh Podman login for ${registry} using ${env.REGISTRY_AUTH_FILE}"
+
+  withCredentials([usernamePassword(
+    credentialsId: credentialsId,
+    usernameVariable: 'RH_USERNAME',
+    passwordVariable: 'RH_PASSWORD'
+  )]) {
+    sh '''#!/usr/bin/env bash
+set -euo pipefail
+
+sudo --preserve-env=REGISTRY_AUTH_FILE,RH_USERNAME,RH_PASSWORD bash -lc '
+  set -euo pipefail
+
+  # Deterministic: remove any existing credential entry for this registry
+  podman logout --authfile "$REGISTRY_AUTH_FILE" registry.redhat.io >/dev/null 2>&1 || true
+
+  # Fresh login
+  echo "$RH_PASSWORD" | podman login registry.redhat.io \
+    --authfile "$REGISTRY_AUTH_FILE" \
+    -u "$RH_USERNAME" \
+    --password-stdin
+
+  # Optional: show which auth file podman store is using (no secrets)
+  podman info --format "ConfigFile={{ .Store.ConfigFile }}"
+'
+'''
+  }
+
+  echo "Red Hat registry login completed (fresh)"
+}
+
+
+/**
+ *  Copies auth.json to the right location so that image pulls from redhat registry are successfull
+ */
+
+def mirrorAuthFileForRoot() {
+  echo "Mirroring ${env.REGISTRY_AUTH_FILE} to /root/.config/containers/auth.json for fallback credential lookup"
+
+  sh '''#!/usr/bin/env bash
+set -euo pipefail
+
+sudo --preserve-env=REGISTRY_AUTH_FILE bash -lc '
+  set -euo pipefail
+  mkdir -p /root/.config/containers
+
+  # Copy the consolidated authfile (contains both ICR + Red Hat entries)
+  cp -f "$REGISTRY_AUTH_FILE" /root/.config/containers/auth.json
+  chmod 600 /root/.config/containers/auth.json
+'
+'''
 }
