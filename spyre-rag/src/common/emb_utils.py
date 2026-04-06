@@ -1,7 +1,6 @@
 import json
-import requests
 import numpy as np
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, SESSION
 from common.retry_utils import retry_on_transient_error
 
 logger = get_logger("Embedding")
@@ -22,6 +21,9 @@ class Embedding:
 
     @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
     def _post_embedding(self, texts):
+        if SESSION is None:
+            raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+        
         payload = {
             "input": texts,
             "model": self.emb_model,
@@ -31,7 +33,7 @@ class Embedding:
             "accept": "application/json",
             "Content-type": "application/json"
         }
-        response = requests.post(
+        response = SESSION.post(
             f"{self.emb_endpoint}/v1/embeddings",
             data=json.dumps(payload),
             headers=headers

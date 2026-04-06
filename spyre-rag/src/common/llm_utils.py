@@ -2,12 +2,11 @@ import logging
 import requests
 import time
 import json
-from requests.adapters import HTTPAdapter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 from common.lang_utils import prompt_map
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, SESSION
 from common.settings import get_settings
 from common.retry_utils import retry_on_transient_error
 
@@ -23,28 +22,6 @@ def tqdm_wrapper(iterable, **kwargs):
         return iterable
 
 settings = get_settings()
-
-SESSION = None
-
-def create_llm_session(pool_maxsize, pool_connections: int = 2, pool_block: bool = True):
-    global SESSION
-
-    # SESSION object will be used by instruct and embedding endpoints. Hence keeping pool_connections = 2
-    # Need to use SESSION object for following reasons:
-    # - To limit the number of concurrent requests getting created to instruct vLLM's API to 32
-    # - To fix the ephemeral port exhaustion issue during chunking, since numerous tokenize calls are made to embedding server
-    if SESSION is None:
-        adapter = HTTPAdapter(
-            pool_connections=pool_connections,
-            pool_maxsize=pool_maxsize,
-            pool_block=pool_block
-        )
-
-        session = requests.Session()
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-
-        SESSION = session
 
 def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, pdf_path, batch_size=32):
     all_prompts = [settings.prompts.llm_classify.format(text=item.strip()) for item in text_blocks]

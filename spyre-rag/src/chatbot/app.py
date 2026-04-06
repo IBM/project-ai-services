@@ -27,9 +27,8 @@ set_log_level(log_level)
 
 import common.db_utils as db
 from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
-from common.misc_utils import get_model_endpoints, set_request_id, configure_uvicorn_logging
-
-from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_non_stream, query_vllm_models
+from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
+from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models
 from common.settings import get_settings
 from common.perf_utils import perf_registry
 from chatbot.backend_utils import search_only, validate_query_length

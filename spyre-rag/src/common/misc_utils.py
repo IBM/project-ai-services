@@ -1,11 +1,16 @@
 import hashlib
 import logging
 import os
+import requests
 from contextvars import ContextVar
+from requests.adapters import HTTPAdapter
 from digitize.config import DIGITIZED_DOCS_DIR
 
 # ContextVar to store the request ID for each request
 request_id_ctx = ContextVar("request_id", default="-")
+
+# Global SESSION for all LLM and embedding API calls
+SESSION = None
 
 
 class DoclingConversionError(Exception):
@@ -140,6 +145,27 @@ def get_logger(name):
     logger.addHandler(console_handler)
 
     return logger
+
+
+def create_llm_session(pool_maxsize, pool_connections: int = 3, pool_block: bool = True):
+    global SESSION
+
+    # SESSION object will be used by instruct and embedding endpoints. Hence keeping pool_connections = 2
+    # Need to use SESSION object for following reasons:
+    # - To limit the number of concurrent requests getting created to instruct vLLM's API to 32
+    # - To fix the ephemeral port exhaustion issue during chunking, since numerous tokenize calls are made to embedding server
+    if SESSION is None:
+        adapter = HTTPAdapter(
+            pool_connections=pool_connections,
+            pool_maxsize=pool_maxsize,
+            pool_block=pool_block
+        )
+
+        session = requests.Session()
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+
+        SESSION = session
 
 
 def get_txt_tab_filenames(file_paths, out_path):
