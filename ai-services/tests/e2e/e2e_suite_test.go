@@ -372,7 +372,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				expectedPorts := []string{uiPort, backendPort, digitizePort, digitizeUiPort, summarizePort}
 				gomega.Expect(podman.VerifyExposedPorts(appName, expectedPorts, appRuntime, widePsOutput)).NotTo(gomega.HaveOccurred(), "Verify exposed ports/routes failed")
 			} else {
-				output, err := podman.GetOpenshiftRoutes()
+				output, err := podman.GetOpenshiftRoutes(appName)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(cli.ValidateOpenShiftRoutes(output)).NotTo(gomega.HaveOccurred(), "Verify exposed ports/routes failed")
 			}

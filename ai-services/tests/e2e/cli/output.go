@@ -42,8 +42,8 @@ func ValidateBootstrapValidateOutput(output string) error {
 func ValidateBootstrapFullOutput(output string, appRuntime string) error {
 	required := map[string][]string{
 		"podman": {
-			"LPAR configured successfully",
-			"Bootstrap configuration completed successfully",
+			"All validations passed",
+			"LPAR bootstrapped successfully",
 		},
 		"openshift": {
 			"Cluster configured successfully",

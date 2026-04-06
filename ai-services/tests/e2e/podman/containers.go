@@ -196,10 +196,10 @@ func parsePodRows(lines []string) ([]PodRow, error) {
 }
 
 // getRestartCount inspects a pod and its containers and returns the total restart count.
-func getRestartCount(podName string, appRuntime string) (int, error) {
+func getRestartCount(podName string, appRuntime string, appName string) (int, error) {
 	if appRuntime == "openshift" {
 		// OpenShift: use oc get pod with JSON output
-		return getOpenshiftRestartCount(podName)
+		return getOpenshiftRestartCount(podName, appName)
 	}
 
 	// Podman: use podman pod inspect
@@ -249,8 +249,8 @@ func getPodmanRestartCount(podName string) (int, error) {
 	return totalRestarts, nil
 }
 
-func getOpenshiftRestartCount(podName string) (int, error) {
-	podRes, err := common.RunCommand("oc", "get", "pod", podName, "-o", "json")
+func getOpenshiftRestartCount(podName string, appName string) (int, error) {
+	podRes, err := common.RunCommand("oc", "get", "pod", podName, "-o", "json", "-n", appName)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get pod %s: %w", podName, err)
 	}
@@ -319,7 +319,7 @@ func waitForPodRunningNoCrash(ctx context.Context, cfg *config.Config, appName, 
 			if !healthy {
 				return false, nil
 			}
-			restarts, err := getRestartCount(podName, appRuntime)
+			restarts, err := getRestartCount(podName, appRuntime, appName)
 			if err != nil {
 				return false, err
 			}
@@ -365,7 +365,7 @@ func VerifyContainers(ctx context.Context, cfg *config.Config, widePSOutput stri
 				}
 			}
 			gomega.Expect(found).To(gomega.BeTrue(), "expected pod with prefix %s to exist", expectedPrefix)
-			restartCount, err := getRestartCount(podName, appRuntime)
+			restartCount, err := getRestartCount(podName, appRuntime, appName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			ginkgo.GinkgoWriter.Printf("[RestartCount] pod=%s restarts=%d\n", expectedPodName, restartCount)
 			gomega.Expect(restartCount).To(gomega.BeNumerically("<=", 0),
@@ -374,7 +374,7 @@ func VerifyContainers(ctx context.Context, cfg *config.Config, widePSOutput stri
 			// For podman, use exact pod name matching
 			expectedPodName = appName + "--" + suffix
 			gomega.Expect(actualPods).To(gomega.HaveKey(expectedPodName), "expected pod %s to exist", expectedPodName)
-			restartCount, err := getRestartCount(expectedPodName, appRuntime)
+			restartCount, err := getRestartCount(expectedPodName, appRuntime, appName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			ginkgo.GinkgoWriter.Printf("[RestartCount] pod=%s restarts=%d\n", expectedPodName, restartCount)
 			gomega.Expect(restartCount).To(gomega.BeNumerically("<=", 0),
@@ -437,8 +437,8 @@ func VerifyExposedPorts(appName string, expectedPorts []string, appRuntime strin
 	return nil
 }
 
-func GetOpenshiftRoutes() (string, error) {
-	response, err := common.RunCommand("oc", "get", "routes")
+func GetOpenshiftRoutes(appName string) (string, error) {
+	response, err := common.RunCommand("oc", "get", "routes", "-n", appName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get routes: %w", err)
 	}

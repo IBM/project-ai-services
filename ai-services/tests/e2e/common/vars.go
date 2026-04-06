@@ -1,5 +1,7 @@
 package common
 
+import "time"
+
 var (
 	ExpectedPodSuffixes = map[string][]string{
 		"podman": {
@@ -23,4 +25,5 @@ var (
 			"ui",
 		},
 	}
+	DeleteSleepInterval = 10 * time.Second
 )

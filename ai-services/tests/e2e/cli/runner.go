@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -145,22 +146,22 @@ func CreateRAGAppAndValidate(
 		return output, err
 	}
 
-	backendURL := ""
-	chatbotUiURL := ""
-	if appRuntime == "podman" {
-		hostIP, err := extractHostIP(output)
-		if err != nil {
-			return output, err
-		}
-		backendURL = fmt.Sprintf("http://%s:%s", hostIP, backendPort)
-		chatbotUiURL = fmt.Sprintf("http://%s:%s", hostIP, uiPort)
-	} else {
-		urls := extractURLsFromOutput(output)
-		backendURL = strings.Replace(urls[0], "digitize-ui", "backend", 1)
-		chatbotUiURL = strings.Replace(urls[0], "digitize-ui", "ui", 1)
+	backendURL, chatbotUiURL, s, err := getRAGURLs(appRuntime, output, backendPort, uiPort)
+	if err != nil {
+		return s, err
 	}
+	// Skip TLS verification for OpenShift (self-signed certificates)
+	skipTLSVerify := appRuntime == "openshift"
 	httpClient := &http.Client{
 		Timeout: defaultCommandTimeout,
+	}
+	if skipTLSVerify {
+		logger.Warningf("[WARNING] TLS certificate verification disabled for OpenShift runtime")
+		httpClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		}
 	}
 	endpoints := []string{
 		"/health",
@@ -176,6 +177,25 @@ func CreateRAGAppAndValidate(
 	logger.Infof("[UI] Chatbot UI available at: %s", chatbotUiURL)
 
 	return output, nil
+}
+
+func getRAGURLs(appRuntime string, output string, backendPort string, uiPort string) (string, string, string, error) {
+	backendURL := ""
+	chatbotUiURL := ""
+	if appRuntime == "podman" {
+		hostIP, err := extractHostIP(output)
+		if err != nil {
+			return "", "", output, err
+		}
+		backendURL = fmt.Sprintf("http://%s:%s", hostIP, backendPort)
+		chatbotUiURL = fmt.Sprintf("http://%s:%s", hostIP, uiPort)
+	} else {
+		urls := extractURLsFromOutput(output)
+		backendURL = strings.Replace(urls[0], "digitize-ui", "backend", 1)
+		chatbotUiURL = strings.Replace(urls[0], "digitize-ui", "ui", 1)
+	}
+
+	return backendURL, chatbotUiURL, "", nil
 }
 
 // waitForEndpointOK polls the given endpoint until it returns HTTP 200 OK or exhausts retries.
@@ -447,6 +467,8 @@ func DeleteAppSkipCleanup(
 	if err := ValidateDeleteAppOutput(output, appName); err != nil {
 		return output, err
 	}
+
+	time.Sleep(common.DeleteSleepInterval) //wait for 10 seconds before checking ps output
 
 	psOutput, err := ApplicationPS(ctx, cfg, appName, appRuntime)
 	if err != nil {
