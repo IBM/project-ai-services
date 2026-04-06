@@ -28,11 +28,6 @@ pipeline {
         POLLER_SCRIPT = '/root/cicd/queue_poller.sh'
         POLLER_TIMEOUT_IN_MINS = '150'
         
-        // ---- Repos -------------------------------------------------------
-        // We could use AI_SERVICES_REPO_URL, but it has ".git"extension
-        // https://github.com/IBM/project-ai-services
-        AI_SERVICES_GITHUB_REPO = "https://github.com/IBM/${PROJECT_NAME}"
-        
         // Always post statuses to the REPO_FOR_STATUS (PR UI reads from base)
         // IBM/project-ai-services
         REPO_FOR_STATUS = "IBM/${PROJECT_NAME}"
@@ -79,9 +74,6 @@ pipeline {
                     passwordVariable: 'password'
                 )]) {
                     sh """
-                    pwd
-                    whoami
-                    
                     nohup "\${POLLER_SCRIPT}" "\${JENKINS_URL}" CHECKOUT="${params.CHECKOUT}" "\${BUILD_URL}" "\${username}" "\${password}" "\${POLLER_TIMEOUT_IN_MINS}" "\${JOB_NAME_SHORT}" >> "\${POLLER_LOGS}" 2>&1 &
                     echo "Queue poller process id: \$!"
                     """
@@ -110,7 +102,7 @@ pipeline {
                         }
 
                         // Resolve the commit SHA from PR number or accept SHA/prefix
-                        String repoUrl = env.AI_SERVICES_GITHUB_REPO ?: 'https://github.com/IBM/project-ai-services'
+                        String repoUrl = env.AI_SERVICES_REPO_URL ?: 'https://github.com/IBM/project-ai-services'
                         String resolvedSha = resolveCommitShaFromCheckout(params.CHECKOUT.trim(), repoUrl)
 
                         if (!resolvedSha) {
@@ -247,10 +239,8 @@ curl -i -sS -H "Authorization: token $GH_INST_TOKEN" -H "Accept: application/vnd
                     dir("${env.PROJECT_NAME}/${env.AI_SERVICES_DIR}") {
                         // List current applications
                         sh "${env.AI_SERVICES_BINARY} application ps"
-                        sh "whoami"
-                        sh "pwd"
                         // Create and deploy the application
-                        sh "sudo --preserve-env=REGISTRY_AUTH_FILE ${env.AI_SERVICES_BINARY} application create ${env.APP_NAME} -t ${env.DEPLOY_APP} --params ui.port=${env.RAG_CHAT_BOT_PORT} --skip-validation numa"
+                        sh "sudo --preserve-env=REGISTRY_AUTH_FILE ${env.AI_SERVICES_BINARY} application create ${env.APP_NAME} -t ${env.DEPLOY_APP} --params ui.port=${env.RAG_CHAT_BOT_PORT}"
                     }
                 }
             }
