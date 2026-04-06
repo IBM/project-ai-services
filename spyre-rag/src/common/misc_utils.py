@@ -17,10 +17,89 @@ class DoclingConversionError(Exception):
     pass
 
 class RequestIDFilter(logging.Filter):
-    #Filter to inject request_id from ContextVar into log records.
+    """Filter to inject request_id from ContextVar into log records."""
     def filter(self, record):
         record.request_id = request_id_ctx.get()
         return True
+
+
+class RequestIDFormatter(logging.Formatter):
+    """Custom formatter that conditionally includes request_id only when present."""
+    def format(self, record):
+        # Get the request_id from the record
+        request_id = getattr(record, 'request_id', '-')
+        
+        # If request_id is the default "-", don't include it in the format
+        if request_id == '-':
+            # Format without request_id brackets
+            self._style._fmt = '%(asctime)s - %(name)-18s - %(levelname)-8s - %(message)s'
+        else:
+            # Format with request_id
+            self._style._fmt = '%(asctime)s - %(name)-18s - %(levelname)-8s - [%(request_id)s] - %(message)s'
+        
+        return super().format(record)
+
+
+class EndpointFilter(logging.Filter):
+    """
+    Filter to exclude health check and polling endpoints from access logs.
+    
+    These endpoints are only logged when LOG_LEVEL is set to DEBUG.
+    """
+    def __init__(self, log_level, filtered_paths):
+        super().__init__()
+        self.log_level = log_level
+        # Endpoints to filter out at INFO level
+        self.filtered_paths = filtered_paths
+    
+    def filter(self, record):
+        # If DEBUG level, allow all logs through
+        if self.log_level == logging.DEBUG:
+            return True
+        
+        # At INFO level or higher, filter out health checks and job polling
+        message = record.getMessage()
+        
+        # Check if this is an access log for filtered endpoints
+        for path in self.filtered_paths:
+            if path in message and 'GET' in message:
+                return False
+        
+        return True
+
+def configure_uvicorn_logging(log_level, filtered_paths):
+    """
+    Configure uvicorn loggers with custom formatting and filtering.
+    
+    This function should be called after uvicorn sets up its logging (e.g., in lifespan).
+    It applies consistent formatting to uvicorn's main and access loggers, and adds
+    endpoint filtering to the access logger to reduce noise from health checks.
+    
+    Args:
+        log_level: The logging level to apply (e.g., logging.INFO, logging.DEBUG)
+        filtered_paths: List of endpoint paths to filter from access logs at INFO level
+    """
+    # Custom formatter matching application log format (without request_id for uvicorn logs)
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)-18s - %(levelname)-8s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Configure uvicorn main logger (startup messages, etc.)
+    uvicorn_logger = logging.getLogger("uvicorn")
+    uvicorn_logger.setLevel(log_level)
+    for handler in uvicorn_logger.handlers:
+        handler.setFormatter(formatter)
+    
+    # Configure uvicorn.access logger (HTTP access logs)
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.setLevel(log_level)
+    for handler in uvicorn_access_logger.handlers:
+        handler.setFormatter(formatter)
+    
+    # Apply endpoint filter to access logger only
+    uvicorn_access_logger.addFilter(EndpointFilter(log_level, filtered_paths))
+
 
 def set_request_id(request_id: str):
     #Set the request ID for the current context.
@@ -52,8 +131,8 @@ def get_logger(name):
     console_handler = logging.StreamHandler()
     console_handler.setLevel(LOG_LEVEL)
 
-    # Update formatter to include request_id
-    formatter = logging.Formatter(
+    # Use custom formatter that conditionally includes request_id
+    formatter = RequestIDFormatter(
         '%(asctime)s - %(name)-18s - %(levelname)-8s - [%(request_id)s] - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S')
     console_handler.setFormatter(formatter)

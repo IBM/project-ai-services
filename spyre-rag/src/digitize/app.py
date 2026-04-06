@@ -23,7 +23,8 @@ if level != "":
 
 set_log_level(log_level)
 
-from common.misc_utils import get_logger, validate_pdf_file, set_request_id
+from common.misc_utils import get_logger, validate_pdf_file, set_request_id, configure_uvicorn_logging
+
 import digitize.digitize_utils as dg_util
 import digitize.types as types
 from digitize.digitize import digitize
@@ -43,6 +44,8 @@ logger = get_logger("digitize_server")
 async def lifespan(app: FastAPI):
     """Manage application lifespan events (startup and shutdown)."""
     # Startup
+    filtered_paths = ['/health', '/v1/jobs']
+    configure_uvicorn_logging(log_level, filtered_paths)
     logger.info("Application starting up...")
 
     # Scan for orphan jobs and mark them as failed
