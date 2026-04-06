@@ -10,6 +10,10 @@ from chatbot.reranker_utils import rerank_documents
 class SimilaritySearchRequest(BaseModel):
     """Request body for POST /v1/similarity-search"""
     query: str = Field(..., description="Natural language search query")
+    mode: str = Field(
+        default="dense",
+        description="A mode parameter to select the search strategy: dense  K-NN, sparse BM25, or hybrid (both)"
+    )
     top_k: Optional[int] = Field(
         default=None,
         description="Number of results to return. Defaults to num_chunks_post_search from settings."
@@ -135,6 +139,7 @@ def perform_similarity_search(
     vectorstore,
     top_k: int,
     rerank: bool,
+    mode:str,
     reranker_model: Optional[str] = None,
     reranker_endpoint: Optional[str] = None,
 ) -> tuple[list[dict], list[float], str]:
@@ -159,10 +164,15 @@ def perform_similarity_search(
         emb_max_tokens,
         vectorstore,
         top_k,
-        mode="dense",
+        mode=mode,
     )
 
-    score_type = "cosine"
+    score_type_map = {
+        "dense": "cosine",
+        "hybrid": "hybrid",
+        "sparse": "bm25"
+    }
+    score_type = score_type_map.get(mode, "cosine")
 
     if rerank:
         reranked = rerank_documents(query, docs, reranker_model, reranker_endpoint)

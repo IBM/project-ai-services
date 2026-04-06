@@ -117,7 +117,9 @@ def swagger_root():
 async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchResponse:
     if not req.query or not req.query.strip():
         raise HTTPException(status_code=400, detail="query is required")
-
+    
+    if req.mode not in ["dense", "sparse", "hybrid"]:
+        raise HTTPException(status_code=400, detail = "mode must be one of: dense, sparse, hybrid")
     try:
         emb_model = emb_model_dict["emb_model"]
         emb_endpoint = emb_model_dict["emb_endpoint"]
@@ -147,6 +149,7 @@ async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchRes
             vectorstore,
             top_k,
             req.rerank,
+            req.mode,
             reranker_model,
             reranker_endpoint,
         )
