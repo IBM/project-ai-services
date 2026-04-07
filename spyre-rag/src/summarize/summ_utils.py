@@ -1,7 +1,7 @@
 import logging
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Optional
 import pypdfium2 as pdfium
 from pydantic import BaseModel, Field
 
@@ -156,83 +156,6 @@ class SummarizeSuccessResponse(BaseModel):
             }
         }
     }
-
-
-class ErrorDetail(BaseModel):
-    code: str = Field(..., description="Machine-readable error code.")
-    message: str = Field(..., description="Human-readable error message.")
-    status: int = Field(..., description="HTTP status code.")
-
-
-class SummarizeErrorResponseBadRequest(BaseModel):
-    error: ErrorDetail
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "error": {
-                    "code": "MISSING_INPUT",
-                    "message": "Either 'text' or 'file' parameter is required",
-                    "status": 400,
-                }
-            }
-        }
-    }
-
-
-class SummarizeErrorResponseContextLimitExceeded(BaseModel):
-    error: ErrorDetail
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "error": {
-                    "code": "CONTEXT_LIMIT_EXCEEDED",
-                    "message": "File size exceeds maximum token limit",
-                    "status": 413,
-                }
-            }
-        }
-    }
-
-
-class SummarizeErrorResponseUnsupportedContentType(BaseModel):
-    error: ErrorDetail
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "error": {
-                    "code": "UNSUPPORTED_CONTENT_TYPE",
-                    "message":  "Content-Type must be application/json or multipart/form-data",
-                    "status": 415,
-                }
-            }
-        }
-    }
-
-
-class SummarizeErrorResponseInternalServiceError(BaseModel):
-    error: ErrorDetail
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "error": {
-                    "code": "LLM_ERROR",
-                    "message":  "Failed to generate summary. Please try again later",
-                    "status": 500,
-                }
-            }
-        }
-    }
-
-error_responses: Dict[int | str, Dict[str, Any]] = {
-    400: {"description": "Bad request (missing input, unsupported file type, invalid params)", "model": SummarizeErrorResponseBadRequest},
-    413: {"description": "Input exceeds context window limit", "model": SummarizeErrorResponseContextLimitExceeded},
-    415: {"description": "Unsupported Content-Type", "model": SummarizeErrorResponseUnsupportedContentType},
-    500: {"description": "LLM service error", "model": SummarizeErrorResponseInternalServiceError},
-}
 
 def validate_summary_length(summary_length):
     if summary_length:

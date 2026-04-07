@@ -32,13 +32,13 @@ type StartOptions struct {
 }
 
 // Bootstrap runs the full bootstrap (configure + validate).
-func Bootstrap(ctx context.Context) (string, error) {
+func Bootstrap(ctx context.Context, appRuntime string) (string, error) {
 	binPath, err := bootstrap.BuildOrVerifyCLIBinary(ctx)
 	if err != nil {
 		return "", err
 	}
-	logger.Infof("[CLI] Running: %s bootstrap", binPath)
-	output, err := common.RunCommand(binPath, "bootstrap")
+	logger.Infof("[CLI] Running: %s bootstrap --runtime %s", binPath, appRuntime)
+	output, err := common.RunCommand(binPath, "bootstrap", "--runtime", appRuntime)
 	if err != nil {
 		return output, err
 	}
@@ -47,13 +47,13 @@ func Bootstrap(ctx context.Context) (string, error) {
 }
 
 // BootstrapConfigure runs only the 'configure' step.
-func BootstrapConfigure(ctx context.Context) (string, error) {
+func BootstrapConfigure(ctx context.Context, appRuntime string) (string, error) {
 	binPath, err := bootstrap.BuildOrVerifyCLIBinary(ctx)
 	if err != nil {
 		return "", err
 	}
-	logger.Infof("[CLI] Running: %s bootstrap configure", binPath)
-	output, err := common.RunCommand(binPath, "bootstrap", "configure")
+	logger.Infof("[CLI] Running: %s bootstrap configure --runtime %s", binPath, appRuntime)
+	output, err := common.RunCommand(binPath, "bootstrap", "configure", "--runtime", appRuntime)
 	if err != nil {
 		return output, err
 	}
@@ -62,13 +62,13 @@ func BootstrapConfigure(ctx context.Context) (string, error) {
 }
 
 // BootstrapValidate runs only the 'validate' step.
-func BootstrapValidate(ctx context.Context) (string, error) {
+func BootstrapValidate(ctx context.Context, appRuntime string) (string, error) {
 	binPath, err := bootstrap.BuildOrVerifyCLIBinary(ctx)
 	if err != nil {
 		return "", err
 	}
-	logger.Infof("[CLI] Running: %s bootstrap validate", binPath)
-	output, err := common.RunCommand(binPath, "bootstrap", "validate")
+	logger.Infof("[CLI] Running: %s bootstrap validate --runtime %s", binPath, appRuntime)
+	output, err := common.RunCommand(binPath, "bootstrap", "validate", "--runtime", appRuntime)
 	if err != nil {
 		return output, err
 	}
@@ -84,6 +84,7 @@ func CreateApp(
 	template string,
 	params string,
 	opts CreateOptions,
+	appRuntime string,
 ) (string, error) {
 	args := []string{
 		"application", "create", appName,
@@ -104,6 +105,7 @@ func CreateApp(
 	if opts.ImagePullPolicy != "" {
 		args = append(args, "--image-pull-policy", opts.ImagePullPolicy)
 	}
+	args = append(args, "--runtime", appRuntime)
 	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
@@ -128,13 +130,14 @@ func CreateRAGAppAndValidate(
 	uiPort string,
 	opts CreateOptions,
 	pods []string,
+	appRuntime string,
 ) (string, error) {
 	const (
 		maxRetries            = 10
 		waitTime              = 15 * time.Second
 		defaultCommandTimeout = 10 * time.Second
 	)
-	output, err := CreateApp(ctx, cfg, appName, template, params, opts)
+	output, err := CreateApp(ctx, cfg, appName, template, params, opts, appRuntime)
 	if err != nil {
 		return output, err
 	}
@@ -240,6 +243,7 @@ func ApplicationPS(
 	ctx context.Context,
 	cfg *config.Config,
 	appName string,
+	appRuntime string,
 	flags ...string,
 ) (string, error) {
 	args := []string{"application", "ps"}
@@ -249,6 +253,7 @@ func ApplicationPS(
 	}
 
 	args = append(args, flags...)
+	args = append(args, "--runtime", appRuntime)
 
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
@@ -262,8 +267,8 @@ func ApplicationPS(
 }
 
 // ListImage from the given application template.
-func ListImage(ctx context.Context, cfg *config.Config, templateName string) error {
-	args := []string{"application", "image", "list", "--template", templateName}
+func ListImage(ctx context.Context, cfg *config.Config, templateName string, appRuntime string) error {
+	args := []string{"application", "image", "list", "--template", templateName, "--runtime", appRuntime}
 	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
@@ -279,7 +284,7 @@ func ListImage(ctx context.Context, cfg *config.Config, templateName string) err
 }
 
 // PullImage from the given application template.
-func PullImage(ctx context.Context, cfg *config.Config, templateName string) error {
+func PullImage(ctx context.Context, cfg *config.Config, templateName string, appRuntime string) error {
 	//perform ICR login
 	url, uname, pswd := bootstrap.GetPodManCreds()
 	loginErr := bootstrap.PodmanRegistryLogin(url, uname, pswd)
@@ -294,7 +299,7 @@ func PullImage(ctx context.Context, cfg *config.Config, templateName string) err
 		return fmt.Errorf("pull images failed due to podman login err: %w", loginErr)
 	}
 
-	args := []string{"application", "image", "pull", "--template", templateName}
+	args := []string{"application", "image", "pull", "--template", templateName, "--runtime", appRuntime}
 	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
@@ -315,12 +320,15 @@ func StopAppWithPods(
 	cfg *config.Config,
 	appName string,
 	pods []string,
+	appRuntime string,
 ) (string, error) {
 	podArg := strings.Join(pods, ",")
 	args := []string{
 		"application", "stop", appName,
 		"--pod", podArg,
 		"--yes",
+		"--runtime",
+		appRuntime,
 	}
 
 	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
@@ -336,7 +344,7 @@ func StopAppWithPods(
 		return output, err
 	}
 
-	psOutput, err := ApplicationPS(ctx, cfg, appName)
+	psOutput, err := ApplicationPS(ctx, cfg, appName, appRuntime)
 	if err != nil {
 		return output, err
 	}
@@ -352,6 +360,7 @@ func StartApplication(
 	ctx context.Context,
 	cfg *config.Config,
 	appName string,
+	appRuntime string,
 	opts StartOptions,
 ) (string, error) {
 	args := []string{"application", "start", appName, "--yes"}
@@ -363,6 +372,7 @@ func StartApplication(
 		args = append(args, "--skip-logs")
 	}
 
+	args = append(args, "--runtime", appRuntime)
 	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
@@ -380,7 +390,7 @@ func StartApplication(
 	}
 
 	// Verify pods are running again.
-	psOutput, err := ApplicationPS(ctx, cfg, appName)
+	psOutput, err := ApplicationPS(ctx, cfg, appName, appRuntime)
 	if err != nil {
 		return output, err
 	}
@@ -397,11 +407,14 @@ func DeleteAppSkipCleanup(
 	ctx context.Context,
 	cfg *config.Config,
 	appName string,
+	appRuntime string,
 ) (string, error) {
 	args := []string{
 		"application", "delete", appName,
 		"--skip-cleanup",
 		"--yes",
+		"--runtime",
+		appRuntime,
 	}
 
 	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
@@ -418,7 +431,7 @@ func DeleteAppSkipCleanup(
 		return output, err
 	}
 
-	psOutput, err := ApplicationPS(ctx, cfg, appName)
+	psOutput, err := ApplicationPS(ctx, cfg, appName, appRuntime)
 	if err != nil {
 		return output, err
 	}
@@ -434,8 +447,9 @@ func ApplicationInfo(
 	ctx context.Context,
 	cfg *config.Config,
 	appName string,
+	appRuntime string,
 ) (string, error) {
-	args := []string{"application", "info", appName}
+	args := []string{"application", "info", appName, "--runtime", appRuntime}
 
 	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
@@ -451,8 +465,8 @@ func ApplicationInfo(
 }
 
 // ModelList lists models for a given application template.
-func ModelList(ctx context.Context, cfg *config.Config, templateName string) (string, error) {
-	args := []string{"application", "model", "list", "--template", templateName}
+func ModelList(ctx context.Context, cfg *config.Config, templateName string, appRuntime string) (string, error) {
+	args := []string{"application", "model", "list", "--template", templateName, "--runtime", appRuntime}
 	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
@@ -465,8 +479,8 @@ func ModelList(ctx context.Context, cfg *config.Config, templateName string) (st
 }
 
 // ModelDownload downloads a model for a given application template.
-func ModelDownload(ctx context.Context, cfg *config.Config, templateName string) (string, error) {
-	args := []string{"application", "model", "download", "--template", templateName}
+func ModelDownload(ctx context.Context, cfg *config.Config, templateName string, appRuntime string) (string, error) {
+	args := []string{"application", "model", "download", "--template", templateName, "--runtime", appRuntime}
 	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
@@ -479,9 +493,10 @@ func ModelDownload(ctx context.Context, cfg *config.Config, templateName string)
 }
 
 // TemplatesCommand runs the 'application template' command.
-func TemplatesCommand(ctx context.Context, cfg *config.Config) (string, error) {
+func TemplatesCommand(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
 	logger.Infof("[CLI] Running: %s application templates", cfg.AIServiceBin)
-	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "application", "templates")
+	args := []string{"application", "templates", "--runtime", appRuntime}
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
 	output := string(out)
 
@@ -537,6 +552,7 @@ func ApplicationLogs(
 	appName string,
 	podName string,
 	containerNameOrID string,
+	appRuntime string,
 ) (string, error) {
 	args := []string{
 		"application",
@@ -548,6 +564,7 @@ func ApplicationLogs(
 		args = append(args, "--container", containerNameOrID)
 	}
 
+	args = append(args, "--runtime", appRuntime)
 	fmt.Printf("[CLI] Running: %s %s\n", cfg.AIServiceBin, strings.Join(args, " "))
 
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
