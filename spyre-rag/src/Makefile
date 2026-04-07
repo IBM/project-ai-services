@@ -20,6 +20,10 @@ run-similarity:
 	PORT=$${PORT:-7000} python -m similarity.app
 .PHONY: run-similarity
 
+run-digitize:
+	PORT=$${PORT:-4000} python -m digitize.app
+.PHONY: run-digitize
+
 run-chatbot:
 	PORT=$${PORT:-5000} python -m chatbot.app
 .PHONY: run-chatbot

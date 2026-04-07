@@ -8,19 +8,9 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.openapi.docs import get_swagger_ui_html
 
-import common.db_utils as db
-from common.misc_utils import get_model_endpoints, set_log_level, set_request_id
-from common.settings import get_settings
-from chatbot.backend_utils import validate_query_length
-from similarity.similarity_utils import (
-    SimilaritySearchRequest,
-    SimilaritySearchResponse,
-    SimilaritySearchResult,
-    error_responses,
-    perform_similarity_search,
-)
+from common.misc_utils import set_log_level
 
-# logging
+# Set log level before importing application modules so their loggers inherit the level
 log_level = logging.INFO
 level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
 if level != "":
@@ -30,10 +20,18 @@ if level != "":
         logging.warning(f"Unknown LOG_LEVEL passed: '{level}', using default INFO level")
 set_log_level(log_level)
 
+import common.db_utils as db
+from common.misc_utils import get_model_endpoints, set_request_id
+from chatbot.backend_utils import validate_query_length
+import similarity.config as config
+from similarity.similarity_utils import (
+    SimilaritySearchRequest,
+    SimilaritySearchResponse,
+    SimilaritySearchResult,
+    error_responses,
+    perform_similarity_search,
+)
 
-
-# init at startup, endpoints are read as imutable state
-settings = get_settings()
 vectorstore = None
 emb_model_dict: dict = {}
 reranker_model_dict: dict = {}
@@ -60,7 +58,7 @@ async def lifespan(app: FastAPI):
 tags_metadata = [
     {
         "name": "similarity",
-        "description": "Dense vector similarity search operations"
+        "description": "Vector similarity search operations"
     },
     {
         "name": "monitoring",
@@ -72,8 +70,7 @@ app = FastAPI(
     lifespan=lifespan,
     title="AI-Services Similarity Search API",
     description=(
-        "Pure dense k-NN cosine similarity search against the vector store.\n\n"
-        "Gives users the option to use rerank or not."
+        "Vector similarity search against the vector store with optional reranking."
     ),
     version="1.0.0",
     openapi_tags=tags_metadata,
@@ -102,24 +99,29 @@ def swagger_root():
     response_model=SimilaritySearchResponse,
     responses=error_responses,
     tags=["similarity"],
-    summary="Dense vector similarity search",
+    summary="Vector similarity search",
     description=(
-        "Performs pure k-NN cosine similarity search (no BM25, no hybrid).\n\n"
-        "| `rerank` | Score type | Latency |\n"
-        "|----------|------------|---------|\n"
-        "| `false` (default) | Cosine similarity (0-1) | Low |\n"
-        "| `true` | Cohere relevance score | Medium |\n\n"
-        "**`top_k`** defaults to `num_chunks_post_search` from settings (currently "
-        f"{settings.num_chunks_post_search}) if not provided."
+        "Performs vector similarity search against the vector store.\n\n"
+        "| `mode` | Score type |\n"
+        "|--------|------------|\n"
+        "| `dense` (default) | Cosine similarity (0-1) |\n"
+        "| `sparse` | BM25 |\n"
+        "| `hybrid` | Hybrid |\n\n"
+        "| `rerank` | Latency |\n"
+        "|----------|----------|\n"
+        "| `false` (default) | Low |\n"
+        "| `true` | Medium |\n\n"
+        "**`top_k`** defaults to `NUM_CHUNKS_POST_SEARCH` "
+        f"(currently {config.NUM_CHUNKS_POST_SEARCH}) if not provided."
     ),
     response_description="Documents ranked by descending score, with score_type indicating the scoring method used."
 )
 async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchResponse:
     if not req.query or not req.query.strip():
         raise HTTPException(status_code=400, detail="query is required")
-    
+
     if req.mode not in ["dense", "sparse", "hybrid"]:
-        raise HTTPException(status_code=400, detail = "mode must be one of: dense, sparse, hybrid")
+        raise HTTPException(status_code=400, detail="mode must be one of: dense, sparse, hybrid")
     try:
         emb_model = emb_model_dict["emb_model"]
         emb_endpoint = emb_model_dict["emb_endpoint"]
@@ -133,7 +135,7 @@ async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchRes
         if not is_valid:
             raise HTTPException(status_code=400, detail=error_msg)
 
-        top_k = req.top_k if req.top_k is not None else settings.num_chunks_post_search
+        top_k = req.top_k if req.top_k is not None else config.NUM_CHUNKS_POST_SEARCH
 
         # reranker config when the caller actually asked for it.
         # avoids a KeyError if RERANKER_ENDPOINT / RERANKER_MODEL env vars are not set in a deployment that doesn't need reranking.

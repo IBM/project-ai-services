@@ -144,18 +144,12 @@ def perform_similarity_search(
     reranker_endpoint: Optional[str] = None,
 ) -> tuple[list[dict], list[float], str]:
     """
-    Run dense k-NN similarity search, with optional Cohere reranking.
+    Run vector similarity search using the specified mode, with optional Cohere reranking.
 
     Returns:
         docs       - list of document dicts (page_content, filename, type, source, chunk_id)
         scores     - parallel list of float scores
-        score_type - "cosine" or "relevance"
-
-    Why mode="dense" only?
-    - Dense search returns cosine similarity scores (0-1), which are meaningful
-      on their own without an LLM or keyword pass.
-    - Hybrid mixes in BM25 scores via RRF fusion, producing scores that don't
-      map cleanly to cosine similarity — wrong for this endpoint's contract.
+        score_type - "cosine", "bm25", "hybrid", or "relevance" (when reranked)
     """
     docs, scores = retrieve_documents(
         query,
