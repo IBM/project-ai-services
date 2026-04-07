@@ -6,10 +6,12 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                     Browser (Client)                         │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │              React Application (Port 3000)             │  │
+│  │              React Application (Port 4001)             │  │
 │  │  ┌─────────────────────────────────────────────────┐  │  │
 │  │  │  IBM Carbon Design System Components            │  │  │
-│  │  │  - DocumentUpload                                │  │  │
+│  │  │  - AppHeader                                     │  │  │
+│  │  │  - HomePage (Tabs)                               │  │  │
+│  │  │  - IngestSidePanel                               │  │  │
 │  │  │  - JobMonitor                                    │  │  │
 │  │  │  - DocumentList                                  │  │  │
 │  │  └─────────────────────────────────────────────────┘  │  │
@@ -71,16 +73,18 @@
 - Manages state for refresh triggers
 - Coordinates between child components
 
-#### 3. **DocumentUpload.jsx**
-- File upload interface
-- Operation type selection (ingestion/digitization)
-- Output format selection (for digitization)
-- File validation and upload handling
-- Success/error notifications
+
+#### 3. **IngestSidePanel.jsx**
+- Manages document upload interface
+- Supports job creation for both ingestion and digitization operations
+- Configurable output format selection (JSON, Markdown, Text)
+- File validation and multi-file upload support
+- Integrated with JobMonitor for seamless workflow
 
 #### 4. **JobMonitor.jsx**
 - Displays job list in a data table
 - Pagination support
+- Integrates IngestSidePanel for document upload and job creation
 - Job status visualization with tags
 - Refresh functionality
 - Job details modal
@@ -106,9 +110,11 @@
 ### Document Upload Flow
 
 ```
-User selects file(s)
+User opens IngestSidePanel
     ↓
-DocumentUpload validates input
+User selects file(s) and operation type
+    ↓
+IngestSidePanel validates input
     ↓
 API call: POST /v1/documents
     ↓
@@ -162,12 +168,13 @@ Display content or refresh list
 
 ### Local Component State
 - Each component manages its own state using React hooks
-- `useState` for local data (files, loading, errors)
+- `useState`, `useReducer` for local data (files, loading, errors)
 - `useEffect` for side effects (API calls, subscriptions)
 
 ### Shared State
 - Refresh triggers passed from HomePage to child components
-- Upload success callback propagates state changes
+- Upload success callback from IngestSidePanel propagates state changes to JobMonitor
+- Side panel open/close state managed by JobMonitor
 
 ### Future Considerations
 - Consider Redux/Context API for complex state
@@ -261,7 +268,7 @@ FormData with:
 
 ### Development
 ```
-npm run dev → Vite Dev Server (Port 3000)
+npm run dev → Vite Dev Server (Port 4001)
               ↓ Proxy
               Backend (Port 4000)
 ```
@@ -321,8 +328,8 @@ npm run build → Static files in dist/
 
 ### E2E Tests (Recommended)
 - Complete user flows
-- Upload → Monitor → View workflow
-- Error scenarios
+- IngestSidePanel → Upload → JobMonitor → DocumentList workflow
+- Error scenarios (invalid files, network failures)
 - Cross-browser testing
 
 ## Monitoring & Logging
