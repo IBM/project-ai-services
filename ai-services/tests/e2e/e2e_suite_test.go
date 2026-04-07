@@ -52,12 +52,14 @@ var (
 	mainPodsByTemplate          map[string][]string
 	defaultRagAccuracyThreshold = 0.70
 	defaultMaxRetries           = 2
+	osArch                      string
 )
 
 func init() {
 	flag.StringVar(&providedAppName, "app-name", "", "Use existing application instead of creating one")
 	flag.BoolVar(&deleteExistingApp, "delete-app", false, "Delete existing app before proceeding ahead with test run")
 	flag.StringVar(&appRuntime, "runtime", "podman", "Runtime on which the app will be deployed")
+	flag.StringVar(&osArch, "os-arch", "", "OS/arch of the binary")
 }
 func TestE2E(t *testing.T) {
 	gomega.RegisterFailHandler(ginkgo.Fail)
@@ -136,7 +138,7 @@ var _ = ginkgo.BeforeSuite(func() {
 
 	ginkgo.By("Building or verifying ai-services CLI")
 	var err error
-	aiServiceBin, err = bootstrap.BuildOrVerifyCLIBinary(ctx)
+	aiServiceBin, err = bootstrap.BuildOrVerifyCLIBinary(ctx, osArch)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	gomega.Expect(aiServiceBin).NotTo(gomega.BeEmpty())
 	cfg.AIServiceBin = aiServiceBin
@@ -248,17 +250,17 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 	})
 	ginkgo.Context("Bootstrap Steps", func() {
 		ginkgo.It("runs bootstrap configure", ginkgo.Label("spyre-dependent"), func() {
-			output, err := cli.BootstrapConfigure(ctx, appRuntime)
+			output, err := cli.BootstrapConfigure(ctx, cfg, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapConfigureOutput(output, appRuntime)).To(gomega.Succeed())
 		})
 		ginkgo.It("runs bootstrap validate", ginkgo.Label("spyre-dependent"), func() {
-			output, err := cli.BootstrapValidate(ctx, appRuntime)
+			output, err := cli.BootstrapValidate(ctx, cfg, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapValidateOutput(output)).To(gomega.Succeed())
 		})
 		ginkgo.It("runs full bootstrap", ginkgo.Label("spyre-dependent"), func() {
-			output, err := cli.Bootstrap(ctx, appRuntime)
+			output, err := cli.Bootstrap(ctx, cfg, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapFullOutput(output, appRuntime)).To(gomega.Succeed())
 		})

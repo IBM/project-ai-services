@@ -27,7 +27,7 @@ func GetTestBinDir() string {
 }
 
 // BuildOrVerifyCLIBinary ensures the ai-services binary is available.
-func BuildOrVerifyCLIBinary(ctx context.Context) (string, error) {
+func BuildOrVerifyCLIBinary(ctx context.Context, osArch string) (string, error) {
 	logger.Infof("[BOOTSTRAP] Starting BuildOrVerifyCLIBinary...")
 
 	if bin, ok, err := fromEnvBinary(); ok {
@@ -38,7 +38,7 @@ func BuildOrVerifyCLIBinary(ctx context.Context) (string, error) {
 		return bin, nil
 	}
 
-	return buildAndVerifyBinary(ctx)
+	return buildAndVerifyBinary(ctx, osArch)
 }
 
 // fromEnvBinary checks AI_SERVICES_BIN env variable.
@@ -84,7 +84,7 @@ func fromTempDirBinary() (string, bool) {
 }
 
 // buildAndVerifyBinary builds and validates the binary.
-func buildAndVerifyBinary(ctx context.Context) (string, error) {
+func buildAndVerifyBinary(ctx context.Context, osArch string) (string, error) {
 	if testBinDir == "" {
 		return "", fmt.Errorf(
 			"testBinDir not set; call SetTestBinDir before BuildOrVerifyCLIBinary",
@@ -93,7 +93,7 @@ func buildAndVerifyBinary(ctx context.Context) (string, error) {
 
 	logger.Infof("[BOOTSTRAP] Building ai-services...")
 
-	binPath, err := buildBinary(ctx, testBinDir)
+	binPath, err := buildBinary(ctx, testBinDir, osArch)
 	if err != nil {
 		logger.Errorf("[BOOTSTRAP] Build failed: %v", err)
 
@@ -118,7 +118,7 @@ func buildAndVerifyBinary(ctx context.Context) (string, error) {
 }
 
 // buildBinary tries make build first, then go build.
-func buildBinary(ctx context.Context, tempBinDir string) (string, error) {
+func buildBinary(ctx context.Context, tempBinDir string, osArch string) (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", fmt.Errorf("failed to get current directory: %w", err)
@@ -131,7 +131,7 @@ func buildBinary(ctx context.Context, tempBinDir string) (string, error) {
 
 	makefilePath := filepath.Join(moduleRoot, "Makefile")
 	if _, err := os.Stat(makefilePath); err == nil {
-		binPath, err := buildUsingMake(ctx, moduleRoot, tempBinDir)
+		binPath, err := buildUsingMake(ctx, moduleRoot, tempBinDir, osArch)
 		if err == nil {
 			return binPath, nil
 		}
@@ -145,6 +145,7 @@ func buildUsingMake(
 	ctx context.Context,
 	moduleRoot string,
 	tempBinDir string,
+	osArch string,
 ) (string, error) {
 	cmd := exec.CommandContext(ctx, "make", "bin")
 	cmd.Dir = moduleRoot
@@ -155,7 +156,7 @@ func buildUsingMake(
 		return "", fmt.Errorf("make bin failed: %w", err)
 	}
 
-	srcBinPath := filepath.Join(moduleRoot, "bin", "ai-services-linux-ppc64le")
+	srcBinPath := filepath.Join(moduleRoot, "bin", "ai-services-"+osArch)
 	if _, err := os.Stat(srcBinPath); err != nil {
 		return "", fmt.Errorf("binary not found after make bin: %w", err)
 	}

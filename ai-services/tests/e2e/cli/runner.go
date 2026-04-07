@@ -33,13 +33,11 @@ type StartOptions struct {
 }
 
 // Bootstrap runs the full bootstrap (configure + validate).
-func Bootstrap(ctx context.Context, appRuntime string) (string, error) {
-	binPath, err := bootstrap.BuildOrVerifyCLIBinary(ctx)
-	if err != nil {
-		return "", err
-	}
-	logger.Infof("[CLI] Running: %s bootstrap --runtime %s", binPath, appRuntime)
-	output, err := common.RunCommand(binPath, "bootstrap", "--runtime", appRuntime)
+func Bootstrap(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	logger.Infof("[CLI] Running: %s bootstrap --runtime %s", cfg.AIServiceBin, appRuntime)
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "bootstrap", "--runtime", appRuntime)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
 	if err != nil {
 		return output, err
 	}
@@ -48,13 +46,11 @@ func Bootstrap(ctx context.Context, appRuntime string) (string, error) {
 }
 
 // BootstrapConfigure runs only the 'configure' step.
-func BootstrapConfigure(ctx context.Context, appRuntime string) (string, error) {
-	binPath, err := bootstrap.BuildOrVerifyCLIBinary(ctx)
-	if err != nil {
-		return "", err
-	}
-	logger.Infof("[CLI] Running: %s bootstrap configure --runtime %s", binPath, appRuntime)
-	output, err := common.RunCommand(binPath, "bootstrap", "configure", "--runtime", appRuntime)
+func BootstrapConfigure(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	logger.Infof("[CLI] Running: %s bootstrap configure --runtime %s", cfg.AIServiceBin, appRuntime)
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "bootstrap", "configure", "--runtime", appRuntime)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
 	if err != nil {
 		return output, err
 	}
@@ -63,13 +59,11 @@ func BootstrapConfigure(ctx context.Context, appRuntime string) (string, error) 
 }
 
 // BootstrapValidate runs only the 'validate' step.
-func BootstrapValidate(ctx context.Context, appRuntime string) (string, error) {
-	binPath, err := bootstrap.BuildOrVerifyCLIBinary(ctx)
-	if err != nil {
-		return "", err
-	}
-	logger.Infof("[CLI] Running: %s bootstrap validate --runtime %s", binPath, appRuntime)
-	output, err := common.RunCommand(binPath, "bootstrap", "validate", "--runtime", appRuntime)
+func BootstrapValidate(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	logger.Infof("[CLI] Running: %s bootstrap validate --runtime %s", cfg.AIServiceBin, appRuntime)
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "bootstrap", "validate", "--runtime", appRuntime)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
 	if err != nil {
 		return output, err
 	}
