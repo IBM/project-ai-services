@@ -11,7 +11,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from tqdm import tqdm
 from pathlib import Path
 from docling_core.types.doc.document import DoclingDocument
-from concurrent.futures import as_completed, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import as_completed, ProcessPoolExecutor
 from sentence_splitter import SentenceSplitter
 
 # Set third-party library log levels before importing project modules
@@ -19,7 +19,7 @@ logging.getLogger('docling').setLevel(logging.CRITICAL)
 
 # Import project modules after setting log levels
 from common.thread_utils import ContextAwareThreadPoolExecutor
-from common.llm_utils import create_llm_session, classify_text_with_llm, summarize_table, tokenize_with_llm
+from common.llm_utils import classify_text_with_llm, summarize_table, tokenize_with_llm
 from common.misc_utils import get_logger, text_suffix, table_suffix, chunk_suffix
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.status import (
@@ -43,8 +43,6 @@ tqdm_wrapper = tqdm if is_debug else (lambda x, **kwargs: x)
 excluded_labels = {
     'page_header', 'page_footer', 'caption', 'reference', 'footnote'
 }
-
-create_llm_session(pool_maxsize=POOL_SIZE)
 
 def process_text(converted_doc, pdf_path, out_path):
     page_count = 0
