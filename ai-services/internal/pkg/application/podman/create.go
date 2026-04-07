@@ -553,7 +553,7 @@ func (p *PodmanApplication) returnEnvParamsForPod(podSpec *models.PodSpec, podAn
 
 func (p *PodmanApplication) deployPodAndReadinessCheck(podSpec *models.PodSpec,
 	podTemplateName string, body io.Reader, opts map[string]string) error {
-	pods, err := p.runtime.CreatePod(body)
+	pods, err := p.runtime.CreatePod(body, opts)
 	if err != nil {
 		return fmt.Errorf("failed pod creation: %w", err)
 	}
