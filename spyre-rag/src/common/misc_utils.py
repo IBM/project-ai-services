@@ -4,7 +4,7 @@ import os
 import requests
 from contextvars import ContextVar
 from requests.adapters import HTTPAdapter
-from digitize.config import DIGITIZED_DOCS_DIR
+from common.config import DIGITIZED_DOCS_DIR
 
 # ContextVar to store the request ID for each request
 request_id_ctx = ContextVar("request_id", default="-")
@@ -211,12 +211,10 @@ def generate_file_checksum(file):
 
 def verify_checksum(file, checksum_file):
     file_sha256 = generate_file_checksum(file)
-    f = open(checksum_file, "r")
-    data = f.read()
+    with open(checksum_file, "r", encoding="utf-8") as f:
+        data = f.read()
     csum = data.split(' ')[0]
-    if csum == file_sha256:
-        return True
-    return False
+    return csum == file_sha256
 
 def validate_pdf_file(filename: str, content) -> None:
     """
@@ -244,10 +242,6 @@ def validate_pdf_file(filename: str, content) -> None:
     if not filename.lower().endswith('.pdf'):
         raise ValueError(f"Only PDF files are allowed. Invalid file: {filename}")
 
-    pdf_signature = b'%PDF'
-    if not content.startswith(pdf_signature):
-        raise ValueError(f"File has .pdf extension but unsupported format: {filename}")
-
     # Check content is bytes (not an exception from failed read)
     if isinstance(content, Exception):
         raise ValueError(f"Failed to read file: {filename}")
@@ -258,6 +252,10 @@ def validate_pdf_file(filename: str, content) -> None:
     # Check content is not empty
     if len(content) == 0:
         raise ValueError(f"File is empty: {filename}")
+
+    pdf_signature = b'%PDF'
+    if not content.startswith(pdf_signature):
+        raise ValueError(f"File has .pdf extension but unsupported format: {filename}")
 
 def get_unprocessed_files(original_files, processed_pdfs):
     return set(original_files).difference(set(processed_pdfs))

@@ -22,7 +22,7 @@ from docling_core.types.doc.document import DoclingDocument
 # Local application imports
 from common.misc_utils import get_logger, DoclingConversionError
 from common.retry_utils import retry_on_transient_error
-from digitize.config import PDF_CHUNK_SIZE
+from common.config import PDF_CHUNK_SIZE
 
 # To suppress the warnings raised from pdfminer package while extracting the font size
 logging.getLogger("pdfminer").propagate = False

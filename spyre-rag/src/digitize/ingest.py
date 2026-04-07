@@ -8,7 +8,7 @@ from common.misc_utils import *
 from digitize.doc_utils import process_documents
 from digitize.status import StatusManager, get_utc_timestamp, get_job_document_stats
 from digitize.types import JobStatus, DocStatus
-import digitize.config as config
+import common.config as config
 
 logger = get_logger("ingest")
 

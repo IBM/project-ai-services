@@ -31,14 +31,14 @@ from common.error_utils import APIError, ErrorCode, http_error_responses, http_e
 import digitize.digitize_utils as dg_util
 import digitize.types as types
 from digitize.digitize import digitize
-import digitize.config as config
+import common.config as config
 from digitize.cleanup import reset_db
 from digitize.ingest import ingest
 from digitize.status import StatusManager
 
 # Semaphores for concurrency limiting
-digitization_semaphore = asyncio.BoundedSemaphore(2)
-ingestion_semaphore = asyncio.BoundedSemaphore(1)
+digitization_semaphore = asyncio.BoundedSemaphore(config.DIGITIZATION_CONCURRENCY_LIMIT)
+ingestion_semaphore = asyncio.BoundedSemaphore(config.INGESTION_CONCURRENCY_LIMIT)
 
 logger = get_logger("digitize_server")
 

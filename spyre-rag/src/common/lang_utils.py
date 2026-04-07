@@ -1,6 +1,6 @@
 import logging
 from lingua import Language, LanguageDetectorBuilder
-from common.settings import get_settings
+import common.config as config
 
 from common.misc_utils import get_logger
 
@@ -9,7 +9,6 @@ logger = get_logger("LANG")
 _language_detector = None
 lang_en = "EN"
 lang_de = "DE"
-settings = get_settings()
 
 # this is extensible to more languages easily
 prompt_map = {
@@ -18,8 +17,8 @@ prompt_map = {
         }
 
 max_tokens_map = {
-                lang_en: settings.llm_max_tokens,
-                lang_de: settings.llm_max_tokens_de
+                lang_en: config.LLM_MAX_TOKENS,
+                lang_de: config.LLM_MAX_TOKENS_DE
             }
 
 def setup_language_detector(languages: list[Language]):
@@ -34,7 +33,7 @@ def setup_language_detector(languages: list[Language]):
         .build()
     )
 
-def detect_language(text: str, min_confidence: float = settings.language_detection_min_confidence) -> str:
+def detect_language(text: str, min_confidence: float = config.LANGUAGE_DETECTION_MIN_CONFIDENCE) -> str:
     """
     Detect the language of a text string.
 

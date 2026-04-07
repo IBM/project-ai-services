@@ -30,7 +30,7 @@ import common.db_utils as db
 from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
 from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
 from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models
-from common.settings import get_settings
+import common.config as config
 from common.perf_utils import perf_registry
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from chatbot.backend_utils import search_only, validate_query_length
@@ -55,8 +55,7 @@ emb_model_dict = {}
 llm_model_dict = {}
 reranker_model_dict = {}
 
-settings = get_settings()
-concurrency_limiter = BoundedSemaphore(settings.max_concurrent_requests)
+concurrency_limiter = BoundedSemaphore(config.MAX_CONCURRENT_REQUESTS)
 
 # Setting 32 to fully utilse the vLLM's Max Batch Size
 POOL_SIZE = 32
@@ -191,8 +190,8 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
             emb_model, emb_endpoint, emb_max_tokens,
             reranker_model,
             reranker_endpoint,
-            settings.num_chunks_post_search,
-            settings.num_chunks_post_reranker,
+            config.NUM_CHUNKS_POST_SEARCH,
+            config.NUM_CHUNKS_POST_RERANKER,
             vectorstore=vectorstore
         )
         # Store metrics in registry for reference endpoint
@@ -338,7 +337,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
         max_tokens = req.max_tokens
         # giving priority to max_tokens passed in the request, otherwise according to detected language of query
         if not max_tokens:
-            max_tokens = max_tokens_map.get(lang, settings.llm_max_tokens)
+            max_tokens = max_tokens_map.get(lang, config.LLM_MAX_TOKENS)
 
         docs, perf_stat_dict = await asyncio.to_thread(
             search_only,
@@ -346,8 +345,8 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
             emb_model, emb_endpoint, emb_max_tokens,
             reranker_model,
             reranker_endpoint,
-            settings.num_chunks_post_search,
-            settings.num_chunks_post_reranker,
+            config.NUM_CHUNKS_POST_SEARCH,
+            config.NUM_CHUNKS_POST_RERANKER,
             vectorstore=vectorstore
         )
 

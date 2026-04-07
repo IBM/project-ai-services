@@ -27,7 +27,7 @@ from digitize.status import (
     get_utc_timestamp
 )
 from digitize.types import DocStatus, JobStatus, OutputFormat
-import digitize.config as config
+import common.config as config
 
 logger = get_logger("doc_utils")
 

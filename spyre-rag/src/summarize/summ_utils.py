@@ -6,7 +6,7 @@ import pypdfium2 as pdfium
 from pydantic import BaseModel, Field
 import threading
 
-from common.settings import get_settings
+import common.config as config
 from common.misc_utils import set_log_level, get_logger
 
 
@@ -20,16 +20,15 @@ if level != "":
 set_log_level(log_level)
 logger = get_logger("summarize")
 
-settings = get_settings()
 _pdf_lock = threading.Lock()
 
 # Pre-compute max input word count from context length at startup
 # input_words/ratio + buf + (input_words/ratio)*coeff < max_model_len
 # => input_words * (1 + coeff) / ratio < max_model_len - buf
 MAX_INPUT_WORDS = int(
-    (settings.context_lengths.granite_3_3_8b_instruct - settings.summarization_prompt_token_count)
-    * settings.token_to_word_ratios.en
-    / (1 + settings.summarization_coefficient)
+    (config.GRANITE_3_3_8B_INSTRUCT_CONTEXT_LENGTH - config.SUMMARIZATION_PROMPT_TOKEN_COUNT)
+    * config.TOKEN_TO_WORD_RATIO_EN
+    / (1 + config.SUMMARIZATION_COEFFICIENT)
 )
 
 def word_count(text: str) -> int:
@@ -39,10 +38,10 @@ def compute_target_and_max_tokens(input_word_count: int, summary_length: Optiona
     if summary_length is not None:
         target_word_count = summary_length
     else:
-        target_word_count = max(1, int(input_word_count * settings.summarization_coefficient))
+        target_word_count = max(1, int(input_word_count * config.SUMMARIZATION_COEFFICIENT))
 
-    est_output_tokens = int(target_word_count / settings.token_to_word_ratios.en)
-    max_tokens = est_output_tokens + settings.summarization_prompt_token_count
+    est_output_tokens = int(target_word_count / config.TOKEN_TO_WORD_RATIO_EN)
+    max_tokens = est_output_tokens + config.SUMMARIZATION_PROMPT_TOKEN_COUNT
     logger.debug(f"max tokens: {max_tokens}, estimated output tokens: {est_output_tokens}")
     return target_word_count, max_tokens
 
@@ -100,13 +99,13 @@ class SummarizeException(Exception):
 
 def build_messages(text, target_words, summary_length) -> list:
     if summary_length:
-        user_prompt = settings.prompts.summarize_user_prompt_with_length.format(target_words=target_words, text=text)
+        user_prompt = config.SUMMARIZE_USER_PROMPT_WITH_LENGTH.format(target_words=target_words, text=text)
     else:
-        user_prompt = settings.prompts.summarize_user_prompt_without_length.format(text=text)
+        user_prompt = config.SUMMARIZE_USER_PROMPT_WITHOUT_LENGTH.format(text=text)
     return [
         {
             "role": "system",
-            "content": settings.prompts.summarize_system_prompt,
+            "content": config.SUMMARIZE_SYSTEM_PROMPT,
         },
         {
             "role": "user",

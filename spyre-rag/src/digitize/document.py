@@ -3,7 +3,7 @@ from typing import Optional, Dict, Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from digitize.config import DOCS_DIR
+from common.config import DOCS_DIR
 from digitize.types import DocStatus, OutputFormat
 
 

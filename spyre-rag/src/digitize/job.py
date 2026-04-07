@@ -4,7 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from digitize.types import JobStatus
-import digitize.config as config
+import common.config as config
 
 
 class JobDocumentSummary(BaseModel):
