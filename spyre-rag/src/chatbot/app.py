@@ -31,6 +31,7 @@ from common.misc_utils import get_model_endpoints, set_request_id, create_llm_se
 from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models
 from common.settings import get_settings
 from common.perf_utils import perf_registry
+from common.error_utils import http_error_responses, http_exception_handler
 from chatbot.backend_utils import search_only, validate_query_length
 from chatbot.response_utils import (
     ReferenceRequest,
@@ -43,7 +44,6 @@ from chatbot.response_utils import (
     HealthResponse,
     ModelsResponse,
     PerfMetricsResponse,
-    common_error_responses,
 )
 
 vectorstore = None
@@ -120,6 +120,7 @@ app = FastAPI(
     version="1.0.0",
     openapi_tags=tags_metadata
 )
+app.add_exception_handler(HTTPException, http_exception_handler)
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
@@ -152,7 +153,7 @@ def limit_concurrency(f):
 @app.post(
     "/reference",
     response_model=ReferenceResponse,
-    responses={400: common_error_responses[400], 500: common_error_responses[500], 503: common_error_responses[503]},
+    responses={400: http_error_responses[400], 500: http_error_responses[500], 503: http_error_responses[503]},
     tags=["retrieval"],
     summary="Retrieve reference documents",
     description="Search the vector store using the prompt, rerank results, and return relevant document chunks with performance metrics."
@@ -204,7 +205,7 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
 @app.get(
     "/v1/models",
     response_model=ModelsResponse,
-    responses={500: common_error_responses[500]},
+    responses={500: http_error_responses[500]},
     tags=["models"],
     summary="List LLM models",
     description="List available models from the configured vLLM endpoint."
@@ -221,7 +222,7 @@ async def list_models():
 @app.get(
     "/v1/perf_metrics",
     response_model=PerfMetricsResponse,
-    responses={404: common_error_responses[404]},
+    responses={404: http_error_responses[404]},
     tags=["monitoring"],
     summary="Get performance metrics",
     description="Return collected performance metrics for recent chat completion and retrieval calls. If request ID is provided, returns only that metric"
@@ -288,10 +289,10 @@ async def locked_stream(stream_g, perf_stat_dict):
                 }
             }
         },
-        400: common_error_responses[400],
-        429: common_error_responses[429],
-        500: common_error_responses[500],
-        503: common_error_responses[503]
+        400: http_error_responses[400],
+        429: http_error_responses[429],
+        500: http_error_responses[500],
+        503: http_error_responses[503]
     }
 )
 async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse | StreamingResponse:
@@ -420,7 +421,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
     "/db-status",
     response_model=DBStatusResponse,
     response_model_exclude_none=True,
-    responses={500: common_error_responses[500]},
+    responses={500: http_error_responses[500]},
     tags=["monitoring"],
     summary="Vector DB status",
     description="Check whether the vector store is initialized and populated."
