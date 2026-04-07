@@ -24,7 +24,8 @@ if level != "":
 set_log_level(log_level)
 
 from common.llm_utils import create_llm_session, query_vllm_summarize, query_vllm_summarize_stream
-from common.misc_utils import get_model_endpoints, set_request_id
+from common.misc_utils import get_model_endpoints, set_request_id, configure_uvicorn_logging
+
 from common.settings import get_settings
 from summarize.summ_utils import (
     SummarizeException,
@@ -47,6 +48,8 @@ concurrency_limiter = asyncio.BoundedSemaphore(settings.max_concurrent_requests)
 
 @asynccontextmanager
 async def lifespan(app):
+    filtered_paths = ['/health']
+    configure_uvicorn_logging(log_level, filtered_paths)
     initialize_models()
     create_llm_session(pool_maxsize=settings.max_concurrent_requests)
     yield
