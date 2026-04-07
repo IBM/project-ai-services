@@ -10,6 +10,7 @@ import uvicorn
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status, Request
 from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import JSONResponse
 
 from common.misc_utils import set_log_level
 
@@ -25,10 +26,10 @@ set_log_level(log_level)
 
 from common.misc_utils import get_logger, validate_pdf_file, set_request_id, configure_uvicorn_logging
 
+from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 import digitize.digitize_utils as dg_util
 import digitize.types as types
 from digitize.digitize import digitize
-from digitize.errors import *
 import digitize.config as config
 from digitize.cleanup import reset_db
 from digitize.ingest import ingest
@@ -87,6 +88,12 @@ app = FastAPI(
     lifespan=lifespan,
     openapi_tags=tags_metadata
 )
+
+# Use the shared exception handler from common.error_utils
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    """Use shared exception handler from common.error_utils"""
+    return await http_exception_handler(request, exc)
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
@@ -197,6 +204,7 @@ async def validate_pdf_files(
     "/v1/jobs",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=types.JobCreatedResponse,
+    responses=http_error_responses,
     tags=["jobs"],
     summary="Create async jobs to upload and process documents",
     description=(
@@ -277,6 +285,7 @@ async def digitize_document(
 @app.get(
     "/v1/jobs",
     response_model=types.JobsListResponse,
+    responses={500: http_error_responses[500]},
     tags=["jobs"],
     summary="List all jobs",
     description="Retrieve information about all submitted jobs with pagination and filtering options.",
@@ -334,6 +343,7 @@ async def get_all_jobs(
 
 @app.get(
     "/v1/jobs/{job_id}",
+    responses={404: http_error_responses[404], 500: http_error_responses[500]},
     tags=["jobs"],
     summary="Get job by ID",
     description="Retrieve detailed status and progress information for a specific job.",
@@ -368,6 +378,7 @@ async def get_job_by_id(job_id: str):
 @app.delete(
     "/v1/jobs/{job_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    responses={404: http_error_responses[404], 409: http_error_responses[409], 500: http_error_responses[500]},
     tags=["jobs"],
     summary="Delete job",
     description="Delete a job status record. Only completed or failed jobs can be deleted. "
@@ -410,6 +421,7 @@ async def delete_job(job_id: str):
 @app.get(
     "/v1/documents",
     response_model=types.DocumentsListResponse,
+    responses={400: http_error_responses[400], 500: http_error_responses[500]},
     tags=["documents"],
     summary="List all documents",
     description="Get high-level information of all documents with pagination and filtering. "
@@ -474,6 +486,7 @@ async def list_documents(
 @app.get(
     "/v1/documents/{doc_id}",
     response_model=types.DocumentDetailResponse,
+    responses={404: http_error_responses[404], 500: http_error_responses[500]},
     tags=["documents"],
     summary="Get document metadata",
     description="Retrieve detailed metadata for a specific document by its ID. "
@@ -512,6 +525,7 @@ async def get_document_metadata(doc_id: str, details: bool = Query(False, descri
 @app.get(
     "/v1/documents/{doc_id}/content",
     response_model=types.DocumentContentResponse,
+    responses={404: http_error_responses[404], 500: http_error_responses[500]},
     tags=["documents"],
     summary="Get document content",
     description="Retrieve the digitized/processed content of a document. "
@@ -553,6 +567,7 @@ async def get_document_content(doc_id: str):
 @app.delete(
     "/v1/documents/{doc_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    responses={404: http_error_responses[404], 409: http_error_responses[409], 500: http_error_responses[500]},
     tags=["documents"],
     summary="Delete document",
     description="Delete a single document by ID. Removes the document from the vector database (if ingested), "
@@ -643,6 +658,7 @@ async def delete_document(doc_id: str):
 @app.delete(
     "/v1/documents",
     status_code=status.HTTP_204_NO_CONTENT,
+    responses={400: http_error_responses[400], 409: http_error_responses[409], 500: http_error_responses[500]},
     tags=["documents"],
     summary="Bulk delete all documents",
     description="⚠️ **DANGER**: Delete ALL documents from the system. "

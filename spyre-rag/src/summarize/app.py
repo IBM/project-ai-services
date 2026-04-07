@@ -26,6 +26,7 @@ set_log_level(log_level)
 from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream
 from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
 from common.settings import get_settings
+from common.error_utils import http_error_responses
 from summarize.summ_utils import (
     SummarizeException,
     word_count,
@@ -35,7 +36,6 @@ from summarize.summ_utils import (
     MAX_INPUT_WORDS,
     compute_target_and_max_tokens,
     SummarizeSuccessResponse,
-    error_responses,
     validate_summary_length,
     extract_text_from_pdf
 )
@@ -207,7 +207,13 @@ async def handle_summarize(
 
 @app.post("/v1/summarize",
 response_model=SummarizeSuccessResponse,
-responses=error_responses,
+responses={
+    400: http_error_responses[400],
+    413: http_error_responses[413],
+    415: http_error_responses[415],
+    429: http_error_responses[429],
+    500: http_error_responses[500],
+},
 summary="Summarize text or file",
 description=(
       "Accepts **either** `application/json` or `multipart/form-data` based on "
