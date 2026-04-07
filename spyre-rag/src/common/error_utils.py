@@ -5,7 +5,7 @@ Provides standardized error codes, response models, and exception handling
 to ensure consistent error responses across digitize, summarize, and chatbot APIs.
 """
 from enum import Enum
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, NoReturn
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -226,7 +226,7 @@ class APIError:
     }
 
     @staticmethod
-    def raise_error(error_code: ErrorCode | str, detail: Optional[str] = None):
+    def raise_error(error_code: ErrorCode | str, detail: Optional[str] = None) -> NoReturn:
         """
         Raise a standardized HTTPException with structured error format.
 

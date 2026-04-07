@@ -31,7 +31,7 @@ from common.misc_utils import get_model_endpoints, set_request_id, create_llm_se
 from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models
 from common.settings import get_settings
 from common.perf_utils import perf_registry
-from common.error_utils import http_error_responses, http_exception_handler
+from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from chatbot.backend_utils import search_only, validate_query_length
 from chatbot.response_utils import (
     ReferenceRequest,
@@ -142,7 +142,7 @@ def limit_concurrency(f):
     @wraps(f)
     async def wrapper(*args, **kwargs):
         if concurrency_limiter.locked():
-            raise HTTPException(status_code=429, detail="Server busy. Try again shortly.")
+            APIError.raise_error(ErrorCode.SERVER_BUSY, "Try again shortly.")
         await concurrency_limiter.acquire()
         try:
             return await f(*args, **kwargs)
@@ -161,7 +161,7 @@ def limit_concurrency(f):
 async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
     # Validate query is not empty
     if not req.prompt or not req.prompt.strip():
-        raise HTTPException(status_code=400, detail="Query cannot be empty")
+        APIError.raise_error(ErrorCode.EMPTY_INPUT, "Query cannot be empty")
 
     # Ensure vectorstore is initialized on first request
     if vectorstore is None:
@@ -179,7 +179,7 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
             validate_query_length, req.prompt, emb_endpoint
         )
         if not is_valid:
-            raise HTTPException(status_code=400, detail=error_msg)
+            APIError.raise_error(ErrorCode.INVALID_PARAMETER, error_msg)
 
         docs, perf_stat_dict = await asyncio.to_thread(
             search_only,
@@ -193,13 +193,12 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
         )
         # Store metrics in registry for reference endpoint
         perf_registry.add_metric(perf_stat_dict)
+        return ReferenceResponse(documents=docs, perf_metrics=perf_stat_dict)
 
     except db.VectorStoreNotReadyError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        APIError.raise_error(ErrorCode.VECTOR_STORE_NOT_READY, str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=repr(e))
-
-    return ReferenceResponse(documents=docs, perf_metrics=perf_stat_dict)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
 
 
 @app.get(
@@ -216,7 +215,7 @@ async def list_models():
         llm_endpoint = llm_model_dict['llm_endpoint']
         return await asyncio.to_thread(query_vllm_models, llm_endpoint)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=repr(e))
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
 
 
 @app.get(
@@ -244,11 +243,10 @@ def get_perf_metrics(request_id: Optional[str] = None) -> PerfMetricsResponse:
     if request_id:
         metric = perf_registry.get_metric_by_request_id(request_id)
         if metric is None:
-            raise HTTPException(status_code=404, detail=f"No metric found for request_id: {request_id}")
+            APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"No metric found for request_id: {request_id}")
         return PerfMetricsResponse(metrics=[metric])
-    else:
-        metrics = perf_registry.get_metrics()
-        return PerfMetricsResponse(metrics=metrics)
+    metrics = perf_registry.get_metrics()
+    return PerfMetricsResponse(metrics=metrics)
 
 async def locked_stream(stream_g, perf_stat_dict):
     try:
@@ -297,13 +295,13 @@ async def locked_stream(stream_g, perf_stat_dict):
 )
 async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse | StreamingResponse:
     if not req.messages:
-        raise HTTPException(status_code=400, detail="messages can't be empty")
+        APIError.raise_error(ErrorCode.EMPTY_INPUT, "messages can't be empty")
 
     query = req.messages[0].content
 
     # Validate query is not empty
     if not query or not query.strip():
-        raise HTTPException(status_code=400, detail="Query cannot be empty")
+        APIError.raise_error(ErrorCode.EMPTY_INPUT, "Query cannot be empty")
 
     # Ensure vectorstore is initialized on first request
     if vectorstore is None:
@@ -326,11 +324,10 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
             # Return streaming error response for consistency
             if req.stream:
                 async def stream_query_length_error():
-                    message = f"Your query is too long. Please shorten it and try again."
+                    message = "Your query is too long. Please shorten it and try again."
                     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
                 return StreamingResponse(stream_query_length_error(), media_type="text/event-stream")
-            else:
-                raise HTTPException(status_code=400, detail=error_msg)
+            APIError.raise_error(ErrorCode.INVALID_PARAMETER, error_msg)
 
         lang = detect_language(query)
 
@@ -350,42 +347,35 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
             vectorstore=vectorstore
         )
 
-    except db.VectorStoreNotReadyError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=repr(e))
-
-    if not docs:
-        message = "No documents found in the knowledge base for this query."
-        if lang == lang_de:
-            message = "Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden."
-        if req.stream:
-            async def stream_docs_not_found():
-                yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
-            return StreamingResponse(stream_docs_not_found(), media_type="text/event-stream")
-        else:
+        if not docs:
+            message = "No documents found in the knowledge base for this query."
+            if lang == lang_de:
+                message = "Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden."
+            if req.stream:
+                async def stream_docs_not_found():
+                    yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
+                return StreamingResponse(stream_docs_not_found(), media_type="text/event-stream")
             return ChatCompletionResponse(
                 choices=[ChatChoice(message=ChatMessage(content=message))]
             )
 
-    if concurrency_limiter.locked():
-        if req.stream:
-            async def stream_server_busy():
-                message = "Server busy. Try again shortly."
-                yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
-            return StreamingResponse(stream_server_busy(), media_type="text/event-stream")
-        else:
-            raise HTTPException(status_code=429, detail="Server busy. Try again shortly.")
-    await concurrency_limiter.acquire()
+        if concurrency_limiter.locked():
+            if req.stream:
+                async def stream_server_busy():
+                    message = "Server busy. Try again shortly."
+                    yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
+                return StreamingResponse(stream_server_busy(), media_type="text/event-stream")
+            APIError.raise_error(ErrorCode.SERVER_BUSY, "Try again shortly.")
+        await concurrency_limiter.acquire()
 
-    try:
-        if req.stream:
-            vllm_stream = await asyncio.to_thread(
-                query_vllm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
-            )
-            # For streaming, release is handled in locked_stream's finally block
-            return StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
-        else:
+        try:
+            if req.stream:
+                vllm_stream = await asyncio.to_thread(
+                    query_vllm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
+                )
+                # For streaming, release is handled in locked_stream's finally block
+                return StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
+
             vllm_non_stream = await asyncio.to_thread(
                 query_vllm_non_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
             )
@@ -394,7 +384,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
 
             # Handle error responses
             if isinstance(vllm_non_stream, dict) and "error" in vllm_non_stream:
-                raise HTTPException(status_code=500, detail=str(vllm_non_stream["error"]))
+                APIError.raise_error(ErrorCode.LLM_ERROR, str(vllm_non_stream["error"]))
 
             # Convert vLLM response to ChatCompletionResponse
             if isinstance(vllm_non_stream, dict) and "choices" in vllm_non_stream:
@@ -407,15 +397,19 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
                             choices.append(ChatChoice(message=ChatMessage(content=message_content)))
                 return ChatCompletionResponse(choices=choices)
 
-            # If response doesn't match expected structure, raise an error
-            raise HTTPException(status_code=500, detail="Unexpected response format from LLM")
+            APIError.raise_error(ErrorCode.LLM_ERROR, "Unexpected response format from LLM")
+        finally:
+            # Release semaphore for non-streaming requests
+            # For streaming requests, release is handled in locked_stream's finally block
+            if not req.stream:
+                concurrency_limiter.release()
+
+    except db.VectorStoreNotReadyError as e:
+        APIError.raise_error(ErrorCode.VECTOR_STORE_NOT_READY, str(e))
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=repr(e))
-    finally:
-        # Release semaphore for non-streaming requests
-        # For streaming requests, release is handled in locked_stream's finally block
-        if not req.stream:
-            concurrency_limiter.release()
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
 
 @app.get(
     "/db-status",
