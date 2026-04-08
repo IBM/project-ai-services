@@ -37,6 +37,9 @@ pipeline {
         
         // icr.io auth file
         REGISTRY_AUTH_FILE = "/run/containers/0/auth.json"
+
+        // Enables optional pre checks against external systems
+        VERIFY_EXTERNAL_INTEGRATIONS = 'true'
     }
 
     // Prevent concurrent builds to ensure only one deployment at a time
@@ -102,8 +105,7 @@ pipeline {
                         }
 
                         // Resolve the commit SHA from PR number or accept SHA/prefix
-                        String repoUrl = env.AI_SERVICES_REPO_URL ?: 'https://github.com/IBM/project-ai-services'
-                        String resolvedSha = resolveCommitShaFromCheckout(params.CHECKOUT.trim(), repoUrl)
+                        String resolvedSha = resolveCommitShaFromCheckout(params.CHECKOUT.trim(), env.AI_SERVICES_REPO_URL)
 
                         if (!resolvedSha) {
                             error("Failed to resolve commit SHA from CHECKOUT='${params.CHECKOUT}'.")
@@ -114,40 +116,9 @@ pipeline {
                         echo "Resolved commit SHA for '${params.CHECKOUT}': ${env.GIT_SHA}"
                     }
                 }
-
-                // Diag: Verify GitHub App access to BASE repo
-                script {
-                    if (params.updateGitStatus) {
-                        withCredentials([
-                            string(credentialsId: 'github_app_id',  variable: 'APP_ID'),
-                            file(credentialsId: 'github_app_key', variable: 'APP_KEY')   // .pem
-                        ]) {
-                            // Create a short-lived App JWT
-                            def jwt = generateAppJWT(APP_ID)
-
-                            // Discover installation ID for BASE repo
-                            def instId = getInstallationIdForRepo(jwt, env.REPO_FOR_STATUS, env.GITHUB_API_BASE)
-                            echo "Resolved installation id for ${env.REPO_FOR_STATUS}: ${instId}"
-
-                            // Mint installation access token
-                            def instToken = getInstallationToken(jwt, instId, env.GITHUB_API_BASE)
-
-                            // Probe: can the installation token see the base repo?
-                            withEnv([
-                                "GH_INST_TOKEN=${instToken}",
-                                "TARGET_URL=${env.GITHUB_API_BASE}/repos/${env.REPO_FOR_STATUS}"
-                            ]) {
-                                sh('''#!/usr/bin/env bash
-set -euo pipefail
-curl -i -sS -H "Authorization: token $GH_INST_TOKEN" -H "Accept: application/vnd.github+json" "$TARGET_URL"
-''')
-                            }
-                        }
-                    }
-                }
             }
         }
-
+       
         // ---------- POST "Deployment started" TO BASE (Github App) ----------
         stage('Posting Deployment started status (GitHub App)') {
             steps {
@@ -670,6 +641,8 @@ def postGitStatusViaApp(Map args = [:]) {
     def payload = groovy.json.JsonOutput.toJson(payloadObj)
     writeFile file: 'payload.json', text: payload
 
+    // dryRun allows validating the target URL and payload without
+    // mutating external state (e.g., posting GitHub statuses).
     if (dryRun) {
         echo "DRY-RUN → Would POST to ${apiBase}/repos/${repoFull}/statuses/${commitSha}"
         echo "Payload: ${payload}"
@@ -758,9 +731,6 @@ sudo --preserve-env=REGISTRY_AUTH_FILE,ICR_USERNAME,ICR_PASSWORD bash -lc '
     --authfile "$REGISTRY_AUTH_FILE" \
     -u "$ICR_USERNAME" \
     --password-stdin
-
-  # Optional: show which auth file podman store is using (no secrets)
-  podman info --format "ConfigFile={{ .Store.ConfigFile }}"
 '
 '''
   }
@@ -797,9 +767,6 @@ sudo --preserve-env=REGISTRY_AUTH_FILE,RH_USERNAME,RH_PASSWORD bash -lc '
     --authfile "$REGISTRY_AUTH_FILE" \
     -u "$RH_USERNAME" \
     --password-stdin
-
-  # Optional: show which auth file podman store is using (no secrets)
-  podman info --format "ConfigFile={{ .Store.ConfigFile }}"
 '
 '''
   }
