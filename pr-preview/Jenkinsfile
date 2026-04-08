@@ -38,8 +38,6 @@ pipeline {
         // icr.io auth file
         REGISTRY_AUTH_FILE = "/run/containers/0/auth.json"
 
-        // Enables optional pre checks against external systems
-        VERIFY_EXTERNAL_INTEGRATIONS = 'true'
     }
 
     // Prevent concurrent builds to ensure only one deployment at a time
