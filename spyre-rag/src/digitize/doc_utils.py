@@ -11,7 +11,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from tqdm import tqdm
 from pathlib import Path
 from docling_core.types.doc.document import DoclingDocument
-from concurrent.futures import as_completed, ProcessPoolExecutor
+from concurrent.futures import as_completed, ProcessPoolExecutor, BrokenExecutor, TimeoutError as FuturesTimeoutError
 from sentence_splitter import SentenceSplitter
 
 # Set third-party library log levels before importing project modules
@@ -202,27 +202,59 @@ def process_converted_document(converted_json_path, pdf_path, out_path, gen_mode
 
         return None, None, None, None, None
 
+def _safe_convert_document(pdf_path, out_path, file_name):
+    """
+    Internal conversion function that can raise exceptions.
+    This is the actual worker logic without exception handling.
+    """
+    logger.info(f"Processing '{pdf_path}'")
+    converted_json = (Path(out_path) / f"{file_name}.json")
+    converted_json_f = str(converted_json)
+    logger.debug(f"Converting '{pdf_path}'")
+    t0 = time.time()
+
+    converted_doc: DoclingDocument = convert_doc(pdf_path, cache_dir=out_path / file_name)
+    converted_doc.save_as_json(str(converted_json_f))
+
+    conversion_time = time.time() - t0
+    logger.debug(f"'{pdf_path}' converted")
+    return converted_json_f, conversion_time
+
+
 def convert_document(pdf_path, out_path, file_name):
     """
-    Convert a single document to JSON format.
+    Guarded worker wrapper for document conversion.
     This function runs in a separate process via ProcessPoolExecutor.
+
+    Returns a structured result dict with success/failure information.
+    The parent process is responsible for updating document status based on this result.
     """
+    result = {
+        "success": False,
+        "converted_json": None,
+        "conversion_time": None,
+        "error": None,
+        "error_type": None
+    }
+
     try:
-        logger.info(f"Processing '{pdf_path}'")
-        converted_json = (Path(out_path) / f"{file_name}.json")
-        converted_json_f = str(converted_json)
-        logger.debug(f"Converting '{pdf_path}'")
-        t0 = time.time()
-
-        converted_doc: DoclingDocument = convert_doc(pdf_path, cache_dir=out_path / file_name)
-        converted_doc.save_as_json(str(converted_json_f))
-
-        conversion_time = time.time() - t0
-        logger.debug(f"'{pdf_path}' converted")
-        return converted_json_f, conversion_time
+        converted_json, conversion_time = _safe_convert_document(pdf_path, out_path, file_name)
+        result["success"] = True
+        result["converted_json"] = converted_json
+        result["conversion_time"] = conversion_time
+        return result
+    except MemoryError as e:
+        # OOM - process will likely be killed soon
+        result["error"] = f"Out of memory: {str(e)}"
+        result["error_type"] = "OOM"
+        logger.error(f"OOM error converting '{pdf_path}': {e}")
+        return result
     except Exception as e:
-        logger.error(f"Error converting '{pdf_path}': {e}")
-    return None, None
+        # Catch all other exceptions to return structured error
+        result["error"] = str(e)
+        result["error_type"] = type(e).__name__
+        logger.error(f"Error converting '{pdf_path}': {e}", exc_info=True)
+        return result
 
 def clean_intermediate_files(doc_id, out_path):
     # Remove intermediate files but keep <doc_id>.json
@@ -286,16 +318,50 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
             chunk_futures = {}
 
             # B. Handle Conversions -> Submit Processing
-            for fut in as_completed(conversion_futures):
+            # Per-file timeout to prevent single document from blocking entire batch
+            per_file_timeout = 3600  # 1 hour per document
+
+            for fut in as_completed(conversion_futures, timeout=per_file_timeout * len(conversion_futures)):
                 path = conversion_futures[fut]
                 doc_id = doc_id_dict.get(Path(path).name)
                 try:
-                    converted_json, conv_time = fut.result()
+                    # Get structured result from guarded worker with per-file timeout
+                    result = fut.result(timeout=per_file_timeout)
+
+                    # Parent-side state management: Check worker result structure
+                    if not result or not isinstance(result, dict):
+                        # Worker crashed or returned invalid result
+                        if doc_id is not None:
+                            error_msg = "Worker process crashed or returned invalid result"
+                            logger.error(f"Conversion failed for {path}: {error_msg}")
+                            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=error_msg)
+                            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+                        continue
+
+                    # Check if worker reported failure
+                    if not result.get("success"):
+                        if doc_id is not None:
+                            error_type = result.get("error_type", "Unknown")
+                            error_msg = result.get("error", "Conversion failed")
+
+                            # Provide specific error message for OOM
+                            if error_type == "OOM":
+                                error_msg = f"Out of memory during conversion: {error_msg}"
+
+                            logger.error(f"Conversion failed for {path}: {error_msg}")
+                            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=error_msg)
+                            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+                        continue
+
+                    # Extract successful results
+                    converted_json = result.get("converted_json")
+                    conv_time = result.get("conversion_time")
+
                     if not converted_json:
                         if doc_id is not None:
                             logger.error(f"Conversion failed for {path}: converted_json is None")
                             status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error="Failed to convert document: conversion returned None")
-                            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.FAILED, error="Failed to convert document: conversion returned None")
+                            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
                         continue
 
                     # Update persistence and session stats
@@ -314,11 +380,20 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         llm_model, llm_endpoint, emb_endpoint, max_tokens, doc_id=doc_id
                     )
                     process_futures[p_future] = str(path)
-                except Exception as e:
-                    logger.error(f"Error from conversion for {path}: {str(e)}", exc_info=True)
+                except FuturesTimeoutError:
+                    # Per-file timeout exceeded
+                    if doc_id is not None:
+                        error_msg = f"Conversion timed out after {per_file_timeout} seconds"
+                        logger.error(f"{error_msg} for {path}")
+                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=error_msg)
+                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+                except (BrokenExecutor, RuntimeError, Exception) as e:
+                    # Handle pool crashes and other errors
+                    error_type = "Process pool crashed" if isinstance(e, (BrokenExecutor, RuntimeError)) else "Conversion error"
+                    logger.error(f"{error_type} for {path}: {str(e)}", exc_info=True)
                     batch_stats.pop(path, {})
                     if doc_id is not None:
-                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to convert document: {str(e)}")
+                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"{error_type}: {str(e)}")
                         status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
 
             # C. Handle Processing -> Submit Chunking

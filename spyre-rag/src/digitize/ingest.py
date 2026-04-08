@@ -1,5 +1,6 @@
 from pathlib import Path
 import time
+import json
 from typing import Optional
 
 import common.db_utils as db
@@ -16,6 +17,43 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
 
     def ingestion_failed():
         logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
+
+    def finalize_orphaned_documents(status_mgr, job_id, doc_id_dict):
+        """
+        Job Reaper/Finalizer: Ensures all documents reach a terminal state (COMPLETED or FAILED).
+        This prevents job deadlock by marking any stuck documents as FAILED.
+        Called in the finally block to guarantee execution even on catastrophic failures.
+        """
+        if not status_mgr or not job_id or not doc_id_dict:
+            return
+
+        try:
+            doc_stats = get_job_document_stats(job_id)
+            total_docs = doc_stats["total_docs"]
+            completed_count = doc_stats["completed_count"]
+            failed_count = doc_stats["failed_count"]
+
+            # Check if there are orphaned documents (not in terminal state)
+            terminal_count = completed_count + failed_count
+            if terminal_count < total_docs:
+                orphaned_count = total_docs - terminal_count
+                logger.warning(f"Job Reaper: Found {orphaned_count} orphaned document(s) in job {job_id}")
+
+                # Mark all orphaned documents as FAILED
+                for filename, doc_id in doc_id_dict.items():
+                    # Check if document is in terminal state
+                    is_completed = any(doc["id"] == doc_id for doc in doc_stats["completed_docs"])
+                    is_failed = any(doc["id"] == doc_id for doc in doc_stats["failed_docs"])
+
+                    if not is_completed and not is_failed:
+                        error_msg = "Document processing incomplete - marked as failed during job finalization"
+                        logger.warning(f"Job Reaper: Finalizing orphaned document {doc_id} as FAILED")
+                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=error_msg)
+                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+
+                logger.info(f"Job Reaper: Marked {orphaned_count} orphaned document(s) as FAILED")
+        except Exception as e:
+            logger.error(f"Job Reaper: Error during job finalization for {job_id}: {e}", exc_info=True)
 
     logger.info(f"Ingestion started from dir '{directory_path}'")
     
@@ -185,3 +223,41 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                 raise fnf_error
 
         return None
+
+    finally:
+        # Job Reaper: ALWAYS run finalization to ensure no orphaned documents
+        # This critical section prevents job deadlock
+        if status_mgr and job_id and doc_id_dict:
+            logger.debug(f"Running job finalizer for job {job_id}")
+            finalize_orphaned_documents(status_mgr, job_id, doc_id_dict)
+
+            # After finalization, ensure job reaches terminal state
+            try:
+                doc_stats = get_job_document_stats(job_id)
+                total_docs = doc_stats["total_docs"]
+                completed_count = doc_stats["completed_count"]
+                failed_count = doc_stats["failed_count"]
+                terminal_count = completed_count + failed_count
+
+                # If all documents are in terminal state, finalize the job
+                if terminal_count == total_docs:
+                    # Read current job status to avoid overwriting
+                    job_file = config.JOBS_DIR / f"{job_id}_status.json"
+                    if job_file.exists():
+                        with open(job_file, "r") as f:
+                            job_data = json.load(f)
+                        current_status = job_data.get("status")
+
+                        # Only update if job is still IN_PROGRESS
+                        if current_status == JobStatus.IN_PROGRESS.value:
+                            if failed_count > 0:
+                                error_msg = f"{failed_count} of {total_docs} document(s) failed"
+                                status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=error_msg)
+                                logger.info(f"Job {job_id} finalized as FAILED ({failed_count} failures)")
+                            else:
+                                status_mgr.update_job_progress("", DocStatus.COMPLETED, JobStatus.COMPLETED)
+                                logger.info(f"Job {job_id} finalized as COMPLETED")
+                else:
+                    logger.warning(f"Job {job_id} has {total_docs - terminal_count} documents not in terminal state after finalization")
+            except Exception as final_error:
+                logger.error(f"Error during final job status update for {job_id}: {final_error}", exc_info=True)
