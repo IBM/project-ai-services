@@ -155,7 +155,8 @@ async def handle_summarize(
     if stream:
         await concurrency_limiter.acquire()
         try:
-            vllm_stream = query_vllm_summarize_stream(
+            vllm_stream = await asyncio.to_thread(
+                query_vllm_summarize_stream,
                 llm_endpoint=llm_endpoint,
                 messages=messages,
                 model=llm_model,
@@ -179,7 +180,9 @@ async def handle_summarize(
 
     async with concurrency_limiter:
         start = time.time()
-        result, in_tokens, out_tokens = query_vllm_summarize(
+        # Running the call in a async thread pool to avoid blocking the event loop
+        result, in_tokens, out_tokens = await asyncio.to_thread(
+            query_vllm_summarize,
             llm_endpoint=llm_endpoint,
             messages=messages,
             model=llm_model,
