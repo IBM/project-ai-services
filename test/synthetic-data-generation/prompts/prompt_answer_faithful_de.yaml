@@ -1,0 +1,79 @@
+- role: user
+  content: |
+    Sie erhalten ein Dokument, eine Frage und eine Antwort. Ihre Aufgabe ist es zu überprüfen, ob die Antwort den 
+    Informationen im bereitgestellten Dokument treu ist. Wenn die Antwort ausschließlich auf dem Inhalt des Dokuments 
+    basiert und diesem nicht widerspricht, dann ist sie treu (faithful). Wenn die Antwort Informationen enthält, 
+    die nicht im Dokument vorhanden sind, wichtige Fakten auslässt, die für die Korrektheit erforderlich sind, 
+    oder dem Dokument widerspricht, dann ist sie nicht treu (not faithful).
+    Richtlinien:
+    - Geben Sie eine Erklärung ab, die beschreibt, warum die Antwort dem Dokument treu ist oder nicht.
+    - Die Erklärung sollte den Inhalt der Antwort mit dem Dokument vergleichen und Übereinstimmungen, Auslassungen oder Widersprüche hervorheben.
+    - Wenn die Antwort nur Informationen aus dem Dokument verwendet und diesem nicht widerspricht, kennzeichnen Sie sie als treu (faithful).
+    - Wenn die Antwort neue Informationen einführt, wichtige Details auslässt, die für die Korrektheit erforderlich sind, oder dem Dokument widerspricht, kennzeichnen Sie sie als nicht treu (not faithful).
+    - Geben Sie nach der Erklärung eindeutig die Bezeichnung an: FAITHFUL oder NOT FAITHFUL.
+
+    Formatieren Sie Ihre Ausgabe strikt wie folgt:
+
+    [Start of Explanation]
+    ...
+    [End of Explanation]
+
+    [Start of Label]
+    ...
+    [End of Label]
+
+    Beispiel 1:
+    [Start of Document]
+    Der Power10-Prozessor verfügt über einen On-Chip-Beschleuniger, der als Nest-Beschleunigereinheit (NX-Einheit) bezeichnet wird. Die auf dem Power10-Prozessor verfügbaren Koprozessor-Funktionen ähneln den Funktionen des Power9-Prozessors. Diese Koprozessoren bieten spezialisierte Funktionen, wie die folgenden Beispiele: IBM-proprietäre Datenkomprimierung und -dekomprimierung, branchenübliche Gzip-Komprimierung und -Dekomprimierung, AES- und Secure-Hash-Algorithmus (SHA)-Kryptographie, Zufallszahlengenerierung. Jede der AES/SHA-Engines, Datenkomprimierungs- und Gzip-Einheiten besteht aus einem Koprozessortyp, und die NX-Einheit verfügt über drei Koprozessortypen. Die NX-Einheit umfasst außerdem zusätzliche Unterstützungshardware für den Koprozessoraufruf durch Benutzercode, die Verwendung effektiver Adressen, Speicherzugriff mit hoher Bandbreite und Interrupt-Benachrichtigung bei Auftragsabschluss. Der DMA-Controller (Direct Memory Access) der NX-Einheit hilft beim Starten der Koprozessoren und beim Verschieben von Daten im Auftrag der Koprozessoren. Die SMP-Verbindungseinheit (SIU) stellt die Schnittstelle zwischen der Power10-SMP-Verbindung und dem DMA-Controller bereit.
+    [End of Document]
+    [Start of Question]
+    Wird der Betriebssystemkernel von Power10 die NX-Koprozessoren transparent starten, um welche Arten von Operationen zu beschleunigen?
+    [End of Question]
+    [Start of Answer]
+    Der Power10-Prozessor wird die Koprozessoren transparent starten, um die folgenden Arten von Operationen zu beschleunigen: Datenkomprimierung, Live-Partitionsmobilitätsmigration, IPsec, JFS2-verschlüsselte Dateisysteme, PKCS11-Verschlüsselung, Zufallszahlengenerierung, die zuletzt angekündigte Verschlüsselung logischer Datenträger.
+    [End of Answer]
+
+    [Start of Explanation]
+    Das Dokument beschreibt nur den Nest-Beschleuniger, seine Funktionen und die NX-Koprozessoren, erwähnt jedoch nicht, wann die NX-Einheiten vom Betriebssystem transparent gestartet werden.
+    Da die Antwort neue Informationen einführt, die nicht durch den Text gestützt werden, ist sie dem Dokument nicht vollständig treu.
+    [End of Explanation]
+
+    [Start of Label]
+    NOT FAITHFUL
+    [End of Label]
+
+    Beispiel 2:
+    [Start of Document]
+    Kapitel: Architektur und technischer Überblick Unterabschnitt: On-Chip-L3-Cache und intelligentes Caching \n\uf0b7 Der Power10-Prozessor verfügt über einen großen On-Chip-L3-Cache von bis zu 120 MB mit einer NUCA-Architektur, die Mechanismen zur Verteilung und gemeinsamen Nutzung von Cache-Speicherbereichen über eine Reihe von L3-Cache-Regionen bereitstellt. Jeder Prozessorkern kann auf einen zugehörigen lokalen 8-MB-L3-Cache zugreifen. Er kann auch auf die Daten in den anderen L3-Cache-Regionen auf dem Chip und im gesamten System zugreifen. Jede L3-Region dient als Victim-Cache für den zugehörigen L2-Cache und kann aggregierten Speicher für den On-Chip-Cache-Speicherbedarf bereitstellen. Durch intelligentes L3-Cache-Management kann der Power10-Prozessor den Zugriff auf L3-Cache-Zeilen optimieren und Cache-Latenzen minimieren. Der L3-Cache enthält einen Ersetzungsalgorithmus mit Datentyp- und Wiederverwendungserkennung. Er unterstützt außerdem eine Vielzahl von Prefetch-Anforderungen vom Kern, einschließlich Befehls- und Daten-Prefetch, und arbeitet kooperativ mit dem Kern, dem Speichercontroller und dem SMP-Verbindungsnetzwerk zusammen, um den Prefetch-Datenverkehr zu verwalten, wodurch der Systemdurchsatz und die Datenlatenz optimiert werden.
+    [End of Document]
+    [Start of Question]
+    Welche Art von Caching-Mechanismus hat der Power10-Prozessor?
+    [End of Question]
+    [Start of Answer]
+    Der Power10-Prozessor verwendet einen großen On-Chip-L3-Cache von bis zu 120 MB, der auf einer NUCA-Architektur (Non-Uniform Cache Access) basiert und Cache-Regionen über den Chip verteilt. Jeder Kern hat schnellen Zugriff auf einen lokalen 8-MB-Bereich des L3-Cache und kann gleichzeitig auf andere L3-Regionen auf dem Prozessor und im gesamten System zugreifen. Die L3-Cache-Regionen fungieren als Victim-Caches für ihre zugehörigen L2-Caches, wodurch die effektive Cache-Kapazität und Datenwiederverwendung verbessert werden. Intelligentes Cache-Management optimiert die Platzierung und den Zugriff auf Cache-Zeilen durch Ersetzungsrichtlinien, die Datentyp und Wiederverwendungsverhalten berücksichtigen. Der Caching-Mechanismus umfasst außerdem koordiniertes Befehls- und Daten-Prefetching, das mit dem Kern, dem Speichercontroller und der SMP-Verbindung zusammenarbeitet, um Latenzen zu reduzieren und den Gesamtdurchsatz zu verbessern.
+    [End of Answer]
+
+    [Start of Explanation]
+    Das Dokument beschreibt den L3-Cache und das intelligente Caching des Power10-Prozessors. Die Antwort gibt genau diese Punkte wieder, ohne neue Funktionen oder Details einzuführen. Daher ist die Antwort vollständig konsistent mit dem Dokument und diesem treu.
+    [End of Explanation]
+
+    [Start of Label]
+    FAITHFUL
+    [End of Label]
+
+    [Start of Document]
+    {{document}}
+    [End of Document]
+    [Start of Question]
+    {{question}}
+    [End of Question]
+    [Start of Answer]
+    {{answer}}
+    [End of Answer]
+    Ihre Antwort MUSS im folgenden Format sein:
+    [Start of Explanation]
+    Erklären Sie, warum die Antwort treu ist oder nicht...
+    [End of Explanation]
+    [Start of Label]
+    FAITHFUL oder NOT_FAITHFUL
+    [End of Label]

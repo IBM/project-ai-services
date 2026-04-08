@@ -1,0 +1,65 @@
+- role: user
+  content: |
+    Antworten Sie mit YES, wenn die Anfrage des Benutzers mithilfe der Informationen im technischen Dokument beantwortet werden kann. Antworten Sie mit NO, wenn das Dokument nicht die erforderlichen Informationen enthält, um die Anfrage zu beantworten. Verwenden Sie nicht das Wort „teilweise". Wenn es eine vernünftige Grundlage gibt, dass das Dokument die Anfrage beantwortet, antworten Sie mit YES.
+    Richtlinien:
+    Antworten Sie mit YES, wenn die Anfrage des Benutzers mithilfe der im technischen Dokument bereitgestellten Informationen beantwortet werden kann.
+    Antworten Sie mit NO, wenn das Dokument nicht die erforderlichen Informationen enthält, um die Anfrage zu beantworten, oder wenn die Anfrage eindeutig außerhalb des Themenbereichs des Dokuments liegt.
+    Vermeiden Sie die Verwendung von „teilweise" in der Antwort. Wenn es eine vernünftige Grundlage gibt, dass das Dokument die Anfrage beantworten kann, antworten Sie mit YES.
+    
+    Antworten Sie strikt in diesem Format:
+    [Start of Document]
+    ...
+    [End of Document]
+    [Start of Question]
+    ...
+    [End of Question]
+    [Start of Explanation]
+    ...
+    [End of Explanation]
+    [Start of Answer]
+    ...
+    [End of Answer]
+    Beispiel 1:
+    [Start of Document]
+    Kapitel: Architektur und technischer Überblick Unterabschnitt: On-Chip-L3-Cache und intelligentes Caching \n\uf0b7 Der Power10-Prozessor verfügt über einen großen On-Chip-L3-Cache von bis zu 120 MB mit einer NUCA-Architektur, die Mechanismen zur Verteilung und gemeinsamen Nutzung von Cache-Speicherbereichen über eine Reihe von L3-Cache-Regionen bereitstellt. Jeder Prozessorkern kann auf einen zugehörigen lokalen 8-MB-L3-Cache zugreifen. Er kann auch auf die Daten in den anderen L3-Cache-Regionen auf dem Chip und im gesamten System zugreifen. Jede L3-Region dient als Victim-Cache für den zugehörigen L2-Cache und kann aggregierten Speicher für den On-Chip-Cache-Speicherbedarf bereitstellen. Durch intelligentes L3-Cache-Management kann der Power10-Prozessor den Zugriff auf L3-Cache-Zeilen optimieren und Cache-Latenzen minimieren. Der L3-Cache enthält einen Ersetzungsalgorithmus mit Datentyp- und Wiederverwendungserkennung. Er unterstützt außerdem eine Vielzahl von Prefetch-Anforderungen vom Kern, einschließlich Befehls- und Daten-Prefetch, und arbeitet kooperativ mit dem Kern, dem Speichercontroller und dem SMP-Verbindungsnetzwerk zusammen, um den Prefetch-Datenverkehr zu verwalten, wodurch der Systemdurchsatz und die Datenlatenz optimiert werden.
+    [End of Document]
+    [Start of Question]
+    Welche Art von Caching-Mechanismus hat der Power10-Prozessor?
+    [End of Question]
+    [Start of Explanation]
+    Der Text beschreibt die verschiedenen Caching-Mechanismen des Power10-Prozessors. Da die Antwort aus dem Text entnommen werden kann, lautet die korrekte Antwort YES.
+    [End of Explanation]
+    [Start of Answer]
+    Yes
+    [End of Answer]
+    Beispiel 2:
+    [Start of Document]
+    Kapitel: Architektur und technischer Überblick Unterabschnitt: On-Chip-L3-Cache und intelligentes Caching \n\uf0b7 Der Power10-Prozessor verfügt über einen großen On-Chip-L3-Cache von bis zu 120 MB mit einer NUCA-Architektur, die Mechanismen zur Verteilung und gemeinsamen Nutzung von Cache-Speicherbereichen über eine Reihe von L3-Cache-Regionen bereitstellt. Jeder Prozessorkern kann auf einen zugehörigen lokalen 8-MB-L3-Cache zugreifen. Er kann auch auf die Daten in den anderen L3-Cache-Regionen auf dem Chip und im gesamten System zugreifen. Jede L3-Region dient als Victim-Cache für den zugehörigen L2-Cache und kann aggregierten Speicher für den On-Chip-Cache-Speicherbedarf bereitstellen. Durch intelligentes L3-Cache-Management kann der Power10-Prozessor den Zugriff auf L3-Cache-Zeilen optimieren und Cache-Latenzen minimieren. Der L3-Cache enthält einen Ersetzungsalgorithmus mit Datentyp- und Wiederverwendungserkennung. Er unterstützt außerdem eine Vielzahl von Prefetch-Anforderungen vom Kern, einschließlich Befehls- und Daten-Prefetch, und arbeitet kooperativ mit dem Kern, dem Speichercontroller und dem SMP-Verbindungsnetzwerk zusammen, um den Prefetch-Datenverkehr zu verwalten, wodurch der Systemdurchsatz und die Datenlatenz optimiert werden.
+    [End of Document]
+    [Start of Question]
+    Erzählen Sie mir über den Nest-Beschleuniger im Power10.
+    [End of Question]
+    [Start of Explanation]
+    Das Dokument beschreibt nur die Caching-Mechanismen des Power10. Es enthält keine Informationen über den Nest-Beschleuniger. Daher kann diese Anfrage nicht anhand des Dokuments beantwortet werden.
+    [End of Explanation]
+    [Start of Answer]
+    NO
+    [End of Answer]
+    Bestimmen Sie nun anhand der obigen Beispiele und Richtlinien, ob die Anfrage aus dem bereitgestellten Dokument beantwortet werden kann.
+    
+    Geben Sie die Erklärung innerhalb der Tags [Start of Explanation] und [End of Explanation] zurück.
+    Geben Sie die Antwort zwischen den Tags [Start of Answer] und [End of Answer] zurück.
+    
+    [Start of Document]
+    {{document}}
+    [End of Document]
+    [Start of Question]
+    {{question}}
+    [End of Question]
+    Ihre Antwort MUSS im folgenden Format sein:
+    [Start of Explanation]
+    Erklären Sie, warum die Frage beantwortbar ist oder nicht...
+    [End of Explanation]
+    [Start of Answer]
+    YES oder NO
+    [End of Answer]

@@ -18,15 +18,14 @@ with open(args.output_file, 'w', newline='', encoding='utf-8') as csvfile:
             item = json.loads(line)
 
             question = item.get('question', '')
-            answer = item.get('answer', [{}])
-            if not type(answer) is list or len(answer) == 0:
-                answer = [{}]
+            answer = item.get('answer', '')
+            if answer is None:
                 print("Warning: missing answer for ", question)
-            answer_content = answer[0].get('content', '')
+                continue
 
             full_path = item.get('filename', '')
             filename = full_path.rsplit('/', 1)[-1]
-            if question and answer_content and filename:
-                writer.writerow([question, answer_content, filename])
+            if question and answer and filename:
+                writer.writerow([question, answer, filename])
 
 print(f"Successfully converted {args.input_file} to {args.output_file}")
