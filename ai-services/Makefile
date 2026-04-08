@@ -54,8 +54,7 @@ JUNIT_FLAG = --junit-report=report-$(RUN_ID).xml --output-dir=$(REPORT_DIR)
 TEST_CMD = $(TEST_BASE) $(TEST_ARGS) $(TEST_PKG) \
 	-- $(if $(APP_NAME),--app-name=$(APP_NAME),) \
         $(if $(DELETE_APP),--delete-app=$(DELETE_APP),) \
-	$(if $(APP_RUNTIME),--runtime=$(APP_RUNTIME),) \
-	--os-arch=$(GOOS)-$(GOARCH)
+	$(if $(APP_RUNTIME),--runtime=$(APP_RUNTIME),)
 
 .PHONY: default
 default:
@@ -121,8 +120,7 @@ test-generate-report:
 	$(TEST_BASE) $(TEST_ARGS) $(JUNIT_FLAG) $(TEST_PKG) \
      -- $(if $(APP_NAME),--app-name=$(APP_NAME),) \
         $(if $(DELETE_APP),--delete-app=$(DELETE_APP),) \
-        $(if $(APP_RUNTIME),--runtime=$(APP_RUNTIME),) \
-		--os-arch=$(GOOS)-$(GOARCH)
+        $(if $(APP_RUNTIME),--runtime=$(APP_RUNTIME),)
 
 .PHONY: swagger
 swagger:

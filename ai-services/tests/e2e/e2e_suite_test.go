@@ -52,14 +52,12 @@ var (
 	mainPodsByTemplate          map[string][]string
 	defaultRagAccuracyThreshold = 0.70
 	defaultMaxRetries           = 2
-	osArch                      string
 )
 
 func init() {
 	flag.StringVar(&providedAppName, "app-name", "", "Use existing application instead of creating one")
 	flag.BoolVar(&deleteExistingApp, "delete-app", false, "Delete existing app before proceeding ahead with test run")
 	flag.StringVar(&appRuntime, "runtime", "podman", "Runtime on which the app will be deployed")
-	flag.StringVar(&osArch, "os-arch", "", "OS/arch of the binary")
 }
 func TestE2E(t *testing.T) {
 	gomega.RegisterFailHandler(ginkgo.Fail)
@@ -138,7 +136,7 @@ var _ = ginkgo.BeforeSuite(func() {
 
 	ginkgo.By("Building or verifying ai-services CLI")
 	var err error
-	aiServiceBin, err = bootstrap.BuildOrVerifyCLIBinary(ctx, osArch)
+	aiServiceBin, err = bootstrap.BuildOrVerifyCLIBinary(ctx)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	gomega.Expect(aiServiceBin).NotTo(gomega.BeEmpty())
 	cfg.AIServiceBin = aiServiceBin
