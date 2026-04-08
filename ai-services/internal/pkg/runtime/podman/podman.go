@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/containers/podman/v5/pkg/bindings"
@@ -179,23 +180,113 @@ func (pc *PodmanClient) PodLogs(podNameOrID string) error {
 		return errors.New("pod name or ID cannot be empty")
 	}
 
-	ctx, cancel := context.WithCancel(pc.Context)
-	defer cancel()
-
-	//nolint:godox
-	// TODO: fetch pods logs via sdk way
-	cmdExec := exec.CommandContext(pc.Context, "podman", "pod", "logs", "-f", podNameOrID)
-	cmdExec.Stdout = os.Stdout
-	cmdExec.Stderr = os.Stderr
-
-	err := cmdExec.Run()
-
-	// If context was cancelled (Ctrl+C), don't treat it as an error
-	if ctx.Err() == context.Canceled {
-		return nil
+	podInspect, err := pc.InspectPod(podNameOrID)
+	if err != nil {
+		return fmt.Errorf("failed to inspect pod: %w", err)
 	}
 
-	return err
+	if len(podInspect.Containers) == 0 {
+		return errors.New("no containers found in pod")
+	}
+
+	// Creating context here that listens for Ctrl+C
+	ctx, stop := signal.NotifyContext(pc.Context, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	opts := &containers.LogOptions{
+		Follow: utils.BoolPtr(true),
+		Stderr: utils.BoolPtr(true),
+		Stdout: utils.BoolPtr(true),
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	errChan := make(chan error, len(podInspect.Containers))
+
+	// Start log streaming for each container
+	for _, container := range podInspect.Containers {
+		wg.Add(1)
+		go func(containerID string) {
+			defer wg.Done()
+
+			// container prefix to show in logs
+			prefix := containerID[:12]
+
+			containerStdout := make(chan string, 50)
+			containerStderr := make(chan string, 50)
+
+			// Start a goroutine to handle log output with prefix
+			var outputWg sync.WaitGroup
+			outputWg.Go(func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case line, ok := <-containerStdout:
+						if !ok {
+							// Check if stderr is also closed
+							select {
+							case _, ok := <-containerStderr:
+								if !ok {
+									return
+								}
+							default:
+							}
+							continue
+						}
+						mu.Lock()
+						logger.Infof("[%s] %s", prefix, line)
+						mu.Unlock()
+					case line, ok := <-containerStderr:
+						if !ok {
+							// Check if stdout is also closed
+							select {
+							case _, ok := <-containerStdout:
+								if !ok {
+									return
+								}
+							default:
+							}
+							continue
+						}
+						mu.Lock()
+						logger.Errorf("[%s] %s", prefix, line)
+						mu.Unlock()
+					}
+				}
+			})
+
+			// Stream logs from container
+			err := containers.Logs(ctx, containerID, opts, containerStdout, containerStderr)
+
+			// Close channels to signal output goroutine
+			close(containerStdout)
+			close(containerStderr)
+
+			// Wait for output goroutine to finish
+			outputWg.Wait()
+
+			// Only report errors if context wasn't cancelled
+			if err != nil && ctx.Err() == nil {
+				errChan <- fmt.Errorf("error streaming logs for container %s: %w", prefix, err)
+			}
+		}(container.ID)
+	}
+
+	// Wait for all container log streams to complete
+	wg.Wait()
+	close(errChan)
+
+	// Collect and report any errors (only if context wasn't cancelled by user)
+	if ctx.Err() != context.Canceled && ctx.Err() != context.DeadlineExceeded {
+		for err := range errChan {
+			if err != nil {
+				logger.Errorln(err.Error())
+			}
+		}
+	}
+
+	return nil
 }
 
 func (pc *PodmanClient) PodExists(nameOrID string) (bool, error) {
