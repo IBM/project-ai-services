@@ -48,8 +48,8 @@ opensearch:
   memoryLimit: 8Gi
   # @description Sets the storage limit for the Opensearch service(Default: 10Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
   storage: 10Gi
-  # @description Number of OpenSearch replicas for the cluster (Default: 3). This value is used for cluster formation, index shards, and index replicas configuration.
-  replicas: 3
+  # @description Number of OpenSearch replicas for the cluster (Default: 1). This value is used for cluster formation, index shards, and index replicas configuration.
+  replicas: 1
   auth:
     username: "admin"
     # @description Password for OpenSearch authentication. Must be at least 15 characters and contain at least one uppercase letter, one lowercase letter, one digit, and one special character. Avoid common words, predictable patterns, or dictionary terms. Use this to override the default admin password.
