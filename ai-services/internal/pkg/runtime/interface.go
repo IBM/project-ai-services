@@ -13,7 +13,7 @@ type Runtime interface {
 
 	// Pod operations
 	ListPods(filters map[string][]string) ([]types.Pod, error)
-	CreatePod(body io.Reader) ([]types.Pod, error)
+	CreatePod(body io.Reader, opts map[string]string) ([]types.Pod, error)
 	DeletePod(id string, force *bool) error
 	StopPod(id string) error
 	StartPod(id string) error
