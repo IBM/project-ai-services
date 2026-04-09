@@ -25,6 +25,8 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
         ai-services.io/component: vectordb
     spec:
+      # Give nodes time to migrate data before K8s kills the pod
+      terminationGracePeriodSeconds: 120
       containers:
         - name: opensearch
           image: "{{ .Values.opensearch.image }}"
