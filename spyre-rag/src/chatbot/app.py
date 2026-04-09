@@ -1,3 +1,4 @@
+import os
 import logging
 import asyncio
 import uuid
@@ -14,7 +15,7 @@ from starlette.concurrency import iterate_in_threadpool
 from lingua import Language
 
 from common.misc_utils import set_log_level
-from common.config import LOG_LEVEL
+from common.config import LOG_LEVEL, LLM_MAX_BATCH_SIZE
 
 set_log_level(LOG_LEVEL)
 
@@ -25,7 +26,6 @@ from common.misc_utils import get_model_endpoints, set_request_id, create_llm_se
 from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models
 import common.config as common_config
 import chatbot.config as config
-from chatbot.config import QUERY_VLLM_STREAM_PROMPT, QUERY_VLLM_STREAM_DE_PROMPT
 from common.perf_utils import perf_registry
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from chatbot.backend_utils import search_only, validate_query_length
@@ -51,9 +51,6 @@ llm_model_dict = {}
 reranker_model_dict = {}
 
 concurrency_limiter = BoundedSemaphore(config.MAX_CONCURRENT_REQUESTS)
-
-# Setting 32 to fully utilse the vLLM's Max Batch Size
-POOL_SIZE = 32
 
 def initialize_models():
     global emb_model_dict, llm_model_dict, reranker_model_dict
@@ -87,7 +84,7 @@ async def lifespan(app):
     configure_uvicorn_logging(LOG_LEVEL, filtered_paths)
     initialize_models()
     setup_language_detector([Language.ENGLISH, Language.GERMAN])
-    create_llm_session(pool_maxsize=POOL_SIZE)
+    create_llm_session(pool_maxsize=LLM_MAX_BATCH_SIZE)
     yield
     stderr_monitor.stop()
 
@@ -369,13 +366,13 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
         try:
             if req.stream:
                 vllm_stream = await asyncio.to_thread(
-                    query_vllm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang, QUERY_VLLM_STREAM_PROMPT, QUERY_VLLM_STREAM_DE_PROMPT
+                    query_vllm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
                 )
                 # For streaming, release is handled in locked_stream's finally block
                 return StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
 
             vllm_non_stream = await asyncio.to_thread(
-                query_vllm_non_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang, QUERY_VLLM_STREAM_PROMPT, QUERY_VLLM_STREAM_DE_PROMPT
+                query_vllm_non_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
             )
             # Store metrics in registry for non-stream
             perf_registry.add_metric(perf_stat_dict)
@@ -450,5 +447,5 @@ async def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 if __name__ == "__main__":
-    from common.config import PORT
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    port = int(os.getenv("PORT", "5000"))
+    uvicorn.run(app, host="0.0.0.0", port=port)

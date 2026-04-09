@@ -74,12 +74,12 @@ class LLMConfig(BaseSettings):
         description="Estimated token count for prompt template",
     )
 
-    # LLM connection pool
-    llm_pool_size: int = Field(
-        alias="LLM_POOL_SIZE",
+    # LLM connection pool / max batch size
+    llm_max_batch_size: int = Field(
+        alias="LLM_MAX_BATCH_SIZE",
         default=32,
         ge=1,
-        description="Connection pool size for LLM service",
+        description="Maximum batch size for LLM service (used for connection pool size)",
     )
 
     @field_validator('llm_max_tokens')
@@ -332,7 +332,9 @@ LLM_MAX_TOKENS_DE = settings.llm.llm_max_tokens_de
 TEMPERATURE = settings.llm.temperature
 MAX_INPUT_LENGTH = settings.llm.max_input_length
 PROMPT_TEMPLATE_TOKEN_COUNT = settings.llm.prompt_template_token_count
-LLM_POOL_SIZE = settings.llm.llm_pool_size
+LLM_MAX_BATCH_SIZE = settings.llm.llm_max_batch_size
+# Backward compatibility alias
+LLM_POOL_SIZE = LLM_MAX_BATCH_SIZE
 
 # Language detection
 LANGUAGE_DETECTION_MIN_CONFIDENCE = settings.language.language_detection_min_confidence

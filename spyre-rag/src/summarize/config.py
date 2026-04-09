@@ -19,6 +19,13 @@ class SummarizationConfig(BaseSettings):
         extra="ignore",
     )
 
+    max_concurrent_requests: int = Field(
+        alias="MAX_CONCURRENT_REQUESTS",
+        default=32,
+        ge=1,
+        description="Maximum number of concurrent requests",
+    )
+
     summarization_coefficient: float = Field(
         alias="SUMMARIZATION_COEFFICIENT",
         default=0.2,
@@ -115,6 +122,7 @@ class SummarizationConfig(BaseSettings):
 settings = SummarizationConfig()
 
 # Backward compatibility: expose settings as module-level constants
+MAX_CONCURRENT_REQUESTS = settings.max_concurrent_requests
 SUMMARIZATION_COEFFICIENT = settings.summarization_coefficient
 SUMMARIZATION_PROMPT_TOKEN_COUNT = settings.summarization_prompt_token_count
 SUMMARIZATION_TEMPERATURE = settings.summarization_temperature

@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
 from common.misc_utils import set_log_level, get_logger
-from common.config import LOG_LEVEL
+from common.config import LOG_LEVEL, LLM_MAX_BATCH_SIZE
 
 set_log_level(LOG_LEVEL)
 
@@ -39,14 +39,14 @@ logger = get_logger("app")
 
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
 
-concurrency_limiter = asyncio.BoundedSemaphore(32)  # Default concurrent requests
+concurrency_limiter = asyncio.BoundedSemaphore(config.MAX_CONCURRENT_REQUESTS)
 
 @asynccontextmanager
 async def lifespan(app):
     filtered_paths = ['/health']
     configure_uvicorn_logging(LOG_LEVEL, filtered_paths)
     initialize_models()
-    create_llm_session(pool_maxsize=32)
+    create_llm_session(pool_maxsize=LLM_MAX_BATCH_SIZE)
     yield
     stderr_monitor.stop()
 
@@ -340,5 +340,5 @@ async def health():
 
 
 if __name__ == "__main__":
-    from common.config import PORT
-    uvicorn.run(app, host="0.0.0.0", port=PORT if PORT != 5000 else 6000)
+    port = int(os.getenv("PORT", "6000"))
+    uvicorn.run(app, host="0.0.0.0", port=port)

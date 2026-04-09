@@ -2,6 +2,7 @@ from lingua import Language, LanguageDetectorBuilder
 from common.config import LANGUAGE_DETECTION_MIN_CONFIDENCE, LLM_MAX_TOKENS, LLM_MAX_TOKENS_DE
 
 from common.misc_utils import get_logger
+from chatbot.config import QUERY_VLLM_STREAM_DE_PROMPT, QUERY_VLLM_STREAM_PROMPT
 
 logger = get_logger("LANG")
 
@@ -9,11 +10,22 @@ _language_detector = None
 lang_en = "EN"
 lang_de = "DE"
 
-# this is extensible to more languages easily
-prompt_map = {
-        lang_de: "query_vllm_stream_de",
-        lang_en: "query_vllm_stream"
-        }
+def get_prompt_for_language(lang: str) -> str:
+    """
+    Get the appropriate prompt template based on language code.
+    This is extensible to more languages easily.
+    
+    Args:
+        lang: Language code (EN, DE, etc.)
+    
+    Returns:
+        The appropriate prompt template for the language
+    """
+    prompt_map = {
+        lang_de: QUERY_VLLM_STREAM_DE_PROMPT,
+        lang_en: QUERY_VLLM_STREAM_PROMPT
+    }
+    return prompt_map.get(lang, QUERY_VLLM_STREAM_PROMPT)  # Default to English if language not found
 
 max_tokens_map = {
                 lang_en: LLM_MAX_TOKENS,
