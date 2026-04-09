@@ -12,16 +12,16 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
 from common.misc_utils import set_log_level, get_logger
-from common.config import LOG_LEVEL, LLM_MAX_BATCH_SIZE
+import common.config as common_config
+import summarize.config as config
 
-set_log_level(LOG_LEVEL)
+set_log_level(common_config.LOG_LEVEL)
 
 from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream
 from common.misc_utils import get_model_endpoints, set_request_id, configure_uvicorn_logging, create_llm_session
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 
 from common.error_utils import http_error_responses
-import summarize.config as config
 from summarize.summ_utils import (
     SummarizeException,
     word_count,
@@ -44,9 +44,9 @@ concurrency_limiter = asyncio.BoundedSemaphore(config.MAX_CONCURRENT_REQUESTS)
 @asynccontextmanager
 async def lifespan(app):
     filtered_paths = ['/health']
-    configure_uvicorn_logging(LOG_LEVEL, filtered_paths)
+    configure_uvicorn_logging(common_config.LOG_LEVEL, filtered_paths)
     initialize_models()
-    create_llm_session(pool_maxsize=LLM_MAX_BATCH_SIZE)
+    create_llm_session(pool_maxsize=common_config.LLM_MAX_BATCH_SIZE)
     yield
     stderr_monitor.stop()
 
