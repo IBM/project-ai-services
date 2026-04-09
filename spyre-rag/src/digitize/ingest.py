@@ -1,6 +1,5 @@
 from pathlib import Path
 import time
-import json
 from typing import Optional
 
 import common.db_utils as db
@@ -17,7 +16,6 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
 
     def ingestion_failed():
         logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
-
 
     logger.info(f"Ingestion started from dir '{directory_path}'")
     
@@ -187,4 +185,3 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                 raise fnf_error
 
         return None
-
