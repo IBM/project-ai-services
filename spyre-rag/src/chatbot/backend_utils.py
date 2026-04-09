@@ -2,7 +2,7 @@ from common.misc_utils import get_logger
 from common.llm_utils import tokenize_with_llm
 from chatbot.reranker_utils import rerank_documents
 from chatbot.retrieval_utils import retrieve_documents
-import common.config as config
+import chatbot.config as config
 import time
 
 logger = get_logger("backend_utils")

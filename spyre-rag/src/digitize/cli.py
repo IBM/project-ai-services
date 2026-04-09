@@ -1,15 +1,14 @@
 import logging
-import os
 import argparse
 from pathlib import Path
 
 from common.misc_utils import set_log_level
+from common.config import LOG_LEVEL
 
 # Setting log level, 1st priority is to the flag received via cli, 2nd priority to the LOG_LEVEL env var.
 log_level = logging.INFO
 
-env_log_level = os.getenv("LOG_LEVEL", "")
-if "debug" in env_log_level.lower():
+if "debug" in LOG_LEVEL.lower():
     log_level = logging.DEBUG
 
 # Parse args early to check for debug flag

@@ -13,7 +13,7 @@ from digitize.types import (
     DocumentDetailResponse,
     DocumentContentResponse
 )
-from common.config import DOCS_DIR, JOBS_DIR, DIGITIZED_DOCS_DIR
+from digitize.config import DOCS_DIR, JOBS_DIR, DIGITIZED_DOCS_DIR
 from digitize.status import (
     get_utc_timestamp,
     create_document_metadata,
@@ -695,7 +695,7 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = JOBS_DIR) -> int:
     """
     from digitize.status import StatusManager
     from digitize.types import JobStatus, DocStatus
-    import common.config as config
+    import digitize.config as config
 
     if not jobs_dir.exists():
         logger.warning(f"Jobs directory does not exist: {jobs_dir}")

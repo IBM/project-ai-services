@@ -1,4 +1,3 @@
-import os
 import logging
 import asyncio
 import uuid
@@ -15,22 +14,18 @@ from starlette.concurrency import iterate_in_threadpool
 from lingua import Language
 
 from common.misc_utils import set_log_level
-log_level = logging.INFO
-level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
-if level != "":
-    if "debug" in level:
-        log_level = logging.DEBUG
-    elif not "info" in level:
-        logging.warning(f"Unknown LOG_LEVEL passed: '{level}', using default INFO level")
+from common.config import LOG_LEVEL
 
-set_log_level(log_level)
+set_log_level(LOG_LEVEL)
 
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 import common.db_utils as db
 from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
 from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
 from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models
-import common.config as config
+import common.config as common_config
+import chatbot.config as config
+from chatbot.config import QUERY_VLLM_STREAM_PROMPT, QUERY_VLLM_STREAM_DE_PROMPT
 from common.perf_utils import perf_registry
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from chatbot.backend_utils import search_only, validate_query_length
@@ -89,7 +84,7 @@ diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_ha
 @asynccontextmanager
 async def lifespan(app):
     filtered_paths = ['/health']
-    configure_uvicorn_logging(log_level, filtered_paths)
+    configure_uvicorn_logging(LOG_LEVEL, filtered_paths)
     initialize_models()
     setup_language_detector([Language.ENGLISH, Language.GERMAN])
     create_llm_session(pool_maxsize=POOL_SIZE)
@@ -337,7 +332,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
         max_tokens = req.max_tokens
         # giving priority to max_tokens passed in the request, otherwise according to detected language of query
         if not max_tokens:
-            max_tokens = max_tokens_map.get(lang, config.LLM_MAX_TOKENS)
+            max_tokens = max_tokens_map.get(lang, common_config.LLM_MAX_TOKENS)
 
         docs, perf_stat_dict = await asyncio.to_thread(
             search_only,
@@ -374,13 +369,13 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
         try:
             if req.stream:
                 vllm_stream = await asyncio.to_thread(
-                    query_vllm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
+                    query_vllm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang, QUERY_VLLM_STREAM_PROMPT, QUERY_VLLM_STREAM_DE_PROMPT
                 )
                 # For streaming, release is handled in locked_stream's finally block
                 return StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
 
             vllm_non_stream = await asyncio.to_thread(
-                query_vllm_non_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
+                query_vllm_non_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang, QUERY_VLLM_STREAM_PROMPT, QUERY_VLLM_STREAM_DE_PROMPT
             )
             # Store metrics in registry for non-stream
             perf_registry.add_metric(perf_stat_dict)
@@ -455,5 +450,5 @@ async def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "5000"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    from common.config import PORT
+    uvicorn.run(app, host="0.0.0.0", port=PORT)

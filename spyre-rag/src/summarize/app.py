@@ -1,6 +1,5 @@
 import asyncio
 import time
-import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -13,22 +12,16 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
 from common.misc_utils import set_log_level, get_logger
-log_level = logging.INFO
-level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
-if level != "":
-    if "debug" in level:
-        log_level = logging.DEBUG
-    elif not "info" in level:
-        logging.warning(f"Unknown LOG_LEVEL passed: '{level}'")
+from common.config import LOG_LEVEL
 
-set_log_level(log_level)
+set_log_level(LOG_LEVEL)
 
 from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream
 from common.misc_utils import get_model_endpoints, set_request_id, configure_uvicorn_logging, create_llm_session
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 
 from common.error_utils import http_error_responses
-import common.config as config
+import summarize.config as config
 from summarize.summ_utils import (
     SummarizeException,
     word_count,
@@ -46,14 +39,14 @@ logger = get_logger("app")
 
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
 
-concurrency_limiter = asyncio.BoundedSemaphore(value=config.MAX_CONCURRENT_REQUESTS)
+concurrency_limiter = asyncio.BoundedSemaphore(32)  # Default concurrent requests
 
 @asynccontextmanager
 async def lifespan(app):
     filtered_paths = ['/health']
-    configure_uvicorn_logging(log_level, filtered_paths)
+    configure_uvicorn_logging(LOG_LEVEL, filtered_paths)
     initialize_models()
-    create_llm_session(pool_maxsize=config.MAX_CONCURRENT_REQUESTS)
+    create_llm_session(pool_maxsize=32)
     yield
     stderr_monitor.stop()
 
@@ -347,5 +340,5 @@ async def health():
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "6000"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    from common.config import PORT
+    uvicorn.run(app, host="0.0.0.0", port=PORT if PORT != 5000 else 6000)

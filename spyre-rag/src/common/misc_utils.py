@@ -4,7 +4,6 @@ import os
 import requests
 from contextvars import ContextVar
 from requests.adapters import HTTPAdapter
-from common.config import DIGITIZED_DOCS_DIR
 
 # ContextVar to store the request ID for each request
 request_id_ctx = ContextVar("request_id", default="-")
@@ -180,25 +179,29 @@ def get_txt_tab_filenames(file_paths, out_path):
 
 
 def get_model_endpoints():
+    from common.config import EMB_ENDPOINT, EMB_MODEL, EMB_MAX_TOKENS, LLM_ENDPOINT, LLM_MODEL, RERANKER_ENDPOINT, RERANKER_MODEL
+    
     emb_model_dict = {
-        'emb_endpoint': os.getenv("EMB_ENDPOINT"),
-        'emb_model':    os.getenv("EMB_MODEL"),
-        'max_tokens':   int(os.getenv("EMB_MAX_TOKENS", "512")),
+        'emb_endpoint': EMB_ENDPOINT,
+        'emb_model':    EMB_MODEL,
+        'max_tokens':   EMB_MAX_TOKENS,
     }
 
     llm_model_dict = {
-        'llm_endpoint': os.getenv("LLM_ENDPOINT", ""),
-        'llm_model':    os.getenv("LLM_MODEL", ""),
+        'llm_endpoint': LLM_ENDPOINT,
+        'llm_model':    LLM_MODEL,
     }
 
     reranker_model_dict = {
-        'reranker_endpoint': os.getenv("RERANKER_ENDPOINT"),
-        'reranker_model':    os.getenv("RERANKER_MODEL"),
+        'reranker_endpoint': RERANKER_ENDPOINT,
+        'reranker_model':    RERANKER_MODEL,
     }
 
     return emb_model_dict, llm_model_dict, reranker_model_dict
 
 def setup_digitized_doc_dir():
+    from digitize.config import DIGITIZED_DOCS_DIR
+    
     os.makedirs(DIGITIZED_DOCS_DIR, exist_ok=True)
     return DIGITIZED_DOCS_DIR
 

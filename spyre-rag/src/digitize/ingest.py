@@ -8,7 +8,7 @@ from common.misc_utils import *
 from digitize.doc_utils import process_documents
 from digitize.status import StatusManager, get_utc_timestamp, get_job_document_stats
 from digitize.types import JobStatus, DocStatus
-import common.config as config
+from common.config import LLM_POOL_SIZE
 
 logger = get_logger("ingest")
 
@@ -122,7 +122,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
     logger.info(f"Ingestion started from dir '{directory_path}'")
 
     # Initialize LLM session for all API calls (LLM and embedding)
-    create_llm_session(pool_maxsize=config.LLM_POOL_SIZE)
+    create_llm_session(pool_maxsize=LLM_POOL_SIZE)
 
     # Initialize status manager
     status_mgr = None

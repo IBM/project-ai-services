@@ -21,13 +21,15 @@ logging.getLogger('docling').setLevel(logging.CRITICAL)
 from common.thread_utils import ContextAwareThreadPoolExecutor
 from common.llm_utils import summarize_and_classify_tables, tokenize_with_llm
 from common.misc_utils import get_logger, text_suffix, table_suffix, text_chunk_suffix, table_chunk_suffix
+from digitize.config import LLM_CLASSIFY_PROMPT, TABLE_SUMMARY_PROMPT
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.status import (
     StatusManager,
     get_utc_timestamp
 )
 from digitize.types import DocStatus, JobStatus, OutputFormat
-import common.config as config
+import digitize.config as config
+from common.config import LLM_POOL_SIZE
 
 logger = get_logger("doc_utils")
 
@@ -35,7 +37,7 @@ logger = get_logger("doc_utils")
 WORKER_SIZE = config.WORKER_SIZE
 HEAVY_PDF_CONVERT_WORKER_SIZE = config.HEAVY_PDF_CONVERT_WORKER_SIZE
 HEAVY_PDF_PAGE_THRESHOLD = config.HEAVY_PDF_PAGE_THRESHOLD
-POOL_SIZE = config.LLM_POOL_SIZE
+POOL_SIZE = LLM_POOL_SIZE
 
 is_debug = logger.isEnabledFor(logging.DEBUG)
 tqdm_wrapper = tqdm if is_debug else (lambda x, **kwargs: x)

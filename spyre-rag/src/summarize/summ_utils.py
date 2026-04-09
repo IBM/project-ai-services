@@ -1,23 +1,14 @@
-import logging
-import os
 import re
 from typing import Optional
 import pypdfium2 as pdfium
 from pydantic import BaseModel, Field
 import threading
 
-import common.config as config
+import common.config as common_config
+import summarize.config as config
 from common.misc_utils import set_log_level, get_logger
 
-
-log_level = logging.INFO
-level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
-if level != "":
-    if "debug" in level:
-        log_level = logging.DEBUG
-    elif not "info" in level:
-        logging.warning("Unknown LOG_LEVEL passed: '%s'", level)
-set_log_level(log_level)
+set_log_level(common_config.LOG_LEVEL)
 logger = get_logger("summarize")
 
 _pdf_lock = threading.Lock()
@@ -26,8 +17,8 @@ _pdf_lock = threading.Lock()
 # input_words/ratio + buf + (input_words/ratio)*coeff < max_model_len
 # => input_words * (1 + coeff) / ratio < max_model_len - buf
 MAX_INPUT_WORDS = int(
-    (config.GRANITE_3_3_8B_INSTRUCT_CONTEXT_LENGTH - config.SUMMARIZATION_PROMPT_TOKEN_COUNT)
-    * config.TOKEN_TO_WORD_RATIO_EN
+    (common_config.GRANITE_3_3_8B_INSTRUCT_CONTEXT_LENGTH - config.SUMMARIZATION_PROMPT_TOKEN_COUNT)
+    * common_config.TOKEN_TO_WORD_RATIO_EN
     / (1 + config.SUMMARIZATION_COEFFICIENT)
 )
 
@@ -40,7 +31,7 @@ def compute_target_and_max_tokens(input_word_count: int, summary_length: Optiona
     else:
         target_word_count = max(1, int(input_word_count * config.SUMMARIZATION_COEFFICIENT))
 
-    est_output_tokens = int(target_word_count / config.TOKEN_TO_WORD_RATIO_EN)
+    est_output_tokens = int(target_word_count / common_config.TOKEN_TO_WORD_RATIO_EN)
     max_tokens = est_output_tokens + config.SUMMARIZATION_PROMPT_TOKEN_COUNT
     logger.debug(f"max tokens: {max_tokens}, estimated output tokens: {est_output_tokens}")
     return target_word_count, max_tokens

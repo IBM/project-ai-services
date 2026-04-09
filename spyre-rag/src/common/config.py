@@ -2,119 +2,363 @@
 Configuration settings for RAG system.
 These values can be overridden via environment variables.
 """
-import os
-from pathlib import Path
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Prompts - Query streaming (English)
-QUERY_VLLM_STREAM_PROMPT = os.getenv(
-    "QUERY_VLLM_STREAM_PROMPT",
-    "You are given:\n1. **A short context text** containing factual information.\n2. **A user's question** seeking clarification or advice.\n3. **Return a concise, to-the-point answer grounded strictly in the provided context.**\n\nThe answer should be accurate, easy to follow, based on the context(s), and include clear reasoning or justification.\nIf the context does not provide enough information, answer using your general knowledge.\n\nContext:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
-)
+from common.misc_utils import get_logger
 
-# Prompts - Query streaming (German)
-QUERY_VLLM_STREAM_DE_PROMPT = os.getenv(
-    "QUERY_VLLM_STREAM_DE_PROMPT",
-    "Sie erhalten: 1. **Einen kurzen Kontexttext** mit sachlichen Informationen.\n2. **Die Frage eines Nutzers**, der um Klärung oder Rat bittet.\n3. **Geben Sie eine prägnante und aussagekräftige Antwort, die sich strikt auf den gegebenen Kontext stützt.**\n\nDie Antwort sollte korrekt, leicht verständlich und kontextbezogen sein sowie eine klare Begründung enthalten.\nWenn der Kontext nicht genügend Informationen liefert, antworten Sie mit Ihrem Allgemeinwissen.\n\nKontext:{context}\n\nFrage:{question}\n\nAntwort:"
-)
+logger = get_logger("settings")
 
-# Prompts - LLM classification
-LLM_CLASSIFY_PROMPT = os.getenv(
-    "LLM_CLASSIFY_PROMPT",
-    "You are an intelligent assistant helping to curate a knowledge base for a Retrieval-Augmented Generation (RAG) system.\nYour task is to decide whether the following text should be included in the knowledge corpus. Respond only with \"yes\" or \"no\".\n\nRespond \"yes\" if the text contains factual, instructional, or explanatory information that could help answer general user questions on any topic.\nRespond \"no\" if the text contains personal, administrative, or irrelevant content, such as names, acknowledgements, contact info, disclaimers, legal notices, or unrelated commentary.\n\nText: {text}\n\nAnswer:"
-)
 
-# Prompts - Table summary
-TABLE_SUMMARY_PROMPT = os.getenv(
-    "TABLE_SUMMARY_PROMPT",
-    "You are an intelligent assistant analyzing set of documents.\nYou are given a table extracted from a document. Your task is to summarize the key points and insights from the table. Avoid repeating the entire content; focus on what is meaningful or important.\n\nTable:\n{content}\n\nSummary:"
-)
+class LLMConfig(BaseSettings):
+    """LLM model and generation settings."""
 
-# Prompts - Summarization system prompt
-SUMMARIZE_SYSTEM_PROMPT = os.getenv(
-    "SUMMARIZE_SYSTEM_PROMPT",
-    "You are a summarization assistant. Output ONLY the summary. \n\nDo not add questions, explanations, headings, code, or any other text."
-)
+    model_config = SettingsConfigDict(
+        env_prefix="",
+        case_sensitive=True,
+        extra="ignore",
+    )
 
-# Prompts - Summarization user prompt with length
-SUMMARIZE_USER_PROMPT_WITH_LENGTH = os.getenv(
-    "SUMMARIZE_USER_PROMPT_WITH_LENGTH",
-    "Summarize the following text in {target_words} words, with an allowed variance of ±50 words.Avoid being overly concise.\nExpand explanations where necessary to meet the word requirement.\n\nYou must strictly meet this word-range requirement. Do not exceed or fall short of the range.\n\n\nText:\n{text}\n\nSummary:"
-)
+    # Context lengths
+    granite_3_3_8b_instruct_context_length: int = Field(
+        alias="GRANITE_3_3_8B_INSTRUCT_CONTEXT_LENGTH",
+        default=32768,
+        ge=1,
+        description="Context length for Granite 3.3 8B Instruct model",
+    )
 
-# Prompts - Summarization user prompt without length
-SUMMARIZE_USER_PROMPT_WITHOUT_LENGTH = os.getenv(
-    "SUMMARIZE_USER_PROMPT_WITHOUT_LENGTH",
-    "Summarize the following text.\n\nText:\n{text}\n\nSummary:"
-)
+    # Token to word ratios
+    token_to_word_ratio_en: float = Field(
+        alias="TOKEN_TO_WORD_RATIO_EN",
+        default=0.75,
+        gt=0.0,
+        le=2.0,
+        description="Token to word ratio for English text",
+    )
+
+    # Generation parameters
+    llm_max_tokens: int = Field(
+        alias="LLM_MAX_TOKENS",
+        default=512,
+        gt=0,
+        description="Maximum tokens for LLM generation (English)",
+    )
+
+    llm_max_tokens_de: int = Field(
+        alias="LLM_MAX_TOKENS_DE",
+        default=700,
+        gt=0,
+        description="Maximum tokens for LLM generation (German)",
+    )
+
+    temperature: float = Field(
+        alias="TEMPERATURE",
+        default=0.0,
+        ge=0.0,
+        lt=1.0,
+        description="Temperature for LLM generation",
+    )
+
+    max_input_length: int = Field(
+        alias="MAX_INPUT_LENGTH",
+        default=6000,
+        ge=3000,
+        le=32000,
+        description="Maximum input length in characters",
+    )
+
+    prompt_template_token_count: int = Field(
+        alias="PROMPT_TEMPLATE_TOKEN_COUNT",
+        default=250,
+        ge=0,
+        description="Estimated token count for prompt template",
+    )
+
+    # LLM connection pool
+    llm_pool_size: int = Field(
+        alias="LLM_POOL_SIZE",
+        default=32,
+        ge=1,
+        description="Connection pool size for LLM service",
+    )
+
+    @field_validator('llm_max_tokens')
+    @classmethod
+    def validate_llm_max_tokens(cls, v):
+        """Validate llm_max_tokens with warning fallback."""
+        if not (isinstance(v, int) and v > 0):
+            logger.warning(f"Setting llm_max_tokens to default '512' as it is missing or malformed in the settings")
+            return 512
+        return v
+
+    @field_validator('llm_max_tokens_de')
+    @classmethod
+    def validate_llm_max_tokens_de(cls, v):
+        """Validate llm_max_tokens_de with warning fallback."""
+        if not (isinstance(v, int) and v > 0):
+            logger.warning(f"Setting llm_max_tokens_de to default '700' as it is missing or malformed in the settings")
+            return 700
+        return v
+
+    @field_validator('temperature')
+    @classmethod
+    def validate_temperature(cls, v):
+        """Validate temperature with warning fallback."""
+        if not (isinstance(v, float) and 0 <= v < 1):
+            logger.warning(f"Setting temperature to default '0.0' as it is missing or malformed in the settings")
+            return 0.0
+        return v
+
+    @field_validator('max_input_length')
+    @classmethod
+    def validate_max_input_length(cls, v):
+        """Validate max_input_length with warning fallback."""
+        if not (isinstance(v, int) and 3000 <= v <= 32000):
+            logger.warning(f"Setting max_input_length to default '6000' as it is missing or malformed in the settings")
+            return 6000
+        return v
+
+    @field_validator('prompt_template_token_count')
+    @classmethod
+    def validate_prompt_template_token_count(cls, v):
+        """Validate prompt_template_token_count with warning fallback."""
+        if not isinstance(v, int):
+            logger.warning(f"Setting prompt_template_token_count to default '250' as it is missing in the settings")
+            return 250
+        return v
+
+
+
+class LanguageConfig(BaseSettings):
+    """Language detection settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="",
+        case_sensitive=True,
+        extra="ignore",
+    )
+
+    language_detection_min_confidence: float = Field(
+        alias="LANGUAGE_DETECTION_MIN_CONFIDENCE",
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence threshold for language detection",
+    )
+
+    @field_validator('language_detection_min_confidence')
+    @classmethod
+    def validate_language_detection_min_confidence(cls, v):
+        """Validate language_detection_min_confidence with warning fallback."""
+        if not isinstance(v, float):
+            logger.warning(f"Setting language_detection_min_confidence to default '0.5' as it is missing in the settings")
+            return 0.5
+        return v
+
+
+class AppConfig(BaseSettings):
+    """Application-level configuration."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="",
+        case_sensitive=True,
+        extra="ignore",
+    )
+
+    log_level: str = Field(
+        alias="LOG_LEVEL",
+        default="INFO",
+        description="Logging level (DEBUG, INFO, WARNING, ERROR)",
+    )
+
+    port: int = Field(
+        alias="PORT",
+        default=5000,
+        ge=1,
+        le=65535,
+        description="Application port number",
+    )
+
+
+class ModelEndpointsConfig(BaseSettings):
+    """Model endpoint configuration."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="",
+        case_sensitive=True,
+        extra="ignore",
+    )
+
+    # Embedding model
+    emb_endpoint: str = Field(
+        alias="EMB_ENDPOINT",
+        default="",
+        description="Embedding model endpoint URL",
+    )
+
+    emb_model: str = Field(
+        alias="EMB_MODEL",
+        default="",
+        description="Embedding model name",
+    )
+
+    emb_max_tokens: int = Field(
+        alias="EMB_MAX_TOKENS",
+        default=512,
+        ge=1,
+        description="Maximum tokens for embedding model",
+    )
+
+    # LLM model
+    llm_endpoint: str = Field(
+        alias="LLM_ENDPOINT",
+        default="",
+        description="LLM endpoint URL",
+    )
+
+    llm_model: str = Field(
+        alias="LLM_MODEL",
+        default="",
+        description="LLM model name",
+    )
+
+    # Reranker model
+    reranker_endpoint: str = Field(
+        alias="RERANKER_ENDPOINT",
+        default="",
+        description="Reranker endpoint URL",
+    )
+
+    reranker_model: str = Field(
+        alias="RERANKER_MODEL",
+        default="",
+        description="Reranker model name",
+    )
+
+
+class VectorStoreConfig(BaseSettings):
+    """Vector store configuration."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="",
+        case_sensitive=True,
+        extra="ignore",
+    )
+
+    vector_store_type: str = Field(
+        alias="VECTOR_STORE_TYPE",
+        default="OPENSEARCH",
+        description="Type of vector store (OPENSEARCH, etc.)",
+    )
+
+    # OpenSearch specific
+    opensearch_host: str = Field(
+        alias="OPENSEARCH_HOST",
+        default="",
+        description="OpenSearch host",
+    )
+
+    opensearch_port: str = Field(
+        alias="OPENSEARCH_PORT",
+        default="9200",
+        description="OpenSearch port",
+    )
+
+    opensearch_username: str = Field(
+        alias="OPENSEARCH_USERNAME",
+        default="",
+        description="OpenSearch username",
+    )
+
+    opensearch_password: str = Field(
+        alias="OPENSEARCH_PASSWORD",
+        default="",
+        description="OpenSearch password",
+    )
+
+    opensearch_db_prefix: str = Field(
+        alias="OPENSEARCH_DB_PREFIX",
+        default="rag",
+        description="OpenSearch database prefix",
+    )
+
+    opensearch_index_name: str = Field(
+        alias="OPENSEARCH_INDEX_NAME",
+        default="default",
+        description="OpenSearch index name",
+    )
+
+    local_cache_dir: str = Field(
+        alias="LOCAL_CACHE_DIR",
+        default="/var/cache",
+        description="Local cache directory for vector store operations",
+    )
+
+
+class Settings(BaseSettings):
+    """Main settings class combining all common configuration sections."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",
+    )
+
+    app: AppConfig = Field(default_factory=AppConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    language: LanguageConfig = Field(default_factory=LanguageConfig)
+    model_endpoints: ModelEndpointsConfig = Field(default_factory=ModelEndpointsConfig)
+    vector_store: VectorStoreConfig = Field(default_factory=VectorStoreConfig)
+
+
+# Global settings instance
+settings = Settings()
+
+# Backward compatibility: expose settings as module-level constants
+# App settings
+LOG_LEVEL = settings.app.log_level
+PORT = settings.app.port
 
 # Context lengths
-GRANITE_3_3_8B_INSTRUCT_CONTEXT_LENGTH = int(os.getenv("GRANITE_3_3_8B_INSTRUCT_CONTEXT_LENGTH", "32768"))
+GRANITE_3_3_8B_INSTRUCT_CONTEXT_LENGTH = settings.llm.granite_3_3_8b_instruct_context_length
 
 # Token to word ratios
-TOKEN_TO_WORD_RATIO_EN = float(os.getenv("TOKEN_TO_WORD_RATIO_EN", "0.75"))
-
-# RAG parameters
-SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.5"))
-MAX_CONCURRENT_REQUESTS = int(os.getenv("MAX_CONCURRENT_REQUESTS", "32"))
-NUM_CHUNKS_POST_SEARCH = int(os.getenv("NUM_CHUNKS_POST_SEARCH", "10"))
-NUM_CHUNKS_POST_RERANKER = int(os.getenv("NUM_CHUNKS_POST_RERANKER", "3"))
+TOKEN_TO_WORD_RATIO_EN = settings.llm.token_to_word_ratio_en
 
 # LLM settings
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
-LLM_MAX_TOKENS_DE = int(os.getenv("LLM_MAX_TOKENS_DE", "700"))
-TEMPERATURE = float(os.getenv("TEMPERATURE", "0.0"))
-MAX_INPUT_LENGTH = int(os.getenv("MAX_INPUT_LENGTH", "6000"))
-PROMPT_TEMPLATE_TOKEN_COUNT = int(os.getenv("PROMPT_TEMPLATE_TOKEN_COUNT", "250"))
-MAX_QUERY_TOKEN_LENGTH = int(os.getenv("MAX_QUERY_TOKEN_LENGTH", "512"))
-
-# Summarization settings
-SUMMARIZATION_COEFFICIENT = float(os.getenv("SUMMARIZATION_COEFFICIENT", "0.2"))
-SUMMARIZATION_PROMPT_TOKEN_COUNT = int(os.getenv("SUMMARIZATION_PROMPT_TOKEN_COUNT", "100"))
-SUMMARIZATION_TEMPERATURE = float(os.getenv("SUMMARIZATION_TEMPERATURE", "0.2"))
-SUMMARIZATION_STOP_WORDS = os.getenv("SUMMARIZATION_STOP_WORDS", "Keywords, Note, ***")
+LLM_MAX_TOKENS = settings.llm.llm_max_tokens
+LLM_MAX_TOKENS_DE = settings.llm.llm_max_tokens_de
+TEMPERATURE = settings.llm.temperature
+MAX_INPUT_LENGTH = settings.llm.max_input_length
+PROMPT_TEMPLATE_TOKEN_COUNT = settings.llm.prompt_template_token_count
+LLM_POOL_SIZE = settings.llm.llm_pool_size
 
 # Language detection
-LANGUAGE_DETECTION_MIN_CONFIDENCE = float(os.getenv("LANGUAGE_DETECTION_MIN_CONFIDENCE", "0.5"))
+LANGUAGE_DETECTION_MIN_CONFIDENCE = settings.language.language_detection_min_confidence
 
-# ============================================================================
-# Digitize Service Configuration
-# ============================================================================
+# Model endpoints
+EMB_ENDPOINT = settings.model_endpoints.emb_endpoint
+EMB_MODEL = settings.model_endpoints.emb_model
+EMB_MAX_TOKENS = settings.model_endpoints.emb_max_tokens
+LLM_ENDPOINT = settings.model_endpoints.llm_endpoint
+LLM_MODEL = settings.model_endpoints.llm_model
+RERANKER_ENDPOINT = settings.model_endpoints.reranker_endpoint
+RERANKER_MODEL = settings.model_endpoints.reranker_model
 
-# Directory paths
-CACHE_DIR = Path(os.getenv("CACHE_DIR", "/var/cache"))
-DOCS_DIR = CACHE_DIR / "docs"
-JOBS_DIR = CACHE_DIR / "jobs"
-STAGING_DIR = CACHE_DIR / "staging"
-DIGITIZED_DOCS_DIR = CACHE_DIR / "digitized"
+# Vector store
+VECTOR_STORE_TYPE = settings.vector_store.vector_store_type
+OPENSEARCH_HOST = settings.vector_store.opensearch_host
+OPENSEARCH_PORT = settings.vector_store.opensearch_port
+OPENSEARCH_USERNAME = settings.vector_store.opensearch_username
+OPENSEARCH_PASSWORD = settings.vector_store.opensearch_password
+OPENSEARCH_DB_PREFIX = settings.vector_store.opensearch_db_prefix
+OPENSEARCH_INDEX_NAME = settings.vector_store.opensearch_index_name
+LOCAL_CACHE_DIR = settings.vector_store.local_cache_dir
 
-# Worker pool sizes
-WORKER_SIZE = int(os.getenv("DOC_WORKER_SIZE", "4"))
-HEAVY_PDF_CONVERT_WORKER_SIZE = int(os.getenv("HEAVY_PDF_CONVERT_WORKER_SIZE", "2"))
-HEAVY_PDF_PAGE_THRESHOLD = int(os.getenv("HEAVY_PDF_PAGE_THRESHOLD", "500"))
-
-# API concurrency limits
-DIGITIZATION_CONCURRENCY_LIMIT = int(os.getenv("DIGITIZATION_CONCURRENCY_LIMIT", "2"))
-INGESTION_CONCURRENCY_LIMIT = int(os.getenv("INGESTION_CONCURRENCY_LIMIT", "1"))
-
-# LLM connection pool size
-LLM_POOL_SIZE = int(os.getenv("LLM_POOL_SIZE", "32"))
-
-# Chunking parameters
-DEFAULT_MAX_TOKENS = int(os.getenv("CHUNK_MAX_TOKENS", "512"))
-DEFAULT_OVERLAP_TOKENS = int(os.getenv("CHUNK_OVERLAP_TOKENS", "50"))
-
-# Document conversion parameters
-PDF_CHUNK_SIZE = int(os.getenv("PDF_CHUNK_SIZE", "100"))  # Pages per chunk for large PDF processing
-
-# Batch processing
-OPENSEARCH_BATCH_SIZE = int(os.getenv("OPENSEARCH_BATCH_SIZE", "10"))
-
-# Retry configuration
-RETRY_MAX_ATTEMPTS = int(os.getenv("RETRY_MAX_ATTEMPTS", "3"))
-RETRY_INITIAL_DELAY = float(os.getenv("RETRY_INITIAL_DELAY", "0.5"))
-RETRY_BACKOFF_MULTIPLIER = float(os.getenv("RETRY_BACKOFF_MULTIPLIER", "2.0"))
-
-# Chunk ID generation
-CHUNK_ID_CONTENT_SAMPLE_SIZE = int(os.getenv("CHUNK_ID_CONTENT_SAMPLE_SIZE", "500"))
+# Service-specific configs are now in their respective modules:
+# - digitize.config for digitize service settings
+# - chatbot.config for RAG/chatbot settings
+# - summarize.config for summarization settings
 
 # Made with Bob
