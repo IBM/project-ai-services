@@ -204,21 +204,25 @@ def process_converted_document(converted_json_path, pdf_path, out_path, gen_mode
 
 def convert_document(pdf_path, out_path, file_name):
     """
-    Worker function for document conversion.
+    Convert a single document to JSON format.
     This function runs in a separate process via ProcessPoolExecutor.
     """
-    logger.info(f"Processing '{pdf_path}'")
-    converted_json = (Path(out_path) / f"{file_name}.json")
-    converted_json_f = str(converted_json)
-    logger.debug(f"Converting '{pdf_path}'")
-    t0 = time.time()
+    try:
+        logger.info(f"Processing '{pdf_path}'")
+        converted_json = (Path(out_path) / f"{file_name}.json")
+        converted_json_f = str(converted_json)
+        logger.debug(f"Converting '{pdf_path}'")
+        t0 = time.time()
 
-    converted_doc: DoclingDocument = convert_doc(pdf_path, cache_dir=out_path / file_name)
-    converted_doc.save_as_json(str(converted_json_f))
+        converted_doc: DoclingDocument = convert_doc(pdf_path, cache_dir=out_path / file_name)
+        converted_doc.save_as_json(str(converted_json_f))
 
-    conversion_time = time.time() - t0
-    logger.debug(f"'{pdf_path}' converted")
-    return converted_json_f, conversion_time
+        conversion_time = time.time() - t0
+        logger.debug(f"'{pdf_path}' converted")
+        return converted_json_f, conversion_time
+    except Exception as e:
+        logger.error(f"Error converting '{pdf_path}': {e}")
+    return None, None
 
 def clean_intermediate_files(doc_id, out_path):
     # Remove intermediate files but keep <doc_id>.json
@@ -266,33 +270,33 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
              ContextAwareThreadPoolExecutor(max_workers=max_worker) as chunker_executor:
 
             # A. Submit Conversions
-                conversion_futures = {}
-                for path in batch_paths:
-                    file_name = ""
-                    doc_id = doc_id_dict.get(Path(path).name)
-                    if doc_id is None:
-                        file_name = path
-                    else:
-                        file_name = doc_id
+            conversion_futures = {}
+            for path in batch_paths:
+                file_name = ""
+                doc_id = doc_id_dict.get(Path(path).name)
+                if doc_id is None:
+                    file_name = path
+                else:
+                    file_name = doc_id
 
-                    try:
-                        future = converter_executor.submit(convert_document, path, out_path, file_name)
-                        conversion_futures[future] = path
-                        # Update status to IN_PROGRESS as soon as document is submitted for conversion
-                        if doc_id is not None:
-                            logger.debug(f"Submitted for conversion: updating job & doc metadata to IN_PROGRESS for document: {doc_id}")
-                            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.IN_PROGRESS})
-                            status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
-                    except (BrokenExecutor, RuntimeError) as e:
-                        # Pool is broken, cannot submit more documents
-                        logger.error(f"Cannot submit document {path} - pool is broken: {e}")
-                        if doc_id:
-                            error_msg = f"Process pool broken before submission: {str(e)}"
-                            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=error_msg)
-                            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
-                            processed_doc_ids.add(doc_id)
-                        # Stop trying to submit more documents
-                        break
+                try:
+                    future = converter_executor.submit(convert_document, path, out_path, file_name)
+                    conversion_futures[future] = path
+                    # Update status to IN_PROGRESS as soon as document is submitted for conversion
+                    if doc_id is not None:
+                        logger.debug(f"Submitted for conversion: updating job & doc metadata to IN_PROGRESS for document: {doc_id}")
+                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.IN_PROGRESS})
+                        status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
+                except (BrokenExecutor, RuntimeError) as e:
+                    # Pool is broken, cannot submit more documents
+                    logger.error(f"Cannot submit document {path} - pool is broken: {e}")
+                    if doc_id:
+                        error_msg = f"Process pool broken before submission: {str(e)}"
+                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=error_msg)
+                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+                        processed_doc_ids.add(doc_id)
+                    # Stop trying to submit more documents
+                    break
 
                 process_futures = {}
                 chunk_futures = {}
