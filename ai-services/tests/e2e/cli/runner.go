@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -32,13 +33,11 @@ type StartOptions struct {
 }
 
 // Bootstrap runs the full bootstrap (configure + validate).
-func Bootstrap(ctx context.Context, appRuntime string) (string, error) {
-	binPath, err := bootstrap.BuildOrVerifyCLIBinary(ctx)
-	if err != nil {
-		return "", err
-	}
-	logger.Infof("[CLI] Running: %s bootstrap --runtime %s", binPath, appRuntime)
-	output, err := common.RunCommand(binPath, "bootstrap", "--runtime", appRuntime)
+func Bootstrap(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	logger.Infof("[CLI] Running: %s bootstrap --runtime %s", cfg.AIServiceBin, appRuntime)
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "bootstrap", "--runtime", appRuntime)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
 	if err != nil {
 		return output, err
 	}
@@ -47,13 +46,11 @@ func Bootstrap(ctx context.Context, appRuntime string) (string, error) {
 }
 
 // BootstrapConfigure runs only the 'configure' step.
-func BootstrapConfigure(ctx context.Context, appRuntime string) (string, error) {
-	binPath, err := bootstrap.BuildOrVerifyCLIBinary(ctx)
-	if err != nil {
-		return "", err
-	}
-	logger.Infof("[CLI] Running: %s bootstrap configure --runtime %s", binPath, appRuntime)
-	output, err := common.RunCommand(binPath, "bootstrap", "configure", "--runtime", appRuntime)
+func BootstrapConfigure(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	logger.Infof("[CLI] Running: %s bootstrap configure --runtime %s", cfg.AIServiceBin, appRuntime)
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "bootstrap", "configure", "--runtime", appRuntime)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
 	if err != nil {
 		return output, err
 	}
@@ -62,13 +59,11 @@ func BootstrapConfigure(ctx context.Context, appRuntime string) (string, error) 
 }
 
 // BootstrapValidate runs only the 'validate' step.
-func BootstrapValidate(ctx context.Context, appRuntime string) (string, error) {
-	binPath, err := bootstrap.BuildOrVerifyCLIBinary(ctx)
-	if err != nil {
-		return "", err
-	}
-	logger.Infof("[CLI] Running: %s bootstrap validate --runtime %s", binPath, appRuntime)
-	output, err := common.RunCommand(binPath, "bootstrap", "validate", "--runtime", appRuntime)
+func BootstrapValidate(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+	logger.Infof("[CLI] Running: %s bootstrap validate --runtime %s", cfg.AIServiceBin, appRuntime)
+	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, "bootstrap", "validate", "--runtime", appRuntime)
+	out, err := cmd.CombinedOutput()
+	output := string(out)
 	if err != nil {
 		return output, err
 	}
@@ -144,13 +139,23 @@ func CreateRAGAppAndValidate(
 	if err := ValidateCreateAppOutput(output, appName); err != nil {
 		return output, err
 	}
-	hostIP, err := extractHostIP(output)
+
+	backendURL, chatbotUiURL, s, err := getRAGURLs(appRuntime, output, backendPort, uiPort)
 	if err != nil {
-		return output, err
+		return s, err
 	}
-	backendURL := fmt.Sprintf("http://%s:%s", hostIP, backendPort)
+	// Skip TLS verification for OpenShift (self-signed certificates)
+	skipTLSVerify := appRuntime == "openshift"
 	httpClient := &http.Client{
 		Timeout: defaultCommandTimeout,
+	}
+	if skipTLSVerify {
+		logger.Warningf("[WARNING] TLS certificate verification disabled for OpenShift runtime")
+		httpClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		}
 	}
 	endpoints := []string{
 		"/health",
@@ -163,10 +168,28 @@ func CreateRAGAppAndValidate(
 			return output, err
 		}
 	}
-	uiURL := fmt.Sprintf("http://%s:%s", hostIP, uiPort)
-	logger.Infof("[UI] Chatbot UI available at: %s", uiURL)
+	logger.Infof("[UI] Chatbot UI available at: %s", chatbotUiURL)
 
 	return output, nil
+}
+
+func getRAGURLs(appRuntime string, output string, backendPort string, uiPort string) (string, string, string, error) {
+	backendURL := ""
+	chatbotUiURL := ""
+	if appRuntime == "podman" {
+		hostIP, err := extractHostIP(output)
+		if err != nil {
+			return "", "", output, err
+		}
+		backendURL = fmt.Sprintf("http://%s:%s", hostIP, backendPort)
+		chatbotUiURL = fmt.Sprintf("http://%s:%s", hostIP, uiPort)
+	} else {
+		urls := extractURLsFromOutput(output)
+		backendURL = strings.Replace(urls[0], "digitize-ui", "backend", 1)
+		chatbotUiURL = strings.Replace(urls[0], "digitize-ui", "ui", 1)
+	}
+
+	return backendURL, chatbotUiURL, "", nil
 }
 
 // waitForEndpointOK polls the given endpoint until it returns HTTP 200 OK or exhausts retries.
@@ -276,7 +299,7 @@ func ListImage(ctx context.Context, cfg *config.Config, templateName string, app
 	if err != nil {
 		return fmt.Errorf("list images failed: %w\n%s", err, output)
 	}
-	if err := ValidateImageListOutput(output); err != nil {
+	if err := ValidateImageListOutput(output, appRuntime); err != nil {
 		return err
 	}
 
@@ -307,7 +330,7 @@ func PullImage(ctx context.Context, cfg *config.Config, templateName string, app
 	if err != nil {
 		return fmt.Errorf("pull images failed: %w\n%s", err, output)
 	}
-	if err := ValidatePullImageOutput(output, templateName); err != nil {
+	if err := ValidatePullImageOutput(output, templateName, appRuntime); err != nil {
 		return err
 	}
 
@@ -340,7 +363,11 @@ func StopAppWithPods(
 		return output, fmt.Errorf("application stop --pod failed: %w\n%s", err, output)
 	}
 
-	if err := ValidateStopAppOutput(output); err != nil {
+	if appRuntime == "openshift" {
+		return output, ValidateStopAppOutputOpenshift(output)
+	}
+
+	if err := ValidateStopAppOutputPodman(output); err != nil {
 		return output, err
 	}
 
@@ -385,6 +412,10 @@ func StartApplication(
 	}
 
 	// Validate output.
+	if appRuntime == "openshift" {
+		return output, ValidateStartAppOutputOpenshift(output)
+	}
+
 	if err := ValidateStartAppOutput(output); err != nil {
 		return output, err
 	}
@@ -430,6 +461,8 @@ func DeleteAppSkipCleanup(
 	if err := ValidateDeleteAppOutput(output, appName); err != nil {
 		return output, err
 	}
+
+	time.Sleep(common.DeleteSleepInterval) //wait for 10 seconds before checking ps output
 
 	psOutput, err := ApplicationPS(ctx, cfg, appName, appRuntime)
 	if err != nil {
@@ -494,7 +527,7 @@ func ModelDownload(ctx context.Context, cfg *config.Config, templateName string,
 
 // TemplatesCommand runs the 'application template' command.
 func TemplatesCommand(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
-	logger.Infof("[CLI] Running: %s application templates", cfg.AIServiceBin)
+	logger.Infof("[CLI] Running: %s application templates --runtime %s", cfg.AIServiceBin, appRuntime)
 	args := []string{"application", "templates", "--runtime", appRuntime}
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	out, err := cmd.CombinedOutput()
@@ -603,4 +636,19 @@ func ApplicationLogs(
 
 		return output, nil
 	}
+}
+
+func extractURLsFromOutput(output string) []string {
+	// Regular expression to match URLs (http and https)
+	urlRegex := regexp.MustCompile(`https?://[^\s]+`)
+
+	matches := urlRegex.FindAllString(output, -1)
+
+	urls := make([]string, 0, len(matches))
+	for _, match := range matches {
+		cleanURL := strings.TrimRight(match, ".,;:!?")
+		urls = append(urls, cleanURL)
+	}
+
+	return urls
 }

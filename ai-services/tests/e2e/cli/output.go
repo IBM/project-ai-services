@@ -8,12 +8,18 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-func ValidateBootstrapConfigureOutput(output string) error {
-	required := []string{
-		"LPAR configured successfully",
-		"Bootstrap configuration completed successfully",
+func ValidateBootstrapConfigureOutput(output string, appRuntime string) error {
+	required := map[string][]string{
+		"podman": {
+			"LPAR configured successfully",
+			"Bootstrap configuration completed successfully",
+		},
+		"openshift": {
+			"Cluster configured successfully",
+			"Bootstrap configuration completed successfully.",
+		},
 	}
-	for _, r := range required {
+	for _, r := range required[appRuntime] {
 		if !strings.Contains(output, r) {
 			return fmt.Errorf("bootstrap configure validation failed: missing '%s'", r)
 		}
@@ -33,12 +39,18 @@ func ValidateBootstrapValidateOutput(output string) error {
 
 	return nil
 }
-func ValidateBootstrapFullOutput(output string) error {
-	required := []string{
-		"LPAR configured successfully",
-		"All validations passed",
+func ValidateBootstrapFullOutput(output string, appRuntime string) error {
+	required := map[string][]string{
+		"podman": {
+			"All validations passed",
+			"LPAR bootstrapped successfully",
+		},
+		"openshift": {
+			"Cluster configured successfully",
+			"All validations passed",
+		},
 	}
-	for _, r := range required {
+	for _, r := range required[appRuntime] {
 		if !strings.Contains(output, r) {
 			return fmt.Errorf("full bootstrap validation failed: missing '%s'", r)
 		}
@@ -171,11 +183,16 @@ func containsAll(output string, fields ...string) bool {
 	return true
 }
 
-func ValidateImageListOutput(output string) error {
-	required := []string{
-		"Container images for application template",
+func ValidateImageListOutput(output string, appRuntime string) error {
+	required := map[string][]string{
+		"podman": {
+			"Container images for application template",
+		},
+		"openshift": {
+			"WARNING:  Not supported for openshift runtime",
+		},
 	}
-	for _, r := range required {
+	for _, r := range required[appRuntime] {
 		if !strings.Contains(output, r) {
 			return fmt.Errorf("image list validation failed: missing '%s'", r)
 		}
@@ -184,11 +201,16 @@ func ValidateImageListOutput(output string) error {
 	return nil
 }
 
-func ValidatePullImageOutput(output, templateName string) error {
-	required := []string{
-		"Downloading the images for the application",
+func ValidatePullImageOutput(output, templateName string, appRuntime string) error {
+	required := map[string][]string{
+		"podman": {
+			"Downloading the images for the application",
+		},
+		"openshift": {
+			"WARNING:  Not supported for openshift runtime",
+		},
 	}
-	for _, r := range required {
+	for _, r := range required[appRuntime] {
 		if !strings.Contains(output, r) {
 			return fmt.Errorf("pull image validation failed: missing '%s'", r)
 		}
@@ -197,9 +219,25 @@ func ValidatePullImageOutput(output, templateName string) error {
 	return nil
 }
 
-func ValidateStopAppOutput(output string) error {
+func ValidateStopAppOutputPodman(output string) error {
 	if !strings.Contains(output, "Proceeding to stop pods") {
-		return fmt.Errorf("stop app validation failed")
+		return fmt.Errorf("podman stop app validation failed")
+	}
+
+	return nil
+}
+
+func ValidateStopAppOutputOpenshift(output string) (err error) {
+	if !strings.Contains(output, "WARNING:  Not implemented") {
+		return fmt.Errorf("openshift stop app validation failed")
+	}
+
+	return nil
+}
+
+func ValidateStartAppOutputOpenshift(output string) (err error) {
+	if !strings.Contains(output, "WARNING:  Not supported for openshift runtime") {
+		return fmt.Errorf("openshift start app validation failed")
 	}
 
 	return nil
@@ -326,52 +364,55 @@ func processTemplateOutput(output string) []string {
 	return arrOutput
 }
 
-func ValidateModelListOutput(output string, templateName string) error {
-	header := fmt.Sprintf("Models in application template %s:", templateName)
-	if !strings.Contains(output, header) {
-		return fmt.Errorf("model list validation failed: missing header '%s'", header)
+func ValidateModelListOutput(output string, templateName string, appRuntime string) error {
+	requiredOutputs := map[string]map[string][]string{
+		"podman": {
+			"rag": {
+				"BAAI/bge-reranker-v2-m3",
+				"ibm-granite/granite-embedding-278m-multilingual",
+				"ibm-granite/granite-3.3-8b-instruct",
+			},
+			"rag-cpu": {
+				"BAAI/bge-reranker-v2-m3",
+				"ibm-granite/granite-embedding-278m-multilingual",
+				"ibm-granite/granite-3.3-8b-instruct",
+			},
+		},
+		"openshift": {
+			"rag": {
+				"WARNING:  Not supported for openshift runtime",
+			},
+		},
 	}
 
-	// Expect at least one model line starting with '- '
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	found := false
-	for _, l := range lines {
-		l = strings.TrimSpace(l)
-		if strings.HasPrefix(l, "- ") {
-			found = true
+	required, ok := requiredOutputs[appRuntime][templateName]
+	if !ok {
+		return fmt.Errorf("model list validation failed")
+	}
 
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf("model list validation failed: no model entries found")
-	}
-	// If this is the rag template, ensure specific models are present
-	if templateName == "rag" {
-		expected := []string{
-			"BAAI/bge-reranker-v2-m3",
-			"ibm-granite/granite-embedding-278m-multilingual",
-			"ibm-granite/granite-3.3-8b-instruct",
-		}
-		for _, e := range expected {
-			if !strings.Contains(output, e) {
-				return fmt.Errorf("model list validation failed: expected model '%s' not found in output", e)
-			}
+	for _, r := range required {
+		if !strings.Contains(output, r) {
+			return fmt.Errorf("model list validation failed: expected model '%s' not found in output", r)
 		}
 	}
 
 	return nil
 }
 
-func ValidateModelDownloadOutput(output string, templateName string) error {
-	required := []string{
-		fmt.Sprintf("Downloaded Models in application template%s:", templateName),
-		"Downloading model ibm-granite/granite-embedding-278m-multilingual to /var/lib/ai-services/models",
-		"Downloading model ibm-granite/granite-3.3-8b-instruct to /var/lib/ai-services/models",
-		"Downloading model BAAI/bge-reranker-v2-m3 to /var/lib/ai-services/models",
-		"Model downloaded successfully",
+func ValidateModelDownloadOutput(output string, templateName string, appRuntime string) error {
+	required := map[string][]string{
+		"podman": {
+			fmt.Sprintf("Downloaded Models in application template%s:", templateName),
+			"Downloading model ibm-granite/granite-embedding-278m-multilingual to /var/lib/ai-services/models",
+			"Downloading model ibm-granite/granite-3.3-8b-instruct to /var/lib/ai-services/models",
+			"Downloading model BAAI/bge-reranker-v2-m3 to /var/lib/ai-services/models",
+			"Model downloaded successfully",
+		},
+		"openshift": {
+			"WARNING:  Not supported for openshift runtime",
+		},
 	}
-	for _, r := range required {
+	for _, r := range required[appRuntime] {
 		if !strings.Contains(output, r) {
 			return fmt.Errorf("model download validation failed: missing '%s'", r)
 		}
@@ -380,17 +421,37 @@ func ValidateModelDownloadOutput(output string, templateName string) error {
 	return nil
 }
 
-func ValidateApplicationsTemplateCommandOutput(output string) error {
-	requiredOutputs := map[string][]string{
-		"rag": {
-			"Description: Retrieval Augmented Generation (RAG) application that combines a vector database, a large language model, and a retrieval mechanism to provide accurate and context-aware responses based on ingested documents.",
-			"ui.port:  Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
-			"backend.port:  Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.",
+func ValidateApplicationsTemplateCommandOutput(output string, appRuntime string) error {
+	requiredOutputs := map[string]map[string][]string{
+		"podman": {
+			"rag": {
+				"Description: Retrieval Augmented Generation (RAG) application that combines a vector database, a large language model, and a retrieval mechanism to provide accurate and context-aware responses based on ingested documents.",
+				"ui.port:  Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
+				"backend.port:  Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.",
+				"summarize.port:  Host port for the Summarize API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
+				"digitize.port:  Host port for the DIGITIZE API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
+				"digitizeUi.port:  Host port for the DIGITIZE UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
+				"opensearch.memoryLimit:  Sets the memory limit for the Opensearch service(Default: 8Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).",
+				"opensearch.auth.password:  Password for OpenSearch authentication. Must be at least 15 characters and contain at least one uppercase letter, one lowercase letter, one digit, and one special character. Avoid common words, predictable patterns, or dictionary terms. Use this to override the default admin password.",
+			},
+			"rag-cpu": {
+				"Description: Retrieval Augmented Generation (RAG) application that combines a vector database, a large language model, and a retrieval mechanism to provide accurate and context-aware responses based on ingested documents.",
+				"ui.port:  Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
+				"backend.port:  Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.",
+				"summarize.port:  Host port for the Summarize API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
+				"digitize.port:  Host port for the DIGITIZE API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
+				"digitizeUi.port:  Host port for the DIGITIZE UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
+				"opensearch.memoryLimit:  Sets the memory limit for the Opensearch service(Default: 8Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).",
+				"opensearch.auth.password:  Password for OpenSearch authentication. Must be at least 15 characters and contain at least one uppercase letter, one lowercase letter, one digit, and one special character. Avoid common words, predictable patterns, or dictionary terms. Use this to override the default admin password.",
+			},
 		},
-		"rag-cpu": {
-			"Description: Retrieval Augmented Generation (RAG) application that combines a vector database, a large language model, and a retrieval mechanism to provide accurate and context-aware responses based on ingested documents.",
-			"ui.port:  Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
-			"backend.port:  Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.",
+		"openshift": {
+			"rag": {
+				"Description: Retrieval Augmented Generation (RAG) application that combines a vector database, a large language model, and a retrieval mechanism to provide accurate and context-aware responses based on ingested documents.",
+				"opensearch.memoryLimit:  Sets the memory limit for the Opensearch service(Default: 8Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).",
+				"opensearch.storage:  Sets the storage limit for the Opensearch service(Default: 10Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).",
+				"opensearch.auth.password:  Password for OpenSearch authentication. Must be at least 15 characters and contain at least one uppercase letter, one lowercase letter, one digit, and one special character. Avoid common words, predictable patterns, or dictionary terms. Use this to override the default admin password.",
+			},
 		},
 	}
 
@@ -398,7 +459,7 @@ func ValidateApplicationsTemplateCommandOutput(output string) error {
 	for _, value := range arrOutput {
 		appName := getFirstWord(value)
 		appName = strings.TrimSpace(appName)
-		required, ok := requiredOutputs[appName]
+		required, ok := requiredOutputs[appRuntime][appName]
 		if !ok {
 			continue
 		}
@@ -475,7 +536,7 @@ func ValidatePodsRunningAfterStart(psOutput, appName string) error {
 func ValidateStartAppOutput(output string) error {
 	if !strings.Contains(output, "Proceeding to start pods") &&
 		!strings.Contains(output, "started successfully") {
-		return fmt.Errorf("start app validation failed")
+		return fmt.Errorf("podman start app validation failed")
 	}
 
 	return nil
@@ -504,4 +565,62 @@ func GetApplicationNameFromPSOutput(psOutput string) (appName string) {
 	}
 
 	return ""
+}
+
+// ValidateOpenShiftRoutes validates the presence of required routes in the OpenShift runtime.
+func ValidateOpenShiftRoutes(output string) error {
+	requiredRoutes := []string{
+		"backend",
+		"digitize-api",
+		"digitize-ui",
+		"summarize-api",
+		"ui",
+	}
+
+	foundRoutes := make(map[string]bool)
+
+	// Parse the output line by line
+	extractOpenshiftRoutes(output, requiredRoutes, foundRoutes)
+
+	// Verify all required routes were found
+	var missingRoutes []string
+	for _, route := range requiredRoutes {
+		if !foundRoutes[route] {
+			missingRoutes = append(missingRoutes, route)
+		}
+	}
+
+	if len(missingRoutes) > 0 {
+		return fmt.Errorf("missing required routes: %v", missingRoutes)
+	}
+
+	logger.Infof("[TEST] All 5 required OpenShift routes validated successfully")
+
+	return nil
+}
+
+func extractOpenshiftRoutes(output string, requiredRoutes []string, foundRoutes map[string]bool) {
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Skip empty lines and header lines
+		if line == "" || strings.HasPrefix(line, "NAME") || strings.HasPrefix(line, "──") {
+			continue
+		}
+
+		// Extract the route name (first field)
+		fields := strings.Fields(line)
+		if len(fields) > 0 {
+			routeName := fields[0]
+			// Check if this route is one of the required ones
+			for _, required := range requiredRoutes {
+				if routeName == required {
+					foundRoutes[required] = true
+
+					break
+				}
+			}
+		}
+	}
 }

@@ -156,7 +156,7 @@ class PerfMetric(BaseModel):
 class PerfMetricsResponse(BaseModel):
     """
     Response containing list of performance metrics.
-    
+
     Supports filtering by request_id via query parameter.
     """
     metrics: list[PerfMetric] = Field(..., description="List of performance metrics from recent requests")

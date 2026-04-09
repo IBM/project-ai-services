@@ -2,7 +2,6 @@ import logging
 import requests
 import time
 import json
-from requests.adapters import HTTPAdapter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
@@ -10,6 +9,7 @@ from common.lang_utils import prompt_map
 from common.misc_utils import get_logger
 from common.settings import get_settings
 from common.retry_utils import retry_on_transient_error
+import common.misc_utils as misc_utils
 
 logger = get_logger("LLM")
 
@@ -23,28 +23,6 @@ def tqdm_wrapper(iterable, **kwargs):
         return iterable
 
 settings = get_settings()
-
-SESSION = None
-
-def create_llm_session(pool_maxsize, pool_connections: int = 2, pool_block: bool = True):
-    global SESSION
-
-    # SESSION object will be used by instruct and embedding endpoints. Hence keeping pool_connections = 2
-    # Need to use SESSION object for following reasons:
-    # - To limit the number of concurrent requests getting created to instruct vLLM's API to 32
-    # - To fix the ephemeral port exhaustion issue during chunking, since numerous tokenize calls are made to embedding server
-    if SESSION is None:
-        adapter = HTTPAdapter(
-            pool_connections=pool_connections,
-            pool_maxsize=pool_maxsize,
-            pool_block=pool_block
-        )
-
-        session = requests.Session()
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-
-        SESSION = session
 
 def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, pdf_path, batch_size=32):
     all_prompts = [settings.prompts.llm_classify.format(text=item.strip()) for item in text_blocks]
@@ -65,7 +43,7 @@ def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, pdf_path, batch
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def classify_single_text(prompt, gen_model, llm_endpoint):
-    if SESSION is None:
+    if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     payload = {
@@ -74,7 +52,7 @@ def classify_single_text(prompt, gen_model, llm_endpoint):
         "temperature": 0,
         "max_tokens": 3,
     }
-    response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
+    response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
     response.raise_for_status()
     result = response.json()
     reply = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip().lower()
@@ -82,7 +60,7 @@ def classify_single_text(prompt, gen_model, llm_endpoint):
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def summarize_single_table(prompt, gen_model, llm_endpoint):
-    if SESSION is None:
+    if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     payload = {
@@ -93,7 +71,7 @@ def summarize_single_table(prompt, gen_model, llm_endpoint):
         "stream": False,
     }
 
-    response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
+    response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
     response.raise_for_status()
     result = response.json()
     reply = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip().lower()
@@ -117,11 +95,11 @@ def summarize_table(table_html, gen_model, llm_endpoint, pdf_path, max_workers=3
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def query_vllm_models(llm_endpoint):
-    if SESSION is None:
+    if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     logger.debug('Querying VLLM models')
-    response = SESSION.get(f"{llm_endpoint}/v1/models")
+    response = misc_utils.SESSION.get(f"{llm_endpoint}/v1/models")
     response.raise_for_status()
     resp_json = response.json()
     return resp_json
@@ -163,14 +141,14 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang):
-    if SESSION is None:
+    if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False, lang )
 
     # Use requests for synchronous HTTP requests
     start_time = time.time()
-    response = SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=False)
+    response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=False)
     request_time = time.time() - start_time
     perf_stat_dict["inference_time"] = request_time
     response.raise_for_status()
@@ -182,7 +160,7 @@ def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_wor
     return response_json
 
 def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang):
-    if SESSION is None:
+    if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens,
@@ -194,7 +172,7 @@ def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, 
         start_time = time.time()
         last_token_time = start_time
 
-        with SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=True) as r:
+        with misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=True) as r:
             for raw_line in r.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
@@ -248,7 +226,7 @@ def query_vllm_summarize(
     max_tokens: int,
     temperature: float,
 ):
-    if SESSION is None:
+    if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     headers = {
@@ -265,7 +243,7 @@ def query_vllm_summarize(
     if stop_words:
         payload["stop"] = stop_words
 
-    response = SESSION.post(
+    response = misc_utils.SESSION.post(
         f"{llm_endpoint}/v1/chat/completions",
         json=payload,
         headers=headers,
@@ -292,7 +270,7 @@ def query_vllm_summarize_stream(
     temperature: float,
 ):
     """Stream a summarization request to vLLM, yielding raw SSE lines."""
-    if SESSION is None:
+    if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     headers = {
@@ -312,7 +290,7 @@ def query_vllm_summarize_stream(
 
     try:
         logger.debug("STREAMING SUMMARIZE RESPONSE")
-        with SESSION.post(
+        with misc_utils.SESSION.post(
             f"{llm_endpoint}/v1/chat/completions",
             json=payload,
             headers=headers,
@@ -352,14 +330,14 @@ def tokenize_with_llm(prompt, emb_endpoint, max_retries=3):
         RuntimeError: If SESSION is not initialized
         requests.exceptions.RequestException: If all retries fail
     """
-    if SESSION is None:
+    if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     payload = {
         "prompt": prompt
     }
 
-    response = SESSION.post(f"{emb_endpoint}/tokenize", json=payload)
+    response = misc_utils.SESSION.post(f"{emb_endpoint}/tokenize", json=payload)
     response.raise_for_status()
     result = response.json()
     tokens = result.get("tokens", [])
@@ -383,14 +361,14 @@ def detokenize_with_llm(tokens, emb_endpoint, max_retries=3):
         RuntimeError: If SESSION is not initialized
         requests.exceptions.RequestException: If all retries fail
     """
-    if SESSION is None:
+    if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     payload = {
         "tokens": tokens
     }
 
-    response = SESSION.post(f"{emb_endpoint}/detokenize", json=payload)
+    response = misc_utils.SESSION.post(f"{emb_endpoint}/detokenize", json=payload)
     response.raise_for_status()
     result = response.json()
     prompt = result.get("prompt", "")

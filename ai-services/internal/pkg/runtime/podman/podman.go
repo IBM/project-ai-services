@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/containers/podman/v5/pkg/bindings"
@@ -15,6 +16,7 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/images"
 	"github.com/containers/podman/v5/pkg/bindings/kube"
 	"github.com/containers/podman/v5/pkg/bindings/pods"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -81,8 +83,40 @@ func (pc *PodmanClient) ListPods(filters map[string][]string) ([]types.Pod, erro
 	return toPodsList(podList), nil
 }
 
-func (pc *PodmanClient) CreatePod(body io.Reader) ([]types.Pod, error) {
-	kubeReport, err := kube.PlayWithBody(pc.Context, body, nil)
+func (pc *PodmanClient) CreatePod(body io.Reader, opts map[string]string) ([]types.Pod, error) {
+	options := &kube.PlayOptions{}
+
+	// Handle start option
+	if v, ok := opts["start"]; ok {
+		switch v {
+		case constants.PodStartOff:
+			start := false
+			options.Start = &start
+		case constants.PodStartOn:
+			start := true
+			options.Start = &start
+		default:
+			// by default go with start set to true
+			start := true
+			options.Start = &start
+		}
+	}
+
+	// Handle publish option
+	if v, ok := opts["publish"]; ok {
+		portMappings := strings.Split(v, ",")
+		publishPorts := []string{}
+		for _, portMapping := range portMappings {
+			if portMapping != "" {
+				publishPorts = append(publishPorts, portMapping)
+			}
+		}
+		if len(publishPorts) > 0 {
+			options.PublishPorts = publishPorts
+		}
+	}
+
+	kubeReport, err := kube.PlayWithBody(pc.Context, body, options)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute podman kube play: %w", err)
 	}
@@ -151,13 +185,7 @@ func (pc *PodmanClient) StopPod(id string) error {
 }
 
 func (pc *PodmanClient) StartPod(id string) error {
-	//nolint:godox
-	// TODO: perform pod start SDK way
-	cmdExec := exec.Command("podman", "pod", "start", id)
-	cmdExec.Stdout = os.Stdout
-	cmdExec.Stderr = os.Stderr
-
-	err := cmdExec.Run()
+	_, err := pods.Start(pc.Context, id, &pods.StartOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to start the pod: %w", err)
 	}

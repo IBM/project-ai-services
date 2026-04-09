@@ -18,6 +18,9 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
 
     logger.info(f"Ingestion started from dir '{directory_path}'")
+    
+    # Initialize LLM session for all API calls (LLM and embedding)
+    create_llm_session(pool_maxsize=config.LLM_POOL_SIZE)
 
     # Initialize status manager
     status_mgr = None
