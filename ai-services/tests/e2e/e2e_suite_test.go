@@ -16,6 +16,7 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/bootstrap"
 	"github.com/project-ai-services/ai-services/tests/e2e/cleanup"
 	"github.com/project-ai-services/ai-services/tests/e2e/cli"
+	"github.com/project-ai-services/ai-services/tests/e2e/common"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
 	"github.com/project-ai-services/ai-services/tests/e2e/ingestion"
 	"github.com/project-ai-services/ai-services/tests/e2e/podman"
@@ -49,7 +50,6 @@ var (
 	summarizePort               string
 	judgePort                   string
 	goldenDatasetFile           string
-	mainPodsByTemplate          map[string][]string
 	defaultRagAccuracyThreshold = 0.70
 	defaultMaxRetries           = 2
 )
@@ -106,15 +106,6 @@ var _ = ginkgo.BeforeSuite(func() {
 	} else {
 		appName = fmt.Sprintf("%s-app-%s", templateName, runID)
 		logger.Infof("[SETUP] Generated application name: %s", appName)
-	}
-
-	ginkgo.By("Setting main pods by template")
-	mainPodsByTemplate = map[string][]string{
-		"rag": {
-			"vllm-server",
-			//"milvus",  --commented as currently switch to opensearch is in-progress
-			"chat-bot",
-		},
 	}
 
 	ginkgo.By("Resolving application ports from environment")
@@ -431,7 +422,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
 
-			suffixes, ok := mainPodsByTemplate[templateName]
+			suffixes, ok := common.ExpectedPodSuffixes[appRuntime]
 			gomega.Expect(ok).To(gomega.BeTrue(), "unknown templateName")
 
 			pods := make([]string, 0, len(suffixes))
@@ -476,14 +467,14 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
 			defer cancel()
 
-			completionStr := "Completed '/var/docs/test_doc.pdf'"
+			completionStr := "| /var/docs/test_doc.pdf |"
 			gomega.Expect(appName).NotTo(gomega.BeEmpty())
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "test_doc.pdf")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -494,14 +485,14 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
 			defer cancel()
 
-			completionStr := "Completed '/var/docs/blank.pdf'"
+			completionStr := "| /var/docs/blank.pdf |"
 			gomega.Expect(appName).NotTo(gomega.BeEmpty())
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "blank.pdf")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -512,14 +503,14 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
 			defer cancel()
 
-			completionStr := "Skipping file with .pdf extension but unsupported format: /var/docs/sample_png.pdf"
+			completionStr := "File validation failed: File has .pdf extension but unsupported format: sample_png.pdf"
 			gomega.Expect(appName).NotTo(gomega.BeEmpty())
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "sample_png.pdf")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -530,14 +521,14 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
 			defer cancel()
 
-			completionStr := "No documents found to process in '/var/docs'"
+			completionStr := "File validation failed: Only PDF files are allowed. Invalid file: sample_txt.txt"
 			gomega.Expect(appName).NotTo(gomega.BeEmpty())
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "sample_txt.txt")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -677,14 +668,13 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 			defer cancel()
 
-			completionStr := "DB Cleaned successfully!"
+			completionStr := "DB cleanup completed successfully"
 			gomega.Expect(appName).NotTo(gomega.BeEmpty())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, true)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, true, appRuntime)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, true)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, true, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			gomega.Expect(logs).To(gomega.ContainSubstring("Local cache cleaned up."))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
 
 			logger.Infof("[TEST] Clean Ingestion completed successfully for application %s", appName)

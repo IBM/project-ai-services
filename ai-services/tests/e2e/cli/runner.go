@@ -376,7 +376,7 @@ func StopAppWithPods(
 		return output, err
 	}
 
-	if err := ValidatePodsExitedAfterStop(psOutput, appName); err != nil {
+	if err := ValidatePodsExitedAfterStop(psOutput, appName, appRuntime); err != nil {
 		return output, err
 	}
 
@@ -426,7 +426,7 @@ func StartApplication(
 		return output, err
 	}
 
-	if err := ValidatePodsRunningAfterStart(psOutput, appName); err != nil {
+	if err := ValidatePodsRunningAfterStart(psOutput, appName, appRuntime); err != nil {
 		return output, err
 	}
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/tests/e2e/common"
 )
 
 func ValidateBootstrapConfigureOutput(output string, appRuntime string) error {
@@ -243,15 +244,9 @@ func ValidateStartAppOutputOpenshift(output string) (err error) {
 	return nil
 }
 
-func ValidatePodsExitedAfterStop(psOutput, appName string) error {
-	mainPods := []string{
-		"vllm-server",
-		// "milvus",  --commented as currently switch to opensearch is in-progress
-		"chat-bot",
-	}
-
+func ValidatePodsExitedAfterStop(psOutput, appName, appRuntime string) error {
 	isMainPod := func(pod string) bool {
-		for _, p := range mainPods {
+		for _, p := range common.ExpectedPodSuffixes[appRuntime] {
 			if pod == p {
 				return true
 			}
@@ -489,23 +484,22 @@ func ValidateVersionCommandOutput(output string, version string, commit string) 
 	return nil
 }
 
-func ValidatePodsRunningAfterStart(psOutput, appName string) error {
-	mainPods := []string{
-		"vllm-server",
-		//"milvus",  --commented as currently switch to opensearch is in-progress
-		"chat-bot",
-	}
-
-	isMainPod := func(pod string) bool {
-		for _, m := range mainPods {
-			if strings.Contains(pod, m) {
-				return true
-			}
-		}
-
+func isMainPod(pod string, appRuntime string) bool {
+	// Skip clean-docs and ingest-docs pods as they are not in running state after start
+	if strings.Contains(pod, "clean-docs") || strings.Contains(pod, "ingest-docs") {
 		return false
 	}
 
+	for _, m := range common.ExpectedPodSuffixes[appRuntime] {
+		if strings.Contains(pod, m) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func ValidatePodsRunningAfterStart(psOutput, appName, appRuntime string) error {
 	for line := range strings.SplitSeq(psOutput, "\n") {
 		line = strings.TrimSpace(line)
 
@@ -519,7 +513,7 @@ func ValidatePodsRunningAfterStart(psOutput, appName string) error {
 		podName := parts[len(parts)-2]
 		status := parts[len(parts)-1]
 
-		if isMainPod(podName) && !strings.Contains(status, "Running") {
+		if isMainPod(podName, appRuntime) && !strings.Contains(status, "Running") {
 			return fmt.Errorf(
 				"main pod %s not running after start for app %s",
 				podName,
