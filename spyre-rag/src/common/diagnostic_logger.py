@@ -314,7 +314,7 @@ class DiagnosticLogger:
         """
         try:
             if paths is None:
-                paths = ["/", "/tmp", os.getcwd()]
+                paths = ["/", "/tmp", "/var", os.getcwd()]
             
             disk_info = {}
             for path in paths:
