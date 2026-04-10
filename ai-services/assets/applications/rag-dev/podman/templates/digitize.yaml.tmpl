@@ -8,6 +8,7 @@ metadata:
     ai-services.io/version: "{{ .Version }}"
   annotations:
     ai-services.io/ports: "{{ .Values.digitizeUi.port }}:4001, {{ .Values.digitize.port }}:4000"
+    io.podman.annotations.pids-limit/backend-server: "4096"
 spec:
   containers:
     - name: ui
@@ -91,6 +92,14 @@ spec:
           value: "1"
         - name: LOG_LEVEL
           value: "{{ .Values.digitize.log_level }}"
+        - name: OMP_NUM_THREADS
+          value: "8"
+        - name: MKL_NUM_THREADS
+          value: "4"
+        - name: OPENBLAS_NUM_THREADS
+          value: "1"
+        - name: DOCLING_NUM_THREADS
+          value: "8"
       volumeMounts:
         - mountPath: /var/cache:z
           name: cache
