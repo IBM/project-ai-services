@@ -23,4 +23,5 @@ RUN --mount=type=bind,from=prebuilder,source=/wheels,target=/wheels,ro \
         --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
         --prefer-binary && \
     pip cache purge && \
-    python download_docling_models.py
+    python download_docling_models.py && \
+    rm -rf ~/.cache/huggingface
