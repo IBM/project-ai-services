@@ -4,6 +4,7 @@ import re
 from typing import Optional
 import pypdfium2 as pdfium
 from pydantic import BaseModel, Field
+import threading
 
 from common.settings import get_settings
 from common.misc_utils import set_log_level, get_logger
@@ -20,6 +21,7 @@ set_log_level(log_level)
 logger = get_logger("summarize")
 
 settings = get_settings()
+_pdf_lock = threading.Lock()
 
 # Pre-compute max input word count from context length at startup
 # input_words/ratio + buf + (input_words/ratio)*coeff < max_model_len
@@ -45,16 +47,17 @@ def compute_target_and_max_tokens(input_word_count: int, summary_length: Optiona
     return target_word_count, max_tokens
 
 def extract_text_from_pdf(content: bytes) -> str:
-    pdf = pdfium.PdfDocument(content)
-    text_parts = []
-    for page_index in range(len(pdf)):
-        page = pdf[page_index]
-        textpage = page.get_textpage()
-        text_parts.append(textpage.get_text_range())
-        textpage.close()
-        page.close()
-    pdf.close()
-    return "\n".join(text_parts)
+    with _pdf_lock:
+        pdf = pdfium.PdfDocument(content)
+        text_parts = []
+        for page_index in range(len(pdf)):
+            page = pdf[page_index]
+            textpage = page.get_textpage()
+            text_parts.append(textpage.get_text_range())
+            textpage.close()
+            page.close()
+        pdf.close()
+        return "\n".join(text_parts)
 
 def trim_to_last_sentence(text: str) -> str:
     """Remove any trailing incomplete sentence."""
