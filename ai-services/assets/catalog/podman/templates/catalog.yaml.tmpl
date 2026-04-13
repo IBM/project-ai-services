@@ -31,18 +31,14 @@ spec:
         periodSeconds: 30
         timeoutSeconds: 5
         failureThreshold: 3
-    - name: server
+    - name: backend
       image: "{{ .Values.backend.image }}"
-      command: ["/usr/bin/ai-services"]
+      command: ["/bin/sh", "-c"]
       args:
-        - "catalog"
-        - "apiserver"
-        - "--port=8080"
-        - "--admin-username=admin"
-        - "--admin-password-hash="${ADMIN_PASSWORD}
+        - "/usr/bin/ai-services catalog apiserver --port=8080 --admin-username=admin --admin-password-hash=${ADMIN_PASSWORD}"
       securityContext:
         seLinuxOptions:
-        type: "spc_t"
+          type: "spc_t"
       env:
         - name: AUTH_JWT_SECRET
           value: "{{ .Values.backend.jwtSecret }}"
