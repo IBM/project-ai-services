@@ -156,6 +156,14 @@ class AppConfig(BaseSettings):
         description="Application port number",
     )
 
+    @field_validator('log_level')
+    @classmethod
+    def validate_log_level(cls, v):
+        """Validate and normalize log level to uppercase."""
+        if isinstance(v, str):
+            return v.upper()
+        return v
+
 
 class ModelEndpointsConfig(BaseSettings):
     """Model endpoint configuration."""
