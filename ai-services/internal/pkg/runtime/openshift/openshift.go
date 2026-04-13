@@ -252,13 +252,6 @@ func (kc *OpenshiftClient) PodLogs(podNameOrID string) error {
 	return followLogs(kc, podName, opts)
 }
 
-// ListContainers lists containers (returns pods' containers in Openshift).
-// func (kc *OpenshiftClient) ListContainers(filters map[string][]string) ([]types.Container, error) {
-// 	logger.Warningln("not implemented")
-
-// 	return nil, nil
-// }
-
 // InspectContainer inspects a container.
 func (kc *OpenshiftClient) InspectContainer(nameOrID string) (*types.Container, error) {
 	pods := &corev1.PodList{}
