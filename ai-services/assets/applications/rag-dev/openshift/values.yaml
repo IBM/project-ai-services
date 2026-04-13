@@ -47,6 +47,10 @@ opensearch:
   memoryLimit: 8Gi
   # @description Sets the storage limit for the Opensearch service(Default: 10Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
   storage: 10Gi
+  # @description Number of OpenSearch pods (nodes) in cluster; increase for adding additional OpenSearch nodes (Default: 1).
+  replicas: 1
+  # @description Number of primary shards for index distribution (Default: 1).
+  numShards: 1
   auth:
     username: "admin"
     # @description Password for OpenSearch authentication. Must be at least 15 characters and contain at least one uppercase letter, one lowercase letter, one digit, and one special character. Avoid common words, predictable patterns, or dictionary terms. Use this to override the default admin password.

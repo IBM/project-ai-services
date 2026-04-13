@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -20,6 +19,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+)
+
+const (
+	logChannelBufferSize = 50
 )
 
 type PodmanClient struct {
@@ -146,21 +149,6 @@ func (pc *PodmanClient) InspectContainer(nameOrId string) (*types.Container, err
 	return toInspectContainer(stats), nil
 }
 
-// func (pc *PodmanClient) ListContainers(filters map[string][]string) ([]types.Container, error) {
-// 	var listOpts containers.ListOptions
-
-// 	if len(filters) >= 1 {
-// 		listOpts.Filters = filters
-// 	}
-
-// 	containerlist, err := containers.List(pc.Context, &listOpts)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("failed to list containers: %w", err)
-// 	}
-
-// 	return toContainerList(containerlist), nil
-// }
-
 func (pc *PodmanClient) StopPod(id string) error {
 	inspectReport, err := pc.InspectPod(id)
 	if err != nil {
@@ -202,51 +190,16 @@ func (pc *PodmanClient) InspectPod(nameOrID string) (*types.Pod, error) {
 	return toPodInspectReport(podInspectReport), nil
 }
 
-func (pc *PodmanClient) PodLogs(podNameOrID string) error {
-	if podNameOrID == "" {
-		return errors.New("pod name or ID cannot be empty")
-	}
-
-	ctx, cancel := context.WithCancel(pc.Context)
-	defer cancel()
-
-	//nolint:godox
-	// TODO: fetch pods logs via sdk way
-	cmdExec := exec.CommandContext(pc.Context, "podman", "pod", "logs", "-f", podNameOrID)
-	cmdExec.Stdout = os.Stdout
-	cmdExec.Stderr = os.Stderr
-
-	err := cmdExec.Run()
-
-	// If context was cancelled (Ctrl+C), don't treat it as an error
-	if ctx.Err() == context.Canceled {
-		return nil
-	}
-
-	return err
-}
-
-func (pc *PodmanClient) PodExists(nameOrID string) (bool, error) {
-	return pods.Exists(pc.Context, nameOrID, nil)
-}
-
-func (pc *PodmanClient) ContainerLogs(containerNameOrID string) error {
-	if containerNameOrID == "" {
-		return fmt.Errorf("container name or ID required to fetch logs")
-	}
-
-	// Creating context here that listens for Ctrl+C
-	ctx, stop := signal.NotifyContext(pc.Context, os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	stdoutChan := make(chan string)
-	stderrChan := make(chan string)
-
+// streamContainerLogs streams logs from a container using channels.
+func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOrID string) error {
 	opts := &containers.LogOptions{
 		Follow: utils.BoolPtr(true),
 		Stderr: utils.BoolPtr(true),
 		Stdout: utils.BoolPtr(true),
 	}
+
+	stdoutChan := make(chan string, logChannelBufferSize)
+	stderrChan := make(chan string, logChannelBufferSize)
 
 	// Channel to signal goroutine completion
 	done := make(chan struct{})
@@ -273,11 +226,67 @@ func (pc *PodmanClient) ContainerLogs(containerNameOrID string) error {
 
 	err := containers.Logs(ctx, containerNameOrID, opts, stdoutChan, stderrChan)
 	<-done
-	if ctx.Err() == context.Canceled || ctx.Err() == context.DeadlineExceeded {
+
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
 	}
 
 	return err
+}
+
+func (pc *PodmanClient) PodLogs(podNameOrID string) error {
+	if podNameOrID == "" {
+		return errors.New("pod name or ID cannot be empty")
+	}
+
+	podInspect, err := pc.InspectPod(podNameOrID)
+	if err != nil {
+		return fmt.Errorf("failed to inspect pod: %w", err)
+	}
+
+	if len(podInspect.Containers) == 0 {
+		return errors.New("no containers found in pod")
+	}
+
+	// creating context here that listens for Ctrl+C
+	ctx, stop := signal.NotifyContext(pc.Context, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	for _, container := range podInspect.Containers {
+		// Skip infra container
+		if container.ID == podInspect.InfraContainerID {
+			continue
+		}
+
+		logger.Infof("Streaming logs for container: %s", container.Name)
+
+		if err := pc.streamContainerLogs(ctx, container.ID); err != nil {
+			return fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
+		}
+
+		// Check if context was cancelled
+		if ctx.Err() == context.Canceled || ctx.Err() == context.DeadlineExceeded {
+			return nil
+		}
+	}
+
+	return nil
+}
+
+func (pc *PodmanClient) PodExists(nameOrID string) (bool, error) {
+	return pods.Exists(pc.Context, nameOrID, nil)
+}
+
+func (pc *PodmanClient) ContainerLogs(containerNameOrID string) error {
+	if containerNameOrID == "" {
+		return fmt.Errorf("container name or ID required to fetch logs")
+	}
+
+	// Creating context here that listens for Ctrl+C
+	ctx, stop := signal.NotifyContext(pc.Context, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return pc.streamContainerLogs(ctx, containerNameOrID)
 }
 
 func (pc *PodmanClient) ContainerExists(nameOrID string) (bool, error) {

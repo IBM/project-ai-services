@@ -28,7 +28,6 @@ spec:
           value: "{{ .Values.opensearch.auth.password }}"
         - name: OPENSEARCH_JAVA_OPTS
           value: "-Xms4g -Xmx4g -XX:MaxDirectMemorySize=2g -XX:-UseSuperWord -XX:TieredStopAtLevel=1"
-        
       ports:
         - name: os-client-port
           containerPort: 9200

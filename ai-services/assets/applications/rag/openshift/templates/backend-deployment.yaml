@@ -70,6 +70,8 @@ spec:
                 secretKeyRef:
                   name: "opensearch-credentials"
                   key: password
+            - name: OPENSEARCH_NUM_SHARDS
+              value: "{{ .Values.opensearch.numShards }}"
             - name: LOG_LEVEL
               value: "{{ .Values.backend.log_level }}"
           ports:
