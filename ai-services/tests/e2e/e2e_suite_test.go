@@ -1117,6 +1117,194 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			_, err = digitization.WaitForJobCompletion(ctx, digitizeBaseURL, job1Resp.JobID, 15*time.Minute)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+
+		ginkgo.It("should reject invalid PDF file for digitization operation", ginkgo.Label("test1"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			// Get path to invalid PDF (PNG file with .pdf extension)
+			_, filename, _, ok := runtime.Caller(0)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			testDir := filepath.Dir(filename)
+			invalidPDFPath := filepath.Join(testDir, "ingestion", "docs", "sample_png.pdf")
+
+			logger.Infof("[TEST] Testing digitization with invalid PDF file: %s", invalidPDFPath)
+
+			// Try to create a digitization job with invalid PDF
+			errorResp, err := digitization.CreateJobExpectingError(ctx, digitizeBaseURL, invalidPDFPath, "digitization", "json", "e2e-invalid-pdf-digitization")
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("UNSUPPORTED_MEDIA_TYPE"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.Equal("File format not supported: File has .pdf extension but unsupported format: sample_png.pdf"))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(415))
+
+			logger.Infof("[TEST] Invalid PDF correctly rejected for digitization with error: %s", errorResp.Error.Message)
+		})
+
+		ginkgo.It("should reject invalid PDF file for ingestion operation", ginkgo.Label("test1"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			// Get path to invalid PDF (PNG file with .pdf extension)
+			_, filename, _, ok := runtime.Caller(0)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			testDir := filepath.Dir(filename)
+			invalidPDFPath := filepath.Join(testDir, "ingestion", "docs", "sample_png.pdf")
+
+			logger.Infof("[TEST] Testing ingestion with invalid PDF file: %s", invalidPDFPath)
+
+			// Try to create an ingestion job with invalid PDF
+			errorResp, err := digitization.CreateJobExpectingError(ctx, digitizeBaseURL, invalidPDFPath, "ingestion", "json", "e2e-invalid-pdf-ingestion")
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("UNSUPPORTED_MEDIA_TYPE"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.Equal("File format not supported: File has .pdf extension but unsupported format: sample_png.pdf"))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(415))
+
+			logger.Infof("[TEST] Invalid PDF correctly rejected for ingestion with error: %s", errorResp.Error.Message)
+		})
+
+		ginkgo.It("should reject non-PDF file for digitization operation", ginkgo.Label("test1"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			// Get path to non-PDF file (TXT file)
+			_, filename, _, ok := runtime.Caller(0)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			testDir := filepath.Dir(filename)
+			nonPDFPath := filepath.Join(testDir, "ingestion", "docs", "sample_txt.txt")
+
+			logger.Infof("[TEST] Testing digitization with non-PDF file: %s", nonPDFPath)
+
+			// Try to create a digitization job with non-PDF file
+			errorResp, err := digitization.CreateJobExpectingError(ctx, digitizeBaseURL, nonPDFPath, "digitization", "json", "e2e-non-pdf-digitization")
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("UNSUPPORTED_MEDIA_TYPE"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.Equal("File format not supported: Only PDF files are allowed. Invalid file: sample_txt.txt"))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(415))
+
+			logger.Infof("[TEST] Non-PDF file correctly rejected for digitization with error: %s", errorResp.Error.Message)
+		})
+
+		ginkgo.It("should reject non-PDF file for ingestion operation", ginkgo.Label("test1"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			// Get path to non-PDF file (TXT file)
+			_, filename, _, ok := runtime.Caller(0)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			testDir := filepath.Dir(filename)
+			nonPDFPath := filepath.Join(testDir, "ingestion", "docs", "sample_txt.txt")
+
+			logger.Infof("[TEST] Testing ingestion with non-PDF file: %s", nonPDFPath)
+
+			// Try to create an ingestion job with non-PDF file
+			errorResp, err := digitization.CreateJobExpectingError(ctx, digitizeBaseURL, nonPDFPath, "ingestion", "json", "e2e-non-pdf-ingestion")
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("UNSUPPORTED_MEDIA_TYPE"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.Equal("File format not supported: Only PDF files are allowed. Invalid file: sample_txt.txt"))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(415))
+
+			logger.Infof("[TEST] Non-PDF file correctly rejected for ingestion with error: %s", errorResp.Error.Message)
+		})
+
+		ginkgo.It("should successfully process blank PDF file for digitization operation", ginkgo.Label("test1"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+			defer cancel()
+
+			// Get path to blank PDF file
+			_, filename, _, ok := runtime.Caller(0)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			testDir := filepath.Dir(filename)
+			blankPDFPath := filepath.Join(testDir, "ingestion", "docs", "blank.pdf")
+
+			logger.Infof("[TEST] Testing digitization with blank PDF file: %s", blankPDFPath)
+
+			// Create digitization job with blank PDF
+			jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, blankPDFPath, "digitization", "json", "e2e-blank-pdf-digitization")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(jobResp).NotTo(gomega.BeNil())
+			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+			logger.Infof("[TEST] Created digitization job with blank PDF: %s", jobResp.JobID)
+
+			// Wait for job completion
+			logger.Infof("[TEST] Waiting for blank PDF digitization job completion")
+			finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 10*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
+			logger.Infof("[TEST] ✓ Blank PDF digitization job completed successfully: %s", jobResp.JobID)
+
+			// Verify document was created
+			gomega.Expect(finalStatus.Documents).NotTo(gomega.BeEmpty())
+			docID := finalStatus.Documents[0].ID
+			createdDocIDs = append(createdDocIDs, docID)
+
+			// Get document details
+			doc, err := digitization.GetDocument(ctx, digitizeBaseURL, docID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(doc.Status).To(gomega.Equal("completed"))
+			gomega.Expect(doc.Name).To(gomega.Equal("blank.pdf"))
+			logger.Infof("[TEST] ✓ Blank PDF digitization completed successfully")
+		})
+
+		ginkgo.It("should successfully process blank PDF file for ingestion operation", ginkgo.Label("test1"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+			defer cancel()
+
+			// Get path to blank PDF file
+			_, filename, _, ok := runtime.Caller(0)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			testDir := filepath.Dir(filename)
+			blankPDFPath := filepath.Join(testDir, "ingestion", "docs", "blank.pdf")
+
+			logger.Infof("[TEST] Testing ingestion with blank PDF file: %s", blankPDFPath)
+
+			// Create ingestion job with blank PDF
+			jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, blankPDFPath, "ingestion", "json", "e2e-blank-pdf-ingestion")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(jobResp).NotTo(gomega.BeNil())
+			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+			logger.Infof("[TEST] Created ingestion job with blank PDF: %s", jobResp.JobID)
+
+			// Wait for job completion
+			logger.Infof("[TEST] Waiting for blank PDF ingestion job completion")
+			finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
+			logger.Infof("[TEST] ✓ Blank PDF ingestion job completed successfully: %s", jobResp.JobID)
+
+			// Verify document was created
+			gomega.Expect(finalStatus.Documents).NotTo(gomega.BeEmpty())
+			docID := finalStatus.Documents[0].ID
+			createdDocIDs = append(createdDocIDs, docID)
+
+			// Get document details
+			doc, err := digitization.GetDocument(ctx, digitizeBaseURL, docID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(doc.Status).To(gomega.Equal("completed"))
+			gomega.Expect(doc.Name).To(gomega.Equal("blank.pdf"))
+			logger.Infof("[TEST] ✓ Blank PDF ingestion completed successfully")
+		})
 	})
 	ginkgo.Context("Application Teardown", func() {
 		ginkgo.It("deletes the application using --skip-cleanup", ginkgo.Label("spyre-dependent"), func() {
