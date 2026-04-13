@@ -38,8 +38,8 @@ class OpensearchVectorStore(VectorStore):
         self.index_name = self._generate_index_name(i_name.lower())
         
         # Replication settings for multi-node clusters
-        self.num_shards = int(os.getenv("OPENSEARCH_NUM_SHARDS", "1"))
-
+        self.num_shards = settings.vector_store.opensearch_num_shards
+        
         logger.debug(f"Connecting to OpenSearch at {self.host}:{self.port}, index: {self.index_name}")
         logger.debug(f"Index configuration: shards={self.num_shards}")
 
