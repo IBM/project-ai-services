@@ -73,6 +73,11 @@ func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error)
 		return nil, err
 	}
 
+	// Check if cluster is accessible
+	if err := checkClusterAccessibility(); err != nil {
+		return nil, fmt.Errorf("cluster is not accessible: %w", err)
+	}
+
 	return &OpenshiftClient{
 		Client:      controllerRuntimeClient,
 		KubeClient:  kubeClient,
@@ -118,6 +123,16 @@ func initializeClients() error {
 	})
 
 	return clientsErr
+}
+
+// checkClusterAccessibility verifies that the cluster is accessible by making a simple API call.
+func checkClusterAccessibility() error {
+	_, err := kubeClient.Discovery().ServerVersion()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // getKubeConfig attempts to get openshift config from in-cluster or kubeconfig file.
