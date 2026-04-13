@@ -179,31 +179,31 @@ def get_txt_tab_filenames(file_paths, out_path):
 
 
 def get_model_endpoints():
-    from common.config import EMB_ENDPOINT, EMB_MODEL, EMB_MAX_TOKENS, LLM_ENDPOINT, LLM_MODEL, RERANKER_ENDPOINT, RERANKER_MODEL
-    
+    from common.settings import settings
+
     emb_model_dict = {
-        'emb_endpoint': EMB_ENDPOINT,
-        'emb_model':    EMB_MODEL,
-        'max_tokens':   EMB_MAX_TOKENS,
+        'emb_endpoint': settings.model_endpoints.emb_endpoint,
+        'emb_model':    settings.model_endpoints.emb_model,
+        'max_tokens':   settings.model_endpoints.emb_max_tokens,
     }
 
     llm_model_dict = {
-        'llm_endpoint': LLM_ENDPOINT,
-        'llm_model':    LLM_MODEL,
+        'llm_endpoint': settings.model_endpoints.llm_endpoint,
+        'llm_model':    settings.model_endpoints.llm_model,
     }
 
     reranker_model_dict = {
-        'reranker_endpoint': RERANKER_ENDPOINT,
-        'reranker_model':    RERANKER_MODEL,
+        'reranker_endpoint': settings.model_endpoints.reranker_endpoint,
+        'reranker_model':    settings.model_endpoints.reranker_model,
     }
 
     return emb_model_dict, llm_model_dict, reranker_model_dict
 
 def setup_digitized_doc_dir():
-    from digitize.config import DIGITIZED_DOCS_DIR
-    
-    os.makedirs(DIGITIZED_DOCS_DIR, exist_ok=True)
-    return DIGITIZED_DOCS_DIR
+    from digitize.settings import settings
+
+    os.makedirs(settings.digitize.digitized_docs_dir, exist_ok=True)
+    return settings.digitize.digitized_docs_dir
 
 def generate_file_checksum(file):
     sha256 = hashlib.sha256()

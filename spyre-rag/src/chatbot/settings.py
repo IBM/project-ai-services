@@ -6,6 +6,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from common.misc_utils import get_logger
+from common.settings import Settings as CommonSettings
 
 logger = get_logger("settings")
 
@@ -13,14 +14,9 @@ logger = get_logger("settings")
 class RAGConfig(BaseSettings):
     """RAG retrieval and ranking settings."""
 
-    model_config = SettingsConfigDict(
-        env_prefix="",
-        case_sensitive=True,
-        extra="ignore",
-    )
+    model_config = SettingsConfigDict()
 
     score_threshold: float = Field(
-        alias="SCORE_THRESHOLD",
         default=0.4,
         gt=0.0,
         lt=1.0,
@@ -28,14 +24,12 @@ class RAGConfig(BaseSettings):
     )
 
     max_concurrent_requests: int = Field(
-        alias="MAX_CONCURRENT_REQUESTS",
         default=32,
         gt=0,
         description="Maximum concurrent requests for RAG operations",
     )
 
     num_chunks_post_search: int = Field(
-        alias="NUM_CHUNKS_POST_SEARCH",
         default=10,
         gt=5,
         le=15,
@@ -43,7 +37,6 @@ class RAGConfig(BaseSettings):
     )
 
     num_chunks_post_reranker: int = Field(
-        alias="NUM_CHUNKS_POST_RERANKER",
         default=3,
         gt=1,
         le=5,
@@ -51,7 +44,6 @@ class RAGConfig(BaseSettings):
     )
 
     max_query_token_length: int = Field(
-        alias="MAX_QUERY_TOKEN_LENGTH",
         default=512,
         gt=0,
         description="Maximum token length for user queries",
@@ -59,7 +51,6 @@ class RAGConfig(BaseSettings):
 
     # Query streaming prompts
     query_vllm_stream_prompt: str = Field(
-        alias="QUERY_VLLM_STREAM_PROMPT",
         default=(
             "You are given:\n1. **A short context text** containing factual information.\n"
             "2. **A user's question** seeking clarification or advice.\n"
@@ -72,7 +63,6 @@ class RAGConfig(BaseSettings):
     )
 
     query_vllm_stream_de_prompt: str = Field(
-        alias="QUERY_VLLM_STREAM_DE_PROMPT",
         default=(
             "Sie erhalten: 1. **Einen kurzen Kontexttext** mit sachlichen Informationen.\n"
             "2. **Die Frage eines Nutzers**, der um Klärung oder Rat bittet.\n"
@@ -121,16 +111,11 @@ class RAGConfig(BaseSettings):
         return v
 
 
-# Global settings instance
-settings = RAGConfig()
+class Settings(BaseSettings):
+    common: CommonSettings = Field(default_factory=CommonSettings)
+    chatbot: RAGConfig = Field(default_factory=RAGConfig)
 
-# Backward compatibility: expose settings as module-level constants
-SCORE_THRESHOLD = settings.score_threshold
-MAX_CONCURRENT_REQUESTS = settings.max_concurrent_requests
-NUM_CHUNKS_POST_SEARCH = settings.num_chunks_post_search
-NUM_CHUNKS_POST_RERANKER = settings.num_chunks_post_reranker
-MAX_QUERY_TOKEN_LENGTH = settings.max_query_token_length
-QUERY_VLLM_STREAM_PROMPT = settings.query_vllm_stream_prompt
-QUERY_VLLM_STREAM_DE_PROMPT = settings.query_vllm_stream_de_prompt
+# Global settings instance
+settings = Settings()
 
 # Made with Bob

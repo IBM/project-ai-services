@@ -6,6 +6,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from common.misc_utils import get_logger
+from common.settings import Settings as CommonSettings
 
 logger = get_logger("settings")
 
@@ -13,21 +14,15 @@ logger = get_logger("settings")
 class SummarizationConfig(BaseSettings):
     """Summarization settings."""
 
-    model_config = SettingsConfigDict(
-        env_prefix="",
-        case_sensitive=True,
-        extra="ignore",
-    )
+    model_config = SettingsConfigDict()
 
     max_concurrent_requests: int = Field(
-        alias="MAX_CONCURRENT_REQUESTS",
         default=32,
         ge=1,
         description="Maximum number of concurrent requests",
     )
 
     summarization_coefficient: float = Field(
-        alias="SUMMARIZATION_COEFFICIENT",
         default=0.2,
         gt=0.0,
         le=1.0,
@@ -35,14 +30,12 @@ class SummarizationConfig(BaseSettings):
     )
 
     summarization_prompt_token_count: int = Field(
-        alias="SUMMARIZATION_PROMPT_TOKEN_COUNT",
         default=100,
         ge=0,
         description="Estimated token count for summarization prompt",
     )
 
     summarization_temperature: float = Field(
-        alias="SUMMARIZATION_TEMPERATURE",
         default=0.2,
         ge=0.0,
         le=2.0,
@@ -50,13 +43,11 @@ class SummarizationConfig(BaseSettings):
     )
 
     summarization_stop_words: str = Field(
-        alias="SUMMARIZATION_STOP_WORDS",
         default="Keywords, Note, ***",
         description="Stop words for summarization (comma-separated)",
     )
 
     summarize_system_prompt: str = Field(
-        alias="SUMMARIZE_SYSTEM_PROMPT",
         default=(
             "You are a summarization assistant. Output ONLY the summary. \n\n"
             "Do not add questions, explanations, headings, code, or any other text."
@@ -65,7 +56,6 @@ class SummarizationConfig(BaseSettings):
     )
 
     summarize_user_prompt_with_length: str = Field(
-        alias="SUMMARIZE_USER_PROMPT_WITH_LENGTH",
         default=(
             "Summarize the following text in {target_words} words, with an allowed variance of ±50 words."
             "Avoid being overly concise.\nExpand explanations where necessary to meet the word requirement.\n\n"
@@ -76,7 +66,6 @@ class SummarizationConfig(BaseSettings):
     )
 
     summarize_user_prompt_without_length: str = Field(
-        alias="SUMMARIZE_USER_PROMPT_WITHOUT_LENGTH",
         default="Summarize the following text.\n\nText:\n{text}\n\nSummary:",
         description="User prompt for summarization without target length",
     )
@@ -118,17 +107,11 @@ class SummarizationConfig(BaseSettings):
         return v
 
 
-# Global settings instance
-settings = SummarizationConfig()
+class Settings(BaseSettings):
+    common: CommonSettings = Field(default_factory=CommonSettings)
+    summarize: SummarizationConfig = Field(default_factory=SummarizationConfig)
 
-# Backward compatibility: expose settings as module-level constants
-MAX_CONCURRENT_REQUESTS = settings.max_concurrent_requests
-SUMMARIZATION_COEFFICIENT = settings.summarization_coefficient
-SUMMARIZATION_PROMPT_TOKEN_COUNT = settings.summarization_prompt_token_count
-SUMMARIZATION_TEMPERATURE = settings.summarization_temperature
-SUMMARIZATION_STOP_WORDS = settings.summarization_stop_words
-SUMMARIZE_SYSTEM_PROMPT = settings.summarize_system_prompt
-SUMMARIZE_USER_PROMPT_WITH_LENGTH = settings.summarize_user_prompt_with_length
-SUMMARIZE_USER_PROMPT_WITHOUT_LENGTH = settings.summarize_user_prompt_without_length
+# Global settings instance
+settings = Settings()
 
 # Made with Bob

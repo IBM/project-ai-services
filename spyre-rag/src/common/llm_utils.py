@@ -7,10 +7,10 @@ from tqdm import tqdm
 
 from common.lang_utils import get_prompt_for_language
 from common.misc_utils import get_logger
-from common.settings import get_settings, Settings
+from common.settings import settings as common_settings
 from common.retry_utils import retry_on_transient_error
-from summarize.config import SUMMARIZATION_STOP_WORDS
-from digitize.config import LLM_CLASSIFY_PROMPT, TABLE_SUMMARY_PROMPT
+from summarize.settings import settings as summarize_settings
+from digitize.settings import settings as digitize_settings
 import common.misc_utils as misc_utils
 
 logger = get_logger("LLM")
@@ -23,8 +23,6 @@ def tqdm_wrapper(iterable, **kwargs):
         return tqdm(iterable, **kwargs)
     else:
         return iterable
-
-settings: Settings = get_settings()
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
@@ -52,10 +50,15 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
         if choices:
             text = (choices[0].get("message", {}).get("content") or "").strip()
 
+<<<<<<< HEAD
         # Parse response - handle multi-line summaries
         summary = ""
         decision = False
         lines = text.splitlines()
+=======
+def summarize_table(table_html, gen_model, llm_endpoint, pdf_path, max_workers=32):
+    all_prompts = [digitize_settings.digitize.table_summary_prompt.format(content=html) for html in table_html]
+>>>>>>> 7633dc2 (Address review comments)
 
         # Find Summary: and Decision: lines
         summary_start = -1
@@ -143,7 +146,9 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
 
     # dynamic chunk truncation: truncates the context, if doesn't fit in the sequence length
     question_token_count = len(tokenize_with_llm(question, llm_endpoint))
-    reamining_tokens = config.MAX_INPUT_LENGTH - (config.PROMPT_TEMPLATE_TOKEN_COUNT + question_token_count)
+    reamining_tokens = common_settings.llm.max_input_length - (
+        common_settings.llm.prompt_template_token_count + question_token_count
+    )
     context = detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:reamining_tokens], llm_endpoint)
     logger.debug(f"Truncated Context: {context}")
 
@@ -265,7 +270,7 @@ def query_vllm_summarize(
         "accept": "application/json",
         "Content-type": "application/json",
     }
-    stop_words = [w for w in SUMMARIZATION_STOP_WORDS.split(",") if w]
+    stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,
         "model": model,
@@ -309,7 +314,7 @@ def query_vllm_summarize_stream(
         "accept": "application/json",
         "Content-type": "application/json",
     }
-    stop_words = [w for w in SUMMARIZATION_STOP_WORDS.split(",") if w]
+    stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,
         "model": model,

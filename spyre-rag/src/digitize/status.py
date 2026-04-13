@@ -10,7 +10,7 @@ from typing import Callable, Any, Mapping
 from digitize.types import JobStatus, DocStatus, OutputFormat
 from digitize.document import DocumentMetadata
 from digitize.job import JobState, JobDocumentSummary, JobStats
-import digitize.config as config
+import digitize.settings as config
 from common.misc_utils import get_logger
 
 logger = get_logger("status")
@@ -52,7 +52,7 @@ def create_document_metadata(
     output_format: OutputFormat,
     operation: str,
     submitted_at: str,
-    docs_dir: Path = config.DOCS_DIR
+    docs_dir: Path | None = None
 ) -> DocumentMetadata:
     """
     Create and persist a single document metadata file.
@@ -68,6 +68,7 @@ def create_document_metadata(
     Returns:
         The created DocumentMetadata object
     """
+    docs_dir = docs_dir or config.settings.digitize.docs_dir
     doc_metadata = DocumentMetadata(
         id=doc_id,
         name=doc_name,
@@ -91,7 +92,7 @@ def create_job_state(
     submitted_at: str,
     doc_id_dict: dict[str, str],
     documents_info: list[str],
-    jobs_dir: Path = config.JOBS_DIR,
+    jobs_dir: Path | None = None,
     job_name: str | None = None
 ) -> JobState:
     """
@@ -109,6 +110,7 @@ def create_job_state(
     Returns:
         The created JobState object
     """
+    jobs_dir = jobs_dir or config.settings.digitize.jobs_dir
     job_doc_summaries = [
         JobDocumentSummary(id=doc_id_dict[doc], name=doc, status=DocStatus.ACCEPTED.value)
         for doc in documents_info
@@ -135,7 +137,7 @@ def create_job_state(
     return job_state
 
 
-def get_job_document_stats(job_id: str, jobs_dir: Path = config.JOBS_DIR) -> dict:
+def get_job_document_stats(job_id: str, jobs_dir: Path | None = None) -> dict:
     """
     Get statistics about documents in a job by reading the job status file.
 
@@ -151,6 +153,7 @@ def get_job_document_stats(job_id: str, jobs_dir: Path = config.JOBS_DIR) -> dic
         - failed_count: Number of failed documents
         - completed_count: Number of completed documents
     """
+    jobs_dir = jobs_dir or config.settings.digitize.jobs_dir
     job_status_file = jobs_dir / f"{job_id}_status.json"
 
     if not job_status_file.exists():
@@ -179,9 +182,9 @@ def get_job_document_stats(job_id: str, jobs_dir: Path = config.JOBS_DIR) -> dic
 
 def retry_on_failure(
     func: Callable,
-    max_retries: int = config.RETRY_MAX_ATTEMPTS,
-    delay: float = config.RETRY_INITIAL_DELAY,
-    backoff: float = config.RETRY_BACKOFF_MULTIPLIER
+    max_retries: int | None = None,
+    delay: float | None = None,
+    backoff: float | None = None
 ) -> Any:
     """
     Retry a function on transient failures with exponential backoff.
@@ -198,6 +201,13 @@ def retry_on_failure(
     Raises:
         Last exception if all retries fail
     """
+    if max_retries is None:
+        max_retries = config.settings.digitize.retry_max_attempts
+    if delay is None:
+        delay = config.settings.digitize.retry_initial_delay
+    if backoff is None:
+        backoff = config.settings.digitize.retry_backoff_multiplier
+
     last_exception: Exception = Exception("No attempts made")
     current_delay = delay
 
@@ -223,7 +233,7 @@ class StatusManager:
     """Thread-safe handler for updating Job and Document status files with synchronous writes"""
     def __init__(self, job_id: str):
         self.job_id = job_id
-        self.job_status_file = config.JOBS_DIR / f"{job_id}_status.json"
+        self.job_status_file = config.settings.digitize.jobs_dir / f"{job_id}_status.json"
         self._job_lock = threading.Lock()
         self._doc_locks: dict[str, threading.Lock] = {}
         self._doc_locks_lock = threading.Lock()
@@ -355,7 +365,7 @@ class StatusManager:
         """
         doc_lock = self._get_doc_lock(doc_id)
         with doc_lock:
-            meta_file = config.DOCS_DIR / f"{doc_id}_metadata.json"
+            meta_file = config.settings.digitize.docs_dir / f"{doc_id}_metadata.json"
 
             if not self._validate_file_exists(meta_file, f"metadata file {doc_id}_metadata.json"):
                 return

@@ -6,7 +6,7 @@ from opensearchpy import OpenSearch, helpers
 from common.misc_utils import get_logger
 from common.vector_db import VectorStore, VectorStoreNotReadyError
 from common.retry_utils import retry_on_transient_error
-from common.config import OPENSEARCH_HOST, OPENSEARCH_PORT, OPENSEARCH_DB_PREFIX, OPENSEARCH_INDEX_NAME, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD
+from common.settings import settings
 
 logger = get_logger("OpenSearch")
 
@@ -31,10 +31,10 @@ class OpensearchVectorStore(VectorStore):
     def __init__(self):
         logger.debug("Initializing OpensearchVectorStore")
 
-        self.host = OPENSEARCH_HOST
-        self.port = OPENSEARCH_PORT
-        self.db_prefix = OPENSEARCH_DB_PREFIX.lower()
-        i_name = OPENSEARCH_INDEX_NAME
+        self.host = settings.vector_store.opensearch_host
+        self.port = settings.vector_store.opensearch_port
+        self.db_prefix = settings.vector_store.opensearch_db_prefix.lower()
+        i_name = settings.vector_store.opensearch_index_name
         self.index_name = self._generate_index_name(i_name.lower())
         
         # Replication settings for multi-node clusters
@@ -47,7 +47,10 @@ class OpensearchVectorStore(VectorStore):
             hosts=[{'host': self.host, 'port': self.port}],
             http_compress=True,
             use_ssl=True,
-            http_auth=(OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD),
+            http_auth=(
+                settings.vector_store.opensearch_username,
+                settings.vector_store.opensearch_password,
+            ),
             verify_certs=False,
             ssl_show_warn=False
         )

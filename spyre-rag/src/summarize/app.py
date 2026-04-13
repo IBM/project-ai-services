@@ -12,10 +12,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
 from common.misc_utils import set_log_level, get_logger
-import common.config as common_config
-import summarize.config as config
+import summarize.settings as settings
 
-set_log_level(common_config.LOG_LEVEL)
+set_log_level(settings.Settings.common.app.log_level)
 
 from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream
 from common.misc_utils import get_model_endpoints, set_request_id, configure_uvicorn_logging, create_llm_session
@@ -39,14 +38,14 @@ logger = get_logger("app")
 
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
 
-concurrency_limiter = asyncio.BoundedSemaphore(config.MAX_CONCURRENT_REQUESTS)
+concurrency_limiter = asyncio.BoundedSemaphore(settings.settings.summarize.max_concurrent_requests)
 
 @asynccontextmanager
 async def lifespan(app):
     filtered_paths = ['/health']
-    configure_uvicorn_logging(common_config.LOG_LEVEL, filtered_paths)
+    configure_uvicorn_logging(settings.settings.common.app.log_level, filtered_paths)
     initialize_models()
-    create_llm_session(pool_maxsize=common_config.LLM_MAX_BATCH_SIZE)
+    create_llm_session(pool_maxsize=settings.settings.common.llm.llm_max_batch_size)
     yield
     stderr_monitor.stop()
 
@@ -158,7 +157,7 @@ async def handle_summarize(
                 messages=messages,
                 model=llm_model,
                 max_tokens=max_tokens,
-                temperature=config.SUMMARIZATION_TEMPERATURE,
+                temperature=settings.settings.summarize.summarization_temperature,
             )
         except Exception as e:
             logger.error(f"LLM call failed with error: {e}")
@@ -184,7 +183,7 @@ async def handle_summarize(
             messages=messages,
             model=llm_model,
             max_tokens=max_tokens,
-            temperature=config.SUMMARIZATION_TEMPERATURE,
+            temperature=settings.settings.summarize.summarization_temperature,
         )
         logger.info(f"Input tokens: {in_tokens}, output tokens: {out_tokens}")
         elapsed_ms = int((time.time() - start) * 1000)
