@@ -52,7 +52,7 @@ def create_document_metadata(
     output_format: OutputFormat,
     operation: str,
     submitted_at: str,
-    docs_dir: Path | None = None
+    docs_dir: Path = settings.digitize.docs_dir
 ) -> DocumentMetadata:
     """
     Create and persist a single document metadata file.
@@ -68,7 +68,6 @@ def create_document_metadata(
     Returns:
         The created DocumentMetadata object
     """
-    docs_dir = docs_dir or settings.digitize.docs_dir
     doc_metadata = DocumentMetadata(
         id=doc_id,
         name=doc_name,
@@ -92,7 +91,7 @@ def create_job_state(
     submitted_at: str,
     doc_id_dict: dict[str, str],
     documents_info: list[str],
-    jobs_dir: Path | None = None,
+    jobs_dir: Path = settings.digitize.jobs_dir,
     job_name: str | None = None
 ) -> JobState:
     """
@@ -110,7 +109,6 @@ def create_job_state(
     Returns:
         The created JobState object
     """
-    jobs_dir = jobs_dir or settings.digitize.jobs_dir
     job_doc_summaries = [
         JobDocumentSummary(id=doc_id_dict[doc], name=doc, status=DocStatus.ACCEPTED.value)
         for doc in documents_info
@@ -137,7 +135,7 @@ def create_job_state(
     return job_state
 
 
-def get_job_document_stats(job_id: str, jobs_dir: Path | None = None) -> dict:
+def get_job_document_stats(job_id: str, jobs_dir: Path = settings.digitize.jobs_dir) -> dict:
     """
     Get statistics about documents in a job by reading the job status file.
 
@@ -153,7 +151,6 @@ def get_job_document_stats(job_id: str, jobs_dir: Path | None = None) -> dict:
         - failed_count: Number of failed documents
         - completed_count: Number of completed documents
     """
-    jobs_dir = jobs_dir or settings.digitize.jobs_dir
     job_status_file = jobs_dir / f"{job_id}_status.json"
 
     if not job_status_file.exists():
@@ -182,9 +179,9 @@ def get_job_document_stats(job_id: str, jobs_dir: Path | None = None) -> dict:
 
 def retry_on_failure(
     func: Callable,
-    max_retries: int | None = None,
-    delay: float | None = None,
-    backoff: float | None = None
+    max_retries: int = settings.digitize.retry_max_attempts,
+    delay: float = settings.digitize.retry_initial_delay,
+    backoff: float = settings.digitize.retry_backoff_multiplier
 ) -> Any:
     """
     Retry a function on transient failures with exponential backoff.
@@ -201,12 +198,6 @@ def retry_on_failure(
     Raises:
         Last exception if all retries fail
     """
-    if max_retries is None:
-        max_retries = settings.digitize.retry_max_attempts
-    if delay is None:
-        delay = settings.digitize.retry_initial_delay
-    if backoff is None:
-        backoff = settings.digitize.retry_backoff_multiplier
 
     last_exception: Exception = Exception("No attempts made")
     current_delay = delay

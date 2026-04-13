@@ -38,7 +38,7 @@ def generate_uuid():
     return str(generated_uuid)
 
 
-def get_all_document_ids(docs_dir: Path | None = None) -> list[str]:
+def get_all_document_ids(docs_dir: Path = settings.digitize.docs_dir) -> list[str]:
     """
     Read all document IDs from metadata files in the docs directory.
 
@@ -48,7 +48,6 @@ def get_all_document_ids(docs_dir: Path | None = None) -> list[str]:
     Returns:
         List of document IDs found in metadata files
     """
-    docs_dir = docs_dir or settings.digitize.docs_dir
     doc_ids = []
     try:
         logger.debug(f"Reading document IDs from {docs_dir}")
@@ -207,7 +206,7 @@ def read_all_job_files() -> List[JobState]:
     return jobs
 
 
-def _read_document_metadata(doc_id: str, docs_dir: Path | None = None) -> DocumentMetadata:
+def _read_document_metadata(doc_id: str, docs_dir: Path = settings.digitize.docs_dir) -> DocumentMetadata:
     """
     Internal helper to read and parse document metadata file into a Pydantic model.
 
@@ -223,7 +222,6 @@ def _read_document_metadata(doc_id: str, docs_dir: Path | None = None) -> Docume
         json.JSONDecodeError: If metadata file is corrupted
         ValidationError: If metadata doesn't match expected schema
     """
-    docs_dir = docs_dir or settings.digitize.docs_dir
 
     # Construct the metadata file path
     meta_file = docs_dir / f"{doc_id}_metadata.json"
@@ -249,7 +247,7 @@ def _read_document_metadata(doc_id: str, docs_dir: Path | None = None) -> Docume
 def get_all_documents(
     status_filter: Optional[str] = None,
     name_filter: Optional[str] = None,
-    docs_dir: Path | None = None
+    docs_dir: Path = settings.digitize.docs_dir
 ) -> List[DocumentListItem]:
     """
     Read all document metadata files, apply filters, and sort by submitted time.
@@ -263,7 +261,6 @@ def get_all_documents(
     Returns:
         List of DocumentListItem models sorted by submitted_at (most recent first)
     """
-    docs_dir = docs_dir or settings.digitize.docs_dir
     logger.debug(f"Fetching documents with filters: status={status_filter}, name={name_filter}")
 
     if not docs_dir.exists():
@@ -313,7 +310,7 @@ def get_all_documents(
     return result
 
 
-def get_document_by_id(doc_id: str, include_details: bool = False, docs_dir: Path | None = None) -> DocumentDetailResponse:
+def get_document_by_id(doc_id: str, include_details: bool = False, docs_dir: Path = settings.digitize.docs_dir) -> DocumentDetailResponse:
     """
     Read a specific document's metadata by ID and return formatted response as Pydantic model.
 
@@ -332,7 +329,6 @@ def get_document_by_id(doc_id: str, include_details: bool = False, docs_dir: Pat
     """
     logger.debug(f"Fetching document {doc_id} with include_details={include_details}")
 
-    docs_dir = docs_dir or settings.digitize.docs_dir
     doc_metadata = _read_document_metadata(doc_id, docs_dir)
 
     doc_dict = doc_metadata.model_dump()
@@ -348,7 +344,7 @@ def get_document_by_id(doc_id: str, include_details: bool = False, docs_dir: Pat
     return response
 
 
-def get_document_content(doc_id: str, docs_dir: Path | None = None) -> DocumentContentResponse:
+def get_document_content(doc_id: str, docs_dir: Path = settings.digitize.docs_dir) -> DocumentContentResponse:
     """
     Read the digitized content of a document from the local cache.
 
@@ -369,7 +365,6 @@ def get_document_content(doc_id: str, docs_dir: Path | None = None) -> DocumentC
     """
     logger.debug(f"Fetching content for document {doc_id}")
 
-    docs_dir = docs_dir or settings.digitize.docs_dir
 
     # Read document metadata using the common helper (returns DocumentMetadata)
     doc_metadata = _read_document_metadata(doc_id, docs_dir)
@@ -411,7 +406,7 @@ def get_document_content(doc_id: str, docs_dir: Path | None = None) -> DocumentC
         output_format=output_format
     )
 
-def is_document_in_active_job(doc_id: str, job_id: Optional[str], jobs_dir: Path | None = None) -> bool:
+def is_document_in_active_job(doc_id: str, job_id: Optional[str], jobs_dir: Path = settings.digitize.jobs_dir) -> bool:
     """
     Check if a document is part of any active job (in_progress status).
     
@@ -426,7 +421,6 @@ def is_document_in_active_job(doc_id: str, job_id: Optional[str], jobs_dir: Path
     Returns:
         True if document is in an active job, False otherwise
     """
-    jobs_dir = jobs_dir or settings.digitize.jobs_dir
     logger.debug(f"Checking if document {doc_id} is part of an active job")
     
     # If document has no job_id, it's not part of any job
@@ -464,7 +458,7 @@ def is_document_in_active_job(doc_id: str, job_id: Optional[str], jobs_dir: Path
         return False
 
 
-def delete_document_files(doc_id: str, output_format: str, docs_dir: Path | None = None) -> None:
+def delete_document_files(doc_id: str, output_format: str, docs_dir: Path = settings.digitize.docs_dir) -> None:
     """
     Delete all files associated with a document from the cache directories.
     
@@ -488,7 +482,6 @@ def delete_document_files(doc_id: str, output_format: str, docs_dir: Path | None
         FileNotFoundError: If document metadata file doesn't exist
         ValueError: If output_format is invalid
     """
-    docs_dir = docs_dir or settings.digitize.docs_dir
     logger.debug(f"Deleting files for document {doc_id} with format {output_format}")
     
     # Check if document exists
@@ -531,7 +524,7 @@ def delete_document_files(doc_id: str, output_format: str, docs_dir: Path | None
     logger.info(f"✅ Deleted {len(files_deleted)} files for document {doc_id}")
 
 
-def has_active_jobs(operation: Optional[str] = None, jobs_dir: Path | None = None) -> tuple[bool, list[str]]:
+def has_active_jobs(operation: Optional[str] = None, jobs_dir: Path = settings.digitize.jobs_dir) -> tuple[bool, list[str]]:
     """
     Check if there are any active jobs (accepted or in_progress status).
     Optionally filter by operation type.
@@ -543,7 +536,6 @@ def has_active_jobs(operation: Optional[str] = None, jobs_dir: Path | None = Non
     Returns:
         Tuple of (has_active, active_job_ids) where has_active is True if any active jobs exist
     """
-    jobs_dir = jobs_dir or settings.digitize.jobs_dir
     filter_msg = f" for operation '{operation}'" if operation else ""
     logger.debug(f"Checking for active jobs{filter_msg}")
 
@@ -627,7 +619,7 @@ def cleanup_digitized_files() -> dict:
     return cleanup_stats
 
 
-def bulk_delete_all_documents(docs_dir: Path | None = None) -> dict:
+def bulk_delete_all_documents(docs_dir: Path = settings.digitize.docs_dir) -> dict:
     """
     Delete all documents from the system including:
     1. All digitized content files from /var/cache/digitized
@@ -642,7 +634,6 @@ def bulk_delete_all_documents(docs_dir: Path | None = None) -> dict:
     Returns:
         Dictionary with deletion statistics
     """
-    docs_dir = docs_dir or settings.digitize.docs_dir
     logger.info("Starting bulk deletion of all documents...")
 
     deletion_stats = {
@@ -690,7 +681,7 @@ def bulk_delete_all_documents(docs_dir: Path | None = None) -> dict:
     return deletion_stats
 
 
-def scan_and_recover_orphan_jobs(jobs_dir: Path | None = None) -> int:
+def scan_and_recover_orphan_jobs(jobs_dir: Path = settings.digitize.jobs_dir) -> int:
     """
     Boot-up scan to identify and mark orphan jobs as failed.
 
@@ -708,7 +699,6 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path | None = None) -> int:
     from digitize.types import JobStatus, DocStatus
     import digitize.settings as config
 
-    jobs_dir = jobs_dir or settings.digitize.jobs_dir
 
     if not jobs_dir.exists():
         logger.warning(f"Jobs directory does not exist: {jobs_dir}")

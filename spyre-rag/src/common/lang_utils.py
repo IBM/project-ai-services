@@ -43,15 +43,13 @@ def setup_language_detector(languages: list[Language]):
         .build()
     )
 
-def detect_language(text: str, min_confidence: float | None = None) -> str:
+def detect_language(text: str, min_confidence: float = settings.common.language.language_detection_min_confidence) -> str:
     """
     Detect the language of a text string.
 
     Returns a language code (EN, DE) if confidence >= min_confidence, else EN by default.
     Thread-safe — can be called from any endpoint or background task.
     """
-    if min_confidence is None:
-        min_confidence = settings.common.language.language_detection_min_confidence
 
     if not _language_detector:
         logger.warning("Lingua detector not initialized. Call setup_language_detector() at startup.")

@@ -100,7 +100,7 @@ class JobState(BaseModel):
         """
         return self.model_dump()
 
-    def save(self, jobs_dir: Path | None = None) -> Path:
+    def save(self, jobs_dir: Path = settings.digitize.jobs_dir) -> Path:
         """
         Persist the job state as <job_id>_status.json.
 
@@ -110,7 +110,6 @@ class JobState(BaseModel):
         Returns:
             Path to the written status file.
         """
-        jobs_dir = jobs_dir or settings.digitize.jobs_dir
         jobs_dir.mkdir(parents=True, exist_ok=True)
         status_path = jobs_dir / f"{self.job_id}_status.json"
         with open(status_path, "w", encoding="utf-8") as f:

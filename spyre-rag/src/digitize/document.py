@@ -70,7 +70,7 @@ class DocumentMetadata(BaseModel):
         """
         return self.model_dump()
 
-    def save(self, docs_dir: Path | None = None) -> Path:
+    def save(self, docs_dir: Path = settings.digitize.docs_dir) -> Path:
         """
         Persist the document metadata as <doc_id>_metadata.json.
 
@@ -80,7 +80,6 @@ class DocumentMetadata(BaseModel):
         Returns:
             Path to the written metadata file.
         """
-        docs_dir = docs_dir or settings.digitize.docs_dir
         docs_dir.mkdir(parents=True, exist_ok=True)
         meta_path = docs_dir / f"{self.id}_metadata.json"
         with open(meta_path, "w", encoding="utf-8") as f:
