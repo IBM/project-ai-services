@@ -13,8 +13,6 @@ logger = get_logger("settings")
 class LLMConfig(BaseSettings):
     """LLM model and generation settings."""
 
-    model_config = SettingsConfigDict()
-
     # Context lengths
     granite_3_3_8b_instruct_context_length: int = Field(
         default=32768,
@@ -120,8 +118,6 @@ class LLMConfig(BaseSettings):
 class LanguageConfig(BaseSettings):
     """Language detection settings."""
 
-    model_config = SettingsConfigDict()
-
     language_detection_min_confidence: float = Field(
         default=0.5,
         ge=0.0,
@@ -141,8 +137,6 @@ class LanguageConfig(BaseSettings):
 
 class AppConfig(BaseSettings):
     """Application-level configuration."""
-
-    model_config = SettingsConfigDict()
 
     log_level: str = Field(
         default="INFO",
@@ -167,8 +161,6 @@ class AppConfig(BaseSettings):
 
 class ModelEndpointsConfig(BaseSettings):
     """Model endpoint configuration."""
-
-    model_config = SettingsConfigDict()
 
     # Embedding model
     emb_endpoint: str = Field(
@@ -212,8 +204,6 @@ class ModelEndpointsConfig(BaseSettings):
 
 class VectorStoreConfig(BaseSettings):
     """Vector store configuration."""
-
-    model_config = SettingsConfigDict()
 
     vector_store_type: str = Field(
         default="OPENSEARCH",
@@ -264,11 +254,6 @@ class VectorStoreConfig(BaseSettings):
 
 class Settings(BaseSettings):
     """Main settings class combining all common configuration sections."""
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-    )
 
     app: AppConfig = Field(default_factory=AppConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)

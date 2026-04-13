@@ -11,8 +11,6 @@ from common.settings import Settings as CommonSettings
 class DigitizeConfig(BaseSettings):
     """Digitize service configuration."""
 
-    model_config = SettingsConfigDict()
-
     # Directory paths
     cache_dir: Path = Field(
         default=Path("/var/cache"),

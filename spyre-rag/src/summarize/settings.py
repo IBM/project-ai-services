@@ -2,6 +2,9 @@
 Configuration settings for Summarization service.
 These values can be overridden via environment variables.
 """
+from pydantic_settings.main import SettingsConfigDict
+
+
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -13,8 +16,6 @@ logger = get_logger("settings")
 
 class SummarizationConfig(BaseSettings):
     """Summarization settings."""
-
-    model_config = SettingsConfigDict()
 
     max_concurrent_requests: int = Field(
         default=32,

@@ -14,8 +14,6 @@ logger = get_logger("settings")
 class RAGConfig(BaseSettings):
     """RAG retrieval and ranking settings."""
 
-    model_config = SettingsConfigDict()
-
     score_threshold: float = Field(
         default=0.4,
         gt=0.0,
