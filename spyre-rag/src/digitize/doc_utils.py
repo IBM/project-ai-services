@@ -28,15 +28,15 @@ from digitize.status import (
     get_utc_timestamp
 )
 from digitize.types import DocStatus, JobStatus, OutputFormat
-import digitize.settings as config
+from digitize.settings import settings
 
 logger = get_logger("doc_utils")
 
 # Load configuration from settings modules
-WORKER_SIZE = config.settings.digitize.doc_worker_size
-HEAVY_PDF_CONVERT_WORKER_SIZE = config.settings.digitize.heavy_pdf_convert_worker_size
-HEAVY_PDF_PAGE_THRESHOLD = config.settings.digitize.heavy_pdf_page_threshold
-POOL_SIZE = config.settings.common.llm.llm_max_batch_size
+WORKER_SIZE = settings.digitize.doc_worker_size
+HEAVY_PDF_CONVERT_WORKER_SIZE = settings.digitize.heavy_pdf_convert_worker_size
+HEAVY_PDF_PAGE_THRESHOLD = settings.digitize.heavy_pdf_page_threshold
+POOL_SIZE = settings.common.llm.llm_max_batch_size
 
 is_debug = logger.isEnabledFor(logging.DEBUG)
 tqdm_wrapper = tqdm if is_debug else (lambda x, **kwargs: x)

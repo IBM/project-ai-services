@@ -2,7 +2,7 @@
 Configuration settings for RAG system.
 These values can be overridden via environment variables.
 """
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from common.misc_utils import get_logger

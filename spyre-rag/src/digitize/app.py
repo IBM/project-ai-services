@@ -10,9 +10,9 @@ from fastapi.openapi.docs import get_swagger_ui_html
 
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 from common.misc_utils import set_log_level, get_logger
-import digitize.settings as settings
+from digitize.settings import settings
 
-set_log_level(settings.settings.common.app.log_level)
+set_log_level(settings.common.app.log_level)
 
 from common.misc_utils import validate_pdf_file, set_request_id, configure_uvicorn_logging
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
@@ -24,8 +24,8 @@ from digitize.ingest import ingest
 from digitize.status import StatusManager
 
 # Semaphores for concurrency limiting
-digitization_semaphore = asyncio.BoundedSemaphore(settings.settings.digitize.digitization_concurrency_limit)
-ingestion_semaphore = asyncio.BoundedSemaphore(settings.settings.digitize.ingestion_concurrency_limit)
+digitization_semaphore = asyncio.BoundedSemaphore(settings.digitize.digitization_concurrency_limit)
+ingestion_semaphore = asyncio.BoundedSemaphore(settings.digitize.ingestion_concurrency_limit)
 
 logger = get_logger("digitize_server")
 
@@ -36,12 +36,12 @@ async def lifespan(app: FastAPI):
     """Manage application lifespan events (startup and shutdown)."""
     # Startup
     filtered_paths = ['/health', '/v1/jobs']
-    configure_uvicorn_logging(settings.settings.common.app.log_level, filtered_paths)
+    configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     logger.info("Application starting up...")
 
     # Scan for orphan jobs and mark them as failed
     try:
-        orphan_count = dg_util.scan_and_recover_orphan_jobs(settings.settings.digitize.jobs_dir)
+        orphan_count = dg_util.scan_and_recover_orphan_jobs(settings.digitize.jobs_dir)
         if orphan_count > 0:
             logger.info(f"Found {orphan_count} orphan job(s) from previous app server run")
     except Exception as e:
@@ -121,7 +121,7 @@ async def health_check():
 
 async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat):
     status_mgr = StatusManager(job_id)
-    job_staging_path = settings.settings.digitize.staging_dir / f"{job_id}"
+    job_staging_path = settings.digitize.staging_dir / f"{job_id}"
 
     try:
         logger.info(f"🚀 Digitization started for job: {job_id}")
@@ -133,7 +133,7 @@ async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: type
         status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing digitization pipeline: {str(e)}")
     finally:
         # Always clean up staging directory, even on crashes
-        dg_util.cleanup_staging_directory(job_id, settings.settings.digitize.staging_dir)
+        dg_util.cleanup_staging_directory(job_id, settings.digitize.staging_dir)
 
         # Crucial: Always release the semaphore slot back to the API
         digitization_semaphore.release()
@@ -141,7 +141,7 @@ async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: type
 
 async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict):
     status_mgr = StatusManager(job_id)
-    job_staging_path = settings.settings.digitize.staging_dir / f"{job_id}"
+    job_staging_path = settings.digitize.staging_dir / f"{job_id}"
 
     try:
         logger.info(f"🚀 Ingestion started for job: {job_id}")
@@ -153,7 +153,7 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
         status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline: {str(e)}")
     finally:
         # Always clean up staging directory, even on crashes
-        dg_util.cleanup_staging_directory(job_id, settings.settings.digitize.staging_dir)
+        dg_util.cleanup_staging_directory(job_id, settings.digitize.staging_dir)
 
         # Mandatory Semaphore Release
         ingestion_semaphore.release()
@@ -254,7 +254,7 @@ async def digitize_document(
         try:
             # Upload the file byte stream to files in staging directory
             # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
-            await dg_util.stage_upload_files(job_id, filenames, str(settings.settings.digitize.staging_dir / job_id), file_contents)
+            await dg_util.stage_upload_files(job_id, filenames, str(settings.digitize.staging_dir / job_id), file_contents)
             doc_id_dict = dg_util.initialize_job_state(job_id, operation, output_format, filenames, job_name)
             if operation == types.OperationType.INGESTION:
                 background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
@@ -343,7 +343,7 @@ async def get_all_jobs(
 async def get_job_by_id(job_id: str):
     """Retrieve detailed status of a specific job by its ID."""
     try:
-        job_status_file = settings.settings.digitize.jobs_dir / f"{job_id}_status.json"
+        job_status_file = settings.digitize.jobs_dir / f"{job_id}_status.json"
 
         if not job_status_file.exists():
             APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"No job found with id '{job_id}'")
@@ -380,7 +380,7 @@ async def get_job_by_id(job_id: str):
 async def delete_job(job_id: str):
     """Deletes a job status file. Does not touch associated document metadata."""
     try:
-        job_status_file = settings.settings.digitize.jobs_dir / f"{job_id}_status.json"
+        job_status_file = settings.digitize.jobs_dir / f"{job_id}_status.json"
 
         if not job_status_file.exists():
             APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"No job found with id '{job_id}'")

@@ -15,9 +15,9 @@ from starlette.concurrency import iterate_in_threadpool
 from lingua import Language
 
 from common.misc_utils import set_log_level
-import chatbot.settings as settings
+from chatbot.settings import settings
 
-set_log_level(settings.settings.common.app.log_level)
+set_log_level(settings.common.app.log_level)
 
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 import common.db_utils as db
@@ -48,7 +48,7 @@ emb_model_dict = {}
 llm_model_dict = {}
 reranker_model_dict = {}
 
-concurrency_limiter = BoundedSemaphore(settings.settings.chatbot.max_concurrent_requests)
+concurrency_limiter = BoundedSemaphore(settings.chatbot.max_concurrent_requests)
 
 def initialize_models():
     global emb_model_dict, llm_model_dict, reranker_model_dict
@@ -79,10 +79,10 @@ diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_ha
 @asynccontextmanager
 async def lifespan(app):
     filtered_paths = ['/health']
-    configure_uvicorn_logging(settings.settings.common.app.log_level, filtered_paths)
+    configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     initialize_models()
     setup_language_detector([Language.ENGLISH, Language.GERMAN])
-    create_llm_session(pool_maxsize=settings.settings.common.llm.llm_max_batch_size)
+    create_llm_session(pool_maxsize=settings.common.llm.llm_max_batch_size)
     yield
     stderr_monitor.stop()
 
@@ -180,8 +180,8 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
             emb_model, emb_endpoint, emb_max_tokens,
             reranker_model,
             reranker_endpoint,
-            settings.settings.chatbot.num_chunks_post_search,
-            settings.settings.chatbot.num_chunks_post_reranker,
+            settings.chatbot.num_chunks_post_search,
+            settings.chatbot.num_chunks_post_reranker,
             vectorstore=vectorstore
         )
         # Store metrics in registry for reference endpoint
@@ -327,7 +327,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
         max_tokens = req.max_tokens
         # giving priority to max_tokens passed in the request, otherwise according to detected language of query
         if not max_tokens:
-            max_tokens = max_tokens_map.get(lang, settings.settings.common.llm.llm_max_tokens)
+            max_tokens = max_tokens_map.get(lang, settings.common.llm.llm_max_tokens)
 
         docs, perf_stat_dict = await asyncio.to_thread(
             search_only,
@@ -335,8 +335,8 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
             emb_model, emb_endpoint, emb_max_tokens,
             reranker_model,
             reranker_endpoint,
-            settings.settings.chatbot.num_chunks_post_search,
-            settings.settings.chatbot.num_chunks_post_reranker,
+            settings.chatbot.num_chunks_post_search,
+            settings.chatbot.num_chunks_post_reranker,
             vectorstore=vectorstore
         )
 

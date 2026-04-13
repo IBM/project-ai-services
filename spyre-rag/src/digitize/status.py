@@ -10,7 +10,7 @@ from typing import Callable, Any, Mapping
 from digitize.types import JobStatus, DocStatus, OutputFormat
 from digitize.document import DocumentMetadata
 from digitize.job import JobState, JobDocumentSummary, JobStats
-import digitize.settings as config
+from digitize.settings import settings
 from common.misc_utils import get_logger
 
 logger = get_logger("status")
@@ -68,7 +68,7 @@ def create_document_metadata(
     Returns:
         The created DocumentMetadata object
     """
-    docs_dir = docs_dir or config.settings.digitize.docs_dir
+    docs_dir = docs_dir or settings.digitize.docs_dir
     doc_metadata = DocumentMetadata(
         id=doc_id,
         name=doc_name,
@@ -110,7 +110,7 @@ def create_job_state(
     Returns:
         The created JobState object
     """
-    jobs_dir = jobs_dir or config.settings.digitize.jobs_dir
+    jobs_dir = jobs_dir or settings.digitize.jobs_dir
     job_doc_summaries = [
         JobDocumentSummary(id=doc_id_dict[doc], name=doc, status=DocStatus.ACCEPTED.value)
         for doc in documents_info
@@ -153,7 +153,7 @@ def get_job_document_stats(job_id: str, jobs_dir: Path | None = None) -> dict:
         - failed_count: Number of failed documents
         - completed_count: Number of completed documents
     """
-    jobs_dir = jobs_dir or config.settings.digitize.jobs_dir
+    jobs_dir = jobs_dir or settings.digitize.jobs_dir
     job_status_file = jobs_dir / f"{job_id}_status.json"
 
     if not job_status_file.exists():
@@ -202,11 +202,11 @@ def retry_on_failure(
         Last exception if all retries fail
     """
     if max_retries is None:
-        max_retries = config.settings.digitize.retry_max_attempts
+        max_retries = settings.digitize.retry_max_attempts
     if delay is None:
-        delay = config.settings.digitize.retry_initial_delay
+        delay = settings.digitize.retry_initial_delay
     if backoff is None:
-        backoff = config.settings.digitize.retry_backoff_multiplier
+        backoff = settings.digitize.retry_backoff_multiplier
 
     last_exception: Exception = Exception("No attempts made")
     current_delay = delay
@@ -233,7 +233,7 @@ class StatusManager:
     """Thread-safe handler for updating Job and Document status files with synchronous writes"""
     def __init__(self, job_id: str):
         self.job_id = job_id
-        self.job_status_file = config.settings.digitize.jobs_dir / f"{job_id}_status.json"
+        self.job_status_file = settings.digitize.jobs_dir / f"{job_id}_status.json"
         self._job_lock = threading.Lock()
         self._doc_locks: dict[str, threading.Lock] = {}
         self._doc_locks_lock = threading.Lock()
@@ -365,7 +365,7 @@ class StatusManager:
         """
         doc_lock = self._get_doc_lock(doc_id)
         with doc_lock:
-            meta_file = config.settings.digitize.docs_dir / f"{doc_id}_metadata.json"
+            meta_file = settings.digitize.docs_dir / f"{doc_id}_metadata.json"
 
             if not self._validate_file_exists(meta_file, f"metadata file {doc_id}_metadata.json"):
                 return

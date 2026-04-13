@@ -1,8 +1,7 @@
 from lingua import Language, LanguageDetectorBuilder
-from common.settings import settings as common_settings
 
 from common.misc_utils import get_logger
-from chatbot.settings import settings as chatbot_settings
+from chatbot.settings import settings
 
 logger = get_logger("LANG")
 
@@ -22,14 +21,14 @@ def get_prompt_for_language(lang: str) -> str:
         The appropriate prompt template for the language
     """
     prompt_map = {
-        lang_de: chatbot_settings.chatbot.query_vllm_stream_de_prompt,
-        lang_en: chatbot_settings.chatbot.query_vllm_stream_prompt
+        lang_de: settings.chatbot.query_vllm_stream_de_prompt,
+        lang_en: settings.chatbot.query_vllm_stream_prompt
     }
-    return prompt_map.get(lang, chatbot_settings.chatbot.query_vllm_stream_prompt)
+    return prompt_map.get(lang, settings.chatbot.query_vllm_stream_prompt)
 
 max_tokens_map = {
-                lang_en: common_settings.llm.llm_max_tokens,
-                lang_de: common_settings.llm.llm_max_tokens_de
+                lang_en: settings.common.llm.llm_max_tokens,
+                lang_de: settings.common.llm.llm_max_tokens_de
             }
 
 def setup_language_detector(languages: list[Language]):
@@ -52,7 +51,7 @@ def detect_language(text: str, min_confidence: float | None = None) -> str:
     Thread-safe — can be called from any endpoint or background task.
     """
     if min_confidence is None:
-        min_confidence = common_settings.language.language_detection_min_confidence
+        min_confidence = settings.common.language.language_detection_min_confidence
 
     if not _language_detector:
         logger.warning("Lingua detector not initialized. Call setup_language_detector() at startup.")

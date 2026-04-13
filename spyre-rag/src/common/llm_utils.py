@@ -50,15 +50,10 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
         if choices:
             text = (choices[0].get("message", {}).get("content") or "").strip()
 
-<<<<<<< HEAD
         # Parse response - handle multi-line summaries
         summary = ""
         decision = False
         lines = text.splitlines()
-=======
-def summarize_table(table_html, gen_model, llm_endpoint, pdf_path, max_workers=32):
-    all_prompts = [digitize_settings.digitize.table_summary_prompt.format(content=html) for html in table_html]
->>>>>>> 7633dc2 (Address review comments)
 
         # Find Summary: and Decision: lines
         summary_start = -1

@@ -4,7 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from digitize.types import JobStatus
-import digitize.settings as config
+from digitize.settings import settings
 
 
 class JobDocumentSummary(BaseModel):
@@ -110,7 +110,7 @@ class JobState(BaseModel):
         Returns:
             Path to the written status file.
         """
-        jobs_dir = jobs_dir or config.settings.digitize.jobs_dir
+        jobs_dir = jobs_dir or settings.digitize.jobs_dir
         jobs_dir.mkdir(parents=True, exist_ok=True)
         status_path = jobs_dir / f"{self.job_id}_status.json"
         with open(status_path, "w", encoding="utf-8") as f:

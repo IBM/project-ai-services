@@ -4,10 +4,10 @@ import pypdfium2 as pdfium
 from pydantic import BaseModel, Field
 import threading
 
-from summarize.settings import Settings
+from summarize.settings import settings
 from common.misc_utils import set_log_level, get_logger
 
-set_log_level(Settings.common.app.log_level)
+set_log_level(settings.common.app.log_level)
 logger = get_logger("summarize")
 
 _pdf_lock = threading.Lock()
@@ -17,11 +17,11 @@ _pdf_lock = threading.Lock()
 # => input_words * (1 + coeff) / ratio < max_model_len - buf
 MAX_INPUT_WORDS = int(
     (
-        Settings.common.llm.granite_3_3_8b_instruct_context_length
-        - Settings.summarize.summarization_prompt_token_count
+        settings.common.llm.granite_3_3_8b_instruct_context_length
+        - settings.summarize.summarization_prompt_token_count
     )
-    * Settings.common.llm.token_to_word_ratio_en
-    / (1 + Settings.summarize.summarization_coefficient)
+    * settings.common.llm.token_to_word_ratio_en
+    / (1 + settings.summarize.summarization_coefficient)
 )
 
 def word_count(text: str) -> int:
@@ -31,10 +31,10 @@ def compute_target_and_max_tokens(input_word_count: int, summary_length: Optiona
     if summary_length is not None:
         target_word_count = summary_length
     else:
-        target_word_count = max(1, int(input_word_count * Settings.summarize.summarization_coefficient))
+        target_word_count = max(1, int(input_word_count * settings.summarize.summarization_coefficient))
 
-    est_output_tokens = int(target_word_count / Settings.common.llm.token_to_word_ratio_en)
-    max_tokens = est_output_tokens + Settings.summarize.summarization_prompt_token_count
+    est_output_tokens = int(target_word_count / settings.common.llm.token_to_word_ratio_en)
+    max_tokens = est_output_tokens + settings.summarize.summarization_prompt_token_count
     logger.debug(f"max tokens: {max_tokens}, estimated output tokens: {est_output_tokens}")
     return target_word_count, max_tokens
 
@@ -92,13 +92,13 @@ class SummarizeException(Exception):
 
 def build_messages(text, target_words, summary_length) -> list:
     if summary_length:
-        user_prompt = Settings.summarize.summarize_user_prompt_with_length.format(target_words=target_words, text=text)
+        user_prompt = settings.summarize.summarize_user_prompt_with_length.format(target_words=target_words, text=text)
     else:
-        user_prompt = Settings.summarize.summarize_user_prompt_without_length.format(text=text)
+        user_prompt = settings.summarize.summarize_user_prompt_without_length.format(text=text)
     return [
         {
             "role": "system",
-            "content": Settings.summarize.summarize_system_prompt,
+            "content": settings.summarize.summarize_system_prompt,
         },
         {
             "role": "user",
