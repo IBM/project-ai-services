@@ -226,6 +226,11 @@ func (pc *PodmanClient) PodLogs(podNameOrID string) error {
 	defer stop()
 
 	for _, container := range podInspect.Containers {
+		// Skip infra container
+		if container.ID == podInspect.InfraContainerID {
+			continue
+		}
+
 		logger.Infof("Streaming logs for container: %s", container.Name)
 
 		if err := pc.streamContainerLogs(ctx, container.ID); err != nil {
