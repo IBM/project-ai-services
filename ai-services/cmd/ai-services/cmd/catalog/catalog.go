@@ -15,7 +15,6 @@ deploying services, and managing service metadata`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
-		Hidden: true, // Hide the catalog command from the main help output until it's ready for public use.
 	}
 
 	catalogCMD.AddCommand(NewAPIServerCmd())

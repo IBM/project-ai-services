@@ -26,9 +26,10 @@ func NewAPIServerCmd() *cobra.Command {
 		adminPasswordHash      string
 	)
 	apiserverCmd := &cobra.Command{
-		Use:   "apiserver",
-		Short: "Manage AI Services API server",
-		Long:  `The apiserver command allows you to manage the AI Services API server, including starting, stopping, and checking the status of the server.`,
+		Use:    "apiserver",
+		Short:  "Manage AI Services API server",
+		Long:   `The apiserver command allows you to manage the AI Services API server, including starting, stopping, and checking the status of the server.`,
+		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			secretKey := os.Getenv("AUTH_JWT_SECRET")
 			if len(secretKey) == 0 {
