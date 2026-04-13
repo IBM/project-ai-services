@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/tests/e2e/common"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
 )
 
@@ -17,19 +18,13 @@ const (
 	waitTickerInterval = 20 * time.Second
 )
 
-// WaitForAllPodsHealthy waits until required service pods
-// (milvus, vllm-server, chat-bot) are Running and Healthy.
+// WaitForAllPodsHealthy waits until required service pods.
 func WaitForAllPodsHealthy(
 	ctx context.Context,
 	cfg *config.Config,
 	appName string,
+	appRuntime string,
 ) error {
-	requiredPods := []string{
-		//"--milvus",  --commented as currently switch to opensearch is in-progress
-		"--vllm-server",
-		"--chat-bot",
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, corePodsTimeout)
 	defer cancel()
 
@@ -44,12 +39,12 @@ func WaitForAllPodsHealthy(
 			return ctx.Err()
 
 		case <-ticker.C:
-			output, err := getAppStatusOutput(ctx, cfg, appName)
+			output, err := getAppStatusOutput(ctx, cfg, appName, appRuntime)
 			if err != nil {
 				continue
 			}
 
-			if areRequiredPodsHealthy(output, appName, requiredPods) {
+			if areRequiredPodsHealthy(output, appName, appRuntime) {
 				logger.Infof("[WAIT] All core pods are healthy")
 
 				return nil
@@ -63,6 +58,7 @@ func getAppStatusOutput(
 	ctx context.Context,
 	cfg *config.Config,
 	appName string,
+	appRuntime string,
 ) (string, error) {
 	cmd := exec.CommandContext(
 		ctx,
@@ -70,6 +66,8 @@ func getAppStatusOutput(
 		"application",
 		"ps",
 		appName,
+		"--runtime",
+		appRuntime,
 	)
 
 	out, err := cmd.CombinedOutput()
@@ -84,10 +82,15 @@ func getAppStatusOutput(
 func areRequiredPodsHealthy(
 	output string,
 	appName string,
-	requiredPods []string,
+	appRuntime string,
 ) bool {
-	for _, suffix := range requiredPods {
-		podName := appName + suffix
+	for _, suffix := range common.ExpectedPodSuffixes[appRuntime] {
+		// Skip clean-docs and ingest-docs pods as they are not in running state
+		if (suffix == "clean-docs") || (suffix == "ingest-docs") {
+			continue
+		}
+
+		podName := appName + "--" + suffix
 		podHealthy := false
 
 		for _, line := range strings.Split(output, "\n") {
@@ -118,6 +121,7 @@ func WaitForIngestionLogs(
 	appName string,
 	completionStr string,
 	cleanDocs bool,
+	appRuntime string,
 ) (string, error) {
 	podSuffix := "--ingest-docs"
 	if cleanDocs {
@@ -147,6 +151,8 @@ func WaitForIngestionLogs(
 				appName,
 				"--pod",
 				podName,
+				"--runtime",
+				appRuntime,
 			)
 
 			out, err := cmd.CombinedOutput()

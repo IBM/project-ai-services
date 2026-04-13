@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -155,7 +156,9 @@ func buildUsingMake(
 		return "", fmt.Errorf("make bin failed: %w", err)
 	}
 
-	srcBinPath := filepath.Join(moduleRoot, "bin", "ai-services")
+	// Determine OS and architecture using runtime package
+	osArch := fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH)
+	srcBinPath := filepath.Join(moduleRoot, "bin", "ai-services-"+osArch)
 	if _, err := os.Stat(srcBinPath); err != nil {
 		return "", fmt.Errorf("binary not found after make bin: %w", err)
 	}

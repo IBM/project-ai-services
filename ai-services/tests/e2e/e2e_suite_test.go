@@ -17,7 +17,9 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/bootstrap"
 	"github.com/project-ai-services/ai-services/tests/e2e/cleanup"
 	"github.com/project-ai-services/ai-services/tests/e2e/cli"
+	"github.com/project-ai-services/ai-services/tests/e2e/common"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
+	"github.com/project-ai-services/ai-services/tests/e2e/digitization"
 	"github.com/project-ai-services/ai-services/tests/e2e/ingestion"
 	"github.com/project-ai-services/ai-services/tests/e2e/podman"
 	"github.com/project-ai-services/ai-services/tests/e2e/rag"
@@ -50,7 +52,6 @@ var (
 	summarizePort               string
 	judgePort                   string
 	goldenDatasetFile           string
-	mainPodsByTemplate          map[string][]string
 	defaultRagAccuracyThreshold = 0.70
 	defaultMaxRetries           = 2
 )
@@ -81,6 +82,10 @@ var _ = ginkgo.BeforeSuite(func() {
 	ginkgo.By("Loading E2E configuration")
 	cfg = &config.Config{}
 
+	ginkgo.By("Setting application runtime for digitization package")
+	digitization.SetAppRuntime(appRuntime)
+	logger.Infof("[SETUP] Application runtime set to: %s", appRuntime)
+
 	ginkgo.By("Generating unique run ID")
 	if runIDEnv := os.Getenv("RUN_ID"); runIDEnv != "" {
 		runID = runIDEnv
@@ -107,15 +112,6 @@ var _ = ginkgo.BeforeSuite(func() {
 	} else {
 		appName = fmt.Sprintf("%s-app-%s", templateName, runID)
 		logger.Infof("[SETUP] Generated application name: %s", appName)
-	}
-
-	ginkgo.By("Setting main pods by template")
-	mainPodsByTemplate = map[string][]string{
-		"rag": {
-			"vllm-server",
-			//"milvus",  --commented as currently switch to opensearch is in-progress
-			"chat-bot",
-		},
 	}
 
 	ginkgo.By("Resolving application ports from environment")
@@ -228,14 +224,14 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		ginkgo.It("runs application template command", ginkgo.Label("spyre-independent"), func() {
 			output, err := cli.TemplatesCommand(ctx, cfg, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(cli.ValidateApplicationsTemplateCommandOutput(output)).To(gomega.Succeed())
+			gomega.Expect(cli.ValidateApplicationsTemplateCommandOutput(output, appRuntime)).To(gomega.Succeed())
 		})
 		ginkgo.It("verifies application model list command", ginkgo.Label("spyre-independent"), func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 			defer cancel()
 			output, err := cli.ModelList(ctx, cfg, templateName, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(cli.ValidateModelListOutput(output, templateName)).To(gomega.Succeed())
+			gomega.Expect(cli.ValidateModelListOutput(output, templateName, appRuntime)).To(gomega.Succeed())
 			logger.Infoln("[TEST] Application model list validated successfully!")
 		})
 		ginkgo.It("verifies application model download command", ginkgo.Label("spyre-independent"), func() {
@@ -243,25 +239,25 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			defer cancel()
 			output, err := cli.ModelDownload(ctx, cfg, templateName, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(cli.ValidateModelDownloadOutput(output, templateName)).To(gomega.Succeed())
+			gomega.Expect(cli.ValidateModelDownloadOutput(output, templateName, appRuntime)).To(gomega.Succeed())
 			logger.Infoln("[TEST] Application model download validated successfully!")
 		})
 	})
 	ginkgo.Context("Bootstrap Steps", func() {
 		ginkgo.It("runs bootstrap configure", ginkgo.Label("spyre-dependent"), func() {
-			output, err := cli.BootstrapConfigure(ctx, appRuntime)
+			output, err := cli.BootstrapConfigure(ctx, cfg, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(cli.ValidateBootstrapConfigureOutput(output)).To(gomega.Succeed())
+			gomega.Expect(cli.ValidateBootstrapConfigureOutput(output, appRuntime)).To(gomega.Succeed())
 		})
 		ginkgo.It("runs bootstrap validate", ginkgo.Label("spyre-dependent"), func() {
-			output, err := cli.BootstrapValidate(ctx, appRuntime)
+			output, err := cli.BootstrapValidate(ctx, cfg, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapValidateOutput(output)).To(gomega.Succeed())
 		})
 		ginkgo.It("runs full bootstrap", ginkgo.Label("spyre-dependent"), func() {
-			output, err := cli.Bootstrap(ctx, appRuntime)
+			output, err := cli.Bootstrap(ctx, cfg, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(cli.ValidateBootstrapFullOutput(output)).To(gomega.Succeed())
+			gomega.Expect(cli.ValidateBootstrapFullOutput(output, appRuntime)).To(gomega.Succeed())
 		})
 	})
 	ginkgo.Context("Application Image Command Tests", func() {
@@ -290,29 +286,36 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			defer cancel()
 
 			pods := []string{"backend", "ui", "db"} // replace with actual pod names
-
+			params := ""
+			cliOptions := cli.CreateOptions{}
+			if appRuntime == "podman" {
+				params = "ui.port=" + uiPort + ",backend.port=" + backendPort + ",digitize.port=" + digitizePort + ",digitizeUi.port=" + digitizeUiPort + ",summarize.port=" + summarizePort
+				cliOptions = cli.CreateOptions{
+					SkipModelDownload: false,
+					ImagePullPolicy:   "IfNotPresent",
+				}
+			}
 			createOutput, err := cli.CreateRAGAppAndValidate(
 				ctx,
 				cfg,
 				appName,
 				templateName,
-				"ui.port="+uiPort+",backend.port="+backendPort+",digitize.port="+digitizePort+",digitizeUi.port="+digitizeUiPort+",summarize.port="+summarizePort,
+				params,
 				backendPort,
 				uiPort,
-				cli.CreateOptions{
-					SkipModelDownload: false,
-					ImagePullPolicy:   "IfNotPresent",
-				},
+				cliOptions,
 				pods,
 				appRuntime,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			ragBaseURL, err = cli.GetBaseURL(createOutput, backendPort)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			if appRuntime == "podman" {
+				ragBaseURL, err = cli.GetBaseURL(createOutput, backendPort)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			judgeBaseURL, err = cli.GetBaseURL(createOutput, judgePort)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				judgeBaseURL, err = cli.GetBaseURL(createOutput, judgePort)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			}
 			logger.Infof("[TEST] Application %s created, healthy, and RAG endpoints validated", appName)
 		})
 	})
@@ -348,18 +351,29 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			if !podmanReady {
 				ginkgo.Skip("Podman not available - will be installed via bootstrap configure")
 			}
-			err := podman.VerifyContainers(appName, appRuntime)
+			psWideArgs := []string{"-o", "wide"}
+			widePsOutput, err := cli.ApplicationPS(ctx, cfg, appName, appRuntime, psWideArgs...)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = podman.VerifyContainers(ctx, cfg, widePsOutput, appName, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "verify containers failed")
 			logger.Infof("[TEST] Containers verified")
 		})
-		ginkgo.It("Verifies Exposed Ports of the application", ginkgo.Label("spyre-dependent"), func() {
+		ginkgo.It("Verifies Exposed Ports/Routes of the application", ginkgo.Label("spyre-dependent"), func() {
 			if !podmanReady {
 				ginkgo.Skip("Podman not available - will be installed via bootstrap configure")
 			}
-			expectedPorts := []string{uiPort, backendPort, digitizePort, digitizeUiPort, summarizePort}
-			err := podman.VerifyExposedPorts(appName, expectedPorts, appRuntime)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "Verify exposed ports failed")
-			logger.Infof("[TEST] Exposed ports verified")
+			if appRuntime == "podman" {
+				psWideArgs := []string{"-o", "wide"}
+				widePsOutput, err := cli.ApplicationPS(ctx, cfg, appName, appRuntime, psWideArgs...)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectedPorts := []string{uiPort, backendPort, digitizePort, digitizeUiPort, summarizePort}
+				gomega.Expect(podman.VerifyExposedPorts(appName, expectedPorts, appRuntime, widePsOutput)).NotTo(gomega.HaveOccurred(), "Verify exposed ports/routes failed")
+			} else {
+				output, err := podman.GetOpenshiftRoutes(appName)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(cli.ValidateOpenShiftRoutes(output)).NotTo(gomega.HaveOccurred(), "Verify exposed ports/routes failed")
+			}
+			logger.Infof("[TEST] Exposed ports/routes verified")
 		})
 		ginkgo.It("verifies application logs output", ginkgo.Label("spyre-dependent"), func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -369,67 +383,8 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			widePsOutput, err := cli.ApplicationPS(ctx, cfg, appName, appRuntime, psWideArgs...)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			wideLines := strings.Split(widePsOutput, "\n")
-
-			type PodInfo struct {
-				PodID      string
-				Containers []string
-			}
-
-			pods := make(map[string]*PodInfo)
-			inTargetApp := false
-
-			for _, line := range wideLines {
-				line = strings.TrimSpace(line)
-				if line == "" ||
-					strings.HasPrefix(line, "APPLICATION") ||
-					strings.HasPrefix(line, "──") {
-					continue
-				}
-
-				fields := strings.Fields(line)
-
-				var podID, podName string
-				var containerStartIdx int
-
-				// First row of the application
-				if len(fields) >= 3 && fields[0] == appName {
-					inTargetApp = true
-					podID = fields[1]
-					podName = fields[2]
-					containerStartIdx = 3
-
-					// Subsequent rows of the same application
-				} else if inTargetApp && len(fields) >= 2 && strings.HasPrefix(fields[1], appName+"--") {
-					podID = fields[0]
-					podName = fields[1]
-					containerStartIdx = 2
-
-				} else if inTargetApp {
-					break
-				} else {
-					continue
-				}
-
-				pod := &PodInfo{
-					PodID: podID,
-				}
-
-				for _, tok := range fields[containerStartIdx:] {
-					tok = strings.TrimSuffix(tok, ",")
-
-					if strings.HasSuffix(tok, "-infra") {
-						continue
-					}
-
-					if strings.HasPrefix(tok, podName+"-") {
-						pod.Containers = append(pod.Containers, tok)
-					}
-				}
-
-				pods[podName] = pod
-			}
-
+			pods, err := podman.ExtractPodInfo(widePsOutput)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(pods).NotTo(gomega.BeEmpty(), "No pods found for application %s", appName)
 
 			for podName, pod := range pods {
@@ -446,7 +401,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				}
 
 				// ---- Pod logs by ID
-				{
+				if appRuntime == "podman" {
 					logCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 					logs, err := cli.ApplicationLogs(logCtx, cfg, appName, pod.PodID, "", appRuntime)
 					cancel()
@@ -473,7 +428,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
 
-			suffixes, ok := mainPodsByTemplate[templateName]
+			suffixes, ok := common.ExpectedPodSuffixes[appRuntime]
 			gomega.Expect(ok).To(gomega.BeTrue(), "unknown templateName")
 
 			pods := make([]string, 0, len(suffixes))
@@ -518,14 +473,14 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
 			defer cancel()
 
-			completionStr := "Completed '/var/docs/test_doc.pdf'"
+			completionStr := "| /var/docs/test_doc.pdf |"
 			gomega.Expect(appName).NotTo(gomega.BeEmpty())
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "test_doc.pdf")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -536,14 +491,14 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
 			defer cancel()
 
-			completionStr := "Completed '/var/docs/blank.pdf'"
+			completionStr := "| /var/docs/blank.pdf |"
 			gomega.Expect(appName).NotTo(gomega.BeEmpty())
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "blank.pdf")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -554,14 +509,14 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
 			defer cancel()
 
-			completionStr := "Skipping file with .pdf extension but unsupported format: /var/docs/sample_png.pdf"
+			completionStr := "File validation failed: File has .pdf extension but unsupported format: sample_png.pdf"
 			gomega.Expect(appName).NotTo(gomega.BeEmpty())
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "sample_png.pdf")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -572,14 +527,14 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
 			defer cancel()
 
-			completionStr := "No documents found to process in '/var/docs'"
+			completionStr := "File validation failed: Only PDF files are allowed. Invalid file: sample_txt.txt"
 			gomega.Expect(appName).NotTo(gomega.BeEmpty())
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "sample_txt.txt")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -719,17 +674,636 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 			defer cancel()
 
-			completionStr := "DB Cleaned successfully!"
+			completionStr := "DB cleanup completed successfully"
 			gomega.Expect(appName).NotTo(gomega.BeEmpty())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, true)).To(gomega.Succeed())
+			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, true, appRuntime)).To(gomega.Succeed())
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, true)
+			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, true, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			gomega.Expect(logs).To(gomega.ContainSubstring("Local cache cleaned up."))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
 
 			logger.Infof("[TEST] Clean Ingestion completed successfully for application %s", appName)
+		})
+	})
+	ginkgo.Context("Digitization Tests", ginkgo.Label("spyre-dependent", "digitization-tests"), func() {
+		var digitizeBaseURL string
+		var createdJobIDs []string
+		var createdDocIDs []string
+
+		ginkgo.BeforeAll(func() {
+			if appName == "" {
+				ginkgo.Fail("Application name is not set")
+			}
+
+			logger.Infof("[DIGITIZE] Setting up digitization tests")
+
+			// Get the digitize base URL
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+
+			infoOutput, err := cli.ApplicationInfo(ctx, cfg, appName, appRuntime)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			if err := cli.ValidateApplicationInfo(infoOutput, appName, templateName); err != nil {
+				ginkgo.Fail(fmt.Sprintf("Digitization tests require a valid running application: %v", err))
+			}
+
+			if appRuntime == "podman" {
+				digitizeBaseURL, err = cli.GetBaseURL(infoOutput, digitizePort)
+			} else {
+				urlList := cli.ExtractURLsFromOutput(infoOutput)
+				if len(urlList) == 0 {
+					ginkgo.Fail("No urls extracted from application info output")
+				} else {
+					digitizeBaseURL = strings.Replace(urlList[0], "ui", "digitize-api", 1)
+				}
+
+			}
+
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			logger.Infof("[DIGITIZE] Digitize Base URL: %s", digitizeBaseURL)
+		})
+
+		ginkgo.AfterEach(func() {
+			// Cleanup: delete created jobs and documents
+			// Wait for jobs to complete before cleanup to avoid resource locked errors
+			ctx := context.Background()
+			for _, jobID := range createdJobIDs {
+				// Wait for job completion before deleting
+				_, _ = digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobID, 10*time.Minute)
+				_ = digitization.DeleteJob(ctx, digitizeBaseURL, jobID)
+			}
+			for _, docID := range createdDocIDs {
+				_ = digitization.DeleteDocument(ctx, digitizeBaseURL, docID)
+			}
+			createdJobIDs = nil
+			createdDocIDs = nil
+		})
+
+		ginkgo.It("should pass health check", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			err := digitization.HealthCheck(ctx, digitizeBaseURL)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			logger.Infof("[TEST] Digitization service health check passed")
+		})
+
+		ginkgo.It("should complete full digitization workflow with job and document operations", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+			defer cancel()
+
+			pdfPath := digitization.GetTestPDFPath()
+			gomega.Expect(pdfPath).NotTo(gomega.BeEmpty())
+
+			// Step 1: Create digitization job
+			logger.Infof("[TEST] Step 1: Creating digitization job")
+			jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "digitization", "json", "e2e-combined-workflow")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(jobResp).NotTo(gomega.BeNil())
+			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+			logger.Infof("[TEST] Created digitization job: %s", jobResp.JobID)
+
+			// Step 2: Get job status immediately after creation
+			logger.Infof("[TEST] Step 2: Getting job status")
+			status, err := digitization.GetJobStatus(ctx, digitizeBaseURL, jobResp.JobID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(status.JobID).To(gomega.Equal(jobResp.JobID))
+			logger.Infof("[TEST] Job status retrieved: %s", status.Status)
+
+			// Step 3: Wait for job completion (only wait ONCE for all checks)
+			logger.Infof("[TEST] Step 3: Waiting for job completion")
+			finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 10*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
+			logger.Infof("[TEST] Digitization job completed: %s", jobResp.JobID)
+
+			// Step 4: List jobs with pagination
+			logger.Infof("[TEST] Step 4: Listing jobs with pagination")
+			jobsList, err := digitization.ListJobs(ctx, digitizeBaseURL, false, 20, 0, "", "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(jobsList.Data).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] Listed %d jobs", len(jobsList.Data))
+
+			// Step 5: Get latest job
+			logger.Infof("[TEST] Step 5: Getting latest job")
+			latestJobsList, err := digitization.ListJobs(ctx, digitizeBaseURL, true, 1, 0, "", "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(latestJobsList.Data).To(gomega.HaveLen(1))
+			gomega.Expect(latestJobsList.Data[0].JobID).To(gomega.Equal(jobResp.JobID))
+			logger.Infof("[TEST] Latest job retrieved: %s", latestJobsList.Data[0].JobID)
+
+			// Step 6: List jobs with filters (digitization only)
+			logger.Infof("[TEST] Step 6: Listing jobs with operation filter")
+			filteredJobsList, err := digitization.ListJobs(ctx, digitizeBaseURL, false, 20, 0, "", "digitization")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			for _, job := range filteredJobsList.Data {
+				gomega.Expect(job.Operation).To(gomega.Equal("digitization"))
+			}
+			logger.Infof("[TEST] Listed %d digitization jobs with filter", len(filteredJobsList.Data))
+
+			// Step 7: Get document ID from completed job
+			logger.Infof("[TEST] Step 7: Getting document details")
+			gomega.Expect(finalStatus.Documents).NotTo(gomega.BeEmpty())
+			docID := finalStatus.Documents[0].ID
+			createdDocIDs = append(createdDocIDs, docID)
+
+			// Step 8: Get document details
+			doc, err := digitization.GetDocument(ctx, digitizeBaseURL, docID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(doc.ID).To(gomega.Equal(docID))
+			gomega.Expect(doc.JobID).To(gomega.Equal(jobResp.JobID))
+			gomega.Expect(doc.Name).To(gomega.Equal("test_doc.pdf"))
+			gomega.Expect(doc.Type).To(gomega.Equal("digitization"))
+			gomega.Expect(doc.Status).To(gomega.Equal("completed"))
+			gomega.Expect(doc.OutputFormat).To(gomega.Equal("json"))
+			logger.Infof("[TEST] Document details retrieved: %s (filename: %s)", doc.ID, doc.Name)
+
+			// Step 9: Get document content
+			logger.Infof("[TEST] Step 8: Getting document content")
+			content, err := digitization.GetDocumentContent(ctx, digitizeBaseURL, docID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(content.Result).NotTo(gomega.BeNil())
+			gomega.Expect(content.OutputFormat).To(gomega.Equal("json"))
+			// For JSON format, Result should be a map
+			resultMap, ok := content.Result.(map[string]interface{})
+			gomega.Expect(ok).To(gomega.BeTrue(), "Result should be a map for JSON format")
+			gomega.Expect(resultMap).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] Document content retrieved successfully")
+
+			// Step 10: List all documents
+			logger.Infof("[TEST] Step 9: Listing all documents")
+			docsList, err := digitization.ListDocuments(ctx, digitizeBaseURL, 20, 0)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(docsList).NotTo(gomega.BeNil())
+			gomega.Expect(docsList.Data).NotTo(gomega.BeEmpty())
+			logger.Infof("[TEST] Listed %d documents", len(docsList.Data))
+
+			logger.Infof("[TEST] ✓ Full digitization workflow completed successfully")
+		})
+
+		ginkgo.It("should complete full ingestion workflow", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+			defer cancel()
+
+			pdfPath := digitization.GetTestPDFPath()
+			gomega.Expect(pdfPath).NotTo(gomega.BeEmpty())
+
+			logger.Infof("[TEST] Creating ingestion job")
+			jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "ingestion", "json", "e2e-combined-ingestion")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+
+			logger.Infof("[TEST] Waiting for ingestion job completion")
+			finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
+
+			logger.Infof("[TEST] ✓ Ingestion job completed: %s", jobResp.JobID)
+		})
+
+		ginkgo.It("should support different output formats", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			defer cancel()
+
+			pdfPath := digitization.GetTestPDFPath()
+			formats := []string{"json", "md", "txt"}
+
+			// Process formats sequentially to avoid exceeding concurrent limit
+			for _, format := range formats {
+				jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "digitization", format, fmt.Sprintf("e2e-format-%s", format))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				createdJobIDs = append(createdJobIDs, jobResp.JobID)
+
+				// Wait for each job to complete before starting the next
+				finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 8*time.Minute)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
+
+				logger.Infof("[TEST] %s format job completed", format)
+			}
+		})
+
+		ginkgo.It("should handle job lifecycle including active job protection and deletion", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+			defer cancel()
+
+			pdfPath := digitization.GetTestPDFPath()
+			gomega.Expect(pdfPath).NotTo(gomega.BeEmpty())
+
+			// Step 1: Create job
+			logger.Infof("[TEST] Step 1: Creating job for lifecycle test")
+			jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "digitization", "json", "e2e-job-lifecycle")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+			logger.Infof("[TEST] Created job: %s", jobResp.JobID)
+
+			// Step 2: Try to delete active job (should fail with 409)
+			logger.Infof("[TEST] Step 2: Testing active job deletion protection")
+			time.Sleep(2 * time.Second) // Wait for job to start processing
+			err = digitization.DeleteJob(ctx, digitizeBaseURL, jobResp.JobID)
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(digitization.IsResourceLockedError(err)).To(gomega.BeTrue(),
+				"Expected resource locked error (409), got: %v", err)
+			logger.Infof("[TEST] ✓ Active job deletion correctly failed with resource locked error")
+
+			// Step 3: Wait for job completion
+			logger.Infof("[TEST] Step 3: Waiting for job completion")
+			_, err = digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 10*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			logger.Infof("[TEST] Job completed successfully")
+
+			// Step 4: Delete completed job (should succeed)
+			logger.Infof("[TEST] Step 4: Deleting completed job")
+			err = digitization.DeleteJob(ctx, digitizeBaseURL, jobResp.JobID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			logger.Infof("[TEST] ✓ Completed job deleted successfully")
+
+			// Step 5: Verify job is deleted (should return 404)
+			logger.Infof("[TEST] Step 5: Verifying job deletion")
+			_, err = digitization.GetJobStatus(ctx, digitizeBaseURL, jobResp.JobID)
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			logger.Infof("[TEST] ✓ Job deletion verified (404 returned)")
+
+			// Remove from cleanup list since we already deleted it
+			createdJobIDs = createdJobIDs[:len(createdJobIDs)-1]
+
+			logger.Infof("[TEST] ✓ Job lifecycle test completed successfully")
+		})
+
+		ginkgo.It("should handle document lifecycle including protection and deletion", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+			defer cancel()
+
+			pdfPath := digitization.GetTestPDFPath()
+			gomega.Expect(pdfPath).NotTo(gomega.BeEmpty())
+
+			// Step 1: Create job
+			logger.Infof("[TEST] Step 1: Creating job for document lifecycle test")
+			jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "digitization", "json", "e2e-doc-lifecycle")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+			logger.Infof("[TEST] Created job: %s", jobResp.JobID)
+
+			// Step 2: Try to delete in-progress document (should fail with 409)
+			logger.Infof("[TEST] Step 2: Testing in-progress document deletion protection")
+			time.Sleep(2 * time.Second) // Wait for job to start and document to be created
+
+			// Get job status to retrieve document ID
+			jobStatus, err := digitization.GetJobStatus(ctx, digitizeBaseURL, jobResp.JobID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(jobStatus.Documents).NotTo(gomega.BeEmpty())
+			docID := jobStatus.Documents[0].ID
+
+			// Try to delete the in-progress document
+			err = digitization.DeleteDocument(ctx, digitizeBaseURL, docID)
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(digitization.IsResourceLockedError(err)).To(gomega.BeTrue(),
+				"Expected resource locked error (409), got: %v", err)
+			logger.Infof("[TEST] ✓ In-progress document deletion correctly failed with resource locked error")
+
+			// Step 3: Wait for job completion
+			logger.Infof("[TEST] Step 3: Waiting for job completion")
+			finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 10*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			logger.Infof("[TEST] Job completed successfully")
+
+			// Step 4: Delete completed document (should succeed)
+			logger.Infof("[TEST] Step 4: Deleting completed document")
+			gomega.Expect(finalStatus.Documents).NotTo(gomega.BeEmpty())
+			docID = finalStatus.Documents[0].ID
+			err = digitization.DeleteDocument(ctx, digitizeBaseURL, docID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			logger.Infof("[TEST] ✓ Completed document deleted successfully")
+
+			// Step 5: Verify document is deleted (should return 404)
+			logger.Infof("[TEST] Step 5: Verifying document deletion")
+			_, err = digitization.GetDocument(ctx, digitizeBaseURL, docID)
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			logger.Infof("[TEST] ✓ Document deletion verified (404 returned)")
+
+			logger.Infof("[TEST] ✓ Document lifecycle test completed successfully")
+		})
+
+		ginkgo.It("should delete all documents", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+			defer cancel()
+
+			// Create and complete jobs sequentially to avoid exceeding concurrent limit
+			pdfPath := digitization.GetTestPDFPath()
+			for i := 0; i < 2; i++ {
+				jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "digitization", "json", fmt.Sprintf("e2e-delete-all-%d", i))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				createdJobIDs = append(createdJobIDs, jobResp.JobID)
+
+				// Wait for each job to complete before starting the next
+				_, err = digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 8*time.Minute)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			}
+
+			// Delete all documents
+			err := digitization.DeleteAllDocuments(ctx, digitizeBaseURL)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// Verify documents are deleted
+			docsList, err := digitization.ListDocuments(ctx, digitizeBaseURL, 20, 0)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(docsList.Data).To(gomega.BeEmpty())
+
+			logger.Infof("[TEST] All documents deleted successfully")
+			createdDocIDs = nil // Clear since all are deleted
+		})
+
+		ginkgo.It("should reject multiple files for digitization operation", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			pdfPath := digitization.GetTestPDFPath()
+			gomega.Expect(pdfPath).NotTo(gomega.BeEmpty())
+
+			// Try to create a job with multiple files (using the same file twice for simplicity)
+			filePaths := []string{pdfPath, pdfPath}
+			errorResp, err := digitization.CreateJobWithMultipleFiles(ctx, digitizeBaseURL, filePaths, "digitization", "json", "e2e-multiple-files-test")
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("INVALID_REQUEST"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.Equal("Request validation failed: Only 1 file allowed for digitization."))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(400))
+
+			logger.Infof("[TEST] Multiple files correctly rejected for digitization with error: %s", errorResp.Error.Message)
+		})
+
+		ginkgo.It("should reject third concurrent digitization job with rate limit error", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+			defer cancel()
+
+			pdfPath := digitization.GetTestPDFPath()
+			gomega.Expect(pdfPath).NotTo(gomega.BeEmpty())
+
+			// Create first digitization job
+			job1, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "digitization", "json", "e2e-concurrent-1")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(job1).NotTo(gomega.BeNil())
+			gomega.Expect(job1.JobID).NotTo(gomega.BeEmpty())
+			createdJobIDs = append(createdJobIDs, job1.JobID)
+			logger.Infof("[TEST] Created first digitization job: %s", job1.JobID)
+
+			// Create second digitization job
+			job2, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "digitization", "json", "e2e-concurrent-2")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(job2).NotTo(gomega.BeNil())
+			gomega.Expect(job2.JobID).NotTo(gomega.BeEmpty())
+			createdJobIDs = append(createdJobIDs, job2.JobID)
+			logger.Infof("[TEST] Created second digitization job: %s", job2.JobID)
+
+			// Try to create third digitization job - should fail with rate limit error
+			errorResp, err := digitization.CreateJobExpectingError(ctx, digitizeBaseURL, pdfPath, "digitization", "json", "e2e-concurrent-3")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("RATE_LIMIT_EXCEEDED"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.Equal("Too many requests: Too many concurrent OperationType.DIGITIZATION requests."))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(429))
+
+			logger.Infof("[TEST] Third concurrent digitization job correctly rejected with rate limit error: %s", errorResp.Error.Message)
+
+			// Wait for the first two jobs to complete before cleanup
+			logger.Infof("[TEST] Waiting for concurrent jobs to complete before cleanup...")
+			_, _ = digitization.WaitForJobCompletion(ctx, digitizeBaseURL, job1.JobID, 10*time.Minute)
+			_, _ = digitization.WaitForJobCompletion(ctx, digitizeBaseURL, job2.JobID, 10*time.Minute)
+		})
+
+		ginkgo.It("should reject concurrent ingestion jobs with rate limit error", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+			defer cancel()
+
+			pdfPath := digitization.GetTestPDFPath()
+			gomega.Expect(pdfPath).NotTo(gomega.BeEmpty())
+
+			// Start the first ingestion job
+			job1Resp, err := digitization.CreateJob(ctx, digitizeBaseURL, pdfPath, "ingestion", "json", "e2e-concurrent-ingestion-1")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(job1Resp).NotTo(gomega.BeNil())
+			gomega.Expect(job1Resp.JobID).NotTo(gomega.BeEmpty())
+			createdJobIDs = append(createdJobIDs, job1Resp.JobID)
+
+			// Wait a moment to ensure the first job starts processing
+			time.Sleep(2 * time.Second)
+
+			// Try to start a second ingestion job while the first is still running
+			// This should fail with a 429 rate limit error
+			errorResp, err := digitization.CreateJobExpectingError(ctx, digitizeBaseURL, pdfPath, "ingestion", "json", "e2e-concurrent-ingestion-2")
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("RATE_LIMIT_EXCEEDED"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.ContainSubstring("Too many requests: An ingestion job is already running"))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(429))
+
+			logger.Infof("[TEST] Concurrent ingestion job correctly rejected with rate limit error: %s", errorResp.Error.Message)
+
+			// Wait for the first job to complete before cleanup
+			_, err = digitization.WaitForJobCompletion(ctx, digitizeBaseURL, job1Resp.JobID, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("should reject invalid PDF file for digitization operation", ginkgo.Label("test1"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			// Get path to invalid PDF (PNG file with .pdf extension)
+			_, filename, _, ok := runtime.Caller(0)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			testDir := filepath.Dir(filename)
+			invalidPDFPath := filepath.Join(testDir, "ingestion", "docs", "sample_png.pdf")
+
+			logger.Infof("[TEST] Testing digitization with invalid PDF file: %s", invalidPDFPath)
+
+			// Try to create a digitization job with invalid PDF
+			errorResp, err := digitization.CreateJobExpectingError(ctx, digitizeBaseURL, invalidPDFPath, "digitization", "json", "e2e-invalid-pdf-digitization")
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("UNSUPPORTED_MEDIA_TYPE"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.Equal("File format not supported: File has .pdf extension but unsupported format: sample_png.pdf"))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(415))
+
+			logger.Infof("[TEST] Invalid PDF correctly rejected for digitization with error: %s", errorResp.Error.Message)
+		})
+
+		ginkgo.It("should reject invalid PDF file for ingestion operation", ginkgo.Label("test1"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			// Get path to invalid PDF (PNG file with .pdf extension)
+			_, filename, _, ok := runtime.Caller(0)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			testDir := filepath.Dir(filename)
+			invalidPDFPath := filepath.Join(testDir, "ingestion", "docs", "sample_png.pdf")
+
+			logger.Infof("[TEST] Testing ingestion with invalid PDF file: %s", invalidPDFPath)
+
+			// Try to create an ingestion job with invalid PDF
+			errorResp, err := digitization.CreateJobExpectingError(ctx, digitizeBaseURL, invalidPDFPath, "ingestion", "json", "e2e-invalid-pdf-ingestion")
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("UNSUPPORTED_MEDIA_TYPE"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.Equal("File format not supported: File has .pdf extension but unsupported format: sample_png.pdf"))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(415))
+
+			logger.Infof("[TEST] Invalid PDF correctly rejected for ingestion with error: %s", errorResp.Error.Message)
+		})
+
+		ginkgo.It("should reject non-PDF file for digitization operation", ginkgo.Label("test1"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			// Get path to non-PDF file (TXT file)
+			_, filename, _, ok := runtime.Caller(0)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			testDir := filepath.Dir(filename)
+			nonPDFPath := filepath.Join(testDir, "ingestion", "docs", "sample_txt.txt")
+
+			logger.Infof("[TEST] Testing digitization with non-PDF file: %s", nonPDFPath)
+
+			// Try to create a digitization job with non-PDF file
+			errorResp, err := digitization.CreateJobExpectingError(ctx, digitizeBaseURL, nonPDFPath, "digitization", "json", "e2e-non-pdf-digitization")
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("UNSUPPORTED_MEDIA_TYPE"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.Equal("File format not supported: Only PDF files are allowed. Invalid file: sample_txt.txt"))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(415))
+
+			logger.Infof("[TEST] Non-PDF file correctly rejected for digitization with error: %s", errorResp.Error.Message)
+		})
+
+		ginkgo.It("should reject non-PDF file for ingestion operation", ginkgo.Label("test1"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			// Get path to non-PDF file (TXT file)
+			_, filename, _, ok := runtime.Caller(0)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			testDir := filepath.Dir(filename)
+			nonPDFPath := filepath.Join(testDir, "ingestion", "docs", "sample_txt.txt")
+
+			logger.Infof("[TEST] Testing ingestion with non-PDF file: %s", nonPDFPath)
+
+			// Try to create an ingestion job with non-PDF file
+			errorResp, err := digitization.CreateJobExpectingError(ctx, digitizeBaseURL, nonPDFPath, "ingestion", "json", "e2e-non-pdf-ingestion")
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("UNSUPPORTED_MEDIA_TYPE"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.Equal("File format not supported: Only PDF files are allowed. Invalid file: sample_txt.txt"))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(415))
+
+			logger.Infof("[TEST] Non-PDF file correctly rejected for ingestion with error: %s", errorResp.Error.Message)
+		})
+
+		ginkgo.It("should successfully process blank PDF file for digitization operation", ginkgo.Label("test1"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+			defer cancel()
+
+			// Get path to blank PDF file
+			_, filename, _, ok := runtime.Caller(0)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			testDir := filepath.Dir(filename)
+			blankPDFPath := filepath.Join(testDir, "ingestion", "docs", "blank.pdf")
+
+			logger.Infof("[TEST] Testing digitization with blank PDF file: %s", blankPDFPath)
+
+			// Create digitization job with blank PDF
+			jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, blankPDFPath, "digitization", "json", "e2e-blank-pdf-digitization")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(jobResp).NotTo(gomega.BeNil())
+			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+			logger.Infof("[TEST] Created digitization job with blank PDF: %s", jobResp.JobID)
+
+			// Wait for job completion
+			logger.Infof("[TEST] Waiting for blank PDF digitization job completion")
+			finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 10*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
+			logger.Infof("[TEST] ✓ Blank PDF digitization job completed successfully: %s", jobResp.JobID)
+
+			// Verify document was created
+			gomega.Expect(finalStatus.Documents).NotTo(gomega.BeEmpty())
+			docID := finalStatus.Documents[0].ID
+			createdDocIDs = append(createdDocIDs, docID)
+
+			// Get document details
+			doc, err := digitization.GetDocument(ctx, digitizeBaseURL, docID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(doc.Status).To(gomega.Equal("completed"))
+			gomega.Expect(doc.Name).To(gomega.Equal("blank.pdf"))
+			logger.Infof("[TEST] ✓ Blank PDF digitization completed successfully")
+		})
+
+		ginkgo.It("should successfully process blank PDF file for ingestion operation", ginkgo.Label("test1"), func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+			defer cancel()
+
+			// Get path to blank PDF file
+			_, filename, _, ok := runtime.Caller(0)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			testDir := filepath.Dir(filename)
+			blankPDFPath := filepath.Join(testDir, "ingestion", "docs", "blank.pdf")
+
+			logger.Infof("[TEST] Testing ingestion with blank PDF file: %s", blankPDFPath)
+
+			// Create ingestion job with blank PDF
+			jobResp, err := digitization.CreateJob(ctx, digitizeBaseURL, blankPDFPath, "ingestion", "json", "e2e-blank-pdf-ingestion")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(jobResp).NotTo(gomega.BeNil())
+			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+			logger.Infof("[TEST] Created ingestion job with blank PDF: %s", jobResp.JobID)
+
+			// Wait for job completion
+			logger.Infof("[TEST] Waiting for blank PDF ingestion job completion")
+			finalStatus, err := digitization.WaitForJobCompletion(ctx, digitizeBaseURL, jobResp.JobID, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(finalStatus.Status).To(gomega.Equal("completed"))
+			logger.Infof("[TEST] ✓ Blank PDF ingestion job completed successfully: %s", jobResp.JobID)
+
+			// Verify document was created
+			gomega.Expect(finalStatus.Documents).NotTo(gomega.BeEmpty())
+			docID := finalStatus.Documents[0].ID
+			createdDocIDs = append(createdDocIDs, docID)
+
+			// Get document details
+			doc, err := digitization.GetDocument(ctx, digitizeBaseURL, docID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(doc.Status).To(gomega.Equal("completed"))
+			gomega.Expect(doc.Name).To(gomega.Equal("blank.pdf"))
+			logger.Infof("[TEST] ✓ Blank PDF ingestion completed successfully")
 		})
 	})
 	ginkgo.Context("Application Teardown", func() {

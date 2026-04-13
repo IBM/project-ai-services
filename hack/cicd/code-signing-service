@@ -1,0 +1,300 @@
+pipeline {
+    agent { label 'shared-x86-centos9' }
+    
+    parameters {
+        string(
+            name: 'VERSION',
+            defaultValue: 'v0.2.0-rc.1',
+            description: 'Version to sign (e.g., v0.2.0-rc.1)'
+        )
+    }
+    
+    environment { 
+        CERT_DIR = "${WORKSPACE}/certs"
+        PUBLIC_ARTIFACTS_DIR = "${WORKSPACE}/public-artifacts"
+        DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR = '/home/jenkins/public-artifacts'
+        PFX_CREDS = credentials('pfx-credentials')
+        REGISTRY = 'docker-na.artifactory.swg-devops.com'
+        AI_SERVICES_REPO_URL = 'https://github.com/IBM/project-ai-services.git'
+        REPO_DIR = 'project-ai-services'
+        GARASIGN_CLIENT = '/opt/Garantir/bin/garasign'
+        HOME_DIR = '/home/jenkins'
+    }
+    
+    stages {
+        stage('Validate Parameters') {
+            steps {
+                script {
+                    validateVersion()
+                    deleteDir()
+                }
+            }
+        }
+
+        stage('Setup Certs') {
+            steps {
+                script {
+                    setupCerts()
+                }
+            }
+        }
+
+        stage('Code Signing Agent') {
+            agent {
+                docker {
+                    label 'shared-x86-centos9'
+
+                    image "${env.REGISTRY}/taas-docker-public/jonk/agent-jnlp:latest"
+                    registryCredentialsId 'jfrog'
+                    registryUrl "https://${env.REGISTRY}"
+                    args """
+                    -e VERSION=${params.VERSION} \
+                    -e CODE_SIGNING_PFX_FILE=${env.HOME_DIR}/certs/cert.pfx \
+                    -e CODE_SIGNING_P12_PASSWORD=${PFX_CREDS} \
+                    -v ${CERT_DIR}:${env.HOME_DIR}/certs:z \
+                    -v ${PUBLIC_ARTIFACTS_DIR}:${DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR}:z
+                    """
+                }
+            }
+
+            stages {
+                stage('Initialize Garasign Client') {
+                    steps {
+                        script {
+                            initializeGaraClient()
+                        }
+                    }
+                }
+
+                stage('Export Public Certificates') {
+                    steps {
+                        script {
+                            exportPublicCertificates()
+                        }
+                    }
+                }
+
+                stage('Checkout Repository') {
+                    steps {
+                        script {
+                            checkoutRepository()
+                        }
+                    }
+                }
+
+                stage('Build Binaries') {
+                    steps {
+                        script {
+                            buildBinaries()
+                        }
+                    }
+                }
+
+                stage('Sign and Verify Binaries') {
+                    steps {
+                        script {
+                            signAndVerifyBinaries()
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Upload Artifacts') {
+            steps {
+                script {
+                    uploadArtifacts()
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            script {
+                cleanup()
+            }
+        }
+        success {
+            echo "Code signing pipeline completed successfully for version ${params.VERSION}"
+        }
+        failure {
+            echo "Code signing pipeline failed for version ${params.VERSION}"
+        }
+    }
+}
+
+def validateVersion() {
+    if (!params.VERSION) {
+        error('VERSION parameter is required')
+    }
+
+    echo "Validating version: ${params.VERSION}"
+
+    def tags = sh(
+        script: "git ls-remote --tags ${env.AI_SERVICES_REPO_URL} | cut -d/ -f3",
+        returnStdout: true
+    ).trim()
+
+    if (!tags.contains(params.VERSION)) {
+        error "Failed to find tag ${params.VERSION} in repository"
+    }
+
+    echo "Version ${params.VERSION} validated successfully"
+}
+
+def setupCerts() {
+    echo "Setting up certificate directory..."
+    
+    sh """
+        mkdir -p ${env.CERT_DIR}
+        mkdir -p ${env.PUBLIC_ARTIFACTS_DIR}
+    """
+    
+    withCredentials([
+        file(credentialsId: 'garasign-pfx-cert', variable: 'PFX_CERT')
+    ]) {
+        sh """
+            cp \${PFX_CERT} ${env.CERT_DIR}/cert.pfx
+            chmod 600 ${env.CERT_DIR}/cert.pfx
+        """
+    }
+    
+    echo "Credentials prepared successfully"
+}
+
+def loginToRegistry() {
+    echo "Logging in to ${env.REGISTRY}..."
+    
+    withCredentials([usernamePassword(
+        credentialsId: 'jfrog',
+        usernameVariable: 'USERNAME',
+        passwordVariable: 'PASSWORD'
+    )]) {
+        sh 'echo ${PASSWORD} | docker login ${REGISTRY} -u ${USERNAME} --password-stdin'
+    }
+    
+    echo "Registry login successful"
+}
+
+def initializeGaraClient() {
+    echo "Initializing Garasign client..."
+    
+    sh """
+        setup-garasign-client
+        cp ${env.HOME_DIR}/.config/Garantir/GRS/config.ini /root/.config/Garantir/GRS/config.ini
+        GrsGPGLoader
+        garasign listkeys
+    """
+    
+    echo "Garasign initialized successfully"
+}
+
+def exportPublicCertificates() {
+    echo 'Exporting public certificates...'
+    
+    def keys = sh(
+        script: "$GARASIGN_CLIENT listkeys | grep -i PRD | awk 'NR==1{print \$8}'",
+        returnStdout: true
+    ).trim()
+    
+    if (!keys) {
+        error 'Failed to retrieve Garasign key'
+    }
+    
+    env.KEYS = keys
+    echo "Using Garasign key: ${env.KEYS}"
+    
+    sh """
+        $GARASIGN_CLIENT export \
+            --key \${KEYS} \
+            --outputDirectory \${DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR}
+        
+        mv \${DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR}/\${KEYS}.pem.pub.key \
+           \${DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR}/cosign.pub
+        
+        rm -rf \${DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR}/\${KEYS}.*
+        
+        ls -lrt \${DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR}
+    """
+    
+    echo "Public certificates exported successfully"
+}
+
+def checkoutRepository() {
+    echo "Checking out repository at version ${params.VERSION}..."
+    
+    sh """
+        rm -rf ${env.REPO_DIR}
+        git clone ${env.AI_SERVICES_REPO_URL}
+        cd ${env.REPO_DIR}
+        git checkout ${params.VERSION}
+        ls -lrt
+    """
+}
+
+def buildBinaries() {
+    echo "Building binaries..."
+    
+    sh """
+        cd ${env.REPO_DIR}/ai-services
+        make binaries
+        ls -lrt bin
+    """
+}
+
+def signAndVerifyBinaries() {
+    echo "Signing and verifying binaries..."
+    
+    sh '''
+        find "./project-ai-services/ai-services/bin" -type f -executable | while read -r BINARY_PATH; do
+            BINARY_NAME=$(basename "$BINARY_PATH")
+            echo "Processing $BINARY_NAME..."
+            
+            # Copy binary to artifacts directory
+            cp "$BINARY_PATH" "$DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR"
+            
+            # Sign the binary
+            echo "Signing $BINARY_NAME..."
+            $GARASIGN_CLIENT sign \
+                --type cosign \
+                --additionalFlags --tlog-upload=false \
+                --key "$KEYS" \
+                --inputFile "$BINARY_PATH" \
+                --outputDirectory "$DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR" \
+                --overwrite
+            
+            # Verify the signature
+            echo "Verifying signature for $BINARY_NAME..."
+            cosign verify-blob \
+                --key "$DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR/cosign.pub" \
+                --insecure-ignore-tlog \
+                --signature "$DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR/${BINARY_NAME}.cosign.sig" \
+                "$BINARY_PATH"
+            
+            echo "✓ $BINARY_NAME signed and verified successfully"
+            echo "---"
+        done
+    '''
+    
+    echo 'All binaries signed and verified successfully'
+}
+
+def uploadArtifacts() {
+    echo 'Uploading signed artifacts...'
+    
+    sh "ls -lrt ${env.PUBLIC_ARTIFACTS_DIR}"
+    
+    archiveArtifacts(
+        artifacts: 'public-artifacts/**/*',
+        fingerprint: true,
+        allowEmptyArchive: false
+    )
+    
+    echo "Artifacts uploaded successfully"
+}
+
+def cleanup() {
+    echo "Cleaning up..."
+    sh "rm -rf ${env.CERT_DIR}"
+}

@@ -73,6 +73,11 @@ func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error)
 		return nil, err
 	}
 
+	// Check if cluster is accessible
+	if err := checkClusterAccessibility(); err != nil {
+		return nil, fmt.Errorf("cluster is not accessible: %w", err)
+	}
+
 	return &OpenshiftClient{
 		Client:      controllerRuntimeClient,
 		KubeClient:  kubeClient,
@@ -118,6 +123,16 @@ func initializeClients() error {
 	})
 
 	return clientsErr
+}
+
+// checkClusterAccessibility verifies that the cluster is accessible by making a simple API call.
+func checkClusterAccessibility() error {
+	_, err := kubeClient.Discovery().ServerVersion()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // getKubeConfig attempts to get openshift config from in-cluster or kubeconfig file.
@@ -180,7 +195,7 @@ func (kc *OpenshiftClient) ListPods(filters map[string][]string) ([]types.Pod, e
 }
 
 // CreatePod creates a pod from YAML manifest.
-func (kc *OpenshiftClient) CreatePod(body io.Reader) ([]types.Pod, error) {
+func (kc *OpenshiftClient) CreatePod(body io.Reader, opts map[string]string) ([]types.Pod, error) {
 	logger.Warningln("Not implemented")
 
 	return nil, nil
@@ -251,13 +266,6 @@ func (kc *OpenshiftClient) PodLogs(podNameOrID string) error {
 
 	return followLogs(kc, podName, opts)
 }
-
-// ListContainers lists containers (returns pods' containers in Openshift).
-// func (kc *OpenshiftClient) ListContainers(filters map[string][]string) ([]types.Container, error) {
-// 	logger.Warningln("not implemented")
-
-// 	return nil, nil
-// }
 
 // InspectContainer inspects a container.
 func (kc *OpenshiftClient) InspectContainer(nameOrID string) (*types.Container, error) {

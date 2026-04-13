@@ -36,8 +36,12 @@ class OpensearchVectorStore(VectorStore):
         self.db_prefix = os.getenv("OPENSEARCH_DB_PREFIX", "rag").lower()
         i_name = os.getenv("OPENSEARCH_INDEX_NAME", "default")
         self.index_name = self._generate_index_name(i_name.lower())
+        
+        # Replication settings for multi-node clusters
+        self.num_shards = int(os.getenv("OPENSEARCH_NUM_SHARDS", "1"))
 
         logger.debug(f"Connecting to OpenSearch at {self.host}:{self.port}, index: {self.index_name}")
+        logger.debug(f"Index configuration: shards={self.num_shards}")
 
         self.client = OpenSearch(
             hosts=[{'host': self.host, 'port': self.port}],
@@ -96,7 +100,9 @@ class OpensearchVectorStore(VectorStore):
             "settings": {
                 "index": {
                     "knn": True,  # Enable k-NN search functionality
-                    "knn.algo_param.ef_search": 100  # Number of candidates to consider during search (higher = more accurate but slower)
+                    "knn.algo_param.ef_search": 100,  # Number of candidates to consider during search (higher = more accurate but slower)
+                    "number_of_shards": self.num_shards,  # Number of primary shards for data distribution
+                    'auto_expand_replicas': '0-all' # dynamically set the replicas based on nodes
                 }
             },
             "mappings": {

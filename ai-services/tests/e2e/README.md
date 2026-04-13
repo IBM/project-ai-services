@@ -38,7 +38,7 @@ minimum number of Spyre cards installed, amongst other pre-flight checks.
       ```bash
       make test
 
-      make test-generate-report TEST_ARGS="--timeout=2h"
+      make test-generate-report TEST_ARGS="--timeout=3h" APP_RUNTIME=<openshift/podman - default is podman>
       ```
 
       Notes:
@@ -56,10 +56,10 @@ minimum number of Spyre cards installed, amongst other pre-flight checks.
       export PATH=$PATH:$(go env GOPATH)/bin
 
       ### run the whole suite
-      ginkgo -r --timeout=2h ./tests/e2e
+      ginkgo -r --timeout=3h ./tests/e2e --runtime=<openshift/podman - default is podman>
 
       ### to generate a junit report with ginkgo
-      ginkgo  -r --timeout=2h --junit-report=e2e-report.xml --output-dir=tests/e2e/reports ./tests/e2e/...
+      ginkgo  -r --timeout=3h --runtime=<openshift/podman - default is podman> --junit-report=e2e-report.xml --output-dir=tests/e2e/reports ./tests/e2e/...
       ```
 
 ## Environment variables to set before running tests
@@ -156,6 +156,44 @@ ginkgo -r ./tests/e2e \
   --app-name=<existing-app-name>
 ```
 
+## Running Digitization API Tests Independently
+
+The Digitization API tests can be executed independently from the full E2E lifecycle. This allows validating an already running RAG application without creating or deleting an application during the test run.
+
+## Prerequisites
+
+- A RAG application must already be running.
+- The application must be healthy.
+- The application must expose an accessible endpoint.
+- The following environment variable must be set
+
+- The following environment variable must be set
+
+```
+export DIGITIZE_PORT=4100
+
+```
+
+- Verify the application exists:
+
+```
+ai-services application info <app-name> --runtime <runtime>
+```
+
+If this command fails, test run will fail.
+
+## Command to Run Digitization API tests Only
+
+```
+ make test TEST_ARGS="--label-filter=\"digitization-tests\" --timeout=2h" APP_NAME=<appname> APP_RUNTIME=<runtime>
+```
+
+OR
+
+```
+ginkgo -r --label-filter="digitization-tests" --timeout=2h ./tests/e2e -- --app-name=<appname>  --runtime=<runtime>
+```
+
 ## Adding new E2E tests
 
 Add new test files under `ai-services/tests/e2e/` as standard Go test files (package `e2e`). The suite's entrypoint is `e2e_suite_test.go` which registers the Ginkgo suite.
@@ -220,10 +258,12 @@ ai-services/tests/e2e/
    │   └─ vars.go
    ├─ config/                     # test configuration helpers
    │   └─ config.go
+   ├─ digitization/               # digitization api test helper functions
+   │   ├─ digitize.go
    ├─ ingestion/                  # document ingestion helpers and test fixtures
    │   ├─ ingest.go
    │   ├─ wait.go
-   │   └─ test_doc.pdf
+   │   └─ docs/                   # test documents for document ingestion and digitization
    ├─ podman/                     # Podman verification helpers (containers, ports, etc.)
    │   └─ containers.go
    ├─ rag/                        # RAG-related test helpers (embeddings, setup, validate)

@@ -87,6 +87,8 @@ spec:
           value: "{{ .Values.opensearch.auth.username }}"
         - name: OPENSEARCH_PASSWORD
           value: "{{ .Values.opensearch.auth.password }}"
+        - name: OPENSEARCH_NUM_SHARDS
+          value: "1"
         - name: LOG_LEVEL
           value: "{{ .Values.digitize.log_level }}"
       volumeMounts:
