@@ -22,13 +22,13 @@ set_log_level(log_level)
 
 import common.db_utils as db
 from common.misc_utils import get_model_endpoints, set_request_id
+from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from chatbot.backend_utils import validate_query_length
 import similarity.config as config
 from similarity.similarity_utils import (
     SimilaritySearchRequest,
     SimilaritySearchResponse,
     SimilaritySearchResult,
-    error_responses,
     perform_similarity_search,
 )
 
@@ -76,6 +76,8 @@ app = FastAPI(
     openapi_tags=tags_metadata,
 )
 
+app.add_exception_handler(HTTPException, http_exception_handler)
+
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
@@ -97,7 +99,7 @@ def swagger_root():
 @app.post(
     "/v1/similarity-search",
     response_model=SimilaritySearchResponse,
-    responses=error_responses,
+    responses={400: http_error_responses[400], 500: http_error_responses[500], 503: http_error_responses[503]},
     tags=["similarity"],
     summary="Vector similarity search",
     description=(
@@ -118,10 +120,10 @@ def swagger_root():
 )
 async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchResponse:
     if not req.query or not req.query.strip():
-        raise HTTPException(status_code=400, detail="query is required")
+        APIError.raise_error(ErrorCode.EMPTY_INPUT, "query is required")
 
     if req.mode not in ["dense", "sparse", "hybrid"]:
-        raise HTTPException(status_code=400, detail="mode must be one of: dense, sparse, hybrid")
+        APIError.raise_error(ErrorCode.INVALID_PARAMETER, "mode must be one of: dense, sparse, hybrid")
     try:
         emb_model = emb_model_dict["emb_model"]
         emb_endpoint = emb_model_dict["emb_endpoint"]
@@ -133,7 +135,7 @@ async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchRes
             validate_query_length, req.query, emb_endpoint
         )
         if not is_valid:
-            raise HTTPException(status_code=400, detail=error_msg)
+            APIError.raise_error(ErrorCode.INVALID_REQUEST, error_msg)
 
         top_k = req.top_k if req.top_k is not None else config.NUM_CHUNKS_POST_SEARCH
 
@@ -157,9 +159,9 @@ async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchRes
         )
 
     except db.VectorStoreNotReadyError:
-        raise HTTPException(status_code=503, detail="Index is empty. Ingest documents first.")
+        APIError.raise_error(ErrorCode.VECTOR_STORE_NOT_READY, "Index is empty. Ingest documents first.")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=repr(e))
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
 
     results = [
         SimilaritySearchResult(

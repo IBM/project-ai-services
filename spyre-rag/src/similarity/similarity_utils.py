@@ -1,9 +1,10 @@
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from chatbot.retrieval_utils import retrieve_documents
 from chatbot.reranker_utils import rerank_documents
+from common.error_utils import http_error_responses
 
 
 
@@ -71,64 +72,6 @@ class SimilaritySearchResponse(BaseModel):
         }
     }
 
-
-class _ErrorDetail(BaseModel):
-    code: str = Field(..., description="Machine-readable error code")
-    message: str = Field(..., description="Human-readable error message")
-    status: int = Field(..., description="HTTP status code")
-
-
-class _ErrorResponse(BaseModel):
-    error: _ErrorDetail
-
-
-error_responses: Dict[int | str, Dict[str, Any]] = {
-    400: {
-        "description": "Bad request — missing or empty query",
-        "model": _ErrorResponse,
-        "content": {
-            "application/json": {
-                "example": {
-                    "error": {
-                        "code": "MISSING_QUERY",
-                        "message": "query is required",
-                        "status": 400
-                    }
-                }
-            }
-        }
-    },
-    503: {
-        "description": "Vector store not ready — no documents ingested yet",
-        "model": _ErrorResponse,
-        "content": {
-            "application/json": {
-                "example": {
-                    "error": {
-                        "code": "DB_NOT_READY",
-                        "message": "Index is empty. Ingest documents first.",
-                        "status": 503
-                    }
-                }
-            }
-        }
-    },
-    500: {
-        "description": "Internal server error",
-        "model": _ErrorResponse,
-        "content": {
-            "application/json": {
-                "example": {
-                    "error": {
-                        "code": "INTERNAL_ERROR",
-                        "message": "Unexpected error during similarity search",
-                        "status": 500
-                    }
-                }
-            }
-        }
-    },
-}
 
 
 def perform_similarity_search(
