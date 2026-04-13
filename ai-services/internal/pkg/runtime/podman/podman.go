@@ -15,6 +15,8 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/images"
 	"github.com/containers/podman/v5/pkg/bindings/kube"
 	"github.com/containers/podman/v5/pkg/bindings/pods"
+	"github.com/containers/podman/v5/pkg/specgen"
+	spec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -291,6 +293,70 @@ func (pc *PodmanClient) ContainerLogs(containerNameOrID string) error {
 
 func (pc *PodmanClient) ContainerExists(nameOrID string) (bool, error) {
 	return containers.Exists(pc.Context, nameOrID, nil)
+}
+
+// RemoveContainer removes a container by ID or name.
+// ContainerMount represents a volume mount for a container.
+type ContainerMount struct {
+	Type        string
+	Source      string
+	Destination string
+	Options     []string
+}
+
+// RunContainerWithSpec creates, starts, waits for, and removes a container with the given configuration.
+// Returns the exit code of the container.
+func (pc *PodmanClient) RunContainerWithSpec(
+	image string,
+	command []string,
+	mounts []ContainerMount,
+	terminal, stdin bool,
+) (int32, error) {
+	// Create container spec
+	s := specgen.NewSpecGenerator(image, false)
+	s.Terminal = &terminal
+	s.Stdin = &stdin
+	s.Command = command
+
+	// Convert mounts
+	if len(mounts) > 0 {
+		s.Mounts = make([]spec.Mount, len(mounts))
+		for i, m := range mounts {
+			s.Mounts[i] = spec.Mount{
+				Type:        m.Type,
+				Source:      m.Source,
+				Destination: m.Destination,
+				Options:     m.Options,
+			}
+		}
+	}
+
+	// Create container
+	createResponse, err := containers.CreateWithSpec(pc.Context, s, nil)
+	if err != nil {
+		return -1, fmt.Errorf("failed to create container: %w", err)
+	}
+
+	containerID := createResponse.ID
+
+	// Ensure container cleanup
+	defer func() {
+		force := true
+		_, _ = containers.Remove(pc.Context, containerID, &containers.RemoveOptions{Force: &force})
+	}()
+
+	// Start container
+	if err := containers.Start(pc.Context, containerID, nil); err != nil {
+		return -1, fmt.Errorf("failed to start container: %w", err)
+	}
+
+	// Wait for container to complete
+	exitCode, err := containers.Wait(pc.Context, containerID, nil)
+	if err != nil {
+		return -1, fmt.Errorf("failed to wait for container: %w", err)
+	}
+
+	return exitCode, nil
 }
 
 func (pc *PodmanClient) ListRoutes() ([]types.Route, error) {

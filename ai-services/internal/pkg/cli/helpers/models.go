@@ -3,13 +3,13 @@ package helpers
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -52,28 +52,42 @@ func DownloadModel(model, targetDir string) error {
 		}
 	}
 	logger.Infof("Downloading model %s to %s\n", model, targetDir)
-	command := "podman"
-	// All arguments must be passed as a slice of strings
-	args := []string{
-		"run",
-		"-ti",
-		"-v",
-		fmt.Sprintf("%s:/models:Z", targetDir),
-		vars.ToolImage,
+
+	// Get Podman client
+	runtimeClient, err := podman.NewPodmanClient()
+	if err != nil {
+		return fmt.Errorf("failed to create podman client: %w", err)
+	}
+
+	// Set up volume mount
+	mounts := []podman.ContainerMount{
+		{
+			Type:        "bind",
+			Source:      targetDir,
+			Destination: "/models",
+			Options:     []string{"Z"},
+		},
+	}
+
+	// Set command and args
+	command := []string{
 		"hf",
 		"download",
 		model,
 		"--local-dir",
 		fmt.Sprintf("/models/%s", model),
 	}
-	cmd := exec.Command(command, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	err := cmd.Run()
+
+	// Run container with spec
+	exitCode, err := runtimeClient.RunContainerWithSpec(vars.ToolImage, command, mounts, true, true)
 	if err != nil {
-		return fmt.Errorf("failed to execute command: %w", err)
+		return fmt.Errorf("failed to run container: %w", err)
 	}
+
+	if exitCode != 0 {
+		return fmt.Errorf("model download failed with exit code %d", exitCode)
+	}
+
 	logger.Infoln("Model downloaded successfully")
 
 	return nil
