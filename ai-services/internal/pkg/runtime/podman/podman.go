@@ -295,7 +295,6 @@ func (pc *PodmanClient) ContainerExists(nameOrID string) (bool, error) {
 	return containers.Exists(pc.Context, nameOrID, nil)
 }
 
-// RemoveContainer removes a container by ID or name.
 // ContainerMount represents a volume mount for a container.
 type ContainerMount struct {
 	Type        string
