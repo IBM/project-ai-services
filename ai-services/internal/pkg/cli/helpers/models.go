@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/containers/podman/v5/pkg/specgen"
+	spec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -59,8 +61,24 @@ func DownloadModel(model, targetDir string) error {
 		return fmt.Errorf("failed to create podman client: %w", err)
 	}
 
-	// Set up volume mount
-	mounts := []podman.ContainerMount{
+	// Create container spec
+	s := specgen.NewSpecGenerator(vars.ToolImage, false)
+	terminal := true
+	stdin := true
+	s.Terminal = &terminal
+	s.Stdin = &stdin
+	s.Command = []string{
+		"hf",
+		"download",
+		model,
+		"--local-dir",
+		fmt.Sprintf("/models/%s", model),
+	}
+	rm := true
+	s.Remove = &rm
+
+	// Convert mounts
+	s.Mounts = []spec.Mount{
 		{
 			Type:        "bind",
 			Source:      targetDir,
@@ -69,17 +87,8 @@ func DownloadModel(model, targetDir string) error {
 		},
 	}
 
-	// Set command and args
-	command := []string{
-		"hf",
-		"download",
-		model,
-		"--local-dir",
-		fmt.Sprintf("/models/%s", model),
-	}
-
 	// Run container with spec
-	exitCode, err := runtimeClient.RunContainerWithSpec(vars.ToolImage, command, mounts, true, true)
+	exitCode, err := runtimeClient.RunContainerWithSpec(s)
 	if err != nil {
 		return fmt.Errorf("failed to run container: %w", err)
 	}

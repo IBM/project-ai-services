@@ -16,7 +16,6 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/kube"
 	"github.com/containers/podman/v5/pkg/bindings/pods"
 	"github.com/containers/podman/v5/pkg/specgen"
-	spec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -303,33 +302,9 @@ type ContainerMount struct {
 	Options     []string
 }
 
-// RunContainerWithSpec creates, starts, waits for, and removes a container with the given configuration.
+// RunContainerWithSpec creates, starts, waits for, and removes a container with the given spec.
 // Returns the exit code of the container.
-func (pc *PodmanClient) RunContainerWithSpec(
-	image string,
-	command []string,
-	mounts []ContainerMount,
-	terminal, stdin bool,
-) (int32, error) {
-	// Create container spec
-	s := specgen.NewSpecGenerator(image, false)
-	s.Terminal = &terminal
-	s.Stdin = &stdin
-	s.Command = command
-
-	// Convert mounts
-	if len(mounts) > 0 {
-		s.Mounts = make([]spec.Mount, len(mounts))
-		for i, m := range mounts {
-			s.Mounts[i] = spec.Mount{
-				Type:        m.Type,
-				Source:      m.Source,
-				Destination: m.Destination,
-				Options:     m.Options,
-			}
-		}
-	}
-
+func (pc *PodmanClient) RunContainerWithSpec(s *specgen.SpecGenerator) (int32, error) {
 	// Create container
 	createResponse, err := containers.CreateWithSpec(pc.Context, s, nil)
 	if err != nil {
@@ -337,12 +312,6 @@ func (pc *PodmanClient) RunContainerWithSpec(
 	}
 
 	containerID := createResponse.ID
-
-	// Ensure container cleanup
-	defer func() {
-		force := true
-		_, _ = containers.Remove(pc.Context, containerID, &containers.RemoveOptions{Force: &force})
-	}()
 
 	// Start container
 	if err := containers.Start(pc.Context, containerID, nil); err != nil {
