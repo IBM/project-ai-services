@@ -14,14 +14,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Extract PR commit SHA and branch
-        run: |
-          echo "PR_NUMBER=${{ github.event.pull_request.number }}" >> $GITHUB_ENV
-          echo "COMMIT_SHA=${{ github.event.pull_request.head.sha }}" >> $GITHUB_ENV
-          echo "BRANCH=${{ github.event.pull_request.head.ref }}" >> $GITHUB_ENV
-
       - name: Build Jenkins Deployment URL
         shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           # Jenkins job users will click to open "Build with Parameters"
 
@@ -29,24 +25,23 @@ jobs:
           JENKINS_URL="https://sys-powercloud-team-jenkins.swg-devops.com"
 
           # Default ApplicationList value
-          APP_LIST="rag-dev"
-
-          # pass this to downstream pipeline, so that it can update the check status if needed
-          UPDATE_STATUS=true
+          DEFAULT_APP="rag-dev"
 
           # Add encoding
-          PR_Q=$(printf %s "$PR_NUMBER" | jq -sRr @uri)
-          APP_Q=$(printf %s "$APP_LIST" | jq -sRr @uri)
+          ENCODED_PR=$(printf %s "$PR_NUMBER" | jq -sRr @uri)
+          ENCODED_APP=$(printf %s "$DEFAULT_APP" | jq -sRr @uri)
    
           # Construct Jenkins Build-with-Parameters URL
-          DEPLOY_URL="${JENKINS_URL}/job/${JOB_NAME}/parambuild/?CHECKOUT=${PR_Q}&ApplicationList=${APP_Q}&updateGitStatus=${UPDATE_STATUS}"
+          # updateGitStatus=true allows downstream Jenkins pipeline to post/update GitHub status
+          DEPLOY_URL="${JENKINS_URL}/job/${JOB_NAME}/parambuild/?CHECKOUT=${ENCODED_PR}&ApplicationList=${ENCODED_APP}&updateGitStatus=true"
 
           echo "DEPLOY_URL=${DEPLOY_URL}" >> $GITHUB_ENV
           echo "Generated Deployment URL: ${DEPLOY_URL}"
 
       - name: Post GitHub Commit Status (Pending)
         env:
-          GH_TOKEN: ${{ github.token }}   # built-in GitHub token
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           echo "Posting pending status to GitHub..."
           curl -sS -H "Authorization: Bearer ${GH_TOKEN}" \
