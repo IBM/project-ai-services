@@ -11,7 +11,6 @@ metadata:
     ai-services.io/model1: BAAI/bge-reranker-v2-m3
     ai-services.io/model2: ibm-granite/granite-embedding-278m-multilingual
     ai-services.io/model3: ibm-granite/granite-3.3-8b-instruct
-    seccomp.security.alpha.kubernetes.io/pod: unconfined
 spec:
   volumes:
     - name: models
@@ -21,23 +20,27 @@ spec:
   containers:
     - name: instruct
       image: "{{ .Values.instruct.image }}"
-      securityContext:
-        procMount: "Unmasked"
-      command: ["/bin/sh", "-c"]
-      args: [
-          "TPT=${THREADS_PER_CORE:-2} && BIND=$(lscpu -p=cpu,core | grep -v '#' | sort -t, -k2 -n | awk -F, -v tpt=$TPT '{c=$2; if(seen[c]<tpt){print $1; seen[c]++}}' | paste -sd,) && export VLLM_CPU_OMP_THREADS_BIND=$BIND && export OMP_NUM_THREADS=$(echo $BIND | tr ',' '\\n' | wc -l) && echo \"Auto-detected thread binding: $BIND ($OMP_NUM_THREADS threads, $TPT per core)\" && vllm serve /models/ibm-granite/granite-3.3-8b-instruct --served-model-name ibm-granite/granite-3.3-8b-instruct --max-model-len 26208 --max-num-batched-tokens 26208 --max-num-seqs 32 --dtype bfloat16 --port 8000"
-      ]
+      args:
+      - --model
+      - /models/ibm-granite/granite-3.3-8b-instruct
+      - --served-model-name
+      - ibm-granite/granite-3.3-8b-instruct
+      - --max-num-batched-tokens=26208
+      - --max-model-len=26208
+      - --port=8000
       livenessProbe:
         httpGet:
           path: /health
           port: 8000
-        initialDelaySeconds: 420
+        initialDelaySeconds: 120
         periodSeconds: 30
         timeoutSeconds: 5
-        failureThreshold: 3
+        failureThreshold: 12
       env:
-        - name: VLLM_CPU_KVCACHE_SPACE
-          value: "20"
+      - name: VLLM_CPU_OMP_THREADS_BIND
+        value: auto
+      - name: VLLM_CPU_KVCACHE_SPACE
+        value: "32"
       resources:
         requests:
           memory: "100Gi"
@@ -51,10 +54,12 @@ spec:
           readOnly: true
     - name: embedding
       image: "{{ .Values.embedding.image }}"
-      command: ["/bin/sh", "-c"]
-      args: [
-          "vllm serve /models/ibm-granite/granite-embedding-278m-multilingual --served-model-name ibm-granite/granite-embedding-278m-multilingual --port 8001"
-      ]
+      args:
+      - --model
+      - /models/ibm-granite/granite-embedding-278m-multilingual
+      - --served-model-name
+      - ibm-granite/granite-embedding-278m-multilingual
+      - --port=8001
       livenessProbe:
         httpGet:
           path: /health
@@ -79,10 +84,12 @@ spec:
           readOnly: true
     - name: reranker
       image: "{{ .Values.reranker.image }}"
-      command: ["/bin/sh", "-c"]
-      args: [
-          "vllm serve /models/BAAI/bge-reranker-v2-m3 --served-model-name BAAI/bge-reranker-v2-m3 --port 8002"
-      ]
+      args:
+      - --model
+      - /models/BAAI/bge-reranker-v2-m3
+      - --served-model-name
+      - BAAI/bge-reranker-v2-m3
+      - --port=8002
       livenessProbe:
         httpGet:
           path: /health

@@ -184,7 +184,7 @@ func getRAGURLs(appRuntime string, output string, backendPort string, uiPort str
 		backendURL = fmt.Sprintf("http://%s:%s", hostIP, backendPort)
 		chatbotUiURL = fmt.Sprintf("http://%s:%s", hostIP, uiPort)
 	} else {
-		urls := extractURLsFromOutput(output)
+		urls := ExtractURLsFromOutput(output)
 		backendURL = strings.Replace(urls[0], "digitize-ui", "backend", 1)
 		chatbotUiURL = strings.Replace(urls[0], "digitize-ui", "ui", 1)
 	}
@@ -638,7 +638,7 @@ func ApplicationLogs(
 	}
 }
 
-func extractURLsFromOutput(output string) []string {
+func ExtractURLsFromOutput(output string) []string {
 	// Regular expression to match URLs (http and https)
 	urlRegex := regexp.MustCompile(`https?://[^\s]+`)
 

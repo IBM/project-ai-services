@@ -42,15 +42,15 @@ opensearch:
 
 instruct:
   # @hidden
-  image: icr.io/ppc64le-oss/vllm-ppc64le:0.10.1.dev852.gee01645db.d20250827
+  image: icr.io/ppc64le-oss/vllm-ppc64le:0.18.0
 
 embedding:
   # @hidden
-  image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
+  image: icr.io/ppc64le-oss/vllm-ppc64le:0.18.0
 
 reranker:
   # @hidden
-  image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
+  image: icr.io/ppc64le-oss/vllm-ppc64le:0.18.0
 
 summarize:
   # @description Host port for the Summarize API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
