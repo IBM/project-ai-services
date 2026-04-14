@@ -294,14 +294,6 @@ func (pc *PodmanClient) ContainerExists(nameOrID string) (bool, error) {
 	return containers.Exists(pc.Context, nameOrID, nil)
 }
 
-// ContainerMount represents a volume mount for a container.
-type ContainerMount struct {
-	Type        string
-	Source      string
-	Destination string
-	Options     []string
-}
-
 // RunContainerWithSpec creates, starts, waits for, and removes a container with the given spec.
 // Returns the exit code of the container.
 func (pc *PodmanClient) RunContainerWithSpec(s *specgen.SpecGenerator) (int32, error) {
