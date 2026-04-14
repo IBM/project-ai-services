@@ -1,6 +1,3 @@
-//go:build catalog_api
-// +build catalog_api
-
 // Package config manages the local CLI configuration for the catalog API client,
 // including persisting and loading auth tokens from the user's config directory.
 package config

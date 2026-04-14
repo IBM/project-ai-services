@@ -1,6 +1,3 @@
-//go:build catalog_api
-// +build catalog_api
-
 // Package client provides an authenticated HTTP client for the AI Services catalog API server.
 // It handles authentication, automatic token refresh, and all API calls.
 package client

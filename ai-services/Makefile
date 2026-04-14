@@ -5,13 +5,8 @@ CONTAINER_BUILDER?=podman
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
 GO := go
-# Feature flags - set ENABLE_CATALOG_API=true to include catalog API server
-# Default is false - catalog API is opt-in for development/CI/CD only
-ENABLE_CATALOG_API ?= false
-BUILDTAGS := exclude_graphdriver_btrfs containers_image_openpgp remote
-ifeq ($(ENABLE_CATALOG_API),true)
-    BUILDTAGS := $(BUILDTAGS) catalog_api
-endif
+# Build tags
+BUILDTAGS := exclude_graphdriver_btrfs containers_image_openpgp remote catalog_api
 BIN = ./bin
 
 # This will be overridden when we build and upload binary to artifact
@@ -99,10 +94,9 @@ binary:
 	$(BUILD_CMD)
 	@echo "Binary built: $(BIN)/ai-services-$(GOOS)-$(GOARCH)"
 
-# Container image build - catalog API enabled by default for containers
-# Override with: make image ENABLE_CATALOG_API=false
+# Container image build
 build:
-	@echo "Building container image with ENABLE_CATALOG_API=$(ENABLE_CATALOG_API)"
+	@echo "Building container image with catalog API enabled"
 	$(CONTAINER_BUILDER) build --build-arg CMD_VERSION=$(VERSION) \
     --build-arg GITCOMMIT=$(GITCOMMIT) --build-arg BUILDDATE=$(BUILDDATE) \
     --build-arg BUILDTAGS="$(BUILDTAGS)" -t $(REGISTRY)/$(IMAGE):$(TAG) .
