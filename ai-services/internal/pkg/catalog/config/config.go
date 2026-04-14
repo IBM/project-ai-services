@@ -47,12 +47,17 @@ func configFilePath() (string, error) {
 
 // Save persists the credentials to disk, creating the config directory if needed.
 func Save(creds Credentials) error {
+	const (
+		configDirPerm  = 0o700
+		configFilePerm = 0o600
+	)
+
 	path, err := configFilePath()
 	if err != nil {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), configDirPerm); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 
@@ -62,7 +67,7 @@ func Save(creds Credentials) error {
 	}
 
 	// Write with restricted permissions so only the owner can read the tokens.
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := os.WriteFile(path, data, configFilePerm); err != nil {
 		return fmt.Errorf("write credentials file: %w", err)
 	}
 

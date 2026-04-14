@@ -42,7 +42,6 @@ Examples:
   printf '%s\n' 'S3cureP@ss!' | ai-services catalog hashpw --stdin --iterations 150000
 
 Tip: Avoid passing plain passwords as CLI args (they can leak via process list).`,
-		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pw, err := getPassword(fromStdin, noConfirm, cmd)
 			if err != nil {

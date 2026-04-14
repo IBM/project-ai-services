@@ -210,9 +210,10 @@ func (c *Client) ServerURL() string {
 // returns the value of the "exp" claim as a time.Time.
 // It is used purely to decide whether a proactive token refresh is needed.
 func jwtExpiry(token string) (time.Time, error) {
+	const jwtPartCount = 3
 	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return time.Time{}, fmt.Errorf("malformed JWT: expected 3 parts, got %d", len(parts))
+	if len(parts) != jwtPartCount {
+		return time.Time{}, fmt.Errorf("malformed JWT: expected %d parts, got %d", jwtPartCount, len(parts))
 	}
 
 	// JWT uses raw (unpadded) base64url encoding for the payload.
