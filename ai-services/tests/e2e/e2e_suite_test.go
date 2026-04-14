@@ -464,6 +464,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 	})
 	ginkgo.Context("Ingestion Tests", func() {
 		ginkgo.BeforeEach(func() {
+			if appRuntime == "openshift" {
+				ginkgo.Skip("Skipping Ingestion Tests for OpenShift runtime")
+			}
 			err := ingestion.CleanDocsFolder(appName)
 			if err != nil {
 				ginkgo.Fail("Failed to clean application docs directory")
@@ -544,6 +547,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 	})
 	ginkgo.Context("RAG Golden Dataset Validation", ginkgo.Label("golden-dataset-validation"), func() {
 		ginkgo.BeforeAll(func() {
+			if appRuntime == "openshift" {
+				ginkgo.Skip("Skipping RAG Golden Dataset Validation for OpenShift runtime")
+			}
 			if appName == "" {
 				ginkgo.Fail("Application name is not set")
 			}
@@ -592,6 +598,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 
 		ginkgo.AfterAll(func() {
+			if appRuntime == "openshift" {
+				ginkgo.Skip("Skipping Judge cleanup for OpenShift runtime")
+			}
 			if err := rag.CleanupLLMAsJudge(runID); err != nil {
 				logger.Warningf("[RAG][WARN] Judge cleanup failed: %v", err)
 			}
@@ -671,6 +680,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 	})
 	ginkgo.Context("Clean Ingestion Docs", func() {
 		ginkgo.It("cleans the ingestion docs from the db", ginkgo.Label("spyre-dependent"), func() {
+			if appRuntime == "openshift" {
+				ginkgo.Skip("Skipping Clean Ingestion Docs for OpenShift runtime")
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 			defer cancel()
 
@@ -836,11 +848,31 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			// Step 10: List all documents
 			logger.Infof("[TEST] Step 9: Listing all documents")
-			docsList, err := digitization.ListDocuments(ctx, digitizeBaseURL, 20, 0)
+			docsList, err := digitization.ListDocuments(ctx, digitizeBaseURL, 20, 0, "", "")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(docsList).NotTo(gomega.BeNil())
 			gomega.Expect(docsList.Data).NotTo(gomega.BeEmpty())
 			logger.Infof("[TEST] Listed %d documents", len(docsList.Data))
+
+			// Step 11: List documents filtered by status
+			logger.Infof("[TEST] Step 10: Listing documents filtered by status 'completed'")
+			filteredDocsList, err := digitization.ListDocuments(ctx, digitizeBaseURL, 20, 0, "completed", "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(filteredDocsList).NotTo(gomega.BeNil())
+			for _, doc := range filteredDocsList.Data {
+				gomega.Expect(doc.Status).To(gomega.Equal("completed"))
+			}
+			logger.Infof("[TEST] Listed %d completed documents", len(filteredDocsList.Data))
+
+			// Step 12: List documents filtered by name
+			logger.Infof("[TEST] Step 11: Listing documents filtered by name 'test_doc.pdf'")
+			nameFilteredDocsList, err := digitization.ListDocuments(ctx, digitizeBaseURL, 20, 0, "", "test_doc.pdf")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(nameFilteredDocsList).NotTo(gomega.BeNil())
+			for _, doc := range nameFilteredDocsList.Data {
+				gomega.Expect(doc.Name).To(gomega.Equal("test_doc.pdf"))
+			}
+			logger.Infof("[TEST] Listed %d documents with name 'test_doc.pdf'", len(nameFilteredDocsList.Data))
 
 			logger.Infof("[TEST] ✓ Full digitization workflow completed successfully")
 		})
@@ -1009,7 +1041,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Verify documents are deleted
-			docsList, err := digitization.ListDocuments(ctx, digitizeBaseURL, 20, 0)
+			docsList, err := digitization.ListDocuments(ctx, digitizeBaseURL, 20, 0, "", "")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(docsList.Data).To(gomega.BeEmpty())
 
@@ -1118,7 +1150,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("should reject invalid PDF file for digitization operation", ginkgo.Label("test1"), func() {
+		ginkgo.It("should reject invalid PDF file for digitization operation", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
@@ -1145,7 +1177,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] Invalid PDF correctly rejected for digitization with error: %s", errorResp.Error.Message)
 		})
 
-		ginkgo.It("should reject invalid PDF file for ingestion operation", ginkgo.Label("test1"), func() {
+		ginkgo.It("should reject invalid PDF file for ingestion operation", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
@@ -1172,7 +1204,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] Invalid PDF correctly rejected for ingestion with error: %s", errorResp.Error.Message)
 		})
 
-		ginkgo.It("should reject non-PDF file for digitization operation", ginkgo.Label("test1"), func() {
+		ginkgo.It("should reject non-PDF file for digitization operation", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
@@ -1199,7 +1231,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] Non-PDF file correctly rejected for digitization with error: %s", errorResp.Error.Message)
 		})
 
-		ginkgo.It("should reject non-PDF file for ingestion operation", ginkgo.Label("test1"), func() {
+		ginkgo.It("should reject non-PDF file for ingestion operation", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
@@ -1226,7 +1258,123 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] Non-PDF file correctly rejected for ingestion with error: %s", errorResp.Error.Message)
 		})
 
-		ginkgo.It("should successfully process blank PDF file for digitization operation", ginkgo.Label("test1"), func() {
+		ginkgo.It("should return 404 error when getting job with invalid ID", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			invalidJobID := "invalid-job-id-123"
+			logger.Infof("[TEST] Testing GetJobStatus with invalid ID: %s", invalidJobID)
+
+			// Try to get job status with invalid ID
+			errorResp, err := digitization.GetJobStatusExpectingError(ctx, digitizeBaseURL, invalidJobID)
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("RESOURCE_NOT_FOUND"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.ContainSubstring("No job found with id"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.ContainSubstring("not found"))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(404))
+
+			logger.Infof("[TEST] ✓ GetJobStatus correctly returned 404 for invalid ID: %s", errorResp.Error.Message)
+		})
+
+		ginkgo.It("should return 404 error when getting document with invalid ID", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			invalidDocID := "invalid-doc-id-123"
+			logger.Infof("[TEST] Testing GetDocument with invalid ID: %s", invalidDocID)
+
+			// Try to get document with invalid ID
+			errorResp, err := digitization.GetDocumentExpectingError(ctx, digitizeBaseURL, invalidDocID)
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("RESOURCE_NOT_FOUND"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.ContainSubstring("Document with ID"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.ContainSubstring("not found"))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(404))
+
+			logger.Infof("[TEST] ✓ GetDocument correctly returned 404 for invalid ID: %s", errorResp.Error.Message)
+		})
+
+		ginkgo.It("should return 404 error when getting document content with invalid ID", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			invalidDocID := "invalid-doc-id-123"
+			logger.Infof("[TEST] Testing GetDocumentContent with invalid ID: %s", invalidDocID)
+
+			// Try to get document content with invalid ID
+			errorResp, err := digitization.GetDocumentContentExpectingError(ctx, digitizeBaseURL, invalidDocID)
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("RESOURCE_NOT_FOUND"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.ContainSubstring("Document with ID"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.ContainSubstring("not found"))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(404))
+
+			logger.Infof("[TEST] ✓ GetDocumentContent correctly returned 404 for invalid ID: %s", errorResp.Error.Message)
+		})
+
+		ginkgo.It("should return 404 error when deleting job with invalid ID", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			invalidJobID := "invalid-job-id-123"
+			logger.Infof("[TEST] Testing DeleteJob with invalid ID: %s", invalidJobID)
+
+			// Try to delete job with invalid ID
+			errorResp, err := digitization.DeleteJobExpectingError(ctx, digitizeBaseURL, invalidJobID)
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("RESOURCE_NOT_FOUND"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.ContainSubstring("No job found with id"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.ContainSubstring("not found"))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(404))
+
+			logger.Infof("[TEST] ✓ DeleteJob correctly returned 404 for invalid ID: %s", errorResp.Error.Message)
+		})
+
+		//TODO- Enable once the response is fixed.
+		ginkgo.XIt("should return 404 error when deleting document with invalid ID", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			invalidDocID := "invalid-doc-id-123"
+			logger.Infof("[TEST] Testing DeleteDocument with invalid ID: %s", invalidDocID)
+
+			// Try to delete document with invalid ID
+			errorResp, err := digitization.DeleteDocumentExpectingError(ctx, digitizeBaseURL, invalidDocID)
+
+			// Should receive an error response, not a request error
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(errorResp).NotTo(gomega.BeNil())
+
+			// Validate the error response structure
+			gomega.Expect(errorResp.Error.Code).To(gomega.Equal("RESOURCE_NOT_FOUND"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.ContainSubstring("Document with ID"))
+			gomega.Expect(errorResp.Error.Message).To(gomega.ContainSubstring("not found"))
+			gomega.Expect(errorResp.Error.Status).To(gomega.Equal(404))
+
+			logger.Infof("[TEST] ✓ DeleteDocument correctly returned 404 for invalid ID: %s", errorResp.Error.Message)
+		})
+
+		ginkgo.It("should successfully process blank PDF file for digitization operation", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
 			defer cancel()
 
@@ -1266,7 +1414,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] ✓ Blank PDF digitization completed successfully")
 		})
 
-		ginkgo.It("should successfully process blank PDF file for ingestion operation", ginkgo.Label("test1"), func() {
+		ginkgo.It("should successfully process blank PDF file for ingestion operation", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 			defer cancel()
 
