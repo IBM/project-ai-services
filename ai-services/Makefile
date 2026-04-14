@@ -6,7 +6,7 @@ CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGIST
 
 GO := go
 # Build tags
-BUILDTAGS := exclude_graphdriver_btrfs containers_image_openpgp remote catalog_api
+BUILDTAGS := exclude_graphdriver_btrfs containers_image_openpgp remote
 BIN = ./bin
 
 # This will be overridden when we build and upload binary to artifact
