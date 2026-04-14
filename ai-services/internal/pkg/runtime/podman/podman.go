@@ -15,6 +15,7 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/images"
 	"github.com/containers/podman/v5/pkg/bindings/kube"
 	"github.com/containers/podman/v5/pkg/bindings/pods"
+	"github.com/containers/podman/v5/pkg/specgen"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -291,6 +292,31 @@ func (pc *PodmanClient) ContainerLogs(containerNameOrID string) error {
 
 func (pc *PodmanClient) ContainerExists(nameOrID string) (bool, error) {
 	return containers.Exists(pc.Context, nameOrID, nil)
+}
+
+// RunContainerWithSpec creates, starts, waits for, and removes a container with the given spec.
+// Returns the exit code of the container.
+func (pc *PodmanClient) RunContainerWithSpec(s *specgen.SpecGenerator) (int32, error) {
+	// Create container
+	createResponse, err := containers.CreateWithSpec(pc.Context, s, nil)
+	if err != nil {
+		return -1, fmt.Errorf("failed to create container: %w", err)
+	}
+
+	containerID := createResponse.ID
+
+	// Start container
+	if err := containers.Start(pc.Context, containerID, nil); err != nil {
+		return -1, fmt.Errorf("failed to start container: %w", err)
+	}
+
+	// Wait for container to complete
+	exitCode, err := containers.Wait(pc.Context, containerID, nil)
+	if err != nil {
+		return -1, fmt.Errorf("failed to wait for container: %w", err)
+	}
+
+	return exitCode, nil
 }
 
 func (pc *PodmanClient) ListRoutes() ([]types.Route, error) {

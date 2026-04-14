@@ -11,6 +11,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.0
+	github.com/opencontainers/runtime-spec v1.2.1
 	github.com/openshift/api v0.0.0-20260213123447-0246c0ac1a77
 	github.com/openshift/client-go v0.0.0-20260213141500-06efc6dce93b
 	github.com/operator-framework/api v0.39.0
@@ -198,7 +199,6 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/opencontainers/runc v1.3.3 // indirect
-	github.com/opencontainers/runtime-spec v1.2.1 // indirect
 	github.com/opencontainers/runtime-tools v0.9.1-0.20250523060157-0ea5ed0382a2 // indirect
 	github.com/opencontainers/selinux v1.13.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
