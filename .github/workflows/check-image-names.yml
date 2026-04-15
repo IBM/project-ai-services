@@ -5,9 +5,10 @@ on:
     paths:
       - 'spyre-rag/src/Makefile'
       - 'spyre-rag/ui/Makefile'
+      - 'digitize-ui/Makefile'
       - 'ai-services/assets/**/values.yaml'
       - .github/workflows/check-image-names.yml
-      - .github/workflows/bump-spyre-rag-version.yml
+      - .github/workflows/bump-makefile-version.yml
       - .github/scripts/check_image_names.py
     branches:
       - main
