@@ -7,7 +7,7 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
   annotations:
-    ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:8080"
+    ai-services.io/ports: "{{ .Values.ui.port }}:3000"
 spec:
   containers:
     - name: ui

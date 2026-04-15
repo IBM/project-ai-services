@@ -12,9 +12,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 )
 
@@ -209,9 +209,9 @@ func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 
 	// Deploy the pod with readiness checks
 	reader := bytes.NewReader(rendered.Bytes())
-	opts := map[string]string{"start": constants.PodStartOn}
+	podDeployOptions := clipodman.ConstructPodDeployOptions(specs.FetchPodAnnotations(*podSpec))
 
-	if err := clipodman.DeployPodAndReadinessCheck(rt, podSpec, podTemplateName, reader, opts); err != nil {
+	if err := clipodman.DeployPodAndReadinessCheck(rt, podSpec, podTemplateName, reader, podDeployOptions); err != nil {
 		return fmt.Errorf("failed to deploy pod: %w", err)
 	}
 
