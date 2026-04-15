@@ -18,7 +18,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
 
     logger.info(f"Ingestion started from dir '{directory_path}'")
-    
+
     # Initialize LLM session for all API calls (LLM and embedding)
     create_llm_session(pool_maxsize=config.LLM_POOL_SIZE)
 
@@ -45,6 +45,8 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         out_path = setup_digitized_doc_dir()
 
         start_time = time.time()
+        # Reserve 100 tokens from embedding model's max_tokens to account for metadata
+        # that will be prepended to content during final merge, ensuring total tokens stay within embedding model limits
         doc_chunks_dict, converted_pdf_stats = process_documents(
             input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'],  emb_model_dict["emb_endpoint"],
             max_tokens=emb_model_dict['max_tokens'] - 100, job_id=job_id, doc_id_dict=doc_id_dict)
