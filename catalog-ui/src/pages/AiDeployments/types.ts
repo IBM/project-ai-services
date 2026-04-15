@@ -4,7 +4,6 @@ export interface AiDeploymentRow {
   id: string;
   name: string;
   status: "Deploying..." | "Deleting..." | "Error" | "Stopped" | "Running";
-  avgUsage: string;
   uptime: string;
   type: string;
   messages: string;
@@ -100,7 +99,6 @@ export type AppAction =
 export const HEADERS: DataTableHeader[] = [
   { header: "Deployment name", key: "name" },
   { header: "Status", key: "status" },
-  { header: "Avg usage", key: "avgUsage" },
   { header: "Uptime", key: "uptime" },
   { header: "Type", key: "type" },
   { header: "Messages", key: "messages" },
@@ -121,7 +119,6 @@ export const MOCK_ROWS: AiDeploymentRow[] = [
     id: "1",
     name: "Incident troubleshooting",
     status: "Deploying...",
-    avgUsage: "30s ago",
     uptime: "Mar 4, 2026",
     type: "Digital assistant",
     messages: "Error message goes here...",
@@ -131,7 +128,6 @@ export const MOCK_ROWS: AiDeploymentRow[] = [
     id: "2",
     name: "Process FAQs",
     status: "Deleting...",
-    avgUsage: "840K/day",
     uptime: "2 days",
     type: "Deep process",
     messages: "Deploying [service]...",
@@ -141,7 +137,6 @@ export const MOCK_ROWS: AiDeploymentRow[] = [
     id: "3",
     name: "Permission requests",
     status: "Error",
-    avgUsage: "10K/day",
     uptime: "Mar 4, 2026",
     type: "Digital assistant",
     messages: "",
@@ -151,7 +146,6 @@ export const MOCK_ROWS: AiDeploymentRow[] = [
     id: "4",
     name: "Contract analysis agent",
     status: "Running",
-    avgUsage: "280K/day",
     uptime: "Mar 4, 2026",
     type: "Summary",
     messages: "",
@@ -161,7 +155,6 @@ export const MOCK_ROWS: AiDeploymentRow[] = [
     id: "5",
     name: "Case routing",
     status: "Running",
-    avgUsage: "180/day",
     uptime: "12 hours",
     type: "Translation",
     messages: "Ingest data",
@@ -171,7 +164,6 @@ export const MOCK_ROWS: AiDeploymentRow[] = [
     id: "6",
     name: "Deals tracker",
     status: "Stopped",
-    avgUsage: "114K/day",
     uptime: "12 hours",
     type: "Digital assistant",
     messages: "",
@@ -181,7 +173,6 @@ export const MOCK_ROWS: AiDeploymentRow[] = [
     id: "7",
     name: "Privacy, redaction, audit",
     status: "Running",
-    avgUsage: "290K",
     uptime: "Jan 2, 2026",
     type: "Question and an...",
     messages: "",
@@ -191,7 +182,6 @@ export const MOCK_ROWS: AiDeploymentRow[] = [
     id: "8",
     name: "IT support triage",
     status: "Running",
-    avgUsage: "1.1M/day",
     uptime: "25 minutes",
     type: "Digital assistant",
     messages: "",
@@ -201,7 +191,6 @@ export const MOCK_ROWS: AiDeploymentRow[] = [
     id: "9",
     name: "Sales deck generator",
     status: "Running",
-    avgUsage: "450K/day",
     uptime: "Nov 9, 2025",
     type: "Digital assistant",
     messages: "",
@@ -232,7 +221,6 @@ export const INITIAL_STATE: AppState = {
   visibleColumns: {
     name: true,
     status: true,
-    avgUsage: true,
     uptime: true,
     type: true,
     messages: true,
@@ -359,7 +347,6 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         visibleColumns: {
           name: true,
           status: true,
-          avgUsage: true,
           uptime: true,
           type: true,
           messages: true,

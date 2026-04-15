@@ -1,18 +1,6 @@
-import { useReducer } from "react";
-import { PageHeader } from "@carbon/ibm-products";
-import {
-  Grid,
-  Column,
-  Search,
-  Accordion,
-  AccordionItem,
-  CheckboxGroup,
-  Checkbox,
-  Button,
-} from "@carbon/react";
-import { ArrowRight } from "@carbon/icons-react";
-import { CatalogCard } from "@/components";
-import styles from "./Architectures.module.scss";
+import { useReducer, useMemo } from "react";
+import { AccordionItem, CheckboxGroup, Checkbox } from "@carbon/react";
+import { CatalogCard, CatalogBrowseLayout } from "@/components";
 import { ACTION_TYPES, INITIAL_STATE, pageReducer } from "./types";
 
 const ArchitecturesPage = () => {
@@ -51,176 +39,147 @@ const ArchitecturesPage = () => {
     return matchesSearch && matchesProvider;
   });
 
+  const providerCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    state.items.forEach((item) => {
+      if (item.provider) {
+        counts[item.provider] = (counts[item.provider] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [state.items]);
+
+  const serviceCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    state.items.forEach((item) => {
+      item.tags.forEach((tag) => {
+        counts[tag] = (counts[tag] || 0) + 1;
+      });
+    });
+    return counts;
+  }, [state.items]);
+
+  const totalSelectedFilters =
+    state.filters.providers.length + state.filters.services.length;
+
   return (
-    <>
-      <PageHeader
-        title={{ text: "Architectures" }}
-        subtitle="Production-ready AI solutions"
-        pageActions={[
-          {
-            key: "learn-more",
-            kind: "tertiary",
-            label: "Learn more",
-            renderIcon: ArrowRight,
-            onClick: () => {
-              window.open(
-                "https://www.ibm.com/docs/en/aiservices?topic=services-introduction",
-                "_blank",
-              );
-            },
-          },
-        ]}
-        pageActionsOverflowLabel="More actions"
-        fullWidthGrid="xl"
-      />
-
-      <div className={styles.pageContent}>
-        <Grid fullWidth>
-          <Column lg={4} md={2} sm={4} className={styles.sidebarColumn}>
-            <div className={styles.sidebar}>
-              <Search
-                placeholder="Search"
-                labelText="Search"
-                value={state.search}
-                onChange={(e) =>
-                  dispatch({
-                    type: ACTION_TYPES.SET_SEARCH,
-                    payload: e.target.value,
-                  })
+    <CatalogBrowseLayout
+      title="Architectures"
+      subtitle="Production-ready AI solutions"
+      searchValue={state.search}
+      onSearchChange={(value) =>
+        dispatch({
+          type: ACTION_TYPES.SET_SEARCH,
+          payload: value,
+        })
+      }
+      totalSelectedFilters={totalSelectedFilters}
+      onClearFilters={() => dispatch({ type: ACTION_TYPES.CLEAR_FILTERS })}
+      filterAccordions={
+        <>
+          <AccordionItem title="Provider" open>
+            <CheckboxGroup legendText="">
+              <Checkbox
+                labelText={`IBM (${providerCounts["IBM"] || 0})`}
+                id="provider-ibm"
+                checked={state.filters.providers.includes("IBM")}
+                onChange={(_, { checked }) =>
+                  handleProviderChange(checked, "IBM")
                 }
-                size="lg"
               />
+              <Checkbox
+                labelText={`IBM certified (any provider) (${providerCounts["IBM certified"] || 0})`}
+                id="provider-ibm-certified"
+                checked={state.filters.providers.includes("IBM certified")}
+                onChange={(_, { checked }) =>
+                  handleProviderChange(checked, "IBM certified")
+                }
+              />
+            </CheckboxGroup>
+          </AccordionItem>
 
-              <Accordion>
-                <AccordionItem title="Provider" open>
-                  <CheckboxGroup legendText="">
-                    <Checkbox
-                      labelText="IBM"
-                      id="provider-ibm"
-                      checked={state.filters.providers.includes("IBM")}
-                      onChange={(_, { checked }) =>
-                        handleProviderChange(checked, "IBM")
-                      }
-                    />
-                    <Checkbox
-                      labelText="IBM certified (any provider)"
-                      id="provider-ibm-certified"
-                      checked={state.filters.providers.includes(
-                        "IBM certified",
-                      )}
-                      onChange={(_, { checked }) =>
-                        handleProviderChange(checked, "IBM certified")
-                      }
-                    />
-                  </CheckboxGroup>
-                </AccordionItem>
-
-                <AccordionItem title="Services">
-                  <CheckboxGroup legendText="">
-                    <Checkbox
-                      labelText="Digitize documents"
-                      id="service-digitize"
-                      checked={state.filters.services.includes(
-                        "Digitize documents",
-                      )}
-                      onChange={(_, { checked }) =>
-                        handleServiceChange(checked, "Digitize documents")
-                      }
-                    />
-                    <Checkbox
-                      labelText="Extract and tag info"
-                      id="service-extract"
-                      checked={state.filters.services.includes(
-                        "Extract and tag info",
-                      )}
-                      onChange={(_, { checked }) =>
-                        handleServiceChange(checked, "Extract and tag info")
-                      }
-                    />
-                    <Checkbox
-                      labelText="Find similar items"
-                      id="service-similar"
-                      checked={state.filters.services.includes(
-                        "Find similar items",
-                      )}
-                      onChange={(_, { checked }) =>
-                        handleServiceChange(checked, "Find similar items")
-                      }
-                    />
-                    <Checkbox
-                      labelText="Knowledge management"
-                      id="service-knowledge"
-                      checked={state.filters.services.includes(
-                        "Knowledge management",
-                      )}
-                      onChange={(_, { checked }) =>
-                        handleServiceChange(checked, "Knowledge management")
-                      }
-                    />
-                    <Checkbox
-                      labelText="Question and answer"
-                      id="service-qa"
-                      checked={state.filters.services.includes(
-                        "Question and answer",
-                      )}
-                      onChange={(_, { checked }) =>
-                        handleServiceChange(checked, "Question and answer")
-                      }
-                    />
-                    <Checkbox
-                      labelText="Translation"
-                      id="service-translation"
-                      checked={state.filters.services.includes("Translation")}
-                      onChange={(_, { checked }) =>
-                        handleServiceChange(checked, "Translation")
-                      }
-                    />
-                    <Checkbox
-                      labelText="Summarization"
-                      id="service-summarization"
-                      checked={state.filters.services.includes("Summarization")}
-                      onChange={(_, { checked }) =>
-                        handleServiceChange(checked, "Summarization")
-                      }
-                    />
-                  </CheckboxGroup>
-                </AccordionItem>
-              </Accordion>
-            </div>
-          </Column>
-
-          <Column lg={12} md={6} sm={4} className={styles.contentColumn}>
-            <div className={styles.cardsGrid}>
-              {filteredItems.map((item) => (
-                <CatalogCard
-                  key={item.id}
-                  id={item.id}
-                  title={item.title}
-                  description={item.description}
-                  tags={item.tags}
-                  category={item.category}
-                  isCertified={item.isCertified}
-                  onDeploy={(id) => console.log("Deploy", id)}
-                  onLearnMore={(id) => console.log("Learn more", id)}
-                />
-              ))}
-            </div>
-
-            {filteredItems.length === 0 && (
-              <div className={styles.emptyState}>
-                <p>No architectures found matching your criteria.</p>
-                <Button
-                  kind="tertiary"
-                  onClick={() => dispatch({ type: ACTION_TYPES.CLEAR_FILTERS })}
-                >
-                  Clear filters
-                </Button>
-              </div>
-            )}
-          </Column>
-        </Grid>
-      </div>
-    </>
+          <AccordionItem title="Services">
+            <CheckboxGroup legendText="">
+              <Checkbox
+                labelText={`Digitize documents (${serviceCounts["Digitize documents"] || 0})`}
+                id="service-digitize"
+                checked={state.filters.services.includes("Digitize documents")}
+                onChange={(_, { checked }) =>
+                  handleServiceChange(checked, "Digitize documents")
+                }
+              />
+              <Checkbox
+                labelText={`Extract and tag info (${serviceCounts["Extract and tag info"] || 0})`}
+                id="service-extract"
+                checked={state.filters.services.includes(
+                  "Extract and tag info",
+                )}
+                onChange={(_, { checked }) =>
+                  handleServiceChange(checked, "Extract and tag info")
+                }
+              />
+              <Checkbox
+                labelText={`Find similar items (${serviceCounts["Find similar items"] || 0})`}
+                id="service-similar"
+                checked={state.filters.services.includes("Find similar items")}
+                onChange={(_, { checked }) =>
+                  handleServiceChange(checked, "Find similar items")
+                }
+              />
+              <Checkbox
+                labelText={`Knowledge management (${serviceCounts["Knowledge management"] || 0})`}
+                id="service-knowledge"
+                checked={state.filters.services.includes(
+                  "Knowledge management",
+                )}
+                onChange={(_, { checked }) =>
+                  handleServiceChange(checked, "Knowledge management")
+                }
+              />
+              <Checkbox
+                labelText={`Question and answer (${serviceCounts["Question and answer"] || 0})`}
+                id="service-qa"
+                checked={state.filters.services.includes("Question and answer")}
+                onChange={(_, { checked }) =>
+                  handleServiceChange(checked, "Question and answer")
+                }
+              />
+              <Checkbox
+                labelText={`Translation (${serviceCounts["Translation"] || 0})`}
+                id="service-translation"
+                checked={state.filters.services.includes("Translation")}
+                onChange={(_, { checked }) =>
+                  handleServiceChange(checked, "Translation")
+                }
+              />
+              <Checkbox
+                labelText={`Summarization (${serviceCounts["Summarization"] || 0})`}
+                id="service-summarization"
+                checked={state.filters.services.includes("Summarization")}
+                onChange={(_, { checked }) =>
+                  handleServiceChange(checked, "Summarization")
+                }
+              />
+            </CheckboxGroup>
+          </AccordionItem>
+        </>
+      }
+      results={filteredItems.map((item) => (
+        <CatalogCard
+          key={item.id}
+          id={item.id}
+          title={item.title}
+          description={item.description}
+          tags={item.tags}
+          category={item.category}
+          isCertified={item.isCertified}
+          tagsHeading="Services"
+          onDeploy={(id) => console.log("Deploy", id)}
+          onLearnMore={(id) => console.log("Learn more", id)}
+        />
+      ))}
+      emptyMessage="No architectures found matching your criteria."
+    />
   );
 };
 

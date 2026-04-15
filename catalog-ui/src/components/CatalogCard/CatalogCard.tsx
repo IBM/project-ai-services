@@ -9,6 +9,7 @@ export interface CatalogCardProps {
   tags: string[];
   category?: string;
   isCertified?: boolean;
+  tagsHeading?: string;
   onDeploy?: (id: string) => void;
   onLearnMore?: (id: string) => void;
   onExplore?: (id: string) => void;
@@ -21,6 +22,7 @@ const CatalogCard = ({
   tags,
   category,
   isCertified,
+  tagsHeading = "Tags",
   onDeploy,
   onLearnMore,
   onExplore,
@@ -48,15 +50,15 @@ const CatalogCard = ({
       <p className={styles.cardDescription}>{description}</p>
 
       <div className={styles.tagsSection}>
-        <h4 className={styles.tagsHeading}>Services</h4>
+        <h4 className={styles.tagsHeading}>{tagsHeading}</h4>
         <div className={styles.tags}>
           {visibleTags.map((tag, index) => (
-            <Tag key={index} type="blue" size="sm">
+            <Tag key={index} type="blue" size="md">
               {tag}
             </Tag>
           ))}
           {remainingCount > 0 && (
-            <Tag type="blue" size="sm">
+            <Tag type="blue" size="md">
               +{remainingCount}
             </Tag>
           )}

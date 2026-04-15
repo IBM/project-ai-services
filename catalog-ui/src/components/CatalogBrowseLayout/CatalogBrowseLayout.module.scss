@@ -1,0 +1,64 @@
+@use "@carbon/react/scss/spacing";
+
+.pageContent {
+  padding: 0 spacing.$spacing-03 spacing.$spacing-07 spacing.$spacing-05;
+  margin-top: spacing.$spacing-07;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-05;
+  padding-bottom: spacing.$spacing-05;
+
+  :global(.cds--accordion__item) {
+    border-top: none;
+  }
+
+  :global(.cds--accordion__heading) {
+    padding-left: 0;
+  }
+
+  :global(.cds--accordion__content) {
+    padding-right: 0;
+  }
+
+  :global(.cds--checkbox-group) {
+    display: flex;
+    flex-direction: column;
+    gap: spacing.$spacing-03;
+  }
+}
+
+.filterHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: spacing.$spacing-03 0;
+}
+
+.filterTitle {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.cardsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  column-gap: spacing.$spacing-05;
+  row-gap: spacing.$spacing-05;
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: spacing.$spacing-09;
+  text-align: center;
+  color: var(--cds-text-secondary);
+
+  p {
+    margin-bottom: spacing.$spacing-05;
+  }
+}

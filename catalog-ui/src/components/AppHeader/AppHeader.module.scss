@@ -2,33 +2,55 @@
 @use "@carbon/react/scss/colors";
 @use "@carbon/react/scss/theme";
 
-:global(.cds--header) {
-  background-color: colors.$black-100 !important;
-  border-bottom: none !important;
-}
+.appHeader {
+  :global(.cds--header) {
+    background-color: colors.$black-100 !important;
+    border-bottom: none !important;
+  }
 
-:global(.cds--header__menu-trigger) {
-  background-color: colors.$black-100 !important;
-  border: none !important;
-  border-bottom: none !important;
-  box-shadow: none !important;
-}
+  :global(.cds--header__menu-trigger) {
+    background-color: colors.$black-100 !important;
+    border: none !important;
+    border-bottom: none !important;
+    box-shadow: none !important;
 
-:global(.cds--header__menu-trigger:hover) {
-  background-color: colors.$black-100 !important;
-  border: none !important;
-  box-shadow: none !important;
-}
+    &:hover {
+      background-color: colors.$black-100 !important;
+      border: none !important;
+      box-shadow: none !important;
+    }
 
-:global(.cds--header__menu-trigger:focus) {
-  background-color: colors.$black-100 !important;
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
-}
+    &:focus {
+      background-color: colors.$black-100 !important;
+      border: none !important;
+      box-shadow: none !important;
+      outline: none !important;
+    }
 
-:global(.cds--header__menu-trigger svg) {
-  vertical-align: middle !important;
+    svg {
+      vertical-align: middle !important;
+    }
+  }
+
+  :global(.cds--header-panel) {
+    position: fixed !important;
+    top: 3rem !important;
+    right: 0 !important;
+    left: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    z-index: 8000 !important;
+
+    &:global(.cds--header-panel--expanded) {
+      max-height: none !important;
+      height: auto !important;
+      overflow: visible !important;
+    }
+  }
 }
 
 .iconWidth {
@@ -43,19 +65,19 @@
   align-items: center !important;
   justify-content: center !important;
   box-shadow: none !important;
-}
 
-.menuBtn:hover {
-  background-color: colors.$black-100 !important;
-  border: none !important;
-  box-shadow: none !important;
-}
+  &:hover {
+    background-color: colors.$black-100 !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
 
-.menuBtn:focus {
-  background-color: colors.$black-100 !important;
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
+  &:focus {
+    background-color: colors.$black-100 !important;
+    border: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+  }
 }
 
 .usercircle {
@@ -68,10 +90,10 @@
   justify-content: center;
   color: theme.$text-on-color;
   transition: background-color 0.2s ease;
-}
 
-.usercircle:hover {
-  background-color: theme.$layer-hover-02;
+  &:hover {
+    background-color: theme.$layer-hover-02;
+  }
 }
 
 .userprofile {
@@ -96,22 +118,4 @@
   padding: spacing.$spacing-05;
   background-color: theme.$layer-01;
   color: theme.$text-primary;
-}
-
-:global(.cds--header-panel--expanded) {
-  max-height: none !important;
-  height: auto !important;
-  overflow: visible !important;
-}
-
-:global(.cds--header-panel) {
-  position: relative !important;
-  bottom: auto !important;
-  right: 0 !important;
-  left: auto !important;
-  transform: none !important;
-  height: auto !important;
-  min-height: 0 !important;
-  max-height: none !important;
-  overflow: visible !important;
 }

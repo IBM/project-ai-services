@@ -157,7 +157,6 @@ const AiDeploymentsPage = () => {
     const matchesSearch = [
       row.name,
       row.status,
-      row.avgUsage,
       row.uptime,
       row.type,
       row.messages,
@@ -450,17 +449,6 @@ const AiDeploymentsPage = () => {
                                   dispatch({
                                     type: ACTION_TYPES.TOGGLE_COLUMN_VISIBILITY,
                                     payload: "status",
-                                  })
-                                }
-                              />
-                              <Checkbox
-                                labelText="Avg usage"
-                                id="column-avgUsage"
-                                checked={state.visibleColumns.avgUsage}
-                                onChange={() =>
-                                  dispatch({
-                                    type: ACTION_TYPES.TOGGLE_COLUMN_VISIBILITY,
-                                    payload: "avgUsage",
                                   })
                                 }
                               />
