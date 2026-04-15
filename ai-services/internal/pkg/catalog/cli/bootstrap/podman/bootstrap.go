@@ -31,97 +31,35 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 	rt, err := podman.NewPodmanClient()
 	if err != nil {
 		s.Fail("failed to initialize podman client")
+
 		return fmt.Errorf("failed to initialize podman client: %w", err)
 	}
 
 	// Check if catalog pod already exists
-	existingPods, err := helpers.CheckExistingPodsForApplication(rt, catalogAppName)
+	if err := checkExistingCatalogPods(rt, s); err != nil {
+		return err
+	}
+
+	// Load template provider and metadata
+	tp, appMetadata, tmpls, err := loadCatalogTemplates(s)
 	if err != nil {
-		s.Fail("failed to check existing pods")
-		return fmt.Errorf("failed to check existing pods: %w", err)
+		return err
 	}
 
-	if len(existingPods) > 0 {
-		s.Stop("Catalog service already deployed")
-		logger.Infof("Catalog pod already exists: %v\n", existingPods)
-		return nil
-	}
-
-	// Load template provider
-	// Catalog is at assets/catalog (so set root to "")
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{
-		Root: "", // This will look directly under assets/
-	})
-
-	// Load metadata from catalog/podman
-	appMetadata, err := tp.LoadMetadata(catalogAppTemplate, true)
-	if err != nil {
-		s.Fail("failed to load catalog metadata")
-		return fmt.Errorf("failed to load catalog metadata: %w", err)
-	}
-
-	// Load all templates from catalog
-	tmpls, err := tp.LoadAllTemplates(catalogAppTemplate)
-	if err != nil {
-		s.Fail("failed to load catalog templates")
-		return fmt.Errorf("failed to load catalog templates: %w", err)
-	}
-
-	// Prepare argParams with bootstrap-specific values
-	if argParams == nil {
-		argParams = make(map[string]string)
-	}
-
-	// Set bootstrap-specific values
-	argParams["backend.adminPasswordHash"] = passwordHash
-	argParams["backend.runtime"] = "podman"
-	argParams["backend.podman.uri"] = podmanURI
-
-	// Load values from catalog with merged params
-	values, err := tp.LoadValues(catalogAppTemplate, nil, argParams)
+	// Prepare values with bootstrap-specific configuration
+	values, err := prepareCatalogValues(tp, podmanURI, passwordHash, argParams)
 	if err != nil {
 		s.Fail("failed to load values")
+
 		return fmt.Errorf("failed to load values: %w", err)
 	}
 
-	// Execute pod templates - following the same pattern as application/podman/create.go:432
-	for i, layer := range appMetadata.PodTemplateExecutions {
-		logger.Infof("\n Executing Layer %d/%d: %v\n", i+1, len(appMetadata.PodTemplateExecutions), layer)
-		logger.Infoln("-------")
-		var wg sync.WaitGroup
-		errCh := make(chan error, len(layer))
-
-		// for each layer, fetch all the pod Template Names and do the pod deploy
-		for _, podTemplateName := range layer {
-			wg.Add(1)
-			go func(t string) {
-				defer wg.Done()
-				if err := executePodTemplate(rt, tp, tmpls, t, catalogAppTemplate, catalogAppName, values, appMetadata.Version, nil, argParams); err != nil {
-					errCh <- err
-				}
-			}(podTemplateName)
-		}
-
-		wg.Wait()
-		close(errCh)
-
-		// collect all errors for this layer
-		var errs []error
-		for e := range errCh {
-			errs = append(errs, fmt.Errorf("layer %d: %w", i+1, e))
-		}
-
-		// If an error exist for a given layer, then return (do not process further layers)
-		if len(errs) > 0 {
-			s.Fail("failed to deploy catalog pod")
-			return errors.Join(errs...)
-		}
-
-		logger.Infof("Layer %d completed\n", i+1)
+	// Execute pod templates
+	if err := executePodLayers(rt, tp, tmpls, appMetadata, values, argParams, s); err != nil {
+		return err
 	}
 
 	s.Stop("Catalog service deployed successfully")
-
 	logger.Infoln("-------")
 
 	// Print next steps similar to application create
@@ -133,11 +71,123 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 	return nil
 }
 
+// checkExistingCatalogPods checks if catalog pods already exist.
+func checkExistingCatalogPods(rt *podman.PodmanClient, s *spinner.Spinner) error {
+	existingPods, err := helpers.CheckExistingPodsForApplication(rt, catalogAppName)
+	if err != nil {
+		s.Fail("failed to check existing pods")
+
+		return fmt.Errorf("failed to check existing pods: %w", err)
+	}
+
+	if len(existingPods) > 0 {
+		s.Stop("Catalog service already deployed")
+		logger.Infof("Catalog pod already exists: %v\n", existingPods)
+
+		return nil
+	}
+
+	return nil
+}
+
+// loadCatalogTemplates loads the catalog template provider, metadata, and templates.
+func loadCatalogTemplates(s *spinner.Spinner) (templates.Template, *templates.AppMetadata, map[string]*template.Template, error) {
+	// Load template provider
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{
+		Root: "", // This will look directly under assets/
+	})
+
+	// Load metadata from catalog/podman
+	appMetadata, err := tp.LoadMetadata(catalogAppTemplate, true)
+	if err != nil {
+		s.Fail("failed to load catalog metadata")
+
+		return nil, nil, nil, fmt.Errorf("failed to load catalog metadata: %w", err)
+	}
+
+	// Load all templates from catalog
+	tmpls, err := tp.LoadAllTemplates(catalogAppTemplate)
+	if err != nil {
+		s.Fail("failed to load catalog templates")
+
+		return nil, nil, nil, fmt.Errorf("failed to load catalog templates: %w", err)
+	}
+
+	return tp, appMetadata, tmpls, nil
+}
+
+// prepareCatalogValues prepares the values map with bootstrap-specific configuration.
+func prepareCatalogValues(tp templates.Template, podmanURI, passwordHash string, argParams map[string]string) (map[string]any, error) {
+	if argParams == nil {
+		argParams = make(map[string]string)
+	}
+
+	// Set bootstrap-specific values
+	argParams["backend.adminPasswordHash"] = passwordHash
+	argParams["backend.runtime"] = "podman"
+	argParams["backend.podman.uri"] = podmanURI
+
+	// Load values from catalog with merged params
+	return tp.LoadValues(catalogAppTemplate, nil, argParams)
+}
+
+// executePodLayers executes all pod template layers.
+func executePodLayers(rt *podman.PodmanClient, tp templates.Template, tmpls map[string]*template.Template,
+	appMetadata *templates.AppMetadata, values map[string]any, argParams map[string]string, s *spinner.Spinner) error {
+	for i, layer := range appMetadata.PodTemplateExecutions {
+		logger.Infof("\n Executing Layer %d/%d: %v\n", i+1, len(appMetadata.PodTemplateExecutions), layer)
+		logger.Infoln("-------")
+
+		if err := executeLayer(rt, tp, tmpls, layer, appMetadata.Version, values, argParams, i); err != nil {
+			s.Fail("failed to deploy catalog pod")
+
+			return err
+		}
+
+		logger.Infof("Layer %d completed\n", i+1)
+	}
+
+	return nil
+}
+
+// executeLayer executes a single layer of pod templates.
+func executeLayer(rt *podman.PodmanClient, tp templates.Template, tmpls map[string]*template.Template,
+	layer []string, version string, values map[string]any, argParams map[string]string, layerIndex int) error {
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(layer))
+
+	// for each layer, fetch all the pod Template Names and do the pod deploy
+	for _, podTemplateName := range layer {
+		wg.Add(1)
+		go func(t string) {
+			defer wg.Done()
+			if err := executePodTemplate(rt, tp, tmpls, t, catalogAppTemplate, catalogAppName, values, version, nil, argParams); err != nil {
+				errCh <- err
+			}
+		}(podTemplateName)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	// collect all errors for this layer
+	var errs []error
+	for e := range errCh {
+		errs = append(errs, fmt.Errorf("layer %d: %w", layerIndex+1, e))
+	}
+
+	// If an error exist for a given layer, then return (do not process further layers)
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
+}
+
 // executePodTemplate executes a single pod template.
 func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls map[string]*template.Template,
 	podTemplateName, appTemplateName, appName string, values map[string]any, version string,
 	valuesFiles []string, argParams map[string]string) error {
-
 	logger.Infof("Processing template: %s\n", podTemplateName)
 
 	// Fetch pod spec

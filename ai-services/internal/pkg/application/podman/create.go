@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"text/template"
-	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -29,9 +28,7 @@ import (
 )
 
 var (
-	extraContainerReadinessTimeout = 5 * time.Minute
-	containerCreationTimeout       = 10 * time.Minute
-	envMutex                       sync.Mutex
+	envMutex sync.Mutex
 )
 
 // Create deploys a new application based on a template.

@@ -40,34 +40,10 @@ Examples:
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
-			// Initialize runtime factory based on flag
-			rt := types.RuntimeType(runtimeType)
-			if !rt.Valid() {
-				return fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift'). Please specify runtime using --runtime flag", runtimeType)
-			}
+			var err error
+			argParams, err = validateBootstrapFlags(adminPassword, rawArgParams)
 
-			vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-			logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
-
-			// Check if podman runtime is being used on unsupported platform
-			if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
-				return err
-			}
-
-			if adminPassword == "" {
-				return fmt.Errorf("admin password is required (use --admin-password flag)")
-			}
-
-			// Parse params if provided
-			if len(rawArgParams) > 0 {
-				var err error
-				argParams, err = utils.ParseKeyValues(rawArgParams)
-				if err != nil {
-					return fmt.Errorf("invalid params format: %w", err)
-				}
-			}
-
-			return nil
+			return err
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return bootstrap.Run(bootstrap.BootstrapOptions{
@@ -78,13 +54,53 @@ Examples:
 		},
 	}
 
+	configureBootstrapFlags(cmd, &adminPassword, &rawArgParams)
+
+	return cmd
+}
+
+// validateBootstrapFlags validates the bootstrap command flags and initializes runtime.
+func validateBootstrapFlags(adminPassword string, rawArgParams []string) (map[string]string, error) {
+	// Initialize runtime factory based on flag
+	rt := types.RuntimeType(runtimeType)
+	if !rt.Valid() {
+		return nil, fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift'). Please specify runtime using --runtime flag", runtimeType)
+	}
+
+	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
+	logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
+
+	// Check if podman runtime is being used on unsupported platform
+	if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
+		return nil, err
+	}
+
+	if adminPassword == "" {
+		return nil, fmt.Errorf("admin password is required (use --admin-password flag)")
+	}
+
+	// Parse params if provided
+	var argParams map[string]string
+	if len(rawArgParams) > 0 {
+		var err error
+		argParams, err = utils.ParseKeyValues(rawArgParams)
+		if err != nil {
+			return nil, fmt.Errorf("invalid params format: %w", err)
+		}
+	}
+
+	return argParams, nil
+}
+
+// configureBootstrapFlags configures the flags for the bootstrap command.
+func configureBootstrapFlags(cmd *cobra.Command, adminPassword *string, rawArgParams *[]string) {
 	// Add runtime flag as required
 	cmd.Flags().StringVarP(&runtimeType, "runtime", "r", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
 	_ = cmd.MarkFlagRequired("runtime")
 
-	cmd.Flags().StringVar(&adminPassword, "admin-password", "", "Password for the admin user (required)")
+	cmd.Flags().StringVar(adminPassword, "admin-password", "", "Password for the admin user (required)")
 	cmd.Flags().StringSliceVar(
-		&rawArgParams,
+		rawArgParams,
 		"params",
 		[]string{},
 		"Inline parameters to configure the catalog service.\n\n"+
@@ -94,8 +110,6 @@ Examples:
 			"Available parameters:\n"+
 			"- ui.port: Port for the catalog UI (default: random available port)\n",
 	)
-
-	return cmd
 }
 
 // Made with Bob
