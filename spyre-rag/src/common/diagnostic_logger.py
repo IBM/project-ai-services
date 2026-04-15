@@ -255,6 +255,54 @@ class DiagnosticLogger:
             self.logger.error(f"Error collecting CPU info: {e}")
             return {"error": str(e)}
     
+    def get_numa_info(self) -> Dict[str, Any]:
+        """
+        Collect NUMA node information.
+        
+        Returns:
+            Dictionary containing NUMA node count.
+        """
+        try:
+            import subprocess
+            
+            # Try to get NUMA node count using lscpu
+            try:
+                result = subprocess.run(
+                    ['lscpu'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                
+                if result.returncode == 0:
+                    # Parse lscpu output for NUMA node(s) line
+                    for line in result.stdout.splitlines():
+                        if 'NUMA node(s):' in line:
+                            fields = line.split()
+                            if fields:
+                                numa_count = int(fields[-1])
+                                return {"numa_node_count": numa_count}
+            except (subprocess.TimeoutExpired, subprocess.SubprocessError, ValueError) as e:
+                self.logger.debug(f"Could not get NUMA info via lscpu: {e}")
+            
+            # Fallback: try to read from /sys/devices/system/node/
+            try:
+                node_path = Path("/sys/devices/system/node")
+                if node_path.exists():
+                    # Count node* directories
+                    numa_nodes = [d for d in node_path.iterdir() if d.is_dir() and d.name.startswith('node')]
+                    numa_count = len(numa_nodes)
+                    if numa_count > 0:
+                        return {"numa_node_count": numa_count}
+            except Exception as e:
+                self.logger.debug(f"Could not read NUMA info from /sys: {e}")
+            
+            return {"numa_node_count": "N/A"}
+        
+        except Exception as e:
+            self.logger.error(f"Error collecting NUMA info: {e}")
+            return {"error": str(e)}
+    
     def get_file_descriptor_info(self) -> Dict[str, Any]:
         """
         Collect file descriptor usage information.
@@ -363,7 +411,7 @@ class DiagnosticLogger:
             Dictionary containing network connection statistics.
         """
         try:
-            connections = self.process.connections(kind='inet')
+            connections = self.process.net_connections(kind='inet')
             
             connection_summary = {
                 "total_connections": len(connections),
@@ -430,6 +478,11 @@ class DiagnosticLogger:
         self.logger.info("--- CPU INFORMATION ---")
         cpu_info = self.get_cpu_info()
         for key, value in cpu_info.items():
+            self.logger.info(f"{key}: {value}")
+        
+        self.logger.info("--- NUMA INFORMATION ---")
+        numa_info = self.get_numa_info()
+        for key, value in numa_info.items():
             self.logger.info(f"{key}: {value}")
         
         self.logger.info("--- FILE DESCRIPTOR INFORMATION ---")
@@ -516,8 +569,6 @@ class StderrMonitor:
         self.original_stderr = sys.stderr
         self._stop_event = threading.Event()
         self._monitor_thread: Optional[threading.Thread] = None
-        self.cooldown_seconds = 3
-        self._last_diagnostic_dump_time = 0.0
         
         # Error patterns to watch for
         self.error_patterns = [
