@@ -15,7 +15,7 @@ from concurrent.futures import as_completed, ProcessPoolExecutor
 from sentence_splitter import SentenceSplitter
 
 # Set third-party library log levels before importing project modules
-logging.getLogger('docling').setLevel(logging.CRITICAL)
+logging.getLogger('docling').setLevel(logging.DEBUG)
 
 # Import project modules after setting log levels
 from common.thread_utils import ContextAwareThreadPoolExecutor
@@ -30,6 +30,23 @@ from digitize.types import DocStatus, JobStatus, OutputFormat
 import digitize.config as config
 
 logger = get_logger("doc_utils")
+
+
+def _format_elapsed(elapsed_seconds: float) -> str:
+    return f"{elapsed_seconds:.2f}s"
+
+
+def log_stage_timing(pdf_path, stage: str, elapsed_seconds: float, **extra_fields):
+    file_name = Path(pdf_path).name if pdf_path else "unknown"
+    extra = " ".join(
+        f"{key}={value}"
+        for key, value in extra_fields.items()
+        if value is not None
+    )
+    suffix = f" {extra}" if extra else ""
+    logger.info(
+        f"[INGEST_TIMING] file={file_name} stage={stage} elapsed={_format_elapsed(elapsed_seconds)}{suffix}"
+    )
 
 # Load configuration from config module
 WORKER_SIZE = config.WORKER_SIZE
@@ -192,9 +209,11 @@ def process_converted_document(converted_json_path, pdf_path, out_path, gen_mode
 
         page_count, process_time = process_text(converted_doc, pdf_path, processed_text_json_path)
         timings["process_text"] = process_time
+        log_stage_timing(pdf_path, "process_text", process_time, pages=page_count)
 
         table_count, process_time = process_table(converted_doc, pdf_path, processed_table_json_path, gen_model, gen_endpoint)
         timings["process_tables"] = process_time
+        log_stage_timing(pdf_path, "process_tables", process_time, tables=table_count)
 
         return processed_text_json_path, processed_table_json_path, page_count, table_count, timings
     except Exception as e:
@@ -219,6 +238,7 @@ def convert_document(pdf_path, out_path, file_name):
 
         conversion_time = time.time() - t0
         logger.debug(f"'{pdf_path}' converted")
+        log_stage_timing(pdf_path, "digitizing", conversion_time)
         return converted_json_f, conversion_time
     except Exception as e:
         logger.error(f"Error converting '{pdf_path}': {e}")
@@ -390,6 +410,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     # Capture chunk counts in real time and update <doc_id>_metadata.json
                     chunk_count = count_chunks(chunk_json, tab_json)
                     batch_stats[path]["chunk_count"] = chunk_count
+                    log_stage_timing(path, "chunking", float(chunk_time or 0), chunks=chunk_count)
 
                     if doc_id is not None:
                         logger.debug(f"Chunking Done: updating doc & job metadata for document: {doc_id}")
@@ -450,7 +471,12 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
             if c_json in chunk_filenames and t_json in table_filenames:
                 # Re-invoke assembly if not already done in _run_batch
                 # or use the combined_docs gathered during the batchs
+                assembly_start = time.time()
                 doc_chunks = create_chunk_documents(c_path, t_path, path)
+                assembly_time = time.time() - assembly_start
+                batch_timings = converted_pdf_stats[path].setdefault("timings", {})
+                batch_timings["assembly"] = round(float(assembly_time or 0), 2)
+                log_stage_timing(path, "assembly", assembly_time, chunks=len(doc_chunks))
                 # Inject the doc_id into every chunk
                 for chunk in doc_chunks:
                     chunk["doc_id"] = doc_id
