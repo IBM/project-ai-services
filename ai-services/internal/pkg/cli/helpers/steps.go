@@ -211,6 +211,7 @@ func renderStepsMarkdown(tp templates.Template, runtime runtime.Runtime, appTemp
 	logger.Infoln(title + ":")
 	logger.Infoln("-------")
 	logger.Infoln(rendered.String())
+	logger.Infoln("") // Add Empty line after printing steps
 
 	return nil
 }
