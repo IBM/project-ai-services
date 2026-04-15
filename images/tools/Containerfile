@@ -11,18 +11,43 @@ RUN dnf update ${DNF_FLAGS} -y \
   && dnf install ${DNF_FLAGS} -y gcc \
   python3.12-pip python3.12 python3.12-devel python3-pexpect python3-ptyprocess python3-pyyaml python3-file-magic \
   && python3.12 -m venv ${VIRTUAL_ENV} \
-  && pip install -r requirements.txt \
+  && ARCH=$(uname -m) \
+  && if [ "$ARCH" = "ppc64le" ]; then \
+  pip install -r requirements.txt --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ --prefer-binary; \
+  else \
+  pip install -r requirements.txt; \
+  fi \
   && rm -rf /var/cache/dnf && dnf clean all -y
+
+FROM registry.access.redhat.com/ubi9/ubi:9.7 as servicereport_builder
+
+ARG SR_COMMIT=2a57a3a4b14d23981b4add77670bcea90cf69d77
+ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
+
+RUN ARCH=$(uname -m) && mkdir -p /rpms && \
+  if [ "$ARCH" = "ppc64le" ]; then \
+  dnf update ${DNF_FLAGS} -y && \
+  dnf install ${DNF_FLAGS} -y git rpm-build rpmdevtools python3-devel && \
+  git clone https://github.com/linux-ras/ServiceReport.git /tmp/servicereport && \
+  cd /tmp/servicereport && \
+  git checkout ${SR_COMMIT} && \
+  python3 setup.py sdist && \
+  rpmdev-setuptree && \
+  cp dist/*.tar.gz ~/rpmbuild/SOURCES/ && \
+  rpmbuild -ba ServiceReport.spec && \
+  cp ~/rpmbuild/RPMS/*/*.rpm /rpms/ && \
+  rm -rf /var/cache/dnf && dnf clean all -y; \
+  fi
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
 
-ARG SR_VERSION
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 COPY --from=tools_builder /opt/venv /opt/venv
+COPY --from=servicereport_builder /rpms/ /tmp/rpms/
 
 RUN microdnf update ${DNF_FLAGS} -y && \
   microdnf install ${DNF_FLAGS} -y python3.12 && \
@@ -30,8 +55,7 @@ RUN microdnf update ${DNF_FLAGS} -y && \
   if [ "$ARCH" = "ppc64le" ]; then \
   echo "Installing ServiceReport for ppc64le..." && \
   microdnf install ${DNF_FLAGS} -y systemd kmod sos python3-pyudev && \
-  curl -LO https://public.dhe.ibm.com/software/server/POWER/Linux/yum/OSS/RHEL/9/ppc64le/ServiceReport-${SR_VERSION}.ppc64le.rpm && \
-  rpm -ivh ServiceReport-${SR_VERSION}.ppc64le.rpm && \
-  rm ServiceReport-${SR_VERSION}.ppc64le.rpm; \
+  rpm -ivh /tmp/rpms/*.rpm && \
+  rm -rf /tmp/rpms; \
   fi && \
   microdnf clean all

@@ -30,8 +30,12 @@ spec:
         name: vLLM
       resources:
         limits:
+          cpu: "12"
+          memory: "150Gi"
           ibm.com/spyre_pf: "4"
         requests:
+          cpu: "12"
+          memory: "150Gi"
           ibm.com/spyre_pf: "4"
       runtime: spyre-temp
       storageUri: {{ .Values.instruct.storageUri }}

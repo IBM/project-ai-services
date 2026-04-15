@@ -23,9 +23,10 @@ if level != "":
 
 set_log_level(log_level)
 
-from common.llm_utils import create_llm_session, query_vllm_summarize, query_vllm_summarize_stream
-from common.misc_utils import get_model_endpoints, set_request_id
+from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream
+from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
 from common.settings import get_settings
+from common.error_utils import http_error_responses
 from summarize.summ_utils import (
     SummarizeException,
     word_count,
@@ -35,7 +36,6 @@ from summarize.summ_utils import (
     MAX_INPUT_WORDS,
     compute_target_and_max_tokens,
     SummarizeSuccessResponse,
-    error_responses,
     validate_summary_length,
     extract_text_from_pdf
 )
@@ -47,6 +47,8 @@ concurrency_limiter = asyncio.BoundedSemaphore(settings.max_concurrent_requests)
 
 @asynccontextmanager
 async def lifespan(app):
+    filtered_paths = ['/health']
+    configure_uvicorn_logging(log_level, filtered_paths)
     initialize_models()
     create_llm_session(pool_maxsize=settings.max_concurrent_requests)
     yield
@@ -153,7 +155,8 @@ async def handle_summarize(
     if stream:
         await concurrency_limiter.acquire()
         try:
-            vllm_stream = query_vllm_summarize_stream(
+            vllm_stream = await asyncio.to_thread(
+                query_vllm_summarize_stream,
                 llm_endpoint=llm_endpoint,
                 messages=messages,
                 model=llm_model,
@@ -177,7 +180,9 @@ async def handle_summarize(
 
     async with concurrency_limiter:
         start = time.time()
-        result, in_tokens, out_tokens = query_vllm_summarize(
+        # Running the call in a async thread pool to avoid blocking the event loop
+        result, in_tokens, out_tokens = await asyncio.to_thread(
+            query_vllm_summarize,
             llm_endpoint=llm_endpoint,
             messages=messages,
             model=llm_model,
@@ -205,7 +210,13 @@ async def handle_summarize(
 
 @app.post("/v1/summarize",
 response_model=SummarizeSuccessResponse,
-responses=error_responses,
+responses={
+    400: http_error_responses[400],
+    413: http_error_responses[413],
+    415: http_error_responses[415],
+    429: http_error_responses[429],
+    500: http_error_responses[500],
+},
 summary="Summarize text or file",
 description=(
       "Accepts **either** `application/json` or `multipart/form-data` based on "

@@ -46,9 +46,10 @@ func StartIngestion(
 	appName string,
 	completionStr string,
 	cleanDocs bool,
+	appRuntime string,
 ) error {
 	// Wait for vLLM pod to be ready.
-	if err := WaitForAllPodsHealthy(ctx, cfg, appName); err != nil {
+	if err := WaitForAllPodsHealthy(ctx, cfg, appName, appRuntime); err != nil {
 		return err
 	}
 
@@ -64,6 +65,8 @@ func StartIngestion(
 		appName,
 		"--pod", podName,
 		"--yes",
+		"--runtime",
+		appRuntime,
 	}
 
 	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
@@ -78,7 +81,7 @@ func StartIngestion(
 	}
 
 	// Wait for ingestion to complete.
-	if _, err := WaitForIngestionLogs(ctx, cfg, appName, completionStr, cleanDocs); err != nil {
+	if _, err := WaitForIngestionLogs(ctx, cfg, appName, completionStr, cleanDocs, appRuntime); err != nil {
 		return err
 	}
 

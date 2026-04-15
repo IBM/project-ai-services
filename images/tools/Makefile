@@ -1,7 +1,7 @@
 REGISTRY?=icr.io/ai-services-private
 IMAGE=tools
-TAG?=0.6
-SR_VERSION=2.2.5-2
+TAG?=0.7
+SR_COMMIT=2a57a3a4b14d23981b4add77670bcea90cf69d77
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
 # Fix: Execute shell command to get the architecture
@@ -24,7 +24,7 @@ FULL_IMAGE_TAG = $(REGISTRY)/$(IMAGE):$(TAG)-$(PLATFORM)
 
 CONTAINER_BUILDER?=podman
 build:
-	$(CONTAINER_BUILDER) build --platform linux/$(PLATFORM) --build-arg SR_VERSION=$(SR_VERSION) -t $(ARCH_TAG) .
+	$(CONTAINER_BUILDER) build --platform linux/$(PLATFORM) --build-arg SR_COMMIT=$(SR_COMMIT) -t $(ARCH_TAG) .
 .PHONY: build
 
 push:

@@ -11,7 +11,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from tqdm import tqdm
 from pathlib import Path
 from docling_core.types.doc.document import DoclingDocument
-from concurrent.futures import as_completed, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import as_completed, ProcessPoolExecutor
 from sentence_splitter import SentenceSplitter
 
 # Set third-party library log levels before importing project modules
@@ -19,10 +19,13 @@ logging.getLogger('docling').setLevel(logging.CRITICAL)
 
 # Import project modules after setting log levels
 from common.thread_utils import ContextAwareThreadPoolExecutor
-from common.llm_utils import create_llm_session, summarize_and_classify_tables, tokenize_with_llm
+from common.llm_utils import classify_text_with_llm, summarize_table, tokenize_with_llm
 from common.misc_utils import get_logger, text_suffix, table_suffix, chunk_suffix
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
-from digitize.status import StatusManager
+from digitize.status import (
+    StatusManager,
+    get_utc_timestamp
+)
 from digitize.types import DocStatus, JobStatus, OutputFormat
 import digitize.config as config
 
@@ -40,8 +43,6 @@ tqdm_wrapper = tqdm if is_debug else (lambda x, **kwargs: x)
 excluded_labels = {
     'page_header', 'page_footer', 'caption', 'reference', 'footnote'
 }
-
-create_llm_session(pool_maxsize=POOL_SIZE)
 
 def process_text(converted_doc, pdf_path, out_path):
     page_count = 0
@@ -128,7 +129,7 @@ def process_text(converted_doc, pdf_path, out_path):
 
     process_time = time.time() - t0
     out_path.write_text(json.dumps(structured_output, indent=2), encoding="utf-8")
-        
+
     return page_count, process_time
 
 def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
@@ -141,7 +142,7 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
         logger.debug(f"No tables found in '{pdf_path}'")
         out_path.write_text(json.dumps({}, indent=2), encoding="utf-8")
         return table_count, process_time
-    
+
     table_dict = {}
     for table_ix, table in enumerate(tqdm_wrapper(converted_doc.tables, desc=f"Processing table content of '{pdf_path}'")):
         table_dict[table_ix] = {}
@@ -151,7 +152,9 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
     table_htmls = [table_dict[key]["html"] for key in sorted(table_dict)]
     table_captions_list = [table_dict[key]["caption"] for key in sorted(table_dict)]
 
-    table_summaries, decisions = summarize_and_classify_tables(table_htmls, gen_model, gen_endpoint, pdf_path)
+    table_summaries = summarize_table(table_htmls, gen_model, gen_endpoint, pdf_path)
+    decisions = classify_text_with_llm(table_summaries, gen_model, gen_endpoint, pdf_path)
+
     filtered_table_dicts = {
         idx: {
             'html': html,
@@ -340,7 +343,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     })
                     batch_stats[path]["timings"]["processing"] = round(float(total_processing_time or 0), 2)
                     batch_table_paths.append(tab_json)
-                   
+
                     if doc_id is not None:
                         logger.debug(f"Processing Done: updating doc & job metadata for document: {doc_id}")
                         status_mgr.update_doc_metadata(doc_id, {
@@ -604,7 +607,7 @@ def chunk_single_file(input_path, pdf_path, out_path, emb_endpoint, max_tokens=5
     try:
         with open(input_path, "r") as f:
             data = json.load(f)
-            
+
             font_size_levels = collect_header_font_sizes(data)
 
             chunks = []
@@ -710,9 +713,11 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn):
     with open(in_tab_f, "r") as f:
         tab_data = json.load(f)
 
+    created_at = get_utc_timestamp()
+
     txt_docs = []
     if len(txt_data):
-        for _, block in enumerate(txt_data):
+        for txt_idx, block in enumerate(txt_data):
             meta_info = ''
             if block.get('chapter_title'):
                 meta_info += f"Chapter: {block.get('chapter_title')} "
@@ -722,34 +727,46 @@ def create_chunk_documents(in_txt_f, in_tab_f, orig_fn):
                 meta_info += f"Subsection: {block.get('subsection_title')} "
             if block.get('subsubsection_title'):
                 meta_info += f"Subsubsection: {block.get('subsubsection_title')} "
+            
+            # Extract page number from page_range (use first page if multiple)
+            page_range = block.get("page_range", [])
+            page_number = page_range[0] if page_range and len(page_range) > 0 else None
+            
             txt_docs.append({
-                # "chunk_id": txt_id,
                 "page_content": f'{meta_info}\n{block.get("content")}' if meta_info != '' else block.get("content"),
                 "filename": orig_fn,
                 "type": "text",
                 "source": meta_info,
-                "language": "en"
+                "language": "en",
+                "page_number": page_number,
+                "chunk_index": txt_idx,
+                "created_at": created_at
             })
 
     tab_docs = []
     if len(tab_data):
         tab_data = list(tab_data.values())
-        for tab_id, block in enumerate(tab_data):
-            # tab_docs.append(Document(
-            #     page_content=block.get('summary'),
-            #     metadata={"filename": orig_fn, "type": "table", "source": block.get('html'), "chunk_id": tab_id}
-            # ))
+        txt_count = len(txt_docs)
+        for tab_idx, block in enumerate(tab_data):
+            # TODO: add page_number for the tables content            
             tab_docs.append({
                 "page_content": f"{block.get('caption')}\n\n{block.get('summary')}" if block.get("caption") else block.get("summary"),
                 "filename": orig_fn,
                 "type": "table",
                 "source": block.get("html"),
-                "language": "en"
+                "language": "en",
+                "chunk_index": txt_count + tab_idx,
+                "created_at": created_at
             })
 
     combined_docs = txt_docs + tab_docs
+    
+    # Add total_chunks to all documents
+    total_chunks = len(combined_docs)
+    for doc in combined_docs:
+        doc["total_chunks"] = total_chunks
 
-    logger.debug(f"Combined chunk documents created")
+    logger.debug(f"Combined chunk documents created: {total_chunks} total chunks")
 
     return combined_docs
 

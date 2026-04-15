@@ -20,7 +20,13 @@ spec:
     model:
       modelFormat:
         name: vLLM
-      resources: {}
+      resources:
+        limits:
+          cpu: "8"
+          memory: "4Gi"
+        requests:
+          cpu: "8"
+          memory: "4Gi"
       runtime: cpu-temp
       storageUri: {{ .Values.reranker.storageUri }}
       args:

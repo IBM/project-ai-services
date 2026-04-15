@@ -8,8 +8,11 @@ metadata:
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     ai-services.io/component: vectordb
 spec:
-  serviceName: "opensearch"
-  replicas: 1
+  serviceName: "opensearch-headless"
+  podManagementPolicy: Parallel
+  replicas: {{ .Values.opensearch.replicas }}
+  persistentVolumeClaimRetentionPolicy:
+    whenScaled: Delete
   selector:
     matchLabels:
       ai-services.io/application: {{ .Release.Name }}
@@ -26,15 +29,26 @@ spec:
         - name: opensearch
           image: "{{ .Values.opensearch.image }}"
           env:
-            - name: "discovery.type"
-              value: "single-node"
+            - name: cluster.name
+              value: opensearch-cluster
+            - name: node.name
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: cluster.initial_master_nodes
+              value: "{{ range $i := until (int .Values.opensearch.replicas) }}{{ if $i }},{{ end }}opensearch-{{ $i }}{{ end }}"
+            - name: discovery.seed_hosts
+              value: opensearch-headless
+            - name: network.host
+              value: 0.0.0.0
             - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: "opensearch-credentials"
                   key: password
             - name: OPENSEARCH_JAVA_OPTS
-              value: "-XX:-UseSuperWord -XX:TieredStopAtLevel=1"
+              value: "-Xms4g -Xmx4g -XX:MaxDirectMemorySize=2g -XX:-UseSuperWord -XX:TieredStopAtLevel=1"
           ports:
             - name: os-client-port
               containerPort: 9200
@@ -50,26 +64,25 @@ spec:
           volumeMounts:
             - mountPath: /usr/share/opensearch/data
               name: data
-          livenessProbe:
-            exec:
-              command:
-              - sh
-              - -c
-              - 'curl -fk -u "admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" https://localhost:9200/_cluster/health'
-            initialDelaySeconds: 90
-            periodSeconds: 30
-            timeoutSeconds: 20
-            failureThreshold: 5
-          readinessProbe:
-            exec:
-              command:
-              - sh
-              - -c
-              - 'curl -fk -u "admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" https://localhost:9200/_cluster/health'
-            initialDelaySeconds: 30
+          startupProbe:
+            tcpSocket:
+              port: 9200
+            initialDelaySeconds: 5
             periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: 9200
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 10
+          readinessProbe:
+            tcpSocket:
+              port: 9200
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
   volumeClaimTemplates:
     - metadata:
         name: data

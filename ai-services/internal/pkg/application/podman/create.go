@@ -21,7 +21,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -554,7 +553,7 @@ func (p *PodmanApplication) returnEnvParamsForPod(podSpec *models.PodSpec, podAn
 
 func (p *PodmanApplication) deployPodAndReadinessCheck(podSpec *models.PodSpec,
 	podTemplateName string, body io.Reader, opts map[string]string) error {
-	pods, err := podman.RunPodmanKubePlay(body, opts)
+	pods, err := p.runtime.CreatePod(body, opts)
 	if err != nil {
 		return fmt.Errorf("failed pod creation: %w", err)
 	}

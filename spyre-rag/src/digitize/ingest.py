@@ -18,6 +18,9 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
 
     logger.info(f"Ingestion started from dir '{directory_path}'")
+    
+    # Initialize LLM session for all API calls (LLM and embedding)
+    create_llm_session(pool_maxsize=config.LLM_POOL_SIZE)
 
     # Initialize status manager
     status_mgr = None
@@ -63,9 +66,28 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
             # Index each document separately and update status
             for doc_id, chunks in doc_chunks_dict.items():
                 logger.debug(f"Indexing {len(chunks)} chunks for document: {doc_id}")
-                success = vector_store.insert_chunks(chunks, embedding=embedder)
 
-                # Update document status immediately after indexing attempt
+                try:
+                    success = vector_store.insert_chunks(chunks, embedding=embedder)
+                except Exception as e:
+                    # Catch exceptions from insert_chunks (e.g., after all retries failed)
+                    # Mark this document as failed and continue with remaining documents
+                    success = False
+                    failed_count += 1
+                    logger.error(f"Failed to index document {doc_id}: {str(e)}")
+
+                    # Reinitialize vector store and embedder after a failure to ensure clean state for next document
+                    # This prevents cascading failures due to corrupted connection state
+                    try:
+                        logger.debug("Reinitializing vector store and embedder after failure")
+                        vector_store = db.get_vector_store()
+                        embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
+                        logger.debug("Successfully reinitialized connections")
+                    except Exception as reinit_error:
+                        logger.error(f"Failed to reinitialize connections: {reinit_error}")
+                        # Continue anyway - the next document will try with existing connections
+
+                # Update document status immediately after indexing attempt, regardless of success or failure
                 if status_mgr and doc_id_dict:
                     if not success:
                         # Mark as FAILED if indexing failed

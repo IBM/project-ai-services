@@ -10,15 +10,47 @@ AI Services, part of the [IBM Open-Source AI Foundation for Power](https://www.i
 
 ## Quick Start
 
-### Pull in AI Services binary
+### Installation
 
-Download the latest ai-services binary from the [releases page](https://github.com/IBM/project-ai-services/releases). Use the following curl command to download it (replace `version` with the desired release tag):
+For detailed platform-specific installation instructions, see [Installation Guide](docs/INSTALLATION.md).
+
+**Quick install for your platform:**
 
 ```bash
-$ curl -LO https://github.com/IBM/project-ai-services/releases/download/<version>/ai-services
-$ sudo chmod +x ai-services
-$ sudo mv ai-services /usr/local/bin/
+# Set version
+VERSION="v0.2.0"
+
+# macOS (Intel)
+curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-amd64"
+chmod +x ai-services-darwin-amd64
+sudo mv ai-services-darwin-amd64 /usr/local/bin/ai-services
+
+# macOS (Apple Silicon)
+curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-arm64"
+chmod +x ai-services-darwin-arm64
+sudo mv ai-services-darwin-arm64 /usr/local/bin/ai-services
+
+# Linux (x86_64)
+curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-linux-amd64"
+chmod +x ai-services-linux-amd64
+sudo mv ai-services-linux-amd64 /usr/local/bin/ai-services
+
+# Linux (ppc64le/Power)
+curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-linux-ppc64le"
+chmod +x ai-services-linux-ppc64le
+sudo mv ai-services-linux-ppc64le /usr/local/bin/ai-services
 ```
+
+**Supported Platforms:**
+- macOS (Intel x86_64, Apple Silicon ARM64) - Client-only mode
+- Linux (x86_64) - Client-only mode
+- Linux (ppc64le/Power) - Local + Remote mode
+
+**Deployment Modes:**
+- **Client-only mode**: CLI connects to remote OpenShift cluster for application deployment
+- **Local + Remote mode**: Supports both local Podman deployments and remote OpenShift cluster connections
+
+For signature verification with Cosign, see the [Installation Guide](docs/INSTALLATION.md).
 
 ### Run the binary to get started
 
