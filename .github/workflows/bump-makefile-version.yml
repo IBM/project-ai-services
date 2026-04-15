@@ -1,0 +1,46 @@
+name: Check Makefile Version Bump
+
+on:
+  pull_request:
+    paths:
+      - 'spyre-rag/src/**'
+      - 'spyre-rag/ui/**'
+      - 'images/rag-base/**'
+      - 'digitize-ui/**'
+    branches:
+      - main
+
+jobs:
+  check-spyre-rag-src:
+    name: Check spyre-rag/src
+    uses: ./.github/workflows/bump-makefile-version-component.yml
+    with:
+      component_path: 'spyre-rag/src'
+      values_yaml_key: 'backend'
+
+  check-spyre-rag-ui:
+    name: Check spyre-rag/ui
+    uses: ./.github/workflows/bump-makefile-version-component.yml
+    with:
+      component_path: 'spyre-rag/ui'
+      values_yaml_key: 'ui'
+
+  check-rag-base:
+    name: Check images/rag-base
+    uses: ./.github/workflows/bump-makefile-version-component.yml
+    with:
+      component_path: 'images/rag-base'
+      additional_notes: |
+        Note: This is the base image used by spyre-rag containers.
+        After bumping, you may also need to update references in:
+        - spyre-rag/src/Makefile (BASE_IMAGE)
+        - Any other dependent Makefiles or Containerfiles
+
+  check-digitize-ui:
+    name: Check digitize-ui
+    uses: ./.github/workflows/bump-makefile-version-component.yml
+    with:
+      component_path: 'digitize-ui'
+      values_yaml_key: 'digitizeUi'
+
+# Made with Bob

@@ -1,6 +1,3 @@
-//go:build catalog_api
-// +build catalog_api
-
 package catalog
 
 import (

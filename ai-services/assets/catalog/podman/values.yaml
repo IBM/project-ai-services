@@ -1,0 +1,12 @@
+ui:
+  port: ""
+  image: icr.io/ai-services-cicd/catalog-ui:0.0.1
+
+backend:
+  port: ""
+  image: icr.io/ai-services-cicd/ai-services:0.0.2
+  jwtSecret: ""
+  runtime: ""
+  adminPasswordHash: ""
+  podman:
+    uri: "/run/podman/podman.sock"
