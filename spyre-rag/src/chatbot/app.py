@@ -25,6 +25,7 @@ if level != "":
 
 set_log_level(log_level)
 
+from common.diagnostic_logger import setup_comprehensive_crash_handler
 import common.db_utils as db
 from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
 from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
@@ -84,6 +85,8 @@ async def ensure_vectorstore_initialized():
                 initialize_vectorstore()
                 logging.info("Vectorstore initialized successfully")
 
+diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logging.getLogger("chatbot"))
+
 @asynccontextmanager
 async def lifespan(app):
     filtered_paths = ['/health']
@@ -92,6 +95,7 @@ async def lifespan(app):
     setup_language_detector([Language.ENGLISH, Language.GERMAN])
     create_llm_session(pool_maxsize=POOL_SIZE)
     yield
+    stderr_monitor.stop()
 
 # OpenAPI tags metadata for endpoint organization
 tags_metadata = [
