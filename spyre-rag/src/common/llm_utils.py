@@ -87,12 +87,12 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
         logger.error(f"Error summarizing/classifying table: {e}")
         return "No summary.", False
 
-def summarize_and_classify_tables(table_htmls, gen_model, llm_endpoint, pdf_path, max_workers=32):
+def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, max_workers=32):
     """
     Combined function to summarize and classify tables using a single prompt.
     Returns tuple: (summaries, decisions)
     """
-    all_prompts = [settings.prompts.table_summary_and_classify.format(content=html) for html in table_htmls]
+    all_prompts = [settings.prompts.table_summary_and_classify.format(content=md) for md in table_mds]
 
     results: list[tuple[str, bool] | None] = [None] * len(all_prompts)
 
