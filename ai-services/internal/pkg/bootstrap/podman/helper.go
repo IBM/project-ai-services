@@ -172,12 +172,12 @@ func setupSMTLevel() error {
 
 	// Skip setup if SMT is already set to 2
 	if currentSMTLevel == smtLevel {
-		logger.Infoln("SMT level is already set to %d, skipping setup", smtLevel, logger.VerbosityLevelDebug)
+		logger.Infof("SMT level is already set to %d, skipping setup", smtLevel, logger.VerbosityLevelDebug)
 
 		return nil
 	}
 
-	logger.Infoln("Current SMT level is %d, setting to %d", currentSMTLevel, smtLevel, logger.VerbosityLevelDebug)
+	logger.Infof("Current SMT level is %d, setting to %d", currentSMTLevel, smtLevel, logger.VerbosityLevelDebug)
 
 	// 1. Enable smtstate.service
 	if err := systemctl("enable", "smtstate.service"); err != nil {
@@ -197,7 +197,7 @@ func setupSMTLevel() error {
 	if err != nil {
 		return fmt.Errorf("failed to set SMT level to %d: %v, output: %s", smtLevel, err, string(out))
 	}
-	logger.Infoln("SMT level set to %d", smtLevel, logger.VerbosityLevelDebug)
+	logger.Infof("SMT level set to %d", smtLevel, logger.VerbosityLevelDebug)
 
 	// 4. Restart smtstate.service to persist the setting
 	if err := systemctl("restart", "smtstate.service"); err != nil {
