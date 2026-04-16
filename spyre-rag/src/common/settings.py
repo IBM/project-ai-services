@@ -122,6 +122,7 @@ class Settings:
     summarization_temperature: float
     summarization_stop_words: str
     language_detection_min_confidence: float
+    table_summary_max_tokens: int
 
 
     def __post_init__(self):
@@ -140,6 +141,7 @@ class Settings:
         default_summarization_temperature = 0.2
         default_summarization_stop_words = "Keywords, Note, ***"
         default_language_detection_min_confidence = 0.5
+        default_table_summary_max_tokens = 1024
 
         if not (isinstance(self.score_threshold, float) and 0 < self.score_threshold < 1):
             object.__setattr__(self, "score_threshold", default_score_threshold)
@@ -207,6 +209,10 @@ class Settings:
                 object.__setattr__(self, "language_detection_min_confidence", default_language_detection_min_confidence)
                 logger.warning(f"Setting language_detection_min_confidence to default '{default_language_detection_min_confidence}' as it is missing in the settings")
 
+        if not (isinstance(self.table_summary_max_tokens, int) and self.table_summary_max_tokens > 0):
+            object.__setattr__(self, "table_summary_max_tokens", default_table_summary_max_tokens)
+            logger.warning(f"Setting table_summary_max_tokens to default '{default_table_summary_max_tokens}' as it is missing or malformed in the settings")
+
 
     @classmethod
     def from_dict(cls, data: dict):
@@ -236,7 +242,8 @@ class Settings:
             summarization_prompt_token_count = data.get("summarization_prompt_token_count", None),  # type: ignore[arg-type]
             summarization_temperature = data.get("summarization_temperature", None),  # type: ignore[arg-type]
             summarization_stop_words = data.get("summarization_stop_words", None),  # type: ignore[arg-type]
-            language_detection_min_confidence = data.get("language_detection_min_confidence", None)  # type: ignore[arg-type]
+            language_detection_min_confidence = data.get("language_detection_min_confidence", None),  # type: ignore[arg-type]
+            table_summary_max_tokens = data.get("table_summary_max_tokens", None)  # type: ignore[arg-type]
         )
 
     @classmethod

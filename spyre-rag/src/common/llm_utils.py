@@ -37,7 +37,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
         "model": gen_model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
-        "max_tokens": 1024,
+        "max_tokens": settings.table_summary_max_tokens,
         "stream": False,
     }
 
