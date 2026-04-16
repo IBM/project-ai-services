@@ -52,7 +52,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
 
         # Parse response - handle multi-line summaries
         summary = ""
-        decision = True
+        decision = False
         lines = text.splitlines()
 
         # Find Summary: and Decision: lines
@@ -85,7 +85,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
 
     except Exception as e:
         logger.error(f"Error summarizing/classifying table: {e}")
-        return "No summary.", True
+        return "No summary.", False
 
 def summarize_and_classify_tables(table_htmls, gen_model, llm_endpoint, pdf_path, max_workers=32):
     """
@@ -118,7 +118,7 @@ def summarize_and_classify_tables(table_htmls, gen_model, llm_endpoint, pdf_path
         else:
             # Default values for failed futures
             summaries.append("No summary.")
-            decisions.append(True)
+            decisions.append(False)
 
     return summaries, decisions
 
