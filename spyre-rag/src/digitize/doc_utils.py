@@ -748,26 +748,22 @@ def chunk_tables(input_path, pdf_path, out_path, emb_endpoint, max_tokens=512, d
                     chunks = split_text_into_token_chunks(summary, emb_endpoint, max_tokens=max_tokens, overlap=50)
 
                     for chunk_part_idx, chunk in enumerate(chunks):
+                        # TODO: Consider adding chunking properties ("is_chunked", "chunk_part", "total_parts")
+                        # in case future requirements need item-level chunk tracking or reassembly logic.
                         chunked_tables.append({
                             "content": chunk,
                             "caption": caption,
-                            "summary": summary,
                             "markdown_source": markdown_source,
                             "page_number": page_number,
                             "table_index": tab_idx,
-                            "is_chunked": True,
-                            "chunk_part": chunk_part_idx + 1,
-                            "total_parts": len(chunks)
                         })
                 else:
                     chunked_tables.append({
                         "content": summary,
                         "caption": caption,
-                        "summary": summary,
                         "markdown_source": markdown_source,
                         "page_number": page_number,
                         "table_index": tab_idx,
-                        "is_chunked": False
                     })
 
         # Save the chunked tables to the output file
@@ -849,8 +845,17 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
             page_number = block.get("page_number")
             content = block.get("content", "")
 
-            # Use content directly (summary already includes all context)
+            # Smart caption prefixing: only add if caption not already in content
+            def _normalize(text: str) -> str:
+                text = text.lower().strip()
+                text = ' '.join(text.split())  # collapse whitespace
+                return text.replace(' - ', '-').replace(' -', '-').replace('- ', '-')
+
             page_content = content
+            if caption:
+                norm_content = _normalize(content)
+                if _normalize(caption) not in norm_content:
+                    page_content = f"Table: {caption}\n{content}"
 
             tab_docs.append({
                 "page_content": page_content,
@@ -860,10 +865,7 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
                 "page_number": page_number,
                 "language": "en",
                 "chunk_index": txt_count + tab_idx,
-                "created_at": created_at,
-                "is_chunked_table": block.get("is_chunked", False),
-                "table_chunk_part": block.get("chunk_part"),
-                "table_total_parts": block.get("total_parts")
+                "created_at": created_at
             })
 
     combined_docs = txt_docs + tab_docs

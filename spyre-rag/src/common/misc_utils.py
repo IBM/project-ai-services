@@ -119,7 +119,7 @@ LOG_LEVEL = logging.INFO
 LOCAL_CACHE_DIR = os.getenv("LOCAL_CACHE_DIR", "/var/cache")
 text_chunk_suffix = "_text_chunk.json"
 text_suffix = "_text.json"
-table_suffix = "_tables.json"
+table_suffix = "_table.json"
 table_chunk_suffix = "_table_chunk.json"
 
 def set_log_level(level):
