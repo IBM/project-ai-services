@@ -158,6 +158,27 @@ func systemctl(action, unit string) error {
 }
 
 func setupSMTLevel() error {
+	// Check current SMT level first
+	cmd := exec.Command("ppc64_cpu", "--smt")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to check current SMT level: %v, output: %s", err, string(out))
+	}
+
+	currentSMTLevel, err := getSMTLevel(string(out))
+	if err != nil {
+		return fmt.Errorf("failed to get current SMT level: %w", err)
+	}
+
+	// Skip setup if SMT is already set to 2
+	if currentSMTLevel == smtLevel {
+		logger.Infoln("SMT level is already set to %d, skipping setup", smtLevel, logger.VerbosityLevelDebug)
+
+		return nil
+	}
+
+	logger.Infoln("Current SMT level is %d, setting to %d", currentSMTLevel, smtLevel, logger.VerbosityLevelDebug)
+
 	// 1. Enable smtstate.service
 	if err := systemctl("enable", "smtstate.service"); err != nil {
 		return fmt.Errorf("failed to enable smtstate.service: %w", err)
@@ -171,12 +192,12 @@ func setupSMTLevel() error {
 	logger.Infoln("smtstate.service started successfully", logger.VerbosityLevelDebug)
 
 	// 3. Set SMT level to 2
-	cmd := exec.Command("ppc64_cpu", fmt.Sprintf("--smt=%d", smtLevel))
-	out, err := cmd.CombinedOutput()
+	cmd = exec.Command("ppc64_cpu", fmt.Sprintf("--smt=%d", smtLevel))
+	out, err = cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to set SMT level to %d: %v, output: %s", smtLevel, err, string(out))
 	}
-	logger.Infoln(fmt.Sprintf("SMT level set to %d", smtLevel), logger.VerbosityLevelDebug)
+	logger.Infoln("SMT level set to %d", smtLevel, logger.VerbosityLevelDebug)
 
 	// 4. Restart smtstate.service to persist the setting
 	if err := systemctl("restart", "smtstate.service"); err != nil {
@@ -195,7 +216,7 @@ func setupSMTLevel() error {
 	if err != nil {
 		return fmt.Errorf("failed to get current SMT level: %w", err)
 	}
-	logger.Infof("SMT level verified: %s", smtLevel, logger.VerbosityLevelDebug)
+	logger.Infof("SMT level verified: %d", smtLevel, logger.VerbosityLevelDebug)
 
 	return nil
 }
