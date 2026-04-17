@@ -363,15 +363,10 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                     )
 
                     c_future = chunker_executor.submit(
-                        chunk_single_file, txt_json, path, out_path,
+                        chunk_single_file, txt_json, tab_json, out_path,
                         emb_endpoint, max_tokens, doc_id=doc_id
                     )
-                    # Also submit table chunking
-                    t_future = chunker_executor.submit(
-                        chunk_tables, tab_json, path, out_path,
-                        emb_endpoint, max_tokens, doc_id=doc_id
-                    )
-                    chunk_futures[c_future] = (str(path), tab_json, t_future)
+                    chunk_futures[c_future] = str(path)
                 except Exception as e:
                     if doc_id is not None:
                         logger.error(f"Error from processing for {path}: {str(e)}", exc_info=True)
@@ -382,38 +377,27 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
             # D. Handle Chunking (both text and tables)
             batch_table_chunk_paths = []
             for fut in as_completed(chunk_futures):
-                path, tab_json, table_chunk_future = chunk_futures[fut]
+                path = chunk_futures[fut]
                 doc_id = doc_id_dict.get(Path(path).name)
                 try:
-                    # Get text chunk result
-                    chunk_json, _, chunk_time = fut.result()
+                    # Get both text and table chunk results
+                    text_chunk_json, table_chunk_json, total_time = fut.result()
 
-                    if not chunk_json:
+                    # Consolidated error handling: fail document if either text or table chunking fails
+                    if not text_chunk_json or not table_chunk_json:
                         if doc_id is not None:
-                            logger.error(f"Text chunking failed for {path}: chunk_json is None")
-                            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to chunk document {doc_id}: chunk_json returned is None")
+                            logger.error(f"Chunking failed for {path}")
+                            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"Chunking failed for document {doc_id}")
                             status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
                         batch_stats.pop(path, {})
                         continue
 
-                    # Get table chunk result
-                    table_chunk_json, _, table_chunk_time = table_chunk_future.result()
-
-                    if not table_chunk_json:
-                        if doc_id is not None:
-                            logger.error(f"Table chunking failed for {path}: table_chunk_json is None")
-                            status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error=f"failed to chunk tables for document {doc_id}")
-                            status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
-                        batch_stats.pop(path, {})
-                        continue
-
-                    batch_stats[path]["timings"]["chunking"] = round(float(chunk_time or 0), 2)
-                    batch_stats[path]["timings"]["table_chunking"] = round(float(table_chunk_time or 0), 2)
-                    batch_chunk_paths.append(chunk_json)
+                    batch_stats[path]["timings"]["chunking"] = round(float(total_time or 0), 2)
+                    batch_chunk_paths.append(text_chunk_json)
                     batch_table_chunk_paths.append(table_chunk_json)
 
                     # Capture chunk counts in real time and update <doc_id>_metadata.json
-                    chunk_count = count_chunks(chunk_json, table_chunk_json)
+                    chunk_count = count_chunks(text_chunk_json, table_chunk_json)
                     batch_stats[path]["chunk_count"] = chunk_count
 
                     if doc_id is not None:
@@ -437,27 +421,27 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
     try:
         # Process Light Batch
         l_worker = min(WORKER_SIZE, len(light_files)) if light_files else 0
-        l_stats, l_chunks_json, l_tab_chunks_json = _run_batch(
+        l_stats, l_text_chunks_json, l_tab_chunks_json = _run_batch(
             light_files, convert_worker=l_worker, max_worker=l_worker, doc_id_dict=doc_id_dict
         )
 
         # Process Heavy Batch
         h_worker = min(WORKER_SIZE, len(heavy_files)) if heavy_files else 0
         h_conv_worker = min(HEAVY_PDF_CONVERT_WORKER_SIZE, len(heavy_files)) if heavy_files else 0
-        h_stats, h_chunks_json, h_tab_chunks_json = _run_batch(
+        h_stats, h_text_chunks_json, h_tab_chunks_json = _run_batch(
             heavy_files, convert_worker=h_conv_worker, max_worker=h_worker, doc_id_dict=doc_id_dict
         )
 
         # Combine statistics for the final return
         converted_pdf_stats = {**l_stats, **h_stats}
-        all_chunk_json_paths = l_chunks_json + h_chunks_json
+        all_text_chunk_json_paths = l_text_chunks_json + h_text_chunks_json
         all_table_chunk_json_paths = l_tab_chunks_json + h_tab_chunks_json
 
-        chunk_filenames = {p.name for p in all_chunk_json_paths}
+        text_chunk_filenames = {p.name for p in all_text_chunk_json_paths}
         table_chunk_filenames = {p.name for p in all_table_chunk_json_paths}
 
         doc_chunks_dict = {}
-        # Final assembly: create_chunk_documents merges text/table outputs
+        # Final assembly: merge_chunked_documents merges text/table outputs
         succeeded_files = converted_pdf_stats.keys()
 
         for path in succeeded_files:
@@ -466,15 +450,15 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                 logger.error(f"No document id found for file: {Path(path).name}.pdf")
                 continue
 
-            c_json = f"{doc_id}{text_chunk_suffix}"
-            t_chunk_json = f"{doc_id}{table_chunk_suffix}"
-            c_path = Path(out_path) / f"{c_json}"
-            t_chunk_path = Path(out_path) / f"{t_chunk_json}"
+            text_chunk_filename = f"{doc_id}{text_chunk_suffix}"
+            table_chunk_filename = f"{doc_id}{table_chunk_suffix}"
+            text_chunk_path = Path(out_path) / text_chunk_filename
+            table_chunk_path = Path(out_path) / table_chunk_filename
 
             # Verify the file was actually processed in the batch
-            if c_json in chunk_filenames and t_chunk_json in table_chunk_filenames:
-                # Merge pre-chunked text and table documents
-                doc_chunks = merge_chunked_documents(c_path, t_chunk_path, path)
+            if text_chunk_filename in text_chunk_filenames and table_chunk_filename in table_chunk_filenames:
+                # Merge pre-chunked text and pre-chunked table documents
+                doc_chunks = merge_chunked_documents(text_chunk_path, table_chunk_path, path)
                 # Inject the doc_id into every chunk
                 for chunk in doc_chunks:
                     chunk["doc_id"] = doc_id
@@ -620,10 +604,9 @@ def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens):
     current_chunk["source_nodes"] = []
 
 
-def chunk_single_file(input_path, pdf_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
+def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
     """
-    Chunk a single file into smaller pieces.
-    No caching - always process fresh.
+    Chunk text content from a document into smaller pieces based on token limits.
     """
     t0 = time.time()
     processed_chunk_json_path = (Path(out_path) / f"{doc_id}{text_chunk_suffix}")
@@ -650,7 +633,7 @@ def chunk_single_file(input_path, pdf_path, out_path, emb_endpoint, max_tokens=5
             current_subsection = None
             current_subsubsection = None
 
-            for idx, block in enumerate(tqdm_wrapper(data, desc=f"Chunking {input_path}")):
+            for idx, block in enumerate(tqdm_wrapper(data, desc=f"Chunking text from '{input_path}'")):
                 label = block.get("label")
                 text = block.get("text", "").strip()
                 page_no = block.get("page", 0)
@@ -709,16 +692,36 @@ def chunk_single_file(input_path, pdf_path, out_path, emb_endpoint, max_tokens=5
         with open(processed_chunk_json_path, "w") as f:
             json.dump(chunks, f, indent=2)
 
-        logger.debug(f"{len(chunks)} RAG chunks saved to {processed_chunk_json_path}")
-        return processed_chunk_json_path, pdf_path, time.time() - t0
+        elapsed = time.time() - t0
+        logger.debug(f"{len(chunks)} text chunks saved to {processed_chunk_json_path} in {elapsed:.2f}s")
+        return processed_chunk_json_path, elapsed
     except Exception as e:
-        logger.error(f"error chunking file '{input_path}': {e}")
+        logger.error(f"Error chunking text from '{input_path}': {e}")
+        return None, None
 
-def chunk_tables(input_path, pdf_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
+def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
+    """
+    Orchestrates chunking of both text and tables for a single document.
+    """
+    t0 = time.time()
+
+    try:
+        # Chunk text content
+        text_chunk_json, text_chunk_time = chunk_text(input_path, out_path, emb_endpoint, max_tokens, doc_id)
+
+        # Chunk tables
+        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id)
+
+        total_time = time.time() - t0
+        return text_chunk_json, table_chunk_json, total_time
+    except Exception as e:
+        logger.error(f"Error chunking document '{input_path}': {e}")
+        return None, None, None
+
+def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
     """
     Chunk table summaries into smaller pieces if they exceed token limits.
-    Uses LLM-generated summaries instead of raw markdown for better RAG retrieval.
-    Parallel to chunk_single_file() but for tables.
+    Called internally by chunk_single_file() for sequential processing.
     """
     t0 = time.time()
     processed_table_chunk_json_path = (Path(out_path) / f"{doc_id}{table_chunk_suffix}")
@@ -733,7 +736,7 @@ def chunk_tables(input_path, pdf_path, out_path, emb_endpoint, max_tokens=512, d
         if tab_data:
             tab_data_list = list(tab_data.values())
 
-            for tab_idx, block in enumerate(tqdm_wrapper(tab_data_list, desc=f"Chunking tables of '{pdf_path}'")):
+            for block in tqdm_wrapper(tab_data_list, desc=f"Chunking tables of '{input_path}'"):
                 caption = block.get('caption', '')
                 summary = block.get("summary", '')
                 markdown_source = block.get("markdown", '')
@@ -755,7 +758,6 @@ def chunk_tables(input_path, pdf_path, out_path, emb_endpoint, max_tokens=512, d
                             "caption": caption,
                             "markdown_source": markdown_source,
                             "page_number": page_number,
-                            "table_index": tab_idx,
                         })
                 else:
                     chunked_tables.append({
@@ -763,7 +765,6 @@ def chunk_tables(input_path, pdf_path, out_path, emb_endpoint, max_tokens=512, d
                         "caption": caption,
                         "markdown_source": markdown_source,
                         "page_number": page_number,
-                        "table_index": tab_idx,
                     })
 
         # Save the chunked tables to the output file
@@ -772,12 +773,10 @@ def chunk_tables(input_path, pdf_path, out_path, emb_endpoint, max_tokens=512, d
 
         elapsed = time.time() - t0
         logger.debug(f"Chunked {len(tab_data)} tables into {len(chunked_tables)} chunks in {elapsed:.2f}s")
-        return processed_table_chunk_json_path, pdf_path, elapsed
+        return processed_table_chunk_json_path, elapsed
     except Exception as e:
         logger.error(f"Error chunking tables from '{input_path}': {e}")
-    return None, None, None
-
-    return None, None, None
+        return None, None
 
 def count_chunks(in_txt_f, in_tab_f):
     """Count total chunks from text and table JSON files without creating document objects."""
@@ -844,9 +843,11 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
             caption = block.get("caption", "")
             page_number = block.get("page_number")
             content = block.get("content", "")
+            md_source = block.get("markdown_source")
 
             # Smart caption prefixing: only add if caption not already in content
             def _normalize(text: str) -> str:
+                # Normalize text: lowercase, collapse whitespace, remove spaces around hyphens for comparison
                 text = text.lower().strip()
                 text = ' '.join(text.split())  # collapse whitespace
                 return text.replace(' - ', '-').replace(' -', '-').replace('- ', '-')
@@ -855,13 +856,13 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
             if caption:
                 norm_content = _normalize(content)
                 if _normalize(caption) not in norm_content:
-                    page_content = f"Table: {caption}\n{content}"
+                    page_content = f"{caption}\n{content}"
 
             tab_docs.append({
                 "page_content": page_content,
                 "filename": orig_fn,
                 "type": "table",
-                "source": block.get("markdown_source"),
+                "source": md_source,
                 "page_number": page_number,
                 "language": "en",
                 "chunk_index": txt_count + tab_idx,
