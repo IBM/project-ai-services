@@ -11,10 +11,9 @@ This document outlines the database design required for the Catalog service, inc
 3. [Table Definitions](#table-definitions)
    - [Users Table](#1-users-table)
    - [Applications Table](#2-applications-table)
-   - [Architectures Table](#3-architectures-table)
-   - [Services Table](#4-services-table)
-   - [Infrastructure Table](#5-infrastructure-table)
-   - [Services-Infrastructure Junction Table](#6-services-infrastructure-junction-table)
+   - [Services Table](#3-services-table)
+   - [Infrastructure Table](#4-infrastructure-table)
+   - [Services-Infrastructure Junction Table](#5-services-infrastructure-junction-table)
 4. [Entity Relationship Model](#entity-relationship-model)
 5. [Relationships](#relationships)
 6. [Key Design Decisions](#key-design-decisions)
@@ -80,16 +79,16 @@ ai_service
 
 **Table Name:** `applications`
 
-| Column Name       | Data Type         | Constraints | Description |
-|-------------------|-------------------|-------------|-------------|
-| id                | UUID              | PRIMARY KEY | Unique application identifier |
-| name              | VARCHAR(100)      |             | Display name of the application |
-| app_name          | VARCHAR(100)      | UNIQUE      | Internal application name (immutable - used for prefixing pod names in Podman and namespace names in OpenShift) |
-| deployment_type   | deployment_type   | ENUM        | Type of deployment (Deployable Architecture, Services) |
-| status            | Status            | ENUM        | Current status (Downloading, Deploying, Running, Deleting, Error) |
-| message           | TEXT              |             | Status message or error details |
-| created_at        | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of creation |
-| updated_at        | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of last update |
+| Column Name         | Data Type         | Constraints | Description |
+|---------------------|-------------------|-------------|-------------|
+| app_name            | VARCHAR(100)      | PRIMARY KEY | Internal application name (immutable - used for prefixing pod names in Podman and namespace names in OpenShift) |
+| deployment_name     | VARCHAR(100)      |             | Display name of the deployment |
+| type                | VARCHAR(100)      |             | Application type (e.g., Digital Assistant, Summarization) |
+| deployment_type     | deployment_type   | ENUM        | Type of deployment (Deployable Architecture, Services) |
+| status              | Status            | ENUM        | Current status (Downloading, Deploying, Running, Deleting, Error) |
+| message             | TEXT              |             | Status message or error details |
+| created_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of creation |
+| updated_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of last update |
 
 **Custom Types:**
 
@@ -110,68 +109,39 @@ CREATE TYPE status AS ENUM (
 
 ---
 
-### 3. Architectures Table
-
-**Table Name:** `architectures`
-
-| Column Name     | Data Type       | Constraints | Description |
-|-----------------|-----------------|-------------|-------------|
-| id              | UUID            | PRIMARY KEY | Unique architecture identifier |
-| application_id  | UUID            | FOREIGN KEY | References applications(id) |
-| type            | VARCHAR(100)    |             | Architecture type (e.g., Digital Assistant, Deep Process Integration) |
-| resources       | resource_config |             | Resource configuration |
-| created_at      | TIMESTAMPTZ     | DEFAULT NOW() | Timestamp of creation |
-| updated_at      | TIMESTAMPTZ     | DEFAULT NOW() | Timestamp of last update |
-
-**Custom Type:**
-
-```sql
-CREATE TYPE resource_config AS (
-    cores text,
-    memory text,
-    storage text,
-    spyre_io text
-);
-```
-
----
-
-### 4. Services Table
+### 3. Services Table
 
 **Table Name:** `services`
 
-| Column Name     | Data Type       | Constraints | Description |
-|-----------------|-----------------|-------------|-------------|
-| id              | UUID            | PRIMARY KEY | Unique service identifier |
-| application_id  | UUID            | FOREIGN KEY | References applications(id) |
-| architecture_id | UUID            | FOREIGN KEY | References architectures(id) |
-| type            | VARCHAR(100)    |             | Service type (e.g., Summarization, Digitization) |
-| endpoints       | TEXT[]          |             | Array of service endpoints/URLs |
-| resources       | resource_config |             | Resource configuration |
-| version         | TEXT            |             | Service version |
-| created_at      | TIMESTAMPTZ     | DEFAULT NOW() | Timestamp of creation |
-| updated_at      | TIMESTAMPTZ     | DEFAULT NOW() | Timestamp of last update |
+| Column Name     | Data Type    | Constraints | Description |
+|-----------------|--------------|-------------|-------------|
+| id              | UUID         | PRIMARY KEY | Unique service identifier |
+| app_name        | VARCHAR(100) | FOREIGN KEY | References applications(app_name) |
+| type            | VARCHAR(100) |             | Service type (e.g., Summarization, Digitization) |
+| endpoints       | TEXT[]       |             | Array of service endpoints/URLs |
+| version         | TEXT         |             | Service version |
+| created_at      | TIMESTAMPTZ  | DEFAULT NOW() | Timestamp of creation |
+| updated_at      | TIMESTAMPTZ  | DEFAULT NOW() | Timestamp of last update |
 
 ---
 
-### 5. Infrastructure Table
+### 4. Infrastructure Table
 
 **Table Name:** `infra`
 
-| Column Name | Data Type       | Constraints | Description |
-|-------------|-----------------|-------------|-------------|
-| id          | UUID            | PRIMARY KEY | Unique infrastructure identifier |
-| status      | Status          | ENUM        | Current status (Deploying, Running, Deleting, Error) |
-| type        | VARCHAR(100)    |             | Infrastructure type (e.g., vector store, inference backend) |
-| endpoints   | TEXT[]          |             | Array of infrastructure endpoints/URLs |
-| resources   | resource_config |             | Resource configuration |
-| version     | TEXT            |             | Infrastructure version |
-| created_at  | TIMESTAMPTZ     | DEFAULT NOW() | Timestamp of creation |
-| updated_at  | TIMESTAMPTZ     | DEFAULT NOW() | Timestamp of last update |
+| Column Name | Data Type    | Constraints | Description |
+|-------------|--------------|-------------|-------------|
+| id          | UUID         | PRIMARY KEY | Unique infrastructure identifier |
+| status      | Status       | ENUM        | Current status (Deploying, Running, Deleting, Error) |
+| type        | VARCHAR(100) |             | Infrastructure type (e.g., vector store, inference backend) |
+| endpoints   | TEXT[]       |             | Array of infrastructure endpoints/URLs |
+| version     | TEXT         |             | Infrastructure version |
+| created_at  | TIMESTAMPTZ  | DEFAULT NOW() | Timestamp of creation |
+| updated_at  | TIMESTAMPTZ  | DEFAULT NOW() | Timestamp of last update |
 
 ---
 
-### 6. Services-Infrastructure Junction Table
+### 5. Services-Infrastructure Junction Table
 
 **Table Name:** `services_infra`
 
@@ -194,25 +164,14 @@ CREATE TYPE resource_config AS (
 ┌──────────────────┐
 │  applications    │
 ├──────────────────┤
-│ id (PK)          │
-│ name             │
-│ app_name         │
+│ app_name (PK)    │
+│ deployment_name  │
+│ type             │
 │ deployment_type  │
 │ status           │
 │ message          │
 │ created_at       │
-└──────────────────┘
-         │
-         │ 1:N
-         ▼
-┌──────────────────┐
-│  architectures   │
-├──────────────────┤
-│ id (PK)          │
-│ application_id(FK)│
-│ type             │
-│ resources        │
-│ created_at       │
+│ updated_at       │
 └──────────────────┘
          │
          │ 1:N
@@ -221,13 +180,12 @@ CREATE TYPE resource_config AS (
 │    services      │
 ├──────────────────┤
 │ id (PK)          │
-│ application_id(FK)│
-│ architecture_id(FK)│
+│ app_name (FK)    │
 │ type             │
-│ resources        │
-│ created_at       │
+│ endpoints        │
 │ version          │
-│ properties       │
+│ created_at       │
+│ updated_at       │
 └──────────────────┘
          │
          │ M:N
@@ -247,103 +205,109 @@ CREATE TYPE resource_config AS (
 │ id (PK)          │
 │ status           │
 │ type             │
-│ resources        │
-│ created_at       │
+│ endpoints        │
 │ version          │
-│ properties       │
+│ created_at       │
+│ updated_at       │
 └──────────────────┘
 ```
 
 ## Relationships
 
-1. **Applications → Architectures**: One-to-Many
-   - One application can have multiple architectures
-
-2. **Applications → Services**: One-to-Many
+1. **Applications → Services**: One-to-Many
    - One application can have multiple services
+   - Services reference their parent application via app_name
+   - app_name is used as the foreign key for natural relationship
 
-3. **Architectures → Services**: One-to-Many
-   - One architecture can have multiple services
-
-4. **Services ↔ Infrastructure**: Many-to-Many
+2. **Services ↔ Infrastructure**: Many-to-Many
    - Services can use multiple infrastructure components
    - Infrastructure components can be shared across multiple services
    - Implemented via the `services_infra` junction table
 
 ## Key Design Decisions
 
-### 1. UUID Primary Keys
-All tables use UUID as primary keys for:
+### 1. Natural Primary Key for Applications
+The applications table uses `app_name` as the primary key:
+- **Natural Identifier**: app_name is already unique and immutable
+- **Meaningful References**: Foreign keys use app_name instead of UUID
+- **Simpler Queries**: No need to join to get application name
+- **Consistent Naming**: Used for pod/namespace prefixes in deployments
+- **No UUID Overhead**: Eliminates unnecessary UUID generation and storage
+
+### 2. UUID Primary Keys for Other Tables
+Services and infrastructure tables use UUID as primary keys for:
 - Global uniqueness
 - Better distribution in distributed systems
 - Security (non-sequential IDs)
 
-### 2. Custom Types
+### 3. Custom Types
 PostgreSQL custom types (ENUM) are used for:
 - **deployment_type**: Ensures only valid deployment types for applications
 - **status**: Standardizes status values across tables (includes Deleting for cleanup workflows)
-- **resource_config**: Structured resource configuration
 
-### 3. Separate Infrastructure Table
+### 4. Application Type Field
+The type field in applications table stores:
+- **Application Type**: Digital Assistant, Summarization, etc.
+- **Direct Classification**: No separate architectures table needed
+- **Simpler Schema**: Reduces table count from 6 to 5 tables
+- **Clear Semantics**: Type directly describes what the application does
+
+### 6. Separate Infrastructure Table
 Infrastructure is separated from services for:
 - **Clear Separation of Concerns**: Different lifecycles, ownership, and scaling patterns
 - **Strong Type Safety**: Foreign keys enforce referential integrity
-- **Better Normalization**: Follows 3NF database design principles
-- **Infrastructure Reusability**: Explicit many-to-many relationship allows sharing
-- **Independent Management**: Infrastructure can be managed, upgraded, and monitored separately
+- **Reusability**: Infrastructure can be shared across multiple services
+- **Independent Lifecycle**: Infrastructure can exist independently of services
+- **Cost Optimization**: Avoid duplicate infrastructure provisioning
 
-### 4. Many-to-Many Relationship
+### 7. Many-to-Many Relationship
 The `services_infra` junction table enables:
 - Multiple services to share the same infrastructure (e.g., multiple services using one vector store)
 - Services to depend on multiple infrastructure components
 - Clean separation between service and infrastructure lifecycles
 - Easy querying of dependencies in both directions
 
-### 5. JSONB for Properties
-The `properties` column uses JSONB for:
-- Flexible schema for service/infrastructure-specific data
-- Efficient querying and indexing
-- Storage of endpoints, models, and other dynamic attributes
-- No schema migrations needed for new property types
-
-### 6. Consistent Field Sizing
-- VARCHAR(100) for type fields in both architectures and services tables
+### 8. Consistent Field Sizing
+- VARCHAR(100) for type fields across applications, services and infra tables
 - Provides sufficient length for descriptive type names
 - Consistent sizing across similar fields
 
-### 7. Timestamps
-All tables include `created_at` with `TIMESTAMPTZ` for:
-- Audit trail
+### 9. Timestamps
+All tables include `created_at` and `updated_at` with `TIMESTAMPTZ` for:
+- Complete audit trail
 - Time-zone aware timestamps
-- Automatic timestamp generation
+- Automatic timestamp generation and updates
+- Tracking both creation and modification times
 
-### 8. Immutable Fields
-The `app_name` field in the applications table is immutable to ensure:
-- Consistent pod naming in Podman
+### 10. Immutable Primary Key
+The `app_name` field serves as both identifier and primary key:
+- Immutable to ensure consistent pod naming in Podman
 - Stable namespace naming in OpenShift
-- Referential integrity in deployed resources
+- Natural referential integrity in deployed resources
+- Prevents accidental renames that would break deployments
 
 ## Migration Strategy
 
 1. Create custom types first:
    - deployment_type
    - status
-   - resource_config
 
 2. Create tables in dependency order:
    - users
-   - applications
-   - architectures
-   - services
+   - applications (with app_name as PK)
+   - services (with app_name FK)
    - infra
    - services_infra (junction table)
 
 3. Add indexes for:
-   - Foreign keys (application_id, architecture_id, service_id, infra_id)
+   - Foreign keys (app_name in services, service_id, infra_id)
    - Frequently queried columns (type, status)
-   - JSONB fields using GIN indexes for efficient querying
+   - app_name is already indexed as primary key
 
-4. Set up appropriate constraints and triggers
+4. Set up appropriate constraints and triggers for:
+   - Automatic updated_at timestamp updates
+   - Cascading deletes where appropriate
+   - Check constraints for valid data
 
 ## Common Queries
 
@@ -352,32 +316,49 @@ The `app_name` field in the applications table is immutable to ensure:
 SELECT * FROM applications ORDER BY created_at DESC;
 ```
 
-### 2. Get application with architectures, services, and infrastructure (for Deployable Architecture):
+### 2. Get application with services and infrastructure:
 ```sql
 SELECT
     a.*,
-    arch.id as arch_id, arch.type as arch_type, arch.resources as arch_resources,
     s.id as service_id, s.type as service_type, s.version as service_version,
-    i.id as infra_id, i.type as infra_type, i.status as infra_status
+    s.endpoints as service_endpoints,
+    i.id as infra_id, i.type as infra_type, i.status as infra_status,
+    i.endpoints as infra_endpoints
 FROM applications a
-LEFT JOIN architectures arch ON a.id = arch.application_id
-LEFT JOIN services s ON arch.id = s.architecture_id
+LEFT JOIN services s ON a.app_name = s.app_name
 LEFT JOIN services_infra si ON s.id = si.service_id
 LEFT JOIN infra i ON si.infra_id = i.id
-WHERE a.id = 'application-uuid' AND a.deployment_type = 'Deployable Architecture';
+WHERE a.app_name = 'my-app';
 ```
 
-### 3. Get application with services and infrastructure (for Services deployment type):
+### 3. Get all services for an application:
+```sql
+SELECT * FROM services
+WHERE app_name = 'my-app'
+ORDER BY created_at;
+```
+
+### 4. Get shared infrastructure usage:
 ```sql
 SELECT
-    a.*,
-    s.id as service_id, s.type as service_type, s.version as service_version,
-    i.id as infra_id, i.type as infra_type, i.status as infra_status
-FROM applications a
-LEFT JOIN services s ON a.id = s.application_id
-LEFT JOIN services_infra si ON s.id = si.service_id
-LEFT JOIN infra i ON si.infra_id = i.id
-WHERE a.id = 'application-uuid' AND a.deployment_type = 'Services';
+    i.*,
+    COUNT(DISTINCT si.service_id) as service_count,
+    COUNT(DISTINCT s.app_name) as application_count
+FROM infra i
+LEFT JOIN services_infra si ON i.id = si.infra_id
+LEFT JOIN services s ON si.service_id = s.id
+GROUP BY i.id
+HAVING COUNT(DISTINCT si.service_id) > 1;
+```
+
+### 5. Get application by app_name (direct lookup):
+```sql
+SELECT * FROM applications WHERE app_name = 'my-app';
+```
+
+### 6. Get applications by type:
+```sql
+SELECT * FROM applications WHERE type = 'Digital Assistant';
 ```
 
 ## Alternative Design: Unified Services Table
@@ -392,13 +373,12 @@ This alternative approach combines the `services`, `infra`, and `services_infra`
 | Column Name         | Data Type         | Constraints | Description |
 |---------------------|-------------------|-------------|-------------|
 | id                  | UUID              | PRIMARY KEY | Unique service identifier |
-| application_id      | UUID              | FOREIGN KEY | References applications(id) |
-| architecture_id     | UUID              | FOREIGN KEY | References architectures(id), nullable |
+| app_name            | VARCHAR(100)      | FOREIGN KEY | References applications(app_name) |
 | type                | VARCHAR(100)      |             | Service/Infrastructure type |
 | category            | service_category  | ENUM        | Service category (Application Service, Infrastructure) |
 | status              | Status            | ENUM        | Current status (Deploying, Running, Deleting, Error) |
-| resources           | resource_config   |             | Resource configuration |
 | created_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of creation |
+| updated_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of last update |
 | version             | TEXT              |             | Service/Infrastructure version |
 | properties          | JSONB             |             | Additional properties (endpoints, models, credentials) |
 | infrastructure_deps | JSONB             |             | Array of infrastructure service dependencies |
@@ -433,7 +413,7 @@ CREATE TYPE service_category AS ENUM (
 
 | Aspect | Separate Infrastructure (Recommended) | Unified Services (Alternative) |
 |--------|--------------------------------------|--------------------------------|
-| **Schema Complexity** | 6 tables (more complex) | 4 tables (simpler) |
+| **Schema Complexity** | 5 tables (users, applications, services, infra, services_infra) | 3 tables (users, applications, services) |
 | **Type Safety** | ✅ Strong - Foreign keys enforce relationships | ⚠️ Weak - JSONB dependencies, no FK enforcement |
 | **Data Integrity** | ✅ Database-level referential integrity | ⚠️ Application-level validation required |
 | **Query Performance** | ✅ Indexed foreign keys, efficient joins | ⚠️ JSONB queries slower, GIN indexes needed |
