@@ -28,7 +28,6 @@ func init() {
 	PodmanRegistry.Register(power.NewPowerRule())
 	PodmanRegistry.Register(rhn.NewRHNRule())
 	PodmanRegistry.Register(spyre.NewSpyreRule())
-	// PodmanRegistry.Register(servicereport.NewServiceReportRule())
 
 	// OpenshiftChecks
 	OpenshiftRegistry.Register(kubeconfig.NewKubeconfigRule())

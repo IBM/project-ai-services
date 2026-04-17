@@ -25,6 +25,8 @@ const (
 	expectedKeyValueParts = 2
 	// maxVfioRuleParts is the maximum number of comma-separated parts in a valid VFIO rule.
 	maxVfioRuleParts = 3
+	// dirPermissions is the default permission for creating directories.
+	dirPermissions = 0755
 )
 
 // RepairResult represents the result of a repair operation.
@@ -356,70 +358,76 @@ func fixPodmanServiceSupplementaryGroups(checkMap map[string]check.CheckResult) 
 		return RepairResult{CheckName: checkName, Status: StatusSkipped}
 	}
 
-	// Create drop-in directory for podman.service
-	dropInDir := "/etc/systemd/system/podman.service.d"
-	if err := os.MkdirAll(dropInDir, 0755); err != nil {
+	if err := createPodmanServiceDropIn(); err != nil {
 		return RepairResult{
 			CheckName: checkName,
 			Status:    StatusFailedToFix,
 			Error:     err,
-			Message:   "Failed to create drop-in directory",
+			Message:   err.Error(),
 		}
 	}
 
-	// Create drop-in configuration file
-	dropInFile := dropInDir + "/override.conf"
-	dropInContent := `[Service]
-SupplementaryGroups=sentient
-`
-
-	if err := utils.WriteToFile(dropInFile, dropInContent); err != nil {
+	if err := reloadAndRestartPodmanServices(); err != nil {
 		return RepairResult{
 			CheckName: checkName,
 			Status:    StatusFailedToFix,
 			Error:     err,
-			Message:   "Failed to write drop-in configuration file",
-		}
-	}
-
-	// Reload systemd daemon
-	exitCode, _, stderr, err := utils.ExecuteCommand("systemctl", "daemon-reload")
-	if err != nil || exitCode != 0 {
-		return RepairResult{
-			CheckName: checkName,
-			Status:    StatusFailedToFix,
-			Error:     err,
-			Message:   "Failed to reload systemd daemon: " + stderr,
-		}
-	}
-
-	// Restart podman service to apply the SupplementaryGroups configuration
-	exitCode, _, stderr, err = utils.ExecuteCommand("systemctl", "restart", "podman.service")
-	if err != nil || exitCode != 0 {
-		return RepairResult{
-			CheckName: checkName,
-			Status:    StatusFailedToFix,
-			Error:     err,
-			Message:   "Failed to restart podman service: " + stderr,
-		}
-	}
-
-	// Restart podman socket to ensure clean connection state
-	exitCode, _, stderr, err = utils.ExecuteCommand("systemctl", "restart", "podman.socket")
-	if err != nil || exitCode != 0 {
-		return RepairResult{
-			CheckName: checkName,
-			Status:    StatusFailedToFix,
-			Error:     err,
-			Message:   "Failed to restart podman socket: " + stderr,
+			Message:   err.Error(),
 		}
 	}
 
 	return RepairResult{
 		CheckName: checkName,
 		Status:    StatusFixed,
-		Message:   "Created drop-in configuration and restarted podman service and socket",
 	}
+}
+
+func createPodmanServiceDropIn() error {
+	dropInDir := "/etc/systemd/system/podman.service.d"
+	if err := os.MkdirAll(dropInDir, dirPermissions); err != nil {
+		return err
+	}
+
+	dropInFile := dropInDir + "/override.conf"
+	dropInContent := `[Service]
+SupplementaryGroups=sentient
+`
+
+	return utils.WriteToFile(dropInFile, dropInContent)
+}
+
+func reloadAndRestartPodmanServices() error {
+	// Reload systemd daemon
+	exitCode, _, _, err := utils.ExecuteCommand("systemctl", "daemon-reload")
+	if err != nil || exitCode != 0 {
+		if err == nil {
+			err = os.ErrInvalid
+		}
+
+		return err
+	}
+
+	// Restart podman service
+	exitCode, _, _, err = utils.ExecuteCommand("systemctl", "restart", "podman.service")
+	if err != nil || exitCode != 0 {
+		if err == nil {
+			err = os.ErrInvalid
+		}
+
+		return err
+	}
+
+	// Restart podman socket
+	exitCode, _, _, err = utils.ExecuteCommand("systemctl", "restart", "podman.socket")
+	if err != nil || exitCode != 0 {
+		if err == nil {
+			err = os.ErrInvalid
+		}
+
+		return err
+	}
+
+	return nil
 }
 
 // Made with Bob

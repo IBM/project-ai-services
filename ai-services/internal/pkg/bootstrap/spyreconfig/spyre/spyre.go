@@ -447,17 +447,32 @@ func checkPodmanServiceSupplementaryGroups() *check.ConfigurationFileCheck {
 	serviceName := "podman.service"
 	confCheck := check.NewConfigurationFileCheck("Podman service SupplementaryGroups configuration", serviceName)
 
-	// Use systemctl to get the service configuration
-	exitCode, stdout, stderr, err := utils.ExecuteCommand("systemctl", "cat", serviceName)
-	if err != nil || exitCode != 0 {
-		log.Printf("Error reading %s: %v, stderr: %s", serviceName, err, stderr)
+	stdout, err := getServiceConfiguration(serviceName)
+	if err != nil {
 		confCheck.AddAttribute("SupplementaryGroups=sentient", false, "", "SupplementaryGroups=sentient")
 		confCheck.SetStatus(false)
 
 		return confCheck
 	}
 
-	// Parse the service file content
+	found, correctValue := checkSupplementaryGroupsInConfig(stdout)
+	setCheckResult(confCheck, found, correctValue)
+
+	return confCheck
+}
+
+func getServiceConfiguration(serviceName string) (string, error) {
+	exitCode, stdout, stderr, err := utils.ExecuteCommand("systemctl", "cat", serviceName)
+	if err != nil || exitCode != 0 {
+		log.Printf("Error reading %s: %v, stderr: %s", serviceName, err, stderr)
+
+		return "", err
+	}
+
+	return stdout, nil
+}
+
+func checkSupplementaryGroupsInConfig(stdout string) (bool, bool) {
 	lines := strings.Split(stdout, "\n")
 	found := false
 	correctValue := false
@@ -465,30 +480,38 @@ func checkPodmanServiceSupplementaryGroups() *check.ConfigurationFileCheck {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 
-		// Look for SupplementaryGroups directive
 		if strings.HasPrefix(line, "SupplementaryGroups=") {
 			found = true
 			value := strings.TrimPrefix(line, "SupplementaryGroups=")
+			correctValue = isSentientGroupPresent(value)
 
-			// Check if sentient group is included (exact match or in space-separated list)
-			if value == sentientGroup {
-				correctValue = true
-				break
-			}
-			// Check if it's in a space-separated list of groups
-			groups := strings.Fields(value)
-			for _, group := range groups {
-				if group == sentientGroup {
-					correctValue = true
-					break
-				}
-			}
 			if correctValue {
 				break
 			}
 		}
 	}
 
+	return found, correctValue
+}
+
+func isSentientGroupPresent(value string) bool {
+	// Check if sentient group is included (exact match or in space-separated list)
+	if value == sentientGroup {
+		return true
+	}
+
+	// Check if it's in a space-separated list of groups
+	groups := strings.Fields(value)
+	for _, group := range groups {
+		if group == sentientGroup {
+			return true
+		}
+	}
+
+	return false
+}
+
+func setCheckResult(confCheck *check.ConfigurationFileCheck, found, correctValue bool) {
 	if found && correctValue {
 		confCheck.AddAttribute("SupplementaryGroups=sentient", true, sentientGroup, "")
 		confCheck.SetStatus(true)
@@ -499,8 +522,6 @@ func checkPodmanServiceSupplementaryGroups() *check.ConfigurationFileCheck {
 		confCheck.AddAttribute("SupplementaryGroups=sentient", false, "not found", sentientGroup)
 		confCheck.SetStatus(false)
 	}
-
-	return confCheck
 }
 
 // Made with Bob

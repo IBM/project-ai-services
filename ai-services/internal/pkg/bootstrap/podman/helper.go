@@ -27,10 +27,7 @@ func configureSpyre() error {
 	logger.Infof("Detected %d Spyre card(s)", numCards)
 
 	// Run validation and repair
-	allPassed, err := runValidationAndRepair()
-	if err != nil {
-		return err
-	}
+	allPassed := runValidationAndRepair()
 
 	// Add current user to sentient group
 	if err := configureUsergroup(); err != nil {
@@ -47,7 +44,7 @@ func configureSpyre() error {
 }
 
 // runValidationAndRepair runs validation checks and attempts repairs if needed.
-func runValidationAndRepair() (bool, error) {
+func runValidationAndRepair() bool {
 	// Run all validation checks
 	checks := spyre.RunChecks()
 
@@ -59,7 +56,7 @@ func runValidationAndRepair() (bool, error) {
 		allPassed = attemptRepairs(checks)
 	}
 
-	return allPassed, nil
+	return allPassed
 }
 
 // checkValidationResults checks if all validation checks passed.
