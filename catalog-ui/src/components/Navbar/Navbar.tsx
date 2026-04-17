@@ -1,4 +1,10 @@
-import { Theme, SideNav, SideNavItems, SideNavMenuItem, SideNavDivider } from "@carbon/react";
+import {
+  Theme,
+  SideNav,
+  SideNavItems,
+  SideNavMenuItem,
+  SideNavDivider,
+} from "@carbon/react";
 import { NavLink } from "react-router-dom";
 import { useRef, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
