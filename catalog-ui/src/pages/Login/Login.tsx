@@ -31,7 +31,7 @@ const LoginPage = () => {
         password,
       });
 
-      navigate("/applications");
+      navigate("/ai-deployments");
     } catch {
       setError(true);
     } finally {

@@ -5,7 +5,7 @@ import AuthLayout from "./layouts/AuthLayout";
 
 import Login from "./pages/Login";
 import Logout from "./pages/Logout";
-import ApplicationsListPage from "./pages/ApplicationsList";
+import ApplicationsListPage from "./pages/AiDeployments";
 import { ProtectedRoute } from "@/components";
 
 function App() {
@@ -18,7 +18,7 @@ function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<MainLayout />}>
             <Route
-              path={ROUTES.APPLICATIONS_LIST}
+              path={ROUTES.AI_DEPLOYMENTS}
               element={<ApplicationsListPage />}
             />
           </Route>

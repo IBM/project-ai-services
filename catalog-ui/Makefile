@@ -18,7 +18,7 @@ push:
 run:
 	$(CONTAINER_BUILDER) run -d \
 		--name $(IMAGE) \
-		-p 3000:3000 \
+		-p 8081:8081 \
 		$(FULL_IMAGE)
 
 stop:

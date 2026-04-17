@@ -34,7 +34,7 @@ import {
   ArrowRight,
   CopyLink,
 } from "@carbon/icons-react";
-import styles from "./ApplicationsList.module.scss";
+import styles from "./AiDeployments.module.scss";
 import type { ApplicationRow, AppState, AppAction } from "./types";
 import { ACTION_TYPES } from "./types";
 
@@ -393,7 +393,7 @@ const ApplicationsListPage = () => {
         />
       )}
       <PageHeader
-        title={{ text: "Applications" }}
+        title={{ text: "AI Deployments" }}
         pageActions={[
           {
             key: "learn-more",

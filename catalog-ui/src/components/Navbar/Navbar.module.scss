@@ -1,3 +1,7 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/theme";
+@use "@carbon/react/scss/type";
+
 .navLink {
   outline: none !important ;
   color: unset;
@@ -5,14 +9,16 @@
 }
 
 .sideNavItem:active .sideNavItem:focus {
-  border-left: 5px solid #0f62fe;
+  border-left: spacing.$spacing-02 solid theme.$link-primary;
   outline: none !important;
-  background-color: #3a3b3b !important;
+  background-color: theme.$layer-selected-01 !important;
   color: unset;
   text-decoration: none;
 }
+
 .sideNavItem {
-  border-left: 5px solid transparent;
+  border-left: spacing.$spacing-02 solid transparent;
+  @include type.type-style("body-01");
   transition:
     background-color 0.2s ease,
     border-color 0.2s ease;

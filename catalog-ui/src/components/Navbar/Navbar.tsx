@@ -1,4 +1,4 @@
-import { Theme, SideNav, SideNavItems, SideNavMenuItem } from "@carbon/react";
+import { Theme, SideNav, SideNavItems, SideNavMenuItem, SideNavDivider } from "@carbon/react";
 import { NavLink } from "react-router-dom";
 import { useRef, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
@@ -26,7 +26,7 @@ const Navbar = (props: NavbarProps) => {
   }, [isSideNavOpen, setIsSideNavOpen]);
 
   return (
-    <Theme theme="g100">
+    <Theme theme="g90">
       <SideNav
         aria-label="Side navigation"
         expanded={isSideNavOpen}
@@ -36,34 +36,36 @@ const Navbar = (props: NavbarProps) => {
         <SideNavItems>
           <SideNavMenuItem
             as={NavLink}
-            to="/applications"
+            to="/ai-deployments"
             className={styles.sideNavItem}
           >
-            Applications
+            AI Deployments
           </SideNavMenuItem>
 
           <SideNavMenuItem
             as={NavLink}
-            to="/technical-templates"
+            to="/architectures"
             className={styles.sideNavItem}
           >
-            Technical templates
+            Architectures
           </SideNavMenuItem>
 
           <SideNavMenuItem
             as={NavLink}
-            to="/business-demo-templates"
+            to="/services"
             className={styles.sideNavItem}
           >
-            Business demo templates
+            Services
           </SideNavMenuItem>
+
+          <SideNavDivider />
 
           <SideNavMenuItem
             as={NavLink}
-            to="/services-catalog"
+            to="/solutions-and-use-cases"
             className={styles.sideNavItem}
           >
-            Services catalog
+            Solutions and use cases
           </SideNavMenuItem>
         </SideNavItems>
       </SideNav>

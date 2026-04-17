@@ -1,7 +1,56 @@
 @use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/colors";
+@use "@carbon/react/scss/theme";
 
-.header {
-  font-size: large;
+.appHeader {
+  :global(.cds--header) {
+    background-color: colors.$black-100 !important;
+    border-bottom: none !important;
+  }
+
+  :global(.cds--header__menu-trigger) {
+    background-color: colors.$black-100 !important;
+    border: none !important;
+    border-bottom: none !important;
+    box-shadow: none !important;
+
+    &:hover {
+      background-color: colors.$black-100 !important;
+      border: none !important;
+      box-shadow: none !important;
+    }
+
+    &:focus {
+      background-color: colors.$black-100 !important;
+      border: none !important;
+      box-shadow: none !important;
+      outline: none !important;
+    }
+
+    svg {
+      vertical-align: middle !important;
+    }
+  }
+
+  :global(.cds--header-panel) {
+    position: fixed !important;
+    top: 3rem !important;
+    right: 0 !important;
+    left: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    z-index: 8000 !important;
+
+    &:global(.cds--header-panel--expanded) {
+      max-height: none !important;
+      height: auto !important;
+      overflow: visible !important;
+    }
+  }
 }
 
 .iconWidth {
@@ -10,24 +59,41 @@
 
 .menuBtn {
   border: none !important;
+  border-bottom: none !important;
+  background-color: colors.$black-100 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-shadow: none !important;
+
+  &:hover {
+    background-color: colors.$black-100 !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  &:focus {
+    background-color: colors.$black-100 !important;
+    border: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+  }
 }
 
 .usercircle {
   width: spacing.$spacing-09;
   height: spacing.$spacing-09;
   border-radius: 50%;
-  background-color: #525252;
-  /* grey circle like screenshot */
+  background-color: theme.$layer-02;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #ffffff;
-  /* makes icon white */
+  color: theme.$text-on-color;
   transition: background-color 0.2s ease;
-}
 
-.usercircle:hover {
-  background-color: #6f6f6f;
+  &:hover {
+    background-color: theme.$layer-hover-02;
+  }
 }
 
 .userprofile {
@@ -40,37 +106,16 @@
 }
 
 .logout {
-  border-top: 1px solid #393939;
-
+  border-top: spacing.$spacing-01 solid theme.$border-subtle-01;
   background: none;
   border: none;
   width: 100%;
   text-align: left;
-
   cursor: pointer;
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: spacing.$spacing-05;
-
-  background-color: #393939;
-  color: #ffffff;
-}
-
-:global(.cds--header-panel--expanded) {
-  max-height: none !important;
-  height: auto !important;
-  overflow: visible !important;
-}
-
-:global(.cds--header-panel) {
-  position: relatives !important;
-  bottom: auto !important;
-  right: 0 !important;
-  left: auto !important;
-  transform: none !important;
-  height: auto !important;
-  min-height: 0 !important;
-  max-height: none !important;
-  overflow: visible !important;
+  background-color: theme.$layer-01;
+  color: theme.$text-primary;
 }
