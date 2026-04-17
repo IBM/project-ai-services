@@ -454,9 +454,16 @@ func DeleteJob(ctx context.Context, baseURL, jobID string) error {
 	return nil
 }
 
-// ListDocuments retrieves a list of all documents.
-func ListDocuments(ctx context.Context, baseURL string, limit, offset int) (*DocumentsListResponse, error) {
+// ListDocuments retrieves a list of documents with optional status and name filters.
+// Pass empty strings for status and name to list all documents without filters.
+func ListDocuments(ctx context.Context, baseURL string, limit, offset int, status, name string) (*DocumentsListResponse, error) {
 	url := fmt.Sprintf("%s/v1/documents?limit=%d&offset=%d", baseURL, limit, offset)
+	if status != "" {
+		url += fmt.Sprintf("&status=%s", status)
+	}
+	if name != "" {
+		url += fmt.Sprintf("&name=%s", name)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -637,6 +644,151 @@ func CreateJobExpectingError(ctx context.Context, baseURL, filePath, operation, 
 	}
 
 	return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(respBody))
+}
+
+// GetJobStatusExpectingError retrieves job status and returns error response if status is not 200.
+func GetJobStatusExpectingError(ctx context.Context, baseURL, jobID string) (*ErrorResponse, error) {
+	url := fmt.Sprintf("%s/v1/jobs/%s", baseURL, jobID)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := getHTTPClient(GET_CALL_TIMEOUT)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// If not OK, parse as error response
+	if resp.StatusCode != http.StatusOK {
+		return parseErrorResponse(body, resp.StatusCode)
+	}
+
+	return nil, fmt.Errorf("unexpected success with status code %d: %s", resp.StatusCode, string(body))
+}
+
+// GetDocumentExpectingError retrieves document details and returns error response if status is not 200.
+func GetDocumentExpectingError(ctx context.Context, baseURL, docID string) (*ErrorResponse, error) {
+	url := fmt.Sprintf("%s/v1/documents/%s", baseURL, docID)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := getHTTPClient(GET_CALL_TIMEOUT)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// If not OK, parse as error response
+	if resp.StatusCode != http.StatusOK {
+		return parseErrorResponse(body, resp.StatusCode)
+	}
+
+	return nil, fmt.Errorf("unexpected success with status code %d: %s", resp.StatusCode, string(body))
+}
+
+// GetDocumentContentExpectingError retrieves document content and returns error response if status is not 200.
+func GetDocumentContentExpectingError(ctx context.Context, baseURL, docID string) (*ErrorResponse, error) {
+	url := fmt.Sprintf("%s/v1/documents/%s/content", baseURL, docID)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := getHTTPClient(DOC_CALL_TIMEOUT)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// If not OK, parse as error response
+	if resp.StatusCode != http.StatusOK {
+		return parseErrorResponse(body, resp.StatusCode)
+	}
+
+	return nil, fmt.Errorf("unexpected success with status code %d: %s", resp.StatusCode, string(body))
+}
+
+// DeleteJobExpectingError deletes a job and returns error response if status is not 200/204.
+func DeleteJobExpectingError(ctx context.Context, baseURL, jobID string) (*ErrorResponse, error) {
+	url := fmt.Sprintf("%s/v1/jobs/%s", baseURL, jobID)
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := getHTTPClient(GET_CALL_TIMEOUT)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// If not OK or NoContent, parse as error response
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return parseErrorResponse(body, resp.StatusCode)
+	}
+
+	return nil, fmt.Errorf("unexpected success with status code %d: %s", resp.StatusCode, string(body))
+}
+
+// DeleteDocumentExpectingError deletes a document and returns error response if status is not 200/204.
+func DeleteDocumentExpectingError(ctx context.Context, baseURL, docID string) (*ErrorResponse, error) {
+	url := fmt.Sprintf("%s/v1/documents/%s", baseURL, docID)
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := getHTTPClient(GET_CALL_TIMEOUT)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// If not OK or NoContent, parse as error response
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return parseErrorResponse(body, resp.StatusCode)
+	}
+
+	return nil, fmt.Errorf("unexpected success with status code %d: %s", resp.StatusCode, string(body))
 }
 
 // createMultipartBodyWithMultipleFiles creates a multipart form body with multiple files.

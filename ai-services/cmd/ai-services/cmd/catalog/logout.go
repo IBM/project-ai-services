@@ -1,6 +1,3 @@
-//go:build catalog_api
-// +build catalog_api
-
 package catalog
 
 import (
@@ -42,6 +39,7 @@ Example:
 			if err != nil {
 				// Token may already be expired – still remove local credentials.
 				logger.Warningf("could not reach server (%v). Removing local credentials anyway.\n", err)
+
 				return config.Delete()
 			}
 

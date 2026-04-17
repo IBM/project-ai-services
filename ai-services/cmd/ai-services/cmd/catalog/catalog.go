@@ -1,6 +1,3 @@
-//go:build catalog_api
-// +build catalog_api
-
 package catalog
 
 import "github.com/spf13/cobra"
@@ -15,7 +12,6 @@ deploying services, and managing service metadata`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
-		Hidden: true, // Hide the catalog command from the main help output until it's ready for public use.
 	}
 
 	catalogCMD.AddCommand(NewAPIServerCmd())

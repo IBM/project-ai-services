@@ -25,6 +25,7 @@ if level != "":
 set_log_level(log_level)
 
 from common.misc_utils import get_logger, validate_pdf_file, set_request_id, configure_uvicorn_logging
+from common.diagnostic_logger import setup_comprehensive_crash_handler
 
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 import digitize.digitize_utils as dg_util
@@ -40,6 +41,8 @@ digitization_semaphore = asyncio.BoundedSemaphore(2)
 ingestion_semaphore = asyncio.BoundedSemaphore(1)
 
 logger = get_logger("digitize_server")
+
+diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -61,6 +64,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Application shutting down...")
+    stderr_monitor.stop()
 
 
 # OpenAPI tags metadata for endpoint organization

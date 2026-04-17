@@ -1,0 +1,76 @@
+name: Bump Makefile Version Component Check
+
+on:
+  workflow_call:
+    inputs:
+      component_path:
+        required: true
+        type: string
+        description: 'Component path to watch for changes (e.g., "spyre-rag/src")'
+      values_yaml_key:
+        required: false
+        type: string
+        description: 'Key in values.yaml files (e.g., "backend", "ui", "digitizeUi")'
+      additional_notes:
+        required: false
+        type: string
+        description: 'Additional notes to display in error message'
+
+jobs:
+  check-version-bump:
+    name: Verify TAG is bumped in ${{ inputs.component_path }}/Makefile
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: changes
+        run: |
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          echo "Changed files:"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -q '^${{ inputs.component_path }}/'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Compare TAG against base branch
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          MAKEFILE_PATH="${{ inputs.component_path }}/Makefile"
+          BASE_TAG=$(git show origin/${{ github.base_ref }}:$MAKEFILE_PATH \
+            | grep -E '^TAG\s*\??=' | head -1 | sed 's/.*=\s*//' | tr -d ' ')
+          HEAD_TAG=$(grep -E '^TAG\s*\??=' $MAKEFILE_PATH \
+            | head -1 | sed 's/.*=\s*//' | tr -d ' ')
+
+          echo "Base branch TAG : $BASE_TAG"
+          echo "PR branch TAG   : $HEAD_TAG"
+
+          if [ "$BASE_TAG" = "$HEAD_TAG" ]; then
+            echo ""
+            echo "❌ ERROR: The image TAG in $MAKEFILE_PATH has not been bumped."
+            echo "   Current TAG : $HEAD_TAG"
+            echo "   Changes to ${{ inputs.component_path }}/** require a version bump."
+            echo "   Please update TAG in $MAKEFILE_PATH"
+            if [ -n "${{ inputs.values_yaml_key }}" ]; then
+              echo "   and the corresponding ${{ inputs.values_yaml_key }}.image references"
+              echo "   in all values.yaml files under ai-services/assets/."
+            fi
+            echo ""
+            echo "   Run: python3 .github/scripts/check_image_names.py  (after bumping)"
+            if [ -n "${{ inputs.additional_notes }}" ]; then
+              echo ""
+              echo "${{ inputs.additional_notes }}"
+            fi
+            echo ""
+            exit 1
+          fi
+
+          echo "✅ TAG bumped: $BASE_TAG → $HEAD_TAG"
+
+# Made with Bob

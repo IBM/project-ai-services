@@ -1,6 +1,3 @@
-//go:build catalog_api
-// +build catalog_api
-
 // Package httpclient provides a generic, reusable HTTP client for making
 // JSON-based API requests. It abstracts the low-level details of building
 // requests, setting headers, and decoding responses.
