@@ -1,0 +1,96 @@
+pipeline {
+    agent { label 'shared-x86-centos9' }
+    triggers {
+        cron('30 14 * * *')
+    }
+
+    environment {
+        WS_APIKEY = credentials('mend-ws-apikey')
+        WS_WSS_URL = 'https://ibmets.whitesourcesoftware.com/agent'
+        WS_USERKEY = credentials('mend-ws-user-key')
+        WS_PRODUCTNAME = credentials('mend-ws-product-name')
+        WS_PROJECTNAME = 'Project AI Services'
+        GO_VERSION = '1.25.8'
+    }
+    
+    stages {
+        stage('Setup Environment') {
+            agent {
+                docker {
+                    label 'shared-x86-centos9'
+                    image 'registry.access.redhat.com/ubi9/openjdk-17:1.24'
+                    args """
+                    -e WS_APIKEY="${WS_APIKEY}" \
+                    -e WS_WSS_URL="${WS_WSS_URL}" \
+                    -e WS_USERKEY="${WS_USERKEY}" \
+                    -e WS_PRODUCTNAME="${WS_PRODUCTNAME}" \
+                    -e WS_PROJECTNAME="${WS_PROJECTNAME}"
+                    """
+                }
+            }
+            stages {
+                stage('Init') {
+                    steps {
+                        sh 'java --version'
+
+                        echo "Installing required packages"
+                        sh """
+                            microdnf install -y wget python3.12 python3.12-pip nodejs npm git tar
+                        """
+                        echo "Configuring Python environment"
+                        sh """
+                            rm -rf /usr/bin/python3
+                            ln -s /usr/bin/pip3.12 /usr/bin/pip
+                            ln -s /usr/bin/pip3.12 /usr/bin/pip3
+                            ln -s /usr/bin/python3.12 /usr/bin/python
+                            ln -s /usr/bin/python3.12 /usr/bin/python3
+                            python3 -m pip install virtualenv
+                        """
+                        echo "Installing Go ${GO_VERSION}"
+                        sh """
+                            wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
+                            rm -rf /usr/local/go
+                            tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
+                            export PATH=\$PATH:/usr/local/go/bin
+                            go version
+                        """
+
+                        echo 'Downloading Mend Unified Agent'
+                        sh 'wget https://unified-agent.s3.amazonaws.com/wss-unified-agent.jar'
+
+                        sh 'ls -lrt'
+                    }
+                }
+
+                stage('Checkout AI Services') {
+                    steps {
+                        script {
+                            sh """
+                                rm -rf project-ai-services || true
+                                git clone https://github.com/IBM/project-ai-services.git
+                            """
+                        }
+                    }
+                }
+
+                stage('Run Mend Scan') {
+                    steps {
+                        script {
+                            echo 'Running Mend security scan'
+                            sh """
+                                export PATH=\$PATH:/usr/local/go/bin
+                                java -jar wss-unified-agent.jar -d project-ai-services
+                            """
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}
