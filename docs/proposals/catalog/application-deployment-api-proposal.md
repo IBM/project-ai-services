@@ -25,16 +25,21 @@
      - 5.1.3 [Logout](#513-logout)
      - 5.1.4 [Get Current User](#514-get-current-user)
    - 5.2 [Application Management Endpoints](#52-application-management-endpoints)
-     - 5.2.1 [List Deployments](#521-list-deployments)
-     - 5.2.2 [Get Deployment Details](#522-get-deployment-details)
-     - 5.2.3 [Create Deployment](#523-create-deployment)
-     - 5.2.4 [Update Deployment](#524-update-deployment)
-     - 5.2.5 [Delete Deployment](#525-delete-deployment)
+     - 5.2.1 [List Applications](#521-list-applications)
+     - 5.2.2 [Get Application Details](#522-get-application-details)
+     - 5.2.3 [Create Application](#523-create-application)
+     - 5.2.4 [Update Application](#524-update-application)
+     - 5.2.5 [Delete Application](#525-delete-application)
      - 5.2.6 [Get Pod/Container Health Status](#526-get-podcontainer-health-status)
+   - 5.3 [Catalog Endpoints](#53-catalog-endpoints)
+     - 5.3.1 [List Available Architectures](#531-list-available-architectures)
+     - 5.3.2 [Get Architecture Details](#532-get-architecture-details)
+     - 5.3.3 [List Available Services](#533-list-available-services)
+     - 5.3.4 [Get Service Details](#534-get-service-details)
+     - 5.3.5 [Get Service Custom Parameters](#535-get-service-custom-parameters)
 6. [Error Handling](#6-error-handling)
    - 6.1 [Error Response Format](#61-error-response-format)
    - 6.2 [HTTP Status Codes](#62-http-status-codes)
-7. [API Usage Examples](#7-api-usage-examples)
 
 ## 1. Executive Summary
 
@@ -337,11 +342,11 @@ Authorization: Bearer <access_token>
 
 ### 5.2 Application Management Endpoints
 
-#### 5.2.1 List Deployments
+#### 5.2.1 List Applications
 
 **Endpoint:** `GET /api/v1/applications`
 
-**Description:** Retrieves a list of all application deployments for the authenticated user.
+**Description:** Retrieves a list of all applications for the authenticated user.
 
 **Request Headers:**
 ```
@@ -399,18 +404,18 @@ Authorization: Bearer <access_token>
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
-- Results should be ordered by `created_at` DESC by default
-- Implement cursor-based pagination for large result sets
-- Consider caching frequently accessed lists
-- Filter by user ownership based on JWT token claims
+1. Validate the incoming JWT token from Authorization header
+2. Execute database query to fetch all deployments from the applications table
+3. Map the database response to the response struct
+4. Return the mapped response with appropriate HTTP status code (200)
 
 ---
 
-#### 5.2.2 Get Deployment Details
+#### 5.2.2 Get Application Details
 
 **Endpoint:** `GET /api/v1/applications/{appName}`
 
-**Description:** Retrieves detailed information about a specific application deployment.
+**Description:** Retrieves detailed information about a specific application.
 
 **Request Headers:**
 ```
@@ -438,10 +443,16 @@ Authorization: Bearer <access_token>
   "services": [
     {
       "id": "789a0123-b45c-67d8-e901-234567890abc",
-      "type": "Chat",
+      "type": "QA-Chatbot",
       "endpoints": [
-        "https://rag-production-chat-ui.apps.cluster.example.com",
-        "https://rag-production-chat-api.apps.cluster.example.com"
+        {
+          "type": "ui",
+          "url": "https://rag-production-chat-ui.apps.cluster.example.com"
+        },
+        {
+          "type": "backend",
+          "url": "https://rag-production-chat-api.apps.cluster.example.com"
+        }
       ],
       "version": "1.0.0",
       "created_at": "2026-04-15T10:31:00Z",
@@ -451,7 +462,10 @@ Authorization: Bearer <access_token>
       "id": "234b5678-c90d-12e3-f456-789012345def",
       "type": "Summary",
       "endpoints": [
-        "https://rag-production-summarization-api.apps.cluster.example.com"
+        {
+          "type": "backend",
+          "url": "https://rag-production-summarization-api.apps.cluster.example.com"
+        }
       ],
       "version": "1.0.0",
       "created_at": "2026-04-15T10:32:00Z",
@@ -477,7 +491,10 @@ Authorization: Bearer <access_token>
       "id": "567c8901-d23e-45f6-g789-012345678hij",
       "type": "Summary",
       "endpoints": [
-        "http://localhost:8081"
+        {
+          "type": "backend",
+          "url": "http://localhost:8081"
+        }
       ],
       "version": "1.0.0",
       "created_at": "2026-04-15T11:00:00Z",
@@ -506,11 +523,17 @@ Authorization: Bearer <access_token>
 | Field | Type | Description |
 |-------|------|-------------|
 | id | string | Unique service identifier (UUID) |
-| type | string | Service type (e.g., "Chat", "Summary", "Digitization") |
-| endpoints | array | Array of service endpoint URLs |
+| type | string | Service type (e.g., "QA-Chatbot", "Summary", "Digitization") |
+| endpoints | array | Array of endpoint objects |
 | version | string | Service version |
 | created_at | string | Creation timestamp |
 | updated_at | string | Last update timestamp |
+
+**Endpoint Object:**
+| Field | Type | Description |
+|-------|------|-------------|
+| type | string | Endpoint type: "ui" or "backend" |
+| url | string | Endpoint URL |
 
 **Error Responses:**
 - `401 Unauthorized` - Invalid or missing access token
@@ -519,19 +542,19 @@ Authorization: Bearer <access_token>
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
-- Verify user ownership before returning details
-- Include real-time status from runtime environment
-- Cache endpoint URLs to reduce runtime queries
-- For OpenShift, query route objects for endpoint URLs
-- For Podman, query container inspect for port mappings
+1. Validate the incoming JWT token from Authorization header
+2. Execute database query on applications table using `app_name` as the filter
+3. Perform JOIN with services table to fetch associated services
+4. Map the database response to the response struct including nested services
+5. Return the mapped response with appropriate HTTP status code
 
 ---
 
-#### 5.2.3 Create Deployment
+#### 5.2.3 Create Application
 
 **Endpoint:** `POST /api/v1/applications`
 
-**Description:** Creates a new application deployment (architecture or service).
+**Description:** Creates a new application (architecture or service).
 
 **Request Headers:**
 ```
@@ -589,22 +612,27 @@ Content-Type: application/json
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
-- Validate `app_name` uniqueness (must be unique, serves as Primary Key)
-- Validate `app_name` format: alphanumeric with hyphens, 3-50 characters
-- Validate template exists in catalog
-- Create database record with status "Downloading"
-- Initiate async deployment job
-- Return immediately with 202 Accepted
-- Use background worker for actual deployment
-- The `app_name` is used for prefixing pod names (Podman) and namespace names (OpenShift)
+1. Validate the incoming JWT token from Authorization header
+2. Validate `app_name` uniqueness by querying the applications table
+3. Validate `app_name` format: alphanumeric with hyphens, 3-50 characters
+4. Validate that the template (e.g., "Digital Assistant") is a valid template in the catalog
+5. Create database records in all required tables with status "Downloading":
+   - Insert record in applications table
+   - Insert corresponding records in services table
+6. Initiate async deployment job
+7. Return immediately with 202 Accepted
+8. Use background worker for actual deployment
+9. Update database based on deployment success/failure:
+   - On success: Update status to "Running" and populate endpoints in services table
+   - On failure: Update status to "Error" with appropriate error message
 
 ---
 
-#### 5.2.4 Update Deployment
+#### 5.2.4 Update Application
 
 **Endpoint:** `PUT /api/v1/applications/{appName}`
 
-**Description:** Updates the display name of an existing application deployment.
+**Description:** Updates the display name of an existing application.
 
 **Request Headers:**
 ```
@@ -661,21 +689,19 @@ Content-Type: application/json
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
-- Only allow updates when status is "running" or "error"
-- Validate configuration changes against template schema
-- Perform rolling update for zero-downtime (OpenShift)
-- Update database record with new configuration
-- Initiate async update job
-- Cannot update: name, type, template, runtime (immutable fields)
-- Log configuration changes for audit trail
+1. Validate the incoming JWT token from Authorization header
+2. Validate the new `deployment_name` format and length (3-100 chars)
+3. Execute database UPDATE query on applications table to update the `deployment_name` field using `app_name` as the filter
+4. Fetch the complete updated application object from the database
+5. Return the entire application object with updated `deployment_name` and `updated_at` timestamp
 
 ---
 
-#### 5.2.5 Delete Deployment
+#### 5.2.5 Delete Application
 
 **Endpoint:** `DELETE /api/v1/applications/{appName}`
 
-**Description:** Deletes an application deployment and all associated resources.
+**Description:** Deletes an application and all associated resources.
 
 **Request Headers:**
 ```
@@ -725,8 +751,6 @@ Authorization: Bearer <access_token>
 - If skip-cleanup=true, preserve application data (documents, embeddings, etc.)
 - If skip-cleanup=false (default), clean up all application data
 - Clean up database records after successful deletion
-- Implement soft delete with `deleted_at` timestamp
-- Keep audit trail of deleted applications
 - For OpenShift: delete namespace and all resources
 - For Podman: stop and remove all containers
 
@@ -844,6 +868,224 @@ Authorization: Bearer <access_token>
 
 ---
 
+### 5.3 Catalog Endpoints
+
+#### 5.3.1 List Available Architectures
+
+**Endpoint:** `GET /api/v1/architectures`
+
+**Description:** Retrieves a list of all available architecture templates.
+
+**Request Headers:**
+```
+Authorization: Bearer <access_token>
+```
+
+**Request Body:** None
+
+**Response (200 OK):**
+```json
+[
+  {
+    "name": "Digital Assistant",
+    "description": "Complete RAG architecture with QA chatbot, summarization, and digitization services",
+    "services": ["QA-Chatbot", "Summary", "Digitization"]
+  }
+]
+```
+
+**Response Schema:**
+| Field | Type | Description |
+|-------|------|-------------|
+| name | string | Architecture template name |
+| description | string | Description of the architecture |
+| services | array | Array of service names included in this architecture |
+
+**Error Responses:**
+- `401 Unauthorized` - Invalid or missing access token
+- `500 Internal Server Error` - Server error
+
+**Implementation Notes:**
+- **TODO:** exploring on asset structure to support granular deployments
+
+---
+
+#### 5.3.2 Get Architecture Details
+
+**Endpoint:** `GET /api/v1/architectures?name="Digital Assistant"`
+
+**Description:** Retrieves detailed information about a specific architecture template.
+
+**Implementation Notes:**
+- **TODO:** exploring on asset structure to support granular deployments
+
+---
+
+#### 5.3.3 List Available Services
+
+**Endpoint:** `GET /api/v1/services`
+
+**Description:** Retrieves a list of all available service templates.
+
+**Request Headers:**
+```
+Authorization: Bearer <access_token>
+```
+
+**Request Body:** None
+
+**Response (200 OK):**
+```json
+[
+  {
+    "name": "QA-Chatbot",
+    "description": "Question-answering chatbot service with RAG capabilities",
+    "reference_architectures": ["Digital Assistant"]
+  },
+  {
+    "name": "Summary",
+    "description": "Document summarization service",
+    "reference_architectures": ["Digital Assistant"]
+  },
+  {
+    "name": "Digitization",
+    "description": "Document digitization and processing service",
+    "reference_architectures": ["Digital Assistant"]
+  }
+]
+```
+
+**Response Schema:**
+| Field | Type | Description |
+|-------|------|-------------|
+| name | string | Service template name |
+| description | string | Description of the service |
+| reference_architectures | array | Array of architecture names that include this service |
+
+**Error Responses:**
+- `401 Unauthorized` - Invalid or missing access token
+- `500 Internal Server Error` - Server error
+
+**Implementation Notes:**
+- **TODO:** exploring on asset structure to support granular deployments
+
+---
+
+#### 5.3.4 Get Service Details
+
+**Endpoint:** `GET /api/v1/services?name="Summarization"`
+
+**Description:** Retrieves detailed information about a specific service template.
+
+**Implementation Notes:**
+- **TODO:** exploring on asset structure to support granular deployments
+
+---
+
+#### 5.3.5 Get Service Custom Parameters
+
+**Endpoint:** `GET /api/v1/services/params?name="Digital Assistant"`
+
+**Description:** Retrieves custom parameters schema for a specific architecture/service template. Returns JSON Schema format that UI can use to generate dynamic forms with validation.
+
+**Request Headers:**
+```
+Authorization: Bearer <access_token>
+```
+
+**Query Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| name | string | Yes | Architecture or service template name |
+
+**Request Body:** None
+
+**Response (200 OK):**
+```json
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "opensearch": {
+      "type": "object",
+      "properties": {
+        "memoryLimit": {
+          "type": "string",
+          "pattern": "^[0-9]+(Ki|Mi|Gi|Ti|Pi|Ei)$",
+          "description": "Memory limit for OpenSearch (e.g., 2Gi, 4Gi)"
+        },
+        "storage": {
+          "type": "string",
+          "pattern": "^[0-9]+(Ki|Mi|Gi|Ti|Pi|Ei)$",
+          "description": "Storage size for OpenSearch (e.g., 10Gi, 20Gi)"
+        },
+        "auth": {
+          "type": "object",
+          "properties": {
+            "password": {
+              "type": "string",
+              "minLength": 15,
+              "allOf": [
+                {
+                  "pattern": ".*[a-z].*",
+                  "description": "Must contain at least one lowercase letter"
+                },
+                {
+                  "pattern": ".*[A-Z].*",
+                  "description": "Must contain at least one uppercase letter"
+                },
+                {
+                  "pattern": ".*[0-9].*",
+                  "description": "Must contain at least one digit"
+                },
+                {
+                  "pattern": ".*[@$!%*?&#^()_+\\-=\\[\\]{};':\"\\\\|,.<>/`~].*",
+                  "description": "Must contain at least one special character"
+                }
+              ],
+              "description": "Password must be at least 15 characters and contain at least one uppercase letter, one lowercase letter, one digit, and one special character"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**Response Schema:**
+Returns a JSON Schema (draft-07) object that defines:
+- Parameter structure and types
+- Validation rules (patterns, minLength, allOf, etc.)
+- Descriptions for each field
+- Nested object properties
+
+**UI Integration:**
+The JSON Schema response can be directly consumed by form libraries such as:
+- `react-jsonschema-form` / `@rjsf/core` (React)
+- `vue-form-generator` (Vue)
+- `angular-schema-form` (Angular)
+
+These libraries will automatically:
+- Generate form fields based on schema types
+- Apply validation rules (pattern matching, length constraints)
+- Display field descriptions and error messages
+- Handle nested objects and complex structures
+
+**Error Responses:**
+- `400 Bad Request` - Invalid or missing name parameter
+- `401 Unauthorized` - Invalid or missing access token
+- `404 Not Found` - Template not found
+- `500 Internal Server Error` - Server error
+
+**Implementation Notes:**
+- Read the values.schema.json file from the template's asset directory
+- Return the schema as-is without modification
+- UI libraries can consume this standard JSON Schema format directly
+- **TODO:** finalizing on Implementation Notes
+
+---
+
 ## 6. Error Handling
 
 ### 6.1 Error Response Format
@@ -869,52 +1111,3 @@ Authorization: Bearer <access_token>
 - `409 Conflict` - Resource conflict (e.g., duplicate name)
 - `422 Unprocessable Entity` - Validation failed
 - `500 Internal Server Error` - Server error
-
-## 7. API Usage Examples
-
-### Example 1: Deploy RAG Architecture
-```bash
-# 1. Login
-curl -X POST http://localhost:8080/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"password"}'
-
-# Response: {"access_token": "eyJhbGc...", ...}
-
-# 2. List Available Architectures
-curl -X GET http://localhost:8080/api/v1/architectures \
-  -H "Authorization: Bearer <token>"
-
-# 3. Deploy RAG Architecture
-curl -X POST http://localhost:8080/api/v1/applications \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "app_name": "rag-production",
-    "deployment_name": "RAG Production",
-    "deployment_type": "Architecture",
-    "template": "Digital Assistant"
-  }'
-
-# Response: {"app_name": "rag-production", "deployment_name": "RAG Production", "status": "Downloading", ...}
-
-# 4. Check Deployment Status
-curl -X GET http://localhost:8080/api/v1/applications/rag-production \
-  -H "Authorization: Bearer <token>"
-```
-
-### Example 2: Deploy Single Service
-```bash
-# 1. Deploy Summarization Service
-curl -X POST http://localhost:8080/api/v1/applications \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "app_name": "summarization-dev",
-    "deployment_name": "Summarization Dev",
-    "deployment_type": "Service",
-    "template": "Summary"
-  }'
-```
-
----
