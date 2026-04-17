@@ -205,11 +205,27 @@ Content-Type: application/json
 - `400 Bad Request` - Missing or invalid request body
 
 **Implementation Notes:**
-- Passwords must be hashed using bcrypt or argon2
-- Access tokens expire after 15 minutes
-- Refresh tokens are valid for 7 days
-- Failed login attempts should be rate-limited
-- Consider implementing account lockout after multiple failed attempts
+1. **Request Validation**: Use Gin's `ShouldBindJSON` to validate request body against `loginReq` struct (username, password required)
+2. **User Lookup**: Call `UserRepository.GetByUserName(ctx, username)` to retrieve user from in-memory store
+3. **Password Verification**: Use PBKDF2 with SHA256 to verify password against stored hash
+   - Hash format: `iterations.salt.hash` (base64 encoded)
+   - Uses constant-time comparison (`subtle.ConstantTimeCompare`) to prevent timing attacks
+4. **Token Generation**:
+   - Generate JWT access token with `TokenManager.GenerateAccessToken(userID)`
+   - Generate JWT refresh token with `TokenManager.GenerateRefreshToken(userID)`
+   - Both tokens include custom claims: `uid` (user ID), issuer ("ai-services-catalog-server"), subject, audience, expiry
+   - Access token audience: "access", Refresh token audience: "refresh"
+   - Signing method: HS256 with secret key
+5. **Response**: Return both tokens with "Bearer" token type (handler returns access_token, refresh_token, token_type)
+6. **Error Handling**: Return 401 for invalid credentials, 400 for malformed requests
+
+**Security Considerations:**
+- Passwords stored as PBKDF2 hashes (iterations + salt + hash, not plaintext)
+- JWT tokens signed with HS256 and secret key
+- Token audience field prevents token type confusion attacks
+- Constant-time password comparison prevents timing attacks
+- Access tokens expire after configured TTL (default: 15 minutes)
+- Refresh tokens valid for configured TTL (default: 7 days)
 
 ---
 
@@ -259,9 +275,24 @@ Content-Type: application/json
 - `400 Bad Request` - Missing refresh token
 
 **Implementation Notes:**
-- Refresh tokens should be rotated on each use
-- Old refresh tokens should be invalidated after rotation
-- Implement refresh token blacklisting for logout functionality
+1. **Request Validation**: Use Gin's `ShouldBind` to validate request body against `refreshReq` struct (refresh_token required)
+2. **Token Validation**: Call `TokenManager.ValidateRefreshToken(refreshToken)` to:
+   - Parse JWT token with HS256 signature verification
+   - Validate token expiry and claims
+   - Check audience field is "refresh" (prevents access token misuse)
+   - Extract user ID from custom claims
+3. **Token Rotation**: Generate new token pair:
+   - New access token with `TokenManager.GenerateAccessToken(userID)`
+   - New refresh token with `TokenManager.GenerateRefreshToken(userID)`
+   - Both tokens have fresh expiry times
+4. **Response**: Return new access_token, refresh_token, and token_type
+5. **Error Handling**: Return 401 for invalid/expired tokens, 400 for missing token
+
+**Security Considerations:**
+- Refresh tokens are rotated on each use (new tokens generated)
+- Old refresh token becomes invalid after successful refresh
+- Token audience validation prevents token type confusion
+- Consider implementing refresh token blacklisting for enhanced security (currently not implemented but can be added)
 
 ---
 
@@ -294,10 +325,28 @@ Authorization: Bearer <access_token>
 - `401 Unauthorized` - Invalid or missing access token
 
 **Implementation Notes:**
-- Add both access and refresh tokens to blacklist
-- Blacklist should persist until token expiration
-- Consider using Redis for efficient token blacklisting
-- Clean up expired tokens from blacklist periodically
+1. **Token Extraction**: Retrieve raw access token from Gin context using `middleware.CtxRawTokenKey`
+   - Token was previously extracted and validated by `AuthMiddleware`
+2. **Token Validation**: Call `TokenManager.ValidateAccessToken(token)` to:
+   - Parse token and extract expiry time
+   - If token is already invalid, treat as success (idempotent operation)
+3. **Blacklist Addition**: Call `TokenBlacklist.Add(token, expiryTime)` to:
+   - Add token to in-memory blacklist map
+   - Store with expiry time for automatic cleanup
+4. **Response**: Return success message "logged out"
+5. **Error Handling**: Return 400 for missing token, 500 for blacklist failures
+
+**Blacklist Implementation:**
+- Uses `InMemoryTokenBlacklist` with map[string]time.Time storage
+- Background garbage collection runs every 1 minute to remove expired tokens
+- `Contains()` method checks blacklist and removes expired entries on-the-fly
+- **Note**: In-memory implementation only suitable for single-instance deployments
+- **Production**: Use Redis with TTL or distributed cache (Memcached) for multi-instance setups
+
+**Middleware Integration:**
+- `AuthMiddleware` checks `TokenBlacklist.Contains(token)` before validating
+- Returns 401 "token revoked" if token is blacklisted
+- Ensures revoked tokens cannot be used even if still valid
 
 ---
 
@@ -334,9 +383,26 @@ Authorization: Bearer <access_token>
 - `401 Unauthorized` - Invalid or missing access token
 
 **Implementation Notes:**
-- Extract user information from JWT token claims
-- Do not expose sensitive information (password hash, etc.)
-- Consider caching user information to reduce database queries
+1. **User ID Extraction**: Retrieve user ID from Gin context using `middleware.CtxUserIDKey`
+   - User ID was extracted from JWT token by `AuthMiddleware` during authentication
+2. **User Lookup**: Call `AuthService.GetUser(ctx, userID)` which:
+   - Calls `UserRepository.GetByID(ctx, userID)` to fetch user from in-memory store
+   - Returns `models.User` struct with ID, UserName, PasswordHash, Name
+3. **Response Filtering**: Return only safe fields (id, username, name)
+   - **Do not expose**: PasswordHash or other sensitive information
+4. **Error Handling**: Return 401 for missing user ID, 404 for user not found
+
+**Middleware Flow:**
+- `AuthMiddleware` validates Bearer token from Authorization header
+- Extracts user ID from JWT custom claims (`uid` field)
+- Sets user ID in Gin context with key `middleware.CtxUserIDKey`
+- Sets raw token in context with key `middleware.CtxRawTokenKey`
+- Adds `X-Token-Exp` header with token expiry time (UTC format)
+
+**Repository:**
+- Uses `InMemoryUserRepo` with dual-index maps (by ID and by username)
+- Thread-safe with RWMutex for concurrent access
+- Returns `ErrUserNotFound` if user doesn't exist
 
 ---
 
@@ -346,7 +412,7 @@ Authorization: Bearer <access_token>
 
 **Endpoint:** `GET /api/v1/applications`
 
-**Description:** Retrieves a list of all applications for the authenticated user.
+**Description:** Retrieves a paginated list of all applications for the authenticated user.
 
 **Request Headers:**
 ```
@@ -354,40 +420,62 @@ Authorization: Bearer <access_token>
 ```
 
 **Query Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| limit | integer | No | Number of results to return (default: 50, max: 100) |
-| offset | integer | No | Pagination offset (default: 0) |
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| page | integer | No | 1 | Page number (1-indexed) |
+| page_size | integer | No | 20 | Number of items per page (max: 100) |
+| sort_by | string | No | created_at | Sort field: "created_at", "updated_at", "app_name", "status" |
+| sort_order | string | No | desc | Sort order: "asc" or "desc" |
+| status | string | No | - | Filter by status: "Downloading", "Deploying", "Running", "Deleting", "Error" |
+| type | string | No | - | Filter by type: "Digital Assistant", "Summary" |
 
 **Request Body:** None
 
 **Response (200 OK):**
 ```json
-[
-  {
-    "app_name": "rag-production",
-    "deployment_name": "RAG Production",
-    "deployment_type": "Architecture",
-    "type": "Digital Assistant",
-    "status": "Running",
-    "message": "All services are operational",
-    "created_at": "2026-04-15T10:30:00Z",
-    "updated_at": "2026-04-15T10:35:00Z"
-  },
-  {
-    "app_name": "summarization-dev",
-    "deployment_name": "Summarization Dev",
-    "deployment_type": "Service",
-    "type": "Summary",
-    "status": "Running",
-    "message": "Service deployed successfully",
-    "created_at": "2026-04-15T11:00:00Z",
-    "updated_at": "2026-04-15T11:05:00Z"
+{
+  "data": [
+    {
+      "app_name": "rag-production",
+      "deployment_name": "RAG Production",
+      "deployment_type": "Architecture",
+      "type": "Digital Assistant",
+      "status": "Running",
+      "message": "All services are operational",
+      "created_at": "2026-04-15T10:30:00Z",
+      "updated_at": "2026-04-15T10:35:00Z"
+    },
+    {
+      "app_name": "summarization-dev",
+      "deployment_name": "Summarization Dev",
+      "deployment_type": "Service",
+      "type": "Summary",
+      "status": "Running",
+      "message": "Service deployed successfully",
+      "created_at": "2026-04-15T11:00:00Z",
+      "updated_at": "2026-04-15T11:05:00Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "page_size": 20,
+    "total_items": 2,
+    "total_pages": 1,
+    "has_next": false,
+    "has_prev": false
   }
-]
+}
 ```
 
 **Response Schema:**
+
+**Root Object:**
+| Field | Type | Description |
+|-------|------|-------------|
+| data | array | Array of application objects |
+| pagination | object | Pagination metadata |
+
+**Application Object (data[]):**
 | Field | Type | Description |
 |-------|------|-------------|
 | app_name | string | Application name (Primary Key, immutable, used for resource naming) |
@@ -399,15 +487,164 @@ Authorization: Bearer <access_token>
 | created_at | string | ISO 8601 timestamp of creation |
 | updated_at | string | ISO 8601 timestamp of last update |
 
+**Pagination Object:**
+| Field | Type | Description |
+|-------|------|-------------|
+| page | integer | Current page number (1-indexed) |
+| page_size | integer | Number of items per page |
+| total_items | integer | Total number of applications matching filters |
+| total_pages | integer | Total number of pages |
+| has_next | boolean | Whether there is a next page |
+| has_prev | boolean | Whether there is a previous page |
+
 **Error Responses:**
+- `400 Bad Request` - Invalid query parameters (e.g., page < 1, page_size > 100)
 - `401 Unauthorized` - Invalid or missing access token
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
-1. Validate the incoming JWT token from Authorization header
-2. Execute database query to fetch all deployments from the applications table
-3. Map the database response to the response struct
-4. Return the mapped response with appropriate HTTP status code (200)
+1. **Token Validation**: Validate JWT token from Authorization header via `AuthMiddleware`
+
+2. **Parameter Validation**:
+   - Validate page >= 1, page_size between 1-100
+   - Validate sort_by is one of allowed fields: `created_at`, `updated_at`, `app_name`, `status`
+   - Validate sort_order is "asc" or "desc" (case-insensitive, convert to uppercase for PostgreSQL)
+   - Validate status filter against ENUM values: `Downloading`, `Deploying`, `Running`, `Deleting`, `Error`
+   - Validate type filter against allowed values: `Digital Assistant`, `Summary`
+
+3. **PostgreSQL Query Construction**:
+   
+   **Step 3a - Build WHERE clause with parameterized queries:**
+   ```go
+   var conditions []string
+   var args []interface{}
+   argIndex := 1
+   
+   // Add status filter if provided
+   if status != "" {
+       conditions = append(conditions, fmt.Sprintf("status = $%d", argIndex))
+       args = append(args, status)
+       argIndex++
+   }
+   
+   // Add type filter if provided
+   if appType != "" {
+       conditions = append(conditions, fmt.Sprintf("type = $%d", argIndex))
+       args = append(args, appType)
+       argIndex++
+   }
+   
+   whereClause := ""
+   if len(conditions) > 0 {
+       whereClause = "WHERE " + strings.Join(conditions, " AND ")
+   }
+   ```
+   
+   **Step 3b - Execute COUNT query for total_items:**
+   ```sql
+   SELECT COUNT(*) FROM applications [WHERE clause];
+   ```
+   Example with filters:
+   ```sql
+   SELECT COUNT(*) FROM applications WHERE status = $1 AND type = $2;
+   ```
+   
+   **Step 3c - Calculate pagination offset:**
+   ```go
+   offset := (page - 1) * pageSize
+   ```
+   
+   **Step 3d - Build and execute SELECT query:**
+   ```sql
+   SELECT
+       app_name,
+       deployment_name,
+       deployment_type,
+       type,
+       status,
+       message,
+       created_at,
+       updated_at
+   FROM applications
+   [WHERE clause]
+   ORDER BY [sort_by] [sort_order]
+   LIMIT $n OFFSET $n+1;
+   ```
+   
+   **Complete example with all parameters:**
+   ```sql
+   -- With status and type filters
+   SELECT
+       app_name, deployment_name, deployment_type, type,
+       status, message, created_at, updated_at
+   FROM applications
+   WHERE status = $1 AND type = $2
+   ORDER BY created_at DESC
+   LIMIT $3 OFFSET $4;
+   
+   -- Arguments: ["Running", "Digital Assistant", 20, 0]
+   ```
+
+4. **Pagination Calculation**:
+   ```go
+   totalPages := int(math.Ceil(float64(totalItems) / float64(pageSize)))
+   if totalPages == 0 {
+       totalPages = 1  // At least 1 page even if no results
+   }
+   hasNext := page < totalPages
+   hasPrev := page > 1
+   ```
+
+5. **Response Mapping**:
+   - Scan PostgreSQL rows into Go structs
+   - Format timestamps to ISO 8601 (RFC3339) using `time.Format(time.RFC3339)`
+   - Construct paginated response with data array and pagination metadata
+
+6. **PostgreSQL-Specific Considerations**:
+   - **Parameterized Queries**: Always use `$1, $2, $3...` placeholders to prevent SQL injection
+   - **Column Name Mapping**: Use snake_case in database (app_name, created_at) but camelCase in JSON response
+   - **ENUM Types**: If using PostgreSQL ENUM for status, ensure filter values match exactly
+   - **Timestamp Handling**: Store as `TIMESTAMP WITH TIME ZONE` (timestamptz) in PostgreSQL
+   - **NULL Handling**: Use `sql.NullString` for nullable fields like message
+   - **Transaction Isolation**: Use READ COMMITTED isolation level for consistent pagination
+   - **Index Recommendations**:
+     ```sql
+     -- Composite index for common queries
+     CREATE INDEX idx_applications_status_created ON applications(status, created_at DESC);
+     CREATE INDEX idx_applications_type_created ON applications(type, created_at DESC);
+     CREATE INDEX idx_applications_created ON applications(created_at DESC);
+     CREATE INDEX idx_applications_updated ON applications(updated_at DESC);
+     ```
+
+7. **Performance Optimization**:
+   - Use `COUNT(*) OVER()` window function to get total count in single query (optional):
+     ```sql
+     SELECT
+         app_name, deployment_name, deployment_type, type,
+         status, message, created_at, updated_at,
+         COUNT(*) OVER() AS total_count
+     FROM applications
+     WHERE status = $1
+     ORDER BY created_at DESC
+     LIMIT $2 OFFSET $3;
+     ```
+   - Consider cursor-based pagination for very large datasets (using `WHERE created_at < $1` instead of OFFSET)
+   - Cache total count for frequently accessed pages (with TTL)
+
+**Example Requests:**
+```
+# Get first page with default settings
+GET /api/v1/applications
+
+# Get second page with 50 items per page
+GET /api/v1/applications?page=2&page_size=50
+
+# Get running applications sorted by name
+GET /api/v1/applications?status=Running&sort_by=app_name&sort_order=asc
+
+# Get Digital Assistant applications
+GET /api/v1/applications?type=Digital%20Assistant
+```
 
 ---
 
