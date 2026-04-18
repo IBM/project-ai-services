@@ -791,7 +791,7 @@ Authorization: Bearer <access_token>
 
 **Endpoint:** `POST /api/v1/applications`
 
-**Description:** Creates a new application (architecture or service).
+**Description:** Creates a new application (architecture or service) with optional custom parameters.
 
 **Request Headers:**
 ```
@@ -802,20 +802,30 @@ Content-Type: application/json
 **Request Body:**
 ```json
 {
-  "app_name": "rag-production",
   "deployment_name": "RAG Production",
   "deployment_type": "Architecture",
-  "template": "Digital Assistant"
+  "template": "Digital Assistant",
+  "params": {
+    "opensearch.memoryLimit": "4Gi",
+    "opensearch.storage": "20Gi",
+    "opensearch.auth.password": "SecurePassword123!@#"
+  }
 }
 ```
 
 **Request Schema:**
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| app_name | string | Yes | Application name (3-50 chars, alphanumeric with hyphens, will be Primary Key) |
 | deployment_name | string | Yes | User-friendly display name (3-100 chars) |
 | deployment_type | string | Yes | Deployment type: "Architecture" or "Service" |
 | template | string | Yes | Template name (e.g., "Digital Assistant", "Summary") |
+| params | object | No | Key-value pairs of custom parameters for the deployment |
+
+**Params Object:**
+- Flexible key-value pairs where keys are parameter paths (e.g., "opensearch.memoryLimit")
+- Values can be strings, numbers, or booleans depending on the parameter type
+- Parameters must match the schema defined in the template
+- If not provided, default values from the template will be used
 
 **Response (202 Accepted):**
 ```json
@@ -825,6 +835,11 @@ Content-Type: application/json
   "deployment_type": "Architecture",
   "status": "Downloading",
   "message": "Deployment initiated successfully",
+  "params": {
+    "opensearch.memoryLimit": "4Gi",
+    "opensearch.storage": "20Gi",
+    "opensearch.auth.password": "***"
+  },
   "created_at": "2026-04-15T10:30:00Z",
   "updated_at": "2026-04-15T10:30:00Z"
 }
@@ -833,35 +848,67 @@ Content-Type: application/json
 **Response Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
-| app_name | string | Application name (Primary Key, immutable) |
+| app_name | string | Auto-generated application name (Primary Key, immutable) |
 | deployment_name | string | User-friendly display name |
 | deployment_type | string | Deployment type |
 | status | string | Initial status ("Downloading") |
 | message | string | Status message |
+| params | object | Applied parameters (sensitive values masked) |
 | created_at | string | Creation timestamp |
 | updated_at | string | Last update timestamp |
 
 **Error Responses:**
 - `400 Bad Request` - Invalid request body or validation errors
 - `401 Unauthorized` - Invalid or missing access token
-- `409 Conflict` - Application name already exists
-- `422 Unprocessable Entity` - Configuration validation failed
+- `409 Conflict` - Application name already exists (normalized deployment_name conflicts)
+- `422 Unprocessable Entity` - Parameter validation failed or invalid template
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
-1. Validate the incoming JWT token from Authorization header
-2. Validate `app_name` uniqueness by querying the applications table
-3. Validate `app_name` format: alphanumeric with hyphens, 3-50 characters
-4. Validate that the template (e.g., "Digital Assistant") is a valid template in the catalog
-5. Create database records in all required tables with status "Downloading":
-   - Insert record in applications table
+1. **Token Validation**: Validate JWT token from Authorization header
+
+2. **App Name Generation**:
+   - Auto-generate `app_name` by normalizing deployment_name
+   - Normalization rules:
+     - Convert to lowercase
+     - Replace spaces and special characters with hyphens
+     - Remove leading/trailing hyphens
+     - Collapse multiple consecutive hyphens to single hyphen
+   - Example transformations:
+     - "RAG Production" → "rag-production"
+     - "My App 2024!" → "my-app-2024"
+     - "Test___Service" → "test-service"
+   - Validate final app_name is 3-50 characters
+   - Check uniqueness in applications table (return 409 if exists)
+
+3. **Template Validation**:
+   - Verify template exists in catalog
+   - Retrieve template's JSON Schema for parameter validation
+
+4. **Parameter Validation** (if params provided):
+   - Validate each param key exists in template's JSON Schema
+   - Validate each param value against its schema definition (type, pattern, min/max, etc.)
+   - Return 422 error with details if validation fails
+   - Merge provided params with template defaults
+
+5. **Database Operations**:
+   - Begin transaction
+   - Insert record in applications table with:
+     - Generated app_name (Primary Key)
+     - deployment_name, deployment_type, template
+     - params as JSONB
+     - status = "Downloading"
    - Insert corresponding records in services table
-6. Initiate async deployment job
-7. Return immediately with 202 Accepted
-8. Use background worker for actual deployment
-9. Update database based on deployment success/failure:
+   - Commit transaction
+
+6. **Async Deployment**:
+   - Initiate background deployment job with app_name
+   - Return immediately with 202 Accepted
+   - Background worker handles actual deployment
+
+7. **Deployment Status Updates**:
    - On success: Update status to "Running" and populate endpoints in services table
-   - On failure: Update status to "Error" with appropriate error message
+   - On failure: Update status to "Error" with error message
 
 ---
 
@@ -926,11 +973,13 @@ Content-Type: application/json
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
-1. Validate the incoming JWT token from Authorization header
-2. Validate the new `deployment_name` format and length (3-100 chars)
-3. Execute database UPDATE query on applications table to update the `deployment_name` field using `app_name` as the filter
-4. Fetch the complete updated application object from the database
-5. Return the entire application object with updated `deployment_name` and `updated_at` timestamp
+1. **Token Validation**: Validate JWT token from Authorization header
+2. **Request Validation**: Validate deployment_name format and length (3-100 chars)
+3. **Database Update**:
+   - Execute UPDATE query on applications table to update deployment_name field
+   - Use app_name as the filter (WHERE app_name = $1)
+   - Update updated_at timestamp
+4. **Response**: Fetch and return the complete updated application object
 
 ---
 

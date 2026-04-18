@@ -170,7 +170,9 @@ The solution is packaged into three primary container images. These are hosted i
 | --- | --- | --- | --- |
 | **API Server** | `catalog-api:v1` | Red Hat UBI 9 (Minimal) / Go | Orchestration, Auth, & Infrastructure Interfacing |
 | **Catalog UI** | `catalog-ui:v1` | Red Hat UBI 9 (Nginx or Equivalent) / React | Carbon-based Web Portal & Asset Hosting |
-| **Database** | `postgresql:18` | Official Image | Persistent data storage for users, deployments, and audit logs |
+| **Database** | `postgresql:18` | `icr.io/ppc64le-oss/postgresql-ppc64le` | Persistent data storage for users, deployments, and audit logs |
+
+> **Note:** The PostgreSQL image is sourced from `icr.io/ppc64le-oss/postgresql-ppc64le`. Currently, version 16.3 is available, but it is recommended to use PostgreSQL 18+ for optimal performance and feature support.
 
 ### 6.2 Deployment Specifications
 
@@ -193,8 +195,7 @@ The `ai-services` CLI abstracts the underlying infrastructure by generating the 
 **PostgreSQL:**
 - Version: 18+
 - Storage: Persistent volume (minimum 10GB)
-- Backup: Automated daily backups
-- High Availability: Replication support for OpenShift deployments
+
 
 ## 7. API Endpoints
 
