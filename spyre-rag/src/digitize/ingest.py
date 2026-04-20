@@ -12,6 +12,18 @@ import digitize.config as config
 
 logger = get_logger("ingest")
 
+
+def log_ingest_timing(file_name: str, stage: str, elapsed_seconds: float, **extra_fields):
+    extra = " ".join(
+        f"{key}={value}"
+        for key, value in extra_fields.items()
+        if value is not None
+    )
+    suffix = f" {extra}" if extra else ""
+    logger.info(
+        f"[INGEST_TIMING] file={file_name} stage={stage} elapsed={elapsed_seconds:.2f}s{suffix}"
+    )
+
 def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Optional[dict] = None):
 
     def ingestion_failed():
@@ -66,6 +78,15 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
             # Index each document separately and update status
             for doc_id, chunks in doc_chunks_dict.items():
                 logger.debug(f"Indexing {len(chunks)} chunks for document: {doc_id}")
+                index_start_time = time.time()
+                file_name = next(
+                    (
+                        original_file_name
+                        for original_file_name, mapped_doc_id in (doc_id_dict or {}).items()
+                        if mapped_doc_id == doc_id
+                    ),
+                    doc_id
+                )
 
                 try:
                     success = vector_store.insert_chunks(chunks, embedding=embedder)
@@ -87,6 +108,21 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                         logger.error(f"Failed to reinitialize connections: {reinit_error}")
                         # Continue anyway - the next document will try with existing connections
 
+                index_elapsed = time.time() - index_start_time
+                log_ingest_timing(file_name, "indexing", index_elapsed, chunks=len(chunks))
+
+                if converted_pdf_stats is not None:
+                    original_path = next(
+                        (
+                            path
+                            for path in converted_pdf_stats.keys()
+                            if Path(path).name == file_name
+                        ),
+                        None
+                    )
+                    if original_path:
+                        converted_pdf_stats[original_path].setdefault("timings", {})["indexing"] = round(index_elapsed, 2)
+
                 # Update document status immediately after indexing attempt, regardless of success or failure
                 if status_mgr and doc_id_dict:
                     if not success:
@@ -107,9 +143,21 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
             else:
                 logger.info(f"All {total_count} processed document(s) loaded into Vector DB successfully")
 
-        # Log time taken for the file
-        end_time: float = time.time()  # End the timer for the current file
+        # Log total time per successfully processed file
+        end_time: float = time.time()
         file_processing_time = end_time - start_time
+        if converted_pdf_stats:
+            for path, stats in converted_pdf_stats.items():
+                timings = stats.get("timings", {})
+                total_elapsed = sum(float(value or 0) for value in timings.values())
+                log_ingest_timing(
+                    Path(path).name,
+                    "total_pipeline",
+                    total_elapsed,
+                    pages=stats.get("page_count"),
+                    tables=stats.get("table_count"),
+                    chunks=stats.get("chunk_count")
+                )
 
         # Determine final job status by reading actual document statuses from job status file
         if status_mgr and job_id:
