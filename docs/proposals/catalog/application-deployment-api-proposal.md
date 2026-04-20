@@ -144,11 +144,11 @@ Authorization: Bearer <access_token>
 
 #### Catalog Endpoints
 - `GET /api/v1/architectures` - List available architectures
-- `GET /api/v1/architectures?name="Digital Assistant"` - Get architecture details
+- `GET /api/v1/architectures/{id}` - Get architecture details
 
 - `GET /api/v1/services` - List available services
-- `GET /api/v1/services?name="Summarization"` - Get service details
-- `GET /api/v1/services/params?name="Summarization"` - Get service custom params
+- `GET /api/v1/services/{id}` - Get service details
+- `GET /api/v1/services/{id}/params` - Get service custom params
 
 
 ## 5. API Endpoint Details
@@ -1166,9 +1166,26 @@ Authorization: Bearer <access_token>
 
 #### 5.3.2 Get Architecture Details
 
-**Endpoint:** `GET /api/v1/architectures?name="Digital Assistant"`
+**Endpoint:** `GET /api/v1/architectures/{id}`
 
 **Description:** Retrieves detailed information about a specific architecture template.
+
+**Request Headers:**
+```
+Authorization: Bearer <access_token>
+```
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| id | string | Yes | Architecture template ID (e.g., "rag") |
+
+**Request Body:** None
+
+**Example Request:**
+```
+GET /api/v1/architectures/rag
+```
 
 **Implementation Notes:**
 - **TODO:** exploring on asset structure to support granular deployments
@@ -1227,9 +1244,26 @@ Authorization: Bearer <access_token>
 
 #### 5.3.4 Get Service Details
 
-**Endpoint:** `GET /api/v1/services?name="Summarization"`
+**Endpoint:** `GET /api/v1/services/{id}`
 
 **Description:** Retrieves detailed information about a specific service template.
+
+**Request Headers:**
+```
+Authorization: Bearer <access_token>
+```
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| id | string | Yes | Service template ID (e.g., "summarize") |
+
+**Request Body:** None
+
+**Example Request:**
+```
+GET /api/v1/services/summarize
+```
 
 **Implementation Notes:**
 - **TODO:** exploring on asset structure to support granular deployments
@@ -1238,21 +1272,26 @@ Authorization: Bearer <access_token>
 
 #### 5.3.5 Get Service Custom Parameters
 
-**Endpoint:** `GET /api/v1/services/params?name="Digital Assistant"`
+**Endpoint:** `GET /api/v1/services/{id}/params`
 
-**Description:** Retrieves custom parameters schema for a specific architecture/service template. Returns JSON Schema format that UI can use to generate dynamic forms with validation.
+**Description:** Retrieves custom parameters schema for a specific service template. Returns JSON Schema format that UI can use to generate dynamic forms with validation.
 
 **Request Headers:**
 ```
 Authorization: Bearer <access_token>
 ```
 
-**Query Parameters:**
+**Path Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| name | string | Yes | Architecture or service template name |
+| id | string | Yes | Service template ID (e.g., "rag", "summarize") |
 
 **Request Body:** None
+
+**Example Request:**
+```
+GET /api/v1/services/rag/params
+```
 
 **Response (200 OK):**
 ```json
@@ -1327,7 +1366,7 @@ These libraries will automatically:
 - Handle nested objects and complex structures
 
 **Error Responses:**
-- `400 Bad Request` - Invalid or missing name parameter
+- `400 Bad Request` - Invalid id parameter
 - `401 Unauthorized` - Invalid or missing access token
 - `404 Not Found` - Template not found
 - `500 Internal Server Error` - Server error
