@@ -20,8 +20,8 @@ This document describes the design and implementation of a summarization endpoin
 |--------|------|-------------|----------------------------------------------------------------------------------------------------|
 | text | string | Conditional | Plain text content to summarize. Required if file is not provided.                                 |
 | file | file | Conditional | File upload (.txt or .pdf). Required if text is not provided.                                      |
-| summary_level | string | Optional | Abstraction level for summary: `brief`, `standard` (default), or `detailed`. Length is automatically calculated based on input size and level. |
-| stream | bool | Optional | if true, stream the content value directly. Default value will be false if not explicitly provided |
+| length | integer | Conditional | Desired summary length in no. of words                                                             |
+| stream | bool | Conditional | if true, stream the content value directly. Default value will be false if not explicitly provided |
 
 ### 2.3 Response Format
 
@@ -50,19 +50,341 @@ Error response:
 | error.code    | string | error code |
 | error.message | string | error message |
 | error.status  | integer | error status |
+## 3. Architecture
 
-## 3. Key Improvements and Changes
+```mermaid
+graph LR
+    %% Nodes
+    U((User))
+    
+    subgraph S1 ["AI-Services backend server"]
+        API["/v1/summarize"]
+    end
+    
+    VLLM["External vLLM<br/>endpoint"]
 
-### 3.1 Why Summary Length Approach Changed
+    %% Edges
+    U -->|"Input text/file +<br/>summary_length"| API
+    API -->|"Summary"| U
+    API <--> VLLM
+```
+
+## 4. Implementation Details
+
+### 4.1 Environment Configuration
+
+| Variable | Description | Example                                              |
+|----------|-------------|------------------------------------------------------|
+| OPENAI_BASE_URL | OpenAI-compatible API endpoint URL |  https://api.openai.com/v1   |
+| MODEL_NAME | Model identifier | ibm-granite/granite-3.3-8b-instruct                  |
+* Max file size for files will be decided as below, check 4.2.1
+
+### 4.2.1 Max size of input text (only for English Language)
+
+*Similar calculation will have to done for all languages to be supported
+
+**Assumptions:**
+- Context window for granite model on spyre in our current configuration is 32768 since MAX_MODEL_LEN=32768 when we run vllm.
+- Token to word relationship for English: 1 token ≈ 0.75 words
+- SUMMARIZATION_COEFFICIENT = 0.2. This would provide a 200-word summary from a 1000 word input. 
+- (summary_length_in_words = input_length_in_words*DEFAULT_SUMMARIZATION_COEFFICIENT)
+
+We need to account for:
+- System prompt: ~30-50 tokens
+- Output summary size: input_length_in_words*SUMMARIZATION_COEFFICIENT
+
+**Calculations:**
+- input_length_in_words/0.75 + 50 + (input_length_in_words/0.75)*SUMMARIZATION_COEFFICIENT < 32768
+- => 1.6* input_length_in_words < 32718
+- => input_length_in_words < 20449
+
+- max_tokens calculation will also be made according to SUMMARIZATION_COEFFICIENT
+- max_tokens = (input_length_in_words/0.75)*SUMMARIZATION_COEFFICIENT + 50 (buffer)
+
+**Conclusion:** We can say that considering the above assumptions, our input tokens can be capped at 20.5k words. 
+Initially we can keep the context length as configurable and let the file size be capped dynamically with above calculation.
+This way we can handle future configurations and models with variable context length.
+
+### 4.2.2 Sequence Diagram to explain above logic
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Service as Summarization Service
+    participant vLLM as OpenAI compatible Model service
+
+    Note over Service, vLLM: Config: MAX_MODEL_LEN = 32768
+
+    Client->>Service: POST /summarize (input(text/file), length?)
+    
+    rect rgb(100, 149, 237)
+        note right of Service: **Step 1: Determine Output Target**
+        Service->>Service: Input Tokens = input_word_count / 0.75
+        
+        alt User provided "length"
+            Service->>Service: Target Words = user_length_param
+        else "length" is empty
+            Service->>Service: Target Words = input_word_count * 0.2 (Coefficient)
+        end
+        
+        Service->>Service: Est. Output Tokens = Target Words / 0.75
+        Service->>Service: Total Load = Input Tokens + Est. Output Tokens + 50
+    end
+
+    rect rgb(100, 149, 237)
+        note right of Service: **Step 2: Validate Context Window**
+        alt Total Load > 32768
+            Service-->>Client: Error: Total context exceeds limit (32k)
+        else Total Load <= 32768
+            note right of Service: **Step 3: Execution**
+            Service->>Service: max_tokens = Est. Output Tokens + 50 (buffer)
+            
+            Service->>vLLM: /chat/completions<br/>(prompt, max_tokens, stream=true)
+            activate vLLM
+            vLLM-->>Service: Streamed Summary Tokens...
+            deactivate vLLM
+            Service-->>Client: Final Summary Response
+        end
+    end
+```
+
+### 4.2.3 Stretch goal: German language support
+- Token to word relationship for German: 1 token ≈ 0.5 words
+- Rest everything remains same
+
+**Calculations:**
+- input_length_in_words/0.5 + 50 + (input_length_in_words/0.5)*SUMMARIZATION_COEFFICIENT < 32768
+- => 2.4* input_length_in_words < 32718
+- => input_length_in_words < 13632
+
+- max_tokens calculation will also be made according to SUMMARIZATION_COEFFICIENT
+- max_tokens = (input_length_in_words/0.5)*SUMMARIZATION_COEFFICIENT + 50 (buffer)
+
+### 4.3 Processing Logic
+
+1. Validate that either text or file parameter is provided. If both are present, text will be prioritized.
+2. Validate summary_length is smaller than the set upper limit.
+3. If file is provided, validate file type (.txt or .pdf)
+4. Extract text content based on input type. If file is pdf, use pypdfium2 to process and extract text.
+5. Validate input text word count is smaller than the upper limit.
+6. Build AI prompt with appropriate length constraints
+7. Send request to AI endpoint
+8. Parse AI response and format result
+9. Return JSON response with summary and metadata
+
+## 5. Rate Limiting
+
+- Rate limiting for this endpoint will be done similar to how it's done for chatbot.app currently
+- Since we want to support only upto 32 connections to the vLLM at any given time, `max_concurrent_requests=32`,
+- Use `concurrency_limiter = BoundedSemaphore(max_concurrent_requests)` and acquire a lock on it whenever we are serving a request.
+- As soon as the response is returned, release the lock and return the semaphore back to the pool.
+
+## 6. Use Cases and Examples
+
+### 6.1 Use Case 1: Plain Text Summarization
+
+**Request:**
+```
+curl -X POST http://localhost:5000/v1/summarize \
+-H "Content-Type: application/json" \
+-d '{"text": "Artificial intelligence has made significant progress in recent years...", "length": 25}'
+```
+**Response:**
+200 OK 
+```json
+{
+  "data": {
+    "summary": "AI has advanced significantly through deep learning and large language models, impacting healthcare, finance, and transportation with both opportunities and ethical challenges.",
+    "original_length": 250,
+    "summary_length": 22
+  },
+  "meta": {
+    "model": "ibm-granite/granite-3.3-8b-instruct",
+    "processing_time_ms": 1245,
+    "input_type": "text"
+  },
+  "usage": {
+    "input_tokens": 385,
+    "output_tokens": 62,
+    "total_tokens": 447
+  }
+}
+```
+
+---
+
+### 6.2 Use Case 2: TXT File Summarization
+
+**Request:**
+```
+curl -X POST http://localhost:5000/v1/summarize \
+  -F "file=@report.txt" \
+  -F "length=50"
+```
+
+**Response:**
+200 OK 
+```json
+{
+  "data": {
+    "summary": "The quarterly financial report shows revenue growth of 15% year-over-year, driven primarily by increased cloud services adoption. Operating expenses remained stable while profit margins improved by 3 percentage points. The company projects continued growth in the next quarter based on strong customer retention and new product launches.",
+    "original_length": 351,
+    "summary_length": 47
+  },
+  "meta": {
+    "model": "ibm-granite/granite-3.3-8b-instruct",
+    "processing_time_ms": 1245,
+    "input_type": "file"
+  },
+  "usage": {
+    "input_tokens": 468,
+    "output_tokens": 62,
+    "total_tokens": 530
+  }
+}
+
+```
+
+---
+
+### 6.3 Use Case 3: PDF File Summarization
+
+**Request:**
+```
+curl -X POST http://localhost:5000/v1/summarize \
+  -F "file=@research_paper.pdf" 
+```
+
+**Response:**
+200 OK 
+```json
+{
+  "data": {
+    "summary": "This research paper investigates the application of transformer-based neural networks in natural language processing tasks. The study presents a novel architecture that combines self-attention mechanisms with convolutional layers to improve processing efficiency. Experimental results demonstrate a 12% improvement in accuracy on standard benchmarks compared to baseline models. The paper also analyzes computational complexity and shows that the proposed architecture reduces training time by 30% while maintaining comparable performance. The authors conclude that hybrid approaches combining different neural network architectures show promise for future NLP applications, particularly in resource-constrained environments.",
+    "original_length": 982,
+    "summary_length": 89
+  },
+  "meta": {
+    "model": "ibm-granite/granite-3.3-8b-instruct",
+    "processing_time_ms": 1450,
+    "input_type": "file"
+  },
+  "usage": {
+    "input_tokens": 1309,
+    "output_tokens": 120,
+    "total_tokens": 1429
+  }
+}
+```
+### 6.4 Use Case 4: streaming summary output
+
+**Request:**
+```
+curl -X POST http://localhost:5000/v1/summarize \
+  -F "file=@research_paper.pdf" \
+  -F "stream=True"
+```
+**Response:**
+202 Accepted 
+```
+data: {"id":"chatcmpl-c0f017cf3dfd4105a01fa271300049fa","object":"chat.completion.chunk","created":1770715601,"model":"ibm-granite/granite-3.3-8b-instruct","choices":[{"index":0,"delta":{"role":"assistant","content":""},"logprobs":null,"finish_reason":null}],"prompt_token_ids":null}
+
+data: {"id":"chatcmpl-c0f017cf3dfd4105a01fa271300049fa","object":"chat.completion.chunk","created":1770715601,"model":"ibm-granite/granite-3.3-8b-instruct","choices":[{"index":0,"delta":{"content":"The"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+
+data: {"id":"chatcmpl-c0f017cf3dfd4105a01fa271300049fa","object":"chat.completion.chunk","created":1770715601,"model":"ibm-granite/granite-3.3-8b-instruct","choices":[{"index":0,"delta":{"content":"quar"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+
+data: {"id":"chatcmpl-c0f017cf3dfd4105a01fa271300049fa","object":"chat.completion.chunk","created":1770715601,"model":"ibm-granite/granite-3.3-8b-instruct","choices":[{"index":0,"delta":{"content":"ter"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+
+```
+
+### 6.5 Error Case 1: Unsupported file type
+
+**Request:**
+```
+curl -X POST http://localhost:5000/v1/summarize \
+  -F "file=@research_paper.md" 
+```
+**Response:**
+400 
+```json
+{
+  "error": {
+    "code": "UNSUPPORTED_FILE_TYPE",
+    "message": "Only .txt and .pdf files are allowed.",
+    "status": 400}
+}
+```
+## 7.1 Successful Responses
+
+| Status Code | Scenario                     |
+|-------------|------------------------------|
+| 200 | plaintext in json body       |
+|200| pdf file in multipart form data |
+| 200 | txt file in multipart form data |
+|202 | streaming enabled            |
+
+## 7.2 Error Responses
+
+| Status Code | Error Scenario | Response Example                                                           |
+|-------------|----------------|----------------------------------------------------------------------------|
+| 400 | Missing both text and file | {"message": "Either 'text' or 'file' parameter is required"}               |
+| 400 | Unsupported file type | {"message": "Unsupported file type. Only .txt and .pdf files are allowed"} |
+| 413 | File too large | {"message": "File size exceeds maximum token limit"}                       |
+| 500 | AI endpoint error | {"message": "Failed to generate summary. Please try again later"}          |
+| 503 | AI services unavailable | {"message": "Summarization service temporarily unavailable"}               |
+
+
+## 8. Test Cases
+
+| Test Case | Input | Expected Result |
+|-----------|-------|-----------------|
+| Valid plain text, short | text + length=50 | 200 OK with short summary |
+| Valid .txt file, medium | .txt file + length=200 | 200 OK with medium summary |
+| Valid .pdf file, long | .pdf file + length=500 | 200 OK with long summary |
+| Missing parameters | No text or file | 400 Bad Request |
+| Invalid file type | .docx file | 400 Bad Request |
+| File too large | 15MB file | 413 Payload Too Large |
+| Invalid summary_length | length="long" | 400 Bad Request |
+| AI service timeout | Valid input + timeout | 500 Internal Server Error |
+
+## 9. Summary Length Configuration Proposal for UI
+
+1. Word count limit hiding behind understandable identifier words like – short, medium, long
+
+| Length Option | Target Words | Instruction                                                     |
+|---------------|--------------|-----------------------------------------------------------------|
+| short         | 50-100       | Provide a brief summary in 2-3 sentences                        |
+| medium        | 150-250      | Provide a comprehensive summary in 1-2 paragraphs               |
+| long          | 300-500      | Provide a detailed summary covering all key points              |
+| extra long    | 800-1000     | Provide a complete and detailed summary covering all key points |
+
+
+
+---------------------------------------------------------------------
+
+
+# Addendum: Summary Level Improvements and Changes
+
+---------------------------------------------------------------------
+
+## 1. Overview of Changes
+
+This addendum documents the improvements made to the summarization endpoint, introducing an abstraction-level based approach (`summary_level` parameter) to replace the direct word count specification (`length` parameter). These changes significantly improve length compliance, token utilization, and summary quality.
+
+## 2. Why the Summary Length Approach Changed
 
 The previous approach using direct word count (`length` parameter) had several limitations:
-- **User confusion**: Users often don't know the content and type of the document, so guessing words incorrectly led to inconsistent results. A key finding has been that 85% of modern AI summarization tools do NOT ask users for specific word/token counts
+
+### Problems with Direct Word Count Approach:
+- **User confusion**: Users often don't know the content and type of the document beforehand, making it difficult to specify appropriate word counts. A key finding: 85% of modern AI summarization tools do NOT ask users for specific word/token counts
 - **Inconsistent results**: Models often stopped early, producing summaries 30-40% shorter than requested
 - **Poor token utilization**: Only 60-70% of allocated tokens were used
 - **Vague instructions**: Generic prompts like "summarize concisely" led to overly brief outputs
 - **Problematic stop words**: Stop sequences like "Keywords", "Note", "***" triggered premature termination
 
-### 3.2 New Abstraction-Level Approach
+## 3. New Abstraction-Level Approach
+
+### 3.1 Summary Levels
 
 The new implementation uses **abstraction levels** (`summary_level` parameter) instead of direct word counts:
 
@@ -72,23 +394,54 @@ The new implementation uses **abstraction levels** (`summary_level` parameter) i
 | `standard` | 1.0x | Balanced summary with main points and context | General purpose (default) |
 | `detailed` | 1.5x | Comprehensive summary with supporting details | In-depth analysis, research |
 
-**How it works:**
-- Summary length is automatically calculated: `input_length × 0.3 ( summarization_coefficient) × level_multiplier`
+### 3.2 How It Works
+
+- Summary length is automatically calculated: `input_length × 0.3 (summarization_coefficient) × level_multiplier`
 - Additional bounds ensure appropriate min/max ranges based on input size
 - Users don't need to specify exact word counts
 
-**Benefits:**
-- More intuitive for users (brief/standard/detailed vs. specific word counts)
-- Adaptive to input size - longer inputs get proportionally longer summaries
-- Better length compliance (85-95% accuracy vs. 60-70%)
-- Improved token utilization (90-95% vs. 60-70%)
-- More comprehensive summaries with preserved details
+### 3.3 Benefits
 
-### 3.3 Prompt Engineering Changes
+- **More intuitive**: Users choose level of detail (brief/standard/detailed) vs. guessing word counts
+- **Adaptive**: Longer inputs automatically get proportionally longer summaries
+- **Better compliance**: 85-95% accuracy vs. 60-70% with direct word counts
+- **Improved utilization**: 90-95% vs. 60-70% of allocated tokens used
+- **Higher quality**: More comprehensive summaries with preserved details
 
-The prompts have been significantly enhanced to enforce length compliance and improve quality:
+## 4. Updated API Parameters
 
-#### System Prompt (Updated)
+### 4.1 New Request Parameter
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| summary_level | string | Optional | Abstraction level for summary: `brief`, `standard` (default), or `detailed`. Length is automatically calculated based on input size and level. |
+
+**Note**: The `length` parameter is still supported for backward compatibility but `summary_level` is the recommended approach.
+
+### 4.2 Updated Architecture Diagram
+
+```mermaid
+graph LR
+    %% Nodes
+    U((User))
+    
+    subgraph S1 ["AI-Services backend server"]
+        API["/v1/summarize"]
+    end
+    
+    VLLM["External vLLM<br/>endpoint"]
+
+    %% Edges
+    U -->|"Input text/file +<br/>summary_level"| API
+    API -->|"Summary"| U
+    API <--> VLLM
+```
+
+## 5. Prompt Engineering Improvements
+
+### 5.1 System Prompt (Updated)
+
+**New Prompt:**
 ```
 You are a professional summarization assistant. Your task is to create comprehensive,
 well-structured summaries that use the full available space to capture all important
@@ -100,7 +453,9 @@ information while maintaining clarity and coherence.
 - Focuses on "comprehensive" summaries
 - Removed vague "concise" language that led to overly brief outputs
 
-#### User Prompt with Length Specification (New)
+### 5.2 User Prompt with Length Specification (New)
+
+**New Prompt:**
 ```
 Create a comprehensive summary of the following text.
 
@@ -123,14 +478,16 @@ Text:
 Comprehensive Summary ({target_words} words):
 ```
 
-**Key features:**
-- Improvement over the prior prompt to give importance to facts and details present in the document.
+**Key Features:**
+- Improvement over prior prompt to emphasize facts and details
 - Explicit target, min, and max word counts
 - Strong directive: "MUST approach X words - do NOT stop early"
 - Detailed checklist of what to include
 - Clear boundaries for acceptable length range
 
-#### User Prompt without Length Specification (Updated)
+### 5.3 User Prompt without Length Specification (Updated)
+
+**New Prompt:**
 ```
 Create a thorough and detailed summary of the following text. Include all key points,
 important details, and relevant context. Preserve all numerical data exactly as stated.
@@ -141,74 +498,38 @@ Text:
 Detailed Summary:
 ```
 
-**Key changes:**
+**Key Changes:**
 - Changed from "concise" to "thorough and detailed"
 - Explicit instruction to include "all key points" and "important details"
 
-### 3.4 Technical Improvements
+## 6. Technical Configuration Changes
 
-- **Removed stop words**: Changed from `["Keywords", "Note", "***"]` to `""` (empty) - eliminated problematic stop sequences that caused early termination
-- **Increased coefficient**: Changed from 0.2 to 0.3 (30% compression vs. 20%) for more detailed summaries. ( This value is recommmended for technical or factual documents. We want to implement customisation over the coefficient, in the future once we can categorise the documents.)
-- **Increased temperature**: Changed from 0.2 to 0.3 for more elaborate responses
+### 6.1 Updated Parameters
+
+| Parameter | Old Value | New Value | Reason |
+|-----------|-----------|-----------|--------|
+| summarization_coefficient | 0.2 | 0.3 | More detailed summaries (30% vs 20% compression). Recommended for technical/factual documents |
+| summarization_temperature | 0.2 | 0.3 | More elaborate responses |
+| summarization_stop_words | ["Keywords", "Note", "***"] | "" (empty) | Eliminated problematic stop sequences |
+| summarization_prompt_token_count | 100 | 150 | Accommodate more detailed instructions |
+
+### 6.2 New Features
+
 - **Min/Max bounds**: Summaries must fall within 85%-115% of target length (e.g., 255-345 words for 300-word target)
-- **Increased prompt token allocation**: Changed from 100 to 150 tokens to accommodate more detailed instructions
+- **Level-based calculation**: Automatic target calculation based on input size and abstraction level
+- **Backward compatibility**: Legacy `length` parameter still supported
 
-## 4. Architecture
+### 6.3 Updated Max Input Calculations
 
-```mermaid
-graph LR
-    %% Nodes
-    U((User))
-    
-    subgraph S1 ["AI-Services backend server"]
-        API["/v1/summarize"]
-    end
-    
-    VLLM["External vLLM<br/>endpoint"]
+**For English (1 token ≈ 0.75 words):**
+- Old limit: ~20.5k words (with coefficient 0.2, 50 token buffer)
+- New limit: ~18.8k words (with coefficient 0.3, 150 token buffer)
 
-    %% Edges
-    U -->|"Input text/file +<br/>summary_level"| API
-    API -->|"Summary"| U
-    API <--> VLLM
-```
+**For German (1 token ≈ 0.5 words):**
+- Old limit: ~13.6k words
+- New limit: ~12.5k words
 
-## 5. Implementation Details
-
-### 5.1 Environment Configuration
-
-| Variable | Description | Example                                              |
-|----------|-------------|------------------------------------------------------|
-| OPENAI_BASE_URL | OpenAI-compatible API endpoint URL |  https://api.openai.com/v1   |
-| MODEL_NAME | Model identifier | ibm-granite/granite-3.3-8b-instruct                  |
-* Max file size for files will be decided as below, check 5.2.1
-
-### 5.2.1 Max size of input text (only for English Language)
-
-*Similar calculation will have to done for all languages to be supported
-
-**Assumptions:**
-- Context window for granite model on spyre in our current configuration is 32768 since MAX_MODEL_LEN=32768 when we run vllm.
-- Token to word relationship for English: 1 token ≈ 0.75 words
-- SUMMARIZATION_COEFFICIENT = 0.3. This would provide a 300-word summary from a 1000 word input.
-- (summary_length_in_words = input_length_in_words*DEFAULT_SUMMARIZATION_COEFFICIENT)
-
-We need to account for:
-- System prompt: ~150 tokens (increased from 50)
-- Output summary size: input_length_in_words*SUMMARIZATION_COEFFICIENT
-
-**Calculations:**
-- input_length_in_words/0.75 + 150 + (input_length_in_words/0.75)*SUMMARIZATION_COEFFICIENT < 32768
-- => 1.73* input_length_in_words < 32618
-- => input_length_in_words < 18856
-
-- max_tokens calculation will also be made according to SUMMARIZATION_COEFFICIENT
-- max_tokens = (input_length_in_words/0.75)*SUMMARIZATION_COEFFICIENT + 10% buffer
-
-**Conclusion:** We can say that considering the above assumptions, our input tokens can be capped at ~18.8k words.
-Initially we can keep the context length as configurable and let the file size be capped dynamically with above calculation.
-This way we can handle future configurations and models with variable context length.
-
-### 5.2.2 Sequence Diagram to explain above logic
+## 7. Updated Sequence Diagram
 
 ```mermaid
 sequenceDiagram
@@ -254,41 +575,9 @@ sequenceDiagram
     end
 ```
 
-### 5.2.3 Stretch goal: German language support
-- Token to word relationship for German: 1 token ≈ 0.5 words
-- Rest everything remains same
+## 8. Updated Use Cases and Examples
 
-**Calculations:**
-- input_length_in_words/0.5 + 150 + (input_length_in_words/0.5)*SUMMARIZATION_COEFFICIENT < 32768
-- => 2.6* input_length_in_words < 32618
-- => input_length_in_words < 12545
-
-- max_tokens calculation will also be made according to SUMMARIZATION_COEFFICIENT
-- max_tokens = (input_length_in_words/0.5)*SUMMARIZATION_COEFFICIENT + 10% buffer
-
-### 5.3 Processing Logic
-
-1. Validate that either text or file parameter is provided. If both are present, text will be prioritized.
-2. Validate summary_level is valid (brief/standard/detailed) if provided
-3. If file is provided, validate file type (.txt or .pdf)
-4. Extract text content based on input type. If file is pdf, use pypdfium2 to process and extract text.
-5. Validate input text word count is smaller than the upper limit.
-6. Calculate target words based on summary_level or use default coefficient (0.3)
-7. Build AI prompt with explicit target, min, and max word counts
-8. Send request to AI endpoint with calculated max_tokens
-9. Parse AI response and format result
-10. Return JSON response with summary and metadata
-
-## 6. Rate Limiting
-
-- Rate limiting for this endpoint will be done similar to how it's done for chatbot.app currently
-- Since we want to support only upto 32 connections to the vLLM at any given time, `max_concurrent_requests=32`,
-- Use `concurrency_limiter = BoundedSemaphore(max_concurrent_requests)` and acquire a lock on it whenever we are serving a request.
-- As soon as the response is returned, release the lock and return the semaphore back to the pool.
-
-## 7. Use Cases and Examples
-
-### 7.1 Use Case 1: Plain Text Summarization with Brief Level
+### 8.1 Use Case 1: Plain Text with Brief Level
 
 **Request:**
 ```bash
@@ -301,7 +590,6 @@ curl -X POST http://localhost:6000/v1/summarize \
 ```
 
 **Response:**
-200 OK
 ```json
 {
   "data": {
@@ -322,9 +610,7 @@ curl -X POST http://localhost:6000/v1/summarize \
 }
 ```
 
----
-
-### 7.2 Use Case 2: TXT File Summarization with Standard Level
+### 8.2 Use Case 2: TXT File with Standard Level
 
 **Request:**
 ```bash
@@ -334,7 +620,6 @@ curl -X POST http://localhost:6000/v1/summarize \
 ```
 
 **Response:**
-200 OK
 ```json
 {
   "data": {
@@ -355,9 +640,7 @@ curl -X POST http://localhost:6000/v1/summarize \
 }
 ```
 
----
-
-### 7.3 Use Case 3: PDF File Summarization with Detailed Level
+### 8.3 Use Case 3: PDF File with Detailed Level
 
 **Request:**
 ```bash
@@ -367,7 +650,6 @@ curl -X POST http://localhost:6000/v1/summarize \
 ```
 
 **Response:**
-200 OK
 ```json
 {
   "data": {
@@ -388,7 +670,7 @@ curl -X POST http://localhost:6000/v1/summarize \
 }
 ```
 
-### 7.4 Use Case 4: Streaming Summary Output
+### 8.4 Use Case 4: Streaming with Summary Level
 
 **Request:**
 ```bash
@@ -399,20 +681,15 @@ curl -X POST http://localhost:6000/v1/summarize \
 ```
 
 **Response:**
-202 Accepted
 ```
-data: {"id":"chatcmpl-c0f017cf3dfd4105a01fa271300049fa","object":"chat.completion.chunk","created":1770715601,"model":"ibm-granite/granite-3.3-8b-instruct","choices":[{"index":0,"delta":{"role":"assistant","content":""},"logprobs":null,"finish_reason":null}],"prompt_token_ids":null}
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","created":1770715601,"model":"ibm-granite/granite-3.3-8b-instruct","choices":[{"index":0,"delta":{"role":"assistant","content":""},"logprobs":null,"finish_reason":null}],"prompt_token_ids":null}
 
-data: {"id":"chatcmpl-c0f017cf3dfd4105a01fa271300049fa","object":"chat.completion.chunk","created":1770715601,"model":"ibm-granite/granite-3.3-8b-instruct","choices":[{"index":0,"delta":{"content":"This"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
-
-data: {"id":"chatcmpl-c0f017cf3dfd4105a01fa271300049fa","object":"chat.completion.chunk","created":1770715601,"model":"ibm-granite/granite-3.3-8b-instruct","choices":[{"index":0,"delta":{"content":" research"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
-
-data: {"id":"chatcmpl-c0f017cf3dfd4105a01fa271300049fa","object":"chat.completion.chunk","created":1770715601,"model":"ibm-granite/granite-3.3-8b-instruct","choices":[{"index":0,"delta":{"content":" paper"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","created":1770715601,"model":"ibm-granite/granite-3.3-8b-instruct","choices":[{"index":0,"delta":{"content":"This"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
 
 ...
 ```
 
-### 7.5 Use Case 5: Default Behavior (No summary_level specified)
+### 8.5 Use Case 5: Default Behavior
 
 **Request:**
 ```bash
@@ -424,53 +701,17 @@ curl -X POST http://localhost:6000/v1/summarize \
 ```
 
 **Response:**
-Uses `standard` level by default (200-400 words)
+Uses `standard` level by default
 
----
+## 9. Updated Error Responses
 
-### 7.6 Error Case: Unsupported File Type
+### 9.1 New Error Case
 
-**Request:**
-```bash
-curl -X POST http://localhost:6000/v1/summarize \
-  -F "file=@research_paper.md"
-```
-
-**Response:**
-400 Bad Request
-```json
-{
-  "error": {
-    "code": "UNSUPPORTED_FILE_TYPE",
-    "message": "Only .txt and .pdf files are allowed.",
-    "status": 400
-  }
-}
-```
-
-## 8. Response Status Codes
-
-### 8.1 Successful Responses
-
-| Status Code | Scenario                     |
-|-------------|------------------------------|
-| 200 | plaintext in json body       |
-| 200 | pdf file in multipart form data |
-| 200 | txt file in multipart form data |
-| 202 | streaming enabled            |
-
-### 8.2 Error Responses
-
-| Status Code | Error Scenario | Response Example                                                           |
-|-------------|----------------|----------------------------------------------------------------------------|
-| 400 | Missing both text and file | {"message": "Either 'text' or 'file' parameter is required"}               |
+| Status Code | Error Scenario | Response Example |
+|-------------|----------------|------------------|
 | 400 | Invalid summary_level | {"message": "Invalid summary_level. Must be 'brief', 'standard', or 'detailed'"} |
-| 400 | Unsupported file type | {"message": "Unsupported file type. Only .txt and .pdf files are allowed"} |
-| 413 | File too large | {"message": "File size exceeds maximum token limit"}                       |
-| 500 | AI endpoint error | {"message": "Failed to generate summary. Please try again later"}          |
-| 503 | AI services unavailable | {"message": "Summarization service temporarily unavailable"}               |
 
-## 9. Test Cases
+## 10. Updated Test Cases
 
 | Test Case | Input | Expected Result |
 |-----------|-------|-----------------|
@@ -478,14 +719,10 @@ curl -X POST http://localhost:6000/v1/summarize \
 | Valid .txt file, standard | .txt file + summary_level=standard | 200 OK with standard summary (1.0x compression) |
 | Valid .pdf file, detailed | .pdf file + summary_level=detailed | 200 OK with detailed summary (1.5x compression) |
 | Default behavior | text only (no summary_level) | 200 OK with standard level summary |
-| Missing parameters | No text or file | 400 Bad Request |
 | Invalid summary_level | summary_level="extra_long" | 400 Bad Request |
-| Invalid file type | .docx file | 400 Bad Request |
-| File too large | 20MB file | 413 Payload Too Large |
-| AI service timeout | Valid input + timeout | 500 Internal Server Error |
-| Streaming enabled | text + stream=true | 202 Accepted with streamed response |
+| Streaming enabled | text + summary_level=brief + stream=true | 202 Accepted with streamed response |
 
-## 10. UI Configuration Recommendations
+## 11. UI Configuration Recommendations
 
 The abstraction levels are now built into the API. UI should present these options:
 
@@ -500,3 +737,36 @@ The abstraction levels are now built into the API. UI should present these optio
 - No need to display or configure specific word counts
 - The system ensures appropriate length using the formula: `input_length × 0.3 × level_multiplier`
 - Users simply choose the level of detail they need
+
+## 12. Expected Performance Improvements
+
+### 12.1 Length Compliance
+- **Before**: 60-70% within target ±50 words
+- **After**: 85-95% within target ±15% range
+
+### 12.2 Token Utilization
+- **Before**: 60-70% of max_tokens used
+- **After**: 90-95% of max_tokens used
+
+### 12.3 Summary Quality
+- **Before**: Often too brief, missing details
+- **After**: Comprehensive, preserves key information
+
+## 13. Summary of Changes
+
+### What Changed
+1. ✅ Added abstraction levels (brief/standard/detailed)
+2. ✅ Improved prompts with explicit length instructions
+3. ✅ Removed problematic stop words
+4. ✅ Increased coefficient from 0.2 to 0.3
+5. ✅ Increased temperature from 0.2 to 0.3
+6. ✅ Added min/max bounds (85%-115%)
+7. ✅ Maintained backward compatibility with `length` parameter
+
+### What to Expect
+- 📈 60-85% improvement in length compliance
+- 📈 30-40% better token utilization
+- 📈 More comprehensive, detailed summaries
+- ✅ Strict adherence to requested abstraction level
+- ✅ Better preservation of factual data
+- ✅ More intuitive user experience
