@@ -1,0 +1,5 @@
+name: ai-services-catalog
+version: 0.0.1
+description: "Catalog Services for Project AI-Service"
+podTemplateExecutions:
+  - [catalog.yaml.tmpl]

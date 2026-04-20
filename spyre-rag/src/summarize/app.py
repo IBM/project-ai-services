@@ -24,7 +24,9 @@ if level != "":
 set_log_level(log_level)
 
 from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream
-from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
+from common.misc_utils import get_model_endpoints, set_request_id, configure_uvicorn_logging, create_llm_session
+from common.diagnostic_logger import setup_comprehensive_crash_handler
+
 from common.settings import get_settings
 from common.error_utils import http_error_responses
 from summarize.summ_utils import (
@@ -42,6 +44,8 @@ from summarize.summ_utils import (
 
 logger = get_logger("app")
 
+diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
+
 settings = get_settings()
 concurrency_limiter = asyncio.BoundedSemaphore(settings.max_concurrent_requests)
 
@@ -52,6 +56,7 @@ async def lifespan(app):
     initialize_models()
     create_llm_session(pool_maxsize=settings.max_concurrent_requests)
     yield
+    stderr_monitor.stop()
 
 # OpenAPI tags metadata for endpoint organization
 tags_metadata = [

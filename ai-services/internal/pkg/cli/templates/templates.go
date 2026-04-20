@@ -14,7 +14,6 @@ type AppMetadata struct {
 	Description           string           `yaml:"description,omitempty"`
 	Hidden                bool             `yaml:"hidden,omitempty"`
 	Version               string           `yaml:"version,omitempty"`
-	SMTLevel              *int             `yaml:"smtLevel,omitempty"`
 	PodTemplateExecutions [][]string       `yaml:"podTemplateExecutions"`
 	Openshift             OpenshiftRuntime `yaml:"openshift,omitempty"`
 }
