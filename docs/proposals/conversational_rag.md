@@ -279,47 +279,56 @@ The system enables natural conversational flows:
 #### 5.1.1 New Utility Module: `conversation_utils.py`
 
 ```python
-def format_conversation_history(messages):
-    """
-    Format OpenAI messages array into prompt-ready string.
-    
+def get_conversation_context(messages):
+    """        
     Args:
-        messages: List of {role: str, content: str}
+        messages: List of message objects in OpenAI format
+                 [{"role": "user", "content": "What is X?"},
+                  {"role": "assistant", "content": "X is..."},
+                  {"role": "user", "content": "Tell me more"}]
     
     Returns:
-        Formatted string: "User: ...\nAssistant: ...\n"
+        tuple: (current_query: str, previous_messages: list)
+               - current_query: The latest user question (clean)
+               - previous_messages: Clean Q&A history in OpenAI format
+    """
+    if not messages or len(messages) == 0:
+        return "", []
+    
+    # Last message should be the current user query (clean question from UI)
+    current_message = messages[-1]
+    current_query = current_message.get("content", "")
+    
+    # Everything before the last message is conversation history
+    previous_messages = messages[:-1] if len(messages) > 1 else []
+    
+    return current_query, previous_messages
+
+
+def format_messages_for_rephrasing(messages):
+    """
+    Format conversation messages into a readable string for query rephrasing.
+    Only used for the rephrasing LLM call, not for the main RAG response.
+    
+    Args:
+        messages: List of message objects in OpenAI format
+    
+    Returns:
+        Formatted string for rephrasing context
     """
     if not messages:
         return ""
     
     history_lines = []
     for msg in messages:
-        role = msg.get("role", "").capitalize()
+        role = msg.get("role", "")
         content = msg.get("content", "")
-        history_lines.append(f"{role}: {content}")
+            
+        # Format as "User: ..." or "Assistant: ..."
+        role_label = "User" if role == "user" else "Assistant"
+        history_lines.append(f"{role_label}: {content}")
     
     return "\n".join(history_lines)
-
-
-def get_conversation_context(messages):
-    """
-    Extract current query and conversation history.
-    
-    Returns:
-        (current_query, conversation_history)
-    """
-    if not messages:
-        return "", ""
-    
-    # Last message is current query
-    current_query = messages[-1].get("content", "")
-    
-    # Everything before is history
-    history_messages = messages[:-1]
-    conversation_history = format_conversation_history(history_messages)
-    
-    return current_query, conversation_history
-```
 
 #### 5.1.1.1 Query Rephrasing for Context-Aware Retrieval
 
@@ -344,20 +353,24 @@ If we search the vector DB with "Is this supported on Power 11?", we won't get r
 Before retrieval, use the LLM to rephrase the current query by incorporating conversation context:
 
 ```python
-async def rephrase_query_with_context(current_query: str, conversation_history: str) -> str:
+async def rephrase_query_with_context(current_query: str, previous_messages: list) -> str:
     """
     Rephrase the current query to be self-contained using conversation context.
     
     Args:
         current_query: The latest user question (may contain pronouns/references)
-        conversation_history: Previous conversation turns
+        previous_messages: Previous conversation messages in OpenAI format
+                          [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
     
     Returns:
         A standalone, search-optimized query
     """
     # Skip rephrasing if no conversation history
-    if not conversation_history or len(conversation_history.strip()) == 0:
+    if not previous_messages or len(previous_messages) == 0:
         return current_query
+    
+    # Format conversation history for rephrasing context
+    conversation_history = format_messages_for_rephrasing(previous_messages)
     
     # Build rephrasing prompt
     rephrase_prompt = f"""Given the conversation history and the current question, rephrase the current question to be a standalone, self-contained query that can be used for semantic search. The rephrased query should:
@@ -447,93 +460,224 @@ Add to `settings.json`:
 #### 5.1.2 Modified `app.py` - Chat Completion Endpoint
 
 **Key Changes:**
-1. Extract current query from last message in array
-2. Format previous messages as conversation history
-3. Pass history to prompt builder
+1. Validate incoming messages follow OpenAI format
+2. Rephrase query using conversation context for better retrieval
+3. Pass structured messages to LLM (not flattened string)
 4. Maintain OpenAI-compatible request/response format
 
 ```python
-from chatbot.conversation_utils import get_conversation_context
+from chatbot.conversation_utils import (
+    get_conversation_context,
+    validate_message_format,
+    rephrase_query_with_context
+)
 
 @app.post("/v1/chat/completions")
 async def chat_completion(req: ChatCompletionRequest):
-    # Extract current query and conversation history
-    current_query, conversation_history = get_conversation_context(req.messages)
+    """
+    OpenAI-compatible chat completion endpoint with RAG.
     
-    # Query needs context-aware rephrasing before retrieval
+    Request format:
+    {
+        "messages": [
+            {"role": "user", "content": "What is Spyre?"},
+            {"role": "assistant", "content": "Spyre is..."},
+            {"role": "user", "content": "Is it supported on Power 11?"}
+        ],
+        "stream": true
+    }
+    """
+    
+    # Extract current query and previous conversation messages
+    # previous_messages maintains OpenAI format: [{"role": "...", "content": "..."}]
+    current_query, previous_messages = get_conversation_context(req.messages)
+    
+    # Rephrase query for better retrieval (if conversation history exists)
     rephrased_query = await rephrase_query_with_context(
         current_query=current_query,
-        conversation_history=conversation_history
+        previous_messages=previous_messages
     )
     
     # Retrieve documents using the rephrased query
     docs, perf_stats = await retrieve_and_rerank(rephrased_query)
     
-    # Generate response with conversation context
+    # Generate response with structured message history
+    # Pass previous_messages as list, not flattened string
     response = await query_llm(
         query=current_query,
         documents=docs,
-        conversation_history=conversation_history,  # NEW
+        previous_messages=previous_messages,  # OpenAI format list
+        stream=req.stream,
         ...
     )
     
     return response
 ```
 
-#### 5.1.3 Modified `llm_utils.py` - Prompt Building
+#### 5.1.3 Modified `llm_utils.py` - Prompt Building with OpenAI Message Format
 
 **Key Changes:**
-1. Accept optional `conversation_history` parameter
-2. Use conversational prompt template when history exists
-3. Allocate token budget for conversation history + current-turn documents + query
+1. Build proper message array with fresh system prompt for each turn
+2. System prompt contains current RAG context (regenerated each time)
+3. Conversation history stored as clean user/assistant pairs
+4. Allocate token budget for messages + current-turn documents
+
+**Important Design Decision:**
+- System prompt is NOT stored in conversation history
+- Each turn regenerates system prompt with fresh RAG context
+- Only clean user questions and assistant answers are stored in history
 
 ```python
-def query_vllm_payload(question, documents, llm_endpoint, llm_model, 
-                      conversation_history="", ...):
-    """Build vLLM payload with optional conversation history."""
+def query_vllm_payload(question, documents, llm_endpoint, llm_model,
+                      previous_messages=None, ...):
+    """
+    Build vLLM payload with OpenAI-compatible message format.
     
+    Args:
+        question: Current user query 
+        documents: Retrieved documents for RAG context (fresh for this turn)
+        previous_messages:[{"role": "user", "content": "What is X?"},
+                           {"role": "assistant", "content": "X is..."}]
+    
+    Returns:
+        Properly structured message array for LLM with fresh system prompt
+    """
+    
+    # Prepare RAG context from retrieved documents (fresh for this turn)
     context = "\n\n".join([doc.get("page_content") for doc in documents])
     
     # Calculate token budget
     question_tokens = len(tokenize_with_llm(question, llm_endpoint))
-    history_tokens = len(tokenize_with_llm(conversation_history, llm_endpoint))
+    
+    history_tokens = 0
+    if previous_messages:
+        for msg in previous_messages:
+            history_tokens += len(tokenize_with_llm(msg.get("content", ""), llm_endpoint))
+    
+    # Reserve tokens for system message template
+    system_message_overhead = 200  
     
     remaining_tokens = settings.max_input_length - (
-        settings.prompt_template_token_count + 
-        question_tokens + 
+        system_message_overhead +
+        question_tokens +
         history_tokens
     )
     
     # Truncate context to fit budget
     context = detokenize_with_llm(
-        tokenize_with_llm(context, llm_endpoint)[:remaining_tokens], 
+        tokenize_with_llm(context, llm_endpoint)[:remaining_tokens],
         llm_endpoint
     )
     
-    # Choose prompt template
-    if conversation_history:
-        prompt = settings.prompts.query_vllm_conversational.format(
-            conversation_history=conversation_history,
-            context=context,
-            question=question
-        )
-    else:
-        # Use existing single-turn prompt
-        prompt = settings.prompts.query_vllm_stream.format(
-            context=context,
-            question=question
-        )
+    # Build message array in OpenAI format
+    message_array = []
+    
+    # This is regenerated for EVERY turn with new retrieved documents
+    system_content = settings.prompts.system_message_with_context.format(
+        context=context
+    )
+    message_array.append({
+        "role": "system",
+        "content": system_content
+    })
+    
+    if previous_messages:
+        message_array.extend(previous_messages)
+    
+    message_array.append({
+        "role": "user",
+        "content": question
+    })
+    
+    payload = {
+        "model": llm_model,
+        "messages": message_array,  # OpenAI format
+        "temperature": settings.temperature,
+        "max_tokens": settings.max_output_length,
+        "stream": True
+    }
     
     return headers, payload
 ```
 
-#### 5.1.4 Updated `settings.json` - Conversational Prompts
+**Example Message Flow:**
+
+**Turn 1 - First Question:**
+
+UI sends (clean question only):
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is Spyre?"
+    }
+  ]
+}
+```
+
+Backend builds message array with fresh system prompt:
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "You are a helpful AI assistant.\n\nRetrieved Context:\n[Fresh RAG docs about Spyre]\n\nInstructions: Answer based on context...\nWhat is Spyre?"
+    }
+  ]
+}
+```
+
+**Turn 2 - Follow-up Question:**
+
+UI sends (clean questions + history):
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is Spyre?"
+    },
+    {
+      "role": "assistant",
+      "content": "Spyre is an AI accelerator for Power hardware..."
+    },
+    {
+      "role": "user",
+      "content": "Is it supported on Power 11?"
+    }
+  ]
+}
+```
+
+Backend builds message array with fresh system prompt:
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is Spyre?"
+    },
+    {
+      "role": "assistant",
+      "content": "Spyre is an AI accelerator for Power hardware..."
+    },
+    {
+      "role": "user",
+      "content": "You are a helpful AI assistant.\n\nRetrieved Context:\n[Fresh RAG docs about Power 11 support]\n\nInstructions: Answer based on context AND history...\nIs it supported on Power 11?"
+    }
+  ]
+}
+```
+
+#### 5.1.4 Updated `settings.json` - System Message Templates
 
 ```json
 {
   "prompts": {
-    "query_vllm_conversational": "You are a helpful AI assistant with access to a knowledge base.\n\nPrevious Conversation:\n{conversation_history}\n\nRetrieved Context:\n{context}\n\nCurrent Question:\n{question}\n\nInstructions:\n- Answer based on retrieved context AND conversation history\n- Reference previous exchanges when relevant\n- Be conversational and natural\n\nAnswer:",
-    "query_vllm_conversational_de": "Sie sind ein hilfreicher KI-Assistent mit Zugriff auf eine Wissensdatenbank.\n\nVorherige Konversation:\n{conversation_history}\n\nAbgerufener Kontext:\n{context}\n\nAktuelle Frage:\n{question}\n\nAnweisungen:\n- Antworten Sie basierend auf dem abgerufenen Kontext UND der Konversationshistorie\n- Verweisen Sie auf frühere Austausche, wenn relevant\n- Seien Sie gesprächig und natürlich\n\nAntwort:"
+    "system_message_with_context": "You are a helpful AI assistant with access to a knowledge base.\n\nRetrieved Context:\n{context}\n\nInstructions:\n- Answer based on the retrieved context and conversation history\n- Reference previous exchanges when relevant\n- Be conversational and natural\n- If the context doesn't contain the answer, say so clearly\n- Cite sources from the context when possible",
+    
+    "system_message_with_context_de": "Sie sind ein hilfreicher KI-Assistent mit Zugriff auf eine Wissensdatenbank.\n\nAbgerufener Kontext:\n{context}\n\nAnweisungen:\n- Antworten Sie basierend auf dem abgerufenen Kontext und der Konversationshistorie\n- Verweisen Sie auf frühere Austausche, wenn relevant\n- Seien Sie gesprächig und natürlich\n- Wenn der Kontext die Antwort nicht enthält, sagen Sie dies klar\n- Zitieren Sie Quellen aus dem Kontext, wenn möglich"
   }
 }
 ```
