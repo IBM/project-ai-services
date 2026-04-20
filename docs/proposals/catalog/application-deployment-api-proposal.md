@@ -645,11 +645,11 @@ Authorization: Bearer <access_token>
       "type": "QA-Chatbot",
       "endpoints": [
         {
-          "type": "ui",
+          "name": "ui",
           "url": "https://rag-production-chat-ui.apps.cluster.example.com"
         },
         {
-          "type": "backend",
+          "name": "backend",
           "url": "https://rag-production-chat-api.apps.cluster.example.com"
         }
       ],
@@ -662,7 +662,7 @@ Authorization: Bearer <access_token>
       "type": "Summary",
       "endpoints": [
         {
-          "type": "backend",
+          "name": "backend",
           "url": "https://rag-production-summarization-api.apps.cluster.example.com"
         }
       ],
@@ -691,7 +691,7 @@ Authorization: Bearer <access_token>
       "type": "Summary",
       "endpoints": [
         {
-          "type": "backend",
+          "name": "backend",
           "url": "http://localhost:8081"
         }
       ],
@@ -731,8 +731,8 @@ Authorization: Bearer <access_token>
 **Endpoint Object:**
 | Field | Type | Description |
 |-------|------|-------------|
-| type | string | Endpoint type: "ui" or "backend" |
-| url | string | Endpoint URL |
+| name | string | Endpoint name: "ui", "backend", or "api" |
+| url | string | Full endpoint URL |
 
 **Error Responses:**
 - `401 Unauthorized` - Invalid or missing access token
@@ -1141,9 +1141,13 @@ Authorization: Bearer <access_token>
 ```json
 [
   {
+    "id": "rag",
     "name": "Digital Assistant",
-    "description": "Complete RAG architecture with QA chatbot, summarization, and digitization services",
-    "services": ["QA-Chatbot", "Summary", "Digitization"]
+    "description": "Enable digital assistants using Retrieval-Augmented Generation (RAG), including AI services that query a managed knowledge base to answer questions from custom documents and data.",
+    "version": "1.0.0",
+    "type": "architecture",
+    "certified_by": "IBM",
+    "services": ["chat", "digitization", "summarization"]
   }
 ]
 ```
@@ -1151,16 +1155,23 @@ Authorization: Bearer <access_token>
 **Response Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
+| id | string | Architecture template ID |
 | name | string | Architecture template name |
 | description | string | Description of the architecture |
-| services | array | Array of service names included in this architecture |
+| version | string | Architecture version |
+| type | string | Type (architecture) |
+| certified_by | string | Certification authority |
+| services | array | Array of service IDs included in this architecture |
 
 **Error Responses:**
 - `401 Unauthorized` - Invalid or missing access token
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
-- **TODO:** exploring on asset structure to support granular deployments
+- Check out the proposal https://github.com/IBM/project-ai-services/pull/636
+- Read architectures from `ai-services/assets/architectures/` directory
+- Parse metadata.yaml files and convert to JSON response format
+- Return all available architecture templates
 
 ---
 
@@ -1187,8 +1198,63 @@ Authorization: Bearer <access_token>
 GET /api/v1/architectures/rag
 ```
 
+**Response (200 OK):**
+```json
+{
+  "id": "rag",
+  "name": "Digital Assistant",
+  "description": "Enable digital assistants using Retrieval-Augmented Generation (RAG), including AI services that query a managed knowledge base to answer questions from custom documents and data.",
+  "version": "1.0.0",
+  "type": "architecture",
+  "certified_by": "IBM",
+  "supported_runtimes": ["podman", "openshift"],
+  "services": [
+    {
+      "id": "chat",
+      "version": ">=1.0.0"
+    },
+    {
+      "id": "digitization",
+      "version": ">=1.0.0"
+    },
+    {
+      "id": "summarization",
+      "version": ">=1.0.0",
+      "optional": true
+    }
+  ],
+  "links": {
+    "demo": "https://example.com/demo/rag",
+    "code": "https://github.com/project-ai-services/spyre-rag",
+    "documentation": "https://docs.example.com/rag"
+  }
+}
+```
+
+**Response Schema:**
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Architecture template ID |
+| name | string | Architecture name |
+| description | string | Detailed description |
+| version | string | Architecture version |
+| type | string | Type (architecture) |
+| certified_by | string | Certification authority |
+| supported_runtimes | array | Supported runtime environments |
+| services | array | Array of service objects |
+| links | object | Related links (demo, code, documentation) |
+
+**Service Object Schema:**
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Service ID |
+| version | string | Version constraint |
+| optional | boolean | Whether service is optional (only present if true) |
+
 **Implementation Notes:**
-- **TODO:** exploring on asset structure to support granular deployments
+- Check out the proposal https://github.com/IBM/project-ai-services/pull/636
+- Read architecture metadata from `ai-services/assets/architectures/{id}/metadata.yaml`
+- Parse YAML and convert to JSON response format
 
 ---
 
@@ -1196,7 +1262,7 @@ GET /api/v1/architectures/rag
 
 **Endpoint:** `GET /api/v1/services`
 
-**Description:** Retrieves a list of all available service templates.
+**Description:** Retrieves a list of all deployable service templates. Dependency-only services are excluded from this list.
 
 **Request Headers:**
 ```
@@ -1209,36 +1275,56 @@ Authorization: Bearer <access_token>
 ```json
 [
   {
-    "name": "QA-Chatbot",
-    "description": "Question-answering chatbot service with RAG capabilities",
-    "reference_architectures": ["Digital Assistant"]
+    "id": "chat",
+    "name": "Question and Answer",
+    "description": "Answer questions in natural language by sourcing general & domain-specific knowledge",
+    "version": "1.0.0",
+    "type": "service",
+    "certified_by": "IBM",
+    "architectures": ["rag", "rag-cpu", "rag-dev"]
   },
   {
-    "name": "Summary",
-    "description": "Document summarization service",
-    "reference_architectures": ["Digital Assistant"]
+    "id": "summarization",
+    "name": "Summarization",
+    "description": "Consolidates input text into a brief statement of main points",
+    "version": "1.0.0",
+    "type": "service",
+    "certified_by": "IBM",
+    "architectures": ["rag", "rag-cpu", "rag-dev"]
   },
   {
-    "name": "Digitization",
-    "description": "Document digitization and processing service",
-    "reference_architectures": ["Digital Assistant"]
-  }
+    "id": "digitization",
+    "name": "Digitize Documents",
+    "description": "Transforms documents such as manuals, invoices, and more into texts",
+    "version": "1.0.0",
+    "type": "service",
+    "certified_by": "IBM",
+    "architectures": ["rag", "rag-cpu", "rag-dev"]
+  },
 ]
 ```
 
 **Response Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
-| name | string | Service template name |
+| id | string | Service template ID |
+| name | string | Service display name |
 | description | string | Description of the service |
-| reference_architectures | array | Array of architecture names that include this service |
+| version | string | Service version |
+| type | string | Service type |
+| certified_by | string | Certification authority |
+| architectures | array | Array of architecture IDs that include this service |
 
 **Error Responses:**
 - `401 Unauthorized` - Invalid or missing access token
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
-- **TODO:** exploring on asset structure to support granular deployments
+- Check out the proposal https://github.com/IBM/project-ai-services/pull/636
+- Read services from `ai-services/assets/services/` directory
+- Filter OUT services that have `dependency_only: true` in their metadata
+- Only return deployable services (chat, summarization, digitization)
+- Dependency-only services (opensearch, embedding, instruct, reranker) should NOT be included in the response
 
 ---
 
@@ -1262,11 +1348,80 @@ Authorization: Bearer <access_token>
 
 **Example Request:**
 ```
-GET /api/v1/services/summarize
+GET /api/v1/services/chat
 ```
 
+**Response (200 OK):**
+```json
+{
+  "id": "chat",
+  "name": "Question and Answer",
+  "description": "Answer questions in natural language by sourcing general & domain-specific knowledge",
+  "version": "1.0.0",
+  "type": "service",
+  "certified_by": "IBM",
+  "architectures": ["rag", "rag-cpu", "rag-dev"],
+  "dependencies": [
+    {
+      "id": "opensearch",
+      "version": ">=1.0.0"
+    },
+    {
+      "id": "embedding",
+      "version": ">=1.0.0"
+    },
+    {
+      "id": "instruct",
+      "version": ">=1.0.0"
+    },
+    {
+      "id": "reranker",
+      "version": ">=1.0.0"
+    }
+  ],
+  "endpoints": [
+    {
+      "name": "ui",
+      "url": "https://<hostname>:3000"
+    },
+    {
+      "name": "backend",
+      "url": "https://<hostname>:5000"
+    }
+  ]
+}
+```
+
+**Response Schema:**
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Service template ID |
+| name | string | Service display name |
+| description | string | Detailed description |
+| version | string | Service version |
+| type | string | Service type |
+| certified_by | string | Certification authority |
+| architectures | array | Architecture IDs that include this service |
+| dependencies | array | Array of dependency objects |
+| endpoints | array | Array of endpoint objects |
+
+**Dependency Object Schema:**
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Dependency service ID |
+| version | string | Version constraint (optional) |
+
+**Endpoint Object Schema:**
+| Field | Type | Description |
+|-------|------|-------------|
+| name | string | Endpoint name (e.g., "ui", "backend", "api") |
+| url | string | Full endpoint URL (e.g., "https://<hostname>:3000") |
+
 **Implementation Notes:**
-- **TODO:** exploring on asset structure to support granular deployments
+- Check out the proposal https://github.com/IBM/project-ai-services/pull/636
+- Read service metadata from `ai-services/assets/services/{id}/metadata.yaml`
+- Parse YAML and convert to JSON response format
+- Include all fields from metadata.yaml in response
 
 ---
 
