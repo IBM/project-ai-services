@@ -52,7 +52,7 @@ The AI Services Catalog currently provides various AI services (chat, summarizat
 
 ### 2.2 Problem Statement
 Users need a standardized way to:
-- Deploy AI services individually or as complete architectures
+- Deploy services individually or as complete architectures
 - Monitor deployment status and health
 - Manage service configurations
 - Access service endpoints
@@ -69,11 +69,11 @@ Users need a standardized way to:
 
 ### 3.1 Key Concepts
 
-**Architecture**: A collection of multiple services that work together as a cohesive application (e.g., RAG architecture includes chat, summarization, and digitization services).
+**Architecture**: A collection of multiple services that work together as a cohesive application (e.g., Digital Assistant).
 
 **Service**: An individual AI service that can be deployed standalone (e.g., summarization service, chat service).
 
-**Runtime**: The deployment environment (Podman for local/development, OpenShift for production/cluster).
+**Runtime**: The deployment environment (Podman, OpenShift).
 
 ### 3.2 Backend System Components
 
@@ -136,11 +136,11 @@ Authorization: Bearer <access_token>
 
 #### Application Management Endpoints
 - `GET /api/v1/applications` - List all deployments
-- `GET /api/v1/applications/{appName}` - Get deployment details
+- `GET /api/v1/applications/{id}` - Get deployment details
 - `POST /api/v1/applications` - Create new deployment
-- `PUT /api/v1/applications/{appName}` - Update deployment
-- `DELETE /api/v1/applications/{appName}` - Delete deployment
-- `GET /api/v1/applications/{appName}/ps` - Get pod/container health status
+- `PUT /api/v1/applications/{id}` - Update deployment
+- `DELETE /api/v1/applications/{id}` - Delete deployment
+- `GET /api/v1/applications/{id}/ps` - Get pod/container health status
 
 #### Catalog Endpoints
 - `GET /api/v1/architectures` - List available architectures
@@ -424,10 +424,6 @@ Authorization: Bearer <access_token>
 |-----------|------|----------|---------|-------------|
 | page | integer | No | 1 | Page number (1-indexed) |
 | page_size | integer | No | 20 | Number of items per page (max: 100) |
-| sort_by | string | No | created_at | Sort field: "created_at", "updated_at", "app_name", "status" |
-| sort_order | string | No | desc | Sort order: "asc" or "desc" |
-| status | string | No | - | Filter by status: "Downloading", "Deploying", "Running", "Deleting", "Error" |
-| type | string | No | - | Filter by type: "Digital Assistant", "Summary" |
 
 **Request Body:** None
 
@@ -436,7 +432,7 @@ Authorization: Bearer <access_token>
 {
   "data": [
     {
-      "app_name": "rag-production",
+      "id": "rag-production",
       "deployment_name": "RAG Production",
       "deployment_type": "Architecture",
       "type": "Digital Assistant",
@@ -446,7 +442,7 @@ Authorization: Bearer <access_token>
       "updated_at": "2026-04-15T10:35:00Z"
     },
     {
-      "app_name": "summarization-dev",
+      "id": "summarization-dev",
       "deployment_name": "Summarization Dev",
       "deployment_type": "Service",
       "type": "Summary",
@@ -478,7 +474,7 @@ Authorization: Bearer <access_token>
 **Application Object (data[]):**
 | Field | Type | Description |
 |-------|------|-------------|
-| app_name | string | Application name (Primary Key, immutable, used for resource naming) |
+| id | string | Application ID (Primary Key, immutable, used for resource naming) |
 | deployment_name | string | User-friendly display name of the deployment |
 | deployment_type | string | Type of deployment: "Architecture" or "Service" |
 | type | string | Application type: "Digital Assistant" for architectures, "Summary" for summarization services |
@@ -507,10 +503,6 @@ Authorization: Bearer <access_token>
 
 2. **Parameter Validation**:
    - Validate page >= 1, page_size between 1-100
-   - Validate sort_by is one of allowed fields: `created_at`, `updated_at`, `app_name`, `status`
-   - Validate sort_order is "asc" or "desc" (case-insensitive, convert to uppercase for PostgreSQL)
-   - Validate status filter against ENUM values: `Downloading`, `Deploying`, `Running`, `Deleting`, `Error`
-   - Validate type filter against allowed values: `Digital Assistant`, `Summary`
 
 3. **PostgreSQL Query Construction**:
    
@@ -557,7 +549,7 @@ Authorization: Bearer <access_token>
    **Step 3d - Build and execute SELECT query:**
    ```sql
    SELECT
-       app_name,
+       id,
        deployment_name,
        deployment_type,
        type,
@@ -575,7 +567,7 @@ Authorization: Bearer <access_token>
    ```sql
    -- With status and type filters
    SELECT
-       app_name, deployment_name, deployment_type, type,
+       id, deployment_name, deployment_type, type,
        status, message, created_at, updated_at
    FROM applications
    WHERE status = $1 AND type = $2
@@ -600,36 +592,6 @@ Authorization: Bearer <access_token>
    - Format timestamps to ISO 8601 (RFC3339) using `time.Format(time.RFC3339)`
    - Construct paginated response with data array and pagination metadata
 
-6. **PostgreSQL-Specific Considerations**:
-   - **Parameterized Queries**: Always use `$1, $2, $3...` placeholders to prevent SQL injection
-   - **Column Name Mapping**: Use snake_case in database (app_name, created_at) but camelCase in JSON response
-   - **ENUM Types**: If using PostgreSQL ENUM for status, ensure filter values match exactly
-   - **Timestamp Handling**: Store as `TIMESTAMP WITH TIME ZONE` (timestamptz) in PostgreSQL
-   - **NULL Handling**: Use `sql.NullString` for nullable fields like message
-   - **Transaction Isolation**: Use READ COMMITTED isolation level for consistent pagination
-   - **Index Recommendations**:
-     ```sql
-     -- Composite index for common queries
-     CREATE INDEX idx_applications_status_created ON applications(status, created_at DESC);
-     CREATE INDEX idx_applications_type_created ON applications(type, created_at DESC);
-     CREATE INDEX idx_applications_created ON applications(created_at DESC);
-     CREATE INDEX idx_applications_updated ON applications(updated_at DESC);
-     ```
-
-7. **Performance Optimization**:
-   - Use `COUNT(*) OVER()` window function to get total count in single query (optional):
-     ```sql
-     SELECT
-         app_name, deployment_name, deployment_type, type,
-         status, message, created_at, updated_at,
-         COUNT(*) OVER() AS total_count
-     FROM applications
-     WHERE status = $1
-     ORDER BY created_at DESC
-     LIMIT $2 OFFSET $3;
-     ```
-   - Consider cursor-based pagination for very large datasets (using `WHERE created_at < $1` instead of OFFSET)
-   - Cache total count for frequently accessed pages (with TTL)
 
 **Example Requests:**
 ```
@@ -639,8 +601,8 @@ GET /api/v1/applications
 # Get second page with 50 items per page
 GET /api/v1/applications?page=2&page_size=50
 
-# Get running applications sorted by name
-GET /api/v1/applications?status=Running&sort_by=app_name&sort_order=asc
+# Get running applications sorted by id
+GET /api/v1/applications?status=Running&sort_by=id&sort_order=asc
 
 # Get Digital Assistant applications
 GET /api/v1/applications?type=Digital%20Assistant
@@ -650,7 +612,7 @@ GET /api/v1/applications?type=Digital%20Assistant
 
 #### 5.2.2 Get Application Details
 
-**Endpoint:** `GET /api/v1/applications/{appName}`
+**Endpoint:** `GET /api/v1/applications/{id}`
 
 **Description:** Retrieves detailed information about a specific application.
 
@@ -662,14 +624,14 @@ Authorization: Bearer <access_token>
 **Path Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| appName | string | Yes | Application name (app_name field) |
+| id | string | Yes | Application ID |
 
 **Request Body:** None
 
 **Response (200 OK) - Deployable Architecture:**
 ```json
 {
-  "app_name": "rag-production",
+  "id": "rag-production",
   "deployment_name": "RAG Production",
   "deployment_type": "Architecture",
   "type": "Digital Assistant",
@@ -715,7 +677,7 @@ Authorization: Bearer <access_token>
 **Response (200 OK) - Services Deployment:**
 ```json
 {
-  "app_name": "summarization-dev",
+  "id": "summarization-dev",
   "deployment_name": "Summarization Dev",
   "deployment_type": "Service",
   "type": "Summary",
@@ -746,7 +708,7 @@ Authorization: Bearer <access_token>
 **Application Level:**
 | Field | Type | Description |
 |-------|------|-------------|
-| app_name | string | Application name (Primary Key, immutable) |
+| id | string | Application ID (Primary Key, immutable) |
 | deployment_name | string | User-friendly display name of the deployment |
 | deployment_type | string | "Architecture" or "Service" |
 | type | string | Application type: "Digital Assistant" for architectures, "Summary" for summarization services |
@@ -780,7 +742,7 @@ Authorization: Bearer <access_token>
 
 **Implementation Notes:**
 1. Validate the incoming JWT token from Authorization header
-2. Execute database query on applications table using `app_name` as the filter
+2. Execute database query on applications table using `id` as the filter
 3. Perform JOIN with services table to fetch associated services
 4. Map the database response to the response struct including nested services
 5. Return the mapped response with appropriate HTTP status code
@@ -804,7 +766,8 @@ Content-Type: application/json
 {
   "deployment_name": "RAG Production",
   "deployment_type": "Architecture",
-  "template": "Digital Assistant",
+  "type": "Digital Assistant",
+  "template": "rag",
   "params": {
     "opensearch.memoryLimit": "4Gi",
     "opensearch.storage": "20Gi",
@@ -818,7 +781,8 @@ Content-Type: application/json
 |-------|------|----------|-------------|
 | deployment_name | string | Yes | User-friendly display name (3-100 chars) |
 | deployment_type | string | Yes | Deployment type: "Architecture" or "Service" |
-| template | string | Yes | Template name (e.g., "Digital Assistant", "Summary") |
+| type | string | Yes | Application type (e.g., "Digital Assistant", "Summary") |
+| template | string | Yes | Template ID (e.g., "rag" is the ID for "Digital Assistant" type) |
 | params | object | No | Key-value pairs of custom parameters for the deployment |
 
 **Params Object:**
@@ -830,9 +794,11 @@ Content-Type: application/json
 **Response (202 Accepted):**
 ```json
 {
-  "app_name": "rag-production",
+  "id": "rag-production",
   "deployment_name": "RAG Production",
   "deployment_type": "Architecture",
+  "type": "Digital Assistant",
+  "template": "rag",
   "status": "Downloading",
   "message": "Deployment initiated successfully",
   "params": {
@@ -848,9 +814,11 @@ Content-Type: application/json
 **Response Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
-| app_name | string | Auto-generated application name (Primary Key, immutable) |
+| id | string | Auto-generated application ID (Primary Key, immutable) |
 | deployment_name | string | User-friendly display name |
 | deployment_type | string | Deployment type |
+| type | string | Application type |
+| template | string | Template ID used for deployment |
 | status | string | Initial status ("Downloading") |
 | message | string | Status message |
 | params | object | Applied parameters (sensitive values masked) |
@@ -867,8 +835,8 @@ Content-Type: application/json
 **Implementation Notes:**
 1. **Token Validation**: Validate JWT token from Authorization header
 
-2. **App Name Generation**:
-   - Auto-generate `app_name` by normalizing deployment_name
+2. **ID Generation**:
+   - Auto-generate `id` by normalizing deployment_name
    - Normalization rules:
      - Convert to lowercase
      - Replace spaces and special characters with hyphens
@@ -878,7 +846,7 @@ Content-Type: application/json
      - "RAG Production" → "rag-production"
      - "My App 2024!" → "my-app-2024"
      - "Test___Service" → "test-service"
-   - Validate final app_name is 3-50 characters
+   - Validate final id is 3-50 characters
    - Check uniqueness in applications table (return 409 if exists)
 
 3. **Template Validation**:
@@ -894,7 +862,7 @@ Content-Type: application/json
 5. **Database Operations**:
    - Begin transaction
    - Insert record in applications table with:
-     - Generated app_name (Primary Key)
+     - Generated id (Primary Key)
      - deployment_name, deployment_type, template
      - params as JSONB
      - status = "Downloading"
@@ -902,7 +870,7 @@ Content-Type: application/json
    - Commit transaction
 
 6. **Async Deployment**:
-   - Initiate background deployment job with app_name
+   - Initiate background deployment job with id
    - Return immediately with 202 Accepted
    - Background worker handles actual deployment
 
@@ -914,7 +882,7 @@ Content-Type: application/json
 
 #### 5.2.4 Update Application
 
-**Endpoint:** `PUT /api/v1/applications/{appName}`
+**Endpoint:** `PUT /api/v1/applications/{id}`
 
 **Description:** Updates the display name of an existing application.
 
@@ -927,7 +895,7 @@ Content-Type: application/json
 **Path Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| appName | string | Yes | Application name (app_name field) |
+| id | string | Yes | Application ID |
 
 **Request Body:**
 ```json
@@ -944,7 +912,7 @@ Content-Type: application/json
 **Response (200 OK):**
 ```json
 {
-  "app_name": "rag-production",
+  "id": "rag-production",
   "deployment_name": "RAG Production Updated",
   "deployment_type": "Architecture",
   "type": "Digital Assistant",
@@ -957,7 +925,7 @@ Content-Type: application/json
 **Response Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
-| app_name | string | Application name (Primary Key, unchanged) |
+| id | string | Application ID (Primary Key, unchanged) |
 | deployment_name | string | Updated display name |
 | deployment_type | string | Deployment type |
 | type | string | Application type |
@@ -977,7 +945,7 @@ Content-Type: application/json
 2. **Request Validation**: Validate deployment_name format and length (3-100 chars)
 3. **Database Update**:
    - Execute UPDATE query on applications table to update deployment_name field
-   - Use app_name as the filter (WHERE app_name = $1)
+   - Use id as the filter (WHERE id = $1)
    - Update updated_at timestamp
 4. **Response**: Fetch and return the complete updated application object
 
@@ -985,7 +953,7 @@ Content-Type: application/json
 
 #### 5.2.5 Delete Application
 
-**Endpoint:** `DELETE /api/v1/applications/{appName}`
+**Endpoint:** `DELETE /api/v1/applications/{id}`
 
 **Description:** Deletes an application and all associated resources.
 
@@ -997,7 +965,7 @@ Authorization: Bearer <access_token>
 **Path Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| appName | string | Yes | Application name (app_name field) |
+| id | string | Yes | Application ID |
 
 **Query Parameters:**
 | Parameter | Type | Required | Description |
@@ -1009,7 +977,7 @@ Authorization: Bearer <access_token>
 **Response (202 Accepted):**
 ```json
 {
-  "app_name": "rag-production",
+  "id": "rag-production",
   "status": "deleting",
   "message": "Deletion initiated successfully"
 }
@@ -1018,7 +986,7 @@ Authorization: Bearer <access_token>
 **Response Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
-| app_name | string | Application name (Primary Key) |
+| id | string | Application ID (Primary Key) |
 | status | string | Status (deleting) |
 | message | string | Status message |
 
@@ -1044,7 +1012,7 @@ Authorization: Bearer <access_token>
 
 #### 5.2.6 Get Pod/Container Health Status
 
-**Endpoint:** `GET /api/v1/applications/{appName}/ps`
+**Endpoint:** `GET /api/v1/applications/{id}/ps`
 
 **Description:** Retrieves health status of all pods/containers in the deployment.
 
@@ -1056,14 +1024,14 @@ Authorization: Bearer <access_token>
 **Path Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| appName | string | Yes | Application name (app_name field) |
+| id | string | Yes | Application ID |
 
 **Request Body:** None
 
 **Response (200 OK):**
 ```json
 {
-  "app_name": "rag-production",
+  "id": "rag-production",
   "pods": [
     {
       "pod_id": "a1b2c3d4e5f6",
@@ -1115,7 +1083,7 @@ Authorization: Bearer <access_token>
 **Response Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
-| app_name | string | Application name (Primary Key) |
+| id | string | Application ID (Primary Key) |
 | pods | array | Array of pod objects |
 
 **Pod Object Schema:**
@@ -1145,7 +1113,7 @@ Authorization: Bearer <access_token>
 - Use the same output format for both Podman and OpenShift runtimes
 - Pod status includes health indicator: "Running (Ready)" when all containers are healthy, "Running (NotReady)" when some containers are unhealthy
 - Container status shows health check results: "Ready" for healthy containers, actual status (starting, exited, etc.) for others
-- Filter pods by application label: `ai-services.io/application=<app_name>`
+- Filter pods by application label: `ai-services.io/application=<id>`
 - For OpenShift: query pods using Kubernetes API
 - For Podman: use `podman pod ps` and `podman pod inspect`
 - Cache results for 5-10 seconds to reduce API calls

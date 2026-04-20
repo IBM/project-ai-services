@@ -9,22 +9,20 @@ This document outlines the database design required for the Catalog service, inc
 1. [Database Selection](#database-selection)
 2. [Database Schema](#database-schema)
 3. [Table Definitions](#table-definitions)
-   - [Users Table](#1-users-table)
-   - [Applications Table](#2-applications-table)
-   - [Services Table](#3-services-table)
-   - [Infrastructure Table](#4-infrastructure-table)
-   - [Services-Infrastructure Junction Table](#5-services-infrastructure-junction-table)
+   - [Applications Table](#1-applications-table)
+   - [Services Table](#2-services-table)
 4. [Entity Relationship Model](#entity-relationship-model)
 5. [Relationships](#relationships)
 6. [Key Design Decisions](#key-design-decisions)
 7. [Migration Strategy](#migration-strategy)
 8. [Common Queries](#common-queries)
-9. [Alternative Design: Unified Services Table](#alternative-design-unified-services-table)
+9. [Alternative Design: Separate Infrastructure Tables](#alternative-design-separate-infrastructure-tables)
    - [Overview](#overview-1)
-   - [Alternative Services Table](#alternative-services-table)
-   - [Comparison: Separate vs Unified Design](#comparison-separate-vs-unified-design)
-   - [Limitations of Unified Design](#limitations-of-unified-design)
-   - [When to Consider Unified Design](#when-to-consider-unified-design)
+   - [Infrastructure Table](#infrastructure-table)
+   - [Services-Infrastructure Junction Table](#services-infrastructure-junction-table)
+   - [Comparison: Unified vs Separate Design](#comparison-unified-vs-separate-design)
+   - [Advantages of Separate Infrastructure Design](#advantages-of-separate-infrastructure-design-1)
+   - [When to Consider Separate Design](#when-to-consider-separate-design)
    - [Recommendation](#recommendation)
 10. [Future Considerations](#future-considerations)
 11. [Security Considerations](#security-considerations)
@@ -47,7 +45,7 @@ We have chosen **PostgreSQL** as our database for the following reasons:
 
 1. **Relational Model Fit**: The Catalog service has clear relationships between Deployable Architectures, Services, and Infrastructure components, which perfectly models the relational SQL structure with tables.
 
-2. **Future Integration**: In upcoming releases, if we adopt Keycloak as our Identity Provider and Identity Access Management tool, we can reuse the same PostgreSQL instance. This approach avoids maintaining multiple database instances.
+2. **Future Integration**: User management will be handled externally (e.g., via Keycloak as our Identity Provider and Identity Access Management tool). If we adopt Keycloak, we can reuse the same PostgreSQL instance for its data storage needs. This approach avoids maintaining multiple database instances.
 
 3. **ACID Compliance**: PostgreSQL provides strong consistency guarantees essential for catalog management.
 
@@ -63,25 +61,13 @@ ai_service
 
 ## Table Definitions
 
-### 1. Users Table
-
-**Table Name:** `users`
-
-| Column Name | Data Type    | Constraints | Description |
-|-------------|--------------|-------------|-------------|
-| id          | UUID         | PRIMARY KEY | Unique user identifier |
-| username    | VARCHAR(100) |             | User's username |
-| password    | TEXT         |             | Encrypted password |
-
----
-
-### 2. Applications Table
+### 1. Applications Table
 
 **Table Name:** `applications`
 
 | Column Name         | Data Type         | Constraints | Description |
 |---------------------|-------------------|-------------|-------------|
-| app_name            | VARCHAR(100)      | PRIMARY KEY | Internal application name (immutable - used for prefixing pod names in Podman and namespace names in OpenShift) |
+| id                  | VARCHAR(100)      | PRIMARY KEY | Internal application identifier (immutable - used for prefixing pod names in Podman and namespace names in OpenShift) |
 | deployment_name     | VARCHAR(100)      |             | Display name of the deployment |
 | type                | VARCHAR(100)      |             | Application type (e.g., Digital Assistant, Summarization) |
 | deployment_type     | deployment_type   | ENUM        | Type of deployment (Deployable Architecture, Services) |
@@ -109,62 +95,39 @@ CREATE TYPE status AS ENUM (
 
 ---
 
-### 3. Services Table
+### 2. Services Table
 
 **Table Name:** `services`
 
-| Column Name     | Data Type    | Constraints | Description |
-|-----------------|--------------|-------------|-------------|
-| id              | UUID         | PRIMARY KEY | Unique service identifier |
-| app_name        | VARCHAR(100) | FOREIGN KEY | References applications(app_name) |
-| type            | VARCHAR(100) |             | Service type (e.g., Summarization, Digitization) |
-| endpoints       | TEXT[]       |             | Array of service endpoints/URLs |
-| version         | TEXT         |             | Service version |
-| created_at      | TIMESTAMPTZ  | DEFAULT NOW() | Timestamp of creation |
-| updated_at      | TIMESTAMPTZ  | DEFAULT NOW() | Timestamp of last update |
+| Column Name         | Data Type         | Constraints | Description |
+|---------------------|-------------------|-------------|-------------|
+| id                  | UUID              | PRIMARY KEY | Unique service identifier |
+| app_id              | VARCHAR(100)      | FOREIGN KEY | References applications(id) |
+| type                | VARCHAR(100)      |             | Service/Infrastructure type |
+| category            | service_category  | ENUM        | Service category (Deployable Service, Infrastructure) |
+| status              | Status            | ENUM        | Current status (Deploying, Running, Deleting, Error) |
+| endpoints           | TEXT[]            |             | Array of service/infrastructure endpoints/URLs |
+| version             | TEXT              |             | Service/Infrastructure version |
+| created_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of creation |
+| updated_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of last update |
 
----
-
-### 4. Infrastructure Table
-
-**Table Name:** `infra`
-
-| Column Name | Data Type    | Constraints | Description |
-|-------------|--------------|-------------|-------------|
-| id          | UUID         | PRIMARY KEY | Unique infrastructure identifier |
-| status      | Status       | ENUM        | Current status (Deploying, Running, Deleting, Error) |
-| type        | VARCHAR(100) |             | Infrastructure type (e.g., vector store, inference backend) |
-| endpoints   | TEXT[]       |             | Array of infrastructure endpoints/URLs |
-| version     | TEXT         |             | Infrastructure version |
-| created_at  | TIMESTAMPTZ  | DEFAULT NOW() | Timestamp of creation |
-| updated_at  | TIMESTAMPTZ  | DEFAULT NOW() | Timestamp of last update |
-
----
-
-### 5. Services-Infrastructure Junction Table
-
-**Table Name:** `services_infra`
-
-| Column Name | Data Type | Constraints | Description |
-|-------------|-----------|-------------|-------------|
-| service_id  | UUID      | PRIMARY KEY, FOREIGN KEY | References services(id) |
-| infra_id    | UUID      | PRIMARY KEY, FOREIGN KEY | References infra(id) |
-
-**Note:** This is a many-to-many relationship table with a composite primary key.
+**Custom Type:**
+```sql
+CREATE TYPE service_category AS ENUM (
+    'Deployable Service',
+    'Infrastructure'
+);
+```
 
 ---
 
 ## Entity Relationship Model
 
 ```
-┌─────────────┐
-│   users     │
-└─────────────┘
-
 ┌──────────────────┐
 │  applications    │
 ├──────────────────┤
-│ app_name (PK)    │
+│ id (PK)          │
 │ deployment_name  │
 │ type             │
 │ deployment_type  │
@@ -180,31 +143,10 @@ CREATE TYPE status AS ENUM (
 │    services      │
 ├──────────────────┤
 │ id (PK)          │
-│ app_name (FK)    │
+│ app_id (FK)      │
 │ type             │
-│ endpoints        │
-│ version          │
-│ created_at       │
-│ updated_at       │
-└──────────────────┘
-         │
-         │ M:N
-         ▼
-┌──────────────────┐
-│ services_infra   │
-├──────────────────┤
-│ service_id (PK,FK)│
-│ infra_id (PK,FK) │
-└──────────────────┘
-         │
-         │ M:N
-         ▼
-┌──────────────────┐
-│      infra       │
-├──────────────────┤
-│ id (PK)          │
+│ category         │
 │ status           │
-│ type             │
 │ endpoints        │
 │ version          │
 │ created_at       │
@@ -216,26 +158,22 @@ CREATE TYPE status AS ENUM (
 
 1. **Applications → Services**: One-to-Many
    - One application can have multiple services
-   - Services reference their parent application via app_name
-   - app_name is used as the foreign key for natural relationship
-
-2. **Services ↔ Infrastructure**: Many-to-Many
-   - Services can use multiple infrastructure components
-   - Infrastructure components can be shared across multiple services
-   - Implemented via the `services_infra` junction table
+   - Services reference their parent application via app_id
+   - Services can be either "Deployable Service" or "Infrastructure" based on category field
+   - Both application services and infrastructure components are stored in the same table
 
 ## Key Design Decisions
 
 ### 1. Natural Primary Key for Applications
-The applications table uses `app_name` as the primary key:
-- **Natural Identifier**: app_name is already unique and immutable
-- **Meaningful References**: Foreign keys use app_name instead of UUID
-- **Simpler Queries**: No need to join to get application name
+The applications table uses `id` as the primary key:
+- **Natural Identifier**: id is already unique and immutable
+- **Meaningful References**: Foreign keys use id instead of UUID
+- **Simpler Queries**: No need to join to get application identifier
 - **Consistent Naming**: Used for pod/namespace prefixes in deployments
 - **No UUID Overhead**: Eliminates unnecessary UUID generation and storage
 
-### 2. UUID Primary Keys for Other Tables
-Services and infrastructure tables use UUID as primary keys for:
+### 2. UUID Primary Keys for Services
+Services table uses UUID as primary key for:
 - Global uniqueness
 - Better distribution in distributed systems
 - Security (non-sequential IDs)
@@ -244,35 +182,29 @@ Services and infrastructure tables use UUID as primary keys for:
 PostgreSQL custom types (ENUM) are used for:
 - **deployment_type**: Ensures only valid deployment types for applications
 - **status**: Standardizes status values across tables (includes Deleting for cleanup workflows)
+- **service_category**: Distinguishes between "Deployable Service" and "Infrastructure"
 
 ### 4. Application Type Field
 The type field in applications table stores:
 - **Application Type**: Digital Assistant, Summarization, etc.
 - **Direct Classification**: No separate architectures table needed
-- **Simpler Schema**: Reduces table count from 6 to 5 tables
+- **Simpler Schema**: Reduces table count
 - **Clear Semantics**: Type directly describes what the application does
 
-### 6. Separate Infrastructure Table
-Infrastructure is separated from services for:
-- **Clear Separation of Concerns**: Different lifecycles, ownership, and scaling patterns
-- **Strong Type Safety**: Foreign keys enforce referential integrity
-- **Reusability**: Infrastructure can be shared across multiple services
-- **Independent Lifecycle**: Infrastructure can exist independently of services
-- **Cost Optimization**: Avoid duplicate infrastructure provisioning
+### 5. Unified Services Table
+Services and infrastructure are stored in a single table with category field:
+- **Simplified Schema**: Only 2 tables (applications, services) instead of 4
+- **Flexible Design**: Easy to add new service categories
+- **Consistent Interface**: Same structure for all service types
+- **Category-based Filtering**: Use category field to distinguish service types
+- **Simpler Queries**: No need for complex joins across multiple tables
 
-### 7. Many-to-Many Relationship
-The `services_infra` junction table enables:
-- Multiple services to share the same infrastructure (e.g., multiple services using one vector store)
-- Services to depend on multiple infrastructure components
-- Clean separation between service and infrastructure lifecycles
-- Easy querying of dependencies in both directions
-
-### 8. Consistent Field Sizing
-- VARCHAR(100) for type fields across applications, services and infra tables
+### 6. Consistent Field Sizing
+- VARCHAR(100) for type fields across applications and services tables
 - Provides sufficient length for descriptive type names
 - Consistent sizing across similar fields
 
-### 9. Timestamps
+### 7. Timestamps
 All tables include `created_at` and `updated_at` with `TIMESTAMPTZ` for:
 - Complete audit trail
 - Time-zone aware timestamps
@@ -280,7 +212,7 @@ All tables include `created_at` and `updated_at` with `TIMESTAMPTZ` for:
 - Tracking both creation and modification times
 
 ### 10. Immutable Primary Key
-The `app_name` field serves as both identifier and primary key:
+The `id` field serves as both identifier and primary key:
 - Immutable to ensure consistent pod naming in Podman
 - Stable namespace naming in OpenShift
 - Natural referential integrity in deployed resources
@@ -291,18 +223,16 @@ The `app_name` field serves as both identifier and primary key:
 1. Create custom types first:
    - deployment_type
    - status
+   - service_category
 
 2. Create tables in dependency order:
-   - users
-   - applications (with app_name as PK)
-   - services (with app_name FK)
-   - infra
-   - services_infra (junction table)
+   - applications (with id as PK)
+   - services (with app_id FK and category field)
 
 3. Add indexes for:
-   - Foreign keys (app_name in services, service_id, infra_id)
-   - Frequently queried columns (type, status)
-   - app_name is already indexed as primary key
+   - Foreign keys (app_id in services)
+   - Frequently queried columns (type, status, category)
+   - id is already indexed as primary key
 
 4. Set up appropriate constraints and triggers for:
    - Automatic updated_at timestamp updates
@@ -316,44 +246,39 @@ The `app_name` field serves as both identifier and primary key:
 SELECT * FROM applications ORDER BY created_at DESC;
 ```
 
-### 2. Get application with services and infrastructure:
+### 2. Get application with all services (deployable):
 ```sql
 SELECT
     a.*,
-    s.id as service_id, s.type as service_type, s.version as service_version,
+    s.id as service_id,
+    s.type as service_type,
+    s.category as service_category,
+    s.status as service_status,
     s.endpoints as service_endpoints,
-    i.id as infra_id, i.type as infra_type, i.status as infra_status,
-    i.endpoints as infra_endpoints
+    s.version as service_version
 FROM applications a
-LEFT JOIN services s ON a.app_name = s.app_name
-LEFT JOIN services_infra si ON s.id = si.service_id
-LEFT JOIN infra i ON si.infra_id = i.id
-WHERE a.app_name = 'my-app';
+LEFT JOIN services s ON a.id = s.app_id
+WHERE a.id = 'my-app'
+ORDER BY s.category, s.created_at;
 ```
 
-### 3. Get all services for an application:
+### 3. Get all deployable services for an application:
 ```sql
 SELECT * FROM services
-WHERE app_name = 'my-app'
+WHERE app_id = 'my-app' AND category = 'Deployable Service'
 ORDER BY created_at;
 ```
 
-### 4. Get shared infrastructure usage:
+### 4. Get all infrastructure for an application:
 ```sql
-SELECT
-    i.*,
-    COUNT(DISTINCT si.service_id) as service_count,
-    COUNT(DISTINCT s.app_name) as application_count
-FROM infra i
-LEFT JOIN services_infra si ON i.id = si.infra_id
-LEFT JOIN services s ON si.service_id = s.id
-GROUP BY i.id
-HAVING COUNT(DISTINCT si.service_id) > 1;
+SELECT * FROM services
+WHERE app_id = 'my-app' AND category = 'Infrastructure'
+ORDER BY created_at;
 ```
 
-### 5. Get application by app_name (direct lookup):
+### 5. Get application by id (direct lookup):
 ```sql
-SELECT * FROM applications WHERE app_name = 'my-app';
+SELECT * FROM applications WHERE id = 'my-app';
 ```
 
 ### 6. Get applications by type:
@@ -361,226 +286,134 @@ SELECT * FROM applications WHERE app_name = 'my-app';
 SELECT * FROM applications WHERE type = 'Digital Assistant';
 ```
 
-## Alternative Design: Unified Services Table
+### 7. Get all services by category:
+```sql
+SELECT * FROM services WHERE category = 'Infrastructure' ORDER BY created_at DESC;
+```
+
+## Alternative Design: Separate Infrastructure Tables
 
 ### Overview
-This alternative approach combines the `services`, `infra`, and `services_infra` tables into a single unified `services` table. This section documents this approach and compares its limitations with the recommended separate infrastructure design.
+This alternative approach separates services and infrastructure into distinct tables with a many-to-many relationship via a junction table. While this provides stronger separation of concerns and infrastructure reusability, it adds complexity compared to the recommended unified services table design.
 
-### Alternative Services Table
+### Infrastructure Table
+
+**Table Name:** `infra`
+
+| Column Name | Data Type    | Constraints | Description |
+|-------------|--------------|-------------|-------------|
+| id          | UUID         | PRIMARY KEY | Unique infrastructure identifier |
+| status      | Status       | ENUM        | Current status (Deploying, Running, Deleting, Error) |
+| type        | VARCHAR(100) |             | Infrastructure type (e.g., vector store, inference backend) |
+| endpoints   | TEXT[]       |             | Array of infrastructure endpoints/URLs |
+| version     | TEXT         |             | Infrastructure version |
+| created_at  | TIMESTAMPTZ  | DEFAULT NOW() | Timestamp of creation |
+| updated_at  | TIMESTAMPTZ  | DEFAULT NOW() | Timestamp of last update |
+
+### Services-Infrastructure Junction Table
+
+**Table Name:** `services_infra`
+
+| Column Name | Data Type | Constraints | Description |
+|-------------|-----------|-------------|-------------|
+| service_id  | UUID      | PRIMARY KEY, FOREIGN KEY | References services(id) |
+| infra_id    | UUID      | PRIMARY KEY, FOREIGN KEY | References infra(id) |
+
+**Note:** This is a many-to-many relationship table with a composite primary key.
+
+### Services Table (Modified for Separate Design)
 
 **Table Name:** `services`
 
-| Column Name         | Data Type         | Constraints | Description |
-|---------------------|-------------------|-------------|-------------|
-| id                  | UUID              | PRIMARY KEY | Unique service identifier |
-| app_name            | VARCHAR(100)      | FOREIGN KEY | References applications(app_name) |
-| type                | VARCHAR(100)      |             | Service/Infrastructure type |
-| category            | service_category  | ENUM        | Service category (Application Service, Infrastructure) |
-| status              | Status            | ENUM        | Current status (Deploying, Running, Deleting, Error) |
-| created_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of creation |
-| updated_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of last update |
-| version             | TEXT              |             | Service/Infrastructure version |
-| properties          | JSONB             |             | Additional properties (endpoints, models, credentials) |
-| infrastructure_deps | JSONB             |             | Array of infrastructure service dependencies |
+| Column Name     | Data Type    | Constraints | Description |
+|-----------------|--------------|-------------|-------------|
+| id              | UUID         | PRIMARY KEY | Unique service identifier |
+| app_id          | VARCHAR(100) | FOREIGN KEY | References applications(id) |
+| type            | VARCHAR(100) |             | Service type (e.g., Summarization, Digitization) |
+| endpoints       | TEXT[]       |             | Array of service endpoints/URLs |
+| version         | TEXT         |             | Service version |
+| created_at      | TIMESTAMPTZ  | DEFAULT NOW() | Timestamp of creation |
+| updated_at      | TIMESTAMPTZ  | DEFAULT NOW() | Timestamp of last update |
 
-**Custom Type:**
-```sql
-CREATE TYPE service_category AS ENUM (
-    'Application Service',
-    'Infrastructure'
-);
-```
+### Comparison: Unified vs Separate Design
 
-**Infrastructure Dependencies JSONB Structure:**
-```json
-{
-  "dependencies": [
-    {
-      "service_id": "uuid-of-vector-store",
-      "type": "vector_store",
-      "required": true
-    },
-    {
-      "service_id": "uuid-of-inference-backend",
-      "type": "inference_backend",
-      "required": true
-    }
-  ]
-}
-```
+| Aspect | Unified Services (Recommended) | Separate Infrastructure (Alternative) |
+|--------|--------------------------------|--------------------------------------|
+| **Schema Complexity** | ✅ 2 tables (applications, services) | ⚠️ 4 tables (applications, services, infra, services_infra) |
+| **Type Safety** | ✅ ENUM-based category field | ✅ Strong - Foreign keys enforce relationships |
+| **Data Integrity** | ✅ Single table, simpler validation | ✅ Database-level referential integrity |
+| **Query Performance** | ✅ Simple queries, no joins needed | ⚠️ Requires joins across multiple tables |
+| **Lifecycle Management** | ✅ Unified lifecycle for all service types | ✅ Independent infrastructure lifecycle |
+| **Infrastructure Reusability** | ⚠️ Requires application-level logic | ✅ Explicit many-to-many via junction table |
+| **Separation of Concerns** | ⚠️ Mixed in single table | ✅ Clear domain boundaries |
+| **Schema Evolution** | ✅ Easy to add new categories | ⚠️ Requires migrations for new tables |
+| **Orphaned Records** | ✅ Simpler to manage | ✅ Prevented by foreign keys |
+| **Finding Services by Type** | ✅ Simple WHERE category clause | ⚠️ Requires filtering across tables |
+| **Dependency Queries** | ✅ Simple category-based queries | ⚠️ Complex joins via junction table |
+| **Infrastructure Catalog** | ⚠️ Requires filtering by category | ✅ Easy to build separate catalog |
+| **Backup/Restore** | ✅ Single table backup | ⚠️ Must backup multiple related tables |
+| **Access Control** | ⚠️ Same permissions for all service types | ✅ Can set different permissions per table |
+| **Monitoring** | ⚠️ Requires category-based filtering | ✅ Separate metrics for services vs infra |
 
-### Comparison: Separate vs Unified Design
+### Advantages of Separate Infrastructure Design
+#### 1. **Infrastructure Reusability**
+The many-to-many relationship via junction table enables:
+- Multiple services can share the same infrastructure (e.g., multiple services using one vector store)
+- Reduces infrastructure provisioning costs
+- Better resource utilization
 
-| Aspect | Separate Infrastructure (Recommended) | Unified Services (Alternative) |
-|--------|--------------------------------------|--------------------------------|
-| **Schema Complexity** | 5 tables (users, applications, services, infra, services_infra) | 3 tables (users, applications, services) |
-| **Type Safety** | ✅ Strong - Foreign keys enforce relationships | ⚠️ Weak - JSONB dependencies, no FK enforcement |
-| **Data Integrity** | ✅ Database-level referential integrity | ⚠️ Application-level validation required |
-| **Query Performance** | ✅ Indexed foreign keys, efficient joins | ⚠️ JSONB queries slower, GIN indexes needed |
-| **Lifecycle Management** | ✅ Independent infrastructure lifecycle | ❌ Mixed lifecycle complicates management |
-| **Infrastructure Reusability** | ✅ Explicit many-to-many via junction table | ⚠️ Implicit via JSONB, harder to query |
-| **Separation of Concerns** | ✅ Clear domain boundaries | ❌ Mixed concerns in single table |
-| **Schema Evolution** | ⚠️ Requires migrations for new fields | ✅ JSONB allows flexible schema |
-| **Orphaned Records** | ✅ Prevented by foreign keys | ❌ Possible if JSONB references deleted services |
-| **Circular Dependencies** | ✅ Can be prevented at DB level | ❌ Must be checked in application code |
-| **Finding Shared Infra** | ✅ Simple COUNT query on junction table | ⚠️ Complex JSONB aggregation queries |
-| **Dependency Queries** | ✅ Standard SQL joins | ⚠️ JSONB path queries with LATERAL joins |
-| **Infrastructure Catalog** | ✅ Easy to build separate catalog | ⚠️ Requires filtering by category |
-| **Backup/Restore** | ✅ Can backup infrastructure separately | ⚠️ All-or-nothing approach |
-| **Access Control** | ✅ Can set different permissions per table | ⚠️ Same permissions for all service types |
-| **Monitoring** | ✅ Separate metrics for services vs infra | ⚠️ Requires category-based filtering |
-
-### Limitations of Unified Design
-
-#### 1. **No Infrastructure Reusability (Critical Limitation)**
-The 1:1 relationship via `parent_service_id` means:
-- **Each infrastructure can only be bound to ONE service**
-- Cannot share a vector database across multiple services
-- Cannot share an inference model across multiple applications
-- Must provision duplicate infrastructure for each service that needs it
-
-**Real-world Impact:**
-```
-Service A (Summarization) → Vector DB Instance 1
-Service B (Digitization)  → Vector DB Instance 2  (Duplicate!)
-Service C (Chat Bot)      → Vector DB Instance 3  (Duplicate!)
-```
-
-Instead of:
+**Example:**
 ```
 Service A (Summarization) ─┐
 Service B (Digitization)  ├─→ Shared Vector DB Instance
 Service C (Chat Bot)      ─┘
 ```
 
-#### 2. **Cannot Leverage Existing Customer Infrastructure**
-Many customers already have:
-- Existing vector databases (OpenSearch, Pinecone, Weaviate)
-- Running inference models/endpoints
-- Established ML infrastructure
+#### 2. **Strong Referential Integrity**
+- Foreign keys enforce valid relationships at database level
+- Prevents orphaned records automatically
+- Cascading deletes can be configured for cleanup
 
-**Problems:**
-- Cannot reference pre-existing infrastructure in the catalog
-- Forces customers to provision new infrastructure even when they have suitable ones
-- No way to "bring your own infrastructure" (BYOI)
-- Increases costs and deployment complexity
+#### 3. **Independent Lifecycle Management**
+- Infrastructure can exist independently of services
+- Easier to manage infrastructure upgrades and maintenance
+- Can delete services without affecting shared infrastructure
 
-#### 3. **Poor UI/UX for Infrastructure Selection**
-The 1:1 model prevents building user-friendly interfaces:
+#### 4. **Clear Separation of Concerns**
+- Services and infrastructure are distinct domain entities
+- Different teams can manage services vs infrastructure
+- Easier to implement role-based access control
 
-**Cannot implement:**
-- Dropdown to select from available vector databases
-- List of running inference models to choose from
-- Infrastructure marketplace/catalog
-- "Use existing" vs "Create new" infrastructure options
-
-**UI Flow Limitation:**
-```
-❌ Cannot do this:
-1. User creates a service
-2. UI shows: "Select Vector Database"
-   - [Existing VDB 1] ← Already running
-   - [Existing VDB 2] ← Already running
-   - [Create New VDB]
-3. User selects existing VDB
-
-✅ Forced to do this:
-1. User creates a service
-2. System automatically creates new dedicated infrastructure
-3. No choice, no reuse
-```
-
-#### 4. **Weak Referential Integrity**
-```sql
--- In unified design with JSONB dependencies, this can happen:
-DELETE FROM services WHERE id = 'infra-uuid';
--- Other services still reference this in their infrastructure_deps JSONB
--- No database error, creates orphaned references
-```
-
-#### 5. **Complex Dependency Queries**
-```sql
--- Finding all services using an infrastructure requires complex JSONB queries:
-SELECT s.*
-FROM services s
-CROSS JOIN LATERAL jsonb_array_elements(s.infrastructure_deps->'dependencies') AS dep
-WHERE (dep->>'service_id')::uuid = 'infra-uuid';
-
--- vs. simple join in separate design:
-SELECT s.* FROM services s
-JOIN services_infra si ON s.id = si.service_id
-WHERE si.infra_id = 'infra-uuid';
-```
-
-#### 6. **Resource Waste and Cost Implications**
-- **Duplicate Infrastructure**: Each service gets its own infrastructure
-- **Higher Costs**: 10 services = 10 vector DBs instead of 1 shared
-- **Resource Inefficiency**: Underutilized infrastructure instances
-- **Operational Overhead**: Managing many small instances vs few large ones
-
-**Cost Example:**
-```
-Separate Design:
-- 1 Shared Vector DB: $500/month
-- 10 Services using it: $500/month total
-
-Unified Design:
-- 10 Dedicated Vector DBs: $500 × 10 = $5,000/month
-- 10x cost increase!
-```
-
-#### 7. **Mixed Lifecycle Management**
-- Infrastructure typically has longer lifecycle than application services
-- Upgrades, backups, and monitoring become more complex
-- Cannot easily separate infrastructure operations from service operations
-- Deleting a service forces deletion of its infrastructure (even if others could use it)
-
-#### 8. **No Database-Level Validation for JSONB Dependencies**
-- Cannot enforce that infrastructure_deps references valid service IDs
-- Cannot prevent circular dependencies at database level
-- Must implement all validation in application code
-- Risk of data inconsistency
-
-#### 9. **Scalability Concerns**
-- Cannot scale infrastructure independently from services
-- Cannot implement infrastructure pooling or load balancing
-- Difficult to implement multi-tenancy for infrastructure
-- No way to track infrastructure utilization across services
-
-#### 10. **Enterprise Requirements Not Met**
-Enterprise customers typically need:
+#### 5. **Enterprise Features**
+Enables advanced enterprise requirements:
 - **Infrastructure Catalog**: Browse and select from approved infrastructure
 - **Cost Allocation**: Track which services use which infrastructure
 - **Compliance**: Ensure services use certified/approved infrastructure
 - **Governance**: Control which infrastructure can be used
-- **Chargeback**: Bill teams based on infrastructure usage
 
-The unified design makes these requirements difficult or impossible to implement.
+### When to Consider Separate Design
 
-### When to Consider Unified Design
-
-The unified design might be acceptable if:
-- Infrastructure is rarely shared across services (1:1 relationship)
-- Application is small-scale with limited infrastructure
-- Schema flexibility is more important than data integrity
-- Team prefers simpler schema over stronger guarantees
-- Infrastructure lifecycle matches service lifecycle
+The separate infrastructure design is beneficial when:
+- Infrastructure needs to be shared across multiple services
+- Infrastructure has a different lifecycle than services
+- Need strong referential integrity and data consistency
+- Enterprise features like infrastructure catalog are required
+- Team size allows managing additional schema complexity
 
 ### Recommendation
 
-**Use the separate infrastructure design** (recommended in this proposal) because:
-1. Infrastructure and services have fundamentally different lifecycles
-2. Database-level integrity prevents data corruption
-3. Better performance for relationship queries
-4. Aligns with industry patterns (Kubernetes, cloud providers)
-5. Easier to scale and maintain long-term
-6. Supports future features like infrastructure marketplace
+**Use the unified services table design** (recommended in this proposal) because:
+1. Simpler schema with only 2 tables
+2. Easier to query and maintain
+3. Sufficient for most use cases where infrastructure sharing is not critical
+4. Category-based filtering provides adequate separation
+5. Lower complexity for development and operations
 
-The additional complexity of 2 extra tables is justified by the significant benefits in data integrity, performance, and maintainability.
+The separate infrastructure design should be considered only when infrastructure reusability and independent lifecycle management are critical requirements that justify the additional schema complexity.
 
 ## Future Considerations
 
-1. **Keycloak Integration**: Schema can be extended to integrate with Keycloak's user management
+1. **User Management**: User authentication and authorization will be handled externally via Keycloak or similar identity management systems
 2. **Audit Logging**: Consider adding `updated_at` and `updated_by` columns
 3. **Soft Deletes**: May add `deleted_at` column for soft delete functionality
 4. **Indexing Strategy**: Create indexes based on query patterns as they emerge
@@ -591,10 +424,11 @@ The additional complexity of 2 extra tables is justified by the significant bene
 ## Conclusion
 
 This database design provides a solid foundation for the Catalog service with:
-- Clear relational structure with proper separation of concerns
-- Strong data integrity through foreign key constraints
+- Simple and maintainable schema with 2 tables (applications, services)
+- Unified services table with category-based distinction between deployable services and infrastructure
+- User management handled externally (e.g., via Keycloak)
+- Strong data integrity through foreign key constraints and ENUM types
 - Efficient querying capabilities with proper indexing
-- Scalability for growth and infrastructure sharing
-- Alignment with industry best practices and cloud-native patterns
-- Flexibility for future enhancements through JSONB properties
-- Support for complex service-infrastructure relationships (if we want to seperate it out)
+- Flexibility to add new service categories without schema changes
+- Clear application-to-services relationship (one-to-many)
+- Alternative separate infrastructure design available for advanced use cases requiring infrastructure reusability
