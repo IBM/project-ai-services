@@ -12,6 +12,7 @@ const (
 	VersionV2            = "v2"
 	DSCKind              = "DataScienceCluster"
 	DSCIKind             = "DSCInitialization"
+	SMTLevel             = 2
 )
 
 // OperatorConfig defines configuration for an operator.

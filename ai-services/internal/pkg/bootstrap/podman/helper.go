@@ -9,12 +9,11 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/spyre"
 )
-
-const smtLevel = 2
 
 func runServiceReport() error {
 	// validate spyre attachment first before running servicereport
@@ -170,14 +169,7 @@ func setupSMTLevel() error {
 		return fmt.Errorf("failed to get current SMT level: %w", err)
 	}
 
-	// Skip setup if SMT is already set to 2
-	if currentSMTLevel == smtLevel {
-		logger.Infof("SMT level is already set to %d, skipping setup", smtLevel, logger.VerbosityLevelDebug)
-
-		return nil
-	}
-
-	logger.Infof("Current SMT level is %d, setting to %d", currentSMTLevel, smtLevel, logger.VerbosityLevelDebug)
+	logger.Infof("Current SMT level is %d", currentSMTLevel, logger.VerbosityLevelDebug)
 
 	// 1. Enable smtstate.service
 	if err := systemctl("enable", "smtstate.service"); err != nil {
@@ -192,12 +184,17 @@ func setupSMTLevel() error {
 	logger.Infoln("smtstate.service started successfully", logger.VerbosityLevelDebug)
 
 	// 3. Set SMT level to 2
-	cmd = exec.Command("ppc64_cpu", fmt.Sprintf("--smt=%d", smtLevel))
-	out, err = cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to set SMT level to %d: %v, output: %s", smtLevel, err, string(out))
+	if currentSMTLevel != constants.SMTLevel {
+		logger.Infof("Setting SMT level from %d to %d", currentSMTLevel, constants.SMTLevel, logger.VerbosityLevelDebug)
+		cmd = exec.Command("ppc64_cpu", fmt.Sprintf("--smt=%d", constants.SMTLevel))
+		out, err = cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to set SMT level to %d: %v, output: %s", constants.SMTLevel, err, string(out))
+		}
+		logger.Infof("SMT level set to %d", constants.SMTLevel, logger.VerbosityLevelDebug)
+	} else {
+		logger.Infof("SMT level is already set to %d", constants.SMTLevel, logger.VerbosityLevelDebug)
 	}
-	logger.Infof("SMT level set to %d", smtLevel, logger.VerbosityLevelDebug)
 
 	// 4. Restart smtstate.service to persist the setting
 	if err := systemctl("restart", "smtstate.service"); err != nil {
