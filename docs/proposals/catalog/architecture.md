@@ -78,7 +78,7 @@ Security is managed at the Catalog UI Service level through a robust JWT-based a
 * **JWT Middleware (The Gatekeeper):**
     1.  **Extraction:** Retrieves the Bearer token from the authorization header of every incoming request.
     2.  **Signature Verification:** The server utilizes an in-memory **Secret Key** to validate the token's integrity. If the signature does not match the payload, the request is immediately rejected.
-    3.  **Claims Validation:** The middleware inspects expiration timestamps (`exp`) and RBAC roles (e.g., `admin` vs. `viewer`) before authorizing orchestration logic.
+    3.  **Claims Validation:** The middleware inspects expiration timestamps (`exp`) and RBAC roles (e.g., `admin` vs. `viewer` in future) before authorizing orchestration logic.
     4.  **Token Blacklisting:** Logout operations add tokens to an in-memory blacklist to prevent reuse. **Note:** For multi-instance deployments, this should be migrated to Redis for distributed token revocation.
 
 > Note: Initially we will start with the admin role implementation and extend it to other roles in the future.
