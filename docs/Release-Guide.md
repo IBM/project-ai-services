@@ -23,14 +23,16 @@ Complete the following tasks before initiating a release:
 
 ### 1. Security Compliance
 
-- **CVE Remediation**: Verify that all high-severity Common Vulnerabilities and Exposures (CVEs) have been addressed in the codebase
-- **Security Review**: Conduct a thorough review and remediate any critical or high-severity security findings
+- **CVE Remediation**: Verify that all high severity Common Vulnerabilities and Exposures (CVEs) have been addressed in the codebase
+  - Review the [Image Scanner GitHub Action](https://github.com/IBM/project-ai-services/actions/workflows/image-scanner.yml) logs to identify reported CVEs by trivy scanner in container images
+  - Check security issues identified by the [Dependabot](https://github.com/IBM/project-ai-services/security/dependabot) scanner
+- **Security Review**: Conduct a thorough review and remediate any critical or high severity security findings
 
 ### 2. Compliance Reporting
 
 - **OSCC Statistics**: Generate Open Source Component Compliance (OSCC) statistics
-- **License Reports**: Generate color-coded reports of package licenses for compliance review
-- **Release Criteria**: Confirm that all compliance and security metrics satisfy the release requirements
+- **License Reports**: Generate color-coded reports of package licenses for compliance review by following the [documented steps](https://ibm.ent.box.com/notes/1821974877149?s=jnvmuk4d2lc0aqki5n5tukvq7lldqxe6)
+- **Release Criteria**: Confirm that all package licenses are approved according to the [OSSC license guidelines](https://w3.ibm.com/w3publisher/ossc-process/resources/licenses)
 
 ## Release Process
 
@@ -71,7 +73,7 @@ Validate image signatures using Cosign to ensure integrity.
 
 1. Install and configure the Cosign tool if not already available
 2. Verify the image signatures using the public key from the release artifacts
-3. Refer to the [Verified Installation with Cosign](https://github.com/adarshagrawal38/project-ai-services/blob/main/docs/INSTALLATION.md#verified-installation-with-cosign) section in the Installation Guide for detailed instructions
+3. Refer to the [Verified Installation with Cosign](./INSTALLATION.md#verified-installation-with-cosign) section in the Installation Guide for detailed instructions
 
 
 ### 4. Image Promotion
