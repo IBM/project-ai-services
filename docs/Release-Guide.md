@@ -26,6 +26,7 @@ Complete the following tasks before initiating a release:
 - **CVE Remediation**: Verify that all high severity Common Vulnerabilities and Exposures (CVEs) have been addressed in the codebase
   - Review the [Image Scanner GitHub Action](https://github.com/IBM/project-ai-services/actions/workflows/image-scanner.yml) logs to identify reported CVEs by trivy scanner in container images
   - Check security issues identified by the [Dependabot](https://github.com/IBM/project-ai-services/security/dependabot) scanner
+  - Trigger the [Twistlock Scanner Jenkins pipeline](https://sys-powercloud-team-jenkins.swg-devops.com/job/ai-services/job/twist-lock-scan/) to scan container images and review the generated report
 - **Security Review**: Conduct a thorough review and remediate any critical or high severity security findings
 
 ### 2. Compliance Reporting
