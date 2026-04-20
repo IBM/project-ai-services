@@ -220,7 +220,7 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 				if !ok {
 					return
 				}
-				logger.Errorln(line)
+				logger.Infoln(line)
 			}
 		}
 	}()
