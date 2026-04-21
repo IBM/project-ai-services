@@ -35,10 +35,28 @@ import {
 } from "@carbon/icons-react";
 import styles from "./AiDeployments.module.scss";
 import type { AiDeploymentRow } from "./types";
-import { ACTION_TYPES, HEADERS, INITIAL_STATE, appReducer } from "./types";
+import {
+  ACTION_TYPES,
+  HEADERS,
+  INITIAL_STATE,
+  appReducer,
+  getUniqueTypes,
+  FILTER_CATEGORIES,
+} from "./types";
 
 const AiDeploymentsPage = () => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
+
+  // Get unique types dynamically from data
+  const uniqueTypes = getUniqueTypes(state.rowsData);
+
+  // Categorize types into architectures and services
+  const availableArchitectures = uniqueTypes.filter((type) =>
+    FILTER_CATEGORIES.architectures.includes(type),
+  );
+  const availableServices = uniqueTypes.filter((type) =>
+    FILTER_CATEGORIES.services.includes(type),
+  );
 
   const handleDelete = async () => {
     if (!state.selectedRowId) {
@@ -147,12 +165,31 @@ const AiDeploymentsPage = () => {
     }
   };
 
-  const filteredRows = state.rowsData.filter((row) =>
-    [row.name, row.status, row.uptime, row.type, row.messages]
+  const filteredRows = state.rowsData.filter((row) => {
+    const matchesSearch = [
+      row.name,
+      row.status,
+      row.uptime,
+      row.type,
+      row.messages,
+    ]
       .join(" ")
       .toLowerCase()
-      .includes(state.search.toLowerCase()),
-  );
+      .includes(state.search.toLowerCase());
+
+    // Combine all selected filters (architectures + services)
+    const allSelectedFilters = [
+      ...state.filters.architectures,
+      ...state.filters.services,
+    ];
+
+    // If no filters selected, show all (that match search)
+    // If filters selected, show only rows matching any of the selected filters
+    const matchesTypeFilter =
+      allSelectedFilters.length === 0 || allSelectedFilters.includes(row.type);
+
+    return matchesSearch && matchesTypeFilter;
+  });
 
   const paginatedRows = filteredRows.slice(
     (state.page - 1) * state.pageSize,
@@ -211,7 +248,17 @@ const AiDeploymentsPage = () => {
       <div className={styles.tableContent}>
         <Grid fullWidth>
           <Column lg={16} md={8} sm={4} className={styles.tableColumn}>
-            <DataTable rows={paginatedRows} headers={HEADERS} size="lg">
+            <DataTable
+              rows={paginatedRows}
+              headers={HEADERS.filter(
+                (h) =>
+                  h.key === "actions" ||
+                  state.visibleColumns[
+                    h.key as keyof typeof state.visibleColumns
+                  ],
+              )}
+              size="lg"
+            >
               {({
                 rows,
                 headers,
@@ -238,13 +285,96 @@ const AiDeploymentsPage = () => {
                       />
 
                       <TableToolbarContent>
-                        <Button
-                          hasIconOnly
-                          kind="ghost"
+                        <OverflowMenu
                           renderIcon={Filter}
-                          iconDescription="Filter"
+                          iconDescription="Filter rows"
+                          aria-label="Filter rows"
                           size="lg"
-                        />
+                          flipped
+                        >
+                          <li
+                            className={styles.overflowMenuContent}
+                            role="none"
+                          >
+                            <h6 className={styles.overflowMenuHeading}>
+                              Filter architectures
+                            </h6>
+                            <CheckboxGroup legendText="">
+                              {availableArchitectures.map((arch) => (
+                                <Checkbox
+                                  key={`filter-arch-${arch}`}
+                                  labelText={arch}
+                                  id={`filter-arch-${arch.replace(/\s+/g, "-").toLowerCase()}`}
+                                  checked={state.pendingFilters.architectures.includes(
+                                    arch,
+                                  )}
+                                  onChange={() =>
+                                    dispatch({
+                                      type: ACTION_TYPES.SET_PENDING_FILTER,
+                                      payload: {
+                                        category: "architectures",
+                                        value: arch,
+                                      },
+                                    })
+                                  }
+                                />
+                              ))}
+                            </CheckboxGroup>
+                          </li>
+                          <li
+                            className={styles.overflowMenuContent}
+                            role="none"
+                          >
+                            <h6 className={styles.overflowMenuHeading}>
+                              Filter services
+                            </h6>
+                            <CheckboxGroup legendText="">
+                              {availableServices.map((service) => (
+                                <Checkbox
+                                  key={`filter-service-${service}`}
+                                  labelText={service}
+                                  id={`filter-service-${service.replace(/\s+/g, "-").toLowerCase()}`}
+                                  checked={state.pendingFilters.services.includes(
+                                    service,
+                                  )}
+                                  onChange={() =>
+                                    dispatch({
+                                      type: ACTION_TYPES.SET_PENDING_FILTER,
+                                      payload: {
+                                        category: "services",
+                                        value: service,
+                                      },
+                                    })
+                                  }
+                                />
+                              ))}
+                            </CheckboxGroup>
+                            <div className={styles.overflowMenuActions}>
+                              <Button
+                                kind="secondary"
+                                size="sm"
+                                onClick={() =>
+                                  dispatch({
+                                    type: ACTION_TYPES.RESET_FILTERS,
+                                  })
+                                }
+                              >
+                                Reset filters
+                              </Button>
+                              <Button
+                                kind="primary"
+                                size="sm"
+                                onClick={() =>
+                                  dispatch({
+                                    type: ACTION_TYPES.APPLY_FILTERS,
+                                  })
+                                }
+                              >
+                                Apply filters
+                              </Button>
+                            </div>
+                          </li>
+                        </OverflowMenu>
                         <Button
                           hasIconOnly
                           kind="ghost"
@@ -255,13 +385,59 @@ const AiDeploymentsPage = () => {
                             dispatch({ type: ACTION_TYPES.OPEN_EXPORT_DIALOG })
                           }
                         />
-                        <Button
-                          hasIconOnly
-                          kind="ghost"
+                        <OverflowMenu
                           renderIcon={ColumnIcon}
                           iconDescription="Edit columns"
+                          aria-label="Edit columns"
                           size="lg"
-                        />
+                          flipped
+                        >
+                          <li
+                            className={styles.overflowMenuContent}
+                            role="none"
+                          >
+                            <h6 className={styles.overflowMenuHeading}>
+                              Edit columns
+                            </h6>
+                            <CheckboxGroup legendText="">
+                              {HEADERS.filter((h) => h.key !== "actions").map(
+                                (header) => (
+                                  <Checkbox
+                                    key={`column-${header.key}`}
+                                    labelText={String(header.header)}
+                                    id={`column-${header.key}`}
+                                    checked={
+                                      state.visibleColumns[
+                                        header.key as keyof typeof state.visibleColumns
+                                      ]
+                                    }
+                                    disabled={header.key === "name"}
+                                    onChange={() =>
+                                      dispatch({
+                                        type: ACTION_TYPES.TOGGLE_COLUMN_VISIBILITY,
+                                        payload: header.key,
+                                      })
+                                    }
+                                  />
+                                ),
+                              )}
+                            </CheckboxGroup>
+                            <div className={styles.overflowMenuActions}>
+                              <Button
+                                kind="secondary"
+                                size="sm"
+                                className={styles.overflowMenuButton}
+                                onClick={() =>
+                                  dispatch({
+                                    type: ACTION_TYPES.RESET_COLUMN_VISIBILITY,
+                                  })
+                                }
+                              >
+                                Reset
+                              </Button>
+                            </div>
+                          </li>
+                        </OverflowMenu>
                         <div className={styles.deployButtonWrapper}>
                           <MenuButton
                             label="Deploy"

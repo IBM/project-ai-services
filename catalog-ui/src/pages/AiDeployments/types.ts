@@ -200,6 +200,17 @@ export const MOCK_ROWS: AiDeploymentRow[] = [
   },
 ];
 
+// Helper function to get unique types from data
+export const getUniqueTypes = (rows: AiDeploymentRow[]): string[] => {
+  return Array.from(new Set(rows.map((row) => row.type))).sort();
+};
+
+// Filter categories - define which types belong to which category
+export const FILTER_CATEGORIES = {
+  architectures: ["Digital assistant", "Deep process", "Summary"],
+  services: ["Translation", "Question and an..."],
+};
+
 // Initial state
 export const INITIAL_STATE: AppState = {
   search: "",
