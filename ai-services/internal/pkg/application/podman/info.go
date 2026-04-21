@@ -5,6 +5,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -41,8 +42,9 @@ func (p *PodmanApplication) Info(opts types.InfoOptions) error {
 	logger.Infoln("Version: " + version)
 
 	// Step3: Read and print the info.md file
+	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
 
-	if err := helpers.PrintInfo(p.runtime, opts.Name, appTemplate); err != nil {
+	if err := helpers.PrintInfo(tp, p.runtime, opts.Name, appTemplate); err != nil {
 		// not failing if overall info command, if we cannot display Info
 		logger.Errorf("failed to display info: %v\n", err)
 

@@ -155,7 +155,7 @@ func (p *PodmanApplication) deployApplication(ctx context.Context, opts types.Cr
 	logger.Infoln("-------")
 
 	// print the next steps to be performed at the end of create
-	if err := helpers.PrintNextSteps(p.runtime, opts.Name, opts.TemplateName); err != nil {
+	if err := helpers.PrintNextSteps(tp, p.runtime, opts.Name, opts.TemplateName); err != nil {
 		// do not want to fail the overall create if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)
 

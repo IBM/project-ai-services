@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -42,7 +43,6 @@ Examples:
 
 			var err error
 			argParams, err = validateConfigureFlags(rawArgParams)
-			_ = argParams
 
 			return err
 		},
@@ -53,15 +53,11 @@ Examples:
 				return fmt.Errorf("failed to read admin password: %w", err)
 			}
 
-			_ = adminPassword
-
-			return nil
-
-			// return bootstrap.Run(bootstrap.BootstrapOptions{
-			// 	AdminPassword: adminPassword,
-			// 	Runtime:       vars.RuntimeFactory.GetRuntimeType(),
-			// 	ArgParams:     argParams,
-			// })
+			return configure.Run(configure.ConfigureOptions{
+				AdminPassword: adminPassword,
+				Runtime:       vars.RuntimeFactory.GetRuntimeType(),
+				ArgParams:     argParams,
+			})
 		},
 	}
 
