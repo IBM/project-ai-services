@@ -220,7 +220,6 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 
 	// wait for container to exit
 	go func() {
-		// Wait for container to exit
 		_, err := containers.Wait(pc.Context, containerNameOrID, nil)
 		if err == nil {
 			// Container exited, cancel the logs streaming
