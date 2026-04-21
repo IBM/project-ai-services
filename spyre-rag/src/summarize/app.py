@@ -37,8 +37,11 @@ from summarize.summ_utils import (
     trim_to_last_sentence,
     MAX_INPUT_WORDS,
     compute_target_and_max_tokens,
+    compute_target_and_max_tokens_from_level,
     SummarizeSuccessResponse,
     validate_summary_length,
+    validate_summary_level,
+    validate_input_word_count_for_level,
     extract_text_from_pdf
 )
 
@@ -139,20 +142,57 @@ def _validate_input_word_count(input_word_count: int, summary_length: Optional[i
 async def handle_summarize(
     content_text: str,
     input_type: str,
-    summary_length: Optional[int],
+    summary_length: Optional[int] = None,
+    summary_level: Optional[str] = None,
     stream: bool = False,
 ):
     """Core summarization logic shared by both JSON and form-data paths."""
     input_word_count = word_count(content_text)
-    _validate_input_word_count(input_word_count, summary_length)
+    
+    # Validate that both parameters are not provided simultaneously
+    if summary_level is not None and summary_length is not None:
+        raise SummarizeException(
+            400, "INVALID_PARAMETER",
+            "Cannot specify both 'summary_level' and 'length'. Please use only one."
+        )
+    
+    # Determine which approach to use: level-based or length-based
+    if summary_level is not None:
+        # New approach: use abstraction level
+        # Validate input and get available output tokens
+        available_output_tokens = validate_input_word_count_for_level(input_word_count, summary_level)
+        target_words, min_words, max_words, max_tokens = compute_target_and_max_tokens_from_level(
+            input_word_count, summary_level, available_output_tokens
+        )
+        has_length_spec = True
+        logger.info(
+            f"Received {input_type} request with input size: {input_word_count} words, "
+            f"level: {summary_level}, target: {target_words} words ({min_words}-{max_words})"
+        )
+    elif summary_length is not None:
+        # Legacy approach: direct length specification
+        _validate_input_word_count(input_word_count, summary_length)
+        target_words, min_words, max_words, max_tokens = compute_target_and_max_tokens(
+            input_word_count, summary_length
+        )
+        has_length_spec = True
+        logger.info(
+            f"Received {input_type} request with input size: {input_word_count} words, "
+            f"target summary length: {summary_length} words"
+        )
+    else:
+        # Automatic: use default coefficient
+        _validate_input_word_count(input_word_count, None)
+        target_words, min_words, max_words, max_tokens = compute_target_and_max_tokens(
+            input_word_count, None
+        )
+        has_length_spec = False
+        logger.info(
+            f"Received {input_type} request with input size: {input_word_count} words, "
+            f"automatic length: {target_words} words"
+        )
 
-    target_words, max_tokens = compute_target_and_max_tokens(input_word_count, summary_length)
-    messages = build_messages(content_text, target_words, summary_length)
-
-    logger.info(
-        f"Received {input_type} request with input size:{input_word_count} words"
-        f"{f', target summary length: {summary_length} words' if summary_length is not None else ''}"
-    )
+    messages = build_messages(content_text, target_words, min_words, max_words, has_length_spec)
 
     llm_endpoint = llm_model_dict['llm_endpoint']
     llm_model = llm_model_dict['llm_model']
@@ -231,9 +271,19 @@ description=(
       "| Field | Type | Required | Description |\n"
       "|-------|------|----------|-------------|\n"
       "| `text` | string | Yes | Plain text content to summarize |\n"
-      "| `length` | integer | No | Desired summary length in words  |\n"
+      "| `summary_level` | string | No | Abstraction level: 'brief', 'standard' (default), or 'detailed' |\n"
+      "| `length` | integer | No | (Legacy) Desired summary length in words |\n"
       "| `stream` | boolean | No | Stream the summary as it is generated, default False |\n\n"
-      "**Example:**\n"
+      "**Note:** Use either `summary_level` (recommended) or `length` (legacy), not both.\n\n"
+      "**Example with summary_level:**\n"
+      "```bash\n"
+      'curl -X POST /v1/summarize -H "Content-Type: application/json" -d '
+      '{\n'
+      '  "text": "Artificial intelligence has made significant progress...",\n'
+      '  "summary_level": "brief"\n'
+      '}\n'
+      "```\n\n"
+      "**Example with length (legacy):**\n"
       "```bash\n"
       'curl -X POST /v1/summarize -H "Content-Type: application/json" -d '
       '{\n'
@@ -246,9 +296,15 @@ description=(
       "| Field | Type | Required | Description |\n"
       "|-------|------|----------|-------------|\n"
       "| `file` | file | Conditional | `.txt` or `.pdf` file to summarize |\n"
-      "| `length` | integer | No | Desired summary length in words |\n"
+      "| `summary_level` | string | No | Abstraction level: 'brief', 'standard' (default), or 'detailed' |\n"
+      "| `length` | integer | No | (Legacy) Desired summary length in words |\n"
       "| `stream` | boolean | No | Stream the summary as it is generated, default False |\n\n"
-      "**Example (curl):**\n"
+      "**Note:** Use either `summary_level` (recommended) or `length` (legacy), not both.\n\n"
+      "**Example with summary_level:**\n"
+      "```bash\n"
+      'curl -X POST /v1/summarize -F "file=@report.pdf" -F "summary_level=detailed"\n'
+      "```\n\n"
+      "**Example with length (legacy):**\n"
       "```bash\n"
       'curl -X POST /v1/summarize -F "file=@report.pdf" -F "length=100"\n'
       "```\n\n"
@@ -280,16 +336,21 @@ async def summarize(request: Request):
             if not text:
                 raise SummarizeException(400, "MISSING_INPUT",
                                          "Either 'text' or 'file' parameter is required")
+            
+            # Support both summary_level (new) and length (legacy)
+            summary_level = validate_summary_level(body.get("summary_level"))
             summary_length = validate_summary_length(body.get("length"))
             stream = bool(body.get("stream", False))
 
-            return await handle_summarize(text, "text", summary_length, stream)
+            return await handle_summarize(text, "text", summary_length, summary_level, stream)
 
         # ----- Multipart / form-data path -----
         elif "multipart/form-data" in content_type:
             form = await request.form()
             file: Optional[UploadFile] = form.get("file")  # type: ignore[assignment]
 
+            # Support both summary_level (new) and length (legacy)
+            summary_level = validate_summary_level(form.get("summary_level"))
             summary_length = validate_summary_length(form.get("length"))
             stream = str(form.get("stream", "false")).lower() == "true"
 
@@ -323,7 +384,7 @@ async def summarize(request: Request):
             if not content_text or not content_text.strip():
                 raise SummarizeException(400, "EMPTY_INPUT",
                                          "The provided input contains no extractable text.")
-            return await handle_summarize(content_text.strip(), "file", summary_length, stream)
+            return await handle_summarize(content_text.strip(), "file", summary_length, summary_level, stream)
 
         else:
             raise SummarizeException(415, "UNSUPPORTED_CONTENT_TYPE",

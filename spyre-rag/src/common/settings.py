@@ -103,6 +103,33 @@ class TokenToWordRatios:
         )
 
 @dataclass(frozen=True)
+class SummarizationLevel:
+    multiplier: float
+    description: str
+
+@dataclass(frozen=True)
+class SummarizationLevels:
+    brief: SummarizationLevel
+    standard: SummarizationLevel
+    detailed: SummarizationLevel
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        if not isinstance(data, dict):
+            raise ValueError("Summarization levels element missing or malformed in the settings")
+        
+        required_levels = ["brief", "standard", "detailed"]
+        for level in required_levels:
+            if level not in data:
+                raise ValueError(f"Required level '{level}' is missing in summarization_levels settings")
+        
+        return cls(
+            brief=SummarizationLevel(**data["brief"]),
+            standard=SummarizationLevel(**data["standard"]),
+            detailed=SummarizationLevel(**data["detailed"])
+        )
+
+@dataclass(frozen=True)
 class Settings:
     prompts: Prompts
     context_lengths: ContextLengths
@@ -121,6 +148,8 @@ class Settings:
     summarization_prompt_token_count: int
     summarization_temperature: float
     summarization_stop_words: str
+    minimum_summary_words: int
+    summarization_levels: SummarizationLevels
     language_detection_min_confidence: float
     table_summary_max_tokens: int
 
@@ -136,10 +165,11 @@ class Settings:
         default_max_input_length = 6000
         default_prompt_template_token_count = 250
         default_max_query_token_length = 512
-        default_summarization_coefficient = 0.2
-        default_summarization_prompt_token_count = 100
-        default_summarization_temperature = 0.2
-        default_summarization_stop_words = "Keywords, Note, ***"
+        default_summarization_coefficient = 0.3
+        default_summarization_prompt_token_count = 150
+        default_summarization_temperature = 0.3
+        default_summarization_stop_words = ""
+        default_minimum_summary_words = 200
         default_language_detection_min_confidence = 0.5
         default_table_summary_max_tokens = 1024
 
@@ -205,6 +235,10 @@ class Settings:
             object.__setattr__(self, "summarization_stop_words", default_summarization_stop_words)
             logger.warning(f"Setting summarization_stop_words to default '{default_summarization_stop_words}' as it is missing in the settings")
 
+        if not (isinstance(self.minimum_summary_words, int) and self.minimum_summary_words > 0):
+            object.__setattr__(self, "minimum_summary_words", default_minimum_summary_words)
+            logger.warning(f"Setting minimum_summary_words to default '{default_minimum_summary_words}' as it is missing or malformed in the settings")
+
         if not isinstance(self.language_detection_min_confidence, float):
                 object.__setattr__(self, "language_detection_min_confidence", default_language_detection_min_confidence)
                 logger.warning(f"Setting language_detection_min_confidence to default '{default_language_detection_min_confidence}' as it is missing in the settings")
@@ -223,6 +257,8 @@ class Settings:
             raise ValueError("Required field 'context_lengths' is missing or not a dict in settings")
         if "token_to_word_ratios" not in data or not isinstance(data["token_to_word_ratios"], dict):
             raise ValueError("Required field 'token_to_word_ratios' is missing or not a dict in settings")
+        if "summarization_levels" not in data or not isinstance(data["summarization_levels"], dict):
+            raise ValueError("Required field 'summarization_levels' is missing or not a dict in settings")
 
         return cls(
             prompts = Prompts.from_dict(data["prompts"]),
@@ -242,6 +278,8 @@ class Settings:
             summarization_prompt_token_count = data.get("summarization_prompt_token_count", None),  # type: ignore[arg-type]
             summarization_temperature = data.get("summarization_temperature", None),  # type: ignore[arg-type]
             summarization_stop_words = data.get("summarization_stop_words", None),  # type: ignore[arg-type]
+            minimum_summary_words = data.get("minimum_summary_words", None),  # type: ignore[arg-type]
+            summarization_levels = SummarizationLevels.from_dict(data["summarization_levels"]),
             language_detection_min_confidence = data.get("language_detection_min_confidence", None),  # type: ignore[arg-type]
             table_summary_max_tokens = data.get("table_summary_max_tokens", None)  # type: ignore[arg-type]
         )
