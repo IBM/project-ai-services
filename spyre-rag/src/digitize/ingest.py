@@ -1,6 +1,6 @@
 from pathlib import Path
 import time
-from typing import Optional
+from typing import Optional, Callable
 
 import common.db_utils as db
 from common.emb_utils import get_embedder
@@ -11,6 +11,108 @@ from digitize.types import JobStatus, DocStatus
 import digitize.config as config
 
 logger = get_logger("ingest")
+
+def create_indexing_handler(emb_model_dict: dict, status_mgr: Optional[StatusManager], doc_id_dict: Optional[dict]):
+    """
+    Create an indexing handler that can be called immediately after chunking of a document.
+
+    Args:
+        emb_model_dict: Dictionary containing embedding model configuration
+        status_mgr: Status manager for updating document status
+        doc_id_dict: Mapping of document names to IDs
+
+    Returns:
+        Callable that handles indexing of a single document's chunks
+    """
+    # Initialize resources once
+    vector_store = db.get_vector_store()
+    embedder = get_embedder(
+        emb_model_dict['emb_model'],
+        emb_model_dict['emb_endpoint'],
+        emb_model_dict['max_tokens']
+    )
+
+    def index_document_chunks(doc_id: str, chunks: list, path: str) -> bool:
+        """
+        Index a single document's chunks immediately after chunking completes.
+
+        Args:
+            doc_id: Document ID
+            chunks: List of chunk dictionaries
+            path: Original file path
+
+        Returns:
+            bool: True if indexing succeeded, False otherwise
+        """
+        nonlocal vector_store, embedder
+
+        try:
+            logger.debug(f"Immediately indexing {len(chunks)} chunks for document: {doc_id}")
+
+            # Capture indexing timing
+            indexing_start_time = time.time()
+
+            # Index the chunks
+            success = vector_store.insert_chunks(chunks, embedding=embedder)
+            indexing_time = time.time() - indexing_start_time
+
+            if not success:
+                logger.error(f"Failed to index document {doc_id}")
+                if status_mgr and doc_id_dict:
+                    status_mgr.update_doc_metadata(
+                        doc_id,
+                        {
+                            "status": DocStatus.FAILED,
+                            "timing_in_secs": {"indexing": round(indexing_time, 2)}
+                        },
+                        error="Failed to index document chunks into vector database"
+                    )
+                    status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+                return False
+
+            # Update status to COMPLETED with indexing timing
+            if status_mgr and doc_id_dict:
+                logger.debug(f"Indexing Done: updating doc metadata to COMPLETED for document: {doc_id}")
+                status_mgr.update_doc_metadata(
+                    doc_id,
+                    {
+                        "status": DocStatus.COMPLETED,
+                        "completed_at": get_utc_timestamp(),
+                        "timing_in_secs": {"indexing": round(indexing_time, 2)}
+                    }
+                )
+                status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
+
+            logger.info(f"✅ Successfully indexed document {doc_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Exception during indexing for {doc_id}: {e}", exc_info=True)
+
+            # Try to reinitialize connections for next document
+            try:
+                logger.debug("Reinitializing vector store and embedder after failure")
+                vector_store = db.get_vector_store()
+                embedder = get_embedder(
+                    emb_model_dict['emb_model'],
+                    emb_model_dict['emb_endpoint'],
+                    emb_model_dict['max_tokens']
+                )
+            except Exception as reinit_error:
+                logger.error(f"Failed to reinitialize connections: {reinit_error}")
+
+            # Mark document as failed
+            if status_mgr and doc_id_dict:
+                status_mgr.update_doc_metadata(
+                    doc_id,
+                    {"status": DocStatus.FAILED},
+                    error=f"Indexing exception: {str(e)}"
+                )
+                status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
+
+            return False
+
+    return index_document_chunks
 
 def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Optional[dict] = None):
 
@@ -40,74 +142,25 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
 
         emb_model_dict, llm_model_dict, _ = get_model_endpoints()
 
-        # Initialize/reset the database before processing any files
-        vector_store = db.get_vector_store()
         out_path = setup_digitized_doc_dir()
+
+        # Create indexing handler for immediate indexing after chunking
+        indexing_handler = create_indexing_handler(emb_model_dict, status_mgr, doc_id_dict)
 
         start_time = time.time()
         # Reserve 100 tokens from embedding model's max_tokens to account for metadata
         # that will be prepended to content during final merge, ensuring total tokens stay within embedding model limits
-        doc_chunks_dict, converted_pdf_stats = process_documents(
+        _, converted_pdf_stats = process_documents(
             input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'],  emb_model_dict["emb_endpoint"],
-            max_tokens=emb_model_dict['max_tokens'] - 100, job_id=job_id, doc_id_dict=doc_id_dict)
+            max_tokens=emb_model_dict['max_tokens'] - 100, job_id=job_id, doc_id_dict=doc_id_dict,
+            indexing_callback=indexing_handler)
         # converted_pdf_stats holds { file_name: {page_count: int, table_count: int, timings: {conversion: time_in_secs, process_text: time_in_secs, process_tables: time_in_secs, chunking: time_in_secs}} }
-        if converted_pdf_stats is None or doc_chunks_dict is None:
+        if converted_pdf_stats is None:
             ingestion_failed()
             return
 
-        if doc_chunks_dict:
-            # Always index documents - treating each request as fresh
-            logger.info("Loading processed documents into vector DB")
-
-            embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
-
-            # Track failed document count for summary logging
-            failed_count = 0
-            total_count = len(doc_chunks_dict)
-
-            # Index each document separately and update status
-            for doc_id, chunks in doc_chunks_dict.items():
-                logger.debug(f"Indexing {len(chunks)} chunks for document: {doc_id}")
-
-                try:
-                    success = vector_store.insert_chunks(chunks, embedding=embedder)
-                except Exception as e:
-                    # Catch exceptions from insert_chunks (e.g., after all retries failed)
-                    # Mark this document as failed and continue with remaining documents
-                    success = False
-                    failed_count += 1
-                    logger.error(f"Failed to index document {doc_id}: {str(e)}")
-
-                    # Reinitialize vector store and embedder after a failure to ensure clean state for next document
-                    # This prevents cascading failures due to corrupted connection state
-                    try:
-                        logger.debug("Reinitializing vector store and embedder after failure")
-                        vector_store = db.get_vector_store()
-                        embedder = get_embedder(emb_model_dict['emb_model'], emb_model_dict['emb_endpoint'], emb_model_dict['max_tokens'])
-                        logger.debug("Successfully reinitialized connections")
-                    except Exception as reinit_error:
-                        logger.error(f"Failed to reinitialize connections: {reinit_error}")
-                        # Continue anyway - the next document will try with existing connections
-
-                # Update document status immediately after indexing attempt, regardless of success or failure
-                if status_mgr and doc_id_dict:
-                    if not success:
-                        # Mark as FAILED if indexing failed
-                        failed_count += 1
-                        logger.error(f"Failed to index document: {doc_id}")
-                        logger.error(f"Indexing failed: updating doc metadata to FAILED for document: {doc_id}")
-                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.FAILED}, error="Failed to index document chunks into vector database")
-                        status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
-                    else:
-                        # Mark as COMPLETED if indexing succeeded
-                        logger.debug(f"Indexing Done: updating doc metadata to COMPLETED for document: {doc_id}")
-                        status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.COMPLETED, "completed_at": get_utc_timestamp()})
-                        status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
-
-            if failed_count > 0:
-                logger.error(f"Indexing failed for {failed_count}/{total_count} document(s)")
-            else:
-                logger.info(f"All {total_count} processed document(s) loaded into Vector DB successfully")
+        # Note: Documents are now indexed immediately after chunking via the indexing_callback
+        logger.info(f"All {len(converted_pdf_stats)} document(s) have been processed and indexed")
 
         # Log time taken for the file
         end_time: float = time.time()  # End the timer for the current file

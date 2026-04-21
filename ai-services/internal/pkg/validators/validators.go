@@ -15,7 +15,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/power"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/rhn"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/root"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/servicereport"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/spyre"
 )
 
@@ -29,7 +28,6 @@ func init() {
 	PodmanRegistry.Register(power.NewPowerRule())
 	PodmanRegistry.Register(rhn.NewRHNRule())
 	PodmanRegistry.Register(spyre.NewSpyreRule())
-	PodmanRegistry.Register(servicereport.NewServiceReportRule())
 
 	// OpenshiftChecks
 	OpenshiftRegistry.Register(kubeconfig.NewKubeconfigRule())
