@@ -41,7 +41,7 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 	if err != nil {
 		s.Fail("failed to load catalog templates")
 
-		return err
+		return fmt.Errorf("failed to load catalog templates: %w", err)
 	}
 
 	// Check if catalog pod already exists
@@ -49,7 +49,7 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 	if err != nil {
 		s.Fail("failed to check existing pods")
 
-		return err
+		return fmt.Errorf("failed to check existing pods: %w", err)
 	}
 
 	if len(existingPods) == len(tmpls) {
