@@ -12,7 +12,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 const (
@@ -149,54 +148,6 @@ func FindFreeSpyreCards() ([]string, error) {
 	}
 
 	return free_spyre_dev_id_list, nil
-}
-
-func RunServiceReportContainer(runCmd string, mode string) error {
-	var svc_tool_cmd *exec.Cmd
-	switch mode {
-	case "configure":
-		svc_tool_cmd = exec.Command(
-			"podman",
-			"run",
-			"--privileged",
-			"--rm",
-			"--name", "servicereport",
-			"-v", "/etc/modprobe.d:/etc/modprobe.d",
-			"-v", "/etc/modules-load.d/:/etc/modules-load.d/",
-			"-v", "/etc/udev/rules.d/:/etc/udev/rules.d/",
-			"-v", "/etc/security/limits.d/:/etc/security/limits.d/",
-			"-v", "/etc/sos:/etc/sos",
-			vars.ToolImage,
-			"bash", "-c", runCmd,
-		)
-	case "validate":
-		svc_tool_cmd = exec.Command(
-			"podman",
-			"run",
-			"--privileged",
-			"--rm",
-			"--name", "servicereport",
-			"-v", "/etc/group:/etc/group:ro",
-			"-v", "/etc/modprobe.d:/etc/modprobe.d:ro",
-			"-v", "/etc/modules-load.d/:/etc/modules-load.d/:ro",
-			"-v", "/etc/udev/rules.d/:/etc/udev/rules.d/:ro",
-			"-v", "/etc/security/limits.d/:/etc/security/limits.d/:ro",
-			"-v", "/etc/sos:/etc/sos:ro",
-			vars.ToolImage,
-			"bash", "-c", runCmd,
-		)
-	default:
-		return fmt.Errorf("invalid mode passed. Allowed options are configure, validate")
-	}
-
-	svc_tool_cmd.Stdout = os.Stdout
-	svc_tool_cmd.Stderr = os.Stderr
-
-	if err := svc_tool_cmd.Run(); err != nil {
-		return fmt.Errorf("failed to run servicereport tool to validate Spyre cards configuration: %v", err)
-	}
-
-	return nil
 }
 
 func ParseSkipChecks(skipChecks []string) map[string]bool {

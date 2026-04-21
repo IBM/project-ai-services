@@ -47,6 +47,17 @@ func (e *embedTemplateProvider) Runtime() string {
 	return e.runtime.String()
 }
 
+// buildPath constructs a path handling empty root correctly.
+func (e *embedTemplateProvider) buildPath(parts ...string) string {
+	allParts := []string{}
+	if e.root != "" {
+		allParts = append(allParts, e.root)
+	}
+	allParts = append(allParts, parts...)
+
+	return strings.Join(allParts, "/")
+}
+
 // ListApplications lists all available application templates.
 func (e *embedTemplateProvider) ListApplications(hidden bool) ([]string, error) {
 	apps := []string{}
@@ -86,7 +97,7 @@ func (e *embedTemplateProvider) ListApplications(hidden bool) ([]string, error) 
 // ListApplicationTemplateValues lists all available template value keys for a single application.
 func (e *embedTemplateProvider) ListApplicationTemplateValues(app string) (map[string]string, error) {
 	// Check if the runtime directory exists for this application
-	runtimePath := fmt.Sprintf("%s/%s/%s", e.root, app, e.Runtime())
+	runtimePath := e.buildPath(app, e.Runtime())
 	_, err := fs.Stat(e.fs, runtimePath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -119,7 +130,7 @@ func (e *embedTemplateProvider) ListApplicationTemplateValues(app string) (map[s
 // LoadAllTemplates loads all templates for a given application.
 func (e *embedTemplateProvider) LoadAllTemplates(app string) (map[string]*template.Template, error) {
 	tmpls := make(map[string]*template.Template)
-	completePath := fmt.Sprintf("%s/%s/%s/templates", e.root, app, e.Runtime())
+	completePath := e.buildPath(app, e.Runtime(), "templates")
 	err := fs.WalkDir(e.fs, completePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -144,7 +155,7 @@ func (e *embedTemplateProvider) LoadAllTemplates(app string) (map[string]*templa
 
 // LoadPodTemplate loads and renders a pod template with the given parameters.
 func (e *embedTemplateProvider) LoadPodTemplate(app, file string, params any) (*models.PodSpec, error) {
-	path := fmt.Sprintf("%s/%s/%s/templates/%s", e.root, app, e.Runtime(), file)
+	path := e.buildPath(app, e.Runtime(), "templates", file)
 	data, err := e.fs.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read metadata: %w", err)
@@ -185,7 +196,7 @@ func (e *embedTemplateProvider) LoadPodTemplateWithValues(app, file, appName str
 
 func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []string, cliOverrides map[string]string) (map[string]interface{}, error) {
 	// Load the default values.yaml
-	valuesPath := fmt.Sprintf("%s/%s/%s/values.yaml", e.root, app, e.Runtime())
+	valuesPath := e.buildPath(app, e.Runtime(), "values.yaml")
 	valuesData, err := e.fs.ReadFile(valuesPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read values.yaml: %w", err)
@@ -235,11 +246,12 @@ func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []str
 // if set it loads the runtime specific metadata.
 func (e *embedTemplateProvider) LoadMetadata(app string, isRuntime bool) (*AppMetadata, error) {
 	// construct metadata.yaml path
-	p := path.Join(e.root, app)
+	var p string
 	if isRuntime {
-		p = path.Join(p, e.Runtime())
+		p = e.buildPath(app, e.Runtime(), "metadata.yaml")
+	} else {
+		p = e.buildPath(app, "metadata.yaml")
 	}
-	p = path.Join(p, "metadata.yaml")
 
 	data, err := e.fs.ReadFile(p)
 	if err != nil {
@@ -257,7 +269,7 @@ func (e *embedTemplateProvider) LoadMetadata(app string, isRuntime bool) (*AppMe
 // LoadMdFiles loads all md files for a given application.
 func (e *embedTemplateProvider) LoadMdFiles(app string) (map[string]*template.Template, error) {
 	tmpls := make(map[string]*template.Template)
-	completePath := fmt.Sprintf("%s/%s/%s/steps", e.root, app, e.Runtime())
+	completePath := e.buildPath(app, e.Runtime(), "steps")
 	err := fs.WalkDir(e.fs, completePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -281,7 +293,7 @@ func (e *embedTemplateProvider) LoadMdFiles(app string) (map[string]*template.Te
 }
 
 func (e *embedTemplateProvider) LoadVarsFile(app string, params map[string]string) (*Vars, error) {
-	path := fmt.Sprintf("%s/%s/%s/steps/vars_file.yaml", e.root, app, e.Runtime())
+	path := e.buildPath(app, e.Runtime(), "steps", "vars_file.yaml")
 
 	data, err := e.fs.ReadFile(path)
 	if err != nil {
@@ -363,7 +375,12 @@ func NewEmbedTemplateProvider(options EmbedOptions) Template {
 	if options.Root != "" {
 		t.root = options.Root
 	} else {
-		t.root = "applications"
+		t.root = ""
+
+		// if its application Fs -> use "applications" as root
+		if t.fs == &assets.ApplicationFS {
+			t.root = "applications"
+		}
 	}
 
 	// Use Podman runtime if not set by default

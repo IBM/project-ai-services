@@ -23,10 +23,20 @@ func (p *PodmanBootstrap) Configure() error {
 	}
 	ctx := context.Background()
 
-	s := spinner.New("Checking podman installation")
+	s := spinner.New("Checking spyre card configuration")
 	s.Start(ctx)
-	// 1. Install and configure Podman if not done
-	// 1.1 Install Podman
+	// 1. Spyre cards – validate and repair spyre configurations
+	if err := configureSpyre(); err != nil {
+		s.Fail("failed to configure spyre card")
+
+		return err
+	}
+	s.Stop("Spyre cards configuration validated successfully.")
+
+	s = spinner.New("Checking podman installation")
+	s.Start(ctx)
+	// 2. Install and configure Podman if not done
+	// 2.1 Install Podman
 	if _, err := validators.Podman(); err != nil {
 		s.UpdateMessage("Installing podman")
 		// setup podman socket and enable service
@@ -42,7 +52,7 @@ func (p *PodmanBootstrap) Configure() error {
 
 	s = spinner.New("Verifying podman configuration")
 	s.Start(ctx)
-	// 1.2 Configure Podman
+	// 2.2 Configure Podman
 	if err := validators.PodmanHealthCheck(); err != nil {
 		s.UpdateMessage("Configuring podman")
 		if err := setupPodman(); err != nil {
@@ -57,23 +67,13 @@ func (p *PodmanBootstrap) Configure() error {
 
 	s = spinner.New("Configuring SMT level to 2")
 	s.Start(ctx)
-	// 2. Configure SMT level to 2 and persist via systemd
+	// 3. Configure SMT level to 2 and persist via systemd
 	if err := setupSMTLevel(); err != nil {
 		s.Fail("failed to configure SMT level")
 
 		return err
 	}
 	s.Stop("SMT level configured successfully (set to 2)")
-
-	s = spinner.New("Checking spyre card configuration")
-	s.Start(ctx)
-	// 3. Spyre cards – run servicereport tool to validate and repair spyre configurations
-	if err := runServiceReport(); err != nil {
-		s.Fail("failed to configure spyre card")
-
-		return err
-	}
-	s.Stop("Spyre cards configuration validated successfully.")
 
 	logger.Infoln("LPAR configured successfully")
 

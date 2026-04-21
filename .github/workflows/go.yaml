@@ -36,15 +36,10 @@ jobs:
           version: v2.7
           working-directory: ai-services
 
-      - name: Build Go binary (without catalog API)
+      - name: Build Go binary
         working-directory: ai-services
         run: |
           GOOS=linux GOARCH=ppc64le make bin
-
-      - name: Build Go binary (with catalog API for CI/CD)
-        working-directory: ai-services
-        run: |
-          GOOS=linux GOARCH=ppc64le make bin ENABLE_CATALOG_API=true
 
   swagger-check:
     name: Verify Swagger Documentation
@@ -65,7 +60,7 @@ jobs:
         working-directory: ai-services
         run: |
           make swagger-fmt
-          make swagger ENABLE_CATALOG_API=true
+          make swagger
           if ! git diff --exit-code; then
             echo "❌ Swagger comments or docs are out of date. Run 'make swagger-fmt && make swagger' and commit the changes."
             git diff

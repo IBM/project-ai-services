@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from common.lang_utils import prompt_map
 from common.misc_utils import get_logger
-from common.settings import get_settings
+from common.settings import get_settings, Settings
 from common.retry_utils import retry_on_transient_error
 import common.misc_utils as misc_utils
 
@@ -22,27 +22,14 @@ def tqdm_wrapper(iterable, **kwargs):
     else:
         return iterable
 
-settings = get_settings()
-
-def classify_text_with_llm(text_blocks, gen_model, llm_endpoint, pdf_path, batch_size=32):
-    all_prompts = [settings.prompts.llm_classify.format(text=item.strip()) for item in text_blocks]
-    decisions = []
-
-    # Process in batches using ThreadPoolExecutor for parallelism
-    with ThreadPoolExecutor(max_workers=batch_size) as executor:
-        futures = {
-            executor.submit(classify_single_text, prompt, gen_model, llm_endpoint): idx
-            for idx, prompt in enumerate(all_prompts)
-        }
-
-        for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts),
-                                   desc=f"Classifying table summaries of '{pdf_path}'"):
-            decisions.append(future.result())
-
-    return decisions
+settings: Settings = get_settings()
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def classify_single_text(prompt, gen_model, llm_endpoint):
+def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
+    """
+    Combined function to summarize and classify a table in a single LLM call.
+    Returns tuple: (summary, decision)
+    """
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
@@ -50,48 +37,90 @@ def classify_single_text(prompt, gen_model, llm_endpoint):
         "model": gen_model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
-        "max_tokens": 3,
-    }
-    response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
-    response.raise_for_status()
-    result = response.json()
-    reply = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip().lower()
-    return "yes" in reply
-
-@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def summarize_single_table(prompt, gen_model, llm_endpoint):
-    if misc_utils.SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
-    payload = {
-        "model": gen_model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
-        "max_tokens": 512,
+        "max_tokens": settings.table_summary_max_tokens,
         "stream": False,
     }
 
-    response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
-    response.raise_for_status()
-    result = response.json()
-    reply = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip().lower()
-    return reply
+    try:
+        response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
+        response.raise_for_status()
+        data = response.json() or {}
+        choices = data.get("choices", [])
+        text = ""
+        if choices:
+            text = (choices[0].get("message", {}).get("content") or "").strip()
 
-def summarize_table(table_html, gen_model, llm_endpoint, pdf_path, max_workers=32):
-    all_prompts = [settings.prompts.table_summary.format(content=html) for html in table_html]
+        # Parse response - handle multi-line summaries
+        summary = ""
+        decision = False
+        lines = text.splitlines()
 
-    summaries = [None] * len(all_prompts)
+        # Find Summary: and Decision: lines
+        summary_start = -1
+        decision_line = -1
+
+        for i, line in enumerate(lines):
+            line_lower = line.strip().lower()
+            if line_lower.startswith("summary:"):
+                summary_start = i
+            elif line_lower.startswith("decision:"):
+                decision_line = i
+                decision = "yes" in line_lower
+
+        # Extract summary (everything between "Summary:" and "Decision:")
+        if summary_start >= 0:
+            if decision_line > summary_start:
+                # Summary is between Summary: and Decision:
+                summary_lines = lines[summary_start:decision_line]
+                # Remove "Summary:" prefix from first line
+                summary_lines[0] = summary_lines[0][summary_lines[0].lower().find("summary:") + len("summary:"):].strip()
+                summary = "\n".join(line.strip() for line in summary_lines if line.strip())
+            else:
+                # No decision found, take everything after Summary:
+                summary_lines = lines[summary_start:]
+                summary_lines[0] = summary_lines[0][summary_lines[0].lower().find("summary:") + len("summary:"):].strip()
+                summary = "\n".join(line.strip() for line in summary_lines if line.strip())
+
+        return summary or "No summary.", decision
+
+    except Exception as e:
+        logger.error(f"Error summarizing/classifying table: {e}")
+        return "No summary.", False
+
+def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, max_workers=32):
+    """
+    Combined function to summarize and classify tables using a single prompt.
+    Returns tuple: (summaries, decisions)
+    """
+    all_prompts = [settings.prompts.table_summary_and_classify.format(content=md) for md in table_mds]
+
+    results: list[tuple[str, bool] | None] = [None] * len(all_prompts)
 
     with ThreadPoolExecutor(max_workers=min(max_workers, len(all_prompts))) as executor:
         futures = {
-            executor.submit(summarize_single_table, prompt, gen_model, llm_endpoint): idx
+            executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint): idx
             for idx, prompt in enumerate(all_prompts)
         }
-        for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts), desc=f"Summarizing tables of '{pdf_path}'"):
+        for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts),
+                                   desc=f"Summarizing and classifying tables of '{pdf_path}'"):
             idx = futures[future]
-            summaries[idx] = future.result()
+            results[idx] = future.result()
 
-    return summaries
+    # Separate summaries and decisions with proper None handling
+    summaries: list[str] = []
+    decisions: list[bool] = []
+
+    for result in results:
+        if result is not None:
+            summary, decision = result
+            summaries.append(summary)
+            decisions.append(decision)
+        else:
+            # Default values for failed futures
+            summaries.append("No summary.")
+            decisions.append(False)
+
+    return summaries, decisions
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def query_vllm_models(llm_endpoint):

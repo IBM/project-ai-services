@@ -2,10 +2,9 @@ package spyre
 
 import (
 	"fmt"
-	"os/exec"
-	"strconv"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/spyreconfig/spyre"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -21,29 +20,44 @@ func (r *SpyreRule) Name() string {
 }
 
 func (r *SpyreRule) Description() string {
-	return "Validates that the IBM Spyre Accelerator is attached to the LPAR."
+	return "Validates IBM Spyre Accelerator configuration."
 }
 
+// Verify performs comprehensive Spyre validation.
 func (r *SpyreRule) Verify() error {
-	logger.Infoln("Validating Spyre attachment...", logger.VerbosityLevelDebug)
-	cmd := `lspci -k -d 1014:06a7 | wc -l`
-	out, err := exec.Command("bash", "-c", cmd).Output()
-	if err != nil {
-		return fmt.Errorf("❌ failed to execute lspci command %w", err)
-	}
-	cardsCount, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return fmt.Errorf("failed to parse spyre cards count: %w", err)
-	}
-	if cardsCount == 0 {
+	logger.Infoln("Running comprehensive Spyre validation...", logger.VerbosityLevelDebug)
+
+	// Check if Spyre cards are present
+	if !spyre.IsApplicable() {
 		return fmt.Errorf("IBM Spyre Accelerator is not attached to the LPAR")
 	}
+
+	numCards := spyre.GetNumberOfSpyreCards()
+	logger.Infof("Detected %d Spyre card(s)", numCards)
+
+	// Run all validation checks
+	checks := spyre.RunChecks()
+
+	// Collect validation errors
+	var validationErrors []string
+	for _, check := range checks {
+		if !check.GetStatus() {
+			validationErrors = append(validationErrors, check.String())
+		}
+	}
+
+	if len(validationErrors) > 0 {
+		return fmt.Errorf("spyre configuration validation failed:\n%s",
+			strings.Join(validationErrors, "\n"))
+	}
+
+	logger.Infoln("✓ All Spyre configuration checks passed", logger.VerbosityLevelDebug)
 
 	return nil
 }
 
 func (r *SpyreRule) Message() string {
-	return "IBM Spyre Accelerator is attached to the LPAR"
+	return "IBM Spyre Accelerator is properly configured"
 }
 
 func (r *SpyreRule) Level() constants.ValidationLevel {
@@ -51,5 +65,7 @@ func (r *SpyreRule) Level() constants.ValidationLevel {
 }
 
 func (r *SpyreRule) Hint() string {
-	return "IBM Spyre Accelerator hardware is required but not detected."
+	return "IBM Spyre Accelerator hardware is required and must be properly configured. Run 'ai-services bootstrap configure' to fix configuration issues."
 }
+
+// Made with Bob

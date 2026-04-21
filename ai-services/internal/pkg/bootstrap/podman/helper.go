@@ -8,104 +8,118 @@ import (
 	"strings"
 	"time"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/spyreconfig/check"
+	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/spyreconfig/spyre"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/spyre"
 )
 
-func runServiceReport() error {
-	// validate spyre attachment first before running servicereport
-	spyreCheck := spyre.NewSpyreRule()
-	err := spyreCheck.Verify()
-	if err != nil {
-		return err
+// configureSpyre validates and repairs Spyre card configuration.
+func configureSpyre() error {
+	logger.Infoln("Running Spyre configuration validation and repair...", logger.VerbosityLevelDebug)
+
+	// Check if Spyre cards are present
+	if !spyre.IsApplicable() {
+		logger.Infoln("No Spyre cards detected. Validation not applicable.", logger.VerbosityLevelDebug)
+
+		return nil
 	}
 
-	// Create host directories for vfio
-	cmd := `mkdir -p /etc/modules-load.d; mkdir -p /etc/udev/rules.d/`
-	_, err = exec.Command("bash", "-c", cmd).Output()
-	if err != nil {
-		return fmt.Errorf("❌ failed to create host volume mounts for servicereport tool %w", err)
-	}
+	numCards := spyre.GetNumberOfSpyreCards()
+	logger.Infof("Detected %d Spyre card(s)", numCards)
 
-	// load vfio kernel modules
-	cmd = `modprobe vfio_pci`
-	_, err = exec.Command("bash", "-c", cmd).Output()
-	if err != nil {
-		return fmt.Errorf("❌ failed to load vfio kernel modules for spyre %w", err)
-	}
-	logger.Infoln("VFIO kernel modules loaded on the host", logger.VerbosityLevelDebug)
+	// Run validation and repair
+	allPassed := runValidationAndRepair()
 
-	if err := helpers.RunServiceReportContainer("servicereport -r -p spyre", "configure"); err != nil {
-		return err
-	}
-
+	// Add current user to sentient group
 	if err := configureUsergroup(); err != nil {
 		return err
 	}
 
-	if err := reloadUdevRules(); err != nil {
-		return err
+	if !allPassed {
+		return fmt.Errorf("some Spyre configuration checks still failed after repair")
 	}
 
-	cards, err := helpers.ListSpyreCards()
-	if err != nil || len(cards) == 0 {
-		return fmt.Errorf("❌ failed to list spyre cards on LPAR %w", err)
-	}
-	num_spyre_cards := len(cards)
-
-	// check if kernel modules for vfio are loaded
-	if err := checkKernelModulesLoaded(num_spyre_cards); err != nil {
-		return err
-	}
+	logger.Infoln("✓ All Spyre configuration checks passed", logger.VerbosityLevelDebug)
 
 	return nil
 }
 
+// runValidationAndRepair runs validation checks and attempts repairs if needed.
+func runValidationAndRepair() bool {
+	// Run all validation checks
+	checks := spyre.RunChecks()
+
+	// Check if any validation failed
+	allPassed := checkValidationResults(checks)
+
+	// If checks failed, attempt repairs
+	if !allPassed {
+		allPassed = attemptRepairs(checks)
+	}
+
+	return allPassed
+}
+
+// checkValidationResults checks if all validation checks passed.
+func checkValidationResults(checks []check.CheckResult) bool {
+	allPassed := true
+	for _, check := range checks {
+		if !check.GetStatus() {
+			allPassed = false
+			logger.Infof("Check failed: %s", check.String())
+		}
+	}
+
+	return allPassed
+}
+
+// attemptRepairs attempts to repair failed checks and re-validates.
+func attemptRepairs(checks []check.CheckResult) bool {
+	logger.Infoln("Attempting automatic repairs...", logger.VerbosityLevelDebug)
+	results := spyre.Repair(checks)
+
+	logRepairResults(results)
+
+	// Re-run checks after repair
+	logger.Infoln("Re-running validation...", logger.VerbosityLevelDebug)
+	checks = spyre.RunChecks()
+
+	allPassed := true
+	for _, check := range checks {
+		if !check.GetStatus() {
+			allPassed = false
+		}
+	}
+
+	return allPassed
+}
+
+// logRepairResults logs the results of repair operations.
+func logRepairResults(results []spyre.RepairResult) {
+	for _, result := range results {
+		switch result.Status {
+		case spyre.StatusFixed:
+			logger.Infof("✓ Fixed: %s", result.CheckName)
+		case spyre.StatusFailedToFix:
+			logger.Infof("✗ Failed to fix: %s - %v", result.CheckName, result.Error)
+		case spyre.StatusNotFixable:
+			logger.Infof("⚠ Not fixable: %s - %s", result.CheckName, result.Message)
+		case spyre.StatusSkipped:
+			// Skip logging for skipped checks
+		default:
+			logger.Infof("Unknown status for %s: %s", result.CheckName, result.Status)
+		}
+	}
+}
+
 func configureUsergroup() error {
-	cmd_str := `groupadd sentient; usermod -aG sentient $USER`
+	cmd_str := `usermod -aG sentient $USER`
 	cmd := exec.Command("bash", "-c", cmd_str)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to create sentient group and add current user to the sentient group. Error: %w, output: %s", err, string(out))
-	}
-
-	return nil
-}
-
-func reloadUdevRules() error {
-	cmd := `udevadm control --reload-rules`
-	_, err := exec.Command("bash", "-c", cmd).Output()
-	if err != nil {
-		return fmt.Errorf("failed to reload udev rules. Error: %w", err)
-	}
-
-	return nil
-}
-
-func checkKernelModulesLoaded(num_spyre_cards int) error {
-	vfio_cmd := `lspci -k -d 1014:06a7 | grep "Kernel driver in use: vfio-pci" | wc -l`
-	out, err := exec.Command("bash", "-c", vfio_cmd).Output()
-	if err != nil {
-		return fmt.Errorf("❌ failed to check vfio cards with kernel modules loaded %w", err)
-	}
-
-	num_vf_cards, err := strconv.Atoi(strings.TrimSuffix(string(out), "\n"))
-	if err != nil {
-		return fmt.Errorf("❌ failed to convert number of virtual spyre cards count from string to integer %w", err)
-	}
-
-	if num_vf_cards != num_spyre_cards {
-		logger.Infof("failed to detect vfio cards, reloading vfio kernel modules..")
-		// reload vfio kernel modules
-		cmd := `rmmod vfio_pci; modprobe vfio_pci`
-		_, err = exec.Command("bash", "-c", cmd).Output()
-		if err != nil {
-			return fmt.Errorf("❌ failed to reload vfio kernel modules for spyre %w", err)
-		}
-		logger.Infoln("VFIO kernel modules reloaded on the host", logger.VerbosityLevelDebug)
 	}
 
 	return nil

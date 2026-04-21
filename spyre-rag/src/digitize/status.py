@@ -328,16 +328,25 @@ class StatusManager:
         metadata_fields: dict[str, Any],
         top_level_fields: dict[str, Any]
     ) -> None:
-        """Apply field updates to data dictionary in-place."""
+        """
+        Apply field updates to data dictionary in-place.
+        Preserves existing metadata fields when updating.
+        """
         data.update(top_level_fields)
+
+        # Always ensure metadata wrapper exists
+        data.setdefault("metadata", {})
         
+        # Apply metadata field updates while preserving existing values
         if metadata_fields:
-            data.setdefault("metadata", {})
             for mk, mv in metadata_fields.items():
                 if mk == "timing_in_secs":
+                    # Merge timing updates with existing timing data
                     data["metadata"].setdefault("timing_in_secs", {}).update(mv)
                 else:
-                    data["metadata"][mk] = mv
+                    # Only update if value is provided (not None)
+                    if mv is not None:
+                        data["metadata"][mk] = mv
 
     def update_doc_metadata(self, doc_id: str, details: Mapping[str, Any], error: str = "") -> None:
         """
