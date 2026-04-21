@@ -3,15 +3,16 @@
 @use "@carbon/react/scss/type";
 
 .navLink {
-  outline: none !important ;
+  outline: none;
   color: unset;
-  text-decoration: none !important;
+  text-decoration: none;
 }
 
-.sideNavItem:active .sideNavItem:focus {
+.sideNavItem:active,
+.sideNavItem:focus {
   border-left: spacing.$spacing-02 solid theme.$link-primary;
-  outline: none !important;
-  background-color: theme.$layer-selected-01 !important;
+  outline: none;
+  background-color: theme.$layer-selected-01;
   color: unset;
   text-decoration: none;
 }

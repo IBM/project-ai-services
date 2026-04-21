@@ -383,12 +383,6 @@ const ApplicationsListPage = () => {
             });
             await handleDelete();
           }}
-          style={{
-            position: "fixed",
-            top: "4rem",
-            right: "2rem",
-            zIndex: "46567",
-          }}
           className={styles.customToast}
         />
       )}

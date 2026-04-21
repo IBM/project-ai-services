@@ -25,61 +25,68 @@
   font-weight: bolder;
   border: none;
 }
+
 :global(
   .cds--checkbox-wrapper
     input:focus:not(:focus-visible)
     + .cds--checkbox-label::before
 ) {
-  outline: none !important;
-  box-shadow: none !important;
+  outline: none;
+  box-shadow: none;
 }
 
 :global(.cds--btn:focus:not(:focus-visible)) {
-  outline: none !important;
-  box-shadow: none !important;
-  border: none !important;
+  outline: none;
+  box-shadow: none;
+  border: none;
 }
+
 .deleteButton {
   transition: background-color 0.2s ease;
-}
 
-.deleteButton:hover {
-  background-color: var(--cds-button-danger-primary) !important;
-  color: var(--cds-background) !important;
-}
+  &:hover {
+    background-color: var(--cds-button-danger-primary);
+    color: var(--cds-background);
 
-.deleteButton:hover svg {
-  fill: var(--cds-icon-on-color);
+    svg {
+      fill: var(--cds-icon-on-color);
+    }
+  }
 }
 
 .selectedDelete {
-  background-color: var(--cds-layer-hover) !important;
+  background-color: var(--cds-layer-hover);
 }
 
 .customToast {
+  position: fixed;
+  top: 4rem;
+  right: 2rem;
+  z-index: 46567;
+
   :global(.cds--actionable-notification__action-button) {
-    border: 1px solid var(--cds-text-on-color) !important;
-    color: var(--cds-text-on-color) !important;
+    border: 1px solid var(--cds-text-on-color);
+    color: var(--cds-text-on-color);
     font-weight: lighter;
-    background-color: transparent !important;
+    background-color: transparent;
 
     &:hover {
-      border: 1px solid var(--cds-text-on-color) !important;
-      color: var(--cds-text-on-color) !important;
-      background-color: transparent !important;
+      border: 1px solid var(--cds-text-on-color);
+      color: var(--cds-text-on-color);
+      background-color: transparent;
     }
 
     &:focus {
-      border: 1px solid var(--cds-text-on-color) !important;
-      color: var(--cds-text-on-color) !important;
-      background-color: transparent !important;
-      outline-offset: 2px !important;
+      border: 1px solid var(--cds-text-on-color);
+      color: var(--cds-text-on-color);
+      background-color: transparent;
+      outline-offset: 2px;
     }
 
     &:active {
-      border: 1px solid var(--cds-text-on-color) !important;
-      color: var(--cds-text-on-color) !important;
-      background-color: var(--cds-layer-active) !important;
+      border: 1px solid var(--cds-text-on-color);
+      color: var(--cds-text-on-color);
+      background-color: var(--cds-layer-active);
     }
   }
 }

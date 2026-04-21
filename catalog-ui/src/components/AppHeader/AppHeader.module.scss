@@ -4,51 +4,51 @@
 
 .appHeader {
   :global(.cds--header) {
-    background-color: colors.$black-100 !important;
-    border-bottom: none !important;
+    background-color: colors.$black-100;
+    border-bottom: none;
   }
 
   :global(.cds--header__menu-trigger) {
-    background-color: colors.$black-100 !important;
-    border: none !important;
-    border-bottom: none !important;
-    box-shadow: none !important;
+    background-color: colors.$black-100;
+    border: none;
+    border-bottom: none;
+    box-shadow: none;
 
     &:hover {
-      background-color: colors.$black-100 !important;
-      border: none !important;
-      box-shadow: none !important;
+      background-color: colors.$black-100;
+      border: none;
+      box-shadow: none;
     }
 
     &:focus {
-      background-color: colors.$black-100 !important;
-      border: none !important;
-      box-shadow: none !important;
-      outline: none !important;
+      background-color: colors.$black-100;
+      border: none;
+      box-shadow: none;
+      outline: none;
     }
 
     svg {
-      vertical-align: middle !important;
+      vertical-align: middle;
     }
   }
 
   :global(.cds--header-panel) {
-    position: fixed !important;
-    top: 3rem !important;
-    right: 0 !important;
-    left: auto !important;
-    bottom: auto !important;
-    transform: none !important;
-    height: auto !important;
-    min-height: 0 !important;
-    max-height: none !important;
-    overflow: visible !important;
-    z-index: 8000 !important;
+    position: fixed;
+    top: 3rem;
+    right: 0;
+    left: auto;
+    bottom: auto;
+    transform: none;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+    z-index: 8000;
 
     &:global(.cds--header-panel--expanded) {
-      max-height: none !important;
-      height: auto !important;
-      overflow: visible !important;
+      max-height: none;
+      height: auto;
+      overflow: visible;
     }
   }
 }
@@ -58,25 +58,25 @@
 }
 
 .menuBtn {
-  border: none !important;
-  border-bottom: none !important;
-  background-color: colors.$black-100 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  box-shadow: none !important;
+  border: none;
+  border-bottom: none;
+  background-color: colors.$black-100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none;
 
   &:hover {
-    background-color: colors.$black-100 !important;
-    border: none !important;
-    box-shadow: none !important;
+    background-color: colors.$black-100;
+    border: none;
+    box-shadow: none;
   }
 
   &:focus {
-    background-color: colors.$black-100 !important;
-    border: none !important;
-    box-shadow: none !important;
-    outline: none !important;
+    background-color: colors.$black-100;
+    border: none;
+    box-shadow: none;
+    outline: none;
   }
 }
 
