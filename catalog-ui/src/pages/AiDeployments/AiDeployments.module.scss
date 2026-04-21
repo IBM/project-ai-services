@@ -23,71 +23,13 @@
 .deleteConfirmation {
   margin-top: spacing.$spacing-07;
   font-weight: bolder;
-  border: none;
-}
-:global(
-  .cds--checkbox-wrapper
-    input:focus:not(:focus-visible)
-    + .cds--checkbox-label::before
-) {
-  outline: none;
-  box-shadow: none;
-}
-
-:global(.cds--btn:focus:not(:focus-visible)) {
-  outline: none;
-  box-shadow: none;
-  border: none;
-}
-
-.deleteButton {
-  transition: background-color 0.2s ease;
-
-  &:hover {
-    background-color: var(--cds-button-danger-primary);
-    color: var(--cds-background);
-
-    svg {
-      fill: var(--cds-icon-on-color);
-    }
-  }
-}
-
-.selectedDelete {
-  background-color: var(--cds-layer-hover);
 }
 
 .customToast {
   position: fixed;
-  top: 4rem;
-  right: 2rem;
+  top: spacing.$spacing-10;
+  right: spacing.$spacing-07;
   z-index: 46567;
-
-  :global(.cds--actionable-notification__action-button) {
-    border: 1px solid var(--cds-text-on-color);
-    color: var(--cds-text-on-color);
-    font-weight: lighter;
-    background-color: transparent;
-
-    &:hover {
-      border: 1px solid var(--cds-text-on-color);
-      color: var(--cds-text-on-color);
-      background-color: transparent;
-    }
-
-    &:focus {
-      border: 1px solid var(--cds-text-on-color);
-      color: var(--cds-text-on-color);
-      background-color: transparent;
-      outline-offset: 2px;
-    }
-
-    &:active {
-      border: 1px solid var(--cds-text-on-color);
-      color: var(--cds-text-on-color);
-      background-color: var(--cds-layer-active);
-    }
-  }
 }
 
 .exportStatus {
@@ -95,3 +37,26 @@
   align-items: center;
   gap: spacing.$spacing-02;
 }
+
+.deployButtonWrapper {
+  position: relative;
+  z-index: 10000;
+
+  :global(.cds--menu-button__trigger) {
+    width: 125px;
+    min-width: 125px;
+    max-width: 125px;
+    height: 48px;
+  }
+
+  :global(.cds--menu) {
+    width: auto;
+    min-width: 200px;
+  }
+}
+
+:global(.cds--menu) {
+  z-index: 10000;
+}
+
+// Made with Bob
