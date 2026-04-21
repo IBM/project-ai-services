@@ -351,6 +351,20 @@ func fixVFIOPermissions(checkMap map[string]check.CheckResult, userGroupResult R
 }
 
 // fixPodmanServiceSupplementaryGroups repairs the podman service SupplementaryGroups configuration.
+//
+// This function addresses the issue where Podman operations invoked via the socket (e.g., through
+// systemd or remote API calls) lack access to VFIO devices because the service doesn't inherit
+// the user's supplementary groups. While shell-based Podman commands work fine (inheriting the
+// user's 'sentient' group), socket-based operations fail without explicit configuration.
+//
+// The repair process:
+//  1. Creates a systemd drop-in file at /etc/systemd/system/podman.service.d/override.conf
+//     containing: [Service]\nSupplementaryGroups=sentient
+//  2. Reloads the systemd daemon to pick up the new configuration
+//  3. Restarts both podman.service and podman.socket to apply the changes
+//
+// This ensures that all Podman operations, regardless of invocation method, have the necessary
+// permissions to access VFIO devices (/dev/vfio/*) required for Spyre card functionality.
 func fixPodmanServiceSupplementaryGroups(checkMap map[string]check.CheckResult) RepairResult {
 	checkName := "Podman service SupplementaryGroups configuration"
 	_, ok := getCheckFromMap(checkMap, checkName)

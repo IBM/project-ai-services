@@ -15,12 +15,12 @@ import (
 )
 
 const (
-	spyreVendorID   = "1014"
-	spyreDeviceID1  = "06a7"
-	spyreDeviceID2  = "06a8"
-	sentientGroup   = "sentient"
-	vfioConfigFile  = "/etc/modprobe.d/vfio-pci.conf"
-	memLimitPerCard = 134234112 // 128MB in bytes - memory lock limit per Spyre card
+	spyreVendorID     = "1014"
+	spyreDeviceIDRev1 = "06a7"
+	spyreDeviceIDRev2 = "06a8"
+	sentientGroup     = "sentient"
+	vfioConfigFile    = "/etc/modprobe.d/vfio-pci.conf"
+	memLimitPerCard   = 134234112 // 128MB in bytes - memory lock limit per Spyre card
 )
 
 // Package-level regex patterns compiled once for performance.
@@ -52,7 +52,7 @@ func GetSpyreDevices() ([]*ghw.PCIDevice, error) {
 	spyreDevices := make([]*ghw.PCIDevice, 0, len(pci.Devices))
 	for _, device := range pci.Devices {
 		if device.Vendor.ID == spyreVendorID &&
-			(device.Product.ID == spyreDeviceID1 || device.Product.ID == spyreDeviceID2) {
+			(device.Product.ID == spyreDeviceIDRev1 || device.Product.ID == spyreDeviceIDRev2) {
 			spyreDevices = append(spyreDevices, device)
 		}
 	}
@@ -443,6 +443,21 @@ func checkVfioDevicePermission(path string, expectedGid int) (bool, error) {
 }
 
 // checkPodmanServiceSupplementaryGroups validates that the podman.service has SupplementaryGroups=sentient configured.
+//
+// Background:
+// When Podman commands are executed directly from the shell, they inherit the user's supplementary groups,
+// including the 'sentient' group which provides access to VFIO devices for Spyre cards. However, when Podman
+// is invoked via the Podman socket (e.g., through systemd or remote API calls), the service runs with its own
+// process context and does not automatically inherit the user's supplementary groups.
+//
+// Without the 'sentient' group in SupplementaryGroups, containers started via the socket will not have the
+// necessary permissions to access VFIO devices (/dev/vfio/*), causing failures when trying to use Spyre cards.
+//
+// This check ensures that the podman.service systemd unit is configured with:
+//
+//	SupplementaryGroups=sentient
+//
+// in the [Service] section, allowing socket-based Podman operations to access VFIO devices properly.
 func checkPodmanServiceSupplementaryGroups() *check.ConfigurationFileCheck {
 	serviceName := "podman.service"
 	confCheck := check.NewConfigurationFileCheck("Podman service SupplementaryGroups configuration", serviceName)
