@@ -150,19 +150,17 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         start_time = time.time()
         # Reserve 100 tokens from embedding model's max_tokens to account for metadata
         # that will be prepended to content during final merge, ensuring total tokens stay within embedding model limits
-        doc_chunks_dict, converted_pdf_stats = process_documents(
+        _, converted_pdf_stats = process_documents(
             input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'],  emb_model_dict["emb_endpoint"],
             max_tokens=emb_model_dict['max_tokens'] - 100, job_id=job_id, doc_id_dict=doc_id_dict,
             indexing_callback=indexing_handler)
         # converted_pdf_stats holds { file_name: {page_count: int, table_count: int, timings: {conversion: time_in_secs, process_text: time_in_secs, process_tables: time_in_secs, chunking: time_in_secs}} }
-        if converted_pdf_stats is None or doc_chunks_dict is None:
+        if converted_pdf_stats is None:
             ingestion_failed()
             return
 
         # Note: Documents are now indexed immediately after chunking via the indexing_callback
-        # The doc_chunks_dict returned here is for reference/logging purposes only
-        if doc_chunks_dict:
-            logger.info(f"All {len(doc_chunks_dict)} document(s) have been processed and indexed")
+        logger.info(f"All {len(converted_pdf_stats)} document(s) have been processed and indexed")
 
         # Log time taken for the file
         end_time: float = time.time()  # End the timer for the current file
