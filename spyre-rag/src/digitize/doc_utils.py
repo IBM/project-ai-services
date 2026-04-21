@@ -430,7 +430,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         if indexing_callback:
                             try:
                                 # Create chunks for immediate indexing
-                                doc_chunks = create_chunk_documents(chunk_json, tab_json, path)
+                                doc_chunks = merge_chunked_documents(text_chunk_json, table_chunk_json, path)
                                 # Inject doc_id into chunks
                                 for chunk in doc_chunks:
                                     chunk["doc_id"] = doc_id
@@ -483,11 +483,11 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
         # Combine statistics for the final return
         converted_pdf_stats = {**l_stats, **h_stats}
-        all_text_chunk_json_paths = l_text_chunks_json + h_text_chunks_json
-        all_table_chunk_json_paths = l_tab_chunks_json + h_tab_chunks_json
+        all_chunk_json_paths = l_chunks_json + h_chunks_json
+        all_table_json_paths = l_tabs_json + h_tabs_json
 
-        text_chunk_filenames = {p.name for p in all_text_chunk_json_paths}
-        table_chunk_filenames = {p.name for p in all_table_chunk_json_paths}
+        chunk_filenames = {p.name for p in all_chunk_json_paths}
+        table_filenames = {p.name for p in all_table_json_paths}
 
         doc_chunks_dict = {}
         # Final assembly: merge_chunked_documents merges text/table outputs
@@ -505,7 +505,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
             table_chunk_path = Path(out_path) / table_chunk_filename
 
             # Verify the file was actually processed in the batch
-            if text_chunk_filename in text_chunk_filenames and table_chunk_filename in table_chunk_filenames:
+            if text_chunk_filename in chunk_filenames and table_chunk_filename in table_filenames:
                 # Merge pre-chunked text and pre-chunked table documents
                 doc_chunks = merge_chunked_documents(text_chunk_path, table_chunk_path, path)
                 # Inject the doc_id into every chunk
