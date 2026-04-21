@@ -15,6 +15,7 @@ deploying services, and managing service metadata`,
 	}
 
 	catalogCMD.AddCommand(NewAPIServerCmd())
+	catalogCMD.AddCommand(NewConfigureCmd())
 	catalogCMD.AddCommand(NewHashpwCmd())
 	catalogCMD.AddCommand(NewLoginCmd())
 	catalogCMD.AddCommand(NewLogoutCmd())
