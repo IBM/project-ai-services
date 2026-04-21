@@ -37,15 +37,13 @@ spec:
       image: "{{ .Values.backend.image }}"
       command: ["/bin/sh", "-c"]
       args:
-        - "/usr/bin/ai-services catalog apiserver --port=8080 --admin-username=admin --admin-password-hash=${ADMIN_PASSWORD}"
+        - "/usr/bin/ai-services catalog apiserver --port=8080 --admin-username=admin --admin-password-hash=${ADMIN_PASSWORD} --runtime={{ .Values.backend.runtime }}"
       securityContext:
         seLinuxOptions:
           type: "spc_t"
       env:
         - name: CONTAINER_HOST
           value: "unix://{{ .Values.backend.podman.uri }}"
-        - name: RUNTIME
-          value: "{{ .Values.backend.runtime }}"
         - name: ADMIN_PASSWORD
           valueFrom:
             secretKeyRef:
