@@ -1207,7 +1207,6 @@ GET /api/v1/architectures/rag
   "version": "1.0.0",
   "type": "architecture",
   "certified_by": "IBM",
-  "supported_runtimes": ["podman", "openshift"],
   "services": [
     {
       "id": "chat",
@@ -1240,7 +1239,6 @@ GET /api/v1/architectures/rag
 | version | string | Architecture version |
 | type | string | Type (architecture) |
 | certified_by | string | Certification authority |
-| supported_runtimes | array | Supported runtime environments |
 | services | array | Array of service objects |
 | links | object | Related links (demo, code, documentation) |
 
@@ -1378,16 +1376,6 @@ GET /api/v1/services/chat
       "id": "reranker",
       "version": ">=1.0.0"
     }
-  ],
-  "endpoints": [
-    {
-      "name": "ui",
-      "url": "https://<hostname>:3000"
-    },
-    {
-      "name": "backend",
-      "url": "https://<hostname>:5000"
-    }
   ]
 }
 ```
@@ -1403,19 +1391,12 @@ GET /api/v1/services/chat
 | certified_by | string | Certification authority |
 | architectures | array | Architecture IDs that include this service |
 | dependencies | array | Array of dependency objects |
-| endpoints | array | Array of endpoint objects |
 
 **Dependency Object Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
 | id | string | Dependency service ID |
 | version | string | Version constraint (optional) |
-
-**Endpoint Object Schema:**
-| Field | Type | Description |
-|-------|------|-------------|
-| name | string | Endpoint name (e.g., "ui", "backend", "api") |
-| url | string | Full endpoint URL (e.g., "https://<hostname>:3000") |
 
 **Implementation Notes:**
 - Check out the proposal https://github.com/IBM/project-ai-services/pull/636
