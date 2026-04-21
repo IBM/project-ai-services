@@ -1,0 +1,20 @@
+name: summarization
+version: "1.0.0"
+runtime: openshift
+
+# Resource requirements for OpenShift runtime
+requirements:
+  min_cpu: "1"
+  min_memory: "2Gi"
+  min_disk: "10Gi"
+
+# Helm chart configuration
+chart_templates:
+  - name: summarize-api-deployment
+    template: summarize-api-deployment.yaml
+  - name: summarize-api-service
+    template: summarize-api-service.yaml
+  - name: summarize-api-route
+    template: summarize-api-route.yaml
+
+# Made with Bob

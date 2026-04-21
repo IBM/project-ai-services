@@ -1,0 +1,18 @@
+# Service identification
+id: embedding
+name: "Embedding"
+description: "Text embedding service for document vectorization"
+version: "1.0.0"
+type: service
+
+# Certification and support
+certified_by: "IBM"
+
+# Service belongs to these architectures
+architectures:
+  - rag
+
+# This service is only used as a dependency by other services
+dependency_only: true
+
+# Made with Bob

@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: "opensearch"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: vectordb
+spec:
+  serviceName: "opensearch-headless"
+  podManagementPolicy: Parallel
+  replicas: {{ .Values.opensearch.replicas }}
+  persistentVolumeClaimRetentionPolicy:
+    whenScaled: Delete
+  selector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: vectordb
+  template:
+    metadata:
+      labels:
+        ai-services.io/application: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+        ai-services.io/component: vectordb
+    spec:
+      containers:
+        - name: opensearch
+          image: "{{ .Values.opensearch.image }}"
+          env:
+            - name: cluster.name
+              value: opensearch-cluster
+            - name: node.name
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: cluster.initial_master_nodes
+              value: "{{ range $i := until (int .Values.opensearch.replicas) }}{{ if $i }},{{ end }}opensearch-{{ $i }}{{ end }}"
+            - name: discovery.seed_hosts
+              value: opensearch-headless
+            - name: network.host
+              value: 0.0.0.0
+            - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "opensearch-credentials"
+                  key: password
+            - name: OPENSEARCH_JAVA_OPTS
+              value: "-Xms4g -Xmx4g -XX:MaxDirectMemorySize=2g -XX:-UseSuperWord -XX:TieredStopAtLevel=1"
+          ports:
+            - name: os-client-port
+              containerPort: 9200
+            - name: os-metrics-port
+              containerPort: 9600
+          resources:
+            requests:
+              cpu: "2"
+              memory: "{{ .Values.opensearch.memoryLimit }}"
+            limits:
+              cpu: "2"
+              memory: "{{ .Values.opensearch.memoryLimit }}"
+          volumeMounts:
+            - mountPath: /usr/share/opensearch/data
+              name: data
+          startupProbe:
+            tcpSocket:
+              port: 9200
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: 9200
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 10
+          readinessProbe:
+            tcpSocket:
+              port: 9200
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          ai-services.io/application: {{ .Release.Name }}
+          ai-services.io/template: {{ .Chart.Name }}
+          ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+          ai-services.io/component: vectordb
+      spec:
+        accessModes:
+          - ReadWriteMany
+        resources:
+          requests:
+            storage: "{{ .Values.opensearch.storage }}"

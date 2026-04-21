@@ -1,0 +1,24 @@
+# Service identification
+id: digitization
+name: "Digitize Documents"
+description: "Transforms documents such as manuals, invoices, and more into texts"
+version: "1.0.0"
+type: service
+
+# Certification and support
+certified_by: "IBM"
+
+# Service belongs to these architectures
+architectures:
+  - rag
+
+# Dependencies on other services (version is optional, uses latest if not specified)
+dependencies:
+  - id: opensearch
+    version: ">=1.0.0"
+  - id: instruct
+    version: ">=1.0.0"
+  - id: embedding
+    version: ">=1.0.0"
+
+# Made with Bob

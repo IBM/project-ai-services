@@ -1,0 +1,29 @@
+name: digitization
+version: "1.0.0"
+runtime: openshift
+
+# Resource requirements for OpenShift runtime
+requirements:
+  min_cpu: "2"
+  min_memory: "4Gi"
+  min_disk: "20Gi"
+
+# Helm chart configuration
+chart_templates:
+  - name: digitize-api-deployment
+    template: digitize-api-deployment.yaml
+  - name: digitize-api-service
+    template: digitize-api-service.yaml
+  - name: digitize-api-route
+    template: digitize-api-route.yaml
+  - name: digitize-ui-deployment
+    template: digitize-ui-deployment.yaml
+  - name: digitize-ui-service
+    template: digitize-ui-service.yaml
+  - name: digitize-ui-route
+    template: digitize-ui-route.yaml
+
+# Models required (none - uses external services)
+models: []
+
+# Made with Bob

@@ -1,0 +1,182 @@
+# Digitization Service - OpenShift Values
+# This file contains default configuration values for the digitization service on OpenShift
+
+# Application metadata
+appName: "rag-app"
+namespace: "ai-services"
+
+# Digitization API configuration
+digitizeApi:
+  replicas: 1
+  image:
+    repository: "icr.io/ai-services-cicd/rag"
+    tag: "v0.0.86"
+    pullPolicy: "IfNotPresent"
+  
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+  
+  service:
+    port: 7000
+    targetPort: 7000
+    type: ClusterIP
+  
+  route:
+    enabled: true
+    host: ""  # Auto-generated if empty
+    tls:
+      enabled: true
+      termination: edge
+      insecureEdgeTerminationPolicy: Redirect
+  
+  env:
+    # Service discovery - uses convention-based naming
+    # Format: {{ .Values.appName }}--<service-id>
+    OPENSEARCH_HOST: "{{ .Values.appName }}--opensearch"
+    OPENSEARCH_PORT: "9200"
+    OPENSEARCH_USER: "admin"
+    OPENSEARCH_PASSWORD: "admin"
+    OPENSEARCH_INDEX: "documents"
+    
+    # Instruct service endpoint
+    INSTRUCT_ENDPOINT: "http://{{ .Values.appName }}--instruct:8000/v1"
+    
+    # Embedding service endpoint
+    EMBEDDING_ENDPOINT: "http://{{ .Values.appName }}--embedding:8000/v1"
+    
+    # Application settings
+    LOG_LEVEL: "INFO"
+    MAX_UPLOAD_SIZE: "100MB"
+    ALLOWED_FILE_TYPES: "pdf,txt,doc,docx"
+
+# Digitization UI configuration
+digitizeUi:
+  replicas: 1
+  image:
+    repository: "icr.io/ai-services-cicd/digitize-ui"
+    tag: "v0.0.16"
+    pullPolicy: "IfNotPresent"
+  
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  
+  service:
+    port: 7001
+    targetPort: 80
+    type: ClusterIP
+  
+  route:
+    enabled: true
+    host: ""  # Auto-generated if empty
+    tls:
+      enabled: true
+      termination: edge
+      insecureEdgeTerminationPolicy: Redirect
+  
+  env:
+    # Backend API endpoint - uses service discovery
+    REACT_APP_API_URL: "http://{{ .Values.appName }}--digitize-api:7000"
+    REACT_APP_TITLE: "Document Digitization"
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# Pod security
+podSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+# Service account
+serviceAccount:
+  create: true
+  name: "digitization-sa"
+  annotations: {}
+
+# Network policies
+networkPolicy:
+  enabled: false
+  ingress: []
+  egress: []
+
+# Monitoring and observability
+monitoring:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+
+# Health checks
+healthChecks:
+  api:
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 7000
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /ready
+        port: 7000
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+  
+  ui:
+    livenessProbe:
+      httpGet:
+        path: /
+        port: 80
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /
+        port: 80
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+# Autoscaling (optional)
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# Affinity and tolerations
+affinity: {}
+tolerations: []
+nodeSelector: {}
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# Made with Bob

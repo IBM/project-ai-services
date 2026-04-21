@@ -1,0 +1,26 @@
+# Service identification
+id: chat
+name: "Question and Answer"
+description: "Answer questions in natural language by sourcing general & domain-specific knowledge"
+version: "1.0.0"
+type: service
+
+# Certification and support
+certified_by: "IBM"
+
+# Service belongs to these architectures
+architectures:
+  - rag
+
+# Dependencies on other services (version is optional, uses latest if not specified)
+dependencies:
+  - id: opensearch
+    version: ">=1.0.0"
+  - id: embedding
+    version: ">=1.0.0"
+  - id: instruct
+    version: ">=1.0.0"
+  - id: reranker
+    version: ">=1.0.0"
+
+# Made with Bob

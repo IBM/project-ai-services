@@ -1,0 +1,5 @@
+instruct:
+  # @hidden
+  storageUri: hf://ibm-granite/granite-3.3-8b-instruct
+
+# Made with Bob

@@ -1,0 +1,5 @@
+reranker:
+  # @hidden
+  storageUri: hf://BAAI/bge-reranker-v2-m3
+
+# Made with Bob

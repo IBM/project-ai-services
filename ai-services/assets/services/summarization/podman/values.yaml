@@ -1,0 +1,9 @@
+summarize:
+  # @description Host port for the Summarize API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
+  port: ""
+  # @hidden
+  image: icr.io/ai-services-cicd/rag:v0.0.86
+  # @hidden
+  log_level: "INFO"
+
+# Made with Bob

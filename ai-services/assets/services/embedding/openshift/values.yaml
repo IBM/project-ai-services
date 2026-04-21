@@ -1,0 +1,5 @@
+embedding:
+  # @hidden
+  storageUri: hf://ibm-granite/granite-embedding-278m-multilingual
+
+# Made with Bob

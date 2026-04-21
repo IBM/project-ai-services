@@ -1,0 +1,22 @@
+name: opensearch
+version: "1.0.0"
+runtime: openshift
+
+# Resource requirements for OpenShift runtime
+requirements:
+  min_cpu: "2"
+  min_memory: "8Gi"
+  min_disk: "50Gi"
+
+# Helm chart configuration
+chart_templates:
+  - name: opensearch-statefulset
+    template: opensearch-statefulset.yaml
+  - name: opensearch-service
+    template: opensearch-service.yaml
+  - name: opensearch-credentials-secret
+    template: opensearch-credentials-secret.yaml
+  - name: opensearch-poddisruptionbudget
+    template: opensearch-poddisruptionbudget.yaml
+
+# Made with Bob

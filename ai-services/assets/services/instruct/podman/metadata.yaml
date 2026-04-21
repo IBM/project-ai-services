@@ -1,0 +1,19 @@
+name: instruct
+version: "1.0.0"
+runtime: podman
+
+# Resource requirements for Podman runtime (with Spyre cards)
+requirements:
+  min_cpu: "4"
+  min_memory: "150Gi"
+  min_spyre: "4"
+  min_disk: "50Gi"
+
+# Pod template execution order
+pod_templates:
+  - name: instruct-server
+    template: instruct-server.yaml.tmpl
+    wait_for_ready: true
+    readiness_timeout: 420s
+
+# Made with Bob
