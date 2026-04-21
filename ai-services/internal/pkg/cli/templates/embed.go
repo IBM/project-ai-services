@@ -378,7 +378,7 @@ func NewEmbedTemplateProvider(options EmbedOptions) Template {
 		t.root = ""
 
 		// if its application Fs -> use "applications" as root
-		if options.FS == &assets.ApplicationFS {
+		if t.fs == &assets.ApplicationFS {
 			t.root = "applications"
 		}
 	}
