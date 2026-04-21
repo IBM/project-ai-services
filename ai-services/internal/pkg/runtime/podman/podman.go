@@ -202,37 +202,67 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 	stdoutChan := make(chan string, logChannelBufferSize)
 	stderrChan := make(chan string, logChannelBufferSize)
 
+	logsCtx, cancelLogs := context.WithCancel(ctx)
+	defer cancelLogs()
+
 	// Channel to signal goroutine completion
 	done := make(chan struct{})
+	logsDone := make(chan error, 1)
 
+	// print logs
+	go pc.printLogsFromChannels(logsCtx, stdoutChan, stderrChan, done)
+
+	// stream logs
 	go func() {
-		defer close(done)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case line, ok := <-stdoutChan:
-				if !ok {
-					return
-				}
-				logger.Infoln(line)
-			case line, ok := <-stderrChan:
-				if !ok {
-					return
-				}
-				logger.Infoln(line)
-			}
+		err := containers.Logs(logsCtx, containerNameOrID, opts, stdoutChan, stderrChan)
+		logsDone <- err
+	}()
+
+	// wait for container to exit
+	go func() {
+		// Wait for container to exit
+		_, err := containers.Wait(pc.Context, containerNameOrID, nil)
+		if err == nil {
+			// Container exited, cancel the logs streaming
+			cancelLogs()
 		}
 	}()
 
-	err := containers.Logs(ctx, containerNameOrID, opts, stdoutChan, stderrChan)
-	<-done
+	// Wait for either logs to complete or context cancellation
+	select {
+	case <-ctx.Done():
+		<-done
 
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
-	}
+	case err := <-logsDone:
+		<-done
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil
+		}
 
-	return err
+		return err
+	}
+}
+
+// printLogsFromChannels reads from stdout and stderr channels and prints logs.
+func (pc *PodmanClient) printLogsFromChannels(ctx context.Context, stdoutChan, stderrChan <-chan string, done chan struct{}) {
+	defer close(done)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case line, ok := <-stdoutChan:
+			if !ok {
+				return
+			}
+			logger.Infoln(line)
+		case line, ok := <-stderrChan:
+			if !ok {
+				return
+			}
+			logger.Infoln(line)
+		}
+	}
 }
 
 func (pc *PodmanClient) PodLogs(podNameOrID string) error {
