@@ -47,27 +47,39 @@ def create_indexing_handler(emb_model_dict: dict, status_mgr: Optional[StatusMan
         nonlocal vector_store, embedder
 
         try:
-            logger.info(f"Immediately indexing {len(chunks)} chunks for document: {doc_id}")
+            logger.debug(f"Immediately indexing {len(chunks)} chunks for document: {doc_id}")
+
+            # Capture indexing timing
+            indexing_start_time = time.time()
 
             # Index the chunks
             success = vector_store.insert_chunks(chunks, embedding=embedder)
+            indexing_time = time.time() - indexing_start_time
+
             if not success:
                 logger.error(f"Failed to index document {doc_id}")
                 if status_mgr and doc_id_dict:
                     status_mgr.update_doc_metadata(
                         doc_id,
-                        {"status": DocStatus.FAILED},
+                        {
+                            "status": DocStatus.FAILED,
+                            "timing_in_secs": {"indexing": round(indexing_time, 2)}
+                        },
                         error="Failed to index document chunks into vector database"
                     )
                     status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
                 return False
 
-            # Update status to COMPLETED
+            # Update status to COMPLETED with indexing timing
             if status_mgr and doc_id_dict:
                 logger.debug(f"Indexing Done: updating doc metadata to COMPLETED for document: {doc_id}")
                 status_mgr.update_doc_metadata(
                     doc_id,
-                    {"status": DocStatus.COMPLETED, "completed_at": get_utc_timestamp()}
+                    {
+                        "status": DocStatus.COMPLETED,
+                        "completed_at": get_utc_timestamp(),
+                        "timing_in_secs": {"indexing": round(indexing_time, 2)}
+                    }
                 )
                 status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
 
@@ -130,8 +142,6 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
 
         emb_model_dict, llm_model_dict, _ = get_model_endpoints()
 
-        # Initialize/reset the database before processing any files
-        vector_store = db.get_vector_store()
         out_path = setup_digitized_doc_dir()
 
         # Create indexing handler for immediate indexing after chunking
