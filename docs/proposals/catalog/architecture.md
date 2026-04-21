@@ -21,7 +21,7 @@ The architecture is centered on the **Catalog Service** as the management plane,
   * **Auth Middleware**: JWT-based authentication and authorization layer
   * **API Server**: REST API endpoints for application lifecycle management
   * **Application Assets**: Embedded templates and configurations for AI services
-* **Data Layer (External)**: PostgreSQL database for persistent storage of user credentials, running application instances, deployment metadata, and audit logs.
+* **Data Layer (External)**: PostgreSQL database for persistent storage of running application instances and deployment metadata.
 * **AI Services Runtime**: The underlying infrastructure layer (Podman on LPAR or Kubernetes on OpenShift) that hosts deployed AI applications and services.
 
 ```mermaid
@@ -65,7 +65,6 @@ The Catalog UI transforms manual workflows into automated, repeatable processes:
 
 * **Accelerated Deployment**: A "One-Click" deployment flow that automates container AI Services provisioning and service exposer.
 
-* **Lifecycle Observability**: Integrated real-time log streaming and status monitoring, providing immediate feedback on AI services health and resource utilization.
 
 * **Persistent State Management**: All deployment metadata, configurations, and user preferences are stored in the database for reliability and recovery.
 

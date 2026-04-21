@@ -183,6 +183,10 @@ The bootstrap process executes the following steps:
    - Validate service health and connectivity
    - Display next steps for accessing the catalog
 
+6. **Printing Next Steps**
+   - Output Catalog UI endpoint for user access
+   - Display the web interface URL in format: `http://<host>:<ui-port>`
+
 #### Example Usage
 
 ```bash
