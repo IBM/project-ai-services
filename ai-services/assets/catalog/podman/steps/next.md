@@ -1,0 +1,1 @@
+- Access the Catalog UI at http://{{ .HOST_IP }}:{{ .UI_PORT }}

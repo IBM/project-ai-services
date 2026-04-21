@@ -10,8 +10,7 @@ logger = get_logger("settings")
 class Prompts:
     query_vllm_stream: str
     query_vllm_stream_de:str
-    llm_classify: str
-    table_summary: str
+    table_summary_and_classify: str
     summarize_system_prompt: str
     summarize_user_prompt_with_length: str
     summarize_user_prompt_without_length: str
@@ -20,8 +19,7 @@ class Prompts:
         if any(prompt in (None, "") for prompt in (
             self.query_vllm_stream,
             self.query_vllm_stream_de,
-            self.llm_classify,
-            self.table_summary,
+            self.table_summary_and_classify,
             self.summarize_system_prompt,
             self.summarize_user_prompt_with_length,
             self.summarize_user_prompt_without_length
@@ -38,8 +36,7 @@ class Prompts:
         required_fields = [
             "query_vllm_stream",
             "query_vllm_stream_de",
-            "llm_classify",
-            "table_summary",
+            "table_summary_and_classify",
             "summarize_system_prompt",
             "summarize_user_prompt_with_length",
             "summarize_user_prompt_without_length"
@@ -52,8 +49,7 @@ class Prompts:
         return cls(
             query_vllm_stream = data["query_vllm_stream"],
             query_vllm_stream_de = data["query_vllm_stream_de"],
-            llm_classify = data["llm_classify"],
-            table_summary = data["table_summary"],
+            table_summary_and_classify = data["table_summary_and_classify"],
             summarize_system_prompt = data["summarize_system_prompt"],
             summarize_user_prompt_with_length = data["summarize_user_prompt_with_length"],
             summarize_user_prompt_without_length = data["summarize_user_prompt_without_length"]
@@ -126,6 +122,7 @@ class Settings:
     summarization_temperature: float
     summarization_stop_words: str
     language_detection_min_confidence: float
+    table_summary_max_tokens: int
 
 
     def __post_init__(self):
@@ -144,6 +141,7 @@ class Settings:
         default_summarization_temperature = 0.2
         default_summarization_stop_words = "Keywords, Note, ***"
         default_language_detection_min_confidence = 0.5
+        default_table_summary_max_tokens = 1024
 
         if not (isinstance(self.score_threshold, float) and 0 < self.score_threshold < 1):
             object.__setattr__(self, "score_threshold", default_score_threshold)
@@ -211,6 +209,10 @@ class Settings:
                 object.__setattr__(self, "language_detection_min_confidence", default_language_detection_min_confidence)
                 logger.warning(f"Setting language_detection_min_confidence to default '{default_language_detection_min_confidence}' as it is missing in the settings")
 
+        if not (isinstance(self.table_summary_max_tokens, int) and self.table_summary_max_tokens > 0):
+            object.__setattr__(self, "table_summary_max_tokens", default_table_summary_max_tokens)
+            logger.warning(f"Setting table_summary_max_tokens to default '{default_table_summary_max_tokens}' as it is missing or malformed in the settings")
+
 
     @classmethod
     def from_dict(cls, data: dict):
@@ -240,7 +242,8 @@ class Settings:
             summarization_prompt_token_count = data.get("summarization_prompt_token_count", None),  # type: ignore[arg-type]
             summarization_temperature = data.get("summarization_temperature", None),  # type: ignore[arg-type]
             summarization_stop_words = data.get("summarization_stop_words", None),  # type: ignore[arg-type]
-            language_detection_min_confidence = data.get("language_detection_min_confidence", None)  # type: ignore[arg-type]
+            language_detection_min_confidence = data.get("language_detection_min_confidence", None),  # type: ignore[arg-type]
+            table_summary_max_tokens = data.get("table_summary_max_tokens", None)  # type: ignore[arg-type]
         )
 
     @classmethod

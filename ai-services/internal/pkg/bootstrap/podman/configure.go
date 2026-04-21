@@ -65,6 +65,16 @@ func (p *PodmanBootstrap) Configure() error {
 		s.Stop("Podman already configured")
 	}
 
+	s = spinner.New("Configuring SMT level to 2")
+	s.Start(ctx)
+	// 3. Configure SMT level to 2 and persist via systemd
+	if err := setupSMTLevel(); err != nil {
+		s.Fail("failed to configure SMT level")
+
+		return err
+	}
+	s.Stop("SMT level configured successfully (set to 2)")
+
 	logger.Infoln("LPAR configured successfully")
 
 	return nil

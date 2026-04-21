@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,18 +37,6 @@ var (
 func (p *PodmanApplication) Create(ctx context.Context, opts types.CreateOptions) error {
 	// Proceed to create application
 	logger.Infof("Creating application '%s' using template '%s'\n", opts.Name, opts.TemplateName)
-
-	// set SMT level to target value
-	s := spinner.New("Checking SMT level")
-	s.Start(ctx)
-	err := p.setSMTLevel(opts.TemplateName)
-	if err != nil {
-		s.Fail("failed to set SMT level")
-
-		return fmt.Errorf("failed to set SMT level: %w", err)
-	}
-	s.Stop("SMT level configured successfully")
-
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
 
 	// validate whether the provided template name is correct
@@ -206,100 +193,6 @@ func (p *PodmanApplication) downloadModels(ctx context.Context, templateName, ap
 	s.Stop("Model download completed.")
 
 	return nil
-}
-
-func (p *PodmanApplication) setSMTLevel(templateName string) error {
-	// 1. Fetch Current SMT level
-	cmd := exec.Command("ppc64_cpu", "--smt")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to check current SMT level: %v, output: %s", err, string(out))
-	}
-
-	currentSMTlevel, err := p.getSMTLevel(string(out))
-	if err != nil {
-		return fmt.Errorf("failed to get current SMT level: %w", err)
-	}
-
-	// 2. Fetch the target SMT level
-	targetSMTLevel, err := p.getTargetSMTLevel(templateName)
-	if err != nil {
-		return fmt.Errorf("failed to get target SMT level: %w", err)
-	}
-
-	if targetSMTLevel == nil {
-		// No SMT level specified in metadata.yaml
-		logger.Infof("No SMT level specified in metadata.yaml. Keeping it to current level: %d\n", currentSMTlevel)
-
-		return nil
-	}
-
-	// 3. Check if SMT level is already set to target value
-	if currentSMTlevel == *targetSMTLevel {
-		// already set
-		logger.Infof("SMT level is already set to %d\n", *targetSMTLevel)
-
-		return nil
-	}
-
-	// 4. Set SMT level to target value
-	arg := "--smt=" + strconv.Itoa(*targetSMTLevel)
-	cmd = exec.Command("ppc64_cpu", arg)
-	out, err = cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to set SMT level: %v, output: %s", err, string(out))
-	}
-
-	// 5. Verify again
-	cmd = exec.Command("ppc64_cpu", "--smt")
-	out, err = cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to verify SMT level: %v, output: %s", err, string(out))
-	}
-
-	currentSMTlevel, err = p.getSMTLevel(string(out))
-	if err != nil {
-		return fmt.Errorf("failed to get SMT level after updating: %w", err)
-	}
-
-	if currentSMTlevel != *targetSMTLevel {
-		return fmt.Errorf("SMT level verification failed: expected %d, got %d", targetSMTLevel, currentSMTlevel)
-	}
-
-	return nil
-}
-
-func (p *PodmanApplication) getSMTLevel(output string) (int, error) {
-	out := strings.TrimSpace(output)
-
-	if !strings.HasPrefix(out, "SMT=") {
-		return 0, fmt.Errorf("unexpected output: %s", out)
-	}
-
-	SMTLevelStr := strings.TrimPrefix(out, "SMT=")
-	SMTlevel, err := strconv.Atoi(SMTLevelStr)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse SMT level: %w", err)
-	}
-
-	return SMTlevel, nil
-}
-
-func (p *PodmanApplication) getTargetSMTLevel(templateName string) (*int, error) {
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
-
-	// validate whether the provided template name is correct
-	if err := validators.ValidateAppTemplateExist(tp, templateName); err != nil {
-		return nil, err
-	}
-
-	// load metadata.yml to read the app metadata
-	appMetadata, err := tp.LoadMetadata(templateName, false)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read the app metadata: %w", err)
-	}
-
-	return appMetadata.SMTLevel, nil
 }
 
 func (p *PodmanApplication) verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *templates.AppMetadata) error {
