@@ -20,9 +20,9 @@ const (
 	infoTitle  = "Info"
 )
 
-func PrintNextSteps(runtime runtime.Runtime, app, appTemplate string) error {
+func PrintNextSteps(tp templates.Template, runtime runtime.Runtime, app, appTemplate string) error {
 	params := map[string]string{"AppName": app}
-	if err := renderStepsMarkdown(runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
+	if err := renderStepsMarkdown(tp, runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
 		logger.Infof("Unable to load steps: %v\n", err)
 
 		return nil
@@ -31,9 +31,9 @@ func PrintNextSteps(runtime runtime.Runtime, app, appTemplate string) error {
 	return nil
 }
 
-func PrintInfo(runtime runtime.Runtime, app, appTemplate string) error {
+func PrintInfo(tp templates.Template, runtime runtime.Runtime, app, appTemplate string) error {
 	params := map[string]string{"AppName": app}
-	if err := renderStepsMarkdown(runtime, appTemplate, params, infoMDFile, infoTitle); err != nil {
+	if err := renderStepsMarkdown(tp, runtime, appTemplate, params, infoMDFile, infoTitle); err != nil {
 		logger.Infof("Unable to load steps: %v\n", err)
 
 		return nil
@@ -172,11 +172,7 @@ func fetchDataSpecificInfo(data any, format string, defaultValue *string) (strin
 	return strings.TrimSpace(result.String()), nil
 }
 
-func renderStepsMarkdown(runtime runtime.Runtime, appTemplate string, params map[string]string, mdFile, title string) error {
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{
-		Runtime: runtime.Type(),
-	})
-
+func renderStepsMarkdown(tp templates.Template, runtime runtime.Runtime, appTemplate string, params map[string]string, mdFile, title string) error {
 	tmpls, err := tp.LoadMdFiles(appTemplate)
 	if err != nil {
 		return nil
@@ -215,6 +211,7 @@ func renderStepsMarkdown(runtime runtime.Runtime, appTemplate string, params map
 	logger.Infoln(title + ":")
 	logger.Infoln("-------")
 	logger.Infoln(rendered.String())
+	logger.Infoln("") // Add Empty line after printing steps
 
 	return nil
 }
