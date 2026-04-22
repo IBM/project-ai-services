@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"os/user"
 	"strings"
 	"syscall"
 
@@ -39,16 +40,46 @@ func NewPodmanClient() (*PodmanClient, error) {
 	// MacOS instructions running in a remote VM:
 	// export CONTAINER_HOST=ssh://root@127.0.0.1:62904/run/podman/podman.sock
 	// export CONTAINER_SSHKEY=/Users/manjunath/.local/share/containers/podman/machine/machine
-	uri := "unix:///run/podman/podman.sock"
-	if v, found := os.LookupEnv("CONTAINER_HOST"); found {
-		uri = v
+	uri, err := resolvePodmanURI()
+	if err != nil {
+		return nil, err
 	}
+
 	ctx, err := bindings.NewConnection(context.Background(), uri)
 	if err != nil {
 		return nil, err
 	}
 
 	return &PodmanClient{Context: ctx}, nil
+}
+
+func resolvePodmanURI() (string, error) {
+	if v, found := os.LookupEnv("CONTAINER_HOST"); found {
+		return v, nil
+	}
+
+	if os.Geteuid() == 0 {
+		return rootPodmanURI()
+	}
+
+	return fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", os.Getuid()), nil
+}
+
+func rootPodmanURI() (string, error) {
+	sudoUser := os.Getenv("SUDO_USER")
+	if sudoUser == "" {
+		return "unix:///run/podman/podman.sock", nil
+	}
+
+	u, err := user.Lookup(sudoUser)
+	if err != nil {
+		return "", fmt.Errorf("failed to lookup user %s: %w", sudoUser, err)
+	}
+
+	return fmt.Sprintf(
+		"unix:///run/user/%s/podman/podman.sock",
+		u.Uid,
+	), nil
 }
 
 // ListImages function to list images (you can expand with more Podman functionalities).

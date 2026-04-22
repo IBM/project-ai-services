@@ -46,12 +46,9 @@ func ListModels(template, appName string) ([]string, error) {
 }
 
 func DownloadModel(model, targetDir string) error {
-	// check for target model directory, if not present create it
-	if _, err := os.Stat(targetDir); os.IsNotExist(err) {
-		err := os.MkdirAll(targetDir, os.ModePerm)
-		if err != nil {
-			return fmt.Errorf("failed to create target model directory: %w", err)
-		}
+	// check for target model directory
+	if _, err := os.Stat(targetDir); err != nil {
+		return fmt.Errorf("user does not have permission to access the directory: %s, err: %w", targetDir, err)
 	}
 	logger.Infof("Downloading model %s to %s\n", model, targetDir)
 
