@@ -395,8 +395,14 @@ Uninstalls and removes all catalog service components, including pods, container
 #### Command Syntax
 
 ```bash
-ai-services catalog delete
+ai-services catalog delete [flags]
 ```
+
+#### Flags
+
+| Flag | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `--skip-cleanup` | bool | No | false | Skip cleaning up database data. When set, only removes containers and pods but preserves database data for future use. |
 
 #### Purpose
 
@@ -420,51 +426,83 @@ The command automatically executes the following cleanup steps:
    - Deletes all catalog pods
    - Removes all containers (UI, backend, database)
    - Cleans up network configurations
-   - Removes persistent volumes
+   - Removes persistent volumes (unless `--skip-cleanup` is set)
    - Deletes associated secrets and configurations
 
-4. **Verification**
+4. **Database Cleanup** (conditional)
+   - If `--skip-cleanup` is **not** set (default behavior):
+     - Removes all database data
+     - Deletes persistent volumes containing database files
+     - Ensures complete data removal
+   - If `--skip-cleanup` **is** set:
+     - Preserves database data and persistent volumes
+     - Allows data to be reused in future deployments
+     - Only removes running containers and pods
+
+5. **Verification**
    - Confirms successful deletion of all resources
    - Reports cleanup summary
-   - Validates complete removal
+   - Validates complete removal (or partial removal if `--skip-cleanup` is used)
 
 #### Example Usage
 
 ```bash
+# Complete deletion (default - removes everything including database data)
 ai-services catalog delete
 
 # Output:
 Deleting catalog services...
 Stopping containers...
 Removing pod ai-services--catalog...
+Cleaning up database data...
 Cleaning up resources...
 Cleanup completed successfully.
 All catalog resources have been removed.
+
+# Deletion with database preservation
+ai-services catalog delete --skip-cleanup
+
+# Output:
+Deleting catalog services...
+Stopping containers...
+Removing pod ai-services--catalog...
+Skipping database cleanup (--skip-cleanup flag set)...
+Cleaning up resources...
+Cleanup completed successfully.
+Catalog containers removed. Database data preserved.
 ```
 
 #### Behavior
 
-- **Automatic Cleanup**: Removes all catalog-related resources without requiring additional flags
-- **Comprehensive Removal**: Ensures complete deletion of pods, containers, volumes, and configurations
+- **Automatic Cleanup**: Removes all catalog-related resources by default
+- **Comprehensive Removal**: Ensures complete deletion of pods, containers, volumes, and configurations (unless `--skip-cleanup` is used)
 - **Graceful Termination**: Allows services to shut down cleanly before removal
 - **Idempotent Operation**: Safe to run multiple times; handles cases where resources are already deleted
 - **Clear Feedback**: Provides detailed status messages throughout the deletion process
+- **Selective Cleanup**: With `--skip-cleanup` flag, preserves database data while removing containers and pods
 
 #### Use Cases
 
-- **Clean Uninstallation**: Remove catalog services when no longer needed
+- **Clean Uninstallation**: Remove catalog services when no longer needed (default behavior)
 - **Redeployment**: Clean environment before reinstalling with different configuration
 - **Troubleshooting**: Remove problematic deployment for a fresh start
 - **Environment Cleanup**: Free resources in development, testing, or production environments
 - **Migration**: Clean up before moving to a different runtime or configuration
+- **Data Preservation**: Use `--skip-cleanup` to preserve database data when:
+  - Upgrading catalog services to a new version
+  - Temporarily removing containers to free resources
+  - Testing different configurations while keeping existing data
+  - Migrating between container runtimes while preserving data
 
 #### Important Notes
 
-- **Permanent Operation**: Deletion is irreversible and removes all catalog data
-- **Data Loss**: All catalog configurations and stored data will be permanently deleted
-- **Token Invalidation**: User authentication tokens will be invalidated
-- **Backup Recommendation**: Backup any important data or configurations before deletion
+- **Permanent Operation**: By default, deletion is irreversible and removes all catalog data
+- **Data Loss**: Without `--skip-cleanup`, all catalog configurations and stored data will be permanently deleted
+- **Data Preservation**: With `--skip-cleanup`, database data is preserved for future use
+- **Token Invalidation**: User authentication tokens will be invalidated after deletion
+- **Backup Recommendation**: Backup any important data or configurations before deletion (unless using `--skip-cleanup`)
 - **Complete Cleanup**: Ensures no orphaned resources remain in the runtime environment
+- **Redeployment with Preserved Data**: When using `--skip-cleanup`, subsequent `catalog configure` commands can reuse the existing database data
 
 ---
 

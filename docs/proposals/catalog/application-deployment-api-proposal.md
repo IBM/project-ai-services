@@ -768,6 +768,21 @@ Content-Type: application/json
   "deployment_type": "Architecture",
   "type": "Digital Assistant",
   "template": "rag",
+  "created_by": "admin",
+  "services": [
+    {
+      "id": "chat",
+      "version": "1.0.0"
+    },
+    {
+      "id": "summarization",
+      "version": "1.0.0"
+    },
+    {
+      "id": "digitization",
+      "version": "1.0.0"
+    }
+  ],
   "params": {
     "opensearch.memoryLimit": "4Gi",
     "opensearch.storage": "20Gi",
@@ -783,7 +798,15 @@ Content-Type: application/json
 | deployment_type | string | Yes | Deployment type: "Architecture" or "Service" |
 | type | string | Yes | Application type (e.g., "Digital Assistant", "Summary") |
 | template | string | Yes | Template ID (e.g., "rag" is the ID for "Digital Assistant" type) |
+| created_by | string | Yes | Username of the user creating the application |
+| services | array | No | Array of service objects to deploy. If not provided, all services from the architecture template will be deployed. For Service deployment_type, this should contain a single service. |
 | params | object | No | Key-value pairs of custom parameters for the deployment |
+
+**Service Object (in services array):**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| id | string | Yes | Service template ID (e.g., "chat", "summarization", "digitization") - must match available services from catalog |
+| version | string | No | Service version to deploy. If not specified, uses the latest compatible version |
 
 **Params Object:**
 - Flexible key-value pairs where keys are parameter paths (e.g., "opensearch.memoryLimit")
@@ -799,8 +822,23 @@ Content-Type: application/json
   "deployment_type": "Architecture",
   "type": "Digital Assistant",
   "template": "rag",
+  "created_by": "admin",
   "status": "Downloading",
   "message": "Deployment initiated successfully",
+  "services": [
+    {
+      "id": "chat",
+      "version": "1.0.0"
+    },
+    {
+      "id": "summarization",
+      "version": "1.0.0"
+    },
+    {
+      "id": "digitization",
+      "version": "1.0.0"
+    }
+  ],
   "params": {
     "opensearch.memoryLimit": "4Gi",
     "opensearch.storage": "20Gi",
@@ -819,8 +857,10 @@ Content-Type: application/json
 | deployment_type | string | Deployment type |
 | type | string | Application type |
 | template | string | Template ID used for deployment |
+| created_by | string | Username of the user who created the application |
 | status | string | Initial status ("Downloading") |
 | message | string | Status message |
+| services | array | Array of service objects that will be deployed |
 | params | object | Applied parameters (sensitive values masked) |
 | created_at | string | Creation timestamp |
 | updated_at | string | Last update timestamp |
@@ -835,7 +875,12 @@ Content-Type: application/json
 **Implementation Notes:**
 1. **Token Validation**: Validate JWT token from Authorization header
 
-2. **ID Generation**:
+2. **User Validation**:
+   - Validate that `created_by` matches the authenticated user from the JWT token
+   - Extract user ID from JWT token and verify it corresponds to the provided `created_by` username
+   - Return 403 Forbidden if `created_by` doesn't match the authenticated user
+
+3. **ID Generation**:
    - Auto-generate `id` by normalizing deployment_name
    - Normalization rules:
      - Convert to lowercase
@@ -849,32 +894,44 @@ Content-Type: application/json
    - Validate final id is 3-50 characters
    - Check uniqueness in applications table (return 409 if exists)
 
-3. **Template Validation**:
+4. **Template Validation**:
    - Verify template exists in catalog
    - Retrieve template's JSON Schema for parameter validation
 
-4. **Parameter Validation** (if params provided):
+5. **Services Validation** (if services provided):
+   - Validate each service ID exists in the catalog (use GET /api/v1/services/{id})
+   - For Architecture deployment_type:
+     - Verify each service is compatible with the architecture template
+     - Check that service versions meet architecture requirements
+     - If services array is not provided, use all services defined in the architecture template
+   - For Service deployment_type:
+     - Ensure only one service is specified in the services array
+     - Validate the service matches the application type
+   - Validate service dependencies are satisfied
+   - Return 422 error if any service validation fails
+
+6. **Parameter Validation** (if params provided):
    - Validate each param key exists in template's JSON Schema
    - Validate each param value against its schema definition (type, pattern, min/max, etc.)
    - Return 422 error with details if validation fails
    - Merge provided params with template defaults
 
-5. **Database Operations**:
+7. **Database Operations**:
    - Begin transaction
    - Insert record in applications table with:
      - Generated id (Primary Key)
-     - deployment_name, deployment_type, template
+     - deployment_name, deployment_type, template, created_by
      - params as JSONB
      - status = "Downloading"
    - Insert corresponding records in services table
    - Commit transaction
 
-6. **Async Deployment**:
+8. **Async Deployment**:
    - Initiate background deployment job with id
    - Return immediately with 202 Accepted
    - Background worker handles actual deployment
 
-7. **Deployment Status Updates**:
+9. **Deployment Status Updates**:
    - On success: Update status to "Running" and populate endpoints in services table
    - On failure: Update status to "Error" with error message
 

@@ -73,6 +73,7 @@ ai_service
 | deployment_type     | deployment_type   | ENUM        | Type of deployment (Deployable Architecture, Services) |
 | status              | Status            | ENUM        | Current status (Downloading, Deploying, Running, Deleting, Error) |
 | message             | TEXT              |             | Status message or error details |
+| createdby           | VARCHAR(100)      |             | User who created the application |
 | created_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of creation |
 | updated_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of last update |
 
@@ -106,7 +107,7 @@ CREATE TYPE status AS ENUM (
 | type                | VARCHAR(100)      |             | Service/Infrastructure type |
 | category            | service_category  | ENUM        | Service category (Deployable Service, Infrastructure) |
 | status              | Status            | ENUM        | Current status (Deploying, Running, Deleting, Error) |
-| endpoints           | TEXT[]            |             | Array of service/infrastructure endpoints/URLs |
+| endpoints           | JSONB             |             | Array of endpoint objects with name and endpoint fields: `[{"name": "ui", "endpoint": "http://..."}, {"name": "backend", "endpoint": "http://..."}]` |
 | version             | TEXT              |             | Service/Infrastructure version |
 | created_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of creation |
 | updated_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of last update |
@@ -133,6 +134,7 @@ CREATE TYPE service_category AS ENUM (
 │ deployment_type  │
 │ status           │
 │ message          │
+│ createdby        │
 │ created_at       │
 │ updated_at       │
 └──────────────────┘
