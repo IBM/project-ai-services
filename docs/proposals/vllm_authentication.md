@@ -4,7 +4,7 @@
 
 ## 1. Executive Summary
 
-**vLLM Authentication** provides simple, password-based authentication for all vLLM inference services (instruct, embedding, and reranker models). By using a single hardcoded password across all services with an opt-out mechanism, the system ensures that AI services have basic authentication by default while maintaining flexibility for development and testing scenarios.
+**vLLM Authentication** provides simple, API key-based authentication for vLLM inference services (instruct, embedding, and reranker models). Each service can have its own independent API key. Authentication is controlled by the presence of API keys supplied via environment variables - if an API key is provided for a service, authentication is enabled for that service; otherwise, it remains disabled. This approach ensures flexibility, security isolation, and simplicity.
 
 ## 2. Problem Statement
 
@@ -15,10 +15,10 @@
 - Security risk in production environments
 
 ### Requirements
-1. **Secure by Default**: Authentication must be enabled automatically during application creation
-2. **Simple Configuration**: Single hardcoded password used across all services
-3. **Opt-Out Mechanism**: Users can disable authentication via explicit flag for development/testing
-4. **Backward Compatible**: Existing deployments should continue to work
+1. **Simple Configuration**: User-Provided API Key - The system authenticates using an API key supplied directly by the user
+2. **Default Behavior**: Authentication disabled by default (no API key = no auth)
+3. **Opt-In Mechanism**: Users enable authentication by providing API keys
+4. **Service Isolation**: Each service (instruct, embedding, reranker) has its own API key
 5. **Minimal Overhead**: No performance degradation or complex configuration
 
 ## 3. Solution Architecture
@@ -28,13 +28,13 @@
 ```
 Client Service
       |
-      | HTTP Request + Authorization: Bearer <password>
+      | HTTP Request + Authorization: Bearer <service_api_key>
       v
-vLLM Server
+vLLM Server (instruct/embedding/reranker)
       |
-      +--> Password Validation
+      +--> API Key Validation
             |
-            +--[Valid Password]-------> Model Inference --> Response
+            +--[Valid API Key]-------> Model Inference --> Response
             |
             +--[Invalid/Missing]-----> 401 Unauthorized
 ```
@@ -43,92 +43,110 @@ vLLM Server
 
 | Component | Role | Implementation |
 |-----------|------|----------------|
-| **vLLM Server** | Validates password using env var | Native vLLM support (v0.4.1+) |
-| **Client Services** | Include `Authorization: Bearer <password>` header | Python utilities (misc_utils, emb_utils, llm_utils) |
-| **Configuration** | Controls auth behavior with hardcoded password | values.yaml with vllm.authEnabled flag |
+| **vLLM Server** | Validates API key using env var | Native vLLM support (v0.4.1+) |
+| **Client Services** | Include `Authorization: Bearer <api_key>` header | Python utilities (misc_utils, emb_utils, llm_utils) |
+| **Configuration** | API keys supplied via parameter or env var | values.yaml with separate keys per service |
 
-### 3.3 Password Architecture
+### 3.3 API Key Architecture
 
-**Simple Hardcoded Password:**
+**Service-Specific API Keys:**
 
-A single hardcoded password is used across all vLLM services:
-
-```
-Hardcoded Password (in code)
-       |
-       v
-Used directly as API key
-       |
-       v
-Passed as VLLM_API_KEY env var
-```
+Users provide individual API keys for each vLLM service:
 
 **Key Properties:**
-- **Simple**: Single password for all services
-- **Hardcoded**: Password defined in code, not configurable by users
+- **User-Controlled**: API keys provided by user, not hardcoded
+- **Optional**: If no API key supplied for a service, authentication is disabled for that service
+- **Service-Isolated**: Each service has its own independent API key
 - **Plain Text**: No encryption or encoding
-- **Shared**: Same password used by instruct, embedding, and reranker services
+- **Granular Control**: Enable auth for some services while leaving others open
 
 ## 4. Feature Specification
 
-### 4.1 Default Behavior (Authentication Enabled)
+### 4.1 Default Behavior (Authentication Disabled)
 
-When a user creates an application **without** specifying authentication preferences:
+When a user creates an application **without** specifying API keys:
 
 ```bash
 $ ai-services application create my-app -t rag
 
-✓ vLLM authentication enabled with password
+⚠ vLLM authentication is disabled for all services (no API keys provided)
 
 Application 'my-app' created successfully
 =====================================
 ```
 
 **What Happens:**
-1. `vllm.authEnabled` is `true` by default
-2. Hardcoded password is used across all services (instruct, embedding, reranker)
-3. Password is passed directly to vLLM servers via env var
-4. Client services use the same hardcoded password in Authorization headers
-5. No password storage in values file - password is hardcoded in code
+1. All `vllm.*.apiKey` fields are empty/unset in values
+2. vLLM servers start without authentication
+3. Client services do not include Authorization headers
+4. No API key storage or secrets created
 
-**Password Usage:**
+### 4.2 Enabling Authentication (Opt-In)
 
-| Environment | How Password Is Used |
-|-------------|-------------------|
-| **Podman** | Hardcoded password passed directly to vLLM via env var |
-| **OpenShift** | Hardcoded password stored in Kubernetes Secret, passed to vLLM via env var |
+Users enable authentication by providing API keys for specific services via the `--params` flag:
 
-**Deployment Flow**:
-```
-1. Hardcoded Password (defined in code)
-2. Deploy Application:
-   
-   Podman:
-   ├─> Pass hardcoded password directly to vLLM env var
-   └─> Client services use same hardcoded password in Authorization headers
-   
-   OpenShift:
-   ├─> Create vllm-password Secret with hardcoded password
-   ├─> Reference Secret in InferenceServices (vLLM pods)
-   ├─> Reference Secret in Deployments (client pods)
-   └─> All services use the same password
-```
-
-### 4.2 Disabling Authentication (Opt-Out)
-
-For development or testing scenarios, users can disable authentication via the `--params` flag:
-
+#### Enable authentication for all services:
 ```bash
-$ ai-services application create my-app -t rag --params vllm.authEnabled=false
+$ ai-services application create my-app -t rag \
+  --params vllm.instruct.apiKey=instruct-key-123 \
+  --params vllm.embedding.apiKey=embedding-key-456 \
+  --params vllm.reranker.apiKey=reranker-key-789
 
-⚠ vLLM authentication is disabled (not recommended for production)
-✓ Application 'my-app' created successfully
+✓ vLLM authentication enabled:
+  - Instruct service: enabled
+  - Embedding service: enabled
+  - Reranker service: enabled
+
+Application 'my-app' created successfully
+=====================================
+```
+
+#### Enable authentication for specific services only:
+```bash
+$ ai-services application create my-app -t rag \
+  --params vllm.instruct.apiKey=instruct-key-123
+
+✓ vLLM authentication status:
+  - Instruct service: enabled
+  - Embedding service: disabled (no API key)
+  - Reranker service: disabled (no API key)
+
+Application 'my-app' created successfully
+=====================================
 ```
 
 **What Happens:**
-1. `vllm.authEnabled` is set to `false` in values
-2. vLLM servers start without auth enabled
-3. Client services do not include Authorization headers
+1. API keys are set for specified services in values
+2. API keys are passed to respective vLLM servers via VLLM_API_KEY env var
+3. Client services use the appropriate API key when calling each service
+4. Services without API keys remain unauthenticated
+
+**API Key Usage:**
+
+| Environment | How API Keys Are Used |
+|-------------|-------------------|
+| **Podman** | API keys passed directly to vLLM via env var per service |
+| **OpenShift** | API keys stored in Kubernetes Secrets, passed to vLLM via env var per service |
+
+**Deployment Flow**:
+```
+1. User Provides API Keys (via --params or env vars)
+2. Deploy Application:
+   
+   Podman:
+   ├─> Pass instruct API key to instruct container env var
+   ├─> Pass embedding API key to embedding container env var
+   ├─> Pass reranker API key to reranker container env var
+   └─> Client services use appropriate API key per service
+   
+   OpenShift:
+   ├─> Create vllm-instruct-api-key Secret (if provided)
+   ├─> Create vllm-embedding-api-key Secret (if provided)
+   ├─> Create vllm-reranker-api-key Secret (if provided)
+   ├─> Reference Secrets in respective InferenceServices
+   ├─> Reference Secrets in client Deployments
+   └─> Each service uses its own API key
+```
 
 ## 5. Configuration Structure
 
@@ -136,38 +154,37 @@ $ ai-services application create my-app -t rag --params vllm.authEnabled=false
 
 ```yaml
 vllm:
-  authEnabled: true  # Default: true (authentication enabled)
+  instruct:
+    apiKey: ""  # Default: empty (authentication disabled)
+  embedding:
+    apiKey: ""  # Default: empty (authentication disabled)
+  reranker:
+    apiKey: ""  # Default: empty (authentication disabled)
 ```
 
-### 5.2 Hardcoded Password
-
-The password is defined as a constant in the codebase:
-
-```python
-# In Python client code
-VLLM_API_KEY = "vllm-default-password"
-```
-
-### 5.3 Configuration Logic
+### 5.2 Configuration Logic
 
 ```
-IF vllm.authEnabled == true:
-    Use hardcoded password for all services
-    Pass password directly to VLLM_API_KEY env var
-    Client services use same hardcoded password in Authorization headers
-ELSE:
-    Do not use authentication
+FOR EACH service (instruct, embedding, reranker):
+  IF vllm.<service>.apiKey is set (non-empty):
+      Pass API key to VLLM_API_KEY env var for that service
+      Client services use API key in Authorization headers for that service
+      Authentication is ENABLED for that service
+  ELSE:
+      Do not set VLLM_API_KEY env var for that service
+      Client services do not include Authorization headers for that service
+      Authentication is DISABLED for that service
 ```
 
 ## 6. Implementation Details
 
 ### 6.1 Server-Side (vLLM)
 
-vLLM natively reads this environment variable for authentication without needing the `--api-key` parameter.
+vLLM natively reads the `VLLM_API_KEY` environment variable for authentication without needing the `--api-key` parameter.
 
 #### Podman Implementation
 
-All vLLM servers use the same hardcoded password set as environment variable in the `env` section:
+Each vLLM server conditionally sets its own API key as environment variable:
 
 ```yaml
 # vllm-server.yaml.tmpl (partial - showing env additions)
@@ -179,18 +196,18 @@ spec:
           value: "/models/ibm-granite/granite-3.3-8b-instruct"
         - name: AIU_WORLD_SIZE
           value: "4"
-        {{- if .Values.vllm.authEnabled }}
+        {{- if .Values.vllm.instruct.apiKey }}
         - name: VLLM_API_KEY
-          value: "vllm-default-password"
+          value: {{ .Values.vllm.instruct.apiKey | quote }}
         {{- end }}
       # ... rest of container spec
     
     - name: embedding
-      {{- if .Values.vllm.authEnabled }}
       env:
+        {{- if .Values.vllm.embedding.apiKey }}
         - name: VLLM_API_KEY
-          value: "vllm-default-password"
-      {{- end }}
+          value: {{ .Values.vllm.embedding.apiKey | quote }}
+        {{- end }}
       # ... rest of container spec
     
     - name: reranker
@@ -199,34 +216,66 @@ spec:
           value: "/models/BAAI/bge-reranker-v2-m3"
         - name: AIU_WORLD_SIZE
           value: "1"
-        {{- if .Values.vllm.authEnabled }}
+        {{- if .Values.vllm.reranker.apiKey }}
         - name: VLLM_API_KEY
-          value: "vllm-default-password"
+          value: {{ .Values.vllm.reranker.apiKey | quote }}
         {{- end }}
       # ... rest of container spec
 ```
 
 #### OpenShift Implementation
 
-**Step 1: Create Kubernetes Secret**
+**Step 1: Create Kubernetes Secrets (one per service, only if API key is provided)**
 
 ```yaml
-# vllm-password-secret.yaml
-{{- if .Values.vllm.authEnabled }}
+# vllm-instruct-api-key-secret.yaml
+{{- if .Values.vllm.instruct.apiKey }}
 apiVersion: v1
 kind: Secret
 metadata:
-  name: "vllm-password"
+  name: "vllm-instruct-api-key"
   labels:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
 type: Opaque
 stringData:
-  password: "vllm-default-password"
+  apiKey: {{ .Values.vllm.instruct.apiKey | quote }}
 {{- end }}
 ```
 
-**Step 2: Reference Secret in InferenceServices (as environment variable)**
+```yaml
+# vllm-embedding-api-key-secret.yaml
+{{- if .Values.vllm.embedding.apiKey }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: "vllm-embedding-api-key"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+type: Opaque
+stringData:
+  apiKey: {{ .Values.vllm.embedding.apiKey | quote }}
+{{- end }}
+```
+
+```yaml
+# vllm-reranker-api-key-secret.yaml
+{{- if .Values.vllm.reranker.apiKey }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: "vllm-reranker-api-key"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+type: Opaque
+stringData:
+  apiKey: {{ .Values.vllm.reranker.apiKey | quote }}
+{{- end }}
+```
+
+**Step 2: Reference Secrets in InferenceServices (as environment variable)**
 
 vLLM natively reads the `VLLM_API_KEY` environment variable:
 
@@ -235,19 +284,15 @@ vLLM natively reads the `VLLM_API_KEY` environment variable:
 spec:
   predictor:
     model:
-      {{- if .Values.vllm.authEnabled }}
       env:
       - name: VLLM_SPYRE_USE_CB
         value: "1"
+      {{- if .Values.vllm.instruct.apiKey }}
       - name: VLLM_API_KEY
         valueFrom:
           secretKeyRef:
-            name: vllm-password
-            key: password
-      {{- else }}
-      env:
-      - name: VLLM_SPYRE_USE_CB
-        value: "1"
+            name: vllm-instruct-api-key
+            key: apiKey
       {{- end }}
       args:
       - '--tensor-parallel-size=4 '
@@ -262,13 +307,13 @@ spec:
 spec:
   predictor:
     model:
-      {{- if .Values.vllm.authEnabled }}
+      {{- if .Values.vllm.embedding.apiKey }}
       env:
       - name: VLLM_API_KEY
         valueFrom:
           secretKeyRef:
-            name: vllm-password
-            key: password
+            name: vllm-embedding-api-key
+            key: apiKey
       {{- end }}
       args:
       - --served-model-name=ibm-granite/granite-embedding-278m-multilingual
@@ -280,13 +325,13 @@ spec:
 spec:
   predictor:
     model:
-      {{- if .Values.vllm.authEnabled }}
+      {{- if .Values.vllm.reranker.apiKey }}
       env:
       - name: VLLM_API_KEY
         valueFrom:
           secretKeyRef:
-            name: vllm-password
-            key: password
+            name: vllm-reranker-api-key
+            key: apiKey
       {{- end }}
       args:
       - '--tensor-parallel-size=1'
@@ -294,88 +339,110 @@ spec:
       # ... rest of spec
 ```
 
-**Step 3: Reference Secret in Client Deployments (FastAPI apps)**
+**Step 3: Reference Secrets in Client Deployments (FastAPI apps)**
 
-FastAPI applications receive the password via environment variable and use it in Authorization headers:
+FastAPI applications receive the API keys via environment variables and use them in Authorization headers:
 
 ```yaml
 # backend-deployment.yaml
-{{- if .Values.vllm.authEnabled }}
 spec:
   template:
     spec:
       containers:
       - name: server
         env:
-        - name: VLLM_API_KEY
+        {{- if .Values.vllm.instruct.apiKey }}
+        - name: VLLM_INSTRUCT_API_KEY
           valueFrom:
             secretKeyRef:
-              name: vllm-password
-              key: password
-{{- end }}
+              name: vllm-instruct-api-key
+              key: apiKey
+        {{- end }}
+        {{- if .Values.vllm.embedding.apiKey }}
+        - name: VLLM_EMBEDDING_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-embedding-api-key
+              key: apiKey
+        {{- end }}
+        {{- if .Values.vllm.reranker.apiKey }}
+        - name: VLLM_RERANKER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-reranker-api-key
+              key: apiKey
+        {{- end }}
 ```
 
 #### Behavior Matrix
 
-| authEnabled | vLLM Behavior |
-|-------------|---------------|
-| true | Authentication enabled with hardcoded password |
-| false | Authentication disabled |
+| Service | API Key Status | vLLM Behavior |
+|---------|----------------|---------------|
+| Instruct | Set (non-empty) | Authentication enabled with instruct API key |
+| Instruct | Unset (empty) | Authentication disabled |
+| Embedding | Set (non-empty) | Authentication enabled with embedding API key |
+| Embedding | Unset (empty) | Authentication disabled |
+| Reranker | Set (non-empty) | Authentication enabled with reranker API key |
+| Reranker | Unset (empty) | Authentication disabled |
 
 ### 6.2 Client-Side (FastAPI Python Services)
 
-FastAPI applications receive the password via environment variable and use it in Authorization headers when making requests to vLLM:
+FastAPI applications receive service-specific API keys via environment variables and use them in Authorization headers when making requests to vLLM:
 
 ```python
 import os
 import requests
 
-# Read password from environment variable (set from Kubernetes Secret or Podman env)
-VLLM_API_KEY = os.getenv("VLLM_API_KEY", "")
+# Read API keys from environment variables (set from Kubernetes Secret or Podman env)
+VLLM_INSTRUCT_API_KEY = os.getenv("VLLM_INSTRUCT_API_KEY", "")
+VLLM_EMBEDDING_API_KEY = os.getenv("VLLM_EMBEDDING_API_KEY", "")
+VLLM_RERANKER_API_KEY = os.getenv("VLLM_RERANKER_API_KEY", "")
 
-# Use password in Authorization header for vLLM API calls
-def get_vllm_headers():
-    """Get headers for vLLM API calls."""
+# Use appropriate API key in Authorization header for vLLM API calls
+def get_vllm_headers(service: str):
+    """Get headers for vLLM API calls based on service type."""
     headers = {}
-    if VLLM_API_KEY:
-        headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
+    
+    if service == "instruct" and VLLM_INSTRUCT_API_KEY:
+        headers["Authorization"] = f"Bearer {VLLM_INSTRUCT_API_KEY}"
+    elif service == "embedding" and VLLM_EMBEDDING_API_KEY:
+        headers["Authorization"] = f"Bearer {VLLM_EMBEDDING_API_KEY}"
+    elif service == "reranker" and VLLM_RERANKER_API_KEY:
+        headers["Authorization"] = f"Bearer {VLLM_RERANKER_API_KEY}"
+    
     return headers
 
 # Example usage in API calls
-headers = get_vllm_headers()
-response = requests.post(vllm_url, headers=headers, json=payload)
-```
+headers = get_vllm_headers("instruct")
+response = requests.post(instruct_url, headers=headers, json=payload)
 
-**Implementation Notes**:
-- Password read from `VLLM_API_KEY` environment variable
-- Environment variable populated from Kubernetes Secret (OpenShift) or template (Podman)
-- Same password used for all vLLM services (instruct, embedding, reranker)
-- Authorization header only added when password is present
-- No hardcoding in Python code - password comes from deployment configuration
+headers = get_vllm_headers("embedding")
+response = requests.post(embedding_url, headers=headers, json=payload)
+
+headers = get_vllm_headers("reranker")
+response = requests.post(reranker_url, headers=headers, json=payload)
+```
 
 ### 6.3 CLI Implementation (Go)
 
-#### Password Handling
+#### API Key Handling
+
+No hardcoded API keys in the CLI. API keys are user-supplied via `--params`:
 
 ```go
-package auth
-
-const (
-    // Hardcoded password for all vLLM services
-    VLLMPassword = "vllm-default-password"
-)
+// No hardcoded API key constants needed
+// API keys come from user via:
+//   --params vllm.instruct.apiKey=<value>
+//   --params vllm.embedding.apiKey=<value>
+//   --params vllm.reranker.apiKey=<value>
 ```
-
-**Note**:
-- Single hardcoded password for all services
-- No password encoding or transformation
-- Password is embedded in the code, not configurable via --params
 
 #### Integration Points
 
-1. Load template values with `vllm.authEnabled` flag (default: true)
-2. Render templates with hardcoded password when authEnabled is true
-3. Deploy application
+1. Load template values with `vllm.*.apiKey` fields (default: empty)
+2. User can override via `--params vllm.<service>.apiKey=<value>`
+3. Render templates with user-provided API keys if set
+4. Deploy application
 
 **Implementation Flow**:
 ```go
@@ -389,11 +456,24 @@ func Create(appName, template string, params map[string]string) error {
     }
     
     // 2. Display information
-    if values.vllm.authEnabled {
-        fmt.Println("✓ vLLM authentication enabled with hardcoded password")
-        fmt.Println("  All services will use the same password")
+    fmt.Println("✓ vLLM authentication status:")
+    
+    if values.vllm.instruct.apiKey != "" {
+        fmt.Println("  - Instruct service: enabled")
     } else {
-        fmt.Println("⚠ vLLM authentication is disabled")
+        fmt.Println("  - Instruct service: disabled (no API key)")
+    }
+    
+    if values.vllm.embedding.apiKey != "" {
+        fmt.Println("  - Embedding service: enabled")
+    } else {
+        fmt.Println("  - Embedding service: disabled (no API key)")
+    }
+    
+    if values.vllm.reranker.apiKey != "" {
+        fmt.Println("  - Reranker service: enabled")
+    } else {
+        fmt.Println("  - Reranker service: disabled (no API key)")
     }
     
     // 3. Render templates with values
@@ -403,19 +483,3 @@ func Create(appName, template string, params map[string]string) error {
     deployApplication(appName, renderedTemplates)
 }
 ```
-
-## 7. Implementation Summary
-
-**Advantages:**
-1. ✅ Simple implementation - no cryptography
-2. ✅ Single hardcoded password for all services
-3. ✅ No password management complexity
-4. ✅ Works identically on Podman and OpenShift
-5. ✅ Minimal code changes required
-6. ✅ Easy to understand and maintain
-
-**Trade-offs:**
-- ⚠️ Password is hardcoded and visible in code
-- ⚠️ Same password used across all services
-- ⚠️ Password transmitted in plain text
-- ⚠️ Not suitable for production security requirements
