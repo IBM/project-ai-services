@@ -278,19 +278,34 @@ The system enables natural conversational flows:
 
 #### 5.1.1 New Utility Module: `conversation_utils.py`
 
+**Important Design Principle:**
+- **Frontend sends**: ONLY clean user/assistant message pairs (no system prompts)
+- **Backend adds**: System prompts dynamically for each turn (not stored in history)
+- **Next turn extraction**: Simple - just filter messages by role="user" and role="assistant"
+
+This makes it trivial to extract conversation history for the next turn because the frontend never includes system prompts in the messages array it sends.
+
 ```python
 def get_conversation_context(messages):
-    """        
+    """
+    Extract current query and conversation history from incoming messages.
+    
+    IMPORTANT: The messages array from the frontend contains ONLY user/assistant pairs.
+    System prompts are NEVER included in the conversation history sent by the frontend.
+    
     Args:
-        messages: List of message objects in OpenAI format
+        messages: List of message objects in OpenAI format from frontend
                  [{"role": "user", "content": "What is X?"},
                   {"role": "assistant", "content": "X is..."},
                   {"role": "user", "content": "Tell me more"}]
+                 
+                 Note: No system messages are present - they're added by backend per turn
     
     Returns:
         tuple: (current_query: str, previous_messages: list)
                - current_query: The latest user question (clean)
                - previous_messages: Clean Q&A history in OpenAI format
+                                   (ready to be used in next turn)
     """
     if not messages or len(messages) == 0:
         return "", []
@@ -300,6 +315,7 @@ def get_conversation_context(messages):
     current_query = current_message.get("content", "")
     
     # Everything before the last message is conversation history
+    # This is already clean user/assistant pairs - no filtering needed!
     previous_messages = messages[:-1] if len(messages) > 1 else []
     
     return current_query, previous_messages
@@ -462,7 +478,7 @@ Add to `settings.json`:
 **Key Changes:**
 1. Validate incoming messages follow OpenAI format
 2. Rephrase query using conversation context for better retrieval
-3. Pass structured messages to LLM (not flattened string)
+3. Pass structured messages AND rephrased query to LLM
 4. Maintain OpenAI-compatible request/response format
 
 ```python
@@ -503,10 +519,12 @@ async def chat_completion(req: ChatCompletionRequest):
     
     # Generate response with structured message history
     # Pass previous_messages as list, not flattened string
+    # Pass rephrased_query to be included in final system prompt
     response = await query_llm(
         query=current_query,
         documents=docs,
         previous_messages=previous_messages,  # OpenAI format list
+        rephrased_query=rephrased_query,      # For RAG system prompt
         stream=req.stream,
         ...
     )
@@ -517,30 +535,33 @@ async def chat_completion(req: ChatCompletionRequest):
 #### 5.1.3 Modified `llm_utils.py` - Prompt Building with OpenAI Message Format
 
 **Key Changes:**
-1. Build proper message array with fresh system prompt for each turn
-2. System prompt contains current RAG context (regenerated each time)
-3. Conversation history stored as clean user/assistant pairs
-4. Allocate token budget for messages + current-turn documents
+1. Build proper message array following official OpenAI logic
+2. Initial system prompt for conversational behavior at the beginning
+3. Conversation history as clean user/assistant pairs in the middle
+4. Final system prompt with RAG context and rephrased query before current question
+5. Allocate token budget for messages + current-turn documents
 
 **Important Design Decision:**
-- System prompt is NOT stored in conversation history
-- Each turn regenerates system prompt with fresh RAG context
+- System prompts are NOT stored in conversation history
+- Each turn uses TWO system messages: initial (conversational) + final (RAG context)
 - Only clean user questions and assistant answers are stored in history
+- The final system prompt contains the rephrased query for better context understanding
 
 ```python
 def query_vllm_payload(question, documents, llm_endpoint, llm_model,
-                      previous_messages=None, ...):
+                      previous_messages=None, rephrased_query=None, ...):
     """
     Build vLLM payload with OpenAI-compatible message format.
     
     Args:
-        question: Current user query 
+        question: Current user query (original)
         documents: Retrieved documents for RAG context (fresh for this turn)
-        previous_messages:[{"role": "user", "content": "What is X?"},
+        previous_messages: [{"role": "user", "content": "What is X?"},
                            {"role": "assistant", "content": "X is..."}]
+        rephrased_query: Contextualized query used for retrieval
     
     Returns:
-        Properly structured message array for LLM with fresh system prompt
+        Message array: [initial_system, ...history, final_system, current_user]
     """
     
     # Prepare RAG context from retrieved documents (fresh for this turn)
@@ -554,11 +575,13 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model,
         for msg in previous_messages:
             history_tokens += len(tokenize_with_llm(msg.get("content", ""), llm_endpoint))
     
-    # Reserve tokens for system message template
-    system_message_overhead = 200  
+    # Reserve tokens for both system messages
+    initial_system_overhead = 100  # "You are a helpful conversational assistant"
+    final_system_overhead = 200    # RAG context + instructions
     
     remaining_tokens = settings.max_input_length - (
-        system_message_overhead +
+        initial_system_overhead +
+        final_system_overhead +
         question_tokens +
         history_tokens
     )
@@ -572,18 +595,29 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model,
     # Build message array in OpenAI format
     message_array = []
     
-    # This is regenerated for EVERY turn with new retrieved documents
-    system_content = settings.prompts.system_message_with_context.format(
-        context=context
-    )
+    # 1. Initial system prompt - conversational behavior
+    initial_system_content = settings.prompts.initial_system_message
     message_array.append({
         "role": "system",
-        "content": system_content
+        "content": initial_system_content
     })
     
+    # 2. Conversation history (if exists)
     if previous_messages:
         message_array.extend(previous_messages)
     
+    # 3. Final system prompt - RAG context with rephrased query
+    # This is regenerated for EVERY turn with new retrieved documents
+    final_system_content = settings.prompts.rag_system_message.format(
+        context=context,
+        rephrased_query=rephrased_query or question
+    )
+    message_array.append({
+        "role": "system",
+        "content": final_system_content
+    })
+    
+    # 4. Current user question
     message_array.append({
         "role": "user",
         "content": question
@@ -616,13 +650,21 @@ UI sends (clean question only):
 }
 ```
 
-Backend builds message array with fresh system prompt:
+Backend builds message array following official OpenAI logic:
 ```json
 {
   "messages": [
     {
+      "role": "system",
+      "content": "You are a helpful, conversational AI assistant. Engage naturally with users and provide clear, accurate responses."
+    },
+    {
+      "role": "system",
+      "content": "Retrieved Context:\n[Fresh RAG docs about Spyre]\n\nRephrased Query: What is Spyre?\n\nInstructions: Answer the user's question based on the retrieved context above. Be conversational and reference the context when relevant."
+    },
+    {
       "role": "user",
-      "content": "You are a helpful AI assistant.\n\nRetrieved Context:\n[Fresh RAG docs about Spyre]\n\nInstructions: Answer based on context...\nWhat is Spyre?"
+      "content": "What is Spyre?"
     }
   ]
 }
@@ -650,10 +692,14 @@ UI sends (clean questions + history):
 }
 ```
 
-Backend builds message array with fresh system prompt:
+Backend builds message array following official OpenAI logic:
 ```json
 {
   "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful, conversational AI assistant. Engage naturally with users and provide clear, accurate responses."
+    },
     {
       "role": "user",
       "content": "What is Spyre?"
@@ -663,8 +709,12 @@ Backend builds message array with fresh system prompt:
       "content": "Spyre is an AI accelerator for Power hardware..."
     },
     {
+      "role": "system",
+      "content": "Retrieved Context:\n[Fresh RAG docs about Power 11 support]\n\nRephrased Query: Is Spyre supported on Power 11 systems?\n\nInstructions: Answer the user's question based on the retrieved context above and the conversation history. Be conversational and reference previous exchanges when relevant."
+    },
+    {
       "role": "user",
-      "content": "You are a helpful AI assistant.\n\nRetrieved Context:\n[Fresh RAG docs about Power 11 support]\n\nInstructions: Answer based on context AND history...\nIs it supported on Power 11?"
+      "content": "Is it supported on Power 11?"
     }
   ]
 }
@@ -675,9 +725,13 @@ Backend builds message array with fresh system prompt:
 ```json
 {
   "prompts": {
-    "system_message_with_context": "You are a helpful AI assistant with access to a knowledge base.\n\nRetrieved Context:\n{context}\n\nInstructions:\n- Answer based on the retrieved context and conversation history\n- Reference previous exchanges when relevant\n- Be conversational and natural\n- If the context doesn't contain the answer, say so clearly\n- Cite sources from the context when possible",
+    "initial_system_message": "You are a helpful, conversational AI assistant. Engage naturally with users, maintain context across the conversation, and provide clear, accurate responses. Be friendly and professional.",
     
-    "system_message_with_context_de": "Sie sind ein hilfreicher KI-Assistent mit Zugriff auf eine Wissensdatenbank.\n\nAbgerufener Kontext:\n{context}\n\nAnweisungen:\n- Antworten Sie basierend auf dem abgerufenen Kontext und der Konversationshistorie\n- Verweisen Sie auf frühere Austausche, wenn relevant\n- Seien Sie gesprächig und natürlich\n- Wenn der Kontext die Antwort nicht enthält, sagen Sie dies klar\n- Zitieren Sie Quellen aus dem Kontext, wenn möglich"
+    "rag_system_message": "Retrieved Context:\n{context}\n\nRephrased Query: {rephrased_query}\n\nInstructions:\n- Answer the user's question based on the retrieved context above\n- Reference the conversation history when relevant\n- Be conversational and natural in your responses\n- If the context doesn't contain the answer, say so clearly\n- Cite sources from the context when possible\n- The rephrased query shows how the question was interpreted with conversation context",
+    
+    "initial_system_message_de": "Sie sind ein hilfreicher, gesprächiger KI-Assistent. Interagieren Sie natürlich mit Benutzern, behalten Sie den Kontext über das Gespräch hinweg bei und geben Sie klare, genaue Antworten. Seien Sie freundlich und professionell.",
+    
+    "rag_system_message_de": "Abgerufener Kontext:\n{context}\n\nUmformulierte Anfrage: {rephrased_query}\n\nAnweisungen:\n- Beantworten Sie die Frage des Benutzers basierend auf dem oben abgerufenen Kontext\n- Verweisen Sie auf die Konversationshistorie, wenn relevant\n- Seien Sie gesprächig und natürlich in Ihren Antworten\n- Wenn der Kontext die Antwort nicht enthält, sagen Sie dies klar\n- Zitieren Sie Quellen aus dem Kontext, wenn möglich\n- Die umformulierte Anfrage zeigt, wie die Frage mit dem Gesprächskontext interpretiert wurde"
   }
 }
 ```
@@ -858,10 +912,34 @@ function App() {
 
 **Backend Processing:**
 1. Extract query: "What is machine learning?"
-2. Conversation history: "" (empty)
-3. Retrieve documents about ML from vector database
-4. Use single-turn prompt template
-5. Generate response
+2. Conversation history: [] (empty)
+3. No rephrasing needed (first message)
+4. Retrieve documents about ML from vector database
+5. Build message array:
+   - Initial system prompt (conversational behavior)
+   - Final system prompt (RAG context + rephrased query)
+   - Current user question
+6. Generate response
+
+**Message Array Sent to LLM:**
+```json
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful, conversational AI assistant..."
+    },
+    {
+      "role": "system",
+      "content": "Retrieved Context:\n[ML documents]\n\nRephrased Query: What is machine learning?\n\nInstructions: Answer based on context..."
+    },
+    {
+      "role": "user",
+      "content": "What is machine learning?"
+    }
+  ]
+}
+```
 
 **Backend Response:**
 ```json
@@ -877,7 +955,7 @@ function App() {
 ```
 
 **Frontend Storage:**
-The frontend stores only the message exchange (no retrieved documents):
+The frontend stores only the message exchange (no system prompts or retrieved documents):
 ```javascript
 {
   role: "user",
@@ -892,7 +970,7 @@ The frontend stores only the message exchange (no retrieved documents):
 ### 6.2 Follow-up Message (With History)
 
 **Frontend Request:**
-The frontend sends only the conversation message history; it does not include previously retrieved documents or their metadata:
+The frontend sends only the conversation message history; it does not include system prompts or previously retrieved documents:
 ```json
 {
   "messages": [
@@ -906,18 +984,52 @@ The frontend sends only the conversation message history; it does not include pr
 
 **Backend Processing:**
 1. Extract query: "Can you give examples?"
-2. Format history:
+2. Extract history:
    ```
-   User: What is machine learning?
-   Assistant: Machine learning is a subset...
+   [
+     {"role": "user", "content": "What is machine learning?"},
+     {"role": "assistant", "content": "Machine learning is a subset..."}
+   ]
    ```
 3. **Rephrase query with context**:
    - Original: "Can you give examples?"
    - Rephrased: "Can you give examples of machine learning?"
    - This ensures vector search retrieves relevant ML example documents
 4. Retrieve NEW documents using the rephrased query from vector database
-5. Use conversational prompt template with message history + newly retrieved docs for the current turn + current query
-6. Generate contextual response without reusing previously retrieved documents from earlier turns
+5. Build message array:
+   - Initial system prompt (conversational behavior)
+   - Conversation history (user/assistant pairs)
+   - Final system prompt (RAG context + rephrased query)
+   - Current user question
+6. Generate contextual response
+
+**Message Array Sent to LLM:**
+```json
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful, conversational AI assistant..."
+    },
+    {
+      "role": "user",
+      "content": "What is machine learning?"
+    },
+    {
+      "role": "assistant",
+      "content": "Machine learning is a subset..."
+    },
+    {
+      "role": "system",
+      "content": "Retrieved Context:\n[NEW ML examples documents]\n\nRephrased Query: Can you give examples of machine learning?\n\nInstructions: Answer based on context and conversation history..."
+    },
+    {
+      "role": "user",
+      "content": "Can you give examples?"
+    }
+  ]
+}
+```
 
 **Backend Response:**
 ```json
@@ -946,6 +1058,60 @@ The frontend stores only the message exchange:
 ```
 
 **Note:** Each turn retrieves fresh documents from the vector database based on the current query. Those retrieved documents are used only for that turn's response generation and are neither stored in conversation history nor reused in future prompts.
+
+**Key Insight - Easy History Extraction:**
+
+The design makes it trivial to extract conversation history for the next turn:
+
+```
+Frontend Storage (what gets sent to backend):
+┌─────────────────────────────────────────┐
+│ messages: [                             │
+│   {role: "user", content: "Q1"},        │  ← Clean user question
+│   {role: "assistant", content: "A1"},   │  ← Clean assistant answer
+│   {role: "user", content: "Q2"},        │  ← Clean user question
+│   {role: "assistant", content: "A2"},   │  ← Clean assistant answer
+│   {role: "user", content: "Q3"}         │  ← Current question
+│ ]                                        │
+└─────────────────────────────────────────┘
+         ↓
+Backend Processing (what gets sent to LLM):
+┌─────────────────────────────────────────┐
+│ messages: [                             │
+│   {role: "system", content: "..."},     │  ← Added by backend (conversational)
+│   {role: "user", content: "Q1"},        │  ← From frontend
+│   {role: "assistant", content: "A1"},   │  ← From frontend
+│   {role: "user", content: "Q2"},        │  ← From frontend
+│   {role: "assistant", content: "A2"},   │  ← From frontend
+│   {role: "system", content: "RAG..."},  │  ← Added by backend (RAG context)
+│   {role: "user", content: "Q3"}         │  ← From frontend
+│ ]                                        │
+└─────────────────────────────────────────┘
+         ↓
+LLM Response:
+┌─────────────────────────────────────────┐
+│ {role: "assistant", content: "A3"}      │  ← Gets added to frontend storage
+└─────────────────────────────────────────┘
+
+Next Turn - Frontend sends:
+┌─────────────────────────────────────────┐
+│ messages: [                             │
+│   {role: "user", content: "Q1"},        │  ← Still clean
+│   {role: "assistant", content: "A1"},   │  ← Still clean
+│   {role: "user", content: "Q2"},        │  ← Still clean
+│   {role: "assistant", content: "A2"},   │  ← Still clean
+│   {role: "user", content: "Q3"},        │  ← Still clean
+│   {role: "assistant", content: "A3"},   │  ← Still clean
+│   {role: "user", content: "Q4"}         │  ← New question
+│ ]                                        │
+└─────────────────────────────────────────┘
+```
+
+**Why This Works:**
+- Frontend NEVER stores system prompts
+- Backend adds system prompts fresh for each turn
+- History extraction = just take all messages except the last one
+- No filtering, no parsing, no complexity!
 
 ## 7. Sequence Diagram
 
@@ -993,9 +1159,13 @@ User          Frontend (Memory)                 Backend API     Vector DB       
 │              │                                   │◄──────────────┤            │
 │              │                                   │               │            │
 │              │                                   │ 8. Build      │            │
-│              │                                   │    prompt     │            │
-│              │                                   │    (single-   │            │
-│              │                                   │    turn)      │            │
+│              │                                   │    message    │            │
+│              │                                   │    array:     │            │
+│              │                                   │    [initial   │            │
+│              │                                   │    system,    │            │
+│              │                                   │    final      │            │
+│              │                                   │    system +   │            │
+│              │                                   │    RAG, user] │            │
 │              │                                   ├──────┐        │            │
 │              │                                   │      │        │            │
 │              │                                   │◄─────┘        │            │
@@ -1071,13 +1241,12 @@ User          Frontend (Memory)                 Backend API     Vector DB       
 │              │                                   │      │        │            │
 │              │                                   │◄─────┘        │            │
 │              │                                   │               │            │
-│              │                                   │ 6. Format     │            │
+│              │                                   │ 6. Extract    │            │
 │              │                                   │    history:   │            │
-│              │                                   │    "User:     │            │
-│              │                                   │    What is    │            │
-│              │                                   │    ML?\n      │            │
-│              │                                   │    Assistant: │            │
-│              │                                   │    ML is..."  │            │
+│              │                                   │    [{role:    │            │
+│              │                                   │    "user"...},│            │
+│              │                                   │    {role:     │            │
+│              │                                   │    "asst..."}]│            │
 │              │                                   ├──────┐        │            │
 │              │                                   │      │        │            │
 │              │                                   │◄─────┘        │            │
@@ -1108,13 +1277,16 @@ User          Frontend (Memory)                 Backend API     Vector DB       
 │              │                                   │◄──────────────┤            │
 │              │                                   │               │            │
 │              │                                   │ 11. Build     │            │
-│              │                                   │     prompt    │            │
-│              │                                   │     (conver-  │            │
-│              │                                   │     sational) │            │
-│              │                                   │     with      │            │
-│              │                                   │     history + │            │
-│              │                                   │     docs +    │            │
-│              │                                   │     query     │            │
+│              │                                   │     message   │            │
+│              │                                   │     array:    │            │
+│              │                                   │     [initial  │            │
+│              │                                   │     system,   │            │
+│              │                                   │     history,  │            │
+│              │                                   │     final     │            │
+│              │                                   │     system +  │            │
+│              │                                   │     RAG +     │            │
+│              │                                   │     rephrased,│            │
+│              │                                   │     user]     │            │
 │              │                                   ├──────┐        │            │
 │              │                                   │      │        │            │
 │              │                                   │◄─────┘        │            │
