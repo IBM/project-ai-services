@@ -23,6 +23,7 @@ import {
   TextInput,
   InlineLoading,
   OverflowMenu,
+  OverflowMenuItem,
   MenuButton,
   MenuItem,
 } from "@carbon/react";
@@ -334,18 +335,15 @@ const AiDeploymentsPage = () => {
                                           flipped
                                           aria-label="Actions"
                                         >
-                                          <Button
-                                            kind="ghost"
-                                            size="sm"
+                                          <OverflowMenuItem
+                                            itemText="Delete"
                                             onClick={() => {
                                               dispatch({
                                                 type: ACTION_TYPES.OPEN_DELETE_DIALOG,
                                                 payload: row.id as string,
                                               });
                                             }}
-                                          >
-                                            Delete
-                                          </Button>
+                                          />
                                         </OverflowMenu>
                                       </TableCell>
                                     );

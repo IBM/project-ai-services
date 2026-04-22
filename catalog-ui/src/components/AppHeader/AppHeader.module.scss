@@ -11,24 +11,16 @@
   :global(.cds--header__menu-trigger) {
     background-color: colors.$black-100;
     border: none;
-    border-bottom: none;
     box-shadow: none;
 
-    &:hover {
+    &:hover,
+    &:focus {
       background-color: colors.$black-100;
-      border: none;
       box-shadow: none;
     }
 
     &:focus {
-      background-color: colors.$black-100;
-      border: none;
-      box-shadow: none;
       outline: none;
-    }
-
-    svg {
-      vertical-align: middle;
     }
   }
 
@@ -85,7 +77,6 @@
 .logout {
   border-top: spacing.$spacing-01 solid theme.$border-subtle-01;
   background: none;
-  border: none;
   width: 100%;
   text-align: left;
   cursor: pointer;
