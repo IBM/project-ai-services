@@ -679,7 +679,7 @@ make build
 ```bash
 # Build with Catalog API enabled
 cd ai-services
-make build ENABLE_CATALOG_API=true
+make build
 
 # Verify catalog command is available
 ./bin/ai-services catalog --help
@@ -689,7 +689,7 @@ make build ENABLE_CATALOG_API=true
 ```bash
 # Build container image with Catalog API
 cd ai-services
-make image ENABLE_CATALOG_API=true
+make image
 ```
 
 **For CI/CD:**
@@ -716,8 +716,8 @@ If API endpoints change, developers need to regenerate Swagger docs:
 ```bash
 cd ai-services
 # Must enable catalog API to regenerate docs
-make swagger ENABLE_CATALOG_API=true
-make build ENABLE_CATALOG_API=true
+make swagger
+make build
 ```
 
 **Important:** Swagger documentation generation requires the Catalog API to be enabled since it reads the API annotations from the catalog package.
@@ -727,7 +727,7 @@ make build ENABLE_CATALOG_API=true
 **Build with Catalog API first:**
 ```bash
 cd ai-services
-make build ENABLE_CATALOG_API=true
+make build
 ```
 
 **Then run the server:**
@@ -735,7 +735,8 @@ make build ENABLE_CATALOG_API=true
 ./bin/ai-services catalog apiserver \
   --admin-username admin \
   --admin-password-hash <bcrypt-hash> \
-  --port 8080
+  --port 8080 \
+  --runtime <podman|openshift>
 ```
 
 ### Generating Password Hash
