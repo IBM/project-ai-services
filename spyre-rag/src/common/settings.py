@@ -55,12 +55,6 @@ class LLMConfig(BaseSettings):
         description="Maximum input length in characters",
     )
 
-    prompt_template_token_count: int = Field(
-        default=250,
-        ge=0,
-        description="Estimated token count for prompt template",
-    )
-
     # LLM connection pool / max batch size
     llm_max_batch_size: int = Field(
         default=32,
@@ -103,16 +97,6 @@ class LLMConfig(BaseSettings):
             logger.warning(f"Setting max_input_length to default '6000' as it is missing or malformed in the settings")
             return 6000
         return v
-
-    @field_validator('prompt_template_token_count')
-    @classmethod
-    def validate_prompt_template_token_count(cls, v):
-        """Validate prompt_template_token_count with warning fallback."""
-        if not isinstance(v, int):
-            logger.warning(f"Setting prompt_template_token_count to default '250' as it is missing in the settings")
-            return 250
-        return v
-
 
 
 class LanguageConfig(BaseSettings):

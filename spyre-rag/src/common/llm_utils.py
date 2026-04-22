@@ -9,6 +9,7 @@ from common.lang_utils import get_prompt_for_language
 from common.misc_utils import get_logger
 from common.settings import settings
 from common.retry_utils import retry_on_transient_error
+from chatbot.settings import settings as chatbot_settings
 from summarize.settings import settings as summarize_settings
 from digitize.settings import settings as digitize_settings
 import common.misc_utils as misc_utils
@@ -142,7 +143,7 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     # dynamic chunk truncation: truncates the context, if doesn't fit in the sequence length
     question_token_count = len(tokenize_with_llm(question, llm_endpoint))
     reamining_tokens = settings.llm.max_input_length - (
-        settings.llm.prompt_template_token_count + question_token_count
+        chatbot_settings.chatbot.prompt_template_token_count + question_token_count
     )
     context = detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:reamining_tokens], llm_endpoint)
     logger.debug(f"Truncated Context: {context}")
