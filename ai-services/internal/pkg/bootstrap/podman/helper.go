@@ -137,7 +137,7 @@ func installPodman() error {
 
 func setupPodman() error {
 	// start podman socket
-	if err := systemctl("start", "podman.socket"); err != nil {
+	if err := systemctl("restart", "podman.socket"); err != nil {
 		return fmt.Errorf("failed to start podman socket: %w", err)
 	}
 	// enable podman socket
@@ -153,6 +153,38 @@ func setupPodman() error {
 	}
 
 	logger.Infof("Podman configured successfully.")
+
+	return nil
+}
+
+func configurePodmanGroups() error {
+	logger.Infoln("Configuring podman service supplementary groups...", logger.VerbosityLevelDebug)
+
+	// Check if Spyre cards are present - only needed if Spyre cards exist
+	if !spyre.IsApplicable() {
+		logger.Infoln("No Spyre cards detected. Skipping podman service supplementary groups configuration.", logger.VerbosityLevelDebug)
+		return nil
+	}
+
+	// Run the check
+	checkResult := spyre.CheckPodmanServiceSupplementaryGroups()
+	if checkResult.GetStatus() {
+		logger.Infoln("✓ Podman service supplementary groups already configured", logger.VerbosityLevelDebug)
+		return nil
+	}
+
+	// Attempt repair
+	logger.Infoln("Fixing podman service supplementary groups configuration...", logger.VerbosityLevelDebug)
+	repairResult := spyre.FixPodmanServiceSupplementaryGroups(checkResult)
+
+	switch repairResult.Status {
+	case spyre.StatusFixed:
+		logger.Infof("✓ Fixed: %s", repairResult.CheckName)
+	case spyre.StatusFailedToFix:
+		return fmt.Errorf("failed to fix %s: %v", repairResult.CheckName, repairResult.Error)
+	case spyre.StatusNotFixable:
+		return fmt.Errorf("not fixable: %s - %s", repairResult.CheckName, repairResult.Message)
+	}
 
 	return nil
 }

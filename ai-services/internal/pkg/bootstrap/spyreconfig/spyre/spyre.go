@@ -75,7 +75,6 @@ func RunChecks() []check.CheckResult {
 		checkUserGroup(),
 		checkVfioModule(),
 		checkVfioAccessPermission(),
-		checkPodmanServiceSupplementaryGroups(),
 	}
 }
 
@@ -442,7 +441,7 @@ func checkVfioDevicePermission(path string, expectedGid int) (bool, error) {
 	return fileGid == expectedGid && utils.IsReadWriteToOwnerGroupUsers(path), nil
 }
 
-// checkPodmanServiceSupplementaryGroups validates that the podman.service has SupplementaryGroups=sentient configured.
+// CheckPodmanServiceSupplementaryGroups validates that the podman.service has SupplementaryGroups=sentient configured.
 //
 // Background:
 // When Podman commands are executed directly from the shell, they inherit the user's supplementary groups,
@@ -458,7 +457,7 @@ func checkVfioDevicePermission(path string, expectedGid int) (bool, error) {
 //	SupplementaryGroups=sentient
 //
 // in the [Service] section, allowing socket-based Podman operations to access VFIO devices properly.
-func checkPodmanServiceSupplementaryGroups() *check.ConfigurationFileCheck {
+func CheckPodmanServiceSupplementaryGroups() *check.ConfigurationFileCheck {
 	serviceName := "podman.service"
 	confCheck := check.NewConfigurationFileCheck("Podman service SupplementaryGroups configuration", serviceName)
 

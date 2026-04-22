@@ -56,7 +56,6 @@ func Repair(checks []check.CheckResult) []RepairResult {
 	results = append(results, userGroupResult)
 	results = append(results, fixVFIOModule(checkMap))
 	results = append(results, fixVFIOPermissions(checkMap, userGroupResult))
-	results = append(results, fixPodmanServiceSupplementaryGroups(checkMap))
 
 	return results
 }
@@ -350,7 +349,7 @@ func fixVFIOPermissions(checkMap map[string]check.CheckResult, userGroupResult R
 	return RepairResult{CheckName: checkName, Status: StatusFixed}
 }
 
-// fixPodmanServiceSupplementaryGroups repairs the podman service SupplementaryGroups configuration.
+// FixPodmanServiceSupplementaryGroups repairs the podman service SupplementaryGroups configuration.
 //
 // This function addresses the issue where Podman operations invoked via the socket (e.g., through
 // systemd or remote API calls) lack access to VFIO devices because the service doesn't inherit
@@ -365,10 +364,11 @@ func fixVFIOPermissions(checkMap map[string]check.CheckResult, userGroupResult R
 //
 // This ensures that all Podman operations, regardless of invocation method, have the necessary
 // permissions to access VFIO devices (/dev/vfio/*) required for Spyre card functionality.
-func fixPodmanServiceSupplementaryGroups(checkMap map[string]check.CheckResult) RepairResult {
+func FixPodmanServiceSupplementaryGroups(checkResult check.CheckResult) RepairResult {
 	checkName := "Podman service SupplementaryGroups configuration"
-	_, ok := getCheckFromMap(checkMap, checkName)
-	if !ok {
+
+	// If check already passed, skip repair
+	if checkResult.GetStatus() {
 		return RepairResult{CheckName: checkName, Status: StatusSkipped}
 	}
 

@@ -65,6 +65,16 @@ func (p *PodmanBootstrap) Configure() error {
 		s.Stop("Podman already configured")
 	}
 
+	s = spinner.New("Configuring podman service for Spyre cards")
+	s.Start(ctx)
+	// 2.3 Configure Podman service supplementary groups for Spyre
+	if err := configurePodmanGroups(); err != nil {
+		s.Fail("failed to configure podman service supplementary groups")
+
+		return err
+	}
+	s.Stop("Podman service configured for Spyre cards")
+
 	s = spinner.New("Configuring SMT level to 2")
 	s.Start(ctx)
 	// 3. Configure SMT level to 2 and persist via systemd
