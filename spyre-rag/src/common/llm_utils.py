@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from common.lang_utils import get_prompt_for_language
 from common.misc_utils import get_logger
-from common.settings import settings as common_settings
+from common.settings import settings
 from common.retry_utils import retry_on_transient_error
 from summarize.settings import settings as summarize_settings
 from digitize.settings import settings as digitize_settings
@@ -37,7 +37,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
         "model": gen_model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
-        "max_tokens": settings.table_summary_max_tokens,
+        "max_tokens": summarize_settings.summarize.table_summary_max_tokens,
         "stream": False,
     }
 
@@ -92,7 +92,7 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, 
     Combined function to summarize and classify tables using a single prompt.
     Returns tuple: (summaries, decisions)
     """
-    all_prompts = [settings.prompts.table_summary_and_classify.format(content=md) for md in table_mds]
+    all_prompts = [digitize_settings.digitize.table_summary_and_classify.format(content=md) for md in table_mds]
 
     results: list[tuple[str, bool] | None] = [None] * len(all_prompts)
 
@@ -141,8 +141,8 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
 
     # dynamic chunk truncation: truncates the context, if doesn't fit in the sequence length
     question_token_count = len(tokenize_with_llm(question, llm_endpoint))
-    reamining_tokens = common_settings.llm.max_input_length - (
-        common_settings.llm.prompt_template_token_count + question_token_count
+    reamining_tokens = settings.llm.max_input_length - (
+        settings.llm.prompt_template_token_count + question_token_count
     )
     context = detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:reamining_tokens], llm_endpoint)
     logger.debug(f"Truncated Context: {context}")

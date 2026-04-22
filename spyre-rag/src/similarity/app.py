@@ -24,7 +24,7 @@ import common.db_utils as db
 from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from chatbot.backend_utils import validate_query_length
-import similarity.config as config
+from similarity.settings import settings
 from similarity.similarity_utils import (
     SimilaritySearchRequest,
     SimilaritySearchResponse,
@@ -115,7 +115,7 @@ def swagger_root():
         "| `false` (default) | Low |\n"
         "| `true` | Medium |\n\n"
         "**`top_k`** defaults to `NUM_CHUNKS_POST_SEARCH` "
-        f"(currently {config.NUM_CHUNKS_POST_SEARCH}) if not provided."
+        f"(currently {settings.similarity.num_chunks_post_search}) if not provided."
     ),
     response_description="Documents ranked by descending score, with score_type indicating the scoring method used."
 )
@@ -138,7 +138,7 @@ async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchRes
         if not is_valid:
             APIError.raise_error(ErrorCode.INVALID_REQUEST, error_msg)
 
-        top_k = req.top_k if req.top_k is not None else config.NUM_CHUNKS_POST_SEARCH
+        top_k = req.top_k if req.top_k is not None else settings.similarity.num_chunks_post_search
 
         # reranker config when the caller actually asked for it.
         # avoids a KeyError if RERANKER_ENDPOINT / RERANKER_MODEL env vars are not set in a deployment that doesn't need reranking.

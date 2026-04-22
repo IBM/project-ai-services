@@ -115,13 +115,56 @@ class DigitizeConfig(BaseSettings):
     )
 
     # Table summary prompt
-    table_summary_prompt: str = Field(
-        default=(
-            "You are an intelligent assistant analyzing set of documents.\n"
-            "You are given a table extracted from a document. Your task is to summarize the key points and insights from the table. "
-            "Avoid repeating the entire content; focus on what is meaningful or important.\n\n"
-            "Table:\n{content}\n\nSummary:"
-        ),
+    table_summary_and_classify: str = Field(
+        default="""You are an intelligent assistant analyzing tables extracted from documents.
+
+                Your tasks:
+
+                1. Extract and document EVERY piece of information from the table in extensive detail:
+                - List ALL sections, subsections, and their reference numbers if present
+                - Include EVERY specification, feature, number, code, condition, and requirement
+                - Mention ALL items even if they seem minor - nothing should be omitted
+                - Use structured format with clear organization (numbered lists, bullet points, or detailed paragraphs)
+                - Be extremely thorough and comprehensive - aim for maximum detail
+                - If the table has multiple rows/columns, describe each one
+                - Preserve all technical terms, version numbers, and specific details exactly as shown
+
+                2. Decide if the table is relevant for a knowledge base:
+                - Relevant: contains factual, instructional, or explanatory info useful for answering questions.
+                - Irrelevant: personal info, disclaimers, administrative notes, or unrelated commentary.
+
+                3. Output in the exact format below:
+
+                Summary: <your extremely detailed summary here - be verbose and comprehensive>
+                Decision: <yes or no>
+
+                Do NOT output JSON, extra commentary, or any other text.
+
+                Examples:
+
+                Positive example (relevant):
+                Table:
+                | Processor | Cores | Memory |
+                |-----------|-------|--------|
+                | Power10   | 16    | 8 TB   |
+
+                Output:
+                Summary: The table presents technical specifications for the Power10 processor. The processor configuration includes 16 cores for parallel processing capabilities. The memory capacity supports up to 8 TB (terabytes) of RAM, providing substantial memory resources for enterprise workloads and data-intensive applications.
+                Decision: yes
+
+                Negative example (irrelevant):
+                Table:
+                | Prepared by: | John Smith |
+                |--------------|------------|
+
+                Output:
+                Summary: Document metadata indicating it was prepared by John Smith.
+                Decision: no
+
+                Now analyze the table below:
+
+                Table:
+                {content}""",
         description="Prompt for table summarization",
     )
 

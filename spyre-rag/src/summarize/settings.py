@@ -71,6 +71,12 @@ class SummarizationConfig(BaseSettings):
         description="User prompt for summarization without target length",
     )
 
+    table_summary_max_tokens: int = Field(
+        default=1024,
+        ge=0,
+        description="Maximum tokens for table summarization",
+    )
+
     @field_validator('summarization_coefficient')
     @classmethod
     def validate_summarization_coefficient(cls, v):
