@@ -99,75 +99,79 @@ const AppHeader = (props: AppHeaderProps) => {
 
   return (
     <Theme theme="g100">
-      <Header aria-label="IBM Power Operations Platform">
-        {!minimal && (
-          <HeaderMenuButton
-            aria-label="Open menu"
-            onClick={(e) => {
-              e.stopPropagation();
-              props.setIsSideNavOpen((prev) => !prev);
-            }}
-            isActive={props.isSideNavOpen}
-            isCollapsible
-            className={styles.menuBtn}
-          />
-        )}
+      <div className={styles.appHeader}>
+        <Header aria-label="IBM Open-Source AI Foundation for Power">
+          {!minimal && (
+            <HeaderMenuButton
+              aria-label="Open menu"
+              onClick={(e) => {
+                e.stopPropagation();
+                props.setIsSideNavOpen((prev) => !prev);
+              }}
+              isActive={props.isSideNavOpen}
+              isCollapsible
+              className={styles.menuBtn}
+            />
+          )}
 
-        <HeaderName prefix="IBM">Power Operations Platform</HeaderName>
+          <HeaderName prefix="IBM">
+            Open-Source AI Foundation for Power
+          </HeaderName>
 
-        {!minimal && (
-          <HeaderGlobalBar>
-            <HeaderGlobalAction
-              aria-label="User"
-              aria-haspopup="menu"
-              aria-expanded={state.isProfileOpen}
-              className={styles.iconWidth}
-              isActive={state.isProfileOpen}
-              onClick={() => dispatch({ type: "TOGGLE_PROFILE" })}
-              ref={userIconRef}
-            >
-              <User size={20} />
-            </HeaderGlobalAction>
-            <HeaderPanel ref={panelRef} expanded={state.isProfileOpen}>
-              <div>
-                <div className={styles.userprofile}>
-                  <div>
-                    <strong>Admin</strong>
+          {!minimal && (
+            <HeaderGlobalBar>
+              <HeaderGlobalAction
+                aria-label="User"
+                aria-haspopup="menu"
+                aria-expanded={state.isProfileOpen}
+                className={styles.iconWidth}
+                isActive={state.isProfileOpen}
+                onClick={() => dispatch({ type: "TOGGLE_PROFILE" })}
+                ref={userIconRef}
+              >
+                <User size={20} />
+              </HeaderGlobalAction>
+              <HeaderPanel ref={panelRef} expanded={state.isProfileOpen}>
+                <div>
+                  <div className={styles.userprofile}>
+                    <div>
+                      <strong>Admin</strong>
+                    </div>
+                    <div className={styles.usercircle}>
+                      <User size={16} />
+                    </div>
                   </div>
-                  <div className={styles.usercircle}>
-                    <User size={16} />
-                  </div>
+
+                  <button
+                    type="button"
+                    className={styles.logout}
+                    onClick={() => {
+                      dispatch({ type: "CLOSE_PROFILE_AND_OPEN_LOGOUT" });
+                    }}
+                  >
+                    <span>Log out</span>
+                    <Logout size={16} />
+                  </button>
                 </div>
-
-                <button
-                  type="button"
-                  className={styles.logout}
-                  onClick={() => {
-                    dispatch({ type: "CLOSE_PROFILE_AND_OPEN_LOGOUT" });
+              </HeaderPanel>
+              <Theme theme="g10">
+                <Modal
+                  open={state.isLogoutModalOpen}
+                  size="sm"
+                  primaryButtonText="Log out"
+                  secondaryButtonText="Cancel"
+                  modalHeading="Are you sure you want to log out of IBM Open-Source AI
+                    Foundation for Power?"
+                  onRequestClose={() => {
+                    dispatch({ type: "CLOSE_LOGOUT_MODAL" });
                   }}
-                >
-                  <span>Log out</span>
-                  <Logout size={16} />
-                </button>
-              </div>
-            </HeaderPanel>
-            <Theme theme="g10">
-              <Modal
-                open={state.isLogoutModalOpen}
-                size="sm"
-                primaryButtonText="Log out"
-                secondaryButtonText="Cancel"
-                modalHeading="Are you sure you want to log out of IBM Open-Source AI
-                  Foundation for Power?"
-                onRequestClose={() => {
-                  dispatch({ type: "CLOSE_LOGOUT_MODAL" });
-                }}
-                onRequestSubmit={handleLogout}
-              ></Modal>
-            </Theme>
-          </HeaderGlobalBar>
-        )}
-      </Header>
+                  onRequestSubmit={handleLogout}
+                ></Modal>
+              </Theme>
+            </HeaderGlobalBar>
+          )}
+        </Header>
+      </div>
     </Theme>
   );
 };

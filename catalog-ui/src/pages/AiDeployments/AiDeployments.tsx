@@ -34,7 +34,7 @@ import {
   ArrowRight,
   CopyLink,
 } from "@carbon/icons-react";
-import styles from "./ApplicationsList.module.scss";
+import styles from "./AiDeployments.module.scss";
 import type { ApplicationRow, AppState, AppAction } from "./types";
 import { ACTION_TYPES } from "./types";
 
@@ -383,17 +383,11 @@ const ApplicationsListPage = () => {
             });
             await handleDelete();
           }}
-          style={{
-            position: "fixed",
-            top: "4rem",
-            right: "2rem",
-            zIndex: "46567",
-          }}
           className={styles.customToast}
         />
       )}
       <PageHeader
-        title={{ text: "Applications" }}
+        title={{ text: "AI Deployments" }}
         pageActions={[
           {
             key: "learn-more",

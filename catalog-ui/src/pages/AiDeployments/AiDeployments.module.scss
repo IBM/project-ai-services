@@ -1,0 +1,98 @@
+@use "@carbon/react/scss/spacing";
+
+.rowActions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: spacing.$spacing-03;
+  padding: spacing.$spacing-03;
+}
+
+.noDataContent {
+  padding: spacing.$spacing-07;
+}
+
+.tableContent {
+  padding: spacing.$spacing-07;
+}
+
+.tableColumn {
+  margin: 0;
+}
+
+.deleteConfirmation {
+  margin-top: spacing.$spacing-07;
+  font-weight: bolder;
+  border: none;
+}
+
+:global(
+  .cds--checkbox-wrapper
+    input:focus:not(:focus-visible)
+    + .cds--checkbox-label::before
+) {
+  outline: none;
+  box-shadow: none;
+}
+
+:global(.cds--btn:focus:not(:focus-visible)) {
+  outline: none;
+  box-shadow: none;
+  border: none;
+}
+
+.deleteButton {
+  transition: background-color 0.2s ease;
+
+  &:hover {
+    background-color: var(--cds-button-danger-primary);
+    color: var(--cds-background);
+
+    svg {
+      fill: var(--cds-icon-on-color);
+    }
+  }
+}
+
+.selectedDelete {
+  background-color: var(--cds-layer-hover);
+}
+
+.customToast {
+  position: fixed;
+  top: 4rem;
+  right: 2rem;
+  z-index: 46567;
+
+  :global(.cds--actionable-notification__action-button) {
+    border: 1px solid var(--cds-text-on-color);
+    color: var(--cds-text-on-color);
+    font-weight: lighter;
+    background-color: transparent;
+
+    &:hover {
+      border: 1px solid var(--cds-text-on-color);
+      color: var(--cds-text-on-color);
+      background-color: transparent;
+    }
+
+    &:focus {
+      border: 1px solid var(--cds-text-on-color);
+      color: var(--cds-text-on-color);
+      background-color: transparent;
+      outline-offset: 2px;
+    }
+
+    &:active {
+      border: 1px solid var(--cds-text-on-color);
+      color: var(--cds-text-on-color);
+      background-color: var(--cds-layer-active);
+    }
+  }
+}
+
+.exportStatus {
+  display: flex;
+  align-items: center;
+  gap: spacing.$spacing-02;
+}

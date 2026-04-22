@@ -1,7 +1,56 @@
 @use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/colors";
+@use "@carbon/react/scss/theme";
 
-.header {
-  font-size: large;
+.appHeader {
+  :global(.cds--header) {
+    background-color: colors.$black-100;
+    border-bottom: none;
+  }
+
+  :global(.cds--header__menu-trigger) {
+    background-color: colors.$black-100;
+    border: none;
+    border-bottom: none;
+    box-shadow: none;
+
+    &:hover {
+      background-color: colors.$black-100;
+      border: none;
+      box-shadow: none;
+    }
+
+    &:focus {
+      background-color: colors.$black-100;
+      border: none;
+      box-shadow: none;
+      outline: none;
+    }
+
+    svg {
+      vertical-align: middle;
+    }
+  }
+
+  :global(.cds--header-panel) {
+    position: fixed;
+    top: 3rem;
+    right: 0;
+    left: auto;
+    bottom: auto;
+    transform: none;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+    z-index: 8000;
+
+    &:global(.cds--header-panel--expanded) {
+      max-height: none;
+      height: auto;
+      overflow: visible;
+    }
+  }
 }
 
 .iconWidth {
@@ -9,25 +58,42 @@
 }
 
 .menuBtn {
-  border: none !important;
+  border: none;
+  border-bottom: none;
+  background-color: colors.$black-100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none;
+
+  &:hover {
+    background-color: colors.$black-100;
+    border: none;
+    box-shadow: none;
+  }
+
+  &:focus {
+    background-color: colors.$black-100;
+    border: none;
+    box-shadow: none;
+    outline: none;
+  }
 }
 
 .usercircle {
   width: spacing.$spacing-09;
   height: spacing.$spacing-09;
   border-radius: 50%;
-  background-color: #525252;
-  /* grey circle like screenshot */
+  background-color: theme.$layer-02;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #ffffff;
-  /* makes icon white */
+  color: theme.$text-on-color;
   transition: background-color 0.2s ease;
-}
 
-.usercircle:hover {
-  background-color: #6f6f6f;
+  &:hover {
+    background-color: theme.$layer-hover-02;
+  }
 }
 
 .userprofile {
@@ -40,37 +106,16 @@
 }
 
 .logout {
-  border-top: 1px solid #393939;
-
+  border-top: spacing.$spacing-01 solid theme.$border-subtle-01;
   background: none;
   border: none;
   width: 100%;
   text-align: left;
-
   cursor: pointer;
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: spacing.$spacing-05;
-
-  background-color: #393939;
-  color: #ffffff;
-}
-
-:global(.cds--header-panel--expanded) {
-  max-height: none !important;
-  height: auto !important;
-  overflow: visible !important;
-}
-
-:global(.cds--header-panel) {
-  position: relatives !important;
-  bottom: auto !important;
-  right: 0 !important;
-  left: auto !important;
-  transform: none !important;
-  height: auto !important;
-  min-height: 0 !important;
-  max-height: none !important;
-  overflow: visible !important;
+  background-color: theme.$layer-01;
+  color: theme.$text-primary;
 }
