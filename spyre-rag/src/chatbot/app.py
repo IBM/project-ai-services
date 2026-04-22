@@ -35,8 +35,6 @@ from common.perf_utils import perf_registry
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from chatbot.backend_utils import search_only, validate_query_length
 from chatbot.response_utils import (
-    ReferenceRequest,
-    ReferenceResponse,
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatChoice,
@@ -153,57 +151,6 @@ def limit_concurrency(f):
         finally:
             concurrency_limiter.release()
     return wrapper
-
-@app.post(
-    "/reference",
-    response_model=ReferenceResponse,
-    responses={400: http_error_responses[400], 500: http_error_responses[500], 503: http_error_responses[503]},
-    tags=["retrieval"],
-    summary="Retrieve reference documents",
-    description="Search the vector store using the prompt, rerank results, and return relevant document chunks with performance metrics."
-)
-async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
-    # Validate query is not empty
-    if not req.prompt or not req.prompt.strip():
-        APIError.raise_error(ErrorCode.EMPTY_INPUT, "Query cannot be empty")
-
-    # Ensure vectorstore is initialized on first request
-    if vectorstore is None:
-        await ensure_vectorstore_initialized()
-
-    try:
-        emb_model = emb_model_dict['emb_model']
-        emb_endpoint = emb_model_dict['emb_endpoint']
-        emb_max_tokens = emb_model_dict['max_tokens']
-        reranker_model = reranker_model_dict['reranker_model']
-        reranker_endpoint = reranker_model_dict['reranker_endpoint']
-
-        # Validate query length
-        is_valid, error_msg = await asyncio.to_thread(
-            validate_query_length, req.prompt, emb_endpoint
-        )
-        if not is_valid:
-            APIError.raise_error(ErrorCode.INVALID_PARAMETER, error_msg)
-
-        docs, perf_stat_dict = await asyncio.to_thread(
-            search_only,
-            req.prompt,
-            emb_model, emb_endpoint, emb_max_tokens,
-            reranker_model,
-            reranker_endpoint,
-            settings.num_chunks_post_search,
-            settings.num_chunks_post_reranker,
-            vectorstore=vectorstore
-        )
-        # Store metrics in registry for reference endpoint
-        perf_registry.add_metric(perf_stat_dict)
-        return ReferenceResponse(documents=docs, perf_metrics=perf_stat_dict)
-
-    except db.VectorStoreNotReadyError as e:
-        APIError.raise_error(ErrorCode.VECTOR_STORE_NOT_READY, str(e))
-    except Exception as e:
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
-
 
 @app.get(
     "/v1/models",

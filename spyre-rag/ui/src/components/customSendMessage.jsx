@@ -106,8 +106,10 @@ async function customSendMessage(request, _options, instance) {
 
     const stream = await client.chat.completions.create(payload);
 
-    const referencePromise = axios.post('/reference', {
-      prompt: userInput,
+    const referencePromise = axios.post('/v1/similarity-search', {
+      query: userInput,
+      mode: "hybrid",
+      rerank: true,
       headers: {
         'Content-Type': 'application/json',
       },
