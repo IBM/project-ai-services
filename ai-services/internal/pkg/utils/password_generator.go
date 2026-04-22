@@ -7,9 +7,9 @@ import (
 )
 
 const (
-	// DefaultPasswordLength is the default length for generated passwords
+	// DefaultPasswordLength is the default length for generated passwords.
 	DefaultPasswordLength = 16
-	// passwordCharset contains all characters used for password generation
+	// passwordCharset contains all characters used for password generation.
 	passwordCharset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}|;:,.<>?"
 )
 
