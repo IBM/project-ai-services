@@ -26,6 +26,16 @@ spec:
     volumeMounts:
     - name: postgres-data
       mountPath: /var/lib/pgsql/18/data
+    livenessProbe:
+      exec:
+        command:
+        - /bin/sh
+        - -c
+        - pg_isready -U {{ .Values.db.user }} -d {{ .Values.db.database }}
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
     resources:
       requests:
         memory: "{{ .Values.db.resources.requests.memory }}"
