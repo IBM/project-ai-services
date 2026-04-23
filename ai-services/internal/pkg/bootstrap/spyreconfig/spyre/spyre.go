@@ -67,7 +67,7 @@ func IsApplicable() bool {
 
 // RunChecks executes all Spyre validation checks.
 func RunChecks() []check.CheckResult {
-	return []check.CheckResult{
+	checks := []check.CheckResult{
 		checkDriverConfig(),
 		checkUdevRule(),
 		checkMemlockConf(),
@@ -75,8 +75,14 @@ func RunChecks() []check.CheckResult {
 		checkUserGroup(),
 		checkVfioModule(),
 		checkVfioAccessPermission(),
-		CheckPodmanServiceSupplementaryGroups(),
 	}
+
+	// Only check podman service configuration if podman is installed
+	if err := utils.PodmanHealthCheck(); err != nil {
+		checks = append(checks, CheckPodmanServiceSupplementaryGroups())
+	}
+
+	return checks
 }
 
 // parseVfioConfigLine parses a single VFIO configuration line and returns the module name

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/spyreconfig/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/root"
 )
 
@@ -38,7 +38,7 @@ func (p *PodmanBootstrap) Configure() error {
 	s.Start(ctx)
 	// 2. Install and configure Podman if not done
 	// 2.1 Install Podman
-	if _, err := validators.Podman(); err != nil {
+	if _, err := utils.Podman(); err != nil {
 		s.UpdateMessage("Installing podman")
 		// setup podman socket and enable service
 		if err := installPodman(); err != nil {
@@ -54,7 +54,7 @@ func (p *PodmanBootstrap) Configure() error {
 	s = spinner.New("Verifying podman configuration")
 	s.Start(ctx)
 	// 2.2 Configure Podman
-	if err := validators.PodmanHealthCheck(); err != nil {
+	if err := utils.PodmanHealthCheck(); err != nil {
 		s.UpdateMessage("Configuring podman")
 		if err := setupPodman(); err != nil {
 			s.Fail("failed to configure podman")

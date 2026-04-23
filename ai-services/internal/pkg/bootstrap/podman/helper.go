@@ -14,7 +14,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/spyreconfig/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 )
 
 const (
@@ -155,7 +154,7 @@ func setupPodman() error {
 	logger.Infoln("Waiting for podman socket to be ready...", logger.VerbosityLevelDebug)
 	time.Sleep(podmanSocketWaitDuration) // wait for socket to be ready
 
-	if err := validators.PodmanHealthCheck(); err != nil {
+	if err := utils.PodmanHealthCheck(); err != nil {
 		return fmt.Errorf("podman health check failed after configuration: %w", err)
 	}
 
