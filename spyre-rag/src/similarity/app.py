@@ -21,7 +21,7 @@ if level != "":
 set_log_level(log_level)
 
 import common.db_utils as db
-from common.misc_utils import get_model_endpoints, set_request_id
+from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from chatbot.backend_utils import validate_query_length
 import similarity.config as config
@@ -53,6 +53,7 @@ def _initialize_vectorstore():
 async def lifespan(app: FastAPI):
     _initialize_models()
     _initialize_vectorstore()
+    create_llm_session(pool_maxsize=10)
     yield
 
 tags_metadata = [
