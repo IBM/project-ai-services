@@ -369,7 +369,7 @@ curl -X POST http://localhost:5000/v1/summarize \
 
 ## 1. Overview of Changes
 
-This addendum documents the improvements made to the summarization endpoint, introducing an abstraction-level based approach (`summary_level` parameter) to replace the direct word count specification (`length` parameter). These changes significantly improve length compliance, token utilization, and summary quality.
+This addendum documents the improvements made to the summarization endpoint, introducing an abstraction-level based approach (`level` parameter) to replace the direct word count specification (`length` parameter). These changes significantly improve length compliance, token utilization, and summary quality.
 
 ## 2. Why the Summary Length Approach Changed
 
@@ -386,7 +386,7 @@ The previous approach using direct word count (`length` parameter) had several l
 
 ### 3.1 Summary Levels
 
-The new implementation uses **abstraction levels** (`summary_level` parameter) instead of direct word counts:
+The new implementation uses **abstraction levels** (`level` parameter) instead of direct word counts:
 
 | Level | Multiplier | Description | Use Case |
 |-------|------------|-------------|----------|
@@ -414,9 +414,9 @@ The new implementation uses **abstraction levels** (`summary_level` parameter) i
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| summary_level | string | Optional | Abstraction level for summary: `brief`, `standard`, or `detailed`. Length is automatically calculated based on input size and level. If not specified, the model determines the summary length automatically. |
+| level | string | Optional | Abstraction level for summary: `brief`, `standard`, or `detailed`. Length is automatically calculated based on input size and level. If not specified, the model determines the summary length automatically. |
 
-**Note**: The `length` parameter is still supported for backward compatibility but is **deprecated and will be removed in the next release**. Please migrate to using `summary_level` instead.
+**Note**: The `length` parameter is still supported for backward compatibility but is **deprecated and will be removed in the next release**. Please migrate to using `level` instead.
 
 ### 4.2 Updated Architecture Diagram
 
@@ -432,7 +432,7 @@ graph LR
     VLLM["External vLLM<br/>endpoint"]
 
     %% Edges
-    U -->|"Input text/file +<br/>summary_level"| API
+    U -->|"Input text/file +<br/>level"| API
     API -->|"Summary"| U
     API <--> VLLM
 ```
@@ -504,7 +504,22 @@ Detailed Summary:
 
 ## 6. Technical Configuration Changes
 
-### 6.1 Updated Parameters
+### 6.1 Tokenization Approach
+
+**Important Change**: The system now uses the `/tokenize` API endpoint to calculate the exact token count of input text, replacing the previous token-to-word ratio estimation approach.
+
+**Previous Approach:**
+- Used fixed ratios: 0.75 for English (1 token ≈ 0.75 words), 0.5 for German
+- Calculated tokens as: `input_tokens = input_word_count / 0.75`
+- Less accurate, especially for non-English languages
+
+**New Approach:**
+- Calls `/tokenize` API with actual input text
+- Returns precise token count based on the model's tokenizer
+- Eliminates estimation errors, which is crucial, because now our approach is based on utilising the entire max_tokens passed in LLM , and if we get this estimate wrong - it can lead to unexpected behavior.
+- More accurate across all languages and content types
+
+### 6.2 Updated Parameters
 
 | Parameter | Old Value | New Value | Reason |
 |-----------|-----------|-----------|--------|
@@ -513,13 +528,13 @@ Detailed Summary:
 | summarization_stop_words | ["Keywords", "Note", "***"] | "" (empty) | Eliminated problematic stop sequences |
 | summarization_prompt_token_count | 100 | 150 | Accommodate more detailed instructions |
 
-### 6.2 New Features
+### 6.3 New Features
 
 - **Min/Max bounds**: Summaries must fall within 85%-115% of target length (e.g., 255-345 words for 300-word target)
 - **Level-based calculation**: Automatic target calculation based on input size and abstraction level
 - **Backward compatibility**: Legacy `length` parameter still supported
 
-### 6.3 Input Validation with Hard and Soft Limits
+### 6.4 Input Validation with Hard and Soft Limits
 
 The system implements a two-tier validation approach to handle large documents gracefully:
 
@@ -542,7 +557,7 @@ The system implements a two-tier validation approach to handle large documents g
 - **User-friendly**: No need to manually adjust input size
 - **Flexible**: System automatically adapts to available context space
 
-### 6.4 Edge Case Test Results
+### 6.5 Edge Case Test Results
 
 Test conducted with a PDF document to demonstrate the hard/soft limit behavior:
 
@@ -585,13 +600,13 @@ sequenceDiagram
 
     Note over Service, vLLM: Config: MAX_MODEL_LEN = 32768
 
-    Client->>Service: POST /summarize (input(text/file), summary_level?)
+    Client->>Service: POST /summarize (input(text/file), level?)
     
     rect rgb(100, 149, 237)
         note right of Service: **Step 1: Determine Output Target**
-        Service->>Service: Input Tokens = input_word_count / 0.75
+        Service->>Service: Input Tokens = call /tokenize API
         
-        alt User provided "summary_level"
+        alt User provided "level"
             Service->>Service: Get level config (brief/standard/detailed)
             Service->>Service: Target Words = input_word_count * 0.3 * level_multiplier
             Service->>Service: Apply min/max bounds from level
@@ -631,7 +646,7 @@ curl -X POST http://localhost:6000/v1/summarize \
   -H "Content-Type: application/json" \
   -d '{
     "text": "Artificial intelligence has made significant progress in recent years...",
-    "summary_level": "brief"
+    "level": "brief"
   }'
 ```
 
@@ -662,7 +677,7 @@ curl -X POST http://localhost:6000/v1/summarize \
 ```bash
 curl -X POST http://localhost:6000/v1/summarize \
   -F "file=@report.txt" \
-  -F "summary_level=standard"
+  -F "level=standard"
 ```
 
 **Response:**
@@ -692,7 +707,7 @@ curl -X POST http://localhost:6000/v1/summarize \
 ```bash
 curl -X POST http://localhost:6000/v1/summarize \
   -F "file=@research_paper.pdf" \
-  -F "summary_level=detailed"
+  -F "level=detailed"
 ```
 
 **Response:**
@@ -722,7 +737,7 @@ curl -X POST http://localhost:6000/v1/summarize \
 ```bash
 curl -X POST http://localhost:6000/v1/summarize \
   -F "file=@research_paper.pdf" \
-  -F "summary_level=standard" \
+  -F "level=standard" \
   -F "stream=true"
 ```
 
@@ -735,7 +750,7 @@ data: {"id":"chatcmpl-...","object":"chat.completion.chunk","created":1770715601
 ...
 ```
 
-### 8.5 Use Case 5: Default Behavior (No summary_level specified)
+### 8.5 Use Case 5: Default Behavior (No level specified)
 
 **Request:**
 ```bash
@@ -747,7 +762,7 @@ curl -X POST http://localhost:6000/v1/summarize \
 ```
 
 **Response:**
-When no `summary_level` is specified, the model determines the summary length automatically without explicit length constraints in the prompt.
+When no `level` is specified, the model determines the summary length automatically without explicit length constraints in the prompt.
 
 ## 9. Updated Error Responses
 
@@ -755,18 +770,18 @@ When no `summary_level` is specified, the model determines the summary length au
 
 | Status Code | Error Scenario | Response Example |
 |-------------|----------------|------------------|
-| 400 | Invalid summary_level | {"message": "Invalid summary_level. Must be 'brief', 'standard', or 'detailed'"} |
+| 400 | Invalid level | {"message": "Invalid level. Must be 'brief', 'standard', or 'detailed'"} |
 
 ## 10. Updated Test Cases
 
 | Test Case | Input | Expected Result |
 |-----------|-------|-----------------|
-| Valid plain text, brief | text + summary_level=brief | 200 OK with brief summary (0.5x compression) |
-| Valid .txt file, standard | .txt file + summary_level=standard | 200 OK with standard summary (1.0x compression) |
-| Valid .pdf file, detailed | .pdf file + summary_level=detailed | 200 OK with detailed summary (1.5x compression) |
-| Default behavior | text only (no summary_level) | 200 OK with standard level summary |
-| Invalid summary_level | summary_level="extra_long" | 400 Bad Request |
-| Streaming enabled | text + summary_level=brief + stream=true | 202 Accepted with streamed response |
+| Valid plain text, brief | text + level=brief | 200 OK with brief summary (0.5x compression) |
+| Valid .txt file, standard | .txt file + level=standard | 200 OK with standard summary (1.0x compression) |
+| Valid .pdf file, detailed | .pdf file + level=detailed | 200 OK with detailed summary (1.5x compression) |
+| Default behavior | text only (no level) | 200 OK with standard level summary |
+| Invalid level | level="extra_long" | 400 Bad Request |
+| Streaming enabled | text + level=brief + stream=true | 202 Accepted with streamed response |
 
 ## 11. UI Configuration Recommendations
 
@@ -774,9 +789,9 @@ The abstraction levels are now built into the API. UI should present these optio
 
 | UI Option | API Parameter | Description |
 |-----------|---------------|-------------|
-| Brief | `summary_level=brief` | High-level overview with key points only |
-| Standard (Default) | `summary_level=standard` | Balanced summary with main points and context |
-| Detailed | `summary_level=detailed` | Comprehensive summary with supporting details |
+| Brief | `level=brief` | High-level overview with key points only |
+| Standard (Default) | `level=standard` | Balanced summary with main points and context |
+| Detailed | `level=detailed` | Comprehensive summary with supporting details |
 
 **Key Points:**
 - Summary length is automatically calculated based on input size and selected level
