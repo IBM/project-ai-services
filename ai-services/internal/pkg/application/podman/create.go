@@ -290,11 +290,14 @@ func (p *PodmanApplication) fetchSpyreCardsFromPodAnnotations(annotations map[st
 }
 
 func (p *PodmanApplication) downloadImagesForTemplate(templateName, appName string, imagePullPolicy image.ImagePullPolicy) error {
-	// create a new imagePull object based on imagePullPolicy
-	imagePull := image.NewImagePull(p.runtime, imagePullPolicy, appName, templateName)
+	// create Images struct and run with the specified policy
+	img := &image.Images{
+		Runtime:     p.runtime,
+		App:         appName,
+		AppTemplate: templateName,
+	}
 
-	// based on the imagePullPolicy set, download the images
-	return imagePull.Run()
+	return img.Run(imagePullPolicy)
 }
 
 func (p *PodmanApplication) executePodTemplates(tp templates.Template,

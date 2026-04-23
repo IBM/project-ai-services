@@ -31,7 +31,10 @@ func list(templateName string) error {
 		return nil
 	}
 
-	images, err := image.ListImages(templateName, "")
+	img := &image.Images{
+		AppTemplate: templateName,
+	}
+	images, err := img.ListImages()
 	if err != nil {
 		return fmt.Errorf("error listing images: %w", err)
 	}
