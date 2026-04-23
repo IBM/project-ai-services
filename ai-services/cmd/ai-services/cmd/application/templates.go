@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 var templatesCmd = &cobra.Command{
@@ -20,7 +20,7 @@ var templatesCmd = &cobra.Command{
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{Runtime: vars.RuntimeFactory.GetRuntimeType()})
+		tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 
 		appTemplateNames, err := tp.ListApplications(hiddenTemplates)
 		if err != nil {

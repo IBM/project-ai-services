@@ -2,7 +2,7 @@ package assets
 
 import "embed"
 
-//go:embed applications bootstrap
+//go:embed applications
 var ApplicationFS embed.FS
 
 //go:embed bootstrap

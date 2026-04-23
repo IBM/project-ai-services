@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/project-ai-services/ai-services/assets"
 	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
@@ -18,7 +19,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -242,8 +242,8 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 
 // validateTemplateFlag validates the template flag.
 func validateTemplateFlag(cmd *cobra.Command) error {
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
-	if err := validators.ValidateAppTemplateExist(tp, templateName); err != nil {
+	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
+	if err := tp.AppTemplateExist(templateName); err != nil {
 		return err
 	}
 
@@ -263,7 +263,7 @@ func validateParamsFlag(cmd *cobra.Command) error {
 	}
 
 	// Validate params against template values
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{Runtime: vars.RuntimeFactory.GetRuntimeType()})
+	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 	_, err = tp.LoadValues(templateName, nil, argParams)
 	if err != nil {
 		return fmt.Errorf("failed to load params: %w", err)
@@ -281,7 +281,7 @@ func validateValuesFlag(cmd *cobra.Command) error {
 	}
 
 	// Validate parameters in values files
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{Runtime: vars.RuntimeFactory.GetRuntimeType()})
+	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 	_, err := tp.LoadValues(templateName, valuesFiles, nil)
 	if err != nil {
 		return fmt.Errorf("failed to validate values files: %w", err)

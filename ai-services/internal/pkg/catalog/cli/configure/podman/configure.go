@@ -86,9 +86,7 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 
 // loadCatalogTemplates loads the catalog template provider, metadata, and templates.
 func loadCatalogTemplates(s *spinner.Spinner) (templates.Template, *templates.AppMetadata, map[string]*template.Template, error) {
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{
-		FS: &assets.CatalogFS,
-	})
+	tp := templates.NewEmbedTemplateProvider(&assets.CatalogFS, "")
 
 	// Load metadata from catalog/podman
 	appMetadata, err := tp.LoadMetadata(catalogAppTemplate, true)
