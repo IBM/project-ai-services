@@ -1,4 +1,5 @@
 import logging
+import os
 import requests
 import time
 import json
@@ -17,6 +18,9 @@ import common.misc_utils as misc_utils
 logger = get_logger("LLM")
 
 is_debug = logger.isEnabledFor(logging.DEBUG)
+
+# Read instruct API key from environment variable
+VLLM_INSTRUCT_API_KEY = os.getenv("VLLM_INSTRUCT_API_KEY", "")
 
 def tqdm_wrapper(iterable, **kwargs):
     """Wrapper for tqdm that only shows progress bar in debug mode."""
@@ -123,16 +127,43 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, 
 
     return summaries, decisions
 
+def get_vllm_headers():
+    """Get headers for vLLM API calls, including auth if configured."""
+    headers = {
+        "accept": "application/json",
+        "Content-type": "application/json",
+    }
+
+    if VLLM_INSTRUCT_API_KEY:
+        headers["Authorization"] = f"Bearer {VLLM_INSTRUCT_API_KEY}"
+        logger.debug("Using vLLM API key for authentication")
+
+    return headers
+
+
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def query_vllm_models(llm_endpoint):
+    """Used both for listing models and as an auth/availability preflight check."""
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     logger.debug('Querying VLLM models')
-    response = misc_utils.SESSION.get(f"{llm_endpoint}/v1/models")
+    response = misc_utils.SESSION.get(
+        f"{llm_endpoint}/v1/models",
+        headers=get_vllm_headers(),
+    )
     response.raise_for_status()
     resp_json = response.json()
     return resp_json
+
+
+def validate_vllm_auth(llm_endpoint):
+    """
+    Validate that the configured credentials can access vLLM.
+    Returns True on success, raises RuntimeError on failure.
+    """
+    query_vllm_models(llm_endpoint)
+    return True
 
 def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
                 stream, lang):
@@ -153,10 +184,7 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     prompt = prompt_template.format(context=context, question=question)
 
     logger.debug("PROMPT:  ", prompt)
-    headers = {
-        "accept": "application/json",
-        "Content-type": "application/json"
-    }
+    headers = get_vllm_headers()
     payload = {
         "messages": [{"role": "user", "content": prompt}],
         "model": llm_model,

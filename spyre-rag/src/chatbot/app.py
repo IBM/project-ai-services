@@ -23,7 +23,7 @@ from common.diagnostic_logger import setup_comprehensive_crash_handler
 import common.db_utils as db
 from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
 from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
-from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models
+from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models, validate_vllm_auth
 from common.perf_utils import perf_registry
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from chatbot.backend_utils import search_only, validate_query_length
@@ -228,6 +228,7 @@ async def locked_stream(stream_g, perf_stat_dict):
             }
         },
         400: http_error_responses[400],
+        401: http_error_responses[401],
         429: http_error_responses[429],
         500: http_error_responses[500],
         503: http_error_responses[503]
@@ -255,6 +256,13 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
         llm_endpoint = llm_model_dict['llm_endpoint']
         reranker_model = reranker_model_dict['reranker_model']
         reranker_endpoint = reranker_model_dict['reranker_endpoint']
+
+        try:
+            await asyncio.to_thread(validate_vllm_auth, llm_endpoint)
+        except Exception as e:
+            auth_message = "Authentication failed while connecting to vLLM."
+            logging.error(f"vLLM authentication error: {auth_message} - {str(e)}")
+            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, auth_message)
 
         # Validate query length
         is_valid, error_msg = await asyncio.to_thread(
