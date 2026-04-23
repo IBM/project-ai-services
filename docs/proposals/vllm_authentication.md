@@ -277,14 +277,17 @@ response = requests.post(instruct_url, headers=headers, json=payload)
 
 #### QnA Service - Chat Completion Endpoint
 
-The QnA service's `/v1/chat/completions` endpoint uses `llm_utils.py` functions to communicate with vLLM. Authentication is handled in the `llm_utils` module by adding the Authorization header to all vLLM requests.
+The QnA service's `/v1/chat/completions` endpoint should validate vLLM authentication before doing any retrieval or generation work. The check is performed by calling `GET /v1/models` using the same Authorization header that will be used for the later chat completion request. If the auth check succeeds, the normal QnA flow continues. If it fails, the endpoint returns early with an authentication error for vLLM.
 
 **Implementation in `common/llm_utils.py`:**
 
 ```python
 import os
+import time
 import requests
+import common.misc_utils as misc_utils
 from common.misc_utils import get_logger
+from common.retry_utils import retry_on_transient_error
 
 logger = get_logger("LLM")
 
@@ -292,33 +295,47 @@ logger = get_logger("LLM")
 VLLM_INSTRUCT_API_KEY = os.getenv("VLLM_INSTRUCT_API_KEY", "")
 
 def get_vllm_headers():
-    """
-    Get headers for vLLM API calls, including authentication if configured.
-    
-    Returns:
-        dict: Headers dictionary with Authorization header if API key is set
-    """
+    """Get headers for vLLM API calls, including auth if configured."""
     headers = {
         "accept": "application/json",
-        "Content-type": "application/json"
+        "Content-type": "application/json",
     }
-    
-    # Add Authorization header if API key is configured
+
     if VLLM_INSTRUCT_API_KEY:
         headers["Authorization"] = f"Bearer {VLLM_INSTRUCT_API_KEY}"
         logger.debug("Using vLLM API key for authentication")
-    
+
     return headers
 
-# Update existing functions to use get_vllm_headers()
 
-def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
-                stream, lang):
+@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
+def query_vllm_models(llm_endpoint):
+    """Used both for listing models and as an auth/availability preflight check."""
+    if misc_utils.SESSION is None:
+        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+
+    logger.debug("Querying VLLM models for auth validation")
+    response = misc_utils.SESSION.get(
+        f"{llm_endpoint}/v1/models",
+        headers=get_vllm_headers(),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def validate_vllm_auth(llm_endpoint):
+    """
+    Validate that the configured credentials can access vLLM.
+    Returns True on success, raises requests.HTTPError on failure.
+    """
+    query_vllm_models(llm_endpoint)
+    return True
+
+
+def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, stream, lang):
     # ... existing context and prompt logic ...
-    
-    # Use the new header function
+
     headers = get_vllm_headers()
-    
     payload = {
         "messages": [{"role": "user", "content": prompt}],
         "model": llm_model,
@@ -326,91 +343,124 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
         "repetition_penalty": 1.1,
         "temperature": temperature,
         "stop": stop_words,
-        "stream": stream
+        "stream": stream,
     }
     if stream:
         payload["stream_options"] = {"include_usage": True}
     return headers, payload
+
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang):
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False, lang)
-    
-    # Headers now include Authorization if API key is set
+    headers, payload = query_vllm_payload(
+        question, documents, llm_endpoint, llm_model,
+        stop_words, max_new_tokens, temperature, False, lang
+    )
+
     start_time = time.time()
-    response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=False)
-    request_time = time.time() - start_time
-    perf_stat_dict["inference_time"] = request_time
-    response.raise_for_status()
-    response_json = response.json()
-    # ... rest of function ...
-
-def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang):
-    if misc_utils.SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
-    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens,
-                                          temperature, True, lang)
-    try:
-        # Headers now include Authorization if API key is set
-        with misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=True) as r:
-            # ... rest of streaming logic ...
-
-@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def query_vllm_models(llm_endpoint):
-    if misc_utils.SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
-    logger.debug('Querying VLLM models')
-    headers = get_vllm_headers()
-    response = misc_utils.SESSION.get(f"{llm_endpoint}/v1/models", headers=headers)
-    response.raise_for_status()
-    return response.json()
-
-@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def classify_single_text(prompt, gen_model, llm_endpoint):
-    if misc_utils.SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
-    headers = get_vllm_headers()
-    payload = {
-        "model": gen_model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
-        "max_tokens": 3,
-    }
-    response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers)
-    response.raise_for_status()
-    # ... rest of function ...
-
-@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def query_vllm_summarize(llm_endpoint, messages, model, max_tokens, temperature):
-    if misc_utils.SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
-    headers = get_vllm_headers()
-    stop_words = [w for w in settings.summarization_stop_words.split(",") if w]
-    payload = {
-        "messages": messages,
-        "model": model,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-    }
-    if stop_words:
-        payload["stop"] = stop_words
-
     response = misc_utils.SESSION.post(
         f"{llm_endpoint}/v1/chat/completions",
         json=payload,
         headers=headers,
         stream=False,
     )
+    perf_stat_dict["inference_time"] = time.time() - start_time
     response.raise_for_status()
-    # ... rest of function ...
+    return response.json()
+
+
+def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang):
+    if misc_utils.SESSION is None:
+        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
+
+    headers, payload = query_vllm_payload(
+        question, documents, llm_endpoint, llm_model,
+        stop_words, max_new_tokens, temperature, True, lang
+    )
+
+    with misc_utils.SESSION.post(
+        f"{llm_endpoint}/v1/chat/completions",
+        json=payload,
+        headers=headers,
+        stream=True,
+    ) as r:
+        r.raise_for_status()
+        # ... rest of streaming logic ...
 ```
+
+**Implementation in `chatbot/app.py`:**
+
+```python
+import requests
+from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models, validate_vllm_auth
+
+@app.post("/v1/chat/completions")
+async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse | StreamingResponse:
+    if not req.messages:
+        APIError.raise_error(ErrorCode.EMPTY_INPUT, "messages can't be empty")
+
+    query = req.messages[0].content
+    if not query or not query.strip():
+        APIError.raise_error(ErrorCode.EMPTY_INPUT, "Query cannot be empty")
+
+    if vectorstore is None:
+        await ensure_vectorstore_initialized()
+
+    try:
+        emb_model = emb_model_dict['emb_model']
+        emb_endpoint = emb_model_dict['emb_endpoint']
+        emb_max_tokens = emb_model_dict['max_tokens']
+        llm_model = llm_model_dict['llm_model']
+        llm_endpoint = llm_model_dict['llm_endpoint']
+        reranker_model = reranker_model_dict['reranker_model']
+        reranker_endpoint = reranker_model_dict['reranker_endpoint']
+
+        # Step 1: validate vLLM auth first
+        try:
+            await asyncio.to_thread(validate_vllm_auth, llm_endpoint)
+        except requests.HTTPError as e:
+            auth_message = "Authentication failed while connecting to vLLM."
+            if e.response is not None:
+                auth_message = f"{auth_message} Response status: {e.response.status_code}"
+            APIError.raise_error(ErrorCode.INVALID_PARAMETER, auth_message)
+
+        # Step 2: continue with existing QnA flow only after auth succeeds
+        is_valid, error_msg = await asyncio.to_thread(validate_query_length, query, emb_endpoint)
+        if not is_valid:
+            if req.stream:
+                async def stream_query_length_error():
+                    message = "Your query is too long. Please shorten it and try again."
+                    yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
+                return StreamingResponse(stream_query_length_error(), media_type="text/event-stream")
+            APIError.raise_error(ErrorCode.INVALID_PARAMETER, error_msg)
+
+        lang = detect_language(query)
+
+        docs, perf_stat_dict = await asyncio.to_thread(
+            search_only,
+            query,
+            emb_model, emb_endpoint, emb_max_tokens,
+            reranker_model, reranker_endpoint,
+            settings.num_chunks_post_search,
+            settings.num_chunks_post_reranker,
+            vectorstore=vectorstore
+        )
+
+        # ... existing docs-not-found, concurrency, stream/non-stream logic ...
+    except Exception as e:
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
+```
+
+**Behavior Summary:**
+
+1. Build vLLM headers from `VLLM_INSTRUCT_API_KEY`
+2. Call `GET {llm_endpoint}/v1/models`
+3. If response is `200 OK`, continue with retrieval + reranking + `/v1/chat/completions`
+4. If response is `401/403` or another auth-related failure, stop immediately and return an auth error to the client
+5. This avoids doing unnecessary QnA work when vLLM credentials are invalid
 
 ### 6.3 CLI Implementation (Go)
 
