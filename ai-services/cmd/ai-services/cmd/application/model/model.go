@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/spf13/cobra"
@@ -27,7 +28,7 @@ func init() {
 }
 
 func models(template string) ([]string, error) {
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 	apps, err := tp.ListApplications(hiddenTemplates)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list the applications, err: %w", err)

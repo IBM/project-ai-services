@@ -7,6 +7,7 @@ import (
 
 	"github.com/containers/podman/v5/pkg/specgen"
 	spec "github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -16,7 +17,7 @@ import (
 )
 
 func ListModels(template, appName string) ([]string, error) {
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 	tmpls, err := tp.LoadAllTemplates(template)
 	if err != nil {
 		return nil, fmt.Errorf("error loading templates for %s: %w", template, err)

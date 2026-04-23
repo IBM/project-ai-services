@@ -11,7 +11,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -120,13 +119,9 @@ func waitForAllCRs(client *openshift.OpenshiftClient) error {
 }
 
 func applyYamlsFromFolder(client *openshift.OpenshiftClient, folder string) error {
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{
-		FS:      &assets.BootstrapFS,
-		Root:    "bootstrap/openshift/" + folder,
-		Runtime: types.RuntimeTypeOpenShift,
-	})
+	tp := templates.NewEmbedTemplateProvider(&assets.BootstrapFS)
 
-	yamls, err := tp.LoadYamls()
+	yamls, err := tp.LoadYamls(folder)
 	if err != nil {
 		return fmt.Errorf("error loading yamls from %s: %w", folder, err)
 	}
