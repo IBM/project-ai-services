@@ -31,6 +31,8 @@ digitizeUi:
   image: icr.io/ai-services-cicd/digitize-ui:v0.0.18
 
 instruct:
+  # @description API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication.
+  apiKey: ""
   # @hidden
   storageUri: hf://ibm-granite/granite-3.3-8b-instruct
 

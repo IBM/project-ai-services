@@ -50,6 +50,10 @@ spec:
           value: "{{ .Values.opensearch.auth.username }}"
         - name: OPENSEARCH_PASSWORD
           value: "{{ .Values.opensearch.auth.password }}"
+        {{- if .Values.instruct.apiKey }}
+        - name: VLLM_INSTRUCT_API_KEY
+          value: "{{ .Values.instruct.apiKey }}"
+        {{- end }}
         - name: LOG_LEVEL
           value: "{{ .Values.similarity.log_level}}"
       resources:

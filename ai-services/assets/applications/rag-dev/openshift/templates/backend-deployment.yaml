@@ -72,6 +72,13 @@ spec:
                   key: password
             - name: OPENSEARCH_NUM_SHARDS
               value: "{{ .Values.opensearch.numShards }}"
+            {{- if .Values.instruct.apiKey }}
+            - name: VLLM_INSTRUCT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vllm-instruct-api-key
+                  key: apiKey
+            {{- end }}
             - name: LOG_LEVEL
               value: "{{ .Values.backend.log_level }}"
           ports:
