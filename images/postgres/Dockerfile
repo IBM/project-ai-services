@@ -1,10 +1,10 @@
 #
-# PostgreSQL 18 on UBI 9
+# PostgreSQL 18 on UBI 9 Minimal
 #
-# This Dockerfile creates a PostgreSQL 18 image based on Red Hat Universal Base Image 9
+# This Dockerfile creates a PostgreSQL 18 image based on Red Hat Universal Base Image 9 Minimal
 #
 
-FROM registry.access.redhat.com/ubi9/ubi:9.7
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
 
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 
@@ -16,19 +16,20 @@ RUN set -eux; \
 
 # Install required packages
 RUN set -ex; \
-	dnf update ${DNF_FLAGS} -y; \
-	dnf install ${DNF_FLAGS} -y \
+	microdnf update ${DNF_FLAGS} -y; \
+	microdnf install ${DNF_FLAGS} -y \
 # https://www.postgresql.org/docs/18/app-psql.html#APP-PSQL-META-COMMAND-PSET-PAGER
 # (if "less" is available, it gets used as the default pager for psql)
 		less \
+		shadow-utils \
 	; \
-	dnf clean all
+	microdnf clean all
 
 # grab gosu for easy step-down from root
 # https://github.com/tianon/gosu/releases
 ENV GOSU_VERSION 1.19
 RUN set -eux; \
-	dnf install ${DNF_FLAGS} -y ca-certificates wget gnupg2; \
+	microdnf install ${DNF_FLAGS} -y ca-certificates wget gnupg2; \
 	dpkgArch="$(uname -m)"; \
 	case "$dpkgArch" in \
 		x86_64) gosuArch='amd64' ;; \
@@ -44,22 +45,22 @@ RUN set -eux; \
 	gpg --batch --verify /usr/local/bin/gosu.asc /usr/local/bin/gosu; \
 	gpgconf --kill all; \
 	rm -rf "$GNUPGHOME" /usr/local/bin/gosu.asc; \
-	dnf remove ${DNF_FLAGS} -y wget; \
-	dnf clean all; \
+	microdnf remove ${DNF_FLAGS} -y wget; \
+	microdnf clean all; \
 	chmod +x /usr/local/bin/gosu; \
 	gosu --version; \
 	gosu nobody true
 
 # make the "en_US.UTF-8" locale so postgres will be utf-8 enabled by default
 RUN set -eux; \
-	dnf install ${DNF_FLAGS} -y \
+	microdnf install ${DNF_FLAGS} -y \
 		glibc-langpack-en \
 		glibc-locale-source \
 		glibc-gconv-extra \
 		xz \
 		zstd \
 	; \
-	dnf clean all
+	microdnf clean all
 
 ENV LANG en_US.UTF-8
 ENV LC_ALL en_US.UTF-8
@@ -79,13 +80,16 @@ RUN set -ex; \
 		s390x) repoArch='s390x' ;; \
 		*) echo >&2 "error: unsupported architecture: $arch"; exit 1 ;; \
 	esac; \
-	dnf install ${DNF_FLAGS} -y "https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-$repoArch/pgdg-redhat-repo-latest.noarch.rpm"; \
-	dnf -qy module disable postgresql; \
-	dnf install ${DNF_FLAGS} --enablerepo=pgdg18 -y \
+	microdnf install ${DNF_FLAGS} -y rpm wget; \
+	wget "https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-$repoArch/pgdg-redhat-repo-latest.noarch.rpm"; \
+	rpm -ivh pgdg-redhat-repo-latest.noarch.rpm; \
+	rm -f pgdg-redhat-repo-latest.noarch.rpm; \
+	microdnf install ${DNF_FLAGS} --enablerepo=pgdg18 -y \
 		postgresql18-server \
 		postgresql18-contrib \
 	; \
-	dnf clean all; \
+	microdnf remove ${DNF_FLAGS} -y wget; \
+	microdnf clean all; \
 	postgres --version
 
 # make the sample config easier to munge (and "correct by default")
