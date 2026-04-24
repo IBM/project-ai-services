@@ -50,6 +50,8 @@ type HostVar struct {
 type Template interface {
 	// ListApplications lists all available application templates
 	ListApplications(hidden bool) ([]string, error)
+	// AppTemplateExist Check if the application directory exists.
+	AppTemplateExist(app string) error
 	// ListApplicationTemplateValues lists all available template parameters with description for a single application.
 	ListApplicationTemplateValues(app string) (map[string]string, error)
 	// LoadAllTemplates loads all templates for a given application
@@ -68,5 +70,5 @@ type Template interface {
 	// LoadVarsFile loads the Chart
 	LoadChart(app string) (chart.Charter, error)
 	// LoadYamls loads the yaml in assests dir
-	LoadYamls() ([][]byte, error)
+	LoadYamls(folder string) ([][]byte, error)
 }

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"text/template"
 
+	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
@@ -21,7 +22,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -33,10 +33,10 @@ var (
 func (p *PodmanApplication) Create(ctx context.Context, opts types.CreateOptions) error {
 	// Proceed to create application
 	logger.Infof("Creating application '%s' using template '%s'\n", opts.Name, opts.TemplateName)
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 
 	// validate whether the provided template name is correct
-	if err := validators.ValidateAppTemplateExist(tp, opts.TemplateName); err != nil {
+	if err := tp.AppTemplateExist(opts.TemplateName); err != nil {
 		return err
 	}
 
@@ -85,7 +85,7 @@ func (p *PodmanApplication) Create(ctx context.Context, opts types.CreateOptions
 }
 
 func (p *PodmanApplication) validateAndAllocateSpyreCards(templateName, appName string, tmpls map[string]*template.Template) ([]string, error) {
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 
 	reqSpyreCardsCount, err := p.calculateReqSpyreCards(tp, utils.ExtractMapKeys(tmpls), templateName, appName)
 	if err != nil {
@@ -139,7 +139,7 @@ func (p *PodmanApplication) deployApplication(ctx context.Context, opts types.Cr
 		return fmt.Errorf("failed while checking existing pods for application: %w", err)
 	}
 
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
+	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 
 	// execute the pod Templates
 	if err := p.executePodTemplates(tp, opts.Name, appMetadata, tmpls, pciAddresses, existingPods, opts.ValuesFiles, opts.ArgParams); err != nil {
@@ -290,11 +290,14 @@ func (p *PodmanApplication) fetchSpyreCardsFromPodAnnotations(annotations map[st
 }
 
 func (p *PodmanApplication) downloadImagesForTemplate(templateName, appName string, imagePullPolicy image.ImagePullPolicy) error {
-	// create a new imagePull object based on imagePullPolicy
-	imagePull := image.NewImagePull(p.runtime, imagePullPolicy, appName, templateName)
+	// create Images struct and run with the specified policy
+	img := &image.Images{
+		Runtime:     p.runtime,
+		App:         appName,
+		AppTemplate: templateName,
+	}
 
-	// based on the imagePullPolicy set, download the images
-	return imagePull.Run()
+	return img.Run(imagePullPolicy)
 }
 
 func (p *PodmanApplication) executePodTemplates(tp templates.Template,

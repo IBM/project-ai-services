@@ -39,3 +39,11 @@ Day N:
 
 - Summarize API is unavailable to use. Please make sure 'summarize-api' pod is running.
 {{- end }}
+
+{{- if eq .SIMILARITY_API_STATUS "running" }}
+
+- Similarity API is available to use at https://{{ .SIMILARITY_API_ROUTE }}. Use this endpoint for vector similarity search via programmatic access.
+{{- else }}
+
+- Similarity API is unavailable to use. Please make sure 'similarity-api' pod is running.
+{{- end }}

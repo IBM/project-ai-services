@@ -3,6 +3,7 @@ package openshift
 import (
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -42,9 +43,7 @@ func (o *OpenshiftApplication) Info(opts types.InfoOptions) error {
 	logger.Infoln("Version: " + version)
 
 	// Step3: Read and print the info.md file
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{
-		Runtime: o.runtime.Type(),
-	})
+	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 
 	if err := helpers.PrintInfo(tp, o.runtime, opts.Name, appTemplate); err != nil {
 		// not failing if overall info command, if we cannot display Info
