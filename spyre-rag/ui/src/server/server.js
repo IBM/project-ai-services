@@ -48,8 +48,8 @@ app.post('/v1/similarity-search', async (req, res) => {
     const response = await axios.post(
       `${targetURL}/v1/similarity-search`,
       {
-        query: query, 
-        mode: "hybrid",
+        query: query,
+        mode: 'hybrid',
         rerank: true,
       },
       {

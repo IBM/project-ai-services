@@ -108,7 +108,7 @@ async function customSendMessage(request, _options, instance) {
 
     const referencePromise = axios.post('/v1/similarity-search', {
       query: userInput,
-      mode: "hybrid",
+      mode: 'hybrid',
       rerank: true,
       headers: {
         'Content-Type': 'application/json',
