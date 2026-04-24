@@ -64,15 +64,6 @@ Users provide an API key for the vLLM instruct service:
 
 When a user creates an application **without** specifying API keys:
 
-```bash
-$ ai-services application create my-app -t rag
-
-⚠ vLLM authentication is disabled (no API key provided)
-
-Application 'my-app' created successfully
-=====================================
-```
-
 **What Happens:**
 1. `vllm.instruct.apiKey` field is empty/unset in values
 2. vLLM instruct server starts without authentication
@@ -82,17 +73,6 @@ Application 'my-app' created successfully
 ### 4.2 Enabling Authentication (Opt-In)
 
 Users enable authentication by providing an API key via the `--params` flag:
-
-#### Enable authentication for instruct service:
-```bash
-$ ai-services application create my-app -t rag \
-  --params vllm.instruct.apiKey=instruct-key-123
-
-✓ vLLM authentication enabled for instruct service
-
-Application 'my-app' created successfully
-=====================================
-```
 
 **What Happens:**
 1. API key is set for instruct service in values
@@ -461,50 +441,3 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
 3. If response is `200 OK`, continue with retrieval + reranking + `/v1/chat/completions`
 4. If response is `401/403` or another auth-related failure, stop immediately and return an auth error to the client
 5. This avoids doing unnecessary QnA work when vLLM credentials are invalid
-
-### 6.3 CLI Implementation (Go)
-
-#### API Key Handling
-
-No hardcoded API keys in the CLI. API keys are user-supplied via `--params`:
-
-```go
-// No hardcoded API key constants needed
-// API key comes from user via:
-//   --params vllm.instruct.apiKey=<value>
-```
-
-#### Integration Points
-
-1. Load template values with `vllm.instruct.apiKey` field (default: empty)
-2. User can override via `--params vllm.instruct.apiKey=<value>`
-3. Render templates with user-provided API key if set
-4. Deploy application
-
-**Implementation Flow**:
-```go
-// Pseudo-code for create.go
-func Create(appName, template string, params map[string]string) error {
-    // 1. Load template values
-    tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{Runtime: runtimeType})
-    values, err := tp.LoadValues(templateName, valuesFiles, params)
-    if err != nil {
-        return err
-    }
-    
-    // 2. Display information
-    fmt.Println("✓ vLLM authentication status:")
-    
-    if values.vllm.instruct.apiKey != "" {
-        fmt.Println("  - Instruct service: enabled")
-    } else {
-        fmt.Println("  - Instruct service: disabled (no API key)")
-    }
-    
-    // 3. Render templates with values
-    renderedTemplates := tp.RenderTemplates(templateName, values)
-    
-    // 4. Deploy using rendered templates
-    deployApplication(appName, renderedTemplates)
-}
-```
