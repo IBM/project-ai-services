@@ -337,7 +337,6 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
 
     filtered_table_dicts = {
         idx: {
-            'markdown': markdown,
             'summary': summary,
             'caption': caption,
             'page_number': page_num
@@ -912,7 +911,6 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
             for block in tqdm_wrapper(tab_data_list, desc=f"Chunking tables of '{input_path}'"):
                 caption = block.get('caption', '')
                 summary = block.get("summary", '')
-                markdown_source = block.get("markdown", '')
                 page_number = block.get('page_number')
 
                 # Use summary for chunking - summaries are more concise and meaningful for RAG
@@ -929,14 +927,12 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
                         chunked_tables.append({
                             "content": chunk,
                             "caption": caption,
-                            "markdown_source": markdown_source,
                             "page_number": page_number,
                         })
                 else:
                     chunked_tables.append({
                         "content": summary,
                         "caption": caption,
-                        "markdown_source": markdown_source,
                         "page_number": page_number,
                     })
 
@@ -1016,7 +1012,6 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
             caption = block.get("caption", "")
             page_number = block.get("page_number")
             content = block.get("content", "")
-            md_source = block.get("markdown_source")
 
             # Smart caption prefixing: only add if caption not already in content
             def _normalize(text: str) -> str:
@@ -1035,7 +1030,7 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
                 "page_content": page_content,
                 "filename": orig_fn,
                 "type": "table",
-                "source": md_source,
+                "source": caption,
                 "page_number": page_number,
                 "language": "en",
                 "chunk_index": txt_count + tab_idx,
