@@ -689,6 +689,11 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = settings.digitize.jobs_dir) ->
     when the application starts, indicating the previous instance crashed
     while processing it.
 
+    This method:
+    1. Updates document metadata files first using update_doc_metadata
+    2. Updates documents in in-progress states to failed
+    3. Updates job status using update_job_progress
+
     Args:
         jobs_dir: Directory containing job status JSON files
 
@@ -698,7 +703,6 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = settings.digitize.jobs_dir) ->
     from digitize.status import StatusManager
     from digitize.types import JobStatus, DocStatus
     import digitize.settings as config
-
 
     if not jobs_dir.exists():
         logger.warning(f"Jobs directory does not exist: {jobs_dir}")
@@ -727,50 +731,56 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = settings.digitize.jobs_dir) ->
                     # Build error message with cleanup instructions
                     error_message = "System restarted during processing"
 
-                    # Check for documents that may need cleanup
+                    # Step 1: Update document metadata and job progress for each document
+                    # Process all documents in in-progress states to failed
                     if "documents" in job_data and job_data["documents"]:
-                        doc_ids = [doc.get("id") for doc in job_data["documents"] if doc.get("id")]
-                        if doc_ids:
-                            error_message += f". Stale documents may exist. Please use DELETE /v1/documents/{{id}} to remove these documents and re-submit to process again: {', '.join(doc_ids)}"
-
-                    # Update job-level fields using StatusManager utility
-                    status_mgr._update_job_level_fields(
-                        job_data,
-                        JobStatus.FAILED,
-                        error_message
-                    )
-
-                    # Update all in-progress documents to failed
-                    if "documents" in job_data:
+                        doc_ids = []
                         for doc in job_data["documents"]:
                             doc_status = doc.get("status")
+                            doc_id = doc.get("id")
+                            
+                            # Check if document is in any in-progress state
                             if doc_status in {DocStatus.ACCEPTED.value, DocStatus.IN_PROGRESS.value,
                                             DocStatus.DIGITIZED.value, DocStatus.PROCESSED.value,
                                             DocStatus.CHUNKED.value}:
-                                doc["status"] = DocStatus.FAILED.value
-
-                                # Update individual document metadata file with failed status and error
-                                doc_id = doc.get("id")
                                 if doc_id:
+                                    doc_ids.append(doc_id)
+                                    
+                                    # Update individual document metadata file using update_doc_metadata
                                     status_mgr.update_doc_metadata(
                                         doc_id,
                                         {"status": DocStatus.FAILED},
-                                        error=f"System restarted during processing, Use DELETE /v1/documents/{doc_id} to remove the stale document and re-submit the document to process again"
+                                        error=f"System restarted during processing. Use DELETE /v1/documents/{doc_id} to remove the stale document and re-submit the document to process again"
                                     )
+                                    
+                                    # Update job progress with document status change
+                                    # Use IN_PROGRESS for job status temporarily to allow document updates
+                                    status_mgr.update_job_progress(
+                                        doc_id=doc_id,
+                                        doc_status=DocStatus.FAILED,
+                                        job_status=JobStatus.IN_PROGRESS,
+                                        error="System restarted"
+                                    )
+                                    logger.debug(f"Updated document {doc_id} to FAILED")
 
-                    # Recalculate stats using StatusManager utility
-                    status_mgr._recalculate_stats(job_data)
+                        # Add document IDs to error message if any were found
+                        if doc_ids:
+                            error_message += f". Stale documents may exist. Please use DELETE /v1/documents/{{id}} to remove these documents and re-submit to process again: {', '.join(doc_ids)}"
 
-                    # Atomically write the updated job file using StatusManager utility
-                    try:
-                        status_mgr._atomic_write_json(job_file, job_data)
-                        logger.info(f"✅ Marked orphan job {job_id} as failed")
-                        orphan_count += 1
+                    # Step 2: Finally update the overall job status to FAILED
+                    # Use empty doc_id to only update job-level status
+                    status_mgr.update_job_progress(
+                        doc_id="",
+                        doc_status=DocStatus.FAILED,  # Not used when doc_id is empty
+                        job_status=JobStatus.FAILED,
+                        error=error_message
+                    )
 
-                        # Clean up staging directory for this orphan job
-                        cleanup_staging_directory(job_id, config.settings.digitize.staging_dir)
-                    except Exception as write_error:
-                        logger.error(f"Failed to update orphan job {job_id}: {write_error}")
+                    logger.info(f"✅ Marked orphan job {job_id} as failed")
+                    orphan_count += 1
+
+                    # Clean up staging directory for this orphan job
+                    cleanup_staging_directory(job_id, config.settings.digitize.staging_dir)
 
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse job file {job_file}: {e}")
