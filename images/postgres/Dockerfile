@@ -4,6 +4,20 @@
 # This Dockerfile creates a PostgreSQL 18 image based on Red Hat Universal Base Image 9 Minimal
 #
 
+FROM golang:1.24 AS gosu-builder
+
+ENV GOSU_VERSION=1.19 \
+	CGO_ENABLED=0
+
+RUN set -eux; \
+	apt-get update; \
+	apt-get install -y --no-install-recommends git ca-certificates; \
+	rm -rf /var/lib/apt/lists/*; \
+	git clone --branch "$GOSU_VERSION" --depth 1 https://github.com/tianon/gosu.git /src/gosu; \
+	cd /src/gosu; \
+	go build -trimpath -ldflags='-s -w -buildid=' -o /out/gosu ./; \
+	/out/gosu --version
+
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
 
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
@@ -25,28 +39,10 @@ RUN set -ex; \
 	; \
 	microdnf clean all
 
-# grab gosu for easy step-down from root
-# https://github.com/tianon/gosu/releases
-ENV GOSU_VERSION 1.19
+# build gosu from source with a current Go toolchain to avoid shipping the
+# prebuilt release binary and its embedded vulnerable dependencies
+COPY --from=gosu-builder /out/gosu /usr/local/bin/gosu
 RUN set -eux; \
-	microdnf install ${DNF_FLAGS} -y ca-certificates wget gnupg2; \
-	dpkgArch="$(uname -m)"; \
-	case "$dpkgArch" in \
-		x86_64) gosuArch='amd64' ;; \
-		aarch64) gosuArch='arm64' ;; \
-		ppc64le) gosuArch='ppc64el' ;; \
-		s390x) gosuArch='s390x' ;; \
-		*) echo >&2 "error: unsupported architecture: $dpkgArch"; exit 1 ;; \
-	esac; \
-	wget -O /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$gosuArch"; \
-	wget -O /usr/local/bin/gosu.asc "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$gosuArch.asc"; \
-	export GNUPGHOME="$(mktemp -d)"; \
-	gpg --batch --keyserver hkps://keys.openpgp.org --recv-keys B42F6819007F00F88E364FD4036A9C25BF357DD4; \
-	gpg --batch --verify /usr/local/bin/gosu.asc /usr/local/bin/gosu; \
-	gpgconf --kill all; \
-	rm -rf "$GNUPGHOME" /usr/local/bin/gosu.asc; \
-	microdnf remove ${DNF_FLAGS} -y wget; \
-	microdnf clean all; \
 	chmod +x /usr/local/bin/gosu; \
 	gosu --version; \
 	gosu nobody true
