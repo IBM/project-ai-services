@@ -4,7 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from digitize.types import JobStatus
-import digitize.config as config
+from digitize.settings import settings
 
 
 class JobDocumentSummary(BaseModel):
@@ -100,7 +100,7 @@ class JobState(BaseModel):
         """
         return self.model_dump()
 
-    def save(self, jobs_dir: Path = config.JOBS_DIR) -> Path:
+    def save(self, jobs_dir: Path = settings.digitize.jobs_dir) -> Path:
         """
         Persist the job state as <job_id>_status.json.
 

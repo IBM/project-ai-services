@@ -9,3 +9,16 @@ backend:
   adminPasswordHash: ""
   podman:
     uri: "/run/podman/podman.sock"
+
+db:
+  port: ""
+  image: icr.io/ai-services-private/postgres:18
+  user: "admin"
+  database: "postgres"
+  password: ""
+  dataPath: "/var/lib/ai-services/db"
+  resources:
+    requests:
+      memory: "512Mi"
+    limits:
+      memory: "1Gi"

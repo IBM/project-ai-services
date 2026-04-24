@@ -5,10 +5,13 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
-from common.lang_utils import prompt_map
+from common.lang_utils import get_prompt_for_language
 from common.misc_utils import get_logger
-from common.settings import get_settings, Settings
+from common.settings import settings
 from common.retry_utils import retry_on_transient_error
+from chatbot.settings import settings as chatbot_settings
+from summarize.settings import settings as summarize_settings
+from digitize.settings import settings as digitize_settings
 import common.misc_utils as misc_utils
 
 logger = get_logger("LLM")
@@ -21,8 +24,6 @@ def tqdm_wrapper(iterable, **kwargs):
         return tqdm(iterable, **kwargs)
     else:
         return iterable
-
-settings: Settings = get_settings()
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
@@ -37,7 +38,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
         "model": gen_model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
-        "max_tokens": settings.table_summary_max_tokens,
+        "max_tokens": summarize_settings.summarize.table_summary_max_tokens,
         "stream": False,
     }
 
@@ -92,7 +93,7 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, 
     Combined function to summarize and classify tables using a single prompt.
     Returns tuple: (summaries, decisions)
     """
-    all_prompts = [settings.prompts.table_summary_and_classify.format(content=md) for md in table_mds]
+    all_prompts = [digitize_settings.digitize.table_summary_and_classify.format(content=md) for md in table_mds]
 
     results: list[tuple[str, bool] | None] = [None] * len(all_prompts)
 
@@ -141,12 +142,15 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
 
     # dynamic chunk truncation: truncates the context, if doesn't fit in the sequence length
     question_token_count = len(tokenize_with_llm(question, llm_endpoint))
-    reamining_tokens = settings.max_input_length - (settings.prompt_template_token_count + question_token_count)
+    reamining_tokens = settings.llm.max_input_length - (
+        chatbot_settings.chatbot.prompt_template_token_count + question_token_count
+    )
     context = detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:reamining_tokens], llm_endpoint)
     logger.debug(f"Truncated Context: {context}")
 
-    prompt_key = prompt_map.get(lang, "query_vllm_stream")
-    prompt = getattr(settings.prompts, prompt_key).format(context=context, question=question)
+    # Get the appropriate prompt template based on language and format it
+    prompt_template = get_prompt_for_language(lang)
+    prompt = prompt_template.format(context=context, question=question)
 
     logger.debug("PROMPT:  ", prompt)
     headers = {
@@ -173,7 +177,7 @@ def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_wor
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False, lang )
+    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False, lang)
 
     # Use requests for synchronous HTTP requests
     start_time = time.time()
@@ -262,7 +266,7 @@ def query_vllm_summarize(
         "accept": "application/json",
         "Content-type": "application/json",
     }
-    stop_words = [w for w in settings.summarization_stop_words.split(",") if w]
+    stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,
         "model": model,
@@ -306,7 +310,7 @@ def query_vllm_summarize_stream(
         "accept": "application/json",
         "Content-type": "application/json",
     }
-    stop_words = [w for w in settings.summarization_stop_words.split(",") if w]
+    stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,
         "model": model,

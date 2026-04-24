@@ -1,0 +1,17 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: "similarity-api"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  port:
+    targetPort: 7000
+  to:
+    kind: Service
+    name: "similarity-api"
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge
