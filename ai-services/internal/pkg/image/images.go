@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -35,7 +34,7 @@ type Images struct {
 
 // ListImages returns the list of images required for the application template.
 func (img *Images) ListImages() ([]string, error) {
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
+	tp := templates.GetTemplateProvider("")
 
 	// Fetch list of app templates
 	apps, err := tp.ListApplications(true)
