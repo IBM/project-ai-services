@@ -702,6 +702,7 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = settings.digitize.jobs_dir) ->
     """
     from digitize.status import StatusManager
     from digitize.types import JobStatus, DocStatus
+    from digitize.doc_utils import clean_intermediate_files
     import digitize.settings as config
 
     if not jobs_dir.exists():
@@ -733,11 +734,21 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = settings.digitize.jobs_dir) ->
 
                     # Step 1: Update document metadata and job progress for each document
                     # Process all documents in in-progress states to failed
+                    # Also clean up intermediate files for all documents (even completed ones)
                     if "documents" in job_data and job_data["documents"]:
                         doc_ids = []
                         for doc in job_data["documents"]:
                             doc_status = doc.get("status")
                             doc_id = doc.get("id")
+                            
+                            if doc_id:
+                                # Clean up intermediate files for all documents
+                                # This step may have been missed during the last restart
+                                try:
+                                    clean_intermediate_files(doc_id, config.settings.digitize.digitized_docs_dir)
+                                    logger.debug(f"Cleaned intermediate files for document {doc_id}")
+                                except Exception as e:
+                                    logger.warning(f"Failed to clean intermediate files for {doc_id}: {e}")
                             
                             # Check if document is in any in-progress state
                             if doc_status in {DocStatus.ACCEPTED.value, DocStatus.IN_PROGRESS.value,
@@ -759,10 +770,10 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = settings.digitize.jobs_dir) ->
                                         doc_id=doc_id,
                                         doc_status=DocStatus.FAILED,
                                         job_status=JobStatus.IN_PROGRESS,
-                                        error="System restarted"
+                                        error=""
                                     )
                                     logger.debug(f"Updated document {doc_id} to FAILED")
-
+                                    
                         # Add document IDs to error message if any were found
                         if doc_ids:
                             error_message += f". Stale documents may exist. Please use DELETE /v1/documents/{{id}} to remove these documents and re-submit to process again: {', '.join(doc_ids)}"
