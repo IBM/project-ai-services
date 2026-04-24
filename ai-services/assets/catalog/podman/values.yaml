@@ -7,6 +7,7 @@ backend:
   image: icr.io/ai-services-cicd/ai-services:0.0.3
   runtime: ""
   adminPasswordHash: ""
+  appDir: "/var/lib/ai-services"
   podman:
     uri: "/run/podman/podman.sock"
 

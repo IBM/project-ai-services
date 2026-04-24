@@ -47,7 +47,7 @@ spec:
         - name: BACKEND_HOST
           value: "{{ .AppName }}--catalog"
         - name: BACKEND_PORT
-          value: "8080" 
+          value: "8080"
       ports:
         - containerPort: 8081
           protocol: TCP
@@ -82,6 +82,8 @@ spec:
             secretKeyRef:
               name: catalog-secret
               key: db-password
+        - name: AI_SERVICES_APP_DIR
+          value: "{{ .Values.backend.appDir }}"
       ports:
         - containerPort: 8080
           protocol: TCP

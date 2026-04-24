@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
 
@@ -16,7 +17,8 @@ var (
 	// SpyreCardAnnotationRegex -> ai-services.io/<containerName>--spyre-cards.
 	SpyreCardAnnotationRegex = regexp.MustCompile(`^ai-services\.io\/([A-Za-z0-9][-A-Za-z0-9_.]*)--spyre-cards$`)
 	ToolImage                = "icr.io/ai-services/tools:0.7"
-	ModelDirectory           = "/var/lib/ai-services/models"
+	// ModelDirectory is the directory for AI models, uses GetModelsPath() for dynamic resolution
+	ModelDirectory = constants.GetModelsPath()
 )
 
 type Label string
