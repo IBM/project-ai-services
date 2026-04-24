@@ -23,7 +23,7 @@ if level != "":
 
 set_log_level(log_level)
 
-from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream
+from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream, tokenize_with_llm
 from common.misc_utils import get_model_endpoints, set_request_id, configure_uvicorn_logging, create_llm_session
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 
@@ -149,6 +149,15 @@ async def handle_summarize(
     """Core summarization logic shared by both JSON and form-data paths."""
     input_word_count = word_count(content_text)
     
+    # Get LLM endpoint for tokenization
+    llm_endpoint = llm_model_dict['llm_endpoint']
+    llm_model = llm_model_dict['llm_model']
+    
+    # Get actual token count from the input text
+    input_tokens = await asyncio.to_thread(
+        lambda: len(tokenize_with_llm(content_text, llm_endpoint))
+    )
+    
     # Validate that both parameters are not provided simultaneously
     if summary_level is not None and summary_length is not None:
         raise SummarizeException(
@@ -159,43 +168,42 @@ async def handle_summarize(
     # Determine which approach to use: level-based or length-based
     if summary_level is not None:
         # New approach: use abstraction level
-        # Validate input and get available output tokens
-        available_output_tokens = validate_input_word_count_for_level(input_word_count, summary_level)
+        # Validate input and get available output tokens (using already-computed token count)
+        available_output_tokens = validate_input_word_count_for_level(
+            input_tokens, input_word_count, summary_level
+        )
         target_words, min_words, max_words, max_tokens = compute_target_and_max_tokens_from_level(
-            input_word_count, summary_level, available_output_tokens
+            input_tokens, input_word_count, summary_level, available_output_tokens
         )
         has_length_spec = True
         logger.info(
-            f"Received {input_type} request with input size: {input_word_count} words, "
+            f"Received {input_type} request with input size: {input_word_count} words ({input_tokens} tokens), "
             f"level: {summary_level}, target: {target_words} words ({min_words}-{max_words})"
         )
     elif summary_length is not None:
         # Legacy approach: direct length specification
         _validate_input_word_count(input_word_count, summary_length)
         target_words, min_words, max_words, max_tokens = compute_target_and_max_tokens(
-            input_word_count, summary_length
+            input_tokens, input_word_count, summary_length
         )
         has_length_spec = True
         logger.info(
-            f"Received {input_type} request with input size: {input_word_count} words, "
+            f"Received {input_type} request with input size: {input_word_count} words ({input_tokens} tokens), "
             f"target summary length: {summary_length} words"
         )
     else:
         # Automatic: use default coefficient
         _validate_input_word_count(input_word_count, None)
         target_words, min_words, max_words, max_tokens = compute_target_and_max_tokens(
-            input_word_count, None
+            input_tokens, input_word_count, None
         )
         has_length_spec = False
         logger.info(
-            f"Received {input_type} request with input size: {input_word_count} words, "
+            f"Received {input_type} request with input size: {input_word_count} words ({input_tokens} tokens), "
             f"automatic length: {target_words} words"
         )
 
     messages = build_messages(content_text, target_words, min_words, max_words, has_length_spec)
-
-    llm_endpoint = llm_model_dict['llm_endpoint']
-    llm_model = llm_model_dict['llm_model']
 
     if stream:
         await concurrency_limiter.acquire()

@@ -35,15 +35,16 @@ MAX_INPUT_WORDS = int(
 def word_count(text: str) -> int:
     return len(text.split())
 
-def validate_input_word_count_for_level(input_word_count: int, summary_level: str) -> int:
+def validate_input_word_count_for_level(input_tokens: int, input_word_count: int, summary_level: str) -> int:
     """
-    Validate input word count with hard and soft limits, return available output tokens.
+    Validate input using actual token count with hard and soft limits, return available output tokens.
     
     Hard limit: input + prompt must not exceed (context_limit - minimum_summary_words)
     Soft limit: If within hard limit, allow processing even if level's ideal output won't fit
     
     Args:
-        input_word_count: Number of words in input text
+        input_tokens: Actual token count of input text
+        input_word_count: Number of words in input text (for logging)
         summary_level: "brief", "standard", or "detailed"
     
     Returns:
@@ -52,8 +53,6 @@ def validate_input_word_count_for_level(input_word_count: int, summary_level: st
     Raises:
         SummarizeException: If input exceeds hard limit
     """
-    # Convert input words to tokens
-    input_tokens = int(input_word_count / settings.token_to_word_ratios.en)
     
     # Calculate minimum output tokens needed
     minimum_output_tokens = int(settings.minimum_summary_words / settings.token_to_word_ratios.en)
@@ -70,7 +69,7 @@ def validate_input_word_count_for_level(input_word_count: int, summary_level: st
         max_allowed_input_words = int(max_allowed_input_tokens * settings.token_to_word_ratios.en)
         raise SummarizeException(
             413, "CONTEXT_LIMIT_EXCEEDED",
-            f"Input size ({input_word_count} words, ~{input_tokens} tokens) exceeds maximum allowed. "
+            f"Input size ({input_word_count} words, {input_tokens} tokens) exceeds maximum allowed. "
             f"Maximum input: ~{max_allowed_input_words} words ({max_allowed_input_tokens} tokens) "
             f"to ensure at least {settings.minimum_summary_words} words for summary.",
         )
@@ -99,7 +98,7 @@ def validate_input_word_count_for_level(input_word_count: int, summary_level: st
         available_output_words = int(available_output_tokens * settings.token_to_word_ratios.en)
         ideal_output_words = int(ideal_output_tokens * settings.token_to_word_ratios.en)
         logger.warning(
-            f"Input size ({input_word_count} words) limits output space. "
+            f"Input size ({input_word_count} words, {input_tokens} tokens) limits output space. "
             f"'{summary_level}' level target is ~{ideal_output_words} words, "
             f"but only ~{available_output_words} words available for summary."
         )
@@ -107,6 +106,7 @@ def validate_input_word_count_for_level(input_word_count: int, summary_level: st
     return available_output_tokens
 
 def compute_target_and_max_tokens_from_level(
+    input_tokens: int,
     input_word_count: int,
     summary_level: str,
     available_output_tokens: int
@@ -115,7 +115,8 @@ def compute_target_and_max_tokens_from_level(
     Compute target words and tokens based on abstraction level and available space.
     
     Args:
-        input_word_count: Number of words in input text
+        input_tokens: Actual token count of input text
+        input_word_count: Number of words in input text (for logging)
         summary_level: "brief", "standard", or "detailed"
         available_output_tokens: Maximum tokens available for output (from validation)
     
@@ -125,39 +126,43 @@ def compute_target_and_max_tokens_from_level(
     # Get level configuration
     level_config = getattr(settings.summarization_levels, summary_level)
     
-    # Calculate ideal target based on input size and level multiplier
-    base_target = int(input_word_count * settings.summarization_coefficient)
-    ideal_target_words = int(base_target * level_config.multiplier)
+    # Calculate ideal target based on input tokens and level multiplier
+    base_target_tokens = int(input_tokens * settings.summarization_coefficient)
+    ideal_target_tokens = int(base_target_tokens * level_config.multiplier)
     
-    # Cap target to available space (convert tokens to words)
-    max_possible_words = int(available_output_tokens * settings.token_to_word_ratios.en)
-    target_word_count = min(ideal_target_words, max_possible_words)
+    # Cap target to available space
+    target_tokens = min(ideal_target_tokens, available_output_tokens)
+    
+    # Convert to words for display
+    target_word_count = int(target_tokens * settings.token_to_word_ratios.en)
     
     # Calculate min/max bounds (85% to 115% of target)
     min_words = int(target_word_count * 0.85)
     max_words = int(target_word_count * 1.15)
     
     # Cap max_words to available space
+    max_possible_words = int(available_output_tokens * settings.token_to_word_ratios.en)
     max_words = min(max_words, max_possible_words)
     
-    # Convert to tokens with small buffer
-    est_output_tokens = int(target_word_count / settings.token_to_word_ratios.en)
-    buffer = max(20, int(est_output_tokens * 0.1))  # 10% buffer
-    max_tokens = min(est_output_tokens + buffer, available_output_tokens)
+    # Add small buffer to max_tokens
+    buffer = max(20, int(target_tokens * 0.1))  # 10% buffer
+    max_tokens = min(target_tokens + buffer, available_output_tokens)
     
     logger.debug(
-        f"Level: {summary_level}, Target: {target_word_count} words "
+        f"Level: {summary_level}, Input: {input_tokens} tokens, Target: {target_word_count} words "
         f"({min_words}-{max_words}), Max tokens: {max_tokens}, Available: {available_output_tokens}"
     )
     
     return target_word_count, min_words, max_words, max_tokens
 
-def compute_target_and_max_tokens(input_word_count: int, summary_length: Optional[int]):
+def compute_target_and_max_tokens(input_tokens: int, input_word_count: int, summary_length: Optional[int]):
     """Legacy function for backward compatibility with direct length specification."""
     if summary_length is not None:
         target_word_count = summary_length
     else:
-        target_word_count = max(1, int(input_word_count * settings.summarization_coefficient))
+        # Use actual input tokens for calculation
+        target_tokens = max(1, int(input_tokens * settings.summarization_coefficient))
+        target_word_count = int(target_tokens * settings.token_to_word_ratios.en)
 
     # Calculate min/max bounds
     min_words = int(target_word_count * 0.85)
@@ -167,7 +172,7 @@ def compute_target_and_max_tokens(input_word_count: int, summary_length: Optiona
     buffer = max(20, int(est_output_tokens * 0.1))
     max_tokens = est_output_tokens + buffer
     
-    logger.debug(f"Target: {target_word_count} words, Max tokens: {max_tokens}")
+    logger.debug(f"Input: {input_tokens} tokens, Target: {target_word_count} words, Max tokens: {max_tokens}")
     return target_word_count, min_words, max_words, max_tokens
 
 def extract_text_from_pdf(content: bytes) -> str:
