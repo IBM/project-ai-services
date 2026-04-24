@@ -39,16 +39,18 @@ app.post('/v1/chat/completions', async (req, res) => {
   }
 });
 
-app.post('/reference', async (req, res) => {
-  const { prompt } = req.body;
+app.post('/v1/similarity-search', async (req, res) => {
+  const { query } = req.body;
   const targetURL = process.env.TARGET_URL;
-  console.log(`Forwarding request to: ${targetURL}, with message: ${prompt}`);
+  console.log(`Forwarding request to: ${targetURL}, with message: ${query}`);
 
   try {
     const response = await axios.post(
-      `${targetURL}/reference`,
+      `${targetURL}/v1/similarity-search`,
       {
-        prompt: prompt,
+        query: query, 
+        mode: "hybrid",
+        rerank: true,
       },
       {
         headers: { 'Content-Type': 'application/json' },
