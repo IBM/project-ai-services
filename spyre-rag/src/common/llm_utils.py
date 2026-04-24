@@ -183,7 +183,7 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     prompt_template = get_prompt_for_language(lang)
     prompt = prompt_template.format(context=context, question=question)
 
-    logger.debug("PROMPT:  ", prompt)
+    logger.debug(f"PROMPT: {prompt}")
     headers = get_vllm_headers()
     payload = {
         "messages": [{"role": "user", "content": prompt}],
