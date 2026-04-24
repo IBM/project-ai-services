@@ -4,7 +4,7 @@
 # This Dockerfile creates a PostgreSQL 18 image based on Red Hat Universal Base Image 9 Minimal
 #
 
-FROM golang:1.24 AS gosu-builder
+FROM golang:1.25 AS gosu-builder
 
 ENV GOSU_VERSION=1.19 \
 	CGO_ENABLED=0
