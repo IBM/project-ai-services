@@ -11,8 +11,39 @@ from common.settings import Settings as CommonSettings
 logger = get_logger("settings")
 
 
+class QueryRephrasingConfig(BaseSettings):
+    """Query rephrasing configuration for conversational RAG."""
+    
+    model_config = SettingsConfigDict(env_prefix="QUERY_REPHRASING_")
+    
+    timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        description="Timeout for rephrasing LLM call in seconds"
+    )
+    
+    max_tokens: int = Field(
+        default=100,
+        gt=0,
+        le=512,
+        description="Maximum tokens for rephrased query"
+    )
+    
+    temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Temperature for rephrasing (0=deterministic)"
+    )
+
+
 class RAGConfig(BaseSettings):
     """RAG retrieval and ranking settings."""
+
+    conversational_mode: bool = Field(
+        default=True,
+        description="Enable conversational RAG mode with query rephrasing and context management"
+    )
 
     score_threshold: float = Field(
         default=0.4,
@@ -127,6 +158,7 @@ class RAGConfig(BaseSettings):
 class Settings(BaseSettings):
     common: CommonSettings = Field(default_factory=CommonSettings)
     chatbot: RAGConfig = Field(default_factory=RAGConfig)
+    query_rephrasing: QueryRephrasingConfig = Field(default_factory=QueryRephrasingConfig)
 
 # Global settings instance
 settings = Settings()
