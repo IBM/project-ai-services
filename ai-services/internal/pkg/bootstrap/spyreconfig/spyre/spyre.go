@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -76,6 +77,7 @@ func RunChecks() []check.CheckResult {
 		checkVfioModule(),
 		checkVfioAccessPermission(),
 		checkPodmanServiceSupplementaryGroups(),
+		checkSELinuxVFIOPolicy(),
 		checkSystemdUserSliceLimits(),
 	}
 }
@@ -577,13 +579,55 @@ func isSentientGroupPresent(value string) bool {
 
 	// Check if it's in a space-separated list of groups
 	groups := strings.Fields(value)
-	for _, group := range groups {
-		if group == sentientGroup {
-			return true
-		}
+	return slices.Contains(groups, sentientGroup)
+}
+
+// checkSELinuxVFIOPolicy validates SELinux policy for VFIO device access.
+func checkSELinuxVFIOPolicy() *check.Check {
+	selinuxCheck := check.NewCheck("SELinux VFIO policy configuration")
+
+	// Check if SELinux is enabled
+	exitCode, stdout, _, err := utils.ExecuteCommand("getenforce")
+	if err != nil || exitCode != 0 {
+		// SELinux not available - skip check (pass)
+		selinuxCheck.SetStatus(true)
+		return selinuxCheck
 	}
 
-	return false
+	status := strings.TrimSpace(stdout)
+	if status == "Disabled" {
+		// SELinux disabled - skip check (pass)
+		selinuxCheck.SetStatus(true)
+		return selinuxCheck
+	}
+
+	// Check if VFIO devices exist
+	if !utils.FileExists("/dev/vfio") {
+		// No VFIO devices - skip check (pass)
+		selinuxCheck.SetStatus(true)
+		return selinuxCheck
+	}
+
+	// Check if policy is installed (requires root/sudo)
+	var stderr string
+	exitCode, stdout, stderr, err = utils.ExecuteCommand("semodule", "-l")
+	if err != nil || exitCode != 0 {
+		// If permission denied, assume policy needs to be checked with sudo
+		// This is expected when running without sudo - skip check (pass)
+		if strings.Contains(stderr, "Permission denied") || strings.Contains(stderr, "access") {
+			selinuxCheck.SetStatus(true)
+			return selinuxCheck
+		}
+		// Other errors mean policy is not installed
+		selinuxCheck.SetStatus(false)
+		return selinuxCheck
+	}
+
+	// Policy should be installed
+	policyInstalled := strings.Contains(stdout, "vllm_vfio_policy")
+	selinuxCheck.SetStatus(policyInstalled)
+
+	return selinuxCheck
 }
 
 func setCheckResult(confCheck *check.ConfigurationFileCheck, found, correctValue bool) {

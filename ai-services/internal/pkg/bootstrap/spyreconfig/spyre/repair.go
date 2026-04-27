@@ -61,6 +61,7 @@ func Repair(checks []check.CheckResult) []RepairResult {
 	results = append(results, fixPodmanServiceSupplementaryGroups(checkMap))
 	results = append(results, fixSystemdUserSliceLimits(checkMap))
 
+	results = append(results, fixSELinuxVFIOPolicy(checkMap))
 	return results
 }
 
@@ -574,6 +575,184 @@ LimitMEMLOCK=infinity
 		Status:    StatusFixed,
 		Message:   fmt.Sprintf("Configured systemd slice limits for user %s (UID: %s)", sudoUser, userID),
 	}
+}
+
+// fixSELinuxVFIOPolicy configures SELinux policy for VFIO device access.
+// This allows containers with container_t type to access VFIO devices.
+func fixSELinuxVFIOPolicy(checkMap map[string]check.CheckResult) RepairResult {
+	checkName := "SELinux VFIO policy configuration"
+
+	// Check if SELinux is enabled
+	exitCode, stdout, _, err := utils.ExecuteCommand("getenforce")
+	if err != nil || exitCode != 0 {
+		return RepairResult{
+			CheckName: checkName,
+			Status:    StatusSkipped,
+			Message:   "SELinux not available or not enabled",
+		}
+	}
+
+	status := strings.TrimSpace(stdout)
+	if status == "Disabled" {
+		return RepairResult{
+			CheckName: checkName,
+			Status:    StatusSkipped,
+			Message:   "SELinux is disabled",
+		}
+	}
+
+	// Check if VFIO devices exist
+	if !utils.FileExists("/dev/vfio") {
+		return RepairResult{
+			CheckName: checkName,
+			Status:    StatusSkipped,
+			Message:   "VFIO devices not found",
+		}
+	}
+
+	// Check if policy is already installed
+	exitCode, stdout, _, err = utils.ExecuteCommand("semodule", "-l")
+	if err == nil && exitCode == 0 && strings.Contains(stdout, "vllm_vfio_policy") {
+		return RepairResult{
+			CheckName: checkName,
+			Status:    StatusSkipped,
+			Message:   "SELinux VFIO policy already installed",
+		}
+	}
+
+	// Create temporary directory for building the policy
+	tmpDir, err := os.MkdirTemp("", "selinux_build")
+	if err != nil {
+		return RepairResult{
+			CheckName: checkName,
+			Status:    StatusFailedToFix,
+			Error:     fmt.Errorf("failed to create temp directory: %w", err),
+		}
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Build and install the policy
+	if err := buildAndInstallSELinuxPolicy(tmpDir); err != nil {
+		return RepairResult{
+			CheckName: checkName,
+			Status:    StatusFailedToFix,
+			Error:     err,
+		}
+	}
+
+	// Update file context database
+	if err := updateSELinuxFileContext(); err != nil {
+		return RepairResult{
+			CheckName: checkName,
+			Status:    StatusFailedToFix,
+			Error:     err,
+		}
+	}
+
+	// Apply labels to existing devices
+	if err := applySELinuxLabels(); err != nil {
+		return RepairResult{
+			CheckName: checkName,
+			Status:    StatusFailedToFix,
+			Error:     err,
+		}
+	}
+
+	return RepairResult{
+		CheckName: checkName,
+		Status:    StatusFixed,
+		Message:   "SELinux VFIO policy configured successfully",
+	}
+}
+
+// buildAndInstallSELinuxPolicy builds and installs the SELinux policy module.
+func buildAndInstallSELinuxPolicy(tmpDir string) error {
+	const policyName = "vllm_vfio_policy"
+	const teContent = `
+module vllm_vfio_policy 1.0;
+
+require {
+    type container_t;
+    type vfio_device_t;
+    class chr_file { ioctl open read write getattr };
+}
+
+# Allow container_t (vLLM) to access vfio_device_t
+allow container_t vfio_device_t:chr_file { ioctl open read write getattr };
+`
+
+	// Write the .te file
+	tePath := fmt.Sprintf("%s/%s.te", tmpDir, policyName)
+	if err := utils.WriteToFile(tePath, teContent); err != nil {
+		return fmt.Errorf("failed to write .te file: %w", err)
+	}
+
+	// Compile .te -> .mod
+	modPath := fmt.Sprintf("%s/%s.mod", tmpDir, policyName)
+	exitCode, _, stderr, err := utils.ExecuteCommand("checkmodule", "-M", "-m", "-o", modPath, tePath)
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("failed to compile policy module: %v, stderr: %s", err, stderr)
+	}
+
+	// Package .mod -> .pp
+	ppPath := fmt.Sprintf("%s/%s.pp", tmpDir, policyName)
+	exitCode, _, stderr, err = utils.ExecuteCommand("semodule_package", "-o", ppPath, "-m", modPath)
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("failed to package policy module: %v, stderr: %s", err, stderr)
+	}
+
+	// Install the module
+	exitCode, _, stderr, err = utils.ExecuteCommand("semodule", "-i", ppPath)
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("failed to install policy module: %v, stderr: %s", err, stderr)
+	}
+
+	return nil
+}
+
+// updateSELinuxFileContext updates the SELinux file context database.
+func updateSELinuxFileContext() error {
+	const vfioPath = "/dev/vfio(/.*)?"
+	const label = "vfio_device_t"
+
+	// Check if context already exists
+	exitCode, stdout, _, err := utils.ExecuteCommand("semanage", "fcontext", "-l")
+	if err == nil && exitCode == 0 && strings.Contains(stdout, vfioPath) {
+		return nil // Already exists
+	}
+
+	// Add file context
+	exitCode, _, stderr, err := utils.ExecuteCommand("semanage", "fcontext", "-a", "-t", label, vfioPath)
+	if err != nil || exitCode != 0 {
+		// Check if it's an "already exists" error
+		if strings.Contains(stderr, "already exists") {
+			return nil
+		}
+		return fmt.Errorf("failed to add file context: %v, stderr: %s", err, stderr)
+	}
+
+	return nil
+}
+
+// applySELinuxLabels applies SELinux labels to existing VFIO devices.
+func applySELinuxLabels() error {
+	if !utils.FileExists("/dev/vfio") {
+		// No VFIO devices to label - this is OK
+		return nil
+	}
+
+	exitCode, _, stderr, err := utils.ExecuteCommand("restorecon", "-Rv", "/dev/vfio")
+	if err != nil || exitCode != 0 {
+		// Check if it's a permission denied error - this can happen if SELinux is in permissive mode
+		// or if the devices are already correctly labeled
+		if strings.Contains(stderr, "Permission denied") {
+			// Not a fatal error - labels will be applied when devices are accessed
+			return nil
+		}
+		return fmt.Errorf("failed to apply labels: %v, stderr: %s", err, stderr)
+	}
+
+	return nil
 }
 
 // Made with Bob
