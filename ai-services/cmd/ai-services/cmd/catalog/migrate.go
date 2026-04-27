@@ -6,10 +6,16 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/migrations"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/spf13/cobra"
 )
 
-// NewMigrateCmd returns the cobra command for database migration operations
+const (
+	// DefaultDBPort is the default PostgreSQL port.
+	DefaultDBPort = 5432
+)
+
+// NewMigrateCmd returns the cobra command for database migration operations.
 func NewMigrateCmd() *cobra.Command {
 	var (
 		dbHost     string
@@ -33,7 +39,7 @@ check migration status, and rollback migrations.`,
 
 	// Add persistent flags for database connection
 	migrateCmd.PersistentFlags().StringVar(&dbHost, "db-host", "localhost", "Database host")
-	migrateCmd.PersistentFlags().IntVar(&dbPort, "db-port", 5432, "Database port")
+	migrateCmd.PersistentFlags().IntVar(&dbPort, "db-port", DefaultDBPort, "Database port")
 	migrateCmd.PersistentFlags().StringVar(&dbUser, "db-user", "admim", "Database user")
 	migrateCmd.PersistentFlags().StringVar(&dbPassword, "db-password", "", "Database password")
 	migrateCmd.PersistentFlags().StringVar(&dbName, "db-name", db.DefaultDBName, "Database name")
@@ -58,7 +64,29 @@ check migration status, and rollback migrations.`,
 	}
 
 	// Subcommand: init - Initialize database and run all migrations
-	initCmd := &cobra.Command{
+	initCmd := createInitCmd(getDBConfig)
+
+	// Subcommand: up - Run pending migrations
+	upCmd := createUpCmd(getDBConfig)
+
+	// Subcommand: status - Check migration status
+	statusCmd := createStatusCmd(getDBConfig)
+
+	// Subcommand: down - Rollback the last migration
+	downCmd := createDownCmd(getDBConfig)
+
+	// Add subcommands
+	migrateCmd.AddCommand(initCmd)
+	migrateCmd.AddCommand(upCmd)
+	migrateCmd.AddCommand(statusCmd)
+	migrateCmd.AddCommand(downCmd)
+
+	return migrateCmd
+}
+
+// createInitCmd creates the init subcommand.
+func createInitCmd(getDBConfig func() db.Config) *cobra.Command {
+	return &cobra.Command{
 		Use:   "init",
 		Short: "Initialize the database and run all migrations",
 		Long: `Initialize the catalog database by creating it if it doesn't exist
@@ -66,7 +94,7 @@ and running all pending migrations.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := getDBConfig()
 
-			fmt.Printf("Initializing database '%s' on %s:%d...\n", cfg.DBName, cfg.Host, cfg.Port)
+			logger.Infof("Initializing database '%s' on %s:%d...\n", cfg.DBName, cfg.Host, cfg.Port)
 
 			// Create database if it doesn't exist
 			if err := db.CreateDatabaseIfNotExists(cfg); err != nil {
@@ -78,66 +106,82 @@ and running all pending migrations.`,
 			if err != nil {
 				return fmt.Errorf("failed to connect to database: %w", err)
 			}
-			defer database.Close()
+			defer func() {
+				if closeErr := database.Close(); closeErr != nil {
+					logger.Errorf("failed to close database connection: %v", closeErr)
+				}
+			}()
 
 			// Run migrations
 			if err := migrations.RunMigrations(database); err != nil {
 				return fmt.Errorf("failed to run migrations: %w", err)
 			}
 
-			fmt.Println("✓ Database initialized successfully")
-			fmt.Println("✓ All migrations applied")
+			logger.Infoln("✓ Database initialized successfully")
+			logger.Infoln("✓ All migrations applied")
 
 			return nil
 		},
 	}
+}
 
-	// Subcommand: up - Run pending migrations
-	upCmd := &cobra.Command{
+// createUpCmd creates the up subcommand.
+func createUpCmd(getDBConfig func() db.Config) *cobra.Command {
+	return &cobra.Command{
 		Use:   "up",
 		Short: "Run all pending migrations",
 		Long:  `Run all pending database migrations.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := getDBConfig()
 
-			fmt.Printf("Connecting to database '%s' on %s:%d...\n", cfg.DBName, cfg.Host, cfg.Port)
+			logger.Infof("Connecting to database '%s' on %s:%d...\n", cfg.DBName, cfg.Host, cfg.Port)
 
 			database, err := db.Connect(cfg)
 			if err != nil {
 				return fmt.Errorf("failed to connect to database: %w", err)
 			}
-			defer database.Close()
+			defer func() {
+				if closeErr := database.Close(); closeErr != nil {
+					logger.Errorf("failed to close database connection: %v", closeErr)
+				}
+			}()
 
-			fmt.Println("Running migrations...")
+			logger.Infoln("Running migrations...")
 
 			if err := migrations.RunMigrations(database); err != nil {
 				return fmt.Errorf("failed to run migrations: %w", err)
 			}
 
-			fmt.Println("✓ All migrations applied successfully")
+			logger.Infoln("✓ All migrations applied successfully")
 
 			return nil
 		},
 	}
+}
 
-	// Subcommand: status - Check migration status
-	statusCmd := &cobra.Command{
+// createStatusCmd creates the status subcommand.
+func createStatusCmd(getDBConfig func() db.Config) *cobra.Command {
+	return &cobra.Command{
 		Use:   "status",
 		Short: "Check the status of database migrations",
 		Long:  `Display the current status of all database migrations.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := getDBConfig()
 
-			fmt.Printf("Connecting to database '%s' on %s:%d...\n", cfg.DBName, cfg.Host, cfg.Port)
+			logger.Infof("Connecting to database '%s' on %s:%d...\n", cfg.DBName, cfg.Host, cfg.Port)
 
 			database, err := db.Connect(cfg)
 			if err != nil {
 				return fmt.Errorf("failed to connect to database: %w", err)
 			}
-			defer database.Close()
+			defer func() {
+				if closeErr := database.Close(); closeErr != nil {
+					logger.Errorf("failed to close database connection: %v", closeErr)
+				}
+			}()
 
-			fmt.Println("\nMigration Status:")
-			fmt.Println("=================")
+			logger.Infoln("\nMigration Status:")
+			logger.Infoln("=================")
 
 			if err := migrations.GetMigrationStatus(database); err != nil {
 				return fmt.Errorf("failed to get migration status: %w", err)
@@ -146,42 +190,40 @@ and running all pending migrations.`,
 			return nil
 		},
 	}
+}
 
-	// Subcommand: down - Rollback the last migration
-	downCmd := &cobra.Command{
+// createDownCmd creates the down subcommand.
+func createDownCmd(getDBConfig func() db.Config) *cobra.Command {
+	return &cobra.Command{
 		Use:   "down",
 		Short: "Rollback the most recent migration",
 		Long:  `Rollback the most recently applied database migration.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := getDBConfig()
 
-			fmt.Printf("Connecting to database '%s' on %s:%d...\n", cfg.DBName, cfg.Host, cfg.Port)
+			logger.Infof("Connecting to database '%s' on %s:%d...\n", cfg.DBName, cfg.Host, cfg.Port)
 
 			database, err := db.Connect(cfg)
 			if err != nil {
 				return fmt.Errorf("failed to connect to database: %w", err)
 			}
-			defer database.Close()
+			defer func() {
+				if closeErr := database.Close(); closeErr != nil {
+					logger.Errorf("failed to close database connection: %v", closeErr)
+				}
+			}()
 
-			fmt.Println("Rolling back last migration...")
+			logger.Infoln("Rolling back last migration...")
 
 			if err := migrations.RollbackMigration(database); err != nil {
 				return fmt.Errorf("failed to rollback migration: %w", err)
 			}
 
-			fmt.Println("✓ Migration rolled back successfully")
+			logger.Infoln("✓ Migration rolled back successfully")
 
 			return nil
 		},
 	}
-
-	// Add subcommands
-	migrateCmd.AddCommand(initCmd)
-	migrateCmd.AddCommand(upCmd)
-	migrateCmd.AddCommand(statusCmd)
-	migrateCmd.AddCommand(downCmd)
-
-	return migrateCmd
 }
 
 // Made with Bob

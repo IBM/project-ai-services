@@ -31,5 +31,3 @@ DROP TYPE IF EXISTS service_category;
 DROP TYPE IF EXISTS status;
 DROP TYPE IF EXISTS deployment_type;
 -- +goose StatementEnd
-
--- Made with Bob

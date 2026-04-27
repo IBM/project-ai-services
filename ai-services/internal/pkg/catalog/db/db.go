@@ -11,17 +11,19 @@ import (
 )
 
 const (
-	// DefaultDBName is the default database name for the catalog service
+	// DefaultDBName is the default database name for the catalog service.
 	DefaultDBName = "ai_service"
-	// DefaultMaxOpenConns is the default maximum number of open connections
+	// DefaultMaxOpenConns is the default maximum number of open connections.
 	DefaultMaxOpenConns = 25
-	// DefaultMaxIdleConns is the default maximum number of idle connections
+	// DefaultMaxIdleConns is the default maximum number of idle connections.
 	DefaultMaxIdleConns = 5
-	// DefaultConnMaxLifetime is the default maximum lifetime of a connection
+	// DefaultConnMaxLifetime is the default maximum lifetime of a connection.
 	DefaultConnMaxLifetime = 5 * time.Minute
+	// DefaultPingTimeout is the default timeout for database ping operations.
+	DefaultPingTimeout = 5 * time.Second
 )
 
-// Config holds database configuration parameters
+// Config holds database configuration parameters.
 type Config struct {
 	Host     string
 	Port     int
@@ -31,7 +33,7 @@ type Config struct {
 	SSLMode  string
 }
 
-// ConnectionString builds a PostgreSQL connection string from the config
+// ConnectionString builds a PostgreSQL connection string from the config.
 func (c *Config) ConnectionString() string {
 	return fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
@@ -39,7 +41,7 @@ func (c *Config) ConnectionString() string {
 	)
 }
 
-// Connect establishes a connection to the PostgreSQL database
+// Connect establishes a connection to the PostgreSQL database.
 func Connect(cfg Config) (*sql.DB, error) {
 	db, err := sql.Open("pgx", cfg.ConnectionString())
 	if err != nil {
@@ -52,18 +54,21 @@ func Connect(cfg Config) (*sql.DB, error) {
 	db.SetConnMaxLifetime(DefaultConnMaxLifetime)
 
 	// Verify connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultPingTimeout)
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			return nil, fmt.Errorf("failed to ping database: %w (close error: %v)", err, closeErr)
+		}
+
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	return db, nil
 }
 
-// CreateDatabaseIfNotExists creates the database if it doesn't exist
+// CreateDatabaseIfNotExists creates the database if it doesn't exist.
 func CreateDatabaseIfNotExists(cfg Config) error {
 	// Connect to postgres database to create the target database
 	adminCfg := cfg
@@ -73,7 +78,12 @@ func CreateDatabaseIfNotExists(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to postgres database: %w", err)
 	}
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			// Log the error but don't override the main error
+			fmt.Printf("warning: failed to close database connection: %v\n", closeErr)
+		}
+	}()
 
 	// Check if database exists
 	var exists bool

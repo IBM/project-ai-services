@@ -12,7 +12,7 @@ import (
 //go:embed assets/*.sql
 var embedMigrations embed.FS
 
-// RunMigrations executes all pending database migrations
+// RunMigrations executes all pending database migrations.
 func RunMigrations(db *sql.DB) error {
 	goose.SetBaseFS(embedMigrations)
 
@@ -27,7 +27,7 @@ func RunMigrations(db *sql.DB) error {
 	return nil
 }
 
-// GetMigrationStatus returns the current migration status
+// GetMigrationStatus returns the current migration status.
 func GetMigrationStatus(db *sql.DB) error {
 	goose.SetBaseFS(embedMigrations)
 
@@ -42,7 +42,7 @@ func GetMigrationStatus(db *sql.DB) error {
 	return nil
 }
 
-// RollbackMigration rolls back the most recent migration
+// RollbackMigration rolls back the most recent migration.
 func RollbackMigration(db *sql.DB) error {
 	goose.SetBaseFS(embedMigrations)
 

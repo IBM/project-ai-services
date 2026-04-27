@@ -29,5 +29,3 @@ DROP TRIGGER IF EXISTS update_services_updated_at ON services;
 -- Drop table
 DROP TABLE IF EXISTS services;
 -- +goose StatementEnd
-
--- Made with Bob
