@@ -10,11 +10,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	// DefaultDBPort is the default PostgreSQL port.
-	DefaultDBPort = 5432
-)
-
 // NewMigrateCmd returns the cobra command for database migration operations.
 func NewMigrateCmd() *cobra.Command {
 	var (
@@ -39,8 +34,8 @@ check migration status, and rollback migrations.`,
 
 	// Add persistent flags for database connection
 	migrateCmd.PersistentFlags().StringVar(&dbHost, "db-host", "localhost", "Database host")
-	migrateCmd.PersistentFlags().IntVar(&dbPort, "db-port", DefaultDBPort, "Database port")
-	migrateCmd.PersistentFlags().StringVar(&dbUser, "db-user", "admim", "Database user")
+	migrateCmd.PersistentFlags().IntVar(&dbPort, "db-port", db.DefaultDBPort, "Database port")
+	migrateCmd.PersistentFlags().StringVar(&dbUser, "db-user", "admin", "Database user")
 	migrateCmd.PersistentFlags().StringVar(&dbPassword, "db-password", "", "Database password")
 	migrateCmd.PersistentFlags().StringVar(&dbName, "db-name", db.DefaultDBName, "Database name")
 	migrateCmd.PersistentFlags().StringVar(&dbSSLMode, "db-sslmode", "disable", "Database SSL mode (disable, require, verify-ca, verify-full)")

@@ -14,6 +14,8 @@ import (
 const (
 	// DefaultDBName is the default database name for the catalog service.
 	DefaultDBName = "ai_service"
+	// DefaultDBPort is the default PostgreSQL port.
+	DefaultDBPort = 5432
 	// DefaultMaxOpenConns is the default maximum number of open connections.
 	DefaultMaxOpenConns = 25
 	// DefaultMaxIdleConns is the default maximum number of idle connections.
