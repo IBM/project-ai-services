@@ -1,6 +1,8 @@
-name: embedding
+name: chat-dev
 version: "1.0.0"
 
 # Pod template execution order
 podTemplateExecutions:
-  - [embedding-server.yaml.tmpl]
+  - [chat-bot.yaml.tmpl]
+
+# Made with Bob

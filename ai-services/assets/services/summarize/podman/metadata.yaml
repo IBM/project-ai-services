@@ -1,6 +1,6 @@
-name: embedding
+name: summarize
 version: "1.0.0"
 
 # Pod template execution order
 podTemplateExecutions:
-  - [embedding-server.yaml.tmpl]
+  - [summarize-api.yaml.tmpl]

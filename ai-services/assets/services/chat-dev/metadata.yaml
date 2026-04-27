@@ -1,7 +1,7 @@
 # Service identification
-id: chat
-name: "Question and Answer"
-description: "Answer questions in natural language by sourcing general & domain-specific knowledge"
+id: chat-dev
+name: "Question and Answer (Dev)"
+description: "Development version - Answer questions in natural language by sourcing general & domain-specific knowledge using CPU-based reranker"
 type: service
 
 # Certification and support
@@ -9,7 +9,7 @@ certified_by: "IBM"
 
 # Service belongs to these architectures
 architectures:
-  - rag
+  - rag-dev
 
 # Dependencies on other services (version is optional, uses latest if not specified)
 dependencies:
@@ -19,7 +19,7 @@ dependencies:
     version: ">=1.0.0"
   - id: instruct
     version: ">=1.0.0"
-  - id: reranker
+  - id: reranker-cpu
     version: ">=1.0.0"
 
 # Made with Bob

@@ -1,18 +1,9 @@
 name: chat
 version: "1.0.0"
-runtime: podman
-
-# Resource requirements for Podman runtime
-requirements:
-  min_cpu: "2"
-  min_memory: "4Gi"
-  min_disk: "20Gi"
 
 # Pod template execution order
-pod_templates:
-  - name: chat-bot
-    template: chat-bot.yaml.tmpl
-    wait_for_ready: true
-    readiness_timeout: 300s
+podTemplateExecutions:
+  - [chat-bot.yaml.tmpl]
 
 # Made with Bob
+

@@ -1,19 +1,6 @@
 name: reranker
 version: "1.0.0"
-runtime: podman
-
-# Resource requirements for Podman runtime
-requirements:
-  min_cpu: "4"
-  min_memory: "5Gi"
-  min_spyre: "1"
-  min_disk: "20Gi"
 
 # Pod template execution order
-pod_templates:
-  - name: reranker-server
-    template: reranker-server.yaml.tmpl
-    wait_for_ready: true
-    readiness_timeout: 120s
-
-# Made with Bob
+podTemplateExecutions:
+  - [reranker-server.yaml.tmpl]

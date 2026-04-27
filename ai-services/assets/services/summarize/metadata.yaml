@@ -1,7 +1,7 @@
 # Service identification
-id: chat
-name: "Question and Answer"
-description: "Answer questions in natural language by sourcing general & domain-specific knowledge"
+id: summarize
+name: "Summarize"
+description: "Consolidates input text into a brief statement of main points"
 type: service
 
 # Certification and support
@@ -13,13 +13,7 @@ architectures:
 
 # Dependencies on other services (version is optional, uses latest if not specified)
 dependencies:
-  - id: opensearch
-    version: ">=1.0.0"
-  - id: embedding
-    version: ">=1.0.0"
   - id: instruct
-    version: ">=1.0.0"
-  - id: reranker
     version: ">=1.0.0"
 
 # Made with Bob

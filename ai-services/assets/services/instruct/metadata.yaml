@@ -2,7 +2,6 @@
 id: instruct
 name: "Instruct"
 description: "Language model inference service for instruction-following tasks"
-version: "1.0.0"
 type: service
 
 # Certification and support

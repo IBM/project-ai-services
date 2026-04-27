@@ -1,6 +1,8 @@
-name: embedding
+name: reranker-cpu
 version: "1.0.0"
 
 # Pod template execution order
 podTemplateExecutions:
-  - [embedding-server.yaml.tmpl]
+  - [reranker-cpu-server.yaml.tmpl]
+
+# Made with Bob

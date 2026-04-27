@@ -2,7 +2,6 @@
 id: reranker
 name: "Reranker"
 description: "Document reranking service for improved search relevance"
-version: "1.0.0"
 type: service
 
 # Certification and support

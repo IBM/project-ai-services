@@ -1,20 +1,20 @@
 pods:
-  - name: "{{ .AppName }}--chat-bot"
+  - name: "{{ .AppName }}--chat-bot-dev"
     format: "index .Ports \"3000/tcp\" 0"
     default: ""
     alias: UI_PORT
 
-  - name: "{{ .AppName }}--chat-bot"
+  - name: "{{ .AppName }}--chat-bot-dev"
     format: "index .Ports \"5000/tcp\" 0"
     default: ""
     alias: BACKEND_PORT
 
 containers:
-  - name: "{{ .AppName }}--chat-bot-ui"
+  - name: "{{ .AppName }}--chat-bot-dev-ui"
     format: ".Status"
     alias: UI_STATUS
 
-  - name: "{{ .AppName }}--chat-bot-backend-server"
+  - name: "{{ .AppName }}--chat-bot-dev-backend-server"
     format: ".Status"
     alias: BACKEND_STATUS
 

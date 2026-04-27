@@ -7,6 +7,7 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
   annotations:
+    io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
     ai-services.io/model: ibm-granite/granite-embedding-278m-multilingual
 spec:
   volumes:

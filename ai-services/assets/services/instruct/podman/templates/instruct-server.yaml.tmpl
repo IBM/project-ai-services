@@ -8,8 +8,10 @@ metadata:
     ai-services.io/version: "{{ .Version }}"
   annotations:
     io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
+    io.podman.annotations.userns: "keep-id"
+    run.oci.keep_original_groups: "1"
     ai-services.io/model: ibm-granite/granite-3.3-8b-instruct
-    ai-services.io/spyre-cards: "4"
+    ai-services.io/instruct--spyre-cards: "4"
 spec:
   volumes:
     - name: dshm
