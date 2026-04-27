@@ -70,7 +70,7 @@ ai_service
 | id                  | VARCHAR(100)      | PRIMARY KEY | Internal application identifier (immutable - used for prefixing pod names in Podman and namespace names in OpenShift) |
 | deployment_name     | VARCHAR(100)      |             | Display name of the deployment |
 | type                | VARCHAR(100)      |             | Application type (e.g., Digital Assistant, Summarization) |
-| deployment_type     | deployment_type   | ENUM        | Type of deployment (Deployable Architecture, Services) |
+| deployment_type     | deployment_type   | ENUM        | Type of deployment (architecture, service) |
 | status              | Status            | ENUM        | Current status (Downloading, Deploying, Running, Deleting, Error) |
 | message             | TEXT              |             | Status message or error details |
 | createdby           | VARCHAR(100)      |             | User who created the application |
@@ -81,8 +81,8 @@ ai_service
 
 ```sql
 CREATE TYPE deployment_type AS ENUM (
-    'Deployable Architecture',
-    'Services'
+    'architecture',
+    'service'
 );
 
 CREATE TYPE status AS ENUM (
