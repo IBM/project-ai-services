@@ -47,7 +47,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
     }
 
     try:
-        response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
+        response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=get_vllm_headers())
         response.raise_for_status()
         data = response.json() or {}
         choices = data.get("choices", [])
@@ -290,10 +290,7 @@ def query_vllm_summarize(
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers = {
-        "accept": "application/json",
-        "Content-type": "application/json",
-    }
+    headers = get_vllm_headers()
     stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,
@@ -334,10 +331,7 @@ def query_vllm_summarize_stream(
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers = {
-        "accept": "application/json",
-        "Content-type": "application/json",
-    }
+    headers = get_vllm_headers()
     stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,
