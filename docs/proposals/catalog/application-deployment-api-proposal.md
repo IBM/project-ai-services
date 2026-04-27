@@ -48,10 +48,13 @@ This proposal outlines the design and implementation of a comprehensive REST API
 ## 2. Background and Motivation
 
 ### 2.1 Current State
+
 The AI Services Catalog currently provides various AI services (chat, summarization, digitization) that can be deployed independently. However, there is no unified API for managing these deployments programmatically.
 
 ### 2.2 Problem Statement
+
 Users need a standardized way to:
+
 - Deploy services individually or as complete architectures
 - Monitor deployment status and health
 - Manage service configurations
@@ -59,11 +62,11 @@ Users need a standardized way to:
 - Handle authentication and authorization
 
 ### 2.3 Goals
+
 1. Provide a RESTful API for application lifecycle management
 2. Support both architecture-level (multiple services) and service-level deployments
 3. Enable multi-runtime support (Podman and OpenShift)
 4. Implement secure authentication and authorization
-
 
 ## 3. Architecture Overview
 
@@ -110,6 +113,7 @@ Users need a standardized way to:
 ## 4. API Specification
 
 ### 4.1 Base URL
+
 ```
 http://localhost:8080/api/v1
 ```
@@ -117,11 +121,13 @@ http://localhost:8080/api/v1
 ### 4.2 Authentication
 
 All endpoints (except `/auth/*`) require JWT Bearer token authentication:
+
 ```
 Authorization: Bearer <access_token>
 ```
 
 **Token Lifecycle:**
+
 - Access tokens expire after 15 minutes
 - Refresh tokens valid for 7 days
 - Token blacklisting on logout
@@ -129,12 +135,14 @@ Authorization: Bearer <access_token>
 ### 4.3 Endpoint Categories
 
 #### Authentication Endpoints
+
 - `POST /api/v1/auth/login` - User login
 - `POST /api/v1/auth/refresh` - Refresh access token
 - `POST /api/v1/auth/logout` - User logout
 - `GET /api/v1/auth/me` - Get current user info
 
 #### Application Management Endpoints
+
 - `GET /api/v1/applications` - List all deployments
 - `GET /api/v1/applications/{id}` - Get deployment details
 - `POST /api/v1/applications` - Create new deployment
@@ -143,13 +151,13 @@ Authorization: Bearer <access_token>
 - `GET /api/v1/applications/{id}/ps` - Get pod/container health status
 
 #### Catalog Endpoints
+
 - `GET /api/v1/architectures` - List available architectures
 - `GET /api/v1/architectures/{id}` - Get architecture details
 
 - `GET /api/v1/services` - List available services
 - `GET /api/v1/services/{id}` - Get service details
 - `GET /api/v1/services/{id}/params` - Get service custom params
-
 
 ## 5. API Endpoint Details
 
@@ -164,11 +172,13 @@ This section provides detailed specifications for each API endpoint, including r
 **Description:** Authenticates a user and returns JWT tokens for subsequent API calls.
 
 **Request Headers:**
+
 ```
 Content-Type: application/json
 ```
 
 **Request Body:**
+
 ```json
 {
   "username": "admin",
@@ -183,6 +193,7 @@ Content-Type: application/json
 | password | string | Yes | User's password |
 
 **Response (200 OK):**
+
 ```json
 {
   "access_token": "eyJhbGc...",
@@ -201,10 +212,12 @@ Content-Type: application/json
 | expires_in | integer | Access token expiration time in seconds (900 = 15 minutes) |
 
 **Error Responses:**
+
 - `401 Unauthorized` - Invalid credentials
 - `400 Bad Request` - Missing or invalid request body
 
 **Implementation Notes:**
+
 1. **Request Validation**: Use Gin's `ShouldBindJSON` to validate request body against `loginReq` struct (username, password required)
 2. **User Lookup**: Call `UserRepository.GetByUserName(ctx, username)` to retrieve user from in-memory store
 3. **Password Verification**: Use PBKDF2 with SHA256 to verify password against stored hash
@@ -220,6 +233,7 @@ Content-Type: application/json
 6. **Error Handling**: Return 401 for invalid credentials, 400 for malformed requests
 
 **Security Considerations:**
+
 - Passwords stored as PBKDF2 hashes (iterations + salt + hash, not plaintext)
 - JWT tokens signed with HS256 and secret key
 - Token audience field prevents token type confusion attacks
@@ -236,11 +250,13 @@ Content-Type: application/json
 **Description:** Obtains a new access token using a valid refresh token.
 
 **Request Headers:**
+
 ```
 Content-Type: application/json
 ```
 
 **Request Body:**
+
 ```json
 {
   "refresh_token": "eyJhbGc..."
@@ -253,6 +269,7 @@ Content-Type: application/json
 | refresh_token | string | Yes | Valid refresh token from login |
 
 **Response (200 OK):**
+
 ```json
 {
   "access_token": "eyJhbGc...",
@@ -271,10 +288,12 @@ Content-Type: application/json
 | expires_in | integer | Access token expiration time in seconds |
 
 **Error Responses:**
+
 - `401 Unauthorized` - Invalid or expired refresh token
 - `400 Bad Request` - Missing refresh token
 
 **Implementation Notes:**
+
 1. **Request Validation**: Use Gin's `ShouldBind` to validate request body against `refreshReq` struct (refresh_token required)
 2. **Token Validation**: Call `TokenManager.ValidateRefreshToken(refreshToken)` to:
    - Parse JWT token with HS256 signature verification
@@ -289,6 +308,7 @@ Content-Type: application/json
 5. **Error Handling**: Return 401 for invalid/expired tokens, 400 for missing token
 
 **Security Considerations:**
+
 - Refresh tokens are rotated on each use (new tokens generated)
 - Old refresh token becomes invalid after successful refresh
 - Token audience validation prevents token type confusion
@@ -303,6 +323,7 @@ Content-Type: application/json
 **Description:** Invalidates the current access and refresh tokens.
 
 **Request Headers:**
+
 ```
 Authorization: Bearer <access_token>
 ```
@@ -310,6 +331,7 @@ Authorization: Bearer <access_token>
 **Request Body:** None
 
 **Response (200 OK):**
+
 ```json
 {
   "message": "Successfully logged out"
@@ -322,9 +344,11 @@ Authorization: Bearer <access_token>
 | message | string | Success message |
 
 **Error Responses:**
+
 - `401 Unauthorized` - Invalid or missing access token
 
 **Implementation Notes:**
+
 1. **Token Extraction**: Retrieve raw access token from Gin context using `middleware.CtxRawTokenKey`
    - Token was previously extracted and validated by `AuthMiddleware`
 2. **Token Validation**: Call `TokenManager.ValidateAccessToken(token)` to:
@@ -337,13 +361,14 @@ Authorization: Bearer <access_token>
 5. **Error Handling**: Return 400 for missing token, 500 for blacklist failures
 
 **Blacklist Implementation:**
+
 - Uses `InMemoryTokenBlacklist` with map[string]time.Time storage
 - Background garbage collection runs every 1 minute to remove expired tokens
 - `Contains()` method checks blacklist and removes expired entries on-the-fly
 - **Note**: In-memory implementation only suitable for single-instance deployments
-- **Production**: Use Redis with TTL or distributed cache (Memcached) for multi-instance setups
 
 **Middleware Integration:**
+
 - `AuthMiddleware` checks `TokenBlacklist.Contains(token)` before validating
 - Returns 401 "token revoked" if token is blacklisted
 - Ensures revoked tokens cannot be used even if still valid
@@ -357,6 +382,7 @@ Authorization: Bearer <access_token>
 **Description:** Returns information about the currently authenticated user.
 
 **Request Headers:**
+
 ```
 Authorization: Bearer <access_token>
 ```
@@ -364,6 +390,7 @@ Authorization: Bearer <access_token>
 **Request Body:** None
 
 **Response (200 OK):**
+
 ```json
 {
   "id": "uid_1",
@@ -380,9 +407,11 @@ Authorization: Bearer <access_token>
 | name | string | User's display name |
 
 **Error Responses:**
+
 - `401 Unauthorized` - Invalid or missing access token
 
 **Implementation Notes:**
+
 1. **User ID Extraction**: Retrieve user ID from Gin context using `middleware.CtxUserIDKey`
    - User ID was extracted from JWT token by `AuthMiddleware` during authentication
 2. **User Lookup**: Call `AuthService.GetUser(ctx, userID)` which:
@@ -393,6 +422,7 @@ Authorization: Bearer <access_token>
 4. **Error Handling**: Return 401 for missing user ID, 404 for user not found
 
 **Middleware Flow:**
+
 - `AuthMiddleware` validates Bearer token from Authorization header
 - Extracts user ID from JWT custom claims (`uid` field)
 - Sets user ID in Gin context with key `middleware.CtxUserIDKey`
@@ -400,6 +430,7 @@ Authorization: Bearer <access_token>
 - Adds `X-Token-Exp` header with token expiry time (UTC format)
 
 **Repository:**
+
 - Uses `InMemoryUserRepo` with dual-index maps (by ID and by username)
 - Thread-safe with RWMutex for concurrent access
 - Returns `ErrUserNotFound` if user doesn't exist
@@ -415,6 +446,7 @@ Authorization: Bearer <access_token>
 **Description:** Retrieves a paginated list of all applications for the authenticated user.
 
 **Request Headers:**
+
 ```
 Authorization: Bearer <access_token>
 ```
@@ -428,13 +460,14 @@ Authorization: Bearer <access_token>
 **Request Body:** None
 
 **Response (200 OK):**
+
 ```json
 {
   "data": [
     {
       "id": "rag-production",
       "deployment_name": "RAG Production",
-      "deployment_type": "Architecture",
+      "deployment_type": "architecture",
       "type": "Digital Assistant",
       "status": "Running",
       "message": "All services are operational",
@@ -444,7 +477,7 @@ Authorization: Bearer <access_token>
     {
       "id": "summarization-dev",
       "deployment_name": "Summarization Dev",
-      "deployment_type": "Service",
+      "deployment_type": "service",
       "type": "Summary",
       "status": "Running",
       "message": "Service deployed successfully",
@@ -476,7 +509,7 @@ Authorization: Bearer <access_token>
 |-------|------|-------------|
 | id | string | Application ID (Primary Key, immutable, used for resource naming) |
 | deployment_name | string | User-friendly display name of the deployment |
-| deployment_type | string | Type of deployment: "Architecture" or "Service" |
+| deployment_type | string | Type of deployment: "architecture" or "service" |
 | type | string | Application type: "Digital Assistant" for architectures, "Summary" for summarization services |
 | status | string | Current status: "Downloading", "Deploying", "Running", "Deleting", "Error" |
 | message | string | Status message or error details |
@@ -494,59 +527,67 @@ Authorization: Bearer <access_token>
 | has_prev | boolean | Whether there is a previous page |
 
 **Error Responses:**
+
 - `400 Bad Request` - Invalid query parameters (e.g., page < 1, page_size > 100)
 - `401 Unauthorized` - Invalid or missing access token
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
+
 1. **Token Validation**: Validate JWT token from Authorization header via `AuthMiddleware`
 
 2. **Parameter Validation**:
    - Validate page >= 1, page_size between 1-100
 
 3. **PostgreSQL Query Construction**:
-   
+
    **Step 3a - Build WHERE clause with parameterized queries:**
+
    ```go
    var conditions []string
    var args []interface{}
    argIndex := 1
-   
+
    // Add status filter if provided
    if status != "" {
        conditions = append(conditions, fmt.Sprintf("status = $%d", argIndex))
        args = append(args, status)
        argIndex++
    }
-   
+
    // Add type filter if provided
    if appType != "" {
        conditions = append(conditions, fmt.Sprintf("type = $%d", argIndex))
        args = append(args, appType)
        argIndex++
    }
-   
+
    whereClause := ""
    if len(conditions) > 0 {
        whereClause = "WHERE " + strings.Join(conditions, " AND ")
    }
    ```
-   
+
    **Step 3b - Execute COUNT query for total_items:**
+
    ```sql
    SELECT COUNT(*) FROM applications [WHERE clause];
    ```
+
    Example with filters:
+
    ```sql
    SELECT COUNT(*) FROM applications WHERE status = $1 AND type = $2;
    ```
-   
+
    **Step 3c - Calculate pagination offset:**
+
    ```go
    offset := (page - 1) * pageSize
    ```
-   
+
    **Step 3d - Build and execute SELECT query:**
+
    ```sql
    SELECT
        id,
@@ -562,8 +603,9 @@ Authorization: Bearer <access_token>
    ORDER BY [sort_by] [sort_order]
    LIMIT $n OFFSET $n+1;
    ```
-   
+
    **Complete example with all parameters:**
+
    ```sql
    -- With status and type filters
    SELECT
@@ -573,11 +615,12 @@ Authorization: Bearer <access_token>
    WHERE status = $1 AND type = $2
    ORDER BY created_at DESC
    LIMIT $3 OFFSET $4;
-   
+
    -- Arguments: ["Running", "Digital Assistant", 20, 0]
    ```
 
 4. **Pagination Calculation**:
+
    ```go
    totalPages := int(math.Ceil(float64(totalItems) / float64(pageSize)))
    if totalPages == 0 {
@@ -592,20 +635,14 @@ Authorization: Bearer <access_token>
    - Format timestamps to ISO 8601 (RFC3339) using `time.Format(time.RFC3339)`
    - Construct paginated response with data array and pagination metadata
 
-
 **Example Requests:**
+
 ```
 # Get first page with default settings
 GET /api/v1/applications
 
 # Get second page with 50 items per page
 GET /api/v1/applications?page=2&page_size=50
-
-# Get running applications sorted by id
-GET /api/v1/applications?status=Running&sort_by=id&sort_order=asc
-
-# Get Digital Assistant applications
-GET /api/v1/applications?type=Digital%20Assistant
 ```
 
 ---
@@ -617,6 +654,7 @@ GET /api/v1/applications?type=Digital%20Assistant
 **Description:** Retrieves detailed information about a specific application.
 
 **Request Headers:**
+
 ```
 Authorization: Bearer <access_token>
 ```
@@ -629,11 +667,12 @@ Authorization: Bearer <access_token>
 **Request Body:** None
 
 **Response (200 OK) - Deployable Architecture:**
+
 ```json
 {
   "id": "rag-production",
   "deployment_name": "RAG Production",
-  "deployment_type": "Architecture",
+  "deployment_type": "architecture",
   "type": "Digital Assistant",
   "status": "Running",
   "message": "All services are operational",
@@ -675,11 +714,12 @@ Authorization: Bearer <access_token>
 ```
 
 **Response (200 OK) - Services Deployment:**
+
 ```json
 {
   "id": "summarization-dev",
   "deployment_name": "Summarization Dev",
-  "deployment_type": "Service",
+  "deployment_type": "service",
   "type": "Summary",
   "status": "Running",
   "message": "Service deployed successfully",
@@ -710,7 +750,7 @@ Authorization: Bearer <access_token>
 |-------|------|-------------|
 | id | string | Application ID (Primary Key, immutable) |
 | deployment_name | string | User-friendly display name of the deployment |
-| deployment_type | string | "Architecture" or "Service" |
+| deployment_type | string | "architecture" or "service" |
 | type | string | Application type: "Digital Assistant" for architectures, "Summary" for summarization services |
 | status | string | Current status (Downloading, Deploying, Running, Deleting, Error) |
 | message | string | Status message or error details |
@@ -731,16 +771,18 @@ Authorization: Bearer <access_token>
 **Endpoint Object:**
 | Field | Type | Description |
 |-------|------|-------------|
-| name | string | Endpoint name: "ui", "backend", or "api" |
+| name | string | Endpoint name: "ui", "backend", or "api". This will be the container name for each service in Podman |
 | url | string | Full endpoint URL |
 
 **Error Responses:**
+
 - `401 Unauthorized` - Invalid or missing access token
 - `404 Not Found` - Application not found
 - `403 Forbidden` - User doesn't have access to this application
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
+
 1. Validate the incoming JWT token from Authorization header
 2. Execute database query on applications table using `id` as the filter
 3. Perform JOIN with services table to fetch associated services
@@ -756,16 +798,18 @@ Authorization: Bearer <access_token>
 **Description:** Creates a new application (architecture or service) with optional custom parameters.
 
 **Request Headers:**
+
 ```
 Authorization: Bearer <access_token>
 Content-Type: application/json
 ```
 
 **Request Body:**
+
 ```json
 {
   "deployment_name": "RAG Production",
-  "deployment_type": "Architecture",
+  "deployment_type": "architecture",
   "type": "Digital Assistant",
   "template": "rag",
   "created_by": "admin",
@@ -780,7 +824,8 @@ Content-Type: application/json
     },
     {
       "id": "digitization",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "optional": true
     }
   ],
   "params": {
@@ -795,7 +840,7 @@ Content-Type: application/json
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | deployment_name | string | Yes | User-friendly display name (3-100 chars) |
-| deployment_type | string | Yes | Deployment type: "Architecture" or "Service" |
+| deployment_type | string | Yes | Deployment type: "architecture" or "service" |
 | type | string | Yes | Application type (e.g., "Digital Assistant", "Summary") |
 | template | string | Yes | Template ID (e.g., "rag" is the ID for "Digital Assistant" type) |
 | created_by | string | Yes | Username of the user creating the application |
@@ -809,17 +854,19 @@ Content-Type: application/json
 | version | string | No | Service version to deploy. If not specified, uses the latest compatible version |
 
 **Params Object:**
+
 - Flexible key-value pairs where keys are parameter paths (e.g., "opensearch.memoryLimit")
 - Values can be strings, numbers, or booleans depending on the parameter type
 - Parameters must match the schema defined in the template
 - If not provided, default values from the template will be used
 
 **Response (202 Accepted):**
+
 ```json
 {
   "id": "rag-production",
   "deployment_name": "RAG Production",
-  "deployment_type": "Architecture",
+  "deployment_type": "architecture",
   "type": "Digital Assistant",
   "template": "rag",
   "created_by": "admin",
@@ -866,6 +913,7 @@ Content-Type: application/json
 | updated_at | string | Last update timestamp |
 
 **Error Responses:**
+
 - `400 Bad Request` - Invalid request body or validation errors
 - `401 Unauthorized` - Invalid or missing access token
 - `409 Conflict` - Application name already exists (normalized deployment_name conflicts)
@@ -873,6 +921,7 @@ Content-Type: application/json
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
+
 1. **Token Validation**: Validate JWT token from Authorization header
 
 2. **User Validation**:
@@ -890,7 +939,7 @@ Content-Type: application/json
    - Example transformations:
      - "RAG Production" → "rag-production"
      - "My App 2024!" → "my-app-2024"
-     - "Test___Service" → "test-service"
+     - "Test\_\_\_Service" → "test-service"
    - Validate final id is 3-50 characters
    - Check uniqueness in applications table (return 409 if exists)
 
@@ -944,6 +993,7 @@ Content-Type: application/json
 **Description:** Updates the display name of an existing application.
 
 **Request Headers:**
+
 ```
 Authorization: Bearer <access_token>
 Content-Type: application/json
@@ -955,6 +1005,7 @@ Content-Type: application/json
 | id | string | Yes | Application ID |
 
 **Request Body:**
+
 ```json
 {
   "deployment_name": "RAG Production Updated"
@@ -967,11 +1018,12 @@ Content-Type: application/json
 | deployment_name | string | Yes | Updated display name (3-100 chars) |
 
 **Response (200 OK):**
+
 ```json
 {
   "id": "rag-production",
   "deployment_name": "RAG Production Updated",
-  "deployment_type": "Architecture",
+  "deployment_type": "architecture",
   "type": "Digital Assistant",
   "status": "Running",
   "message": "Deployment name updated successfully",
@@ -991,6 +1043,7 @@ Content-Type: application/json
 | updated_at | string | Update timestamp |
 
 **Error Responses:**
+
 - `400 Bad Request` - Invalid request body or name validation failed
 - `401 Unauthorized` - Invalid or missing access token
 - `403 Forbidden` - User doesn't own this application
@@ -998,6 +1051,7 @@ Content-Type: application/json
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
+
 1. **Token Validation**: Validate JWT token from Authorization header
 2. **Request Validation**: Validate deployment_name format and length (3-100 chars)
 3. **Database Update**:
@@ -1015,6 +1069,7 @@ Content-Type: application/json
 **Description:** Deletes an application and all associated resources.
 
 **Request Headers:**
+
 ```
 Authorization: Bearer <access_token>
 ```
@@ -1032,6 +1087,7 @@ Authorization: Bearer <access_token>
 **Request Body:** None
 
 **Response (202 Accepted):**
+
 ```json
 {
   "id": "rag-production",
@@ -1048,6 +1104,7 @@ Authorization: Bearer <access_token>
 | message | string | Status message |
 
 **Error Responses:**
+
 - `401 Unauthorized` - Invalid or missing access token
 - `403 Forbidden` - User doesn't own this application
 - `404 Not Found` - Application not found
@@ -1055,6 +1112,7 @@ Authorization: Bearer <access_token>
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
+
 - Update database status to "deleting"
 - Initiate async deletion job
 - Delete in order: services → infrastructure → namespace/pods
@@ -1074,6 +1132,7 @@ Authorization: Bearer <access_token>
 **Description:** Retrieves health status of all pods/containers in the deployment.
 
 **Request Headers:**
+
 ```
 Authorization: Bearer <access_token>
 ```
@@ -1086,16 +1145,17 @@ Authorization: Bearer <access_token>
 **Request Body:** None
 
 **Response (200 OK):**
+
 ```json
 {
   "id": "rag-production",
   "pods": [
     {
       "pod_id": "a1b2c3d4e5f6",
-      "pod_name": "rag-production-chat-ui",
+      "pod_name": "rag-production-chat",
       "status": "Running (Ready)",
       "created": "2d5h",
-      "exposed": "8080, 8081",
+      "exposed": [8080, 8081],
       "containers": [
         {
           "name": "chat-ui",
@@ -1103,19 +1163,6 @@ Authorization: Bearer <access_token>
         },
         {
           "name": "nginx",
-          "status": "Ready"
-        }
-      ]
-    },
-    {
-      "pod_id": "b2c3d4e5f6g7",
-      "pod_name": "rag-production-chat-api",
-      "status": "Running (Ready)",
-      "created": "2d5h",
-      "exposed": "8082",
-      "containers": [
-        {
-          "name": "chat-api",
           "status": "Ready"
         }
       ]
@@ -1160,6 +1207,7 @@ Authorization: Bearer <access_token>
 | status | string | Container status (Ready, running, starting, exited, etc.) |
 
 **Error Responses:**
+
 - `401 Unauthorized` - Invalid or missing access token
 - `403 Forbidden` - User doesn't own this application
 - `404 Not Found` - Application not found
@@ -1167,6 +1215,7 @@ Authorization: Bearer <access_token>
 - `503 Service Unavailable` - Cannot connect to runtime
 
 **Implementation Notes:**
+
 - Use the same output format for both Podman and OpenShift runtimes
 - Pod status includes health indicator: "Running (Ready)" when all containers are healthy, "Running (NotReady)" when some containers are unhealthy
 - Container status shows health check results: "Ready" for healthy containers, actual status (starting, exited, etc.) for others
@@ -1181,13 +1230,14 @@ Authorization: Bearer <access_token>
 
 ### 5.3 Catalog Endpoints
 
-#### 5.3.1 List Available Architectures
+#### 5.3.1 List Available Deployable Architectures
 
 **Endpoint:** `GET /api/v1/architectures`
 
 **Description:** Retrieves a list of all available architecture templates.
 
 **Request Headers:**
+
 ```
 Authorization: Bearer <access_token>
 ```
@@ -1195,6 +1245,7 @@ Authorization: Bearer <access_token>
 **Request Body:** None
 
 **Response (200 OK):**
+
 ```json
 [
   {
@@ -1202,7 +1253,6 @@ Authorization: Bearer <access_token>
     "name": "Digital Assistant",
     "description": "Enable digital assistants using Retrieval-Augmented Generation (RAG), including AI services that query a managed knowledge base to answer questions from custom documents and data.",
     "version": "1.0.0",
-    "type": "architecture",
     "certified_by": "IBM",
     "services": ["chat", "digitization", "summarization"]
   }
@@ -1221,10 +1271,12 @@ Authorization: Bearer <access_token>
 | services | array | Array of service IDs included in this architecture |
 
 **Error Responses:**
+
 - `401 Unauthorized` - Invalid or missing access token
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
+
 - Check out the proposal https://github.com/IBM/project-ai-services/pull/636
 - Read architectures from `ai-services/assets/architectures/` directory
 - Parse metadata.yaml files and convert to JSON response format
@@ -1239,6 +1291,7 @@ Authorization: Bearer <access_token>
 **Description:** Retrieves detailed information about a specific architecture template.
 
 **Request Headers:**
+
 ```
 Authorization: Bearer <access_token>
 ```
@@ -1251,11 +1304,13 @@ Authorization: Bearer <access_token>
 **Request Body:** None
 
 **Example Request:**
+
 ```
 GET /api/v1/architectures/rag
 ```
 
 **Response (200 OK):**
+
 ```json
 {
   "id": "rag",
@@ -1307,19 +1362,21 @@ GET /api/v1/architectures/rag
 | optional | boolean | Whether service is optional (only present if true) |
 
 **Implementation Notes:**
+
 - Check out the proposal https://github.com/IBM/project-ai-services/pull/636
 - Read architecture metadata from `ai-services/assets/architectures/{id}/metadata.yaml`
 - Parse YAML and convert to JSON response format
 
 ---
 
-#### 5.3.3 List Available Services
+#### 5.3.3 List Available Deployable Services
 
 **Endpoint:** `GET /api/v1/services`
 
 **Description:** Retrieves a list of all deployable service templates. Dependency-only services are excluded from this list.
 
 **Request Headers:**
+
 ```
 Authorization: Bearer <access_token>
 ```
@@ -1327,6 +1384,7 @@ Authorization: Bearer <access_token>
 **Request Body:** None
 
 **Response (200 OK):**
+
 ```json
 [
   {
@@ -1355,7 +1413,7 @@ Authorization: Bearer <access_token>
     "type": "service",
     "certified_by": "IBM",
     "architectures": ["rag", "rag-cpu", "rag-dev"]
-  },
+  }
 ]
 ```
 
@@ -1371,10 +1429,12 @@ Authorization: Bearer <access_token>
 | architectures | array | Array of architecture IDs that include this service |
 
 **Error Responses:**
+
 - `401 Unauthorized` - Invalid or missing access token
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
+
 - Check out the proposal https://github.com/IBM/project-ai-services/pull/636
 - Read services from `ai-services/assets/services/` directory
 - Filter OUT services that have `dependency_only: true` in their metadata
@@ -1390,6 +1450,7 @@ Authorization: Bearer <access_token>
 **Description:** Retrieves detailed information about a specific service template.
 
 **Request Headers:**
+
 ```
 Authorization: Bearer <access_token>
 ```
@@ -1402,11 +1463,13 @@ Authorization: Bearer <access_token>
 **Request Body:** None
 
 **Example Request:**
+
 ```
 GET /api/v1/services/chat
 ```
 
 **Response (200 OK):**
+
 ```json
 {
   "id": "chat",
@@ -1456,6 +1519,7 @@ GET /api/v1/services/chat
 | version | string | Version constraint (optional) |
 
 **Implementation Notes:**
+
 - Check out the proposal https://github.com/IBM/project-ai-services/pull/636
 - Read service metadata from `ai-services/assets/services/{id}/metadata.yaml`
 - Parse YAML and convert to JSON response format
@@ -1470,6 +1534,7 @@ GET /api/v1/services/chat
 **Description:** Retrieves custom parameters schema for a specific service template. Returns JSON Schema format that UI can use to generate dynamic forms with validation.
 
 **Request Headers:**
+
 ```
 Authorization: Bearer <access_token>
 ```
@@ -1482,11 +1547,13 @@ Authorization: Bearer <access_token>
 **Request Body:** None
 
 **Example Request:**
+
 ```
 GET /api/v1/services/rag/params
 ```
 
 **Response (200 OK):**
+
 ```json
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
@@ -1541,6 +1608,7 @@ GET /api/v1/services/rag/params
 
 **Response Schema:**
 Returns a JSON Schema (draft-07) object that defines:
+
 - Parameter structure and types
 - Validation rules (patterns, minLength, allOf, etc.)
 - Descriptions for each field
@@ -1548,23 +1616,27 @@ Returns a JSON Schema (draft-07) object that defines:
 
 **UI Integration:**
 The JSON Schema response can be directly consumed by form libraries such as:
+
 - `react-jsonschema-form` / `@rjsf/core` (React)
 - `vue-form-generator` (Vue)
 - `angular-schema-form` (Angular)
 
 These libraries will automatically:
+
 - Generate form fields based on schema types
 - Apply validation rules (pattern matching, length constraints)
 - Display field descriptions and error messages
 - Handle nested objects and complex structures
 
 **Error Responses:**
+
 - `400 Bad Request` - Invalid id parameter
 - `401 Unauthorized` - Invalid or missing access token
 - `404 Not Found` - Template not found
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
+
 - Read the values.schema.json file from the template's asset directory
 - Return the schema as-is without modification
 - UI libraries can consume this standard JSON Schema format directly
@@ -1575,6 +1647,7 @@ These libraries will automatically:
 ## 6. Error Handling
 
 ### 6.1 Error Response Format
+
 ```json
 {
   "error": "error_code",
@@ -1589,6 +1662,7 @@ These libraries will automatically:
 ```
 
 ### 6.2 HTTP Status Codes
+
 - `200 OK` - Successful request
 - `202 Accepted` - Async operation initiated
 - `400 Bad Request` - Invalid request
