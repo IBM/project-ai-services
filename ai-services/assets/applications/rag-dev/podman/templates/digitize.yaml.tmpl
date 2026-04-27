@@ -90,10 +90,6 @@ spec:
           value: "{{ .Values.opensearch.auth.password }}"
         - name: OPENSEARCH_NUM_SHARDS
           value: "1"
-        {{- if .Values.instruct.apiKey }}
-        - name: VLLM_INSTRUCT_API_KEY
-          value: "{{ .Values.instruct.apiKey }}"
-        {{- end }}
         - name: LOG_LEVEL
           value: "{{ .Values.digitize.log_level }}"
       volumeMounts:

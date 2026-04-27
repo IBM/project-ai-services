@@ -44,13 +44,6 @@ spec:
               value: http://instruct-predictor:8000
             - name: LLM_MODEL
               value: ibm-granite/granite-3.3-8b-instruct
-            {{- if .Values.instruct.apiKey }}
-            - name: VLLM_INSTRUCT_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: vllm-instruct-api-key
-                  key: apiKey
-            {{- end }}
             - name: LOG_LEVEL
               value: "{{ .Values.summarize.log_level }}"
           ports:
