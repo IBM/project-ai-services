@@ -8,6 +8,7 @@ metadata:
     ai-services.io/version: "{{ .Version }}"
   annotations:
     ai-services.io/ports: "{{ .Values.digitizeUi.port }}:4001, {{ .Values.digitize.port }}:4000"
+    io.podman.annotations.pids-limit/backend-server: "4096"
 spec:
   containers:
     - name: ui

@@ -2,52 +2,12 @@ package image
 
 import (
 	"fmt"
-	"slices"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
-
-// ListImages returns the list of images required for given application template.
-func ListImages(template, appName string) ([]string, error) {
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
-
-	// fetch list of app templates
-	apps, err := tp.ListApplications(true)
-	if err != nil {
-		return nil, fmt.Errorf("error listing templates: %w", err)
-	}
-	if found := slices.Contains(apps, template); !found {
-		return nil, fmt.Errorf("provided template name is wrong. Please provide a valid template name")
-	}
-
-	// load all the pod templates for given template
-	tmpls, err := tp.LoadAllTemplates(template)
-	if err != nil {
-		return nil, fmt.Errorf("error loading templates for %s: %w", template, err)
-	}
-
-	images := []string{
-		// include tool image as well which is used for all the housekeeping tasks
-		vars.ToolImage,
-	}
-
-	// fetch all the images required for the given template by looping over each of the pod template files
-	for _, tmpl := range tmpls {
-		ps, err := tp.LoadPodTemplateWithValues(template, tmpl.Name(), appName, nil, nil)
-		if err != nil {
-			return nil, fmt.Errorf("error loading pod template: %w", err)
-		}
-		for _, container := range ps.Spec.Containers {
-			images = append(images, container.Image)
-		}
-	}
-
-	return utils.UniqueSlice(images), nil
-}
 
 // pullImageFromRegistry pulls the required images from registry.
 func pullImageFromRegistry(runtime runtime.Runtime, images []string) error {

@@ -67,7 +67,7 @@ func IsApplicable() bool {
 
 // RunChecks executes all Spyre validation checks.
 func RunChecks() []check.CheckResult {
-	return []check.CheckResult{
+	checks := []check.CheckResult{
 		checkDriverConfig(),
 		checkUdevRule(),
 		checkMemlockConf(),
@@ -75,8 +75,14 @@ func RunChecks() []check.CheckResult {
 		checkUserGroup(),
 		checkVfioModule(),
 		checkVfioAccessPermission(),
-		checkPodmanServiceSupplementaryGroups(),
 	}
+
+	// Only check podman service configuration if podman is installed
+	if _, err := utils.Podman(); err == nil {
+		checks = append(checks, CheckPodmanServiceSupplementaryGroups())
+	}
+
+	return checks
 }
 
 // parseVfioConfigLine parses a single VFIO configuration line and returns the module name
@@ -442,7 +448,7 @@ func checkVfioDevicePermission(path string, expectedGid int) (bool, error) {
 	return fileGid == expectedGid && utils.IsReadWriteToOwnerGroupUsers(path), nil
 }
 
-// checkPodmanServiceSupplementaryGroups validates that the podman.service has SupplementaryGroups=sentient configured.
+// CheckPodmanServiceSupplementaryGroups validates that the podman.service has SupplementaryGroups=sentient configured.
 //
 // Background:
 // When Podman commands are executed directly from the shell, they inherit the user's supplementary groups,
@@ -458,7 +464,7 @@ func checkVfioDevicePermission(path string, expectedGid int) (bool, error) {
 //	SupplementaryGroups=sentient
 //
 // in the [Service] section, allowing socket-based Podman operations to access VFIO devices properly.
-func checkPodmanServiceSupplementaryGroups() *check.ConfigurationFileCheck {
+func CheckPodmanServiceSupplementaryGroups() *check.ConfigurationFileCheck {
 	serviceName := "podman.service"
 	confCheck := check.NewConfigurationFileCheck("Podman service SupplementaryGroups configuration", serviceName)
 

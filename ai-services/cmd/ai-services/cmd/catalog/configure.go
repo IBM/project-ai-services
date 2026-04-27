@@ -37,7 +37,7 @@ Examples:
 	 ai-services catalog configure --runtime podman
 	 
 	 # Configure with custom UI port
-	 ai-services catalog configure --runtime podman --params ui.port=3000`,
+	 ai-services catalog configure --runtime podman --params ui.port=8081`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
@@ -108,7 +108,7 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 		"Inline parameters to configure the catalog service.\n\n"+
 			"Format:\n"+
 			"- Comma-separated key=value pairs\n"+
-			"- Example: --params ui.port=3000\n\n"+
+			"- Example: --params ui.port=8081\n\n"+
 			"Available parameters:\n"+
 			"- ui.port: Port for the catalog UI (default: random available port)\n",
 	)

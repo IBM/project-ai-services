@@ -32,7 +32,6 @@ export OPENSEARCH_DB_PREFIX=RAG_DB
 export OPENSEARCH_USERNAME="admin"
 export OPENSEARCH_PASSWORD="AiServices@1234"
 export DOCLING_MODELS_DIR=/var/docling-models
-export SETTINGS_PATH=/var/settings.json
 export CACHE_DIR=/var/rag_cache
 ```
 
