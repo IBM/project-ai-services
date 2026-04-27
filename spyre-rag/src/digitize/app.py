@@ -5,7 +5,7 @@ from typing import List, Optional
 from contextlib import asynccontextmanager
 import uvicorn
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status, Request, Header
 from fastapi.openapi.docs import get_swagger_ui_html
 
 from common.diagnostic_logger import setup_comprehensive_crash_handler
@@ -119,7 +119,7 @@ async def health_check():
     """
     return {"status": "ok"}
 
-async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat):
+async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat, api_key: str | None = None):
     status_mgr = StatusManager(job_id)
     job_staging_path = settings.digitize.staging_dir / f"{job_id}"
 
@@ -139,14 +139,14 @@ async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: type
         digitization_semaphore.release()
         logger.debug(f"Semaphore slot released from digitization job {job_id}")
 
-async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict):
+async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict, api_key: str | None = None):
     status_mgr = StatusManager(job_id)
     job_staging_path = settings.digitize.staging_dir / f"{job_id}"
 
     try:
         logger.info(f"🚀 Ingestion started for job: {job_id}")
         # to_thread prevents the heavy 'ingest' process from blocking the main FastAPI event loop and returns the response to request asynchronously.
-        await asyncio.to_thread(ingest, job_staging_path, job_id, doc_id_dict)
+        await asyncio.to_thread(ingest, job_staging_path, job_id, doc_id_dict, api_key)
         logger.info(f"Ingestion for {job_id} completed successfully")
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
@@ -217,8 +217,14 @@ async def digitize_document(
         types.OutputFormat.JSON,
         description="Output format for digitization: 'json', 'md', or 'txt' (only applies to digitization operation)"
     ),
-    job_name: Optional[str] = Query(None, description="Optional human-readable name for the job")
+    job_name: Optional[str] = Query(None, description="Optional human-readable name for the job"),
+    authorization: Optional[str] = Header(None)
 ):
+    # Extract API key from Authorization header if provided
+    api_key = None
+    if authorization and authorization.startswith("Bearer "):
+        api_key = authorization[7:]  # Remove "Bearer " prefix
+    
     try:
         # 1. Early exit if no files submitted
         if not files or len(files) == 0:
@@ -257,9 +263,9 @@ async def digitize_document(
             await dg_util.stage_upload_files(job_id, filenames, str(settings.digitize.staging_dir / job_id), file_contents)
             doc_id_dict = dg_util.initialize_job_state(job_id, operation, output_format, filenames, job_name)
             if operation == types.OperationType.INGESTION:
-                background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
+                background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict, api_key)
             else:
-                background_tasks.add_task(digitize_documents, job_id, doc_id_dict, output_format)
+                background_tasks.add_task(digitize_documents, job_id, doc_id_dict, output_format, api_key)
         except Exception as e:
             sem.release()
             logger.error(f"Failed to schedule background task for job {job_id}, semaphore released: {e}")

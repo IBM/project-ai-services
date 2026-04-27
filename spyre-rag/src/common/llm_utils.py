@@ -19,9 +19,6 @@ logger = get_logger("LLM")
 
 is_debug = logger.isEnabledFor(logging.DEBUG)
 
-# Read instruct API key from environment variable
-VLLM_INSTRUCT_API_KEY = os.getenv("VLLM_INSTRUCT_API_KEY", "")
-
 def tqdm_wrapper(iterable, **kwargs):
     """Wrapper for tqdm that only shows progress bar in debug mode."""
     if is_debug:
@@ -30,10 +27,13 @@ def tqdm_wrapper(iterable, **kwargs):
         return iterable
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
+def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, api_key: str | None = None):
     """
     Combined function to summarize and classify a table in a single LLM call.
     Returns tuple: (summary, decision)
+    
+    Args:
+        api_key: Optional API key for vLLM authentication
     """
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
@@ -47,7 +47,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
     }
 
     try:
-        response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=get_vllm_headers())
+        response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=get_vllm_headers(api_key))
         response.raise_for_status()
         data = response.json() or {}
         choices = data.get("choices", [])
@@ -92,10 +92,13 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
         logger.error(f"Error summarizing/classifying table: {e}")
         return "No summary.", False
 
-def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, max_workers=32):
+def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, max_workers=32, api_key: str | None = None):
     """
     Combined function to summarize and classify tables using a single prompt.
     Returns tuple: (summaries, decisions)
+    
+    Args:
+        api_key: Optional API key for vLLM authentication
     """
     all_prompts = [digitize_settings.digitize.table_summary_and_classify.format(content=md) for md in table_mds]
 
@@ -103,7 +106,7 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, 
 
     with ThreadPoolExecutor(max_workers=min(max_workers, len(all_prompts))) as executor:
         futures = {
-            executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint): idx
+            executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint, api_key): idx
             for idx, prompt in enumerate(all_prompts)
         }
         for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts),
@@ -127,46 +130,58 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, 
 
     return summaries, decisions
 
-def get_vllm_headers():
-    """Get headers for vLLM API calls, including auth if configured."""
+def get_vllm_headers(api_key: str | None = None):
+    """Get headers for vLLM API calls, including auth if provided.
+    
+    Args:
+        api_key: Optional API key to include in Authorization header.
+                 If not provided, no auth header is added.
+    """
     headers = {
         "accept": "application/json",
         "Content-type": "application/json",
     }
 
-    if VLLM_INSTRUCT_API_KEY:
-        headers["Authorization"] = f"Bearer {VLLM_INSTRUCT_API_KEY}"
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
         logger.debug("Using vLLM API key for authentication")
 
     return headers
 
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def query_vllm_models(llm_endpoint):
-    """Used both for listing models and as an auth/availability preflight check."""
+def query_vllm_models(llm_endpoint, api_key: str | None = None):
+    """Used both for listing models and as an auth/availability preflight check.
+    
+    Args:
+        api_key: Optional API key for vLLM authentication
+    """
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     logger.debug('Querying VLLM models')
     response = misc_utils.SESSION.get(
         f"{llm_endpoint}/v1/models",
-        headers=get_vllm_headers(),
+        headers=get_vllm_headers(api_key),
     )
     response.raise_for_status()
     resp_json = response.json()
     return resp_json
 
 
-def validate_vllm_auth(llm_endpoint):
+def validate_vllm_auth(llm_endpoint, api_key: str | None = None):
     """
-    Validate that the configured credentials can access vLLM.
+    Validate that the provided credentials can access vLLM.
     Returns True on success, raises RuntimeError on failure.
+    
+    Args:
+        api_key: Optional API key for vLLM authentication
     """
-    query_vllm_models(llm_endpoint)
+    query_vllm_models(llm_endpoint, api_key)
     return True
 
 def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
-                stream, lang):
+                stream, lang, api_key: str | None = None):
     context = "\n\n".join([doc.get("page_content") for doc in documents])
 
     logger.debug(f'Original Context: {context}')
@@ -184,7 +199,7 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     prompt = prompt_template.format(context=context, question=question)
 
     logger.debug(f"PROMPT: {prompt}")
-    headers = get_vllm_headers()
+    headers = get_vllm_headers(api_key)
     payload = {
         "messages": [{"role": "user", "content": prompt}],
         "model": llm_model,
@@ -201,11 +216,11 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     return headers, payload
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang):
+def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang, api_key: str | None = None):
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False, lang)
+    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False, lang, api_key)
 
     # Use requests for synchronous HTTP requests
     start_time = time.time()
@@ -220,12 +235,12 @@ def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_wor
 
     return response_json
 
-def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang):
+def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang, api_key: str | None = None):
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens,
-                                          temperature, True, lang)
+                                          temperature, True, lang, api_key)
     try:
         # Use requests for synchronous HTTP requests
         logger.debug("STREAMING RESPONSE")
@@ -286,11 +301,12 @@ def query_vllm_summarize(
     model: str,
     max_tokens: int,
     temperature: float,
+    api_key: str | None = None,
 ):
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers = get_vllm_headers()
+    headers = get_vllm_headers(api_key)
     stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,
@@ -326,12 +342,13 @@ def query_vllm_summarize_stream(
     model: str,
     max_tokens: int,
     temperature: float,
+    api_key: str | None = None,
 ):
     """Stream a summarization request to vLLM, yielding raw SSE lines."""
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers = get_vllm_headers()
+    headers = get_vllm_headers(api_key)
     stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,

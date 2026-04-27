@@ -3,7 +3,7 @@ import logging
 import asyncio
 import uuid
 from typing import Optional
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import StreamingResponse
 import json
@@ -149,11 +149,17 @@ def limit_concurrency(f):
     summary="List LLM models",
     description="List available models from the configured vLLM endpoint."
 )
-async def list_models():
+async def list_models(authorization: Optional[str] = Header(None)):
     logging.debug("List models..")
+    
+    # Extract API key from Authorization header if provided
+    api_key = None
+    if authorization and authorization.startswith("Bearer "):
+        api_key = authorization[7:]  # Remove "Bearer " prefix
+    
     try:
         llm_endpoint = llm_model_dict['llm_endpoint']
-        return await asyncio.to_thread(query_vllm_models, llm_endpoint)
+        return await asyncio.to_thread(query_vllm_models, llm_endpoint, api_key)
     except Exception as e:
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
 
@@ -202,7 +208,7 @@ async def locked_stream(stream_g, perf_stat_dict):
     response_model=ChatCompletionResponse,
     tags=["chat"],
     summary="Chat with RAG",
-    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON.",
+    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON. Requires API key in Authorization header.",
     responses={
         200: {
             "description": "Successful Response",
@@ -234,7 +240,12 @@ async def locked_stream(stream_g, perf_stat_dict):
         503: http_error_responses[503]
     }
 )
-async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse | StreamingResponse:
+async def chat_completion(req: ChatCompletionRequest, authorization: Optional[str] = Header(None)) -> ChatCompletionResponse | StreamingResponse:
+    # Extract API key from Authorization header if provided
+    api_key = None
+    if authorization and authorization.startswith("Bearer "):
+        api_key = authorization[7:]  # Remove "Bearer " prefix
+    
     if not req.messages:
         APIError.raise_error(ErrorCode.EMPTY_INPUT, "messages can't be empty")
 
@@ -257,12 +268,6 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
         reranker_model = reranker_model_dict['reranker_model']
         reranker_endpoint = reranker_model_dict['reranker_endpoint']
 
-        try:
-            await asyncio.to_thread(validate_vllm_auth, llm_endpoint)
-        except Exception as e:
-            auth_message = "Authentication failed while connecting to vLLM."
-            logging.error(f"vLLM authentication error: {auth_message} - {str(e)}")
-            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, auth_message)
 
         # Validate query length
         is_valid, error_msg = await asyncio.to_thread(
@@ -319,13 +324,13 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
         try:
             if req.stream:
                 vllm_stream = await asyncio.to_thread(
-                    query_vllm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
+                    query_vllm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang, api_key
                 )
                 # For streaming, release is handled in locked_stream's finally block
                 return StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
 
             vllm_non_stream = await asyncio.to_thread(
-                query_vllm_non_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
+                query_vllm_non_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang, api_key
             )
             # Store metrics in registry for non-stream
             perf_registry.add_metric(perf_stat_dict)

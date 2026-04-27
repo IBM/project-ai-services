@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, Request, UploadFile
+from fastapi import FastAPI, Request, UploadFile, Header
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
@@ -132,8 +132,13 @@ async def handle_summarize(
     input_type: str,
     summary_length: Optional[int],
     stream: bool = False,
+    api_key: str | None = None,
 ):
-    """Core summarization logic shared by both JSON and form-data paths."""
+    """Core summarization logic shared by both JSON and form-data paths.
+    
+    Args:
+        api_key: API key for vLLM authentication
+    """
     input_word_count = word_count(content_text)
     _validate_input_word_count(input_word_count, summary_length)
 
@@ -158,6 +163,7 @@ async def handle_summarize(
                 model=llm_model,
                 max_tokens=max_tokens,
                 temperature=settings.summarize.summarization_temperature,
+                api_key=api_key,
             )
         except Exception as e:
             logger.error(f"LLM call failed with error: {e}")
@@ -184,6 +190,7 @@ async def handle_summarize(
             model=llm_model,
             max_tokens=max_tokens,
             temperature=settings.summarize.summarization_temperature,
+            api_key=api_key,
         )
         logger.info(f"Input tokens: {in_tokens}, output tokens: {out_tokens}")
         elapsed_ms = int((time.time() - start) * 1000)
@@ -208,6 +215,7 @@ async def handle_summarize(
 response_model=SummarizeSuccessResponse,
 responses={
     400: http_error_responses[400],
+    401: http_error_responses[401],
     413: http_error_responses[413],
     415: http_error_responses[415],
     429: http_error_responses[429],
@@ -250,8 +258,13 @@ description=(
 response_description="Summarization result with metadata and token usage.",
 tags=["Summarization"],
 )
-async def summarize(request: Request):
+async def summarize(request: Request, authorization: Optional[str] = Header(None)):
     """Accept plain text via JSON or text/file via multipart/form-data."""
+    # Extract API key from Authorization header if provided
+    api_key = None
+    if authorization and authorization.startswith("Bearer "):
+        api_key = authorization[7:]  # Remove "Bearer " prefix
+    
     try:
         if concurrency_limiter.locked():
             raise SummarizeException(429, "SERVER_BUSY",
@@ -274,7 +287,7 @@ async def summarize(request: Request):
             summary_length = validate_summary_length(body.get("length"))
             stream = bool(body.get("stream", False))
 
-            return await handle_summarize(text, "text", summary_length, stream)
+            return await handle_summarize(text, "text", summary_length, stream, api_key)
 
         # ----- Multipart / form-data path -----
         elif "multipart/form-data" in content_type:
@@ -314,7 +327,7 @@ async def summarize(request: Request):
             if not content_text or not content_text.strip():
                 raise SummarizeException(400, "EMPTY_INPUT",
                                          "The provided input contains no extractable text.")
-            return await handle_summarize(content_text.strip(), "file", summary_length, stream)
+            return await handle_summarize(content_text.strip(), "file", summary_length, stream, api_key)
 
         else:
             raise SummarizeException(415, "UNSUPPORTED_CONTENT_TYPE",
