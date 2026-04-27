@@ -8,6 +8,7 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 const (
@@ -81,7 +82,7 @@ func CreateDatabaseIfNotExists(cfg Config) error {
 	defer func() {
 		if closeErr := db.Close(); closeErr != nil {
 			// Log the error but don't override the main error
-			fmt.Printf("warning: failed to close database connection: %v\n", closeErr)
+			logger.Warningf("warning: failed to close database connection: %v\n", closeErr)
 		}
 	}()
 
