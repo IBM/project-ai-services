@@ -24,6 +24,12 @@ type ConfigureOptions struct {
 	ArgParams     map[string]string
 }
 
+// UninstallOptions contains the configuration for uninstalling the catalog service.
+type UninstallOptions struct {
+	Runtime types.RuntimeType
+	AutoYes bool
+}
+
 // Run executes the configure process for the catalog service.
 func Run(opts ConfigureOptions) error {
 	ctx := context.Background()
@@ -76,6 +82,23 @@ func hashPasswordPBKDF2(password string, iteration int) (string, error) {
 		base64.RawStdEncoding.EncodeToString(hash))
 
 	return encoded, nil
+}
+
+// Uninstall removes the catalog service and cleans up resources.
+func Uninstall(opts UninstallOptions) error {
+	ctx := context.Background()
+
+	// Remove catalog service based on runtime
+	switch opts.Runtime {
+	case types.RuntimeTypePodman:
+		return catalogPodman.UninstallCatalog(ctx, opts.AutoYes)
+
+	case types.RuntimeTypeOpenShift:
+		return fmt.Errorf("openshift runtime is not yet supported for catalog uninstall")
+
+	default:
+		return fmt.Errorf("unsupported runtime type: %s", opts.Runtime)
+	}
 }
 
 // Made with Bob
