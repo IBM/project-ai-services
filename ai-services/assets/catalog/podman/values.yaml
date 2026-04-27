@@ -14,7 +14,7 @@ db:
   port: ""
   image: icr.io/ai-services-private/postgres:18
   user: "admin"
-  database: "postgres"
+  database: "ai_service"
   password: ""
   dataPath: "/var/lib/ai-services/db"
   resources:

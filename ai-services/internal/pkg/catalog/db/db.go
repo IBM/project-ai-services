@@ -37,7 +37,7 @@ type Config struct {
 // ConnectionString builds a PostgreSQL connection string from the config.
 func (c *Config) ConnectionString() string {
 	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		"host=%s port=%d user=%s password='%s' dbname=%s sslmode=%s",
 		c.Host, c.Port, c.User, c.Password, c.DBName, c.SSLMode,
 	)
 }
