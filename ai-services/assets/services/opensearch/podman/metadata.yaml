@@ -1,6 +1,2 @@
 name: opensearch
 version: "1.0.0"
-
-# Pod template execution order
-podTemplateExecutions:
-  - [opensearch.yaml.tmpl]

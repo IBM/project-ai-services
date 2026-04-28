@@ -1,6 +1,2 @@
 name: digitize
 version: "1.0.0"
-
-# Pod template execution order
-podTemplateExecutions:
-  - [digitize.yaml.tmpl]

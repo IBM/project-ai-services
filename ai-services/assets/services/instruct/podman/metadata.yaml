@@ -1,6 +1,2 @@
 name: instruct
 version: "1.0.0"
-
-# Pod template execution order
-podTemplateExecutions:
-  - [instruct-server.yaml.tmpl]
