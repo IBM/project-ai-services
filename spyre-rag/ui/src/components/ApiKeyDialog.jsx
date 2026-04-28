@@ -40,8 +40,7 @@ export function ApiKeyDialog({ isOpen, onApiKeyValidated }) {
       });
 
       if (response.ok) {
-        // Store API key in sessionStorage
-        sessionStorage.setItem('vllm_api_key', apiKey.trim());
+        // API key is valid, pass it to parent component
         setShowDialog(false);
         onApiKeyValidated(apiKey.trim());
       } else {
@@ -82,8 +81,8 @@ export function ApiKeyDialog({ isOpen, onApiKeyValidated }) {
     >
       <div className="api-key-dialog-content">
         <p className="api-key-dialog-description">
-          Please enter your vLLM API key to access the chatbot. Your key will be stored
-          for this session only and will be cleared when you refresh the page.
+          Please enter your vLLM API key to access the chatbot. You will need to
+          re-enter your key each time you refresh the page.
         </p>
 
         {error && (

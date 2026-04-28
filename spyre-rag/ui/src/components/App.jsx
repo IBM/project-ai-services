@@ -40,15 +40,8 @@ function App() {
         setAuthRequired(data.auth_required);
 
         if (data.auth_required) {
-          // Auth is required, check for stored API key
-          const storedApiKey = sessionStorage.getItem('vllm_api_key');
-          if (storedApiKey) {
-            setApiKey(storedApiKey);
-            setIsReady(true);
-          } else {
-            // Show dialog if no API key found
-            setShowApiKeyDialog(true);
-          }
+          // Auth is required, always show dialog on page load/refresh
+          setShowApiKeyDialog(true);
         } else {
           // Auth not required, proceed without API key
           setApiKey('not-needed');
@@ -75,7 +68,6 @@ function App() {
     // Only handle auth errors if auth is actually required
     if (authRequired) {
       // Clear invalid API key and show dialog again
-      sessionStorage.removeItem('vllm_api_key');
       setApiKey(null);
       setShowApiKeyDialog(true);
       setIsReady(false);
