@@ -161,7 +161,7 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
         "messages": [{"role": "user", "content": prompt}],
         "model": llm_model,
         "max_tokens": max_new_tokens,
-        "repetition_penalty": 1.1,
+        "frequency_penalty": 1.1,
         "temperature": temperature,
         "stop": stop_words,
         "stream": stream

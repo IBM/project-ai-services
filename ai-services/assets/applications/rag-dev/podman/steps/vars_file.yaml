@@ -40,11 +40,11 @@ containers:
 
   - name: "{{ .AppName }}--digitize-ui"
     format: ".Status"
-    alias: DIGITIZE_API_STATUS
+    alias: DIGITIZE_UI_STATUS
 
   - name: "{{ .AppName }}--digitize-backend-server"
     format: ".Status"
-    alias: DIGITIZE_UI_STATUS
+    alias: DIGITIZE_API_STATUS
 
   - name: "{{ .AppName }}--summarize-api-summarize-api"
     format: ".Status"
