@@ -381,20 +381,8 @@ func LoadUserCertificates(certPath, keyPath string) error {
     */
     
     // Step 5: Load certificates via Caddy Admin API
-    // Extract domain from certificate for ID
-    domain := ""
-    for _, dnsName := range cert.DNSNames {
-        if strings.HasPrefix(dnsName, "*.") {
-            domain = strings.TrimPrefix(dnsName, "*.")
-            break
-        }
-    }
-    if domain == "" {
-        return fmt.Errorf("no wildcard domain found in certificate")
-    }
-    
     payload := map[string]interface{}{
-        "@id": fmt.Sprintf("cert-%s", domain),
+        "@id": "external-certs",
         "load_pem": []map[string]string{
             {
                 "certificate": string(certBytes),
@@ -943,7 +931,7 @@ A certificate is considered a valid renewal if:
 
 5. **Replace Certificate:**
    - Remove the old certificate from the payload
-   - Add the new certificate with ID `cert-<domain>`
+   - Add the new certificate
    - POST updated payload to `http://localhost:2019/config/apps/tls/certificates/`
 
 **Example:**
