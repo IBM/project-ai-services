@@ -16,6 +16,11 @@ Day N:
 - Q&A API is unavailable to use. Please make sure 'backend' pod is running.
 {{- end }}
 
+{{- if .Values.instruct.apiKey }}
+
+- vLLM exposed via Q&A is authenticated with user provided API Key: {{ .Values.instruct.apiKey }}
+{{- end }}
+
 {{- if eq .DIGITIZE_UI_STATUS "running" }}
 
 - Add documents to your RAG application using the Digitize Documents UI: https://{{ .DIGITIZE_UI_ROUTE }}.

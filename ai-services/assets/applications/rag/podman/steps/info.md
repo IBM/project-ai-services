@@ -20,6 +20,11 @@ Day N:
 {{- end }}
 {{- end }}
 
+{{- if .Values.instruct.apiKey }}
+
+- vLLM exposed via Q&A is authenticated with user provided API Key: {{ .Values.instruct.apiKey }}
+{{- end }}
+
 {{- if ne .DIGITIZE_UI_PORT "" }}
 {{- if eq .DIGITIZE_UI_STATUS "running" }}
 
