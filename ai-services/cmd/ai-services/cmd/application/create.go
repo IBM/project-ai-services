@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -53,24 +52,6 @@ var createCmd = &cobra.Command{
 	`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		// If no --appdir provided, use default from constants
-		if appDir == "" {
-			appDir = constants.GetAppDir()
-		}
-		
-		// Validate appDir permissions early - BEFORE any operations
-		if err := validateAppDir(appDir); err != nil {
-			return fmt.Errorf("invalid app directory '%s': %w", appDir, err)
-		}
-		
-		// Set AI_SERVICES_APP_DIR environment variable
-		if err := os.Setenv("AI_SERVICES_APP_DIR", appDir); err != nil {
-			return fmt.Errorf("failed to set AI_SERVICES_APP_DIR: %w", err)
-		}
-		
-		// Update vars.ModelDirectory to use the new path
-		vars.ModelDirectory = constants.GetModelsPath()
-
 		// Check if podman runtime is being used on unsupported platform
 		if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
 			return err
@@ -84,7 +65,42 @@ var createCmd = &cobra.Command{
 
 		appName := args[0]
 
-		return utils.VerifyAppName(appName)
+		if err := utils.VerifyAppName(appName); err != nil {
+			return err
+		}
+
+		// Extract baseDir from argParams if provided, otherwise use default
+		var baseDir string
+		if argParams != nil {
+			if bd, ok := argParams["baseDir"]; ok {
+				baseDir = bd
+			}
+		}
+		if baseDir == "" {
+			baseDir = constants.GetBaseDir()
+		}
+
+		// Validate baseDir and get the ai-services subdirectory path
+		aiServicesDir, err := utils.ValidateBaseDir(baseDir)
+		if err != nil {
+			return fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
+		}
+
+		// Set AI_SERVICES_BASE_DIR environment variable to the ai-services subdirectory
+		if err := os.Setenv("AI_SERVICES_BASE_DIR", aiServicesDir); err != nil {
+			return fmt.Errorf("failed to set AI_SERVICES_BASE_DIR: %w", err)
+		}
+
+		// Update vars.ModelDirectory to use the new path
+		vars.ModelDirectory = constants.GetModelsPath()
+
+		// Update argParams with the validated baseDir (ai-services subdirectory)
+		if argParams == nil {
+			argParams = make(map[string]string)
+		}
+		argParams["baseDir"] = aiServicesDir
+
+		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appName := args[0]
@@ -95,14 +111,6 @@ var createCmd = &cobra.Command{
 
 		if err := doBootstrapValidate(); err != nil {
 			return err
-		}
-
-		// Add appDir to argParams if provided
-		if appDir != "" {
-			if argParams == nil {
-				argParams = make(map[string]string)
-			}
-			argParams["appDir"] = appDir
 		}
 
 		// Create application instance using factory
@@ -156,16 +164,6 @@ func initCreateCommonFlags() {
 	createCmd.Flags().StringVarP(&templateName, appFlags.Create.Template, "t", "", "Application template to use (required)")
 	_ = createCmd.MarkFlagRequired(appFlags.Create.Template)
 
-	createCmd.Flags().StringVar(
-		&appDir,
-		"appdir",
-		"",
-		"Base directory for AI services data (applications, models, cache).\n\n"+
-			fmt.Sprintf("If not specified, uses AI_SERVICES_APP_DIR environment variable or default %s\n", constants.DefaultAppDir)+
-			"Example: --appdir /custom/path/ai-services\n\n"+
-			"Note: This should match the --appdir used in 'catalog configure'\n",
-	)
-
 	createCmd.Flags().StringSliceVar(
 		&rawArgParams,
 		appFlags.Create.Params,
@@ -173,8 +171,12 @@ func initCreateCommonFlags() {
 		"Inline parameters to configure the application.\n\n"+
 			"Format:\n"+
 			"- Comma-separated key=value pairs\n"+
-			"- Example: --params key1=value1,key2=value2\n\n"+
+			"- Example: --params key1=value1,key2=value2,baseDir=/custom/path\n\n"+
 			"- Use \"ai-services application templates\" to view the list of supported parameters\n\n"+
+			"Available parameters:\n"+
+			"- baseDir: Base directory for AI services data (default: "+constants.DefaultBaseDir+")\n"+
+			"  Note: An 'ai-services' subdirectory will be created within this path\n"+
+			"  Example: --params baseDir=/custom/path creates /custom/path/ai-services\n\n"+
 			"Precedence:\n"+
 			"- When both --values and --params are provided, --params overrides --values\n",
 	)
@@ -208,8 +210,8 @@ func initCreatePodmanFlags() {
 		appFlags.Create.SkipModelDownload,
 		false,
 		"Skip model download during application creation\n\n"+
-			"Use this if local models already exist at $AI_SERVICES_APP_DIR/models/\n"+
-			"(default: /var/lib/ai-services/models/)\n"+
+			"Use this if local models already exist at $AI_SERVICES_BASE_DIR/models/\n"+
+			"(default: /var/lib/ai-services/ai-services/models/)\n"+
 			"Recommended for air-gapped networks\n\n"+
 			"Warning:\n"+
 			"- If set to true and models are missing → command will fail\n"+
@@ -364,29 +366,5 @@ func validateSkipChecksFlag(cmd *cobra.Command) error {
 
 	return nil
 }
-// validateAppDir validates that the app directory exists or can be created and is writable.
-func validateAppDir(dir string) error {
-	// Clean the path
-	dir = filepath.Clean(dir)
-
-	// Check if directory exists or can be created
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("cannot create directory: %w", err)
-	}
-
-	// Check write permissions by creating a test file
-	testFile := filepath.Join(dir, ".ai-services-permission-test")
-	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
-		return fmt.Errorf("no write permission: %w", err)
-	}
-
-	// Clean up test file
-	if err := os.Remove(testFile); err != nil {
-		logger.Warningf("Failed to remove test file %s: %v\n", testFile, err)
-	}
-
-	return nil
-}
-
 
 // Made with Bob

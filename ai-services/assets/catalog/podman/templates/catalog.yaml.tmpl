@@ -82,8 +82,8 @@ spec:
             secretKeyRef:
               name: catalog-secret
               key: db-password
-        - name: AI_SERVICES_APP_DIR
-          value: "{{ .Values.backend.appDir }}"
+        - name: AI_SERVICES_BASE_DIR
+          value: "{{ .Values.backend.baseDir }}"
       ports:
         - containerPort: 8080
           protocol: TCP
