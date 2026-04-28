@@ -14,6 +14,40 @@ from common.settings import Settings as CommonSettings
 logger = get_logger("settings")
 
 
+class SummarizationLevel(BaseSettings):
+    """Configuration for a single summarization level."""
+    
+    multiplier: float = Field(
+        ...,
+        gt=0.0,
+        description="Multiplier for the base summarization coefficient",
+    )
+    
+    description: str = Field(
+        ...,
+        description="Human-readable description of this level",
+    )
+
+
+class SummarizationLevelsConfig(BaseSettings):
+    """Configuration for different summarization abstraction levels."""
+    
+    brief: SummarizationLevel = Field(
+        default=SummarizationLevel(multiplier=0.5, description="Quick overview"),
+        description="Brief summarization level",
+    )
+    
+    standard: SummarizationLevel = Field(
+        default=SummarizationLevel(multiplier=1.0, description="Balanced summary"),
+        description="Standard summarization level",
+    )
+    
+    detailed: SummarizationLevel = Field(
+        default=SummarizationLevel(multiplier=1.5, description="Comprehensive summary"),
+        description="Detailed summarization level",
+    )
+
+
 class SummarizationConfig(BaseSettings):
     """Summarization settings."""
 
@@ -24,50 +58,74 @@ class SummarizationConfig(BaseSettings):
     )
 
     summarization_coefficient: float = Field(
-        default=0.2,
+        default=0.3,
         gt=0.0,
         le=1.0,
-        description="Coefficient for calculating summary length",
+        description="Base coefficient for calculating summary length",
     )
 
     summarization_prompt_token_count: int = Field(
-        default=100,
+        default=200,
         ge=0,
         description="Estimated token count for summarization prompt",
     )
 
     summarization_temperature: float = Field(
-        default=0.2,
+        default=0.3,
         ge=0.0,
         le=2.0,
         description="Temperature for summarization generation",
     )
 
     summarization_stop_words: str = Field(
-        default="Keywords, Note, ***",
+        default="",
         description="Stop words for summarization (comma-separated)",
+    )
+    
+    minimum_summary_words: int = Field(
+        default=200,
+        gt=0,
+        description="Minimum number of words for a valid summary",
     )
 
     summarize_system_prompt: str = Field(
         default=(
-            "You are a summarization assistant. Output ONLY the summary. \n\n"
-            "Do not add questions, explanations, headings, code, or any other text."
+            "You are an expert summarization assistant. Your summaries must be comprehensive and use the full available space. "
+            "Preserve numerical data and maintain factual accuracy. Output ONLY the summary."
         ),
         description="System prompt for summarization",
     )
 
     summarize_user_prompt_with_length: str = Field(
         default=(
-            "Summarize the following text in {target_words} words, with an allowed variance of ±50 words."
-            "Avoid being overly concise.\nExpand explanations where necessary to meet the word requirement.\n\n"
-            "You must strictly meet this word-range requirement. Do not exceed or fall short of the range.\n\n\n"
-            "Text:\n{text}\n\nSummary:"
+            "Create a comprehensive summary of the following text.\n\n"
+            "TARGET LENGTH: {target_words} words\n\n"
+            "CRITICAL INSTRUCTIONS:\n"
+            "1. Your summary MUST approach {target_words} words - do NOT stop early\n"
+            "2. Use the FULL available space by including:\n"
+            "   - All key findings and main points\n"
+            "   - Supporting details and context\n"
+            "   - Relevant data and statistics\n"
+            "   - Implications and significance\n"
+            "3. Preserve ALL numerical data EXACTLY\n"
+            "4. A summary under {min_words} words is considered incomplete\n\n"
+            "Text:\n{text}\n\n"
+            "Comprehensive Summary ({target_words} words):"
         ),
         description="User prompt for summarization with target length",
     )
 
     summarize_user_prompt_without_length: str = Field(
-        default="Summarize the following text.\n\nText:\n{text}\n\nSummary:",
+        default=(
+            "Create a thorough and comprehensive summary of the following text.\n\n"
+            "REQUIREMENTS:\n"
+            "- Be detailed and comprehensive\n"
+            "- Preserve all numerical data and statistics\n"
+            "- Include key findings, supporting details, and implications\n"
+            "- Maintain factual accuracy\n\n"
+            "Text:\n{text}\n\n"
+            "Comprehensive Summary:"
+        ),
         description="User prompt for summarization without target length",
     )
 
@@ -75,6 +133,11 @@ class SummarizationConfig(BaseSettings):
         default=1024,
         ge=0,
         description="Maximum tokens for table summarization",
+    )
+    
+    summarization_levels: SummarizationLevelsConfig = Field(
+        default_factory=SummarizationLevelsConfig,
+        description="Configuration for different summarization abstraction levels",
     )
 
     @field_validator('summarization_coefficient')
