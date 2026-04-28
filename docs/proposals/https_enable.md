@@ -217,11 +217,14 @@ As part of the `ai-services catalog configure` command, deploy the Caddy server 
 **Command Options:**
 ```bash
 ai-services catalog configure [options]
-  --domain-name <domain>  Custom domain name for self-signed certificates (optional)
-                          If not provided, uses wildcard DNS format: <service>.<ip>.nip.io
-                          Example: --domain-name example.com generates certs for *.example.com
-  --ssl-cert <path>       Path to user-provided SSL certificate (optional)
-  --ssl-key <path>        Path to user-provided SSL private key (optional)
+  --domain-name <domain>     Custom domain name for self-signed certificates (optional)
+                             If not provided, uses wildcard DNS format: <service>.<ip>.nip.io
+                             Example: --domain-name example.com generates certs for *.example.com
+  --external-port <port>     External HTTPS port for Caddy server (optional, default: 443)
+                             If not 443, port will be included in service URLs
+                             Example: --external-port 8443 results in https://service.<domain>:8443
+  --ssl-cert <path>          Path to user-provided SSL certificate (optional)
+  --ssl-key <path>           Path to user-provided SSL private key (optional)
 ```
 
 **Process:**
@@ -231,9 +234,11 @@ ai-services catalog configure [options]
    - If `--ssl-cert` and `--ssl-key` are provided, load user-provided certificates into Caddy
    - If `--domain-name` is provided, generate self-signed certificates for the specified domain
    - If neither is provided, use wildcard DNS format `<service>.<ip>.nip.io` with self-signed certificates
-4. **Populate domain name in Catalog configuration:**
+4. **Populate configuration in Catalog:**
    - Update the `values.yaml` file with the domain name (from `--domain-name` flag or extracted from certificate)
-   - The Catalog backend will use this domain name when generating service URLs and registering routes with Caddy
+   - Update the `values.yaml` file with the external port (from `--external-port` flag, default: 443)
+   - The Catalog backend will use these values when generating service URLs and registering routes with Caddy
+   - If port is not 443, URLs will include the port: `https://service.domain:port`
 5. Deploy Caddy container along with Catalog service containers
 
 **Minimal Caddyfile Configuration:**
