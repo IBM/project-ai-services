@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/project-ai-services/ai-services/assets"
 	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
@@ -15,7 +14,6 @@ import (
 	appFlags "github.com/project-ai-services/ai-services/internal/pkg/cli/constants/application"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -242,7 +240,7 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 
 // validateTemplateFlag validates the template flag.
 func validateTemplateFlag(cmd *cobra.Command) error {
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
+	tp := GetTemplateProvider()
 	if err := tp.AppTemplateExist(templateName); err != nil {
 		return err
 	}
@@ -263,7 +261,7 @@ func validateParamsFlag(cmd *cobra.Command) error {
 	}
 
 	// Validate params against template values
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
+	tp := GetTemplateProvider()
 	_, err = tp.LoadValues(templateName, nil, argParams)
 	if err != nil {
 		return fmt.Errorf("failed to load params: %w", err)
@@ -281,7 +279,7 @@ func validateValuesFlag(cmd *cobra.Command) error {
 	}
 
 	// Validate parameters in values files
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
+	tp := GetTemplateProvider()
 	_, err := tp.LoadValues(templateName, valuesFiles, nil)
 	if err != nil {
 		return fmt.Errorf("failed to validate values files: %w", err)

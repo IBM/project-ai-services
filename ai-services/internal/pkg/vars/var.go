@@ -10,6 +10,8 @@ import (
 var (
 	// RuntimeFactory defines Global runtime factory.
 	RuntimeFactory *runtime.RuntimeFactory
+	// CustomAppPath stores the custom application templates path from CLI flag
+	CustomAppPath string
 )
 
 var (

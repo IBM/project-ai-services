@@ -7,6 +7,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/application/image"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/application/model"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -17,6 +18,8 @@ var (
 	hiddenTemplates bool
 	// Runtime type flag for application command.
 	runtimeType string
+	// Custom application path for user-supplied templates
+	customAppPath string
 )
 
 // ApplicationCmd represents the application command.
@@ -34,6 +37,9 @@ var ApplicationCmd = &cobra.Command{
 
 		vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
 		logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
+
+		// Store custom app path in global variable for access by internal packages
+		vars.CustomAppPath = customAppPath
 
 		return nil
 	},
@@ -55,8 +61,32 @@ func init() {
 	ApplicationCmd.PersistentFlags().StringVar(&runtimeType, "runtime", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
 	_ = ApplicationCmd.MarkPersistentFlagRequired("runtime")
 
+	// Add custom application path flag
+	ApplicationCmd.PersistentFlags().StringVar(&customAppPath, "app-path", "",
+		"Path to custom application templates directory\n\n"+
+			"Custom applications are merged with built-in templates.\n"+
+			"If a custom application has the same name as a built-in one, the custom version takes precedence.\n\n"+
+			"Can also be set via AI_SERVICES_APP_PATH environment variable.\n"+
+			"Command-line flag takes precedence over environment variable.\n\n"+
+			"Example directory structure:\n"+
+			"  /path/to/custom/apps/\n"+
+			"    my-app/\n"+
+			"      metadata.yaml\n"+
+			"      podman/\n"+
+			"        metadata.yaml\n"+
+			"        values.yaml\n"+
+			"        templates/\n"+
+			"          *.yaml.tmpl\n")
+
 	ApplicationCmd.PersistentFlags().StringVar(&vars.ToolImage, "tool-image", vars.ToolImage, "Tool image to use for downloading the model(only for the development purpose)")
 	ApplicationCmd.PersistentFlags().BoolVar(&hiddenTemplates, "hidden", false, "Show hidden templates")
 	_ = ApplicationCmd.PersistentFlags().MarkHidden("tool-image")
 	_ = ApplicationCmd.PersistentFlags().MarkHidden("hidden")
+}
+
+// GetTemplateProvider creates and returns the appropriate template provider.
+// It checks for custom application path from flag or environment variable,
+// and creates a composite provider if custom path is specified.
+func GetTemplateProvider() templates.Template {
+	return templates.GetTemplateProvider(customAppPath)
 }

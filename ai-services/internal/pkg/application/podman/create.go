@@ -10,7 +10,6 @@ import (
 	"sync"
 	"text/template"
 
-	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
@@ -33,7 +32,7 @@ var (
 func (p *PodmanApplication) Create(ctx context.Context, opts types.CreateOptions) error {
 	// Proceed to create application
 	logger.Infof("Creating application '%s' using template '%s'\n", opts.Name, opts.TemplateName)
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
+	tp := templates.GetTemplateProvider("")
 
 	// validate whether the provided template name is correct
 	if err := tp.AppTemplateExist(opts.TemplateName); err != nil {
@@ -85,7 +84,7 @@ func (p *PodmanApplication) Create(ctx context.Context, opts types.CreateOptions
 }
 
 func (p *PodmanApplication) validateAndAllocateSpyreCards(templateName, appName string, tmpls map[string]*template.Template) ([]string, error) {
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
+	tp := templates.GetTemplateProvider("")
 
 	reqSpyreCardsCount, err := p.calculateReqSpyreCards(tp, utils.ExtractMapKeys(tmpls), templateName, appName)
 	if err != nil {
@@ -139,7 +138,7 @@ func (p *PodmanApplication) deployApplication(ctx context.Context, opts types.Cr
 		return fmt.Errorf("failed while checking existing pods for application: %w", err)
 	}
 
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
+	tp := templates.GetTemplateProvider("")
 
 	// execute the pod Templates
 	if err := p.executePodTemplates(tp, opts.Name, appMetadata, tmpls, pciAddresses, existingPods, opts.ValuesFiles, opts.ArgParams); err != nil {

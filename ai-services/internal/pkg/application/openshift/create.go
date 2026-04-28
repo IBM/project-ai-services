@@ -7,7 +7,6 @@ import (
 
 	"helm.sh/helm/v4/pkg/chart"
 
-	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -19,7 +18,7 @@ import (
 func (o *OpenshiftApplication) Create(ctx context.Context, opts types.CreateOptions) error {
 	logger.Infof("Creating application '%s' using template '%s'\n", opts.Name, opts.TemplateName)
 
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
+	tp := templates.GetTemplateProvider("")
 
 	// Step1: Fetch the operation timeout
 	timeout, err := getOperationTimeout(ctx, tp, opts)
