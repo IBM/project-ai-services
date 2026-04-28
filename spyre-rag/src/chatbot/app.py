@@ -243,29 +243,35 @@ async def is_auth_required() -> bool:
             return True
 
 
-@app.get(
-    "/v1/auth-required",
-    responses={200: {"description": "Returns whether authentication is required"}},
-    tags=["models"],
-    summary="Check if authentication is required",
-    description="Check if vLLM endpoint requires API key authentication."
-)
+@app.get("/v1/auth-required", include_in_schema=False)
 async def check_auth_required():
-    """Check if authentication is required by testing vLLM access without API key."""
+    """Internal API for UI/bootstrap flows to detect whether the configured vLLM endpoint enforces authentication.
+
+    Usage:
+    - Method: GET
+    - Path: /v1/auth-required
+    - Response: {"auth_required": true|false}
+
+    """
     logging.debug("Checking if auth is required...")
     auth_required = await is_auth_required()
     return {"auth_required": auth_required}
 
 
-@app.post(
-    "/v1/validate-api-key",
-    responses={200: {"description": "API key is valid"}, 401: http_error_responses[401], 500: http_error_responses[500]},
-    tags=["models"],
-    summary="Validate vLLM API key",
-    description="Validate that the provided API key can access the vLLM endpoint. **Requires API key in Authorization header** (Bearer token)."
-)
+@app.post("/v1/validate-api-key", include_in_schema=False)
 async def validate_api_key(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
-    """Validate API key by attempting to list models from vLLM. Requires Authorization header with Bearer token."""
+    """Internal API for validating a bearer token against the configured vLLM endpoint.
+
+    Usage:
+    - Method: POST
+    - Path: /v1/validate-api-key
+    - Required header: Authorization: Bearer <api-key>
+    - Success response: {"status": "valid", "message": "API key is valid"}
+    - Failure modes:
+      - 401 when the API key is missing or invalid
+      - 500 for unexpected upstream/service errors
+
+    """
     logging.debug("Validating API key...")
     
     # Extract API key from credentials
