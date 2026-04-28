@@ -264,12 +264,11 @@ class Job(Base):
     job_name = Column(String(500), nullable=True)
     operation = Column(String(50), nullable=False)
     status = Column(String(50), nullable=False)
-    submitted_at = Column(DateTime(timezone=True), nullable=False)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=False)  # When user submitted
+    completed_at = Column(DateTime(timezone=True), nullable=True)   # When finished
     error = Column(Text, nullable=True)
     stats = Column(JSONB, nullable=False, default={"total_documents": 0, "completed": 0, "failed": 0, "in_progress": 0})
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())  # Last modified
     
     # Relationship to documents
     documents = relationship("Document", back_populates="job", cascade="all, delete-orphan")
@@ -291,12 +290,11 @@ class Document(Base):
     type = Column(String(50), nullable=False)
     status = Column(String(50), nullable=False)
     output_format = Column(String(10), nullable=False)
-    submitted_at = Column(DateTime(timezone=True), nullable=False)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=False)  # When user submitted
+    completed_at = Column(DateTime(timezone=True), nullable=True)   # When finished
     error = Column(Text, nullable=True)
     metadata = Column(JSONB, nullable=False, default={})
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())  # Last modified
     
     # Relationship to job
     job = relationship("Job", back_populates="documents")
@@ -391,12 +389,11 @@ CREATE TABLE jobs (
     job_name VARCHAR(500),
     operation VARCHAR(50) NOT NULL,
     status VARCHAR(50) NOT NULL,
-    submitted_at TIMESTAMP NOT NULL,
-    completed_at TIMESTAMP,
+    submitted_at TIMESTAMP NOT NULL,  -- When user submitted the job
+    completed_at TIMESTAMP,           -- When job finished processing
     error TEXT,
     stats JSONB NOT NULL DEFAULT '{"total_documents": 0, "completed": 0, "failed": 0, "in_progress": 0}',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- Last modification time
     CONSTRAINT chk_job_status CHECK (status IN ('accepted', 'in_progress', 'completed', 'failed')),
     CONSTRAINT chk_job_operation CHECK (operation IN ('ingestion', 'digitization'))
 );
@@ -409,17 +406,42 @@ CREATE TABLE documents (
     type VARCHAR(50) NOT NULL,
     status VARCHAR(50) NOT NULL,
     output_format VARCHAR(10) NOT NULL,
-    submitted_at TIMESTAMP NOT NULL,
-    completed_at TIMESTAMP,
+    submitted_at TIMESTAMP NOT NULL,  -- When user submitted the document
+    completed_at TIMESTAMP,           -- When document finished processing
     error TEXT,
     metadata JSONB NOT NULL DEFAULT '{}',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- Last modification time
     CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'failed')),
     CONSTRAINT chk_doc_type CHECK (type IN ('ingestion', 'digitization')),
     CONSTRAINT chk_output_format CHECK (output_format IN ('txt', 'md', 'json'))
 );
 ```
+
+**Timestamp Design Decision:**
+
+**Removed `created_at`, kept `submitted_at` and `updated_at`:**
+
+- ✅ `submitted_at` - Business timestamp (when user submitted job/document)
+  - Meaningful for business logic and reporting
+  - Used for sorting, filtering, and analytics
+  - Set once at creation, never changes
+
+- ✅ `updated_at` - Technical timestamp (last modification time)
+  - Tracks when record was last modified
+  - Useful for debugging and audit trails
+  - Automatically updated by trigger on every UPDATE
+
+- ❌ `created_at` - REMOVED (redundant)
+  - Would be identical to `submitted_at` in our use case
+  - No delay between submission and record creation
+  - Adds confusion without value
+  - Wastes storage space
+
+**Why this works:**
+- Job/document submission and database record creation happen atomically
+- No queuing or delay between user action and database insert
+- `submitted_at` serves both business and technical purposes
+- `updated_at` tracks subsequent modifications
 
 ### Indexes
 
@@ -576,28 +598,250 @@ DB_POOL_SIZE = 10
 DB_POOL_SIZE = 20
 ```
 
-#### 1.2 Schema Creation
+#### 1.2 Schema Creation via Init Container
 
-**Script: `scripts/db/init_schema.sql`**
+**When Do CREATE TABLE Statements Get Executed?**
+
+The database schema (tables, indexes, triggers) is created by an **init container** that runs before the main digitize-api container starts. This ensures the database is properly initialized before any application code runs.
+
+**Execution Flow:**
+
+```
+Podman/OCP Deployment
+    ↓
+Init Container Starts (digitize-db-init)
+    ↓
+Execute init_db.sh script
+    ↓
+Connect to PostgreSQL
+    ↓
+Run init_schema.sql with IF NOT EXISTS clauses
+    ↓
+CREATE TABLE IF NOT EXISTS jobs (...)
+CREATE TABLE IF NOT EXISTS documents (...)
+CREATE INDEX IF NOT EXISTS idx_jobs_submitted_at_status (...)
+CREATE INDEX IF NOT EXISTS idx_documents_job_id (...)
+CREATE INDEX IF NOT EXISTS idx_documents_submitted_at_status (...)
+CREATE OR REPLACE FUNCTION update_updated_at_column() (...)
+CREATE TRIGGER IF NOT EXISTS update_jobs_updated_at (...)
+CREATE TRIGGER IF NOT EXISTS update_documents_updated_at (...)
+    ↓
+Init Container Completes Successfully
+    ↓
+Main Application Container (digitize-api) Starts
+    ↓
+Application Ready
+```
+
+**Script: `spyre-rag/src/digitize/scripts/init_schema.sql`**
+
 ```sql
--- Create database
-CREATE DATABASE digitize_metadata;
+-- Database initialization script for digitize metadata
+-- This script is idempotent and safe to run multiple times
+-- All CREATE statements use IF NOT EXISTS
 
--- Connect to database
-\c digitize_metadata
+-- Create tables with IF NOT EXISTS
+CREATE TABLE IF NOT EXISTS jobs (
+    job_id VARCHAR(255) PRIMARY KEY,
+    job_name VARCHAR(500),
+    operation VARCHAR(50) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    submitted_at TIMESTAMP NOT NULL,  -- When user submitted the job
+    completed_at TIMESTAMP,           -- When job finished processing
+    error TEXT,
+    stats JSONB NOT NULL DEFAULT '{"total_documents": 0, "completed": 0, "failed": 0, "in_progress": 0}',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- Last modification time
+    CONSTRAINT chk_job_status CHECK (status IN ('accepted', 'in_progress', 'completed', 'failed')),
+    CONSTRAINT chk_job_operation CHECK (operation IN ('ingestion', 'digitization'))
+);
 
--- Create tables (use schema from above)
--- Create indexes (use indexes from above)
--- Create triggers (use triggers from above)
+CREATE TABLE IF NOT EXISTS documents (
+    doc_id VARCHAR(255) PRIMARY KEY,
+    job_id VARCHAR(255) REFERENCES jobs(job_id) ON DELETE CASCADE,
+    name VARCHAR(500) NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    output_format VARCHAR(10) NOT NULL,
+    submitted_at TIMESTAMP NOT NULL,  -- When user submitted the document
+    completed_at TIMESTAMP,           -- When document finished processing
+    error TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- Last modification time
+    CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'failed')),
+    CONSTRAINT chk_doc_type CHECK (type IN ('ingestion', 'digitization')),
+    CONSTRAINT chk_output_format CHECK (output_format IN ('txt', 'md', 'json'))
+);
+
+-- Create indexes with IF NOT EXISTS
+CREATE INDEX IF NOT EXISTS idx_jobs_submitted_at_status ON jobs(submitted_at DESC, status);
+CREATE INDEX IF NOT EXISTS idx_documents_job_id ON documents(job_id);
+CREATE INDEX IF NOT EXISTS idx_documents_submitted_at_status ON documents(submitted_at DESC, status);
+
+-- Create trigger function (OR REPLACE makes it idempotent)
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Create triggers with IF NOT EXISTS (PostgreSQL 14+)
+-- For PostgreSQL < 14, use DROP TRIGGER IF EXISTS first
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_jobs_updated_at') THEN
+        CREATE TRIGGER update_jobs_updated_at BEFORE UPDATE ON jobs
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_documents_updated_at') THEN
+        CREATE TRIGGER update_documents_updated_at BEFORE UPDATE ON documents
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END
+$$;
 
 -- Grant permissions
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO digitize_user;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO digitize_user;
 ```
 
+**Script: `spyre-rag/src/digitize/scripts/init_db.sh`**
+
+```bash
+#!/bin/bash
+# Database initialization script for digitize service
+# This script is executed by the init container
+
+set -e  # Exit on error
+
+echo "Starting database initialization..."
+
+# Wait for PostgreSQL to be ready (connect to default 'postgres' database)
+echo "Waiting for PostgreSQL to be ready..."
+until PGPASSWORD=$POSTGRES_PASSWORD psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d postgres -c '\q' 2>/dev/null; do
+  echo "PostgreSQL is unavailable - sleeping"
+  sleep 2
+done
+
+echo "PostgreSQL is ready!"
+
+# Create database if it doesn't exist (must use 'postgres' database to create new databases)
+echo "Creating database '$POSTGRES_DB' if not exists..."
+PGPASSWORD=$POSTGRES_PASSWORD psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d postgres -tc \
+  "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'" | grep -q 1 || \
+  PGPASSWORD=$POSTGRES_PASSWORD psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d postgres \
+  -c "CREATE DATABASE $POSTGRES_DB"
+
+# Verify target database is accessible
+echo "Verifying database '$POSTGRES_DB' is accessible..."
+until PGPASSWORD=$POSTGRES_PASSWORD psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c '\q' 2>/dev/null; do
+  echo "Database '$POSTGRES_DB' not yet accessible - sleeping"
+  sleep 1
+done
+
+echo "Database '$POSTGRES_DB' is accessible!"
+
+# Run schema initialization on target database
+echo "Initializing database schema..."
+PGPASSWORD=$POSTGRES_PASSWORD psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -f /scripts/init_schema.sql
+
+echo "✅ Database initialization completed successfully!"
+```
+
+**OCP/Podman Deployment Changes:**
+
+Add init container section:
+
+```yaml
+spec:
+  template:
+    spec:
+      # Init container to initialize database schema
+      initContainers:
+        - name: digitize-db-init
+          image: "icr.io/ai-services-private/postgres:18"  # ppc64le compatible UBI based Postgres image
+          command: ["/bin/sh", "/scripts/init_db.sh"]
+          env:
+            - name: POSTGRES_HOST
+              value: "{{ .Values.postgres.host }}"
+            - name: POSTGRES_PORT
+              value: "{{ .Values.postgres.port }}"
+            - name: POSTGRES_DB
+              value: "{{ .Values.postgres.database }}"
+            - name: POSTGRES_USER
+              value: "{{ .Values.postgres.user }}"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Values.postgres.secretName }}"
+                  key: password
+          volumeMounts:
+            - name: db-init-scripts
+              mountPath: /scripts
+              readOnly: true
+
+      # Main application container
+      containers:
+        - name: digitize-api
+          # ... existing container configuration ...
+          env:
+            # Add PostgreSQL connection environment variables
+            - name: POSTGRES_HOST
+              value: "{{ .Values.postgres.host }}"
+            - name: POSTGRES_PORT
+              value: "{{ .Values.postgres.port }}"
+            - name: POSTGRES_DB
+              value: "{{ .Values.postgres.database }}"
+            - name: POSTGRES_USER
+              value: "{{ .Values.postgres.user }}"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .Values.postgres.secretName }}"
+                  key: password
+            # ... existing env vars ...
+
+      volumes:
+        - name: db-init-scripts
+          configMap:
+            name: digitize-db-init-scripts
+            defaultMode: 0755
+        # ... existing volumes ...
+```
+
+**ConfigMap for Init Scripts:**
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: digitize-db-init-scripts
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+data:
+  init_db.sh: |
+{{ .Files.Get "spyre-rag/src/digitize/scripts/init_db.sh" | indent 4 }}
+  init_schema.sql: |
+{{ .Files.Get "spyre-rag/src/digitize/scripts/init_schema.sql" | indent 4 }}
+```
+
+**Why Init Container Approach?**
+
+- ✅ **Separation of Concerns**: Schema management separate from application code
+- ✅ **Idempotent**: Safe to run on every pod restart (IF NOT EXISTS clauses)
+- ✅ **Fail-Fast**: Application won't start if database initialization fails
+- ✅ **Auditability**: Clear SQL scripts that can be reviewed and version controlled
+- ✅ **No Application Code Changes**: Application doesn't handle schema creation
+- ✅ **Kubernetes Native**: Leverages init container pattern for setup tasks
+- ✅ **Rerun Safe**: Can be rerun without issues due to IF NOT EXISTS
+
 #### 1.3 Data Migration Script (Using SQLAlchemy ORM)
 
-**Script: `scripts/db/migrate_json_to_postgres.py`**
+**Script: `spyre-rag/src/digitize/scripts/migrate_json_to_postgres.py`**
 ```python
 import json
 from pathlib import Path
@@ -718,17 +962,8 @@ if __name__ == "__main__":
 - Built-in transaction handling
 - Cleaner, more maintainable code
 - Database-agnostic (easy to switch databases)
-    cursor.close()
-    conn.close()
-    
-    print(f"Migration complete: {migrated} jobs migrated, {failed} failed")
 
-if __name__ == "__main__":
-    print("Starting migration...")
-    migrate_jobs()
-    migrate_documents()
-    print("Migration complete!")
-```
+---
 
 ### Phase 2: Implementation (Week 2)
 
@@ -738,8 +973,10 @@ if __name__ == "__main__":
 ```python
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+from contextlib import contextmanager
 from sqlalchemy import update as sql_update, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import selectinload, Session
 from digitize.database import SessionScoped
 from digitize.models import Job, Document
 from digitize.document import DocumentMetadata
@@ -747,15 +984,68 @@ from digitize.job import JobState, JobDocumentSummary
 from digitize.types import DocStatus, JobStatus
 
 class MetadataStore:
-    """SQLAlchemy ORM-backed metadata storage for documents and jobs."""
-    
-    def __init__(self):
-        """Initialize metadata store with SQLAlchemy session."""
-        self.session = SessionScoped()
-    
+    """
+    SQLAlchemy ORM-backed metadata storage for documents and jobs.
+
+    Supports explicit transaction management for atomic operations.
+    Use the transaction() context manager for operations that need atomicity.
+    """
+
+    def __init__(self, session: Optional[Session] = None):
+        """
+        Initialize metadata store with SQLAlchemy session.
+
+        Args:
+            session: Optional external session for transaction control.
+                    If not provided, creates a new scoped session.
+        """
+        self._external_session = session is not None
+        self.session = session if session else SessionScoped()
+
+    @contextmanager
+    def transaction(self):
+        """
+        Context manager for explicit transaction boundaries.
+
+        Usage:
+            with db_store.transaction():
+                db_store.save_document(doc)
+                db_store.update_job(job)
+            # Commits here, or rolls back on exception
+
+        This ensures atomic updates across multiple operations.
+        """
+        if self._external_session:
+            # If using external session, don't manage transaction here
+            yield self
+            return
+
+        try:
+            yield self
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+
+    def commit(self):
+        """Explicitly commit the current transaction."""
+        if not self._external_session:
+            self.session.commit()
+
+    def rollback(self):
+        """Explicitly rollback the current transaction."""
+        if not self._external_session:
+            self.session.rollback()
+
     # Document operations
-    def save_document(self, doc: DocumentMetadata) -> None:
-        """Save or update document metadata using ORM."""
+    def save_document(self, doc: DocumentMetadata, auto_commit: bool = True) -> None:
+        """
+        Save or update document metadata using ORM.
+
+        Args:
+            doc: Document metadata to save
+            auto_commit: If True, commits immediately. If False, caller must commit.
+        """
         stmt = insert(Document).values(
             doc_id=doc.id,
             job_id=doc.job_id,
@@ -782,10 +1072,16 @@ class MetadataStore:
             )
         )
         self.session.execute(stmt)
-        self.session.commit()
-    
+        if auto_commit and not self._external_session:
+            self.session.commit()
+
     def get_document(self, doc_id: str) -> Optional[DocumentMetadata]:
-        """Retrieve document metadata by ID using ORM."""
+        """
+        Retrieve document metadata by ID using ORM.
+
+        No eager loading needed here because we only access document columns,
+        not the related Job object. The job_id is a foreign key column, not a relationship.
+        """
         doc = self.session.query(Document).filter(Document.doc_id == doc_id).first()
         if doc:
             return DocumentMetadata(
@@ -801,33 +1097,78 @@ class MetadataStore:
                 metadata=doc.metadata
             )
         return None
-    
-    def update_document_metadata(self, doc_id: str, updates: Dict[str, Any]) -> None:
-        """Update specific fields of document metadata using ORM."""
+
+    def update_document_metadata(self, doc_id: str, updates: Dict[str, Any], auto_commit: bool = True) -> None:
+        """
+        Update specific fields of document metadata using ORM.
+
+        Args:
+            doc_id: Document ID to update
+            updates: Dictionary of fields to update
+            auto_commit: If True, commits immediately. If False, caller must commit.
+
+        Note:
+            For 'metadata' updates, performs DEEP merge to preserve nested structures.
+            Example: Updating timing_in_secs.chunking won't overwrite timing_in_secs.digitizing
+        """
         # Prepare update values
         update_values = {}
         for key, value in updates.items():
             if key == 'metadata':
-                # Merge with existing metadata using PostgreSQL JSONB operator
-                stmt = sql_update(Document).where(Document.doc_id == doc_id).values(
-                    metadata=Document.metadata + value  # JSONB concatenation
-                )
-                self.session.execute(stmt)
+                # Deep merge metadata using PostgreSQL's jsonb_set for each path
+                # This preserves nested structures like timing_in_secs
+                doc = self.session.query(Document).filter(Document.doc_id == doc_id).first()
+                if doc:
+                    merged_metadata = self._deep_merge_jsonb(doc.metadata or {}, value)
+                    update_values['metadata'] = merged_metadata
                 continue
             elif key == 'status':
                 update_values[key] = value.value if hasattr(value, 'value') else value
             else:
                 update_values[key] = value
-        
+
         if update_values:
             stmt = sql_update(Document).where(Document.doc_id == doc_id).values(**update_values)
             self.session.execute(stmt)
-        
-        self.session.commit()
+
+        if auto_commit and not self._external_session:
+            self.session.commit()
     
+    def _deep_merge_jsonb(self, existing: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Recursively merge two dictionaries, preserving nested structures.
+
+        Args:
+            existing: Current metadata dictionary
+            updates: New values to merge in
+
+        Returns:
+            Merged dictionary with deep merge applied
+
+        Example:
+            existing = {"pages": 5, "timing_in_secs": {"digitizing": 10, "processing": 20}}
+            updates = {"timing_in_secs": {"chunking": 15}}
+            result = {"pages": 5, "timing_in_secs": {"digitizing": 10, "processing": 20, "chunking": 15}}
+        """
+        result = existing.copy()
+        for key, value in updates.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                # Recursively merge nested dictionaries
+                result[key] = self._deep_merge_jsonb(result[key], value)
+            else:
+                # Overwrite or add new key
+                result[key] = value
+        return result
+
     # Job operations
-    def save_job(self, job: JobState) -> None:
-        """Save or update job state using ORM."""
+    def save_job(self, job: JobState, auto_commit: bool = True) -> None:
+        """
+        Save or update job state using ORM.
+
+        Args:
+            job: Job state to save
+            auto_commit: If True, commits immediately. If False, caller must commit.
+        """
         stmt = insert(Job).values(
             job_id=job.job_id,
             job_name=job.job_name,
@@ -850,21 +1191,35 @@ class MetadataStore:
             )
         )
         self.session.execute(stmt)
-        self.session.commit()
-    
+        if auto_commit and not self._external_session:
+            self.session.commit()
+
     def get_job(self, job_id: str) -> Optional[JobState]:
-        """Retrieve job state by ID using ORM."""
-        job = self.session.query(Job).filter(Job.job_id == job_id).first()
+        """
+        Retrieve job state by ID using ORM with eager loading.
+
+        Uses selectinload to fetch related documents efficiently.
+        This executes 2 queries total (not N+1):
+        1. SELECT job WHERE job_id = ?
+        2. SELECT documents WHERE job_id IN (?)
+
+        More efficient than joinedload for one-to-many relationships.
+        """
+        job = (
+            self.session.query(Job)
+            .options(selectinload(Job.documents))  # Eager load documents
+            .filter(Job.job_id == job_id)
+            .first()
+        )
         if not job:
             return None
-        
-        # Get documents for this job
-        documents = self.session.query(Document).filter(Document.job_id == job_id).all()
+
+        # Documents are already loaded via selectinload
         doc_summaries = [
             JobDocumentSummary(id=doc.doc_id, name=doc.name, status=doc.status)
-            for doc in documents
+            for doc in job.documents
         ]
-        
+
         return JobState(
             job_id=job.job_id,
             job_name=job.job_name,
@@ -876,17 +1231,17 @@ class MetadataStore:
             documents=doc_summaries,
             stats=job.stats
         )
-    
+
     def list_documents(self, limit: int = 100, offset: int = 0,
                       status: Optional[str] = None) -> List[DocumentMetadata]:
         """List documents with pagination and optional filtering using ORM."""
         query = self.session.query(Document)
-        
+
         if status:
             query = query.filter(Document.status == status)
-        
+
         query = query.order_by(Document.submitted_at.desc()).limit(limit).offset(offset)
-        
+
         documents = []
         for doc in query.all():
             documents.append(DocumentMetadata(
@@ -902,39 +1257,85 @@ class MetadataStore:
                 metadata=doc.metadata
             ))
         return documents
-    
+
     def list_jobs(self, limit: int = 100, offset: int = 0,
                  status: Optional[str] = None) -> List[JobState]:
-        """List jobs with pagination and optional filtering using ORM."""
-        query = self.session.query(Job)
-        
+        """
+        List jobs with pagination and optional filtering using ORM.
+
+        Uses selectinload to fetch related documents efficiently.
+        This executes 2 queries total (not N+1):
+        1. SELECT jobs with pagination and filtering
+        2. SELECT all documents WHERE job_id IN (job1, job2, ...)
+
+        Much more efficient than N separate queries or joinedload with duplicates.
+        """
+        query = self.session.query(Job).options(selectinload(Job.documents))
+
         if status:
             query = query.filter(Job.status == status)
-        
+
         query = query.order_by(Job.submitted_at.desc()).limit(limit).offset(offset)
-        
+
         jobs = []
         for job in query.all():
-            # Get documents for each job
-            documents = self.session.query(Document).filter(Document.job_id == job.job_id).all()
+            # Documents are already loaded via selectinload
             doc_summaries = [
                 JobDocumentSummary(id=doc.doc_id, name=doc.name, status=doc.status)
-                for doc in documents
-            ]
-            
-            jobs.append(JobState(
-                job_id=job.job_id,
-                job_name=job.job_name,
-                operation=job.operation,
-                status=job.status,
-                submitted_at=job.submitted_at.isoformat() if job.submitted_at else None,
-                completed_at=job.completed_at.isoformat() if job.completed_at else None,
-                error=job.error,
-                documents=doc_summaries,
-                stats=job.stats
-            ))
-        return jobs
+                for doc in job.documents
+
+**Usage Examples:**
+
+```python
+# Example 1: Single operation (auto-commit)
+db_store = MetadataStore()
+db_store.save_document(doc)  # Commits automatically
+
+# Example 2: Atomic multi-operation using transaction context manager
+db_store = MetadataStore()
+with db_store.transaction():
+    db_store.update_document_metadata(doc_id, {"status": DocStatus.COMPLETED})
+    db_store.save_job(job)  # Both operations committed together
+# Commits here, or rolls back on exception
+
+# Example 3: Manual transaction control
+db_store = MetadataStore()
+try:
+    db_store.save_document(doc, auto_commit=False)
+    db_store.update_document_metadata(doc_id, updates, auto_commit=False)
+    db_store.save_job(job, auto_commit=False)
+    db_store.commit()  # Explicit commit
+except Exception:
+    db_store.rollback()  # Explicit rollback
+    raise
+
+# Example 4: Using external session for fine-grained control
+from digitize.database import SessionLocal
+
+session = SessionLocal()
+try:
+    db_store = MetadataStore(session=session)
+
+    # Multiple operations in same transaction
+    db_store.save_document(doc, auto_commit=False)
+    db_store.save_job(job, auto_commit=False)
+
+    # Commit when ready
+    session.commit()
+except Exception:
+    session.rollback()
+    raise
+finally:
+    session.close()
 ```
+
+**Transaction Management Benefits:**
+
+- ✅ **Atomicity**: Multiple operations succeed or fail together
+- ✅ **Consistency**: Database always in valid state
+- ✅ **Flexibility**: Choose auto-commit for simple ops, explicit transactions for complex ones
+- ✅ **Safety**: Automatic rollback on exceptions
+- ✅ **Backward Compatible**: Existing code with auto_commit=True works unchanged
 
 **Benefits of SQLAlchemy Implementation:**
 - ✅ **Type Safety**: ORM models provide compile-time type checking
@@ -945,17 +1346,195 @@ class MetadataStore:
 - ✅ **Relationship Handling**: Automatic JOIN operations via relationships
 - ✅ **Transaction Management**: Automatic commit/rollback on errors
 
-### Dependencies
+**Eager Loading Strategy: `selectinload` vs `joinedload`**
+
+SQLAlchemy provides two main eager loading strategies:
+
+1. **`joinedload`** - Uses SQL JOIN in a single query
+   ```sql
+   SELECT jobs.*, documents.*
+   FROM jobs
+   LEFT OUTER JOIN documents ON jobs.job_id = documents.job_id
+   WHERE jobs.job_id = ?
+   ```
+   - ✅ Single query
+   - ❌ Can return duplicate rows (one per document)
+   - ❌ Less efficient for one-to-many with many related records
+   - ✅ Good for one-to-one or small one-to-many relationships
+
+2. **`selectinload`** - Uses separate optimized query with IN clause
+   ```sql
+   -- Query 1: Get jobs
+   SELECT * FROM jobs WHERE job_id = ?
+
+   -- Query 2: Get all related documents in one query
+   SELECT * FROM documents WHERE job_id IN (?, ?, ...)
+   ```
+   - ✅ Two queries total (not N+1)
+   - ✅ No duplicate rows
+   - ✅ More efficient for one-to-many with many related records
+   - ✅ Better for collections with many items
+   - ✅ **Recommended for most one-to-many relationships**
+
+**For our use case (Job → Documents):**
+- Each job can have many documents (one-to-many)
+- `selectinload` is more efficient and preferred
+- Avoids row duplication in result set
+- Better performance when jobs have many documents
+
+**JSONB Metadata Updates: Deep Merge Strategy**
+
+PostgreSQL's native `||` operator performs **shallow merge** on JSONB:
+
+```python
+# PROBLEM: Shallow merge loses nested data
+existing = {"pages": 5, "timing_in_secs": {"digitizing": 10, "processing": 20}}
+update = {"timing_in_secs": {"chunking": 15}}
+result = existing || update  # PostgreSQL || operator
+# Result: {"pages": 5, "timing_in_secs": {"chunking": 15}}
+# ❌ Lost digitizing and processing times!
+```
+
+**Our Solution: Python-based Deep Merge**
+
+The `_deep_merge_jsonb()` helper function performs recursive deep merge:
+
+```python
+def _deep_merge_jsonb(existing: Dict, updates: Dict) -> Dict:
+    """Recursively merge dictionaries, preserving nested structures."""
+    result = existing.copy()
+    for key, value in updates.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = self._deep_merge_jsonb(result[key], value)  # Recurse
+        else:
+            result[key] = value
+    return result
+```
+
+**Example: Updating timing_in_secs incrementally**
+
+```python
+# Initial state
+doc.metadata = {
+    "pages": 10,
+    "tables": 3,
+    "timing_in_secs": {
+        "digitizing": 5.2,
+        "processing": 3.1
+    }
+}
+
+# Update 1: Add chunking time
+db_store.update_document_metadata(doc_id, {
+    "metadata": {"timing_in_secs": {"chunking": 2.5}}
+})
+# Result: All previous timing fields preserved + chunking added
+# {"pages": 10, "tables": 3, "timing_in_secs": {"digitizing": 5.2, "processing": 3.1, "chunking": 2.5}}
+
+# Update 2: Add indexing time
+db_store.update_document_metadata(doc_id, {
+    "metadata": {"timing_in_secs": {"indexing": 1.8}}
+})
+# Result: All timing fields preserved + indexing added
+# {"pages": 10, "tables": 3, "timing_in_secs": {"digitizing": 5.2, "processing": 3.1, "chunking": 2.5, "indexing": 1.8}}
+```
+
+**Why Deep Merge Matters:**
+
+- ✅ **Incremental Updates**: Can update individual timing fields as pipeline stages complete
+- ✅ **Data Preservation**: Never lose existing nested data during updates
+- ✅ **Pipeline Compatibility**: Each stage (digitizing, processing, chunking, indexing) can update its own timing independently
+- ✅ **Backward Compatible**: Works with existing code that updates metadata incrementally
+
+**Performance Consideration:**
+
+Deep merge is performed in Python (not SQL) because:
+- PostgreSQL's `jsonb_set()` requires explicit paths for each nested key
+- Python recursive merge is simpler and more maintainable
+- Metadata updates are infrequent (per document, not per query)
+- The overhead is negligible compared to document processing time
+
+- ✅ **Eager Loading Optimization**: Uses `selectinload()` to avoid N+1 query problems when fetching related documents
+- ✅ **Query Efficiency**: Single query fetches job and all related documents instead of separate queries per job
+
+### Phase 2: Code Implementation (Week 2)
+
+#### 2.1 Dependencies
 
 **File: `spyre-rag/requirements.txt`** (add these lines)
 ```
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.0  # PostgreSQL driver
-alembic>=1.12.0  # For database migrations (optional but recommended)
-            self._put_conn(conn)
 ```
 
-#### 2.2 Update StatusManager
+**File: `spyre-rag/requirements-test.txt`** (add for testing)
+```
+pytest>=7.0.0
+testcontainers[postgres]>=3.7.0  # For PostgreSQL test containers
+```
+
+**Why testcontainers for testing?**
+- Code uses PostgreSQL-specific features (JSONB, ON CONFLICT DO UPDATE, JSONB || operator)
+- SQLite cannot be used for testing as it doesn't support these features
+- testcontainers spins up a real PostgreSQL instance in Docker for tests
+- Tests run against actual PostgreSQL, ensuring compatibility
+- Automatic cleanup after tests complete
+
+#### 2.2 Database Connection Setup
+
+**File: `spyre-rag/src/digitize/database.py`**
+
+```python
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.pool import QueuePool
+import os
+from digitize.models import Base
+
+# Database configuration from environment
+DB_HOST = os.getenv("POSTGRES_HOST", "localhost")
+DB_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
+DB_NAME = os.getenv("POSTGRES_DB", "digitize_metadata")
+DB_USER = os.getenv("POSTGRES_USER", "digitize_user")
+DB_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "5"))
+
+# Create database URL
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+# Create engine with connection pooling
+engine = create_engine(
+    DATABASE_URL,
+    poolclass=QueuePool,
+    pool_size=DB_POOL_SIZE,
+    max_overflow=DB_MAX_OVERFLOW,
+    pool_pre_ping=True,  # Verify connections before using
+    echo=False  # Set to True for SQL query logging during development
+)
+
+# Create session factory
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Thread-safe session
+SessionScoped = scoped_session(SessionLocal)
+
+def get_session():
+    """Get database session with automatic cleanup."""
+    session = SessionScoped()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+```
+
+**Note:** No `init_db()` or schema creation function needed - tables are created by init container before application starts.
+
+#### 2.3 Update StatusManager
 
 **File: `spyre-rag/src/digitize/status.py`** (modifications)
 ```python
@@ -969,36 +1548,36 @@ class StatusManager:
         self._job_lock = threading.Lock()
         self._doc_locks: dict[str, threading.Lock] = {}
         self._doc_locks_lock = threading.Lock()
-    
+
     def update_doc_metadata(self, doc_id: str, details: Mapping[str, Any], error: str = "") -> None:
         """Updates document metadata in PostgreSQL."""
         doc_lock = self._get_doc_lock(doc_id)
         with doc_lock:
             try:
                 updates = {}
-                
+
                 # Categorize fields
                 metadata_fields, top_level_fields = self._categorize_fields(details)
-                
+
                 # Add error if provided
                 if error:
                     top_level_fields["error"] = str(error)
                     if "status" not in top_level_fields:
                         top_level_fields["status"] = DocStatus.FAILED
-                
+
                 # Merge metadata updates
                 if metadata_fields:
                     updates['metadata'] = metadata_fields
-                
+
                 # Add top-level updates
                 updates.update(top_level_fields)
-                
+
                 # Update in database
                 self.db_store.update_document_metadata(doc_id, updates)
                 logger.debug(f"✅ Successfully updated metadata for {doc_id}")
             except Exception as e:
                 logger.error(f"❌ Failed to update metadata for {doc_id}: {str(e)}", exc_info=True)
-    
+
     def update_job_progress(self, doc_id: str, doc_status: DocStatus, job_status: JobStatus, error: str = ""):
         """Updates job progress in PostgreSQL."""
         with self._job_lock:
@@ -1008,19 +1587,19 @@ class StatusManager:
                 if not job:
                     logger.error(f"Job {self.job_id} not found")
                     return
-                
+
                 # Update document status if doc_id provided
                 if doc_id:
                     for doc in job.documents:
                         if doc.id == doc_id:
                             doc.status = doc_status.value
                             break
-                
+
                 # Recalculate stats
                 status_counts = {}
                 for doc in job.documents:
                     status_counts[doc.status] = status_counts.get(doc.status, 0) + 1
-                
+
                 job.stats.completed = status_counts.get(DocStatus.COMPLETED.value, 0)
                 job.stats.failed = status_counts.get(DocStatus.FAILED.value, 0)
                 job.stats.in_progress = (
@@ -1029,7 +1608,7 @@ class StatusManager:
                     status_counts.get(DocStatus.PROCESSED.value, 0) +
                     status_counts.get(DocStatus.CHUNKED.value, 0)
                 )
-                
+
                 # Update job-level fields
                 job.status = job_status
                 if job_status in [JobStatus.COMPLETED, JobStatus.FAILED]:
@@ -1038,10 +1617,10 @@ class StatusManager:
                     failed_docs = job.stats.failed
                     if total_docs > 0 and (completed_docs + failed_docs) == total_docs:
                         job.completed_at = get_utc_timestamp()
-                
+
                 if error and job_status == JobStatus.FAILED:
                     job.error = str(error)
-                
+
                 # Save to database
                 self.db_store.save_job(job)
             except Exception as e:
@@ -1062,12 +1641,30 @@ from digitize.document import DocumentMetadata
 from digitize.job import JobState, JobStats, JobDocumentSummary
 from digitize.types import DocStatus, JobStatus, OutputFormat
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def test_engine():
-    """Create in-memory SQLite database for testing."""
-    engine = create_engine('sqlite:///:memory:', echo=True)
-    Base.metadata.create_all(engine)
-    return engine
+    """
+    Create PostgreSQL test database.
+
+    IMPORTANT: Cannot use SQLite for testing because the code uses
+    PostgreSQL-specific features:
+    - JSONB column type
+    - INSERT ... ON CONFLICT DO UPDATE (upsert)
+    - JSONB || operator for merging JSON
+
+    Options for test database:
+    1. Use testcontainers-python to spin up PostgreSQL in Docker
+    2. Use a dedicated test PostgreSQL instance
+    3. Use PostgreSQL running in CI/CD pipeline
+    """
+    # Option 1: Using testcontainers (recommended)
+    from testcontainers.postgres import PostgresContainer
+
+    with PostgresContainer("postgres:15-alpine") as postgres:
+        engine = create_engine(postgres.get_connection_url(), echo=True)
+        Base.metadata.create_all(engine)
+        yield engine
+        Base.metadata.drop_all(engine)
 
 @pytest.fixture
 def db_store(test_engine):
@@ -1076,6 +1673,7 @@ def db_store(test_engine):
     store = MetadataStore()
     store.session = Session()
     yield store
+    store.session.rollback()  # Rollback any uncommitted changes
     store.session.close()
 
 def test_save_and_get_document(db_store):
@@ -1090,10 +1688,10 @@ def test_save_and_get_document(db_store):
         job_id="test_job_1",
         metadata={"pages": 10}
     )
-    
+
     db_store.save_document(doc)
     retrieved = db_store.get_document("test_doc_1")
-    
+
     assert retrieved is not None
     assert retrieved.id == doc.id
     assert retrieved.name == doc.name
@@ -1111,13 +1709,87 @@ def test_update_document_metadata(db_store):
         job_id="test_job_1",
         metadata={}
     )
-    
+
     db_store.save_document(doc)
     db_store.update_document_metadata("test_doc_2", {
         "status": DocStatus.COMPLETED.value,
         "metadata": {"pages": 20, "tables": 5}
     })
-    
+
+def test_deep_merge_metadata(db_store):
+    """
+    Test that metadata updates perform DEEP merge, not shallow merge.
+
+    This is critical for nested structures like timing_in_secs where we want
+    to update individual timing fields without losing other timing data.
+    """
+    # Create document with initial nested metadata
+    doc = DocumentMetadata(
+        id="test_doc_deep_merge",
+        name="test.pdf",
+        type="digitization",
+        status=DocStatus.IN_PROGRESS,
+        output_format=OutputFormat.JSON,
+        submitted_at="2024-01-01T00:00:00Z",
+        job_id="test_job_1",
+        metadata={
+            "pages": 10,
+            "tables": 3,
+            "timing_in_secs": {
+                "digitizing": 5.2,
+                "processing": 3.1
+            }
+        }
+    )
+    db_store.save_document(doc)
+
+    # Update only chunking time - should preserve digitizing and processing
+    db_store.update_document_metadata("test_doc_deep_merge", {
+        "metadata": {
+            "timing_in_secs": {
+                "chunking": 2.5
+            }
+        }
+    })
+
+    # Verify deep merge preserved all timing fields
+    retrieved = db_store.get_document("test_doc_deep_merge")
+    assert retrieved.metadata["pages"] == 10  # Top-level preserved
+    assert retrieved.metadata["tables"] == 3  # Top-level preserved
+    assert retrieved.metadata["timing_in_secs"]["digitizing"] == 5.2  # Nested preserved
+    assert retrieved.metadata["timing_in_secs"]["processing"] == 3.1  # Nested preserved
+    assert retrieved.metadata["timing_in_secs"]["chunking"] == 2.5   # New field added
+
+    # Update indexing time - should preserve all previous timing fields
+    db_store.update_document_metadata("test_doc_deep_merge", {
+        "metadata": {
+            "timing_in_secs": {
+                "indexing": 1.8
+            }
+        }
+    })
+
+    # Verify all timing fields still present
+    retrieved = db_store.get_document("test_doc_deep_merge")
+    assert retrieved.metadata["timing_in_secs"]["digitizing"] == 5.2
+    assert retrieved.metadata["timing_in_secs"]["processing"] == 3.1
+    assert retrieved.metadata["timing_in_secs"]["chunking"] == 2.5
+    assert retrieved.metadata["timing_in_secs"]["indexing"] == 1.8
+
+    # Update top-level field - should preserve nested structure
+    db_store.update_document_metadata("test_doc_deep_merge", {
+        "metadata": {
+            "pages": 12  # Update top-level
+        }
+    })
+
+    retrieved = db_store.get_document("test_doc_deep_merge")
+    assert retrieved.metadata["pages"] == 12  # Updated
+    assert retrieved.metadata["tables"] == 3  # Preserved
+    # All timing fields should still be intact
+    assert len(retrieved.metadata["timing_in_secs"]) == 4
+    assert retrieved.metadata["timing_in_secs"]["digitizing"] == 5.2
+
     retrieved = db_store.get_document("test_doc_2")
     assert retrieved.status == DocStatus.COMPLETED.value
     assert retrieved.metadata["pages"] == 20
@@ -1136,7 +1808,7 @@ def test_job_with_documents(db_store):
         stats=JobStats(total_documents=2, completed=0, failed=0, in_progress=2)
     )
     db_store.save_job(job)
-    
+
     # Create documents for this job
     doc1 = DocumentMetadata(
         id="doc_1",
@@ -1158,10 +1830,10 @@ def test_job_with_documents(db_store):
         job_id="test_job_1",
         metadata={}
     )
-    
+
     db_store.save_document(doc1)
     db_store.save_document(doc2)
-    
+
     # Retrieve job and verify documents are loaded via relationship
     retrieved_job = db_store.get_job("test_job_1")
     assert retrieved_job is not None
@@ -1185,11 +1857,11 @@ def test_list_documents_with_filtering(db_store):
             metadata={}
         )
         db_store.save_document(doc)
-    
+
     # Test filtering by status
     completed_docs = db_store.list_documents(status=DocStatus.COMPLETED.value)
     assert len(completed_docs) == 3
-    
+
     failed_docs = db_store.list_documents(status=DocStatus.FAILED.value)
     assert len(failed_docs) == 2
 
@@ -1208,11 +1880,11 @@ def test_pagination(db_store):
             metadata={}
         )
         db_store.save_document(doc)
-    
+
     # Test pagination
     page1 = db_store.list_documents(limit=5, offset=0)
     page2 = db_store.list_documents(limit=5, offset=5)
-    
+
     assert len(page1) == 5
     assert len(page2) == 5
     assert page1[0].id != page2[0].id
@@ -1231,7 +1903,7 @@ def test_concurrent_document_updates(db_store):
     """Test concurrent document updates using StatusManager with ORM."""
     job_id = "concurrent_test_job"
     status_mgr = StatusManager(job_id)
-    
+
     # Create test documents
     doc_ids = [f"doc_{i}" for i in range(10)]
     for doc_id in doc_ids:
@@ -1246,16 +1918,16 @@ def test_concurrent_document_updates(db_store):
             metadata={}
         )
         db_store.save_document(doc)
-    
+
     # Update documents concurrently
     def update_doc(doc_id):
         status_mgr.update_doc_metadata(doc_id, {"pages": 100})
         status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
-    
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(update_doc, doc_id) for doc_id in doc_ids]
         concurrent.futures.wait(futures)
-    
+
     # Verify all documents were updated
     for doc_id in doc_ids:
         doc = db_store.get_document(doc_id)
@@ -1293,7 +1965,7 @@ def create_test_document(doc_id: str, engine):
     try:
         store = MetadataStore()
         store.session = session
-        
+
         doc = DocumentMetadata(
             id=doc_id,
             name=f"test_{doc_id}.pdf",
@@ -1313,12 +1985,12 @@ def test_concurrent_writes(num_documents=1000, num_workers=32):
     """Test concurrent write performance with SQLAlchemy ORM."""
     engine = setup_test_db()
     start_time = time.time()
-    
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures = [executor.submit(create_test_document, f"doc_{i}", engine)
                   for i in range(num_documents)]
         results = [f.result() for f in concurrent.futures.as_completed(futures)]
-    
+
     elapsed = time.time() - start_time
     print(f"✅ Created {len(results)} documents in {elapsed:.2f}s")
     print(f"📊 Throughput: {len(results)/elapsed:.2f} docs/sec")
@@ -1330,17 +2002,17 @@ def test_query_performance(engine):
     session = Session()
     store = MetadataStore()
     store.session = session
-    
+
     # Test pagination
     start = time.time()
     docs = store.list_documents(limit=100, offset=0)
     print(f"📄 Paginated query (100 docs): {(time.time()-start)*1000:.2f}ms")
-    
+
     # Test filtered query
     start = time.time()
     docs = store.list_documents(status=DocStatus.COMPLETED.value, limit=100)
     print(f"🔍 Filtered query: {(time.time()-start)*1000:.2f}ms")
-    
+
     session.close()
 
 if __name__ == "__main__":
@@ -1372,6 +2044,242 @@ If issues arise:
 2. Export data from PostgreSQL back to JSON files
 3. Investigate and fix issues
 4. Re-attempt migration
+
+
+## Monitoring and Observability
+
+### Key Metrics to Monitor
+
+#### 1. Connection Pool Metrics
+
+**Why Monitor:**
+- Detect connection exhaustion
+- Optimize pool sizing
+- Identify connection leaks
+
+**Metrics:**
+```python
+# Using SQLAlchemy pool events
+from sqlalchemy import event
+
+@event.listens_for(engine, "connect")
+def receive_connect(dbapi_conn, connection_record):
+    # Track connection creation
+    metrics.increment("db.connections.created")
+
+@event.listens_for(engine, "checkout")
+def receive_checkout(dbapi_conn, connection_record, connection_proxy):
+    # Track connection checkout from pool
+    metrics.increment("db.connections.checkout")
+    metrics.gauge("db.pool.size", engine.pool.size())
+    metrics.gauge("db.pool.checked_out", engine.pool.checkedout())
+    metrics.gauge("db.pool.overflow", engine.pool.overflow())
+```
+
+**Key Metrics:**
+- `db.pool.size` - Current pool size
+- `db.pool.checked_out` - Connections currently in use
+- `db.pool.overflow` - Overflow connections created
+- `db.pool.checked_in` - Available connections
+- `db.connections.wait_time` - Time waiting for connection
+
+**Alerts:**
+- Pool utilization > 80% (warning)
+- Pool utilization > 95% (critical)
+- Connection wait time > 100ms (warning)
+
+#### 2. Query Performance Metrics
+
+**Why Monitor:**
+- Identify slow queries
+- Detect N+1 query problems
+- Track query patterns
+
+**Metrics to Track:**
+```python
+# Using SQLAlchemy events
+@event.listens_for(engine, "before_cursor_execute")
+def receive_before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    context._query_start_time = time.time()
+
+@event.listens_for(engine, "after_cursor_execute")
+def receive_after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    total_time = time.time() - context._query_start_time
+    metrics.histogram("db.query.duration", total_time * 1000)  # milliseconds
+    metrics.increment("db.query.count")
+```
+
+**Key Metrics:**
+- `db.query.duration.p50` - Median query latency
+- `db.query.duration.p95` - 95th percentile latency
+- `db.query.duration.p99` - 99th percentile latency
+- `db.query.count` - Total queries executed
+- `db.query.errors` - Failed queries
+
+**Alerts:**
+- p95 latency > 100ms (warning)
+- p99 latency > 500ms (critical)
+- Query error rate > 1% (critical)
+
+#### 3. Database Health Metrics
+
+**PostgreSQL Queries:**
+
+```sql
+-- Connection count
+SELECT count(*) as active_connections
+FROM pg_stat_activity
+WHERE state = 'active';
+
+-- Table bloat (dead tuples)
+SELECT schemaname, tablename,
+       n_dead_tup, n_live_tup,
+       ROUND(100.0 * n_dead_tup / NULLIF(n_live_tup + n_dead_tup, 0), 2) as dead_tuple_percent
+FROM pg_stat_user_tables
+WHERE n_dead_tup > 1000
+ORDER BY n_dead_tup DESC;
+
+-- Index usage
+SELECT schemaname, tablename, indexname,
+       idx_scan, idx_tup_read, idx_tup_fetch
+FROM pg_stat_user_indexes
+WHERE idx_scan = 0  -- Unused indexes
+ORDER BY pg_relation_size(indexrelid) DESC;
+
+-- Cache hit ratio (should be > 99%)
+SELECT
+    sum(heap_blks_read) as heap_read,
+    sum(heap_blks_hit) as heap_hit,
+    ROUND(100.0 * sum(heap_blks_hit) / NULLIF(sum(heap_blks_hit) + sum(heap_blks_read), 0), 2) as cache_hit_ratio
+FROM pg_statio_user_tables;
+
+-- Long running queries
+SELECT pid, now() - query_start as duration, query, state
+FROM pg_stat_activity
+WHERE state != 'idle'
+  AND now() - query_start > interval '5 seconds'
+ORDER BY duration DESC;
+```
+
+**Key Metrics:**
+- `db.connections.active` - Active connections
+- `db.connections.idle` - Idle connections
+- `db.table.bloat_percent` - Dead tuple percentage
+- `db.cache.hit_ratio` - Cache hit ratio (target: >99%)
+- `db.index.unused` - Count of unused indexes
+- `db.query.long_running` - Queries running > 5s
+
+**Alerts:**
+- Active connections > 80% of max_connections (warning)
+- Table bloat > 20% (warning), > 50% (critical)
+- Cache hit ratio < 95% (warning), < 90% (critical)
+- Long running queries > 30s (warning)
+
+#### 4. Application-Level Metrics
+
+**Business Metrics:**
+```python
+# Track document processing
+metrics.histogram("digitize.document.processing_time", duration_seconds)
+metrics.increment("digitize.document.status", tags={"status": doc_status})
+metrics.gauge("digitize.job.active_count", active_job_count)
+
+# Track database operations
+metrics.histogram("digitize.db.save_document.duration", duration_ms)
+metrics.histogram("digitize.db.get_job.duration", duration_ms)
+metrics.increment("digitize.db.operation.errors", tags={"operation": "save_document"})
+```
+
+**Key Metrics:**
+- `digitize.document.processing_time.p95` - Document processing latency
+- `digitize.job.active_count` - Currently active jobs
+- `digitize.db.operation.duration.p95` - Database operation latency
+- `digitize.db.operation.errors` - Database operation failures
+
+#### 5. Table Size and Growth
+
+**Monitor Table Growth:**
+```sql
+-- Table sizes
+SELECT
+    schemaname,
+    tablename,
+    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as total_size,
+    pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) as table_size,
+    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename) - pg_relation_size(schemaname||'.'||tablename)) as index_size
+FROM pg_tables
+WHERE schemaname = 'public'
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+
+-- Row counts
+SELECT
+    schemaname,
+    tablename,
+    n_live_tup as row_count,
+    n_dead_tup as dead_rows
+FROM pg_stat_user_tables
+ORDER BY n_live_tup DESC;
+```
+
+**Key Metrics:**
+- `db.table.size_bytes` - Table size in bytes
+- `db.table.row_count` - Number of rows
+- `db.table.growth_rate` - Rows added per day
+- `db.index.size_bytes` - Index size in bytes
+
+### Monitoring Tools
+
+**Recommended Stack:**
+1. **Prometheus** - Metrics collection
+2. **Grafana** - Visualization and dashboards
+3. **pg_stat_statements** - PostgreSQL query statistics
+4. **pgBadger** - PostgreSQL log analyzer
+
+**Dashboard Panels:**
+1. Connection Pool Utilization (gauge)
+2. Query Latency Percentiles (line chart)
+3. Active Connections (time series)
+4. Cache Hit Ratio (gauge)
+5. Table Bloat (bar chart)
+6. Slow Queries (table)
+7. Database Size Growth (area chart)
+8. Error Rate (time series)
+
+### Maintenance Tasks
+
+**Regular Maintenance:**
+```sql
+-- Vacuum to reclaim space (run weekly)
+VACUUM ANALYZE jobs;
+VACUUM ANALYZE documents;
+
+-- Reindex if needed (run monthly or when bloat > 30%)
+REINDEX TABLE jobs;
+REINDEX TABLE documents;
+
+-- Update statistics (run daily)
+ANALYZE jobs;
+ANALYZE documents;
+```
+
+**Automated Maintenance:**
+- Enable autovacuum (should be on by default)
+- Configure autovacuum thresholds based on table size
+- Monitor autovacuum activity
+
+```sql
+-- Check autovacuum settings
+SELECT name, setting
+FROM pg_settings
+WHERE name LIKE 'autovacuum%';
+
+-- Monitor autovacuum activity
+SELECT schemaname, tablename, last_vacuum, last_autovacuum, last_analyze, last_autoanalyze
+FROM pg_stat_user_tables
+ORDER BY last_autovacuum DESC NULLS LAST;
+```
+
+---
 
 ---
 
