@@ -1,4 +1,5 @@
 @use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/type";
 
 .noDataContent {
   padding: spacing.$spacing-07;
@@ -14,7 +15,7 @@
 
 .deleteConfirmation {
   margin-top: spacing.$spacing-07;
-  font-weight: bolder;
+  @include type.type-style("heading-compact-01");
 }
 
 .customToast {
@@ -41,4 +42,57 @@
     width: auto;
     min-width: spacing.$spacing-13;
   }
+}
+
+:global(.cds--overflow-menu-options) {
+  &:has(.overflowMenuContent) {
+    min-width: 234px;
+    width: 234px;
+  }
+
+  &:not(:has(.overflowMenuContent)).cds--overflow-menu--flip {
+    left: auto;
+    right: spacing.$spacing-03;
+  }
+}
+
+.overflowMenuContent {
+  padding: spacing.$spacing-05;
+  padding-bottom: 0;
+  width: 100%;
+}
+
+.overflowMenuHeading {
+  margin-bottom: spacing.$spacing-03;
+  @include type.type-style("heading-compact-01");
+}
+
+.overflowMenuActions {
+  margin-top: spacing.$spacing-03;
+  margin-left: calc(-1 * spacing.$spacing-05);
+  margin-right: calc(-1 * spacing.$spacing-05);
+  display: flex;
+  gap: 0;
+
+  :global(.cds--btn) {
+    flex: 1;
+    border-radius: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    &:first-child {
+      border-bottom-left-radius: 0;
+    }
+
+    &:last-child {
+      border-bottom-right-radius: 0;
+    }
+  }
+}
+
+.overflowMenuButton {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 0;
 }

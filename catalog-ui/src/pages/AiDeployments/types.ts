@@ -31,12 +31,10 @@ export interface AppState {
   hasError: boolean;
   visibleColumns: Record<string, boolean>;
   filters: {
-    architectures: string[];
-    services: string[];
+    types: string[];
   };
   pendingFilters: {
-    architectures: string[];
-    services: string[];
+    types: string[];
   };
 }
 
@@ -60,7 +58,7 @@ export const ACTION_TYPES = {
   SET_SELECTED_ROW_ID: "SET_SELECTED_ROW_ID",
   TOGGLE_COLUMN_VISIBILITY: "TOGGLE_COLUMN_VISIBILITY",
   RESET_COLUMN_VISIBILITY: "RESET_COLUMN_VISIBILITY",
-  SET_PENDING_FILTER: "SET_PENDING_FILTER",
+  TOGGLE_PENDING_TYPE_FILTER: "TOGGLE_PENDING_TYPE_FILTER",
   APPLY_FILTERS: "APPLY_FILTERS",
   RESET_FILTERS: "RESET_FILTERS",
 } as const;
@@ -86,12 +84,11 @@ export type AppAction =
   | { type: typeof ACTION_TYPES.SET_EXPORT_ERROR; payload: string }
   | { type: typeof ACTION_TYPES.CLEAR_EXPORT_ERROR }
   | { type: typeof ACTION_TYPES.SET_SELECTED_ROW_ID; payload: string | null }
-  | { type: typeof ACTION_TYPES.SET_IS_DELETING; payload: boolean }
   | { type: typeof ACTION_TYPES.TOGGLE_COLUMN_VISIBILITY; payload: string }
   | { type: typeof ACTION_TYPES.RESET_COLUMN_VISIBILITY }
   | {
-      type: typeof ACTION_TYPES.SET_PENDING_FILTER;
-      payload: { category: "architectures" | "services"; value: string };
+      type: typeof ACTION_TYPES.TOGGLE_PENDING_TYPE_FILTER;
+      payload: { value: string };
     }
   | { type: typeof ACTION_TYPES.APPLY_FILTERS }
   | { type: typeof ACTION_TYPES.RESET_FILTERS };
@@ -205,12 +202,6 @@ export const getUniqueTypes = (rows: AiDeploymentRow[]): string[] => {
   return Array.from(new Set(rows.map((row) => row.type))).sort();
 };
 
-// Filter categories - define which types belong to which category
-export const FILTER_CATEGORIES = {
-  architectures: ["Digital assistant", "Deep process", "Summary"],
-  services: ["Translation", "Question and an..."],
-};
-
 // Initial state
 export const INITIAL_STATE: AppState = {
   search: "",
@@ -239,12 +230,10 @@ export const INITIAL_STATE: AppState = {
     messages: true,
   },
   filters: {
-    architectures: [],
-    services: [],
+    types: [],
   },
   pendingFilters: {
-    architectures: [],
-    services: [],
+    types: [],
   },
 };
 
@@ -347,17 +336,16 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           messages: true,
         },
       };
-    case ACTION_TYPES.SET_PENDING_FILTER: {
-      const { category, value } = action.payload;
-      const currentFilters = state.pendingFilters[category];
+    case ACTION_TYPES.TOGGLE_PENDING_TYPE_FILTER: {
+      const { value } = action.payload;
+      const currentFilters = state.pendingFilters.types;
       const newFilters = currentFilters.includes(value)
         ? currentFilters.filter((v) => v !== value)
         : [...currentFilters, value];
       return {
         ...state,
         pendingFilters: {
-          ...state.pendingFilters,
-          [category]: newFilters,
+          types: newFilters,
         },
       };
     }
@@ -365,20 +353,17 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       return {
         ...state,
         filters: {
-          architectures: [...state.pendingFilters.architectures],
-          services: [...state.pendingFilters.services],
+          types: state.pendingFilters.types,
         },
       };
     case ACTION_TYPES.RESET_FILTERS:
       return {
         ...state,
         filters: {
-          architectures: [],
-          services: [],
+          types: [],
         },
         pendingFilters: {
-          architectures: [],
-          services: [],
+          types: [],
         },
       };
     default:

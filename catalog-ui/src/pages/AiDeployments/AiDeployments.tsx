@@ -41,7 +41,6 @@ import {
   INITIAL_STATE,
   appReducer,
   getUniqueTypes,
-  FILTER_CATEGORIES,
 } from "./types";
 
 const AiDeploymentsPage = () => {
@@ -49,14 +48,6 @@ const AiDeploymentsPage = () => {
 
   // Get unique types dynamically from data
   const uniqueTypes = getUniqueTypes(state.rowsData);
-
-  // Categorize types into architectures and services
-  const availableArchitectures = uniqueTypes.filter((type) =>
-    FILTER_CATEGORIES.architectures.includes(type),
-  );
-  const availableServices = uniqueTypes.filter((type) =>
-    FILTER_CATEGORIES.services.includes(type),
-  );
 
   const handleDelete = async () => {
     if (!state.selectedRowId) {
@@ -177,16 +168,11 @@ const AiDeploymentsPage = () => {
       .toLowerCase()
       .includes(state.search.toLowerCase());
 
-    // Combine all selected filters (architectures + services)
-    const allSelectedFilters = [
-      ...state.filters.architectures,
-      ...state.filters.services,
-    ];
-
     // If no filters selected, show all (that match search)
     // If filters selected, show only rows matching any of the selected filters
     const matchesTypeFilter =
-      allSelectedFilters.length === 0 || allSelectedFilters.includes(row.type);
+      state.filters.types.length === 0 ||
+      state.filters.types.includes(row.type);
 
     return matchesSearch && matchesTypeFilter;
   });
@@ -296,58 +282,30 @@ const AiDeploymentsPage = () => {
                             className={styles.overflowMenuContent}
                             role="none"
                           >
-                            <h6 className={styles.overflowMenuHeading}>
-                              Filter architectures
-                            </h6>
+                            <h6 className={styles.overflowMenuHeading}>Type</h6>
                             <CheckboxGroup legendText="">
-                              {availableArchitectures.map((arch) => (
-                                <Checkbox
-                                  key={`filter-arch-${arch}`}
-                                  labelText={arch}
-                                  id={`filter-arch-${arch.replace(/\s+/g, "-").toLowerCase()}`}
-                                  checked={state.pendingFilters.architectures.includes(
-                                    arch,
-                                  )}
-                                  onChange={() =>
-                                    dispatch({
-                                      type: ACTION_TYPES.SET_PENDING_FILTER,
-                                      payload: {
-                                        category: "architectures",
-                                        value: arch,
-                                      },
-                                    })
-                                  }
-                                />
-                              ))}
-                            </CheckboxGroup>
-                          </li>
-                          <li
-                            className={styles.overflowMenuContent}
-                            role="none"
-                          >
-                            <h6 className={styles.overflowMenuHeading}>
-                              Filter services
-                            </h6>
-                            <CheckboxGroup legendText="">
-                              {availableServices.map((service) => (
-                                <Checkbox
-                                  key={`filter-service-${service}`}
-                                  labelText={service}
-                                  id={`filter-service-${service.replace(/\s+/g, "-").toLowerCase()}`}
-                                  checked={state.pendingFilters.services.includes(
-                                    service,
-                                  )}
-                                  onChange={() =>
-                                    dispatch({
-                                      type: ACTION_TYPES.SET_PENDING_FILTER,
-                                      payload: {
-                                        category: "services",
-                                        value: service,
-                                      },
-                                    })
-                                  }
-                                />
-                              ))}
+                              {uniqueTypes.length === 0 ? (
+                                <p>No types available</p>
+                              ) : (
+                                uniqueTypes.map((type) => (
+                                  <Checkbox
+                                    key={`filter-type-${type}`}
+                                    labelText={type}
+                                    id={`filter-type-${type.replace(/\s+/g, "-").toLowerCase()}`}
+                                    checked={state.pendingFilters.types.includes(
+                                      type,
+                                    )}
+                                    onChange={() =>
+                                      dispatch({
+                                        type: ACTION_TYPES.TOGGLE_PENDING_TYPE_FILTER,
+                                        payload: {
+                                          value: type,
+                                        },
+                                      })
+                                    }
+                                  />
+                                ))
+                              )}
                             </CheckboxGroup>
                             <div className={styles.overflowMenuActions}>
                               <Button
