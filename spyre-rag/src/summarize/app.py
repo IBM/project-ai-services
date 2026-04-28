@@ -132,13 +132,10 @@ async def handle_summarize(
     input_type: str,
     summary_length: Optional[int],
     stream: bool = False,
-    api_key: str | None = None,
 ):
-    """Core summarization logic shared by both JSON and form-data paths.
-    
-    Args:
-        api_key: API key for vLLM authentication
-    """
+    """Core summarization logic shared by both JSON and form-data paths."""
+    # Get API key from environment settings
+    api_key = settings.common.model_endpoints.vllm_api_key or None
     input_word_count = word_count(content_text)
     _validate_input_word_count(input_word_count, summary_length)
 
@@ -258,13 +255,8 @@ description=(
 response_description="Summarization result with metadata and token usage.",
 tags=["Summarization"],
 )
-async def summarize(request: Request, authorization: Optional[str] = Header(None)):
+async def summarize(request: Request):
     """Accept plain text via JSON or text/file via multipart/form-data."""
-    # Extract API key from Authorization header if provided
-    api_key = None
-    if authorization and authorization.startswith("Bearer "):
-        api_key = authorization[7:]  # Remove "Bearer " prefix
-    
     try:
         if concurrency_limiter.locked():
             raise SummarizeException(429, "SERVER_BUSY",
@@ -287,7 +279,7 @@ async def summarize(request: Request, authorization: Optional[str] = Header(None
             summary_length = validate_summary_length(body.get("length"))
             stream = bool(body.get("stream", False))
 
-            return await handle_summarize(text, "text", summary_length, stream, api_key)
+            return await handle_summarize(text, "text", summary_length, stream)
 
         # ----- Multipart / form-data path -----
         elif "multipart/form-data" in content_type:
@@ -327,7 +319,7 @@ async def summarize(request: Request, authorization: Optional[str] = Header(None
             if not content_text or not content_text.strip():
                 raise SummarizeException(400, "EMPTY_INPUT",
                                          "The provided input contains no extractable text.")
-            return await handle_summarize(content_text.strip(), "file", summary_length, stream, api_key)
+            return await handle_summarize(content_text.strip(), "file", summary_length, stream)
 
         else:
             raise SummarizeException(415, "UNSUPPORTED_CONTENT_TYPE",

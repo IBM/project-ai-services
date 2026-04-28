@@ -119,7 +119,7 @@ async def health_check():
     """
     return {"status": "ok"}
 
-async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat, api_key: str | None = None):
+async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat):
     status_mgr = StatusManager(job_id)
     job_staging_path = settings.digitize.staging_dir / f"{job_id}"
 
@@ -139,12 +139,14 @@ async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: type
         digitization_semaphore.release()
         logger.debug(f"Semaphore slot released from digitization job {job_id}")
 
-async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict, api_key: str | None = None):
+async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict):
     status_mgr = StatusManager(job_id)
     job_staging_path = settings.digitize.staging_dir / f"{job_id}"
 
     try:
         logger.info(f"🚀 Ingestion started for job: {job_id}")
+        # Get API key from environment settings
+        api_key = settings.common.model_endpoints.vllm_api_key or None
         # to_thread prevents the heavy 'ingest' process from blocking the main FastAPI event loop and returns the response to request asynchronously.
         await asyncio.to_thread(ingest, job_staging_path, job_id, doc_id_dict, api_key)
         logger.info(f"Ingestion for {job_id} completed successfully")
@@ -217,14 +219,8 @@ async def digitize_document(
         types.OutputFormat.JSON,
         description="Output format for digitization: 'json', 'md', or 'txt' (only applies to digitization operation)"
     ),
-    job_name: Optional[str] = Query(None, description="Optional human-readable name for the job"),
-    authorization: Optional[str] = Header(None)
+    job_name: Optional[str] = Query(None, description="Optional human-readable name for the job")
 ):
-    # Extract API key from Authorization header if provided
-    api_key = None
-    if authorization and authorization.startswith("Bearer "):
-        api_key = authorization[7:]  # Remove "Bearer " prefix
-    
     try:
         # 1. Early exit if no files submitted
         if not files or len(files) == 0:
@@ -263,9 +259,9 @@ async def digitize_document(
             await dg_util.stage_upload_files(job_id, filenames, str(settings.digitize.staging_dir / job_id), file_contents)
             doc_id_dict = dg_util.initialize_job_state(job_id, operation, output_format, filenames, job_name)
             if operation == types.OperationType.INGESTION:
-                background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict, api_key)
+                background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
             else:
-                background_tasks.add_task(digitize_documents, job_id, doc_id_dict, output_format, api_key)
+                background_tasks.add_task(digitize_documents, job_id, doc_id_dict, output_format)
         except Exception as e:
             sem.release()
             logger.error(f"Failed to schedule background task for job {job_id}, semaphore released: {e}")
