@@ -12,8 +12,10 @@ import (
 )
 
 const (
+	// DriverName is the PostgreSQL driver name used for database connections.
+	DriverName = "pgx"
 	// DefaultDBName is the default database name for the catalog service.
-	DefaultDBName = "ai_service"
+	DefaultDBName = "ai_services"
 	// DefaultDBPort is the default PostgreSQL port.
 	DefaultDBPort = 5432
 	// DefaultMaxOpenConns is the default maximum number of open connections.
@@ -46,7 +48,7 @@ func (c *Config) ConnectionString() string {
 
 // Connect establishes a connection to the PostgreSQL database.
 func Connect(cfg Config) (*sql.DB, error) {
-	db, err := sql.Open("pgx", cfg.ConnectionString())
+	db, err := sql.Open(DriverName, cfg.ConnectionString())
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database connection: %w", err)
 	}
@@ -84,7 +86,7 @@ func CreateDatabaseIfNotExists(cfg Config) error {
 	defer func() {
 		if closeErr := db.Close(); closeErr != nil {
 			// Log the error but don't override the main error
-			logger.Warningf("warning: failed to close database connection: %v\n", closeErr)
+			logger.Warningf("failed to close database connection: %v\n", closeErr)
 		}
 	}()
 
