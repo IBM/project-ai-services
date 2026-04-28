@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"go.yaml.in/yaml/v3"
@@ -381,25 +382,21 @@ func FlattenMapToKeys(m map[string]any, prefix string) map[string]string {
 func ValidateBaseDir(baseDir string) (string, error) {
 	// Clean the path
 	baseDir = filepath.Clean(baseDir)
-	
 	// Create ai-services subdirectory within the base directory
 	aiServicesDir := filepath.Join(baseDir, "ai-services")
-	
 	// Check if directory exists or can be created
-	if err := os.MkdirAll(aiServicesDir, 0755); err != nil {
+	if err := os.MkdirAll(aiServicesDir, constants.DirPerm); err != nil {
 		return "", fmt.Errorf("cannot create directory: %w", err)
 	}
-	
 	// Check write permissions by creating a test file
 	testFile := filepath.Join(aiServicesDir, ".ai-services-permission-test")
-	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte("test"), constants.FilePerm); err != nil {
 		return "", fmt.Errorf("no write permission: %w", err)
 	}
-	
 	// Clean up test file
 	if err := os.Remove(testFile); err != nil {
 		logger.Warningf("Failed to remove test file %s: %v\n", testFile, err)
 	}
-	
+
 	return aiServicesDir, nil
 }
