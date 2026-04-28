@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import {
   BusEventType,
   ChatCustomElement,
@@ -11,10 +12,7 @@ import { AIExplanationCard } from './AIExplanationCard.jsx';
 import { customSendMessage } from './customSendMessage.jsx';
 import HeaderNav from './Header.jsx';
 import { renderUserDefinedResponse } from './renderUserDefinedResponse.jsx';
-
-const messaging = {
-  customSendMessage,
-};
+import { ApiKeyDialog } from './ApiKeyDialog.jsx';
 
 const header = {
   title: 'DigitalAssistant',
@@ -28,6 +26,68 @@ const layout = {
 };
 
 function App() {
+  const [apiKey, setApiKey] = useState(null);
+  const [showApiKeyDialog, setShowApiKeyDialog] = useState(false);
+  const [authRequired, setAuthRequired] = useState(null); // null = checking, true/false = determined
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    // Check if authentication is required
+    const checkAuthRequirement = async () => {
+      try {
+        const response = await fetch('/v1/auth-required');
+        const data = await response.json();
+        setAuthRequired(data.auth_required);
+
+        if (data.auth_required) {
+          // Auth is required, check for stored API key
+          const storedApiKey = sessionStorage.getItem('vllm_api_key');
+          if (storedApiKey) {
+            setApiKey(storedApiKey);
+            setIsReady(true);
+          } else {
+            // Show dialog if no API key found
+            setShowApiKeyDialog(true);
+          }
+        } else {
+          // Auth not required, proceed without API key
+          setApiKey('not-needed');
+          setIsReady(true);
+        }
+      } catch (error) {
+        console.error('Error checking auth requirement:', error);
+        // On error, assume auth is required to be safe
+        setAuthRequired(true);
+        setShowApiKeyDialog(true);
+      }
+    };
+
+    checkAuthRequirement();
+  }, []);
+
+  const handleApiKeyValidated = (validatedKey) => {
+    setApiKey(validatedKey);
+    setShowApiKeyDialog(false);
+    setIsReady(true);
+  };
+
+  const handleAuthError = () => {
+    // Only handle auth errors if auth is actually required
+    if (authRequired) {
+      // Clear invalid API key and show dialog again
+      sessionStorage.removeItem('vllm_api_key');
+      setApiKey(null);
+      setShowApiKeyDialog(true);
+      setIsReady(false);
+    }
+  };
+
+  // Create messaging object with API key
+  const messaging = {
+    customSendMessage: (request, options, instance) =>
+      customSendMessage(request, options, instance, apiKey, handleAuthError),
+  };
+
   function onAfterRender(instance) {
     instance.on({ type: BusEventType.FEEDBACK, handler: feedbackHandler });
 
@@ -65,6 +125,10 @@ function App() {
 
   return (
     <>
+      <ApiKeyDialog
+        isOpen={showApiKeyDialog}
+        onApiKeyValidated={handleApiKeyValidated}
+      />
       <Theme theme="white">
         <Content id="main-content">
           <Grid fullWidth className="chat-page-grid">
@@ -75,19 +139,21 @@ function App() {
             </Column>
             <Column sm={4} md={8} lg={12}>
               <div className="chat-container">
-                <ChatCustomElement
-                  className="fullScreen"
-                  messaging={messaging}
-                  header={header}
-                  layout={layout}
-                  openChatByDefault={true}
-                  onAfterRender={onAfterRender}
-                  renderUserDefinedResponse={renderUserDefinedResponse}
-                  strings={{
-                    ai_slug_title: undefined,
-                    ai_slug_description: <AIExplanationCard />,
-                  }}
-                />
+                {isReady && apiKey && (
+                  <ChatCustomElement
+                    className="fullScreen"
+                    messaging={messaging}
+                    header={header}
+                    layout={layout}
+                    openChatByDefault={true}
+                    onAfterRender={onAfterRender}
+                    renderUserDefinedResponse={renderUserDefinedResponse}
+                    strings={{
+                      ai_slug_title: undefined,
+                      ai_slug_description: <AIExplanationCard />,
+                    }}
+                  />
+                )}
               </div>
             </Column>
           </Grid>

@@ -142,6 +142,66 @@ def limit_concurrency(f):
     return wrapper
 
 @app.get(
+    "/v1/auth-required",
+    responses={200: {"description": "Returns whether authentication is required"}},
+    tags=["models"],
+    summary="Check if authentication is required",
+    description="Check if vLLM endpoint requires API key authentication."
+)
+async def check_auth_required():
+    """Check if authentication is required by testing vLLM access without API key."""
+    logging.debug("Checking if auth is required...")
+    
+    try:
+        llm_endpoint = llm_model_dict['llm_endpoint']
+        # Try to access without API key
+        await asyncio.to_thread(query_vllm_models, llm_endpoint, None)
+        # If successful, auth is not required
+        return {"auth_required": False}
+    except Exception as e:
+        # Check if it's an authentication error
+        error_str = str(e).lower()
+        if "401" in error_str or "unauthorized" in error_str or "forbidden" in error_str:
+            # Auth is required
+            return {"auth_required": True}
+        # For other errors, assume auth might be required to be safe
+        logging.warning(f"Error checking auth requirement: {e}")
+        return {"auth_required": True}
+
+
+@app.post(
+    "/v1/validate-api-key",
+    responses={200: {"description": "API key is valid"}, 401: http_error_responses[401], 500: http_error_responses[500]},
+    tags=["models"],
+    summary="Validate vLLM API key",
+    description="Validate that the provided API key can access the vLLM endpoint."
+)
+async def validate_api_key(authorization: Optional[str] = Header(None)):
+    """Validate API key by attempting to list models from vLLM."""
+    logging.debug("Validating API key...")
+    
+    # Extract API key from Authorization header
+    api_key = None
+    if authorization and authorization.startswith("Bearer "):
+        api_key = authorization[7:]  # Remove "Bearer " prefix
+    
+    if not api_key:
+        APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "API key is required")
+    
+    try:
+        llm_endpoint = llm_model_dict['llm_endpoint']
+        # Use validate_vllm_auth which will raise an exception if auth fails
+        await asyncio.to_thread(validate_vllm_auth, llm_endpoint, api_key)
+        return {"status": "valid", "message": "API key is valid"}
+    except Exception as e:
+        # Check if it's an authentication error
+        error_str = str(e).lower()
+        if "401" in error_str or "unauthorized" in error_str or "forbidden" in error_str:
+            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "Invalid API key")
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
+
+
+@app.get(
     "/v1/models",
     response_model=ModelsResponse,
     responses={500: http_error_responses[500]},
