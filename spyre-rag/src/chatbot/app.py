@@ -3,7 +3,8 @@ import logging
 import asyncio
 import uuid
 from typing import Optional
-from fastapi import FastAPI, Request, HTTPException, Header
+from fastapi import FastAPI, Request, HTTPException, Header, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import StreamingResponse
 import json
@@ -117,6 +118,9 @@ app = FastAPI(
     version="1.0.0",
     openapi_tags=tags_metadata
 )
+
+# Simple Bearer token security scheme for Swagger UI
+security = HTTPBearer(auto_error=False, description="Enter your vLLM API key")
 app.add_exception_handler(HTTPException, http_exception_handler)
 
 @app.middleware("http")
@@ -258,16 +262,14 @@ async def check_auth_required():
     responses={200: {"description": "API key is valid"}, 401: http_error_responses[401], 500: http_error_responses[500]},
     tags=["models"],
     summary="Validate vLLM API key",
-    description="Validate that the provided API key can access the vLLM endpoint."
+    description="Validate that the provided API key can access the vLLM endpoint. **Requires API key in Authorization header** (Bearer token)."
 )
-async def validate_api_key(authorization: Optional[str] = Header(None)):
-    """Validate API key by attempting to list models from vLLM."""
+async def validate_api_key(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """Validate API key by attempting to list models from vLLM. Requires Authorization header with Bearer token."""
     logging.debug("Validating API key...")
     
-    # Extract API key from Authorization header
-    api_key = None
-    if authorization and authorization.startswith("Bearer "):
-        api_key = authorization[7:]  # Remove "Bearer " prefix
+    # Extract API key from credentials
+    api_key = credentials.credentials if credentials else None
     
     if not api_key:
         APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "API key is required")
@@ -291,15 +293,14 @@ async def validate_api_key(authorization: Optional[str] = Header(None)):
     responses={401: http_error_responses[401], 500: http_error_responses[500]},
     tags=["models"],
     summary="List LLM models",
-    description="List available models from the configured vLLM endpoint. Requires API key in Authorization header if vLLM authentication is enabled."
+    description="List available models from the configured vLLM endpoint. **Requires API key in Authorization header** (Bearer token) if vLLM authentication is enabled."
 )
-async def list_models(authorization: Optional[str] = Header(None)):
+async def list_models(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """List available LLM models. Requires Authorization header with Bearer token if authentication is enabled."""
     logging.debug("List models..")
     
-    # Extract API key from Authorization header if provided
-    api_key = None
-    if authorization and authorization.startswith("Bearer "):
-        api_key = authorization[7:]  # Remove "Bearer " prefix
+    # Extract API key from credentials
+    api_key = credentials.credentials if credentials else None
     
     # Check if auth is required and enforce it
     if await is_auth_required():
@@ -361,7 +362,7 @@ async def locked_stream(stream_g, perf_stat_dict):
     response_model=ChatCompletionResponse,
     tags=["chat"],
     summary="Chat with RAG",
-    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON. Requires API key in Authorization header if vLLM authentication is enabled.",
+    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON. **Requires API key in Authorization header** (Bearer token) if vLLM authentication is enabled.",
     responses={
         200: {
             "description": "Successful Response",
@@ -393,11 +394,9 @@ async def locked_stream(stream_g, perf_stat_dict):
         503: http_error_responses[503]
     }
 )
-async def chat_completion(req: ChatCompletionRequest, authorization: Optional[str] = Header(None)) -> ChatCompletionResponse | StreamingResponse:
-    # Extract API key from Authorization header if provided
-    api_key = None
-    if authorization and authorization.startswith("Bearer "):
-        api_key = authorization[7:]  # Remove "Bearer " prefix
+async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> ChatCompletionResponse | StreamingResponse:
+    # Extract API key from credentials
+    api_key = credentials.credentials if credentials else None
     
     # Check if auth is required and enforce it
     if await is_auth_required():
