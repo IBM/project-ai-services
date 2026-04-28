@@ -1393,8 +1393,7 @@ Authorization: Bearer <access_token>
     "description": "Answer questions in natural language by sourcing general & domain-specific knowledge",
     "version": "1.0.0",
     "type": "service",
-    "certified_by": "IBM",
-    "architectures": ["rag", "rag-cpu", "rag-dev"]
+    "certified_by": "IBM"
   },
   {
     "id": "summarization",
@@ -1402,8 +1401,7 @@ Authorization: Bearer <access_token>
     "description": "Consolidates input text into a brief statement of main points",
     "version": "1.0.0",
     "type": "service",
-    "certified_by": "IBM",
-    "architectures": ["rag", "rag-cpu", "rag-dev"]
+    "certified_by": "IBM"
   },
   {
     "id": "digitization",
@@ -1411,8 +1409,7 @@ Authorization: Bearer <access_token>
     "description": "Transforms documents such as manuals, invoices, and more into texts",
     "version": "1.0.0",
     "type": "service",
-    "certified_by": "IBM",
-    "architectures": ["rag", "rag-cpu", "rag-dev"]
+    "certified_by": "IBM"
   }
 ]
 ```
@@ -1478,7 +1475,6 @@ GET /api/v1/services/chat
   "version": "1.0.0",
   "type": "service",
   "certified_by": "IBM",
-  "architectures": ["rag", "rag-cpu", "rag-dev"],
   "dependencies": [
     {
       "id": "opensearch",
@@ -1565,12 +1561,14 @@ GET /api/v1/services/rag/params
         "memoryLimit": {
           "type": "string",
           "pattern": "^[0-9]+(Ki|Mi|Gi|Ti|Pi|Ei)$",
-          "description": "Memory limit for OpenSearch (e.g., 2Gi, 4Gi)"
+          "description": "Memory limit for OpenSearch (e.g., 2Gi, 4Gi)",
+          "x-advanced": true
         },
         "storage": {
           "type": "string",
           "pattern": "^[0-9]+(Ki|Mi|Gi|Ti|Pi|Ei)$",
-          "description": "Storage size for OpenSearch (e.g., 10Gi, 20Gi)"
+          "description": "Storage size for OpenSearch (e.g., 10Gi, 20Gi)",
+          "x-advanced": true
         },
         "auth": {
           "type": "object",
