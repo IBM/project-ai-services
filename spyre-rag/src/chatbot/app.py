@@ -36,6 +36,8 @@ from chatbot.response_utils import (
     HealthResponse,
     ModelsResponse,
     PerfMetricsResponse,
+    ReferenceRequest,
+    ReferenceResponse,
 )
 
 vectorstore = None
@@ -45,6 +47,10 @@ vectorstore_lock = asyncio.Lock()
 emb_model_dict = {}
 llm_model_dict = {}
 reranker_model_dict = {}
+
+# Cache for auth requirement check
+auth_required_cache = {"checked": False, "required": False}
+auth_cache_lock = asyncio.Lock()
 
 concurrency_limiter = BoundedSemaphore(settings.chatbot.max_concurrent_requests)
 
@@ -141,6 +147,98 @@ def limit_concurrency(f):
             concurrency_limiter.release()
     return wrapper
 
+@app.post(
+    "/reference",
+    response_model=ReferenceResponse,
+    responses={400: http_error_responses[400], 500: http_error_responses[500], 503: http_error_responses[503]},
+    tags=["retrieval"],
+    summary="Retrieve reference documents",
+    description="Search the vector store using the prompt, rerank results, and return relevant document chunks with performance metrics."
+)
+async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
+    # Validate query is not empty
+    if not req.prompt or not req.prompt.strip():
+        APIError.raise_error(ErrorCode.EMPTY_INPUT, "Query cannot be empty")
+
+    # Ensure vectorstore is initialized on first request
+    if vectorstore is None:
+        await ensure_vectorstore_initialized()
+
+    try:
+        emb_model = emb_model_dict['emb_model']
+        emb_endpoint = emb_model_dict['emb_endpoint']
+        emb_max_tokens = emb_model_dict['max_tokens']
+        reranker_model = reranker_model_dict['reranker_model']
+        reranker_endpoint = reranker_model_dict['reranker_endpoint']
+
+        # Validate query length
+        is_valid, error_msg = await asyncio.to_thread(
+            validate_query_length, req.prompt, emb_endpoint
+        )
+        if not is_valid:
+            APIError.raise_error(ErrorCode.INVALID_PARAMETER, error_msg)
+
+        docs, perf_stat_dict = await asyncio.to_thread(
+            search_only,
+            req.prompt,
+            emb_model, emb_endpoint, emb_max_tokens,
+            reranker_model,
+            reranker_endpoint,
+            settings.chatbot.num_chunks_post_search,
+            settings.chatbot.num_chunks_post_reranker,
+            vectorstore=vectorstore
+        )
+        # Store metrics in registry for reference endpoint
+        perf_registry.add_metric(perf_stat_dict)
+        return ReferenceResponse(documents=docs, perf_metrics=perf_stat_dict)
+
+    except db.VectorStoreNotReadyError as e:
+        APIError.raise_error(ErrorCode.VECTOR_STORE_NOT_READY, str(e))
+    except Exception as e:
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
+
+
+async def is_auth_required() -> bool:
+    """
+    Check if vLLM authentication is required and cache the result.
+    Returns True if auth is required, False otherwise.
+    """
+    global auth_required_cache
+    
+    # Check cache first
+    if auth_required_cache["checked"]:
+        return auth_required_cache["required"]
+    
+    async with auth_cache_lock:
+        # Double-check after acquiring lock
+        if auth_required_cache["checked"]:
+            return auth_required_cache["required"]
+        
+        try:
+            llm_endpoint = llm_model_dict['llm_endpoint']
+            # Try to access without API key
+            await asyncio.to_thread(query_vllm_models, llm_endpoint, None)
+            # If successful, auth is not required
+            auth_required_cache["checked"] = True
+            auth_required_cache["required"] = False
+            logging.debug("vLLM authentication is NOT required")
+            return False
+        except Exception as e:
+            # Check if it's an authentication error
+            error_str = str(e).lower()
+            if "401" in error_str or "unauthorized" in error_str or "forbidden" in error_str:
+                # Auth is required
+                auth_required_cache["checked"] = True
+                auth_required_cache["required"] = True
+                logging.debug("vLLM authentication IS required")
+                return True
+            # For other errors, assume auth might be required to be safe
+            logging.debug(f"Error checking auth requirement: {e}, assuming auth is required")
+            auth_required_cache["checked"] = True
+            auth_required_cache["required"] = True
+            return True
+
+
 @app.get(
     "/v1/auth-required",
     responses={200: {"description": "Returns whether authentication is required"}},
@@ -151,22 +249,8 @@ def limit_concurrency(f):
 async def check_auth_required():
     """Check if authentication is required by testing vLLM access without API key."""
     logging.debug("Checking if auth is required...")
-    
-    try:
-        llm_endpoint = llm_model_dict['llm_endpoint']
-        # Try to access without API key
-        await asyncio.to_thread(query_vllm_models, llm_endpoint, None)
-        # If successful, auth is not required
-        return {"auth_required": False}
-    except Exception as e:
-        # Check if it's an authentication error
-        error_str = str(e).lower()
-        if "401" in error_str or "unauthorized" in error_str or "forbidden" in error_str:
-            # Auth is required
-            return {"auth_required": True}
-        # For other errors, assume auth might be required to be safe
-        logging.warning(f"Error checking auth requirement: {e}")
-        return {"auth_required": True}
+    auth_required = await is_auth_required()
+    return {"auth_required": auth_required}
 
 
 @app.post(
@@ -204,10 +288,10 @@ async def validate_api_key(authorization: Optional[str] = Header(None)):
 @app.get(
     "/v1/models",
     response_model=ModelsResponse,
-    responses={500: http_error_responses[500]},
+    responses={401: http_error_responses[401], 500: http_error_responses[500]},
     tags=["models"],
     summary="List LLM models",
-    description="List available models from the configured vLLM endpoint."
+    description="List available models from the configured vLLM endpoint. Requires API key in Authorization header if vLLM authentication is enabled."
 )
 async def list_models(authorization: Optional[str] = Header(None)):
     logging.debug("List models..")
@@ -217,10 +301,19 @@ async def list_models(authorization: Optional[str] = Header(None)):
     if authorization and authorization.startswith("Bearer "):
         api_key = authorization[7:]  # Remove "Bearer " prefix
     
+    # Check if auth is required and enforce it
+    if await is_auth_required():
+        if not api_key:
+            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "API key is required when vLLM authentication is enabled")
+    
     try:
         llm_endpoint = llm_model_dict['llm_endpoint']
         return await asyncio.to_thread(query_vllm_models, llm_endpoint, api_key)
     except Exception as e:
+        # Check if it's an authentication error
+        error_str = str(e).lower()
+        if "401" in error_str or "unauthorized" in error_str or "forbidden" in error_str:
+            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "Invalid or missing API key")
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
 
 
@@ -268,7 +361,7 @@ async def locked_stream(stream_g, perf_stat_dict):
     response_model=ChatCompletionResponse,
     tags=["chat"],
     summary="Chat with RAG",
-    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON. Requires API key in Authorization header.",
+    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON. Requires API key in Authorization header if vLLM authentication is enabled.",
     responses={
         200: {
             "description": "Successful Response",
@@ -305,6 +398,16 @@ async def chat_completion(req: ChatCompletionRequest, authorization: Optional[st
     api_key = None
     if authorization and authorization.startswith("Bearer "):
         api_key = authorization[7:]  # Remove "Bearer " prefix
+    
+    # Check if auth is required and enforce it
+    if await is_auth_required():
+        if not api_key:
+            message = "API key is required when vLLM authentication is enabled"
+            if req.stream:
+                async def stream_auth_error():
+                    yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
+                return StreamingResponse(stream_auth_error(), media_type="text/event-stream", status_code=401)
+            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, message)
     
     if not req.messages:
         APIError.raise_error(ErrorCode.EMPTY_INPUT, "messages can't be empty")
