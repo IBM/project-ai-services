@@ -892,15 +892,16 @@ An async job model solves all of these while staying consistent with the pattern
 | Parameter | Type | Required | Description |
 |:---|:---|:---|:---|
 | `file` | file | Yes | A single `.txt` or `.pdf` file to summarize. |
-| `length` | integer | No | Desired summary length in words. |
+| `level` | string | Optional | Abstraction level for summary: `brief`, `standard`, or `detailed`. Length is automatically calculated based on input size and level. If not specified, the model determines the summary length automatically. |
 | `job_name` | string | No | Optional human-readable label for the job. |
+
 
 **Validation rules:**
 
 - Exactly one file must be provided.
 - The file must have a `.txt` or `.pdf` extension.
 - There is **no `MAX_INPUT_WORDS` limit** for async jobs. Documents of any size are accepted and handled via the chunked summarization strategy (see Section 6).
-- If `length` is provided, it must be a positive integer within bounds.
+- If `level` is provided, it must be one of the three `brief`, `standard`, or `detailed`.
 
 **Processing flow:**
 
@@ -908,40 +909,38 @@ An async job model solves all of these while staying consistent with the pattern
 2. Check the `concurrency_limiter` semaphore. If all 32 slots are occupied, return `429`.
 3. Generate a `job_id` (UUID).
 4. Stage the uploaded file to `/var/cache/summarize/staging/{job_id}/`.
-5. Write `{job_id}_status.json` to `/var/cache/summarize/jobs/` with initial status `accepted`.
-6. Write `{doc_id}_metadata.json` to `/var/cache/summarize/docs/`.
-7. Acquire the semaphore and launch background processing via FastAPI `BackgroundTasks`.
-8. Return `202 Accepted` with `{ "job_id": "..." }`.
+5. Insert a row into the `summarize_jobs` table with initial status `accepted`. 
+6. Acquire the semaphore and launch background processing via FastAPI `BackgroundTasks`. 
+7. Return `202 Accepted` with `{ "job_id": "..." }`.
 
 **Background worker:**
 
 1. Read the staged file and extract text (PDF via `pypdfium2`, TXT via UTF-8 decode).
-2. Update job status to `in_progress`, document status to `in_progress`.
-3. Compute word count of the extracted text.
-4. Determine summarization strategy based on input size (see Section 6):
+2. Update job row: `status = 'in_progress'`, `document_original_word_count = <word_count>`.
+3. Determine summarization strategy based on input size (see Section 6):
     - If the input fits within the context window → **direct summarization** (single LLM call).
     - If the input exceeds the context window → **chunked summarization** (chunk → summarize each → merge summaries).
-5. Write the result to `/var/cache/summarize/results/{job_id}_result.json`.
-6. Update job status to `completed` (or `failed` on error).
-7. Clean up staging directory. 
-8. Release the semaphore.
+4. Write the result to `/var/cache/summarize/results/{job_id}_result.json`. 
+5. Update job row: `status = 'completed'`, `completed_at = now()` (or `status = 'failed'`, `error = <message>` on error). 
+6. Clean up staging directory. 
+7. Release the semaphore.
 
 **Response codes:**
 
-| Status | Description |
-|:---|:---|
-| 202 Accepted | Job created successfully. |
-| 400 Bad Request | Missing file, multiple files provided, or invalid `length`. |
-| 415 Unsupported Media Type | File is not a valid `.txt` or `.pdf`. |
-| 429 Too Many Requests | Semaphore at capacity. |
-| 500 Internal Server Error | Unexpected failure. |
+| Status | Description                                                |
+|:---|:-----------------------------------------------------------|
+| 202 Accepted | Job created successfully.                                  |
+| 400 Bad Request | Missing file, multiple files provided, or invalid `level`. |
+| 415 Unsupported Media Type | File is not a valid `.txt` or `.pdf`.                      |
+| 429 Too Many Requests | Semaphore at capacity.                                     |
+| 500 Internal Server Error | Unexpected failure.                                        |
 
 **Sample request:**
 
 ```bash
 curl -X POST http://localhost:6000/v1/summarize/jobs \
   -F "file=@report.pdf" \
-  -F "length=200"
+  -F "level=brief"
 ```
 
 **Sample response (202):**
@@ -1029,7 +1028,7 @@ Returns full status and metadata of a specific job.
 ---
 ### 5.4 DELETE /v1/summarize/jobs/{job_id} — Delete Job Record
 
-Deletes the job status file and the result file. Only `completed` or `failed` jobs may be deleted.
+Deletes the job row from the `summarize_jobs` table and the associated result file from disk. Only `completed` or `failed` jobs may be deleted.
 
 **Response codes:**
 
@@ -1044,7 +1043,7 @@ Deletes the job status file and the result file. Only `completed` or `failed` jo
 
 ### 5.5 DELETE /v1/summarize/jobs — Bulk Delete All Jobs
 
-Deletes **all** job status files, document metadata files, result files, and any remaining staging data. This is the summarization equivalent of the digitize service's bulk document delete.
+Deletes **all** rows from the `summarize_jobs` table, all result files, and any remaining staging data. This is the summarization equivalent of the digitize service's bulk document delete.
 
 **Query parameters:**
 
@@ -1055,8 +1054,8 @@ Deletes **all** job status files, document metadata files, result files, and any
 **Processing flow:**
 
 1. Validate that `confirm=true`.
-2. Check for active jobs. If any job has status `accepted` or `in_progress`, reject with `409`.
-3. Delete all files under `/var/cache/summarize/jobs/`. 
+2. Check for active jobs. If any row in `summarize_jobs` has `status IN ('accepted', 'in_progress')`, reject with `409`.
+3. Delete all rows from the `summarize_jobs` table.
 4. Delete all files under `/var/cache/summarize/results/`. 
 5. Delete any remaining staging directories under `/var/cache/summarize/staging/`. 
 6. Return `204 No Content`.
@@ -1116,18 +1115,26 @@ Returns the completed summary and result metadata for the job.
 > For chunked summarization, `usage` reflects the aggregate token counts across all LLM calls (chunk summaries + final merge).
 ---
 
+## 6. Chunked Summarization for Large Documents
+
+### 6.1 Motivation
+
+The synchronous `POST /v1/summarize` endpoint enforces a `MAX_INPUT_WORDS` limit because the entire text, prompt, and output must fit within the model's context window (`MAX_MODEL_LEN = 32768` tokens) in a single call. This is appropriate for a synchronous, latency-sensitive path.
+
+For the async job path, this limit is unnecessarily restrictive. Long documents — reports, research papers, books — are a primary use case for background summarization. Instead of rejecting them, the async worker uses a **chunk-and-merge** strategy inspired by the approach described in the [IBM Granite + Docling summarization tutorial](https://www.ibm.com/think/tutorials/llm-text-summarization-alice-in-wonderland-granite-docling).
+
 ### 6.2 Strategy Overview
 
 The approach follows a two-phase pipeline:
 
 **Phase 1 — Chunk and Summarize:**
 1. Split the input text into chunks that each fit within the model's context window (accounting for the system prompt and estimated output tokens).
-2. Summarize each chunk independently with a single LLM call, producing a chunk-level summary.
+2. If the combined estimated summaries of all chunks exceed the context window, fail the job with error `FILE_SIZE_OVER_LIMIT`.
+3. Summarize each chunk independently with a single LLM call, producing a chunk-level summary.
 
 **Phase 2 — Merge:**
-3. Concatenate all chunk-level summaries.
-4. If the combined summaries fit within the context window, make a single final LLM call to produce a unified summary.
-5. If the combined summaries still exceed the context window, fail the job with error `FILE_SIZE_OVER_LIMIT`.
+4. Concatenate all chunk-level summaries.
+5. If the combined summaries fit within the context window, make a single final LLM call to produce a unified summary.
 6. In the future, if there is a demand for extra large files for this service, we can implement to apply Phase 1 recursively.
 
 ### 6.3 Decision Logic
@@ -1179,7 +1186,7 @@ The merge step uses a distinct prompt that instructs the model to combine the ch
 
 - The system prompt indicates that the input consists of summaries of sequential sections from a single document.
 - The user prompt asks the model to produce a unified summary that preserves the key points from all sections without redundancy.
-- If the user specified a `length` parameter, it is applied to the final merge call (not to individual chunk summaries).
+- If the user specified a `level` parameter, it is applied to the final merge call (not to individual chunk summaries).
 
 #### 6.6.1 Merge Prompt
 
@@ -1191,31 +1198,47 @@ You are a summarization assistant. You are given a series of summaries, each cov
 Do not add questions, explanations, headings, code, or any other text.
 ```
 
-**User prompt — with length:**
+**User prompt — with level:**
 
 ```
 The following are summaries of consecutive sections from a single document.
 Combine them into one unified summary in {target_words} words, with an allowed variance of ±50 words.
 Preserve the key points from all sections. Remove redundancy and ensure the summary reads as a single coherent text, not as a list of section summaries.
-
+CRITICAL INSTRUCTIONS:\n
+    1. Your summary MUST approach {target_words} words - do NOT stop early\n
+    2. Use the FULL available space by including:\n
+       - All key findings and main points\n
+       - Supporting details and context\n
+       - Relevant data and statistics\n
+       - Implications and significance\n
+    3. Preserve ALL numerical data EXACTLY\n
+    4. A summary under {min_words} words is considered incomplete\n\n
 Section summaries:
 {merged_chunk_summaries}
 
 Unified summary:
 ```
 
-**User prompt — without length:**
+**User prompt — without level:**
 
 ```
 The following are summaries of consecutive sections from a single document.
 Combine them into one unified summary.
 Preserve the key points from all sections. Remove redundancy and ensure the summary reads as a single coherent text, not as a list of section summaries.
-
+CRITICAL INSTRUCTIONS:\n
+    1. Use the FULL available space by including:\n
+       - All key findings and main points\n
+       - Supporting details and context\n
+       - Relevant data and statistics\n
+       - Implications and significance\n
+    2. Preserve ALL numerical data EXACTLY\n
 Section summaries:
 {merged_chunk_summaries}
 
 Unified summary:
 ```
+> **Note:** Prompt for the individual chunked summaries will be same as asynchronous summarization.
+
 
 ### 6.7 Sequence Diagram
 
@@ -1268,7 +1291,7 @@ This gives the user an accurate picture of total resource consumption.
 
 ### 6.9 Job Status Tracking for Chunked Summarization
 
-For large documents processed via chunking, the job status file tracks progress at a finer granularity:
+For large documents processed via chunking, the summarize_jobs table tracks progress at a finer granularity:
 
 ```json
 {
@@ -1289,40 +1312,131 @@ The `chunking` field is only present when the chunked strategy is in use. The `p
 
 ## 7. Storage Layout
 
-All job-related state is persisted under `/var/cache/summarize/`, which is a persistent volume mounted by the container runtime.
+### 7.1 Overview
+
+Job and document metadata is persisted in **PostgreSQL**, consistent with the recent migration of the digitize service from JSON files to a relational database. The summarization service shares the same PostgreSQL instance and uses its own tables within the same database.
+
+File-based storage is retained only for two purposes:
+
+- **Staging directory** (`/var/cache/summarize/staging/{job_id}/`): temporarily holds the uploaded file while the background worker processes it. Deleted after the job completes or fails.
+- **Result files** (`/var/cache/summarize/results/{job_id}_result.json`): stores the full summary output, token usage, and model metadata. These are kept on disk rather than in the database because summary text can be large and is read-once (fetched via `GET /v1/summarize/jobs/{job_id}/result`), making it a poor fit for a database column that would bloat the table and slow queries.
 
 ```
 /var/cache/summarize/
 ├── staging/
 │   └── {job_id}/
 │       └── report.pdf
-├── jobs/
-│   └── {job_id}_status.json
 └── results/
     └── {job_id}_result.json
 ```
-> **Note:** Compared to the digitize service, there is no separate `docs/` directory. Since each job maps to exactly one document and the result is a sub-resource of the job, a separate document metadata layer is unnecessary. Document-level information (filename, word count, processing time) is stored directly in the job status file and the result file.
 
-### 7.1 Job Status File — `{job_id}_status.json`
+### 7.2 Database Tables
+
+#### 7.2.1 `summarize_jobs` Table
+
+Stores one row per summarization job. Since each job processes exactly one document, document metadata is inlined into the job row rather than in a separate table (unlike the digitize service which has a many-to-one `documents → jobs` relationship).
+
+```python
+from sqlalchemy import Column, String, Text, Integer, DateTime, Index, CheckConstraint
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import declarative_base
+from sqlalchemy.sql import func
+
+Base = declarative_base()
+
+
+class SummarizeJob(Base):
+    """SQLAlchemy model for summarize_jobs table."""
+    __tablename__ = 'summarize_jobs'
+
+    # Job identity
+    job_id = Column(String(255), primary_key=True)
+    job_name = Column(String(500), nullable=True)
+
+    # Job status
+    status = Column(String(50), nullable=False)
+    submitted_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    error = Column(Text, nullable=True)
+
+    # Document info (inlined — one job = one document)
+    document_name = Column(String(500), nullable=False)
+    document_original_word_count = Column(Integer, nullable=True)
+
+    # Summarization parameters
+    level = Column(String(20), nullable=False, default='standard')
+
+    # Chunking progress (null when strategy is "direct")
+    chunking = Column(JSONB, nullable=True)
+    # Example: {"strategy": "chunked", "total_chunks": 12, "completed_chunks": 7, "phase": "summarizing"}
+
+    # Timestamps
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Constraints
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('accepted', 'in_progress', 'completed', 'failed')",
+            name='chk_summarize_job_status'
+        ),
+        CheckConstraint(
+            "level IN ('brief', 'standard', 'detailed')",
+            name='chk_summarize_job_level'
+        ),
+        Index('idx_summarize_jobs_submitted_at_status', 'submitted_at', 'status'),
+    )
+```
+
+#### 7.2.2 Column Details
+
+| Column | Type | Nullable | Description |
+|:---|:---|:---|:---|
+| `job_id` | `String(255)` | No (PK) | UUID generated at job creation. |
+| `job_name` | `String(500)` | Yes | Optional human-readable label provided by the user. |
+| `status` | `String(50)` | No | One of: `accepted`, `in_progress`, `completed`, `failed`. |
+| `submitted_at` | `DateTime(tz)` | No | Timestamp when the job was created. |
+| `completed_at` | `DateTime(tz)` | Yes | Timestamp when the job finished (completed or failed). `NULL` while active. |
+| `error` | `Text` | Yes | Error message if the job failed. `NULL` on success. |
+| `document_name` | `String(500)` | No | Original filename of the uploaded file (e.g., `report.pdf`). |
+| `document_original_word_count` | `Integer` | Yes | Word count of the extracted text. Set after text extraction, `NULL` before. |
+|`level`     | `String(20)`   | No | Summarization detail level. One of: brief, standard, detailed. Defaults to standard.|
+| `chunking` | `JSONB` | Yes | Chunk progress metadata. `NULL` for direct summarization. See below. |
+| `updated_at` | `DateTime(tz)` | No | Auto-updated by the database on every row modification. |
+
+#### 7.2.3 `chunking` JSONB Schema
+
+When the document exceeds `MAX_INPUT_WORDS` and the chunked strategy is used, the `chunking` column is populated:
 
 ```json
 {
-    "job_id": "a1b2c3d4-...",
-    "job_name": "Q3 revenue report",
-    "operation": "summarization",
-    "status": "completed",
-    "submitted_at": "2026-03-15T10:30:00Z",
-    "completed_at": "2026-03-15T10:31:45Z",
-    "summary_length": 200,
-    "document": {
-        "name": "report1.pdf",
-        "status": "completed",
-        "word_count": 4200 
-    },
-    "error": null
+    "strategy": "chunked",
+    "total_chunks": 12,
+    "completed_chunks": 7,
+    "phase": "summarizing"
 }
 ```
-### 7.2 Result File — `{job_id}_result.json`
+
+| Field | Type | Description |
+|:---|:---|:---|
+| `strategy` | string | Always `"chunked"` when present. |
+| `total_chunks` | integer | Number of chunks the document was split into. |
+| `completed_chunks` | integer | Number of chunks summarized so far. Updated after each chunk LLM call. |
+| `phase` | string | `"summarizing"` (chunk-level summaries in progress) or `"merging"` (producing the final unified summary). |
+
+For direct summarization (document fits in context window), the `chunking` column remains `NULL`.
+
+#### 7.2.4 Index Strategy
+
+| Index | Columns | Purpose |
+|:---|:---|:---|
+| Primary key | `job_id` | Unique lookup for `GET /v1/summarize/jobs/{job_id}` and `DELETE`. |
+| `idx_summarize_jobs_submitted_at_status` | `submitted_at`, `status` | Supports `GET /v1/summarize/jobs` with `status` filter and `latest` sort. Also used by the recovery scan to find zombie jobs. |
+
+No full-text index is needed since `job_name` filtering (if added later) would be a simple `LIKE` query on a low-cardinality, low-volume table.
+
+### 7.3 Result Files (Disk)
+
+Result files remain on disk at `/var/cache/summarize/results/{job_id}_result.json`. The structure is unchanged:
 
 ```json
 {
@@ -1344,6 +1458,7 @@ All job-related state is persisted under `/var/cache/summarize/`, which is a per
     }
 }
 ```
+
 **Example result for a chunked summarization:**
 
 ```json
@@ -1367,6 +1482,16 @@ All job-related state is persisted under `/var/cache/summarize/`, which is a per
     }
 }
 ```
+
+### 7.4 Lifecycle of Storage Artifacts
+
+| Artifact | Created at | Updated during | Deleted at |
+|:---|:---|:---|:---|
+| `summarize_jobs` row | `POST /v1/summarize/jobs` (status: `accepted`) | Background worker updates `status`, `chunking`, `completed_at`, `error`, `document_original_word_count` | `DELETE /v1/summarize/jobs/{job_id}` or bulk `DELETE /v1/summarize/jobs?confirm=true` |
+| Staging file | `POST /v1/summarize/jobs` | — | Background worker deletes after job completes/fails |
+| Result file | Background worker writes after successful summarization | — | `DELETE /v1/summarize/jobs/{job_id}` or bulk delete |
+
+
 ---
 
 ## 8. Concurrency Limiting
@@ -1389,41 +1514,43 @@ The sync endpoint already acquires this semaphore before calling vLLM (either vi
 
 ## 9. Recovery Strategy
 
-Identical to the digitize service:
+Consistent with the digitize service's approach, adapted for PostgreSQL:
 
-1. **Boot-up scan:** On startup, the FastAPI app scans `/var/cache/summarize/jobs/*.json`.
-2. **Identify zombies:** Any job with status `accepted` or `in_progress` is a zombie (no worker is handling it after a restart).
-3. **Mark as failed:** Update those jobs to `status: failed` with error `"System restarted during processing"`.
+1. **Boot-up scan:** On startup, the FastAPI app queries the `summarize_jobs` table for any rows with `status IN ('accepted', 'in_progress')`.
+2. **Identify zombies:** Any such row is a zombie — no background worker could be handling it after a restart.
+3. **Mark as failed:** Update those rows to `status = 'failed'`, `error = 'System restarted during processing'`, `completed_at = now()`.
 4. **Cleanup:** Delete corresponding staging directories under `/var/cache/summarize/staging/`.
+
+Because the database is transactional, the status update and the identification of zombies are atomic — there is no risk of a race condition between the recovery scan and a newly submitted job (unlike the previous JSON-file approach where a crash during a write could leave a corrupt status file).
 
 ---
 
 ## 10. Test Cases
 
-| Test Case | Input | Expected Result |
-|:---|:---|:---|
-| Submit single PDF | 1 PDF file | 202 with job_id, eventually completes |
-| Submit single TXT | 1 TXT file | 202 with job_id, eventually completes |
-| Submit with custom length | file + `length=100` | 202, summary targets ~100 words |
-| Submit multiple files | 2 files in one request | 400 `INVALID_REQUEST` |
-| No file attached | Empty request | 400 `INVALID_REQUEST` |
-| Unsupported file type | `.docx` file | 400 `UNSUPPORTED_FILE_TYPE` |
-| Corrupt PDF | Invalid bytes with `.pdf` ext | 415 `UNSUPPORTED_MEDIA_TYPE` |
-| Semaphore exhausted | Submit while all 32 slots busy | 429 `RATE_LIMIT_EXCEEDED` |
-| Small file (direct) | File within `MAX_INPUT_WORDS` | 202, result has `strategy: "direct"` |
-| Large file (chunked) | File exceeding `MAX_INPUT_WORDS` | 202, result has `strategy: "chunked"` |
-| Very large file (recursive) | File requiring recursive merge | 202, completes with correct aggregate usage |
-| Job progress (chunked) | Poll during chunked processing | 200, shows `chunking.completed_chunks` incrementing |
-| Get job status | Valid `job_id` | 200 with current status and document info |
-| Get nonexistent job | Random UUID | 404 `RESOURCE_NOT_FOUND` |
-| Get result via sub-resource | `GET /v1/summarize/jobs/{id}/result` | 200 with summary data |
-| Get result (in progress) | In-progress `job_id` | 202 Accepted |
-| Get result (not found) | Random UUID | 404 `RESOURCE_NOT_FOUND` |
-| Delete completed job | Completed `job_id` | 204 No Content, result file also deleted |
-| Delete active job | In-progress `job_id` | 409 `RESOURCE_LOCKED` |
-| Bulk delete (confirm=true) | No active jobs | 204 No Content, all data removed |
-| Bulk delete (confirm=false) | `confirm=false` | 400 `INVALID_REQUEST` |
-| Bulk delete (active job) | An in-progress job exists | 409 `RESOURCE_LOCKED` |
-| Recovery after crash | Kill during processing | On restart, zombie jobs marked `failed` |
+| Test Case                   | Input                                | Expected Result                                     |
+|:----------------------------|:-------------------------------------|:----------------------------------------------------|
+| Submit single PDF           | 1 PDF file                           | 202 with job_id, eventually completes               |
+| Submit single TXT           | 1 TXT file                           | 202 with job_id, eventually completes               |
+| Submit with custom level    | file + `level=brief`                 | 202, summary targets a brief output                 |
+| Submit multiple files       | 2 files in one request               | 400 `INVALID_REQUEST`                               |
+| No file attached            | Empty request                        | 400 `INVALID_REQUEST`                               |
+| Unsupported file type       | `.docx` file                         | 400 `UNSUPPORTED_FILE_TYPE`                         |
+| Corrupt PDF                 | Invalid bytes with `.pdf` ext        | 415 `UNSUPPORTED_MEDIA_TYPE`                        |
+| Semaphore exhausted         | Submit while all 32 slots busy       | 429 `RATE_LIMIT_EXCEEDED`                           |
+| Small file (direct)         | File within `MAX_INPUT_WORDS`        | 202, result has `strategy: "direct"`                |
+| Large file (chunked)        | File exceeding `MAX_INPUT_WORDS`     | 202, result has `strategy: "chunked"`               |
+| Very large file (recursive) | File requiring recursive merge       | 202, completes with correct aggregate usage         |
+| Job progress (chunked)      | Poll during chunked processing       | 200, shows `chunking.completed_chunks` incrementing |
+| Get job status              | Valid `job_id`                       | 200 with current status and document info           |
+| Get nonexistent job         | Random UUID                          | 404 `RESOURCE_NOT_FOUND`                            |
+| Get result via sub-resource | `GET /v1/summarize/jobs/{id}/result` | 200 with summary data                               |
+| Get result (in progress)    | In-progress `job_id`                 | 202 Accepted                                        |
+| Get result (not found)      | Random UUID                          | 404 `RESOURCE_NOT_FOUND`                            |
+| Delete completed job        | Completed `job_id`                   | 204 No Content, result file also deleted            |
+| Delete active job           | In-progress `job_id`                 | 409 `RESOURCE_LOCKED`                               |
+| Bulk delete (confirm=true)  | No active jobs                       | 204 No Content, all data removed                    |
+| Bulk delete (confirm=false) | `confirm=false`                      | 400 `INVALID_REQUEST`                               |
+| Bulk delete (active job)    | An in-progress job exists            | 409 `RESOURCE_LOCKED`                               |
+| Recovery after crash        | Kill during processing               | On restart, zombie jobs marked `failed`             |
 
 ---
