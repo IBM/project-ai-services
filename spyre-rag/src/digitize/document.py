@@ -3,7 +3,7 @@ from typing import Optional, Dict, Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from digitize.config import DOCS_DIR
+from digitize.settings import settings
 from digitize.types import DocStatus, OutputFormat
 
 
@@ -70,7 +70,7 @@ class DocumentMetadata(BaseModel):
         """
         return self.model_dump()
 
-    def save(self, docs_dir: Path = DOCS_DIR) -> Path:
+    def save(self, docs_dir: Path = settings.digitize.docs_dir) -> Path:
         """
         Persist the document metadata as <doc_id>_metadata.json.
 

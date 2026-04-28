@@ -22,7 +22,7 @@ from docling_core.types.doc.document import DoclingDocument
 # Local application imports
 from common.misc_utils import get_logger, DoclingConversionError
 from common.retry_utils import retry_on_transient_error
-from digitize.config import PDF_CHUNK_SIZE
+from digitize.settings import settings
 
 # To suppress the warnings raised from pdfminer package while extracting the font size
 logging.getLogger("pdfminer").propagate = False
@@ -205,8 +205,8 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
     # Get total page count
     total_pages = get_pdf_page_count(path)
     
-    # If document has PDF_CHUNK_SIZE pages or fewer, convert normally
-    if total_pages <= PDF_CHUNK_SIZE:
+    # If document has configured chunk size pages or fewer, convert normally
+    if total_pages <= settings.digitize.pdf_chunk_size:
         logger.debug(f"Converting {path} document with {total_pages} pages in single pass")
         
         @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
@@ -221,10 +221,13 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
         return _convert_single_doc()
     
     # Process in chunks
-    # Calculate total chunks using ceiling division: equivalent to math.ceil(total_pages / PDF_CHUNK_SIZE)
-    # This ensures all pages are covered even if the last chunk is smaller
-    total_chunks = (total_pages + PDF_CHUNK_SIZE - 1) // PDF_CHUNK_SIZE
-    logger.debug(f"Converting {path} document with {total_pages} pages in {total_chunks} chunks of {PDF_CHUNK_SIZE}")
+    # Calculate total chunks using ceiling division for the configured PDF chunk size.
+    # This ensures all pages are covered even if the last chunk is smaller.
+    total_chunks = (total_pages + settings.digitize.pdf_chunk_size - 1) // settings.digitize.pdf_chunk_size
+    logger.debug(
+        f"Converting {path} document with {total_pages} pages in {total_chunks} "
+        f"chunks of {settings.digitize.pdf_chunk_size}"
+    )
     
     # Determine cache directory for storing chunk results
     if cache_dir is None:
@@ -238,9 +241,9 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
         # Process document in chunks and save each chunk
         chunk_files = []
         
-        for start_page in range(1, total_pages + 1, PDF_CHUNK_SIZE):
-            end_page = min(start_page + PDF_CHUNK_SIZE - 1, total_pages)
-            chunk_num = (start_page - 1) // PDF_CHUNK_SIZE + 1
+        for start_page in range(1, total_pages + 1, settings.digitize.pdf_chunk_size):
+            end_page = min(start_page + settings.digitize.pdf_chunk_size - 1, total_pages)
+            chunk_num = (start_page - 1) // settings.digitize.pdf_chunk_size + 1
             
             logger.debug(f"Processing {path}'s chunk {chunk_num}/{total_chunks} (pages {start_page}-{end_page})")
             chunk_file = convert_chunk(doc_converter, path, chunk_num, start_page, end_page, chunk_cache_dir)
@@ -268,7 +271,6 @@ def get_doc_converter():
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions
     from docling.document_converter import DocumentConverter, PdfFormatOption
-    from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
 
     # Accelerator & pipeline options
     pipeline_options = PdfPipelineOptions()
@@ -293,7 +295,7 @@ def get_doc_converter():
         allowed_formats=[
             InputFormat.PDF
         ],
-        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options, backend=PyPdfiumDocumentBackend)}
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
     )
 
     return doc_converter

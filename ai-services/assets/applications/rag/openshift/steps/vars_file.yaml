@@ -19,6 +19,10 @@ containers:
     format: ".Status"
     alias: SUMMARIZE_API_STATUS
 
+  - name: "similarity-api"
+    format: ".Status"
+    alias: SIMILARITY_API_STATUS
+
 hosts:
   - fetch: UI_ROUTE
     type: route
@@ -29,4 +33,6 @@ hosts:
   - fetch: DIGITIZE_UI_ROUTE
     type: route
   - fetch: SUMMARIZE_API_ROUTE
+    type: route
+  - fetch: SIMILARITY_API_ROUTE
     type: route

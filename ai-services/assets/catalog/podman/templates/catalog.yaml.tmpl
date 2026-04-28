@@ -49,6 +49,13 @@ spec:
             secretKeyRef:
               name: catalog-secret
               key: admin-password
+        - name: DB_USER
+          value: "{{ .Values.db.user }}"
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: catalog-secret
+              key: db-password
       ports:
         - containerPort: 8080
           protocol: TCP
