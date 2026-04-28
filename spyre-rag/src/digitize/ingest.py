@@ -114,7 +114,7 @@ def create_indexing_handler(emb_model_dict: dict, status_mgr: Optional[StatusMan
 
     return index_document_chunks
 
-def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Optional[dict] = None, api_key: str | None = None):
+def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Optional[dict] = None):
 
     def ingestion_failed():
         logger.info("❌ Ingestion failed, please re-run the ingestion again, If the issue still persists, please report an issue in https://github.com/IBM/project-ai-services/issues")
@@ -153,7 +153,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         _, converted_pdf_stats = process_documents(
             input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'],  emb_model_dict["emb_endpoint"],
             max_tokens=emb_model_dict['max_tokens'] - 100, job_id=job_id, doc_id_dict=doc_id_dict,
-            indexing_callback=indexing_handler, api_key=api_key)
+            indexing_callback=indexing_handler)
         # converted_pdf_stats holds { file_name: {page_count: int, table_count: int, timings: {conversion: time_in_secs, process_text: time_in_secs, process_tables: time_in_secs, chunking: time_in_secs}} }
         if converted_pdf_stats is None:
             ingestion_failed()

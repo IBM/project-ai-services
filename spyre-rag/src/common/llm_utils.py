@@ -27,13 +27,10 @@ def tqdm_wrapper(iterable, **kwargs):
         return iterable
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, api_key: str | None = None):
+def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
     """
     Combined function to summarize and classify a table in a single LLM call.
     Returns tuple: (summary, decision)
-    
-    Args:
-        api_key: Optional API key for vLLM authentication
     """
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
@@ -47,7 +44,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, api_key
     }
 
     try:
-        response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=get_vllm_headers(api_key))
+        response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=get_vllm_headers(settings.model_endpoints.vllm_api_key))
         response.raise_for_status()
         data = response.json() or {}
         choices = data.get("choices", [])
@@ -92,13 +89,10 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, api_key
         logger.error(f"Error summarizing/classifying table: {e}")
         return "No summary.", False
 
-def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, max_workers=32, api_key: str | None = None):
+def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, max_workers=32):
     """
     Combined function to summarize and classify tables using a single prompt.
     Returns tuple: (summaries, decisions)
-    
-    Args:
-        api_key: Optional API key for vLLM authentication
     """
     all_prompts = [digitize_settings.digitize.table_summary_and_classify.format(content=md) for md in table_mds]
 
@@ -106,7 +100,7 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, 
 
     with ThreadPoolExecutor(max_workers=min(max_workers, len(all_prompts))) as executor:
         futures = {
-            executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint, api_key): idx
+            executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint): idx
             for idx, prompt in enumerate(all_prompts)
         }
         for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts),
@@ -301,12 +295,11 @@ def query_vllm_summarize(
     model: str,
     max_tokens: int,
     temperature: float,
-    api_key: str | None = None,
 ):
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers = get_vllm_headers(api_key)
+    headers = get_vllm_headers(settings.model_endpoints.vllm_api_key)
     stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,
@@ -342,13 +335,12 @@ def query_vllm_summarize_stream(
     model: str,
     max_tokens: int,
     temperature: float,
-    api_key: str | None = None,
 ):
     """Stream a summarization request to vLLM, yielding raw SSE lines."""
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers = get_vllm_headers(api_key)
+    headers = get_vllm_headers(settings.model_endpoints.vllm_api_key)
     stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,

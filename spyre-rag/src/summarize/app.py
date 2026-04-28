@@ -134,8 +134,6 @@ async def handle_summarize(
     stream: bool = False,
 ):
     """Core summarization logic shared by both JSON and form-data paths."""
-    # Get API key from environment settings
-    api_key = settings.common.model_endpoints.vllm_api_key or None
     input_word_count = word_count(content_text)
     _validate_input_word_count(input_word_count, summary_length)
 
@@ -160,7 +158,6 @@ async def handle_summarize(
                 model=llm_model,
                 max_tokens=max_tokens,
                 temperature=settings.summarize.summarization_temperature,
-                api_key=api_key,
             )
         except Exception as e:
             logger.error(f"LLM call failed with error: {e}")
@@ -187,7 +184,6 @@ async def handle_summarize(
             model=llm_model,
             max_tokens=max_tokens,
             temperature=settings.summarize.summarization_temperature,
-            api_key=api_key,
         )
         logger.info(f"Input tokens: {in_tokens}, output tokens: {out_tokens}")
         elapsed_ms = int((time.time() - start) * 1000)

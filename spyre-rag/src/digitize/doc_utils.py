@@ -305,7 +305,7 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
 
     return merged_dict
 
-def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint, api_key: str | None = None):
+def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
     table_count = 0
     process_time = 0.0
     filtered_table_dicts = {}
@@ -333,7 +333,7 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint, ap
     table_page_numbers = [merged_table_dict[key]["page_number"] for key in sorted(merged_table_dict)]
 
     # Summarize and classify tables - use markdown directly
-    table_summaries, decisions = summarize_and_classify_tables(table_markdowns, gen_model, gen_endpoint, pdf_path, api_key=api_key)
+    table_summaries, decisions = summarize_and_classify_tables(table_markdowns, gen_model, gen_endpoint, pdf_path)
 
     filtered_table_dicts = {
         idx: {
@@ -349,13 +349,10 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint, ap
 
     return table_count, process_time
 
-def process_converted_document(converted_json_path, pdf_path, out_path, gen_model, gen_endpoint, emb_endpoint, max_tokens, doc_id, api_key: str | None = None):
+def process_converted_document(converted_json_path, pdf_path, out_path, gen_model, gen_endpoint, emb_endpoint, max_tokens, doc_id):
     """
     Process converted document to extract text and tables.
     No caching - always process fresh.
-    
-    Args:
-        api_key: Optional API key for vLLM authentication
     """
     processed_text_json_path = (Path(out_path) / f"{doc_id}{text_suffix}")
     processed_table_json_path = (Path(out_path) / f"{doc_id}{table_suffix}")
@@ -376,7 +373,7 @@ def process_converted_document(converted_json_path, pdf_path, out_path, gen_mode
         page_count, process_time = process_text(converted_doc, pdf_path, processed_text_json_path)
         timings["process_text"] = process_time
 
-        table_count, process_time = process_table(converted_doc, pdf_path, processed_table_json_path, gen_model, gen_endpoint, api_key)
+        table_count, process_time = process_table(converted_doc, pdf_path, processed_table_json_path, gen_model, gen_endpoint)
         timings["process_tables"] = process_time
 
         return processed_text_json_path, processed_table_json_path, page_count, table_count, timings
@@ -420,7 +417,7 @@ def clean_intermediate_files(doc_id, out_path):
             except Exception as e:
                 logger.warning(f"Failed to clean up {file_path}: {e}")
 
-def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoint, max_tokens, job_id, doc_id_dict, indexing_callback=None, api_key: str | None = None):
+def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoint, max_tokens, job_id, doc_id_dict, indexing_callback=None):
     """
     Process documents for ingestion pipeline.
     Each request is treated as fresh.
@@ -436,7 +433,6 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
         doc_id_dict: Mapping of filenames to document IDs
         indexing_callback: Optional callback function to index chunks immediately after chunking.
                           Signature: callback(doc_id: str, chunks: list, path: str) -> bool
-        api_key: Optional API key for vLLM authentication
     """
     # Partition files into light and heavy based on page count
     light_files, heavy_files = [], []
@@ -510,7 +506,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
                     p_future = processor_executor.submit(
                         process_converted_document, converted_json, path, out_path,
-                        llm_model, llm_endpoint, emb_endpoint, max_tokens, doc_id=doc_id, api_key=api_key
+                        llm_model, llm_endpoint, emb_endpoint, max_tokens, doc_id=doc_id
                     )
                     process_futures[p_future] = str(path)
                 except Exception as e:

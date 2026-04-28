@@ -145,10 +145,8 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
 
     try:
         logger.info(f"🚀 Ingestion started for job: {job_id}")
-        # Get API key from environment settings
-        api_key = settings.common.model_endpoints.vllm_api_key or None
         # to_thread prevents the heavy 'ingest' process from blocking the main FastAPI event loop and returns the response to request asynchronously.
-        await asyncio.to_thread(ingest, job_staging_path, job_id, doc_id_dict, api_key)
+        await asyncio.to_thread(ingest, job_staging_path, job_id, doc_id_dict)
         logger.info(f"Ingestion for {job_id} completed successfully")
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
