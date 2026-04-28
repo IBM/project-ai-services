@@ -208,6 +208,8 @@ These can be extended to support both development and production scenarios.
 
 This section provides step-by-step instructions for integrating Caddy server with the Catalog service to enable HTTPS.
 
+**Note:** The Caddy ppc64le image is available in Docker, but needs to be built with UBI (Universal Base Image) for this project.
+
 ### Step 1: Deploy Caddy Server with Catalog Assets
 
 As part of the `ai-services catalog configure` command, deploy the Caddy server alongside other Catalog assets.
@@ -215,15 +217,24 @@ As part of the `ai-services catalog configure` command, deploy the Caddy server 
 **Command Options:**
 ```bash
 ai-services catalog configure [options]
-  --ssl-cert <path>    Path to user-provided SSL certificate (optional)
-  --ssl-key <path>     Path to user-provided SSL private key (optional)
+  --domain-name <domain>  Custom domain name for self-signed certificates (optional)
+                          If not provided, uses wildcard DNS format: <service>.<ip>.nip.io
+                          Example: --domain-name example.com generates certs for *.example.com
+  --ssl-cert <path>       Path to user-provided SSL certificate (optional)
+  --ssl-key <path>        Path to user-provided SSL private key (optional)
 ```
 
 **Process:**
 1. Before installing Catalog assets, create a minimal Caddyfile configuration
 2. Write the Caddyfile to `/var/lib/ai-services/certs/Caddyfile`
-3. If user provides certificates via `--ssl-cert` and `--ssl-key`, load them into Caddy
-4. Deploy Caddy container along with Catalog service containers
+3. Determine certificate strategy:
+   - If `--ssl-cert` and `--ssl-key` are provided, load user-provided certificates into Caddy
+   - If `--domain-name` is provided, generate self-signed certificates for the specified domain
+   - If neither is provided, use wildcard DNS format `<service>.<ip>.nip.io` with self-signed certificates
+4. **Populate domain name in Catalog configuration:**
+   - Update the `values.yaml` file with the domain name (from `--domain-name` flag or extracted from certificate)
+   - The Catalog backend will use this domain name when generating service URLs and registering routes with Caddy
+5. Deploy Caddy container along with Catalog service containers
 
 **Minimal Caddyfile Configuration:**
 
@@ -365,10 +376,25 @@ func LoadUserCertificates(certPath, keyPath string) error {
     */
     
     // Step 5: Load certificates via Caddy Admin API
-    payload := []map[string]string{
-        {
-            "certificate": string(certBytes),
-            "key":         string(keyBytes),
+    // Extract domain from certificate for ID
+    domain := ""
+    for _, dnsName := range cert.DNSNames {
+        if strings.HasPrefix(dnsName, "*.") {
+            domain = strings.TrimPrefix(dnsName, "*.")
+            break
+        }
+    }
+    if domain == "" {
+        return fmt.Errorf("no wildcard domain found in certificate")
+    }
+    
+    payload := map[string]interface{}{
+        "@id": fmt.Sprintf("cert-%s", domain),
+        "load_pem": []map[string]string{
+            {
+                "certificate": string(certBytes),
+                "key":         string(keyBytes),
+            },
         },
     }
     
@@ -424,7 +450,7 @@ func LoadUserCertificates(certPath, keyPath string) error {
 2. **System reads and validates certificate files:**
    - Validates that both certificate and key files exist
    - Reads file contents into memory
-   - **Extracts hostname from certificate's Common Name (CN) or Subject Alternative Name (SAN)**
+   - **Extracts domain name from certificate's Common Name (CN) or Subject Alternative Name (SAN)**
    - **Verifies SAN contains wildcard entry** (e.g., `*.example.com`) to support multiple subdomains
 
 3. **Load into Caddy via Admin API:**
@@ -437,11 +463,11 @@ func LoadUserCertificates(certPath, keyPath string) error {
    - No need to restart Caddy container
    - Certificates are immediately available for new routes
 
-**Certificate Hostname Extraction:**
+**Certificate Domain Name Extraction:**
 
 ```go
-// Extract hostname from certificate
-func ExtractHostnameFromCert(certPath string) (string, error) {
+// Extract domain name from certificate
+func ExtractDomainFromCert(certPath string) (string, error) {
     certPEM, err := os.ReadFile(certPath)
     if err != nil {
         return "", fmt.Errorf("failed to read certificate: %w", err)
@@ -477,23 +503,27 @@ When registering routes with Caddy, the domain format depends on whether user-pr
 | Certificate Type | Domain Format | Example |
 |-----------------|---------------|---------|
 | Self-signed (default) | `<pod_name>-<container_name>.<ip>.nip.io` | `ai-services--catalog-ui.10.20.186.33.nip.io` |
-| User-provided | `<pod_name>-<container_name>.<hostname>` | `ai-services--catalog-ui.example.com` |
+| User-provided | `<pod_name>-<container_name>.<domain>` | `ai-services--catalog-ui.example.com` |
 
 **Implementation:**
 
 ```go
-func GetDomainForService(podName, containerName, hostIP string, userCertPath string) (string, error) {
+func GetDomainForService(podName, containerName, hostIP, domainName, userCertPath string) (string, error) {
+    // Priority 1: User-provided certificates (extract domain name from cert)
     if userCertPath != "" {
-        // User provided certificate - extract hostname from cert
-        hostname, err := ExtractHostnameFromCert(userCertPath)
+        domain, err := ExtractDomainFromCert(userCertPath)
         if err != nil {
-            return "", fmt.Errorf("failed to extract hostname from certificate: %w", err)
+            return "", fmt.Errorf("failed to extract domain name from certificate: %w", err)
         }
-        // Use hostname from certificate
-        return fmt.Sprintf("%s-%s.%s", podName, containerName, hostname), nil
+        return fmt.Sprintf("%s-%s.%s", podName, containerName, domain), nil
     }
     
-    // No user certificate - use nip.io with IP
+    // Priority 2: Custom domain name for self-signed certificates
+    if domainName != "" {
+        return fmt.Sprintf("%s-%s.%s", podName, containerName, domainName), nil
+    }
+    
+    // Priority 3: Default wildcard DNS with nip.io
     return fmt.Sprintf("%s-%s.%s.nip.io", podName, containerName, hostIP), nil
 }
 ```
@@ -542,17 +572,26 @@ After deploying the Catalog assets, dynamically register the Catalog service rou
 
 **Domain Format:**
 
-The domain format depends on whether user-provided certificates are used:
+The domain format depends on the certificate configuration:
 
-- **With self-signed certificates (default):** `<pod_name>-<container_name>.<ip>.nip.io`
+- **Default (no flags):** `<service>.<ip>.nip.io`
   - Example: `ai-services--catalog-ui.10.20.186.33.nip.io`
-  - Hostname is extracted from the certificate's SAN field
+  - Uses wildcard DNS service for automatic IP resolution
+  - Self-signed certificates generated automatically
 
-- **With user-provided certificates:** `<pod_name>-<container_name>.<hostname>`
+- **With `--domain-name` flag:** `<service>.<domain>`
+  - Example: `ai-services--catalog-ui.example.com` (when `--domain-name example.com`)
+  - Self-signed certificates generated for `*.example.com`
+  - Requires DNS configuration to point domain to host IP
+
+- **With user-provided certificates:** `<service>.<domain>`
   - Example: `ai-services--catalog-ui.example.com`
-  - Hostname is extracted from the certificate's SAN wildcard entry
+  - Domain name extracted from certificate's SAN wildcard entry
+  - Uses provided certificates instead of generating new ones
 
-**Why nip.io for self-signed certificates?**
+**Certificate Configuration Strategies:**
+
+**1. Default Strategy (nip.io):**
 
 [nip.io](https://nip.io) is a wildcard DNS service that provides automatic DNS resolution for any IP address. It eliminates the need for:
 - Manual DNS configuration during development
@@ -566,14 +605,26 @@ The domain format depends on whether user-provided certificates are used:
 - Enables HTTPS with proper domain names without DNS infrastructure
 - Perfect for development, testing, and demo environments
 
-**Why hostname extraction for user-provided certificates?**
+**2. Custom Domain Strategy (`--domain-name`):**
+
+When users specify a custom domain for self-signed certificates:
+- Self-signed certificates are generated for `*.<domain>`
+- Example: `--domain-name example.com` generates certs for `*.example.com`
+- Services are accessible at `<service>.example.com`
+- Requires DNS configuration to point the domain to the host IP
+- Useful for internal networks with custom DNS infrastructure
+- Provides branded domain names for development/staging environments
+
+**3. User-Provided Certificate Strategy (`--ssl-cert`/`--ssl-key`):**
+
+**Why domain name extraction for user-provided certificates?**
 
 When users provide their own certificates:
 - The certificate is issued for a specific domain (e.g., `*.example.com`)
 - We must use that domain when registering routes with Caddy
 - Using nip.io would cause certificate validation errors
-- The hostname is extracted from the certificate's SAN wildcard entry
-- All services use subdomains of the extracted hostname
+- The domain name is extracted from the certificate's SAN wildcard entry
+- All services use subdomains of the extracted domain name
 
 **Caddy Admin API Call:**
 
@@ -582,6 +633,7 @@ curl http://localhost:2019/config/apps/http/servers/my_app_server/routes \
   -X POST \
   -H "Content-Type: application/json" \
   -d '{
+    "@id": "route-ai-services--catalog-ui",
     "match": [
       {
         "host": ["ai-services--catalog-ui.<ip>.nip.io"]
@@ -602,6 +654,7 @@ curl http://localhost:2019/config/apps/http/servers/my_app_server/routes \
 ```
 
 **Parameters:**
+- `@id`: Unique identifier for the route in format `route-<pod_name>-<container_name>` (e.g., `route-ai-services--catalog-ui`)
 - `host`: The domain pattern matching `<pod_name>-<container_name>.<ip>.nip.io`
 - `dial`: The internal service address (container name and port)
 - `terminal`: Stops route matching after this route is matched
@@ -612,6 +665,7 @@ After successful deployment, the Catalog service should display the HTTPS endpoi
 
 **Example Output:**
 
+**Default Configuration (nip.io):**
 ```
 ✓ Catalog service deployed successfully
 
@@ -622,8 +676,42 @@ Next Steps:
    
    https://ai-services--catalog-ui.10.20.186.33.nip.io
    
-   Note: Using self-signed certificate. Your browser may show a security warning.
+   Note: Using self-signed certificate with wildcard DNS (nip.io).
+         Your browser may show a security warning.
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+**With Custom Domain (`--domain-name example.com`):**
+```
+✓ Catalog service deployed successfully
+
+Next Steps:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Access the Catalog API via HTTPS:
+   
+   https://ai-services--catalog-ui.example.com
+   
+   Note: Using self-signed certificate for *.example.com.
+         Ensure DNS is configured to point example.com to 10.20.186.33.
+         Your browser may show a security warning.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+**With User-Provided Certificates:**
+```
+✓ Catalog service deployed successfully
+
+Next Steps:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Access the Catalog API via HTTPS:
+   
+   https://ai-services--catalog-ui.example.com
+   
+   Note: Using user-provided certificate.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -661,6 +749,7 @@ curl http://caddy:2019/config/apps/http/servers/my_app_server/routes \
   -X POST \
   -H "Content-Type: application/json" \
   -d '{
+    "@id": "route-<pod_name>-<container_name>",
     "match": [
       {
         "host": ["<pod_name>-<container_name>.<ip>.nip.io"]
@@ -691,6 +780,7 @@ curl http://caddy:2019/config/apps/http/servers/my_app_server/routes \
   -X POST \
   -H "Content-Type: application/json" \
   -d '{
+    "@id": "route-rag-demo-chat-bot-ui",
     "match": [
       {
         "host": ["rag-demo-chat-bot-ui.10.20.186.33.nip.io"]
