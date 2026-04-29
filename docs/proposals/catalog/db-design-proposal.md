@@ -49,7 +49,7 @@ We have chosen **PostgreSQL** as our database for the following reasons:
 ### Database Name
 
 ```
-ai_service
+ai_services
 ```
 
 ## Table Definitions
@@ -60,24 +60,18 @@ ai_service
 
 | Column Name         | Data Type         | Constraints | Description |
 |---------------------|-------------------|-------------|-------------|
-| id                  | VARCHAR(100)      | PRIMARY KEY | Internal application identifier (immutable - used for prefixing pod names in Podman and namespace names in OpenShift) |
-| deployment_name     | VARCHAR(100)      |             | Display name of the deployment |
-| type                | VARCHAR(100)      |             | Application type (e.g., Digital Assistant, Summarization) |
-| deployment_type     | deployment_type   | ENUM        | Type of deployment (architecture, service) |
+| id                  | UUID              | PRIMARY KEY | Unique application identifier |
+| name                | VARCHAR(100)      |             | Application name |
+| template            | VARCHAR(100)      |             | Architecture/service template ID (e.g., rag, summarize, digitize) |
 | status              | Status            | ENUM        | Current status (Downloading, Deploying, Running, Deleting, Error) |
 | message             | TEXT              |             | Status message or error details |
-| createdby           | VARCHAR(100)      |             | User who created the application |
+| created_by          | VARCHAR(100)      |             | User who created the application |
 | created_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of creation |
 | updated_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of last update |
 
 **Custom Types:**
 
 ```sql
-CREATE TYPE deployment_type AS ENUM (
-    'architecture',
-    'service'
-);
-
 CREATE TYPE status AS ENUM (
     'Downloading',
     'Deploying',
@@ -96,7 +90,7 @@ CREATE TYPE status AS ENUM (
 | Column Name         | Data Type         | Constraints | Description |
 |---------------------|-------------------|-------------|-------------|
 | id                  | UUID              | PRIMARY KEY | Unique service identifier |
-| app_id              | VARCHAR(100)      | FOREIGN KEY | References applications(id) |
+| app_id              | UUID              | FOREIGN KEY | References applications(id) |
 | type                | VARCHAR(100)      |             | Service type (e.g., Summarization, Digitization, Vector Store, Inference Backend) |
 | status              | Status            | ENUM        | Current status (Deploying, Running, Deleting, Error) |
 | endpoints           | JSONB             |             | Array of endpoint objects with name and endpoint fields: `[{"name": "ui", "endpoint": "http://..."}, {"name": "backend", "endpoint": "http://..."}]` |
@@ -106,7 +100,7 @@ CREATE TYPE status AS ENUM (
 
 ---
 
-### 3. Service Dependencies Table
+### 3. Service Dependencies Table (Taking it up at the end of Q2)
 
 **Table Name:** `service_dependencies`
 
@@ -141,7 +135,7 @@ This table manages both revoked access tokens (blacklist) and active refresh tok
 | id                  | SERIAL            | PRIMARY KEY | Auto-incrementing unique identifier |
 | token_hash          | VARCHAR(64)       | NOT NULL, UNIQUE | SHA-256 hash of the JWT token (hex-encoded, 64 characters) |
 | token_type          | VARCHAR(20)       | NOT NULL    | Token type: "access_blacklist" or "refresh_active" |
-| user_id             | VARCHAR(100)      | NOT NULL    | User ID associated with the token |
+| user_id             | UUID              | NOT NULL    | User ID associated with the token |
 | expires_at          | TIMESTAMPTZ       | NOT NULL    | Token expiry timestamp |
 | created_at          | TIMESTAMPTZ       | DEFAULT NOW() | When the token was created/blacklisted |
 
@@ -227,13 +221,13 @@ This table manages both revoked access tokens (blacklist) and active refresh tok
 
 ## Key Design Decisions
 
-### 1. Natural Primary Key for Applications
-The applications table uses `id` as the primary key:
-- **Natural Identifier**: id is already unique and immutable
-- **Meaningful References**: Foreign keys use id instead of UUID
-- **Simpler Queries**: No need to join to get application identifier
-- **Consistent Naming**: Used for pod/namespace prefixes in deployments
-- **No UUID Overhead**: Eliminates unnecessary UUID generation and storage
+### 1. UUID Primary Key for Applications
+The applications table uses UUID as the primary key:
+- **Global Uniqueness**: Ensures unique identifiers across distributed systems
+- **Security**: Non-sequential IDs prevent enumeration attacks
+- **Immutable Identifier**: UUID remains constant throughout application lifecycle
+- **Consistent with Services**: Aligns with services table design
+- **Standard Practice**: Follows industry best practices for distributed systems
 
 ### 2. UUID Primary Keys for Services
 Services table uses UUID as primary key for:
@@ -243,15 +237,14 @@ Services table uses UUID as primary key for:
 
 ### 3. Custom Types
 PostgreSQL custom types (ENUM) are used for:
-- **deployment_type**: Ensures only valid deployment types for applications
 - **status**: Standardizes status values across tables (includes Deleting for cleanup workflows)
 
-### 4. Application Type Field
-The type field in applications table stores:
-- **Application Type**: Digital Assistant, Summarization, etc.
-- **Direct Classification**: No separate architectures table needed
-- **Simpler Schema**: Reduces table count
-- **Clear Semantics**: Type directly describes what the application does
+### 4. Application Template Field
+The template field in applications table stores:
+- **Architecture/Service ID**: Stores the identifier of the architecture or service template (e.g., rag, summarize, digitize)
+- **Direct Reference**: Template corresponds to the ID of the architecture/service being deployed
+- **Simpler Schema**: Single template field replaces type and deployment_type columns
+- **Clear Identification**: Template directly identifies which architecture or service is being deployed
 
 ### 5. Tokens Table
 The tokens table provides dual-purpose token management with enhanced security:
@@ -267,15 +260,15 @@ The tokens table provides dual-purpose token management with enhanced security:
 - **Created Timestamp**: Tracks when token was created/blacklisted for audit purposes
 - **Security**: Even if database is compromised, actual tokens cannot be extracted
 
-### 6. Unified Services Table
+### 5. Unified Services Table
 All services (including infrastructure components like vector stores, databases, inference backends) are stored in a single table:
-- **Simplified Schema**: 4 tables (applications, services, service_dependencies, token_blacklist)
+- **Simplified Schema**: 4 tables (applications, services, service_dependencies, tokens)
 - **Flexible Design**: Easy to add new service types
 - **Consistent Interface**: Same structure for all service types
 - **Type-based Filtering**: Use type field to distinguish service types
 - **Explicit Dependency Tracking**: Separate service_dependencies table tracks service relationships
 
-### 7. Service Dependencies Table
+### 6. Service Dependencies Table
 The service_dependencies table provides explicit many-to-many relationship tracking:
 - **Minimal Design**: Only 2 columns (consumer_service_id, provider_service_id)
 - **Composite Primary Key**: Ensures unique service-to-service relationships
@@ -284,12 +277,13 @@ The service_dependencies table provides explicit many-to-many relationship track
 - **No Metadata**: Intentionally minimal - additional fields can be added later if needed
 - **Bidirectional Queries**: Easy to find both dependencies and dependents
 
-### 8. Consistent Field Sizing
-- VARCHAR(100) for type fields across applications and services tables
-- Provides sufficient length for descriptive type names
-- Consistent sizing across similar fields
+### 7. UUID Consistency
+- UUID used for all primary keys (applications, services)
+- UUID used for all foreign key references (app_id, user_id)
+- Provides global uniqueness and security across the system
+- Consistent data type for identifiers throughout the schema
 
-### 9. Timestamps
+### 8. Timestamps
 Applications and services tables include `created_at` and `updated_at` with `TIMESTAMPTZ` for:
 - Complete audit trail
 - Time-zone aware timestamps
@@ -297,12 +291,12 @@ Applications and services tables include `created_at` and `updated_at` with `TIM
 - Tracking both creation and modification times
 - Note: service_dependencies and token_blacklist tables intentionally exclude created_at/updated_at for minimal design
 
-### 10. Immutable Primary Key
-The `id` field serves as both identifier and primary key:
-- Immutable to ensure consistent pod naming in Podman
-- Stable namespace naming in OpenShift
-- Natural referential integrity in deployed resources
-- Prevents accidental renames that would break deployments
+### 9. Immutable UUID Primary Key
+The `id` field (UUID) serves as the primary key:
+- Immutable to ensure consistent references across the system
+- UUID provides stable, globally unique identifiers
+- Prevents accidental ID collisions in distributed deployments
+- Maintains referential integrity across all related tables
 
 ## Common Queries
 
@@ -322,14 +316,14 @@ SELECT
     s.version as service_version
 FROM applications a
 LEFT JOIN services s ON a.id = s.app_id
-WHERE a.id = 'my-app'
+WHERE a.id = 'application-uuid-here'
 ORDER BY s.created_at;
 ```
 
 ### 3. Get all services for an application:
 ```sql
 SELECT * FROM services
-WHERE app_id = 'my-app'
+WHERE app_id = 'application-uuid-here'
 ORDER BY created_at;
 ```
 
@@ -353,7 +347,7 @@ WHERE sd.provider_service_id = 'provider-service-uuid-here';
 ```sql
 SELECT
     a.id as app_id,
-    a.deployment_name,
+    a.name,
     consumer.id as consumer_service_id,
     consumer.type as consumer_service_type,
     provider.id as provider_service_id,
@@ -362,7 +356,7 @@ FROM applications a
 JOIN services consumer ON a.id = consumer.app_id
 LEFT JOIN service_dependencies sd ON consumer.id = sd.consumer_service_id
 LEFT JOIN services provider ON sd.provider_service_id = provider.id
-WHERE a.id = 'my-app'
+WHERE a.id = 'application-uuid-here'
 ORDER BY consumer.type, provider.type;
 ```
 
@@ -382,12 +376,12 @@ ORDER BY consumer_count DESC;
 
 ### 8. Get application by id (direct lookup):
 ```sql
-SELECT * FROM applications WHERE id = 'my-app';
+SELECT * FROM applications WHERE id = 'application-uuid-here';
 ```
 
-### 9. Get applications by type:
+### 9. Get applications by template:
 ```sql
-SELECT * FROM applications WHERE type = 'Digital Assistant';
+SELECT * FROM applications WHERE template = 'rag';
 ```
 
 ### 10. Get all services by type:

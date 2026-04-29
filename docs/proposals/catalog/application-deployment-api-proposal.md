@@ -511,8 +511,8 @@ Authorization: Bearer <access_token>
 {
   "data": [
     {
-      "id": "rag-production",
-      "deployment_name": "RAG Production",
+      "id": "123e4567-e89b-12d3-a456-426614174000",
+      "name": "RAG Production",
       "deployment_type": "architecture",
       "type": "Digital Assistant",
       "status": "Running",
@@ -521,8 +521,8 @@ Authorization: Bearer <access_token>
       "updated_at": "2026-04-15T10:35:00Z"
     },
     {
-      "id": "summarization-dev",
-      "deployment_name": "Summarization Dev",
+      "id": "223e4567-e89b-12d3-a456-426614174001",
+      "name": "Summarization Dev",
       "deployment_type": "service",
       "type": "Summary",
       "status": "Running",
@@ -553,8 +553,8 @@ Authorization: Bearer <access_token>
 **Application Object (data[]):**
 | Field | Type | Description |
 |-------|------|-------------|
-| id | string | Application ID (Primary Key, immutable, used for resource naming) |
-| deployment_name | string | User-friendly display name of the deployment |
+| id | string | Application ID (UUID) |
+| name | string | Application name |
 | deployment_type | string | Type of deployment: "architecture" or "service" |
 | type | string | Application type: "Digital Assistant" for architectures, "Summary" for summarization services |
 | status | string | Current status: "Downloading", "Deploying", "Running", "Deleting", "Error" |
@@ -580,106 +580,11 @@ Authorization: Bearer <access_token>
 
 **Implementation Notes:**
 
-1. **Token Validation**: Validate JWT token from Authorization header via `AuthMiddleware`
-
-2. **Parameter Validation**:
-   - Validate page >= 1, page_size between 1-100
-
-3. **PostgreSQL Query Construction**:
-
-   **Step 3a - Build WHERE clause with parameterized queries:**
-
-   ```go
-   var conditions []string
-   var args []interface{}
-   argIndex := 1
-
-   // Add status filter if provided
-   if status != "" {
-       conditions = append(conditions, fmt.Sprintf("status = $%d", argIndex))
-       args = append(args, status)
-       argIndex++
-   }
-
-   // Add type filter if provided
-   if appType != "" {
-       conditions = append(conditions, fmt.Sprintf("type = $%d", argIndex))
-       args = append(args, appType)
-       argIndex++
-   }
-
-   whereClause := ""
-   if len(conditions) > 0 {
-       whereClause = "WHERE " + strings.Join(conditions, " AND ")
-   }
-   ```
-
-   **Step 3b - Execute COUNT query for total_items:**
-
-   ```sql
-   SELECT COUNT(*) FROM applications [WHERE clause];
-   ```
-
-   Example with filters:
-
-   ```sql
-   SELECT COUNT(*) FROM applications WHERE status = $1 AND type = $2;
-   ```
-
-   **Step 3c - Calculate pagination offset:**
-
-   ```go
-   offset := (page - 1) * pageSize
-   ```
-
-   **Step 3d - Build and execute SELECT query:**
-
-   ```sql
-   SELECT
-       id,
-       deployment_name,
-       deployment_type,
-       type,
-       status,
-       message,
-       created_at,
-       updated_at
-   FROM applications
-   [WHERE clause]
-   ORDER BY [sort_by] [sort_order]
-   LIMIT $n OFFSET $n+1;
-   ```
-
-   **Complete example with all parameters:**
-
-   ```sql
-   -- With status and type filters
-   SELECT
-       id, deployment_name, deployment_type, type,
-       status, message, created_at, updated_at
-   FROM applications
-   WHERE status = $1 AND type = $2
-   ORDER BY created_at DESC
-   LIMIT $3 OFFSET $4;
-
-   -- Arguments: ["Running", "Digital Assistant", 20, 0]
-   ```
-
-4. **Pagination Calculation**:
-
-   ```go
-   totalPages := int(math.Ceil(float64(totalItems) / float64(pageSize)))
-   if totalPages == 0 {
-       totalPages = 1  // At least 1 page even if no results
-   }
-   hasNext := page < totalPages
-   hasPrev := page > 1
-   ```
-
-5. **Response Mapping**:
-   - Scan PostgreSQL rows into Go structs
-   - Format timestamps to ISO 8601 (RFC3339) using `time.Format(time.RFC3339)`
-   - Construct paginated response with data array and pagination metadata
+1. Validate JWT token from Authorization header via `AuthMiddleware`
+2. Validate pagination parameters (page >= 1, page_size between 1-100)
+3. Query all rows from the applications table with pagination support
+4. For each application, use the template field to fetch the corresponding type (Digital Assistant) and deployment_type (architecture or service) from the architecure or service metadata file for the corresponding template id (This will be unique and belongs to either architecture or service).
+5. Construct paginated response with application data and metadata
 
 **Example Requests:**
 
@@ -716,8 +621,8 @@ Authorization: Bearer <access_token>
 
 ```json
 {
-  "id": "rag-production",
-  "deployment_name": "RAG Production",
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "name": "RAG Production",
   "deployment_type": "architecture",
   "type": "Digital Assistant",
   "status": "Running",
@@ -763,8 +668,8 @@ Authorization: Bearer <access_token>
 
 ```json
 {
-  "id": "summarization-dev",
-  "deployment_name": "Summarization Dev",
+  "id": "223e4567-e89b-12d3-a456-426614174001",
+  "name": "Summarization Dev",
   "deployment_type": "service",
   "type": "Summary",
   "status": "Running",
@@ -794,8 +699,8 @@ Authorization: Bearer <access_token>
 **Application Level:**
 | Field | Type | Description |
 |-------|------|-------------|
-| id | string | Application ID (Primary Key, immutable) |
-| deployment_name | string | User-friendly display name of the deployment |
+| id | string | Application ID (UUID) |
+| name | string | Application name |
 | deployment_type | string | "architecture" or "service" |
 | type | string | Application type: "Digital Assistant" for architectures, "Summary" for summarization services |
 | status | string | Current status (Downloading, Deploying, Running, Deleting, Error) |
@@ -832,7 +737,7 @@ Authorization: Bearer <access_token>
 1. Validate the incoming JWT token from Authorization header
 2. Execute database query on applications table using `id` as the filter
 3. Perform JOIN with services table to fetch associated services
-4. Map the database response to the response struct including nested services
+4. For each application, use the template field to fetch the corresponding type (Digital Assistant) and deployment_type (architecture or service) from the architecure or service metadata file for the corresponding template id (This will be unique and belongs to either architecture or service).
 5. Return the mapped response with appropriate HTTP status code
 
 ---
@@ -850,13 +755,11 @@ Authorization: Bearer <access_token>
 Content-Type: application/json
 ```
 
-**Request Body:**
+**Request Body Example 1 (Architecture):**
 
 ```json
 {
-  "deployment_name": "RAG Production",
-  "deployment_type": "architecture",
-  "type": "Digital Assistant",
+  "name": "RAG Production",
   "template": "rag",
   "created_by": "admin",
   "services": [
@@ -870,14 +773,42 @@ Content-Type: application/json
     },
     {
       "id": "digitization",
-      "version": "1.0.0",
-      "optional": true
+      "version": "1.0.0"
     }
   ],
   "params": {
-    "opensearch.memoryLimit": "4Gi",
-    "opensearch.storage": "20Gi",
-    "opensearch.auth.password": "SecurePassword123!@#"
+    "rag": {
+      "digitize": {
+        "port": 8080
+      },
+      "summarize": {
+        "port": 8081
+      },
+      "opensearch": {
+        "memoryLimit": "4Gi",
+        "storage": "20Gi",
+        "auth": {
+          "password": "SecurePassword123!@#"
+        }
+      }
+    }
+  }
+}
+```
+
+**Request Body Example 2 (Service):**
+
+```json
+{
+  "name": "Summarization Service",
+  "template": "summarize",
+  "created_by": "admin",
+  "params": {
+    "summarize": {
+      "instruct": {
+        "apiKey": "sk-1234567890abcdef1234567890"
+      }
+    }
   }
 }
 ```
@@ -885,12 +816,10 @@ Content-Type: application/json
 **Request Schema:**
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| deployment_name | string | Yes | User-friendly display name (3-100 chars) |
-| deployment_type | string | Yes | Deployment type: "architecture" or "service" |
-| type | string | Yes | Application type (e.g., "Digital Assistant", "Summary") |
-| template | string | Yes | Template ID (e.g., "rag" is the ID for "Digital Assistant" type) |
+| name | string | Yes | Application name (3-100 chars) |
+| template | string | Yes | Template ID (e.g., rag, summarize, digitize) |
 | created_by | string | Yes | Username of the user creating the application |
-| services | array | No | Array of service objects to deploy. If not provided, all services from the architecture template will be deployed. For Service deployment_type, this should contain a single service. |
+| services | array | No | Array of service objects to deploy. If not provided, all services from the template will be deployed |
 | params | object | No | Key-value pairs of custom parameters for the deployment |
 
 **Service Object (in services array):**
@@ -901,8 +830,9 @@ Content-Type: application/json
 
 **Params Object:**
 
-- Flexible key-value pairs where keys are parameter paths (e.g., "opensearch.memoryLimit")
-- Values can be strings, numbers, or booleans depending on the parameter type
+- Nested object structure matching the JSON Schema returned by GET /api/v1/params?id={template}
+- Top-level key is the template ID (e.g., "rag", "summarize")
+- Contains nested objects for each component/service with their respective parameters
 - Parameters must match the schema defined in the template
 - If not provided, default values from the template will be used
 
@@ -910,53 +840,18 @@ Content-Type: application/json
 
 ```json
 {
-  "id": "rag-production",
-  "deployment_name": "RAG Production",
-  "deployment_type": "architecture",
-  "type": "Digital Assistant",
-  "template": "rag",
-  "created_by": "admin",
+  "id": "123e4567-e89b-12d3-a456-426614174000",
   "status": "Downloading",
-  "message": "Deployment initiated successfully",
-  "services": [
-    {
-      "id": "chat",
-      "version": "1.0.0"
-    },
-    {
-      "id": "summarization",
-      "version": "1.0.0"
-    },
-    {
-      "id": "digitization",
-      "version": "1.0.0"
-    }
-  ],
-  "params": {
-    "opensearch.memoryLimit": "4Gi",
-    "opensearch.storage": "20Gi",
-    "opensearch.auth.password": "***"
-  },
-  "created_at": "2026-04-15T10:30:00Z",
-  "updated_at": "2026-04-15T10:30:00Z"
+  "message": "Deployment initiated successfully"
 }
 ```
 
 **Response Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
-| id | string | Auto-generated application ID (Primary Key, immutable) |
-| deployment_name | string | User-friendly display name |
-| deployment_type | string | Deployment type |
-| type | string | Application type |
-| template | string | Template ID used for deployment |
-| created_by | string | Username of the user who created the application |
+| id | string | Auto-generated application ID (UUID) |
 | status | string | Initial status ("Downloading") |
 | message | string | Status message |
-| services | array | Array of service objects that will be deployed |
-| params | object | Applied parameters (sensitive values masked) |
-| created_at | string | Creation timestamp |
-| updated_at | string | Last update timestamp |
 
 **Error Responses:**
 
@@ -976,32 +871,19 @@ Content-Type: application/json
    - Return 403 Forbidden if `created_by` doesn't match the authenticated user
 
 3. **ID Generation**:
-   - Auto-generate `id` by normalizing deployment_name
-   - Normalization rules:
-     - Convert to lowercase
-     - Replace spaces and special characters with hyphens
-     - Remove leading/trailing hyphens
-     - Collapse multiple consecutive hyphens to single hyphen
-   - Example transformations:
-     - "RAG Production" → "rag-production"
-     - "My App 2024!" → "my-app-2024"
-     - "Test\_\_\_Service" → "test-service"
-   - Validate final id is 3-50 characters
-   - Check uniqueness in applications table (return 409 if exists)
+   - Auto-generate `id` as UUID v4
+   - Use standard UUID generation library (e.g., `github.com/google/uuid`)
+   - No need to check uniqueness as UUIDs are globally unique
 
 4. **Template Validation**:
    - Verify template exists in catalog
    - Retrieve template's JSON Schema for parameter validation
 
 5. **Services Validation** (if services provided):
-   - Validate each service ID exists in the catalog (use GET /api/v1/services/{id})
-   - For Architecture deployment_type:
-     - Verify each service is compatible with the architecture template
-     - Check that service versions meet architecture requirements
-     - If services array is not provided, use all services defined in the architecture template
-   - For Service deployment_type:
-     - Ensure only one service is specified in the services array
-     - Validate the service matches the application type
+   - Validate each service ID exists in the catalog
+   - Verify each service is compatible with the template
+   - Check that service versions meet template requirements
+   - If services array is not provided, use all services defined in the template
    - Validate service dependencies are satisfied
    - Return 422 error if any service validation fails
 
@@ -1014,8 +896,8 @@ Content-Type: application/json
 7. **Database Operations**:
    - Begin transaction
    - Insert record in applications table with:
-     - Generated id (Primary Key)
-     - deployment_name, deployment_type, template, created_by
+     - Generated id (UUID, Primary Key)
+     - name, template, created_by
      - params as JSONB
      - status = "Downloading"
    - Insert corresponding records in services table
@@ -1054,21 +936,21 @@ Content-Type: application/json
 
 ```json
 {
-  "deployment_name": "RAG Production Updated"
+  "name": "RAG Production Updated"
 }
 ```
 
 **Request Schema:**
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| deployment_name | string | Yes | Updated display name (3-100 chars) |
+| name | string | Yes | Updated name (3-100 chars) |
 
 **Response (200 OK):**
 
 ```json
 {
-  "id": "rag-production",
-  "deployment_name": "RAG Production Updated",
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "name": "RAG Production Updated",
   "deployment_type": "architecture",
   "type": "Digital Assistant",
   "status": "Running",
@@ -1080,8 +962,8 @@ Content-Type: application/json
 **Response Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
-| id | string | Application ID (Primary Key, unchanged) |
-| deployment_name | string | Updated display name |
+| id | string | Application ID (UUID, unchanged) |
+| name | string | Updated name |
 | deployment_type | string | Deployment type |
 | type | string | Application type |
 | status | string | Current status |
@@ -1101,7 +983,7 @@ Content-Type: application/json
 1. **Token Validation**: Validate JWT token from Authorization header
 2. **Request Validation**: Validate deployment_name format and length (3-100 chars)
 3. **Database Update**:
-   - Execute UPDATE query on applications table to update deployment_name field
+   - Execute UPDATE query on applications table to update name field
    - Use id as the filter (WHERE id = $1)
    - Update updated_at timestamp
 4. **Response**: Fetch and return the complete updated application object
@@ -1136,7 +1018,7 @@ Authorization: Bearer <access_token>
 
 ```json
 {
-  "id": "rag-production",
+  "id": "123e4567-e89b-12d3-a456-426614174000",
   "status": "deleting",
   "message": "Deletion initiated successfully"
 }
@@ -1145,7 +1027,7 @@ Authorization: Bearer <access_token>
 **Response Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
-| id | string | Application ID (Primary Key) |
+| id | string | Application ID (UUID) |
 | status | string | Status (deleting) |
 | message | string | Status message |
 
@@ -1194,7 +1076,7 @@ Authorization: Bearer <access_token>
 
 ```json
 {
-  "id": "rag-production",
+  "id": "123e4567-e89b-12d3-a456-426614174000",
   "pods": [
     {
       "pod_id": "a1b2c3d4e5f6",
@@ -1233,7 +1115,7 @@ Authorization: Bearer <access_token>
 **Response Schema:**
 | Field | Type | Description |
 |-------|------|-------------|
-| id | string | Application ID (Primary Key) |
+| id | string | Application ID (UUID) |
 | pods | array | Array of pod objects |
 
 **Pod Object Schema:**
@@ -1520,25 +1402,7 @@ GET /api/v1/services/chat
   "description": "Answer questions in natural language by sourcing general & domain-specific knowledge",
   "version": "1.0.0",
   "type": "service",
-  "certified_by": "IBM",
-  "dependencies": [
-    {
-      "id": "opensearch",
-      "version": ">=1.0.0"
-    },
-    {
-      "id": "embedding",
-      "version": ">=1.0.0"
-    },
-    {
-      "id": "instruct",
-      "version": ">=1.0.0"
-    },
-    {
-      "id": "reranker",
-      "version": ">=1.0.0"
-    }
-  ]
+  "certified_by": "IBM"
 }
 ```
 
@@ -1552,13 +1416,6 @@ GET /api/v1/services/chat
 | type | string | Service type |
 | certified_by | string | Certification authority |
 | architectures | array | Architecture IDs that include this service |
-| dependencies | array | Array of dependency objects |
-
-**Dependency Object Schema:**
-| Field | Type | Description |
-|-------|------|-------------|
-| id | string | Dependency service ID |
-| version | string | Version constraint (optional) |
 
 **Implementation Notes:**
 
@@ -1569,11 +1426,11 @@ GET /api/v1/services/chat
 
 ---
 
-#### 5.3.5 Get Service Custom Parameters
+#### 5.3.5 Get Template Parameters
 
-**Endpoint:** `GET /api/v1/services/{id}/params`
+**Endpoint:** `GET /api/v1/params`
 
-**Description:** Retrieves custom parameters schema for a specific service template. Returns JSON Schema format that UI can use to generate dynamic forms with validation.
+**Description:** Retrieves custom parameters schema for a specific architecture or service template. Returns JSON Schema format that UI can use to generate dynamic forms with validation.
 
 **Request Headers:**
 
@@ -1581,66 +1438,124 @@ GET /api/v1/services/chat
 Authorization: Bearer <access_token>
 ```
 
-**Path Parameters:**
+**Query Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| id | string | Yes | Service template ID (e.g., "rag", "summarize") |
+| id | string | Yes | Architecture or service template ID (e.g., "rag", "summarize") |
 
 **Request Body:** None
 
-**Example Request:**
+**Example Request 1 (Architecture):**
 
 ```
-GET /api/v1/services/rag/params
+GET /api/v1/params?id=rag
 ```
 
-**Response (200 OK):**
+**Response (200 OK) - Architecture Example:**
 
 ```json
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
-    "opensearch": {
+    "rag": {
       "type": "object",
       "properties": {
-        "memoryLimit": {
-          "type": "string",
-          "pattern": "^[0-9]+(Ki|Mi|Gi|Ti|Pi|Ei)$",
-          "description": "Memory limit for OpenSearch (e.g., 2Gi, 4Gi)",
-          "x-advanced": true
-        },
-        "storage": {
-          "type": "string",
-          "pattern": "^[0-9]+(Ki|Mi|Gi|Ti|Pi|Ei)$",
-          "description": "Storage size for OpenSearch (e.g., 10Gi, 20Gi)",
-          "x-advanced": true
-        },
-        "auth": {
+        "digitize": {
           "type": "object",
           "properties": {
-            "password": {
+            "port": {
+              "type": "integer",
+              "description": "Port number for digitize service",
+              "default": 8080
+            }
+          }
+        },
+        "summarize": {
+          "type": "object",
+          "properties": {
+            "port": {
+              "type": "integer",
+              "description": "Port number for summarize service",
+              "default": 8081
+            }
+          }
+        },
+        "opensearch": {
+          "type": "object",
+          "properties": {
+            "memoryLimit": {
               "type": "string",
-              "minLength": 15,
-              "allOf": [
-                {
-                  "pattern": ".*[a-z].*",
-                  "description": "Must contain at least one lowercase letter"
-                },
-                {
-                  "pattern": ".*[A-Z].*",
-                  "description": "Must contain at least one uppercase letter"
-                },
-                {
-                  "pattern": ".*[0-9].*",
-                  "description": "Must contain at least one digit"
-                },
-                {
-                  "pattern": ".*[@$!%*?&#^()_+\\-=\\[\\]{};':\"\\\\|,.<>/`~].*",
-                  "description": "Must contain at least one special character"
+              "pattern": "^[0-9]+(Ki|Mi|Gi|Ti|Pi|Ei)$",
+              "description": "Memory limit for OpenSearch (e.g., 2Gi, 4Gi)",
+              "x-advanced": true
+            },
+            "storage": {
+              "type": "string",
+              "pattern": "^[0-9]+(Ki|Mi|Gi|Ti|Pi|Ei)$",
+              "description": "Storage size for OpenSearch (e.g., 10Gi, 20Gi)",
+              "x-advanced": true
+            },
+            "auth": {
+              "type": "object",
+              "properties": {
+                "password": {
+                  "type": "string",
+                  "minLength": 15,
+                  "allOf": [
+                    {
+                      "pattern": ".*[a-z].*",
+                      "description": "Must contain at least one lowercase letter"
+                    },
+                    {
+                      "pattern": ".*[A-Z].*",
+                      "description": "Must contain at least one uppercase letter"
+                    },
+                    {
+                      "pattern": ".*[0-9].*",
+                      "description": "Must contain at least one digit"
+                    },
+                    {
+                      "pattern": ".*[@$!%*?&#^()_+\\-=\\[\\]{};':\"\\\\|,.<>/`~].*",
+                      "description": "Must contain at least one special character"
+                    }
+                  ],
+                  "description": "Password must be at least 15 characters and contain at least one uppercase letter, one lowercase letter, one digit, and one special character"
                 }
-              ],
-              "description": "Password must be at least 15 characters and contain at least one uppercase letter, one lowercase letter, one digit, and one special character"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**Example Request 2 (Service):**
+
+```
+GET /api/v1/params?id=summarize
+```
+
+**Response (200 OK) - Service Example:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "summarize": {
+      "type": "object",
+      "properties": {
+        "instruct": {
+          "type": "object",
+          "properties": {
+            "apiKey": {
+              "type": "string",
+              "minLength": 20,
+              "description": "API key for instruct service",
+              "x-sensitive": true
             }
           }
         }
@@ -1681,10 +1596,11 @@ These libraries will automatically:
 
 **Implementation Notes:**
 
-- Read the values.schema.json file from the template's asset directory
-- Return the schema as-is without modification
-- UI libraries can consume this standard JSON Schema format directly
-- **TODO:** finalizing on Implementation Notes
+1. Validate the `id` query parameter is provided
+2. Check if the template exists in architectures or services catalog
+3. Read the values.schema.json file from the template's asset directory
+4. Wrap the schema properties under the template ID as a nested object
+5. Return the complete JSON Schema with the template ID as the top-level property key
 
 ---
 
