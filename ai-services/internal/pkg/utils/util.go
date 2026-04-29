@@ -377,6 +377,35 @@ func FlattenMapToKeys(m map[string]any, prefix string) map[string]string {
 	return result
 }
 
+// GetBaseDir returns the base directory from environment variable or default.
+// It automatically appends "/ai-services" suffix if not already present.
+func GetBaseDir() string {
+	baseDir := constants.DefaultBaseDir
+	if dir := os.Getenv("AI_SERVICES_BASE_DIR"); dir != "" {
+		baseDir = dir
+	}
+
+	// Clean the path to remove trailing slashes and normalize
+	baseDir = filepath.Clean(baseDir)
+
+	// Ensure the path ends with /ai-services
+	if !strings.HasSuffix(baseDir, "/ai-services") {
+		baseDir = filepath.Join(baseDir, "ai-services")
+	}
+
+	return baseDir
+}
+
+// GetApplicationsPath returns the applications path based on the configured base directory.
+func GetApplicationsPath() string {
+	return filepath.Join(GetBaseDir(), "applications")
+}
+
+// GetModelsPath returns the models path based on the configured base directory.
+func GetModelsPath() string {
+	return filepath.Join(GetBaseDir(), "models")
+}
+
 // ValidateBaseDir validates that the base directory exists or can be created and is writable.
 // It creates an 'ai-services' subdirectory within the provided base directory for all AI services content.
 func ValidateBaseDir(baseDir string) (string, error) {

@@ -177,7 +177,7 @@ func (p *PodmanApplication) downloadModels(ctx context.Context, templateName, ap
 	for _, model := range models {
 		s.UpdateMessage("Downloading model: " + model + "...")
 		err = utils.Retry(vars.RetryCount, vars.RetryInterval, nil, func() error {
-			return helpers.DownloadModel(model, vars.ModelDirectory)
+			return helpers.DownloadModel(model, utils.GetModelsPath())
 		})
 		if err != nil {
 			s.Fail("failed to download model: " + model)
@@ -221,7 +221,7 @@ func (p *PodmanApplication) calculateReqSpyreCards(tp templates.Template, podTem
 
 	// Prepare argParams with baseDir to ensure consistency
 	argParams := map[string]string{
-		"baseDir": constants.GetBaseDir(),
+		"baseDir": utils.GetBaseDir(),
 	}
 
 	// Calculate Req Spyre Counts
@@ -316,7 +316,7 @@ func (p *PodmanApplication) executePodTemplates(tp templates.Template,
 
 	// Always set baseDir from environment or default to ensure consistency
 	// This overrides any baseDir in values.yaml with the actual runtime base directory
-	argParams["baseDir"] = constants.GetBaseDir()
+	argParams["baseDir"] = utils.GetBaseDir()
 
 	// Load values for template rendering
 	values, err := tp.LoadValues(appMetadata.Name, valuesFiles, argParams)

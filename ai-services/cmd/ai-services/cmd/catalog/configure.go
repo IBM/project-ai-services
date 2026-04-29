@@ -38,7 +38,7 @@ func NewConfigureCmd() *cobra.Command {
 Examples:
 	 # Configure catalog service for podman
 	 ai-services catalog configure --runtime podman
-	 
+
 	 # Configure with custom UI port
 	 ai-services catalog configure --runtime podman --params ui.port=8081`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -123,12 +123,8 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 		&baseDir,
 		"basedir",
 		constants.DefaultBaseDir,
-		"Base directory for AI services data (applications, models, cache).\n\n"+
-			fmt.Sprintf("Default: %s\n", constants.DefaultBaseDir)+
-			"Example: --basedir /custom/path\n\n"+
-			"Note: An 'ai-services' subdirectory will be created within this path.\n"+
-			"The directory will be created if it doesn't exist.\n"+
-			"User must have write permissions to this directory.\n",
+		"Base directory for AI services data (applications, models, cache).\n"+
+			"Example: --basedir /custom/path\n",
 	)
 
 	cmd.Flags().StringSliceVar(
