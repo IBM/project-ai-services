@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -37,7 +37,7 @@ Examples:
 			return validateUninstallFlags()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return configure.Uninstall(configure.UninstallOptions{
+			return uninstall.Uninstall(uninstall.UninstallOptions{
 				Runtime: vars.RuntimeFactory.GetRuntimeType(),
 				AutoYes: uninstallAutoYes,
 			})

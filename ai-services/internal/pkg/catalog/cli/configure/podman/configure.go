@@ -13,6 +13,7 @@ import (
 	"text/template"
 
 	"github.com/project-ai-services/ai-services/assets"
+	catalog "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -24,7 +25,6 @@ import (
 )
 
 const (
-	catalogAppName     = "ai-services"
 	catalogAppTemplate = "catalog"
 	dirPerm            = 0o755
 	filePerm           = 0o644
@@ -91,7 +91,7 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 	logger.Infoln("-------")
 
 	// Print next steps similar to application create
-	if err := helpers.PrintNextSteps(tp, rt, catalogAppName, catalogAppTemplate); err != nil {
+	if err := helpers.PrintNextSteps(tp, rt, catalog.CatalogAppName, catalogAppTemplate); err != nil {
 		// do not want to fail the overall configure if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)
 	}
