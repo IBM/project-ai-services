@@ -1,5 +1,5 @@
 REGISTRY?=icr.io/ai-services-private
-IMAGE=rag-base
+IMAGE=python-base
 TAG?=v0.0.24
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
