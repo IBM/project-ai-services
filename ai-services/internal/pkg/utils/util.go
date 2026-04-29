@@ -378,22 +378,13 @@ func FlattenMapToKeys(m map[string]any, prefix string) map[string]string {
 }
 
 // GetBaseDir returns the base directory from environment variable or default.
-// It automatically appends "/ai-services" suffix if not already present.
 func GetBaseDir() string {
 	baseDir := constants.DefaultBaseDir
 	if dir := os.Getenv("AI_SERVICES_BASE_DIR"); dir != "" {
 		baseDir = dir
 	}
 
-	// Clean the path to remove trailing slashes and normalize
-	baseDir = filepath.Clean(baseDir)
-
-	// Ensure the path ends with /ai-services
-	if !strings.HasSuffix(baseDir, "/ai-services") {
-		baseDir = filepath.Join(baseDir, "ai-services")
-	}
-
-	return baseDir
+	return filepath.Clean(baseDir)
 }
 
 // GetApplicationsPath returns the applications path based on the configured base directory.
@@ -411,14 +402,16 @@ func GetModelsPath() string {
 func ValidateBaseDir(baseDir string) (string, error) {
 	// Clean the path
 	baseDir = filepath.Clean(baseDir)
-	// Create ai-services subdirectory within the base directory
-	aiServicesDir := filepath.Join(baseDir, "ai-services")
+	// Only add ai-services subdirectory if not already present
+	if filepath.Base(baseDir) != "ai-services" {
+		baseDir = filepath.Join(baseDir, "ai-services")
+	}
 	// Check if directory exists or can be created
-	if err := os.MkdirAll(aiServicesDir, constants.DirPerm); err != nil {
+	if err := os.MkdirAll(baseDir, constants.DirPerm); err != nil {
 		return "", fmt.Errorf("cannot create directory: %w", err)
 	}
 	// Check write permissions by creating a test file
-	testFile := filepath.Join(aiServicesDir, ".ai-services-permission-test")
+	testFile := filepath.Join(baseDir, ".ai-services-permission-test")
 	if err := os.WriteFile(testFile, []byte("test"), constants.FilePerm); err != nil {
 		return "", fmt.Errorf("no write permission: %w", err)
 	}
@@ -427,5 +420,5 @@ func ValidateBaseDir(baseDir string) (string, error) {
 		logger.Warningf("Failed to remove test file %s: %v\n", testFile, err)
 	}
 
-	return aiServicesDir, nil
+	return baseDir, nil
 }
