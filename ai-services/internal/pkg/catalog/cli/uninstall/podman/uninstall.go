@@ -38,6 +38,7 @@ func UninstallCatalog(ctx context.Context, autoYes bool) error {
 	if !podsExists {
 		s.Stop("No catalog service found")
 		logger.Infoln("Catalog service is not deployed")
+
 		return nil
 	}
 
@@ -141,6 +142,7 @@ func secretDeletion(rt *podman.PodmanClient) error {
 			return fmt.Errorf("failed to remove secret: %w", err)
 		}
 	}
+
 	return nil
 }
 
