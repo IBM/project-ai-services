@@ -162,12 +162,11 @@ This table manages both revoked access tokens (blacklist) and active refresh tok
 │  applications    │
 ├──────────────────┤
 │ id (PK)          │
-│ deployment_name  │
-│ type             │
-│ deployment_type  │
+│ name             │
+│ template         │
 │ status           │
 │ message          │
-│ createdby        │
+│ created_by       │
 │ created_at       │
 │ updated_at       │
 └──────────────────┘
@@ -189,13 +188,14 @@ This table manages both revoked access tokens (blacklist) and active refresh tok
 |
 |
 ┌──────────────────┐
-│ token_blacklist  │
+│     tokens       │
 ├──────────────────┤
 │ id (PK)          │
-│ token (UNIQUE)   │
+│ token_hash       │
 │ token_type       │
 │ user_id          │
 │ expires_at       │
+│ created_at       │
 └──────────────────┘
 ```
 
