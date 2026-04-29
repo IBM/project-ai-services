@@ -229,8 +229,11 @@ Content-Type: application/json
    - Both tokens include custom claims: `uid` (user ID), issuer ("ai-services-catalog-server"), subject, audience, expiry
    - Access token audience: "access", Refresh token audience: "refresh"
    - Signing method: HS256 with secret key
-5. **Response**: Return both tokens with "Bearer" token type (handler returns access_token, refresh_token, token_type)
-6. **Error Handling**: Return 401 for invalid credentials, 400 for malformed requests
+5. **Store Refresh Token**: Hash the refresh token using SHA-256 and store in database:
+   - Call `TokenStore.Add(HashToken(refreshToken), "refresh_active", userID, refreshTokenExpiry)`
+   - Inserts into `tokens` table with token_type='refresh_active'
+6. **Response**: Return both tokens with "Bearer" token type (handler returns access_token, refresh_token, token_type)
+7. **Error Handling**: Return 401 for invalid credentials, 400 for malformed requests, 500 for database errors
 
 **Security Considerations:**
 
@@ -295,24 +298,30 @@ Content-Type: application/json
 **Implementation Notes:**
 
 1. **Request Validation**: Use Gin's `ShouldBind` to validate request body against `refreshReq` struct (refresh_token required)
-2. **Token Validation**: Call `TokenManager.ValidateRefreshToken(refreshToken)` to:
+2. **Check Refresh Token in Database**: Hash the refresh token and check if it exists in database:
+   - Call `TokenStore.Contains(HashToken(refreshToken), "refresh_active")`
+   - Return 401 "token not found or revoked" if not in database
+3. **Token Validation**: Call `TokenManager.ValidateRefreshToken(refreshToken)` to:
    - Parse JWT token with HS256 signature verification
    - Validate token expiry and claims
    - Check audience field is "refresh" (prevents access token misuse)
-   - Extract user ID from custom claims
-3. **Token Rotation**: Generate new token pair:
+   - Extract user ID and expiry time from custom claims
+4. **Token Rotation**: Generate new token pair:
    - New access token with `TokenManager.GenerateAccessToken(userID)`
    - New refresh token with `TokenManager.GenerateRefreshToken(userID)`
    - Both tokens have fresh expiry times
-4. **Response**: Return new access_token, refresh_token, and token_type
-5. **Error Handling**: Return 401 for invalid/expired tokens, 400 for missing token
+5. **Update Database**:
+   - Delete old refresh token: `TokenStore.Delete(HashToken(oldRefreshToken), "refresh_active")`
+   - Store new refresh token: `TokenStore.Add(HashToken(newRefreshToken), "refresh_active", userID, newRefreshTokenExpiry)`
+6. **Response**: Return new access_token, refresh_token, and token_type
+7. **Error Handling**: Return 401 for invalid/expired/revoked tokens, 400 for missing token, 500 for database errors
 
 **Security Considerations:**
 
 - Refresh tokens are rotated on each use (new tokens generated)
-- Old refresh token becomes invalid after successful refresh
+- Old refresh token is blacklisted after successful refresh to prevent reuse
 - Token audience validation prevents token type confusion
-- Consider implementing refresh token blacklisting for enhanced security (currently not implemented but can be added)
+- Both access and refresh tokens are blacklisted in the same `token_blacklist` table with `token_type` field
 
 ---
 
@@ -320,7 +329,7 @@ Content-Type: application/json
 
 **Endpoint:** `POST /api/v1/auth/logout`
 
-**Description:** Invalidates the current access and refresh tokens.
+**Description:** Invalidates the current access token and deletes all refresh tokens for the user.
 
 **Request Headers:**
 
@@ -349,29 +358,66 @@ Authorization: Bearer <access_token>
 
 **Implementation Notes:**
 
-1. **Token Extraction**: Retrieve raw access token from Gin context using `middleware.CtxRawTokenKey`
+1. **Access Token Extraction**: Retrieve raw access token from Gin context using `middleware.CtxRawTokenKey`
    - Token was previously extracted and validated by `AuthMiddleware`
-2. **Token Validation**: Call `TokenManager.ValidateAccessToken(token)` to:
+2. **User ID Extraction**: Retrieve user ID from Gin context using `middleware.CtxUserIDKey`
+   - User ID was extracted from JWT token by `AuthMiddleware`
+3. **Access Token Validation**: Call `TokenManager.ValidateAccessToken(accessToken)` to:
    - Parse token and extract expiry time
    - If token is already invalid, treat as success (idempotent operation)
-3. **Blacklist Addition**: Call `TokenBlacklist.Add(token, expiryTime)` to:
-   - Add token to in-memory blacklist map
-   - Store with expiry time for automatic cleanup
-4. **Response**: Return success message "logged out"
-5. **Error Handling**: Return 400 for missing token, 500 for blacklist failures
+4. **Blacklist Access Token**: Hash and store access token in database:
+   - Call `TokenStore.Add(HashToken(accessToken), "access_blacklist", userID, accessTokenExpiry)`
+   - Inserts into `tokens` table with token_type='access_blacklist'
+   - Use ON CONFLICT DO NOTHING to handle duplicate logout attempts
+5. **Delete All User Refresh Tokens**: Remove all active refresh tokens for the user:
+   - Execute: `DELETE FROM tokens WHERE user_id = $1 AND token_type = 'refresh_active'`
+   - This logs out the user from all devices/sessions
+6. **Response**: Return success message "logged out"
+7. **Error Handling**: Return 400 for missing token, 500 for database failures
 
-**Blacklist Implementation:**
+**Token Storage Implementation:**
 
-- Uses `InMemoryTokenBlacklist` with map[string]time.Time storage
-- Background garbage collection runs every 1 minute to remove expired tokens
-- `Contains()` method checks blacklist and removes expired entries on-the-fly
-- **Note**: In-memory implementation only suitable for single-instance deployments
+- Uses PostgreSQL `tokens` table with columns: id, token_hash, token_type, user_id, expires_at, created_at
+- Tokens are hashed using SHA-256 before storage (64-character hex string)
+- Dual purpose table:
+  - Access tokens: Blacklist approach (token_type='access_blacklist')
+  - Refresh tokens: Whitelist approach (token_type='refresh_active')
+- Periodic cleanup job removes expired tokens: `DELETE FROM tokens WHERE expires_at < NOW()`
+- Database-backed implementation supports multi-instance deployments
+- Replaces the in-memory `InMemoryTokenBlacklist` for production use
+- Server does NOT store plaintext tokens - only SHA-256 hashes
 
 **Middleware Integration:**
 
-- `AuthMiddleware` checks `TokenBlacklist.Contains(token)` before validating
-- Returns 401 "token revoked" if token is blacklisted
-- Ensures revoked tokens cannot be used even if still valid
+- `AuthMiddleware` checks access token against database:
+  - Hash the token: `tokenHash := HashToken(accessToken)`
+  - Query: `SELECT EXISTS(SELECT 1 FROM tokens WHERE token_hash = $1 AND token_type = 'access_blacklist' AND expires_at > NOW())`
+  - Returns 401 "token revoked" if blacklisted
+- `RefreshTokens` endpoint checks refresh token against database:
+  - Hash the token: `tokenHash := HashToken(refreshToken)`
+  - Query: `SELECT EXISTS(SELECT 1 FROM tokens WHERE token_hash = $1 AND token_type = 'refresh_active' AND expires_at > NOW())`
+  - Returns 401 "token not found" if not in database
+- Ensures revoked/deleted tokens cannot be used even if still valid
+
+**Token Hashing:**
+
+Tokens use SHA-256 for hashing (not PBKDF2 like passwords) because:
+- JWTs are already cryptographically secure and signed
+- We only need fast lookup, not brute-force protection
+
+```go
+import (
+    "crypto/sha256"
+    "encoding/hex"
+)
+
+func HashToken(token string) string {
+    hash := sha256.Sum256([]byte(token))
+    return hex.EncodeToString(hash[:])
+}
+```
+
+**Note**: Passwords use PBKDF2 with SHA-256 (slow, with salt and iterations) for brute-force protection, while tokens use simple SHA-256 (fast) for lookup since JWTs are already secure.
 
 ---
 
