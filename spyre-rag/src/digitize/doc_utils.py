@@ -27,15 +27,15 @@ from digitize.status import (
     get_utc_timestamp
 )
 from digitize.types import DocStatus, JobStatus, OutputFormat
-import digitize.config as config
+from digitize.settings import settings
 
 logger = get_logger("doc_utils")
 
-# Load configuration from config module
-WORKER_SIZE = config.WORKER_SIZE
-HEAVY_PDF_CONVERT_WORKER_SIZE = config.HEAVY_PDF_CONVERT_WORKER_SIZE
-HEAVY_PDF_PAGE_THRESHOLD = config.HEAVY_PDF_PAGE_THRESHOLD
-POOL_SIZE = config.LLM_POOL_SIZE
+# Load configuration from settings modules
+WORKER_SIZE = settings.digitize.doc_worker_size
+HEAVY_PDF_CONVERT_WORKER_SIZE = settings.digitize.heavy_pdf_convert_worker_size
+HEAVY_PDF_PAGE_THRESHOLD = settings.digitize.heavy_pdf_page_threshold
+POOL_SIZE = settings.common.llm.llm_max_batch_size
 
 is_debug = logger.isEnabledFor(logging.DEBUG)
 tqdm_wrapper = tqdm if is_debug else (lambda x, **kwargs: x)
@@ -132,6 +132,179 @@ def process_text(converted_doc, pdf_path, out_path):
 
     return page_count, process_time
 
+def extract_table_headers(markdown_table: str) -> list[str]:
+    """
+    Extract headers from a markdown table by parsing the first row with pipe symbols.
+    Handles cases where the first line might be a caption without pipes.
+
+    Args:
+        markdown_table: Markdown formatted table string
+
+    Returns:
+        List of header strings, or empty list if no headers found
+    """
+    if not markdown_table or not markdown_table.strip():
+        return []
+
+    try:
+        lines = markdown_table.strip().split('\n')
+        if not lines:
+            return []
+
+        # Find the first line that contains pipe symbols (actual table row)
+        header_line = None
+        for line in lines:
+            line = line.strip()
+            if '|' in line:
+                header_line = line
+                break
+
+        if not header_line:
+            return []
+
+        # Remove leading and trailing pipes and split by pipe
+        if header_line.startswith('|'):
+            header_line = header_line[1:]
+        if header_line.endswith('|'):
+            header_line = header_line[:-1]
+
+        # Split by pipe and strip whitespace from each header
+        headers = [h.strip() for h in header_line.split('|')]
+
+        # Filter out empty headers
+        headers = [h for h in headers if h]
+
+        return headers
+    except Exception as e:
+        logger.debug(f"Failed to extract headers from markdown table: {e}")
+        return []
+
+
+def headers_match(headers1: list[str], headers2: list[str]) -> bool:
+    """
+    Check if two header lists match (case-insensitive, whitespace normalized).
+
+    Args:
+        headers1: First list of headers
+        headers2: Second list of headers
+
+    Returns:
+        True if headers match, False otherwise
+    """
+    if not headers1 or not headers2:
+        return False
+
+    if len(headers1) != len(headers2):
+        return False
+
+    # Normalize and compare headers
+    normalized1 = [h.lower().strip() for h in headers1]
+    normalized2 = [h.lower().strip() for h in headers2]
+
+    return normalized1 == normalized2
+
+
+def merge_markdown_tables(table1_md: str, table2_md: str) -> str:
+    """
+    Merge two markdown tables by removing the header from the second table
+    and appending its rows to the first table.
+    Handles cases where tables might have captions before the actual table.
+
+    Args:
+        table1_md: First markdown table (with headers)
+        table2_md: Second markdown table (headers will be removed)
+
+    Returns:
+        Merged markdown table
+    """
+    if not table1_md or not table2_md:
+        return table1_md or table2_md or ""
+
+    # Split tables into lines
+    lines1 = table1_md.strip().split('\n')
+    lines2 = table2_md.strip().split('\n')
+
+    # Find where the data rows start in table2 (skip caption, header and separator)
+    # Look for the separator line (contains dashes and pipes: |---|---|)
+    data_start_idx = 0
+    for i, line in enumerate(lines2):
+        line = line.strip()
+        # Separator line typically contains dashes and pipes: |---|---|
+        if '|' in line and '---' in line:
+            data_start_idx = i + 1
+            break
+
+    # If we found a separator, append only the data rows from table2
+    if 0 < data_start_idx < len(lines2):
+        merged_lines = lines1 + lines2[data_start_idx:]
+        return '\n'.join(merged_lines)
+
+    # Fallback: just append all lines from table2 (shouldn't happen with valid markdown tables)
+    return table1_md + '\n' + table2_md
+
+
+def merge_consecutive_tables(table_dict: dict) -> dict:
+    """
+    Merge tables that span multiple consecutive pages with matching headers.
+
+    Args:
+        table_dict: Dictionary with table index as key and table data as value
+                   Each value should have 'markdown', 'caption', and 'page_number' keys
+
+    Returns:
+        Dictionary with merged tables, using same structure as input
+    """
+    if not table_dict:
+        return {}
+
+    # Sort tables by index to process in order
+    sorted_indices = sorted(table_dict.keys())
+
+    merged_dict = {}
+    skip_indices = set()
+
+    for i, idx in enumerate(sorted_indices):
+        if idx in skip_indices:
+            continue
+
+        current_table = table_dict[idx]
+        current_markdown = current_table.get('markdown', '')
+        current_page = current_table.get('page_number')
+        current_headers = extract_table_headers(current_markdown)
+
+        # Try to merge with subsequent tables on consecutive pages
+        merged_markdown = current_markdown
+        last_merged_page = current_page
+        # look at the next 2 pages
+        for j in range(i + 1, min(i + 3, len(sorted_indices))):
+            next_idx = sorted_indices[j]
+            next_table = table_dict[next_idx]
+            next_markdown = next_table.get('markdown', '')
+            next_page = next_table.get('page_number')
+            next_headers = extract_table_headers(next_markdown)
+            # Check if tables are on consecutive pages and have matching headers
+            if (next_page is not None and
+                last_merged_page is not None and
+                next_page == last_merged_page + 1 and
+                headers_match(current_headers, next_headers)):
+                # Merge the tables
+                merged_markdown = merge_markdown_tables(merged_markdown, next_markdown)
+                last_merged_page = next_page
+                skip_indices.add(next_idx)
+                logger.debug(f"Merged table {next_idx} (page {next_page}) into table {idx} (page {current_page})")
+            else:
+                # Stop looking if pages are not consecutive or headers don't match
+                break
+
+        # Store the merged (or original) table
+        merged_dict[idx] = {
+            'markdown': merged_markdown,
+            'caption': current_table.get('caption', ''),
+            'page_number': current_page
+        }
+
+    return merged_dict
+
 def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
     table_count = 0
     process_time = 0.0
@@ -151,16 +324,19 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
         table_dict[table_ix]["caption"] = table.caption_text(doc=converted_doc)
         table_dict[table_ix]["page_number"] = table.prov[0].page_no if table.prov else None
 
-    table_markdowns = [table_dict[key]["markdown"] for key in sorted(table_dict)]
-    table_captions_list = [table_dict[key]["caption"] for key in sorted(table_dict)]
-    table_page_numbers = [table_dict[key]["page_number"] for key in sorted(table_dict)]
+    # Merge tables that span multiple consecutive pages with matching headers
+    logger.debug(f"Merging tables spanning multiple pages for '{pdf_path}'")
+    merged_table_dict = merge_consecutive_tables(table_dict)
+
+    table_markdowns = [merged_table_dict[key]["markdown"] for key in sorted(merged_table_dict)]
+    table_captions_list = [merged_table_dict[key]["caption"] for key in sorted(merged_table_dict)]
+    table_page_numbers = [merged_table_dict[key]["page_number"] for key in sorted(merged_table_dict)]
 
     # Summarize and classify tables - use markdown directly
     table_summaries, decisions = summarize_and_classify_tables(table_markdowns, gen_model, gen_endpoint, pdf_path)
 
     filtered_table_dicts = {
         idx: {
-            'markdown': markdown,
             'summary': summary,
             'caption': caption,
             'page_number': page_num
@@ -735,7 +911,6 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
             for block in tqdm_wrapper(tab_data_list, desc=f"Chunking tables of '{input_path}'"):
                 caption = block.get('caption', '')
                 summary = block.get("summary", '')
-                markdown_source = block.get("markdown", '')
                 page_number = block.get('page_number')
 
                 # Use summary for chunking - summaries are more concise and meaningful for RAG
@@ -752,14 +927,12 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
                         chunked_tables.append({
                             "content": chunk,
                             "caption": caption,
-                            "markdown_source": markdown_source,
                             "page_number": page_number,
                         })
                 else:
                     chunked_tables.append({
                         "content": summary,
                         "caption": caption,
-                        "markdown_source": markdown_source,
                         "page_number": page_number,
                     })
 
@@ -839,7 +1012,6 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
             caption = block.get("caption", "")
             page_number = block.get("page_number")
             content = block.get("content", "")
-            md_source = block.get("markdown_source")
 
             # Smart caption prefixing: only add if caption not already in content
             def _normalize(text: str) -> str:
@@ -858,7 +1030,7 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
                 "page_content": page_content,
                 "filename": orig_fn,
                 "type": "table",
-                "source": md_source,
+                "source": caption,
                 "page_number": page_number,
                 "language": "en",
                 "chunk_index": txt_count + tab_idx,

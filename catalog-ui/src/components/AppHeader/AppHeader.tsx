@@ -110,7 +110,6 @@ const AppHeader = (props: AppHeaderProps) => {
               }}
               isActive={props.isSideNavOpen}
               isCollapsible
-              className={styles.menuBtn}
             />
           )}
 

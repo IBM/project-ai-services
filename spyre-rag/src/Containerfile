@@ -7,4 +7,3 @@ COPY digitize digitize
 COPY chatbot chatbot
 COPY summarize summarize
 COPY similarity similarity
-COPY settings.json .

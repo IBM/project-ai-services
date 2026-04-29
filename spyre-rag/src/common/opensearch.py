@@ -1,4 +1,3 @@
-import os
 import numpy as np
 import hashlib
 from tqdm import tqdm
@@ -7,6 +6,7 @@ from opensearchpy import OpenSearch, helpers
 from common.misc_utils import get_logger
 from common.vector_db import VectorStore, VectorStoreNotReadyError
 from common.retry_utils import retry_on_transient_error
+from common.settings import settings
 
 logger = get_logger("OpenSearch")
 
@@ -31,15 +31,15 @@ class OpensearchVectorStore(VectorStore):
     def __init__(self):
         logger.debug("Initializing OpensearchVectorStore")
 
-        self.host = os.getenv("OPENSEARCH_HOST")
-        self.port = os.getenv("OPENSEARCH_PORT")
-        self.db_prefix = os.getenv("OPENSEARCH_DB_PREFIX", "rag").lower()
-        i_name = os.getenv("OPENSEARCH_INDEX_NAME", "default")
+        self.host = settings.vector_store.opensearch_host
+        self.port = settings.vector_store.opensearch_port
+        self.db_prefix = settings.vector_store.opensearch_db_prefix.lower()
+        i_name = settings.vector_store.opensearch_index_name
         self.index_name = self._generate_index_name(i_name.lower())
         
         # Replication settings for multi-node clusters
-        self.num_shards = int(os.getenv("OPENSEARCH_NUM_SHARDS", "1"))
-
+        self.num_shards = settings.vector_store.opensearch_num_shards
+        
         logger.debug(f"Connecting to OpenSearch at {self.host}:{self.port}, index: {self.index_name}")
         logger.debug(f"Index configuration: shards={self.num_shards}")
 
@@ -47,7 +47,10 @@ class OpensearchVectorStore(VectorStore):
             hosts=[{'host': self.host, 'port': self.port}],
             http_compress=True,
             use_ssl=True,
-            http_auth=(os.getenv("OPENSEARCH_USERNAME"), os.getenv("OPENSEARCH_PASSWORD")),
+            http_auth=(
+                settings.vector_store.opensearch_username,
+                settings.vector_store.opensearch_password,
+            ),
             verify_certs=False,
             ssl_show_warn=False
         )

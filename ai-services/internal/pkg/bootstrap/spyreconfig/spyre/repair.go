@@ -26,8 +26,6 @@ const (
 	expectedKeyValueParts = 2
 	// maxVfioRuleParts is the maximum number of comma-separated parts in a valid VFIO rule.
 	maxVfioRuleParts = 3
-	// dirPermissions is the default permission for creating directories.
-	dirPermissions = 0755
 )
 
 // RepairResult represents the result of a repair operation.
@@ -58,7 +56,6 @@ func Repair(checks []check.CheckResult) []RepairResult {
 	results = append(results, userGroupResult)
 	results = append(results, fixVFIOModule(checkMap))
 	results = append(results, fixVFIOPermissions(checkMap, userGroupResult))
-	results = append(results, fixPodmanServiceSupplementaryGroups(checkMap))
 	results = append(results, fixSystemdUserSliceLimits(checkMap))
 
 	results = append(results, fixSELinuxVFIOPolicy(checkMap))
@@ -406,100 +403,6 @@ func fixVFIOPermissions(checkMap map[string]check.CheckResult, userGroupResult R
 	return RepairResult{CheckName: checkName, Status: StatusFixed}
 }
 
-// fixPodmanServiceSupplementaryGroups repairs the podman service SupplementaryGroups configuration.
-//
-// This function addresses the issue where Podman operations invoked via the socket (e.g., through
-// systemd or remote API calls) lack access to VFIO devices because the service doesn't inherit
-// the user's supplementary groups. While shell-based Podman commands work fine (inheriting the
-// user's 'sentient' group), socket-based operations fail without explicit configuration.
-//
-// The repair process:
-//  1. Creates a systemd drop-in file at /etc/systemd/system/podman.service.d/override.conf
-//     containing: [Service]\nSupplementaryGroups=sentient
-//  2. Reloads the systemd daemon to pick up the new configuration
-//  3. Restarts both podman.service and podman.socket to apply the changes
-//
-// This ensures that all Podman operations, regardless of invocation method, have the necessary
-// permissions to access VFIO devices (/dev/vfio/*) required for Spyre card functionality.
-func fixPodmanServiceSupplementaryGroups(checkMap map[string]check.CheckResult) RepairResult {
-	checkName := "Podman service SupplementaryGroups configuration"
-	_, ok := getCheckFromMap(checkMap, checkName)
-	if !ok {
-		return RepairResult{CheckName: checkName, Status: StatusSkipped}
-	}
-
-	if err := createPodmanServiceDropIn(); err != nil {
-		return RepairResult{
-			CheckName: checkName,
-			Status:    StatusFailedToFix,
-			Error:     err,
-			Message:   err.Error(),
-		}
-	}
-
-	if err := reloadAndRestartPodmanServices(); err != nil {
-		return RepairResult{
-			CheckName: checkName,
-			Status:    StatusFailedToFix,
-			Error:     err,
-			Message:   err.Error(),
-		}
-	}
-
-	return RepairResult{
-		CheckName: checkName,
-		Status:    StatusFixed,
-	}
-}
-
-func createPodmanServiceDropIn() error {
-	dropInDir := "/etc/systemd/system/podman.service.d"
-	if err := os.MkdirAll(dropInDir, dirPermissions); err != nil {
-		return err
-	}
-
-	dropInFile := dropInDir + "/override.conf"
-	dropInContent := `[Service]
-SupplementaryGroups=sentient
-`
-
-	return utils.WriteToFile(dropInFile, dropInContent)
-}
-
-func reloadAndRestartPodmanServices() error {
-	// Reload systemd daemon
-	exitCode, _, _, err := utils.ExecuteCommand("systemctl", "daemon-reload")
-	if err != nil || exitCode != 0 {
-		if err == nil {
-			err = os.ErrInvalid
-		}
-
-		return err
-	}
-
-	// Restart podman service
-	exitCode, _, _, err = utils.ExecuteCommand("systemctl", "restart", "podman.service")
-	if err != nil || exitCode != 0 {
-		if err == nil {
-			err = os.ErrInvalid
-		}
-
-		return err
-	}
-
-	// Restart podman socket
-	exitCode, _, _, err = utils.ExecuteCommand("systemctl", "restart", "podman.socket")
-	if err != nil || exitCode != 0 {
-		if err == nil {
-			err = os.ErrInvalid
-		}
-
-		return err
-	}
-
-	return nil
-}
-
 // fixSystemdUserSliceLimits configures systemd user slice limits for rootless podman.
 // This ensures that containers started by non-root users have proper ulimits
 func fixSystemdUserSliceLimits(checkMap map[string]check.CheckResult) RepairResult {
@@ -754,5 +657,4 @@ func applySELinuxLabels() error {
 
 	return nil
 }
-
 // Made with Bob

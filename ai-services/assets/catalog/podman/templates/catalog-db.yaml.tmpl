@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .AppName }}--db"
+  labels:
+    ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
+spec:
+  containers:
+  - name: postgresql
+    image: "{{ .Values.db.image }}"
+    ports:
+    - containerPort: 5432
+      hostPort: {{ .Values.db.port }}
+    env:
+    - name: POSTGRES_USER
+      value: "{{ .Values.db.user }}"
+    - name: POSTGRES_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: catalog-secret
+          key: db-password
+    - name: POSTGRES_DB
+      value: "{{ .Values.db.database }}"
+    volumeMounts:
+    - name: postgres-data
+      mountPath: /var/lib/pgsql/18/data
+    livenessProbe:
+      exec:
+        command:
+        - /bin/sh
+        - -c
+        - pg_isready -U {{ .Values.db.user }} -d {{ .Values.db.database }}
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    resources:
+      requests:
+        memory: "{{ .Values.db.resources.requests.memory }}"
+      limits:
+        memory: "{{ .Values.db.resources.limits.memory }}"
+  volumes:
+  - name: postgres-data
+    hostPath:
+      path: {{ .Values.db.dataPath }}
+      type: DirectoryOrCreate

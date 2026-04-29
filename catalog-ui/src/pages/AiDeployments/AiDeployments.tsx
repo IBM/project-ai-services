@@ -22,214 +22,32 @@ import {
   Modal,
   TextInput,
   InlineLoading,
-  type DataTableHeader,
+  OverflowMenu,
+  OverflowMenuItem,
+  MenuButton,
+  MenuItem,
 } from "@carbon/react";
 import {
-  Add,
-  Download,
-  Renew,
-  Settings,
-  ArrowUpRight,
-  TrashCan,
+  Export,
+  Filter,
+  Column as ColumnIcon,
   ArrowRight,
-  CopyLink,
 } from "@carbon/icons-react";
 import styles from "./AiDeployments.module.scss";
-import type { ApplicationRow, AppState, AppAction } from "./types";
-import { ACTION_TYPES } from "./types";
+import type { AiDeploymentRow } from "./types";
+import {
+  ACTION_TYPES,
+  HEADERS,
+  INITIAL_STATE,
+  appReducer,
+  getUniqueTypes,
+} from "./types";
 
-const headers: DataTableHeader[] = [
-  { header: "Name", key: "name" },
-  { header: "Template", key: "template" },
-  { header: "Processors", key: "processors" },
-  { header: "Memory", key: "memory" },
-  { header: "Cards", key: "cards" },
-  { header: "Storage", key: "storage" },
-  { header: "", key: "actions" },
-];
+const AiDeploymentsPage = () => {
+  const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
-const rows: ApplicationRow[] = [
-  {
-    id: "1",
-    name: "Incident troubleshooting",
-    template: "Digital Assistant",
-    processors: 1,
-    memory: "3GB",
-    cards: 4,
-    storage: "180GB",
-    actions: "actions",
-  },
-  {
-    id: "2",
-    name: "Customer onboarding bot",
-    template: "Workflow Assistant",
-    processors: 2,
-    memory: "8GB",
-    cards: 6,
-    storage: "250GB",
-    actions: "actions",
-  },
-  {
-    id: "3",
-    name: "Claims processing engine",
-    template: "Automation Studio",
-    processors: 4,
-    memory: "16GB",
-    cards: 8,
-    storage: "500GB",
-    actions: "actions",
-  },
-  {
-    id: "4",
-    name: "Knowledge base search",
-    template: "Search Service",
-    processors: 1,
-    memory: "4GB",
-    cards: 3,
-    storage: "120GB",
-    actions: "actions",
-  },
-  {
-    id: "5",
-    name: "Predictive analytics model",
-    template: "ML Runtime",
-    processors: 8,
-    memory: "32GB",
-    cards: 10,
-    storage: "1TB",
-    actions: "actions",
-  },
-  {
-    id: "6",
-    name: "Security monitoring",
-    template: "Threat Detection AI",
-    processors: 8,
-    memory: "16GB",
-    cards: 10,
-    storage: "1TB",
-    actions: "actions",
-  },
-];
-
-const initialState: AppState = {
-  search: "",
-  page: 1,
-  pageSize: 10,
-  isDeleteDialogOpen: false,
-  isConfirmed: false,
-  rowsData: rows,
-  selectedRowId: null,
-  toastOpen: false,
-  deleteErrorMessage: "",
-  deleteErrorRowName: "",
-  isDeleting: false,
-  hasError: false,
-  isExportDialogOpen: false,
-  csvFileName: "",
-  exportStatus: "idle",
-  exportErrorMessage: "",
-};
-
-const appReducer = (state: AppState, action: AppAction): AppState => {
-  switch (action.type) {
-    case ACTION_TYPES.SET_SEARCH:
-      return { ...state, search: action.payload };
-
-    case ACTION_TYPES.SET_PAGE:
-      return { ...state, page: action.payload };
-
-    case ACTION_TYPES.SET_PAGE_SIZE:
-      return { ...state, pageSize: action.payload };
-
-    case ACTION_TYPES.OPEN_DELETE_DIALOG:
-      return {
-        ...state,
-        selectedRowId: action.payload,
-        isDeleteDialogOpen: true,
-        toastOpen: false,
-      };
-
-    case ACTION_TYPES.CLOSE_DELETE_DIALOG:
-      return {
-        ...state,
-        isDeleteDialogOpen: false,
-        isConfirmed: false,
-        selectedRowId: state.hasError ? state.selectedRowId : null,
-      };
-
-    case ACTION_TYPES.SET_CONFIRMED:
-      return { ...state, isConfirmed: action.payload };
-
-    case ACTION_TYPES.DELETE_ROW:
-      return {
-        ...state,
-        rowsData: state.rowsData.filter((r) => r.id !== action.payload),
-        isDeleteDialogOpen: false,
-        isConfirmed: false,
-      };
-
-    case ACTION_TYPES.SHOW_ERROR:
-      return {
-        ...state,
-        deleteErrorMessage: action.payload.message,
-        deleteErrorRowName: action.payload.rowName ?? "",
-        toastOpen: true,
-        isDeleting: false,
-        hasError: true,
-      };
-
-    case ACTION_TYPES.HIDE_ERROR:
-      return {
-        ...state,
-        toastOpen: false,
-        selectedRowId: null,
-        hasError: false,
-        deleteErrorRowName: "",
-      };
-
-    case ACTION_TYPES.SET_IS_DELETING:
-      return { ...state, isDeleting: action.payload };
-
-    case ACTION_TYPES.SET_SELECTED_ROW_ID:
-      return { ...state, selectedRowId: action.payload };
-
-    case ACTION_TYPES.OPEN_EXPORT_DIALOG:
-      return {
-        ...state,
-        isExportDialogOpen: true,
-        csvFileName: "",
-        exportErrorMessage: "",
-        exportStatus: "idle",
-      };
-
-    case ACTION_TYPES.CLOSE_EXPORT_DIALOG:
-      return {
-        ...state,
-        isExportDialogOpen: false,
-      };
-
-    case ACTION_TYPES.SET_CSV_FILENAME:
-      return { ...state, csvFileName: action.payload };
-
-    case ACTION_TYPES.SET_EXPORT_STATUS:
-      return { ...state, exportStatus: action.payload };
-
-    case ACTION_TYPES.SET_EXPORT_ERROR:
-      return {
-        ...state,
-        exportErrorMessage: action.payload,
-      };
-
-    case ACTION_TYPES.CLEAR_EXPORT_ERROR:
-      return { ...state, exportErrorMessage: "" };
-
-    default:
-      return state;
-  }
-};
-
-const ApplicationsListPage = () => {
-  const [state, dispatch] = useReducer(appReducer, initialState);
+  // Get unique types dynamically from data
+  const uniqueTypes = getUniqueTypes(state.rowsData);
 
   const handleDelete = async () => {
     if (!state.selectedRowId) {
@@ -297,7 +115,7 @@ const ApplicationsListPage = () => {
     });
 
     try {
-      const exportableHeaders = headers.filter((h) => h.key !== "actions");
+      const exportableHeaders = HEADERS.filter((h) => h.key !== "actions");
       const csvHeaders = exportableHeaders.map((h) => h.header);
 
       const escapeCSV = (value: unknown) =>
@@ -305,7 +123,7 @@ const ApplicationsListPage = () => {
 
       const csvRows = filteredRows.map((row) =>
         exportableHeaders.map((h) =>
-          escapeCSV(row[h.key as keyof ApplicationRow]),
+          escapeCSV(row[h.key as keyof AiDeploymentRow]),
         ),
       );
 
@@ -338,19 +156,26 @@ const ApplicationsListPage = () => {
     }
   };
 
-  const filteredRows = state.rowsData.filter((row) =>
-    [
+  const filteredRows = state.rowsData.filter((row) => {
+    const matchesSearch = [
       row.name,
-      row.template,
-      row.memory,
-      row.storage,
-      String(row.processors),
-      String(row.cards),
+      row.status,
+      row.uptime,
+      row.type,
+      row.messages,
     ]
       .join(" ")
       .toLowerCase()
-      .includes(state.search.toLowerCase()),
-  );
+      .includes(state.search.toLowerCase());
+
+    // If no filters selected, show all (that match search)
+    // If filters selected, show only rows matching any of the selected filters
+    const matchesTypeFilter =
+      state.filters.types.length === 0 ||
+      state.filters.types.includes(row.type);
+
+    return matchesSearch && matchesTypeFilter;
+  });
 
   const paginatedRows = filteredRows.slice(
     (state.page - 1) * state.pageSize,
@@ -409,7 +234,17 @@ const ApplicationsListPage = () => {
       <div className={styles.tableContent}>
         <Grid fullWidth>
           <Column lg={16} md={8} sm={4} className={styles.tableColumn}>
-            <DataTable rows={paginatedRows} headers={headers} size="lg">
+            <DataTable
+              rows={paginatedRows}
+              headers={HEADERS.filter(
+                (h) =>
+                  h.key === "actions" ||
+                  state.visibleColumns[
+                    h.key as keyof typeof state.visibleColumns
+                  ],
+              )}
+              size="lg"
+            >
               {({
                 rows,
                 headers,
@@ -436,33 +271,152 @@ const ApplicationsListPage = () => {
                       />
 
                       <TableToolbarContent>
+                        <OverflowMenu
+                          renderIcon={Filter}
+                          iconDescription="Filter rows"
+                          aria-label="Filter rows"
+                          size="lg"
+                          flipped
+                        >
+                          <li
+                            className={styles.overflowMenuContent}
+                            role="none"
+                          >
+                            <h6 className={styles.overflowMenuHeading}>Type</h6>
+                            <CheckboxGroup legendText="">
+                              {uniqueTypes.length === 0 ? (
+                                <p>No types available</p>
+                              ) : (
+                                uniqueTypes.map((type) => (
+                                  <Checkbox
+                                    key={`filter-type-${type}`}
+                                    labelText={type}
+                                    id={`filter-type-${type.replace(/\s+/g, "-").toLowerCase()}`}
+                                    checked={state.pendingFilters.types.includes(
+                                      type,
+                                    )}
+                                    onChange={() =>
+                                      dispatch({
+                                        type: ACTION_TYPES.TOGGLE_PENDING_TYPE_FILTER,
+                                        payload: {
+                                          value: type,
+                                        },
+                                      })
+                                    }
+                                  />
+                                ))
+                              )}
+                            </CheckboxGroup>
+                            <div className={styles.overflowMenuActions}>
+                              <Button
+                                kind="secondary"
+                                size="sm"
+                                onClick={() =>
+                                  dispatch({
+                                    type: ACTION_TYPES.RESET_FILTERS,
+                                  })
+                                }
+                              >
+                                Reset filters
+                              </Button>
+                              <Button
+                                kind="primary"
+                                size="sm"
+                                onClick={() =>
+                                  dispatch({
+                                    type: ACTION_TYPES.APPLY_FILTERS,
+                                  })
+                                }
+                              >
+                                Apply filters
+                              </Button>
+                            </div>
+                          </li>
+                        </OverflowMenu>
                         <Button
                           hasIconOnly
                           kind="ghost"
-                          renderIcon={Download}
-                          iconDescription="Download"
+                          renderIcon={Export}
+                          iconDescription="Export"
                           size="lg"
                           onClick={() =>
                             dispatch({ type: ACTION_TYPES.OPEN_EXPORT_DIALOG })
                           }
                         />
-                        <Button
-                          hasIconOnly
-                          kind="ghost"
-                          renderIcon={Renew}
-                          iconDescription="Refresh"
+                        <OverflowMenu
+                          renderIcon={ColumnIcon}
+                          iconDescription="Edit columns"
+                          aria-label="Edit columns"
                           size="lg"
-                        />
-                        <Button
-                          hasIconOnly
-                          kind="ghost"
-                          renderIcon={Settings}
-                          iconDescription="Settings"
-                          size="lg"
-                        />
-                        <Button size="lg" kind="primary" renderIcon={Add}>
-                          Deploy application
-                        </Button>
+                          flipped
+                        >
+                          <li
+                            className={styles.overflowMenuContent}
+                            role="none"
+                          >
+                            <h6 className={styles.overflowMenuHeading}>
+                              Edit columns
+                            </h6>
+                            <CheckboxGroup legendText="">
+                              {HEADERS.filter((h) => h.key !== "actions").map(
+                                (header) => (
+                                  <Checkbox
+                                    key={`column-${header.key}`}
+                                    labelText={String(header.header)}
+                                    id={`column-${header.key}`}
+                                    checked={
+                                      state.visibleColumns[
+                                        header.key as keyof typeof state.visibleColumns
+                                      ]
+                                    }
+                                    disabled={header.key === "name"}
+                                    onChange={() =>
+                                      dispatch({
+                                        type: ACTION_TYPES.TOGGLE_COLUMN_VISIBILITY,
+                                        payload: header.key,
+                                      })
+                                    }
+                                  />
+                                ),
+                              )}
+                            </CheckboxGroup>
+                            <div className={styles.overflowMenuActions}>
+                              <Button
+                                kind="secondary"
+                                size="sm"
+                                className={styles.overflowMenuButton}
+                                onClick={() =>
+                                  dispatch({
+                                    type: ACTION_TYPES.RESET_COLUMN_VISIBILITY,
+                                  })
+                                }
+                              >
+                                Reset
+                              </Button>
+                            </div>
+                          </li>
+                        </OverflowMenu>
+                        <div className={styles.deployButtonWrapper}>
+                          <MenuButton
+                            label="Deploy"
+                            kind="primary"
+                            size="lg"
+                            menuAlignment="bottom-end"
+                          >
+                            <MenuItem
+                              label="Architecture"
+                              onClick={() => {
+                                console.log("Deploy Architecture");
+                              }}
+                            />
+                            <MenuItem
+                              label="Service"
+                              onClick={() => {
+                                console.log("Deploy Service");
+                              }}
+                            />
+                          </MenuButton>
+                        </div>
                       </TableToolbarContent>
                     </TableToolbar>
 
@@ -510,32 +464,13 @@ const ApplicationsListPage = () => {
                                   if (cell.info.header === "actions") {
                                     return (
                                       <TableCell key={cellKey} {...cellProps}>
-                                        <div className={styles.rowActions}>
-                                          <Button
-                                            kind="tertiary"
-                                            size="sm"
-                                            renderIcon={ArrowUpRight}
-                                          >
-                                            Open
-                                          </Button>
-                                          <Button
-                                            hasIconOnly
-                                            kind="tertiary"
-                                            size="sm"
-                                            renderIcon={CopyLink}
-                                            iconDescription="Copy"
-                                          />
-                                          <Button
-                                            hasIconOnly
-                                            kind="ghost"
-                                            size="sm"
-                                            renderIcon={TrashCan}
-                                            iconDescription="Delete"
-                                            className={`${styles.deleteButton} ${
-                                              state.selectedRowId === row.id
-                                                ? styles.selectedDelete
-                                                : ""
-                                            }`}
+                                        <OverflowMenu
+                                          size="sm"
+                                          flipped
+                                          aria-label="Actions"
+                                        >
+                                          <OverflowMenuItem
+                                            itemText="Delete"
                                             onClick={() => {
                                               dispatch({
                                                 type: ACTION_TYPES.OPEN_DELETE_DIALOG,
@@ -543,7 +478,7 @@ const ApplicationsListPage = () => {
                                               });
                                             }}
                                           />
-                                        </div>
+                                        </OverflowMenu>
                                       </TableCell>
                                     );
                                   }
@@ -613,7 +548,7 @@ const ApplicationsListPage = () => {
                       <strong>
                         {state.selectedRowId
                           ? state.rowsData.find(
-                              (r: ApplicationRow) =>
+                              (r: AiDeploymentRow) =>
                                 r.id === state.selectedRowId,
                             )?.name
                           : ""}
@@ -693,4 +628,4 @@ const ApplicationsListPage = () => {
   );
 };
 
-export default ApplicationsListPage;
+export default AiDeploymentsPage;

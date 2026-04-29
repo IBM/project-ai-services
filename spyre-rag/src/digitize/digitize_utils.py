@@ -13,7 +13,7 @@ from digitize.types import (
     DocumentDetailResponse,
     DocumentContentResponse
 )
-from digitize.config import DOCS_DIR, JOBS_DIR, DIGITIZED_DOCS_DIR
+from digitize.settings import settings
 from digitize.status import (
     get_utc_timestamp,
     create_document_metadata,
@@ -38,7 +38,7 @@ def generate_uuid():
     return str(generated_uuid)
 
 
-def get_all_document_ids(docs_dir: Path = DOCS_DIR) -> list[str]:
+def get_all_document_ids(docs_dir: Path = settings.digitize.docs_dir) -> list[str]:
     """
     Read all document IDs from metadata files in the docs directory.
 
@@ -93,10 +93,10 @@ def initialize_job_state(job_id: str, operation: str, output_format:OutputFormat
     for doc in documents_info:
         doc_id = doc_id_dict[doc]
         logger.debug(f"Generated document id {doc_id} for the file: {doc}")
-        create_document_metadata(doc, doc_id, job_id, output_format, operation, submitted_at, DOCS_DIR)
+        create_document_metadata(doc, doc_id, job_id, output_format, operation, submitted_at, settings.digitize.docs_dir)
 
     # Create and persist the job state file
-    create_job_state(job_id, operation, submitted_at, doc_id_dict, documents_info, JOBS_DIR, job_name)
+    create_job_state(job_id, operation, submitted_at, doc_id_dict, documents_info, settings.digitize.jobs_dir, job_name)
 
     return doc_id_dict
 
@@ -192,11 +192,11 @@ def read_all_job_files() -> List[JobState]:
         List of JobState objects. Files that fail to parse are skipped.
     """
 
-    if not JOBS_DIR.exists() or not JOBS_DIR.is_dir():
+    if not settings.digitize.jobs_dir.exists() or not settings.digitize.jobs_dir.is_dir():
         return []
 
     jobs = []
-    for file_path in JOBS_DIR.glob("*_status.json"):
+    for file_path in settings.digitize.jobs_dir.glob("*_status.json"):
         if not file_path.is_file():
             continue
         job_state = read_job_file(file_path)
@@ -206,7 +206,7 @@ def read_all_job_files() -> List[JobState]:
     return jobs
 
 
-def _read_document_metadata(doc_id: str, docs_dir: Path = DOCS_DIR) -> DocumentMetadata:
+def _read_document_metadata(doc_id: str, docs_dir: Path = settings.digitize.docs_dir) -> DocumentMetadata:
     """
     Internal helper to read and parse document metadata file into a Pydantic model.
 
@@ -222,6 +222,7 @@ def _read_document_metadata(doc_id: str, docs_dir: Path = DOCS_DIR) -> DocumentM
         json.JSONDecodeError: If metadata file is corrupted
         ValidationError: If metadata doesn't match expected schema
     """
+
     # Construct the metadata file path
     meta_file = docs_dir / f"{doc_id}_metadata.json"
 
@@ -246,7 +247,7 @@ def _read_document_metadata(doc_id: str, docs_dir: Path = DOCS_DIR) -> DocumentM
 def get_all_documents(
     status_filter: Optional[str] = None,
     name_filter: Optional[str] = None,
-    docs_dir: Path = DOCS_DIR
+    docs_dir: Path = settings.digitize.docs_dir
 ) -> List[DocumentListItem]:
     """
     Read all document metadata files, apply filters, and sort by submitted time.
@@ -309,7 +310,7 @@ def get_all_documents(
     return result
 
 
-def get_document_by_id(doc_id: str, include_details: bool = False, docs_dir: Path = DOCS_DIR) -> DocumentDetailResponse:
+def get_document_by_id(doc_id: str, include_details: bool = False, docs_dir: Path = settings.digitize.docs_dir) -> DocumentDetailResponse:
     """
     Read a specific document's metadata by ID and return formatted response as Pydantic model.
 
@@ -343,7 +344,7 @@ def get_document_by_id(doc_id: str, include_details: bool = False, docs_dir: Pat
     return response
 
 
-def get_document_content(doc_id: str, docs_dir: Path = DOCS_DIR) -> DocumentContentResponse:
+def get_document_content(doc_id: str, docs_dir: Path = settings.digitize.docs_dir) -> DocumentContentResponse:
     """
     Read the digitized content of a document from the local cache.
 
@@ -364,6 +365,7 @@ def get_document_content(doc_id: str, docs_dir: Path = DOCS_DIR) -> DocumentCont
     """
     logger.debug(f"Fetching content for document {doc_id}")
 
+
     # Read document metadata using the common helper (returns DocumentMetadata)
     doc_metadata = _read_document_metadata(doc_id, docs_dir)
 
@@ -372,7 +374,7 @@ def get_document_content(doc_id: str, docs_dir: Path = DOCS_DIR) -> DocumentCont
 
     # Determine file extension based on output format
     file_extension = output_format  # json, md, or text
-    content_file = DIGITIZED_DOCS_DIR / f"{doc_id}.{file_extension}"
+    content_file = settings.digitize.digitized_docs_dir / f"{doc_id}.{file_extension}"
 
     if not content_file.exists():
         logger.error(f"Document content file not found: {content_file}")
@@ -404,7 +406,7 @@ def get_document_content(doc_id: str, docs_dir: Path = DOCS_DIR) -> DocumentCont
         output_format=output_format
     )
 
-def is_document_in_active_job(doc_id: str, job_id: Optional[str], jobs_dir: Path = JOBS_DIR) -> bool:
+def is_document_in_active_job(doc_id: str, job_id: Optional[str], jobs_dir: Path = settings.digitize.jobs_dir) -> bool:
     """
     Check if a document is part of any active job (in_progress status).
     
@@ -456,7 +458,7 @@ def is_document_in_active_job(doc_id: str, job_id: Optional[str], jobs_dir: Path
         return False
 
 
-def delete_document_files(doc_id: str, output_format: str, docs_dir: Path = DOCS_DIR) -> None:
+def delete_document_files(doc_id: str, output_format: str, docs_dir: Path = settings.digitize.docs_dir) -> None:
     """
     Delete all files associated with a document from the cache directories.
     
@@ -496,7 +498,7 @@ def delete_document_files(doc_id: str, output_format: str, docs_dir: Path = DOCS
     files_deleted = []
     
     # STEP 1: Delete digitized content file FIRST
-    content_file = DIGITIZED_DOCS_DIR / f"{doc_id}.{output_format}"
+    content_file = settings.digitize.digitized_docs_dir / f"{doc_id}.{output_format}"
     if content_file.exists():
         try:
             content_file.unlink()
@@ -522,7 +524,7 @@ def delete_document_files(doc_id: str, output_format: str, docs_dir: Path = DOCS
     logger.info(f"✅ Deleted {len(files_deleted)} files for document {doc_id}")
 
 
-def has_active_jobs(operation: Optional[str] = None, jobs_dir: Path = JOBS_DIR) -> tuple[bool, list[str]]:
+def has_active_jobs(operation: Optional[str] = None, jobs_dir: Path = settings.digitize.jobs_dir) -> tuple[bool, list[str]]:
     """
     Check if there are any active jobs (accepted or in_progress status).
     Optionally filter by operation type.
@@ -592,15 +594,15 @@ def cleanup_digitized_files() -> dict:
         "errors": []
     }
 
-    if DIGITIZED_DOCS_DIR.exists():
+    if settings.digitize.digitized_docs_dir.exists():
         try:
             # Count files before deletion
-            file_count = sum(1 for _ in DIGITIZED_DOCS_DIR.iterdir() if _.is_file())
-            logger.debug(f"Found {file_count} files in {DIGITIZED_DOCS_DIR}")
+            file_count = sum(1 for _ in settings.digitize.digitized_docs_dir.iterdir() if _.is_file())
+            logger.debug(f"Found {file_count} files in {settings.digitize.digitized_docs_dir}")
 
             # Delete the entire directory and recreate it
-            shutil.rmtree(DIGITIZED_DOCS_DIR)
-            DIGITIZED_DOCS_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(settings.digitize.digitized_docs_dir)
+            settings.digitize.digitized_docs_dir.mkdir(parents=True, exist_ok=True)
 
             cleanup_stats["content_files_deleted"] = file_count
             logger.info(f"✅ Cleanup completed: {file_count} content files deleted")
@@ -609,7 +611,7 @@ def cleanup_digitized_files() -> dict:
             logger.error(f"✗ {error_msg}")
             cleanup_stats["errors"].append(error_msg)
     else:
-        logger.info(f"Digitized directory {DIGITIZED_DOCS_DIR} does not exist")
+        logger.info(f"Digitized directory {settings.digitize.digitized_docs_dir} does not exist")
     
     if cleanup_stats["errors"]:
         logger.error(f"Cleanup completed with {len(cleanup_stats['errors'])} errors")
@@ -617,7 +619,7 @@ def cleanup_digitized_files() -> dict:
     return cleanup_stats
 
 
-def bulk_delete_all_documents(docs_dir: Path = DOCS_DIR) -> dict:
+def bulk_delete_all_documents(docs_dir: Path = settings.digitize.docs_dir) -> dict:
     """
     Delete all documents from the system including:
     1. All digitized content files from /var/cache/digitized
@@ -679,13 +681,18 @@ def bulk_delete_all_documents(docs_dir: Path = DOCS_DIR) -> dict:
     return deletion_stats
 
 
-def scan_and_recover_orphan_jobs(jobs_dir: Path = JOBS_DIR) -> int:
+def scan_and_recover_orphan_jobs(jobs_dir: Path = settings.digitize.jobs_dir) -> int:
     """
     Boot-up scan to identify and mark orphan jobs as failed.
 
     An orphan job is one with status 'accepted' or 'in_progress' that exists
     when the application starts, indicating the previous instance crashed
     while processing it.
+
+    This method:
+    1. Updates document metadata files first using update_doc_metadata
+    2. Updates documents in in-progress states to failed
+    3. Updates job status using update_job_progress
 
     Args:
         jobs_dir: Directory containing job status JSON files
@@ -695,7 +702,8 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = JOBS_DIR) -> int:
     """
     from digitize.status import StatusManager
     from digitize.types import JobStatus, DocStatus
-    import digitize.config as config
+    from digitize.doc_utils import clean_intermediate_files
+    import digitize.settings as config
 
     if not jobs_dir.exists():
         logger.warning(f"Jobs directory does not exist: {jobs_dir}")
@@ -724,50 +732,66 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = JOBS_DIR) -> int:
                     # Build error message with cleanup instructions
                     error_message = "System restarted during processing"
 
-                    # Check for documents that may need cleanup
+                    # Step 1: Update document metadata and job progress for each document
+                    # Process all documents in in-progress states to failed
+                    # Also clean up intermediate files for all documents (even completed ones)
                     if "documents" in job_data and job_data["documents"]:
-                        doc_ids = [doc.get("id") for doc in job_data["documents"] if doc.get("id")]
-                        if doc_ids:
-                            error_message += f". Stale documents may exist. Please use DELETE /v1/documents/{{id}} to remove these documents and re-submit to process again: {', '.join(doc_ids)}"
-
-                    # Update job-level fields using StatusManager utility
-                    status_mgr._update_job_level_fields(
-                        job_data,
-                        JobStatus.FAILED,
-                        error_message
-                    )
-
-                    # Update all in-progress documents to failed
-                    if "documents" in job_data:
+                        doc_ids = []
                         for doc in job_data["documents"]:
                             doc_status = doc.get("status")
+                            doc_id = doc.get("id")
+                            
+                            if doc_id:
+                                # Clean up intermediate files for all documents
+                                # This step may have been missed during the last restart
+                                try:
+                                    clean_intermediate_files(doc_id, config.settings.digitize.digitized_docs_dir)
+                                    logger.debug(f"Cleaned intermediate files for document {doc_id}")
+                                except Exception as e:
+                                    logger.warning(f"Failed to clean intermediate files for {doc_id}: {e}")
+                            
+                            # Check if document is in any in-progress state
                             if doc_status in {DocStatus.ACCEPTED.value, DocStatus.IN_PROGRESS.value,
                                             DocStatus.DIGITIZED.value, DocStatus.PROCESSED.value,
                                             DocStatus.CHUNKED.value}:
-                                doc["status"] = DocStatus.FAILED.value
-
-                                # Update individual document metadata file with failed status and error
-                                doc_id = doc.get("id")
                                 if doc_id:
+                                    doc_ids.append(doc_id)
+                                    
+                                    # Update individual document metadata file using update_doc_metadata
                                     status_mgr.update_doc_metadata(
                                         doc_id,
                                         {"status": DocStatus.FAILED},
-                                        error=f"System restarted during processing, Use DELETE /v1/documents/{doc_id} to remove the stale document and re-submit the document to process again"
+                                        error=f"System restarted during processing. Use DELETE /v1/documents/{doc_id} to remove the stale document and re-submit the document to process again"
                                     )
+                                    
+                                    # Update job progress with document status change
+                                    # Use IN_PROGRESS for job status temporarily to allow document updates
+                                    status_mgr.update_job_progress(
+                                        doc_id=doc_id,
+                                        doc_status=DocStatus.FAILED,
+                                        job_status=JobStatus.IN_PROGRESS,
+                                        error=""
+                                    )
+                                    logger.debug(f"Updated document {doc_id} to FAILED")
+                                    
+                        # Add document IDs to error message if any were found
+                        if doc_ids:
+                            error_message += f". Stale documents may exist. Please use DELETE /v1/documents/{{id}} to remove these documents and re-submit to process again: {', '.join(doc_ids)}"
 
-                    # Recalculate stats using StatusManager utility
-                    status_mgr._recalculate_stats(job_data)
+                    # Step 2: Finally update the overall job status to FAILED
+                    # Use empty doc_id to only update job-level status
+                    status_mgr.update_job_progress(
+                        doc_id="",
+                        doc_status=DocStatus.FAILED,  # Not used when doc_id is empty
+                        job_status=JobStatus.FAILED,
+                        error=error_message
+                    )
 
-                    # Atomically write the updated job file using StatusManager utility
-                    try:
-                        status_mgr._atomic_write_json(job_file, job_data)
-                        logger.info(f"✅ Marked orphan job {job_id} as failed")
-                        orphan_count += 1
+                    logger.info(f"✅ Marked orphan job {job_id} as failed")
+                    orphan_count += 1
 
-                        # Clean up staging directory for this orphan job
-                        cleanup_staging_directory(job_id, config.STAGING_DIR)
-                    except Exception as write_error:
-                        logger.error(f"Failed to update orphan job {job_id}: {write_error}")
+                    # Clean up staging directory for this orphan job
+                    cleanup_staging_directory(job_id, config.settings.digitize.staging_dir)
 
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse job file {job_file}: {e}")

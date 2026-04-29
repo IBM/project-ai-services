@@ -3,6 +3,7 @@ package podman
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const (
@@ -86,9 +88,7 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 
 // loadCatalogTemplates loads the catalog template provider, metadata, and templates.
 func loadCatalogTemplates(s *spinner.Spinner) (templates.Template, *templates.AppMetadata, map[string]*template.Template, error) {
-	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{
-		FS: &assets.CatalogFS,
-	})
+	tp := templates.NewEmbedTemplateProvider(&assets.CatalogFS, "")
 
 	// Load metadata from catalog/podman
 	appMetadata, err := tp.LoadMetadata(catalogAppTemplate, true)
@@ -115,10 +115,20 @@ func prepareCatalogValues(tp templates.Template, podmanURI, passwordHash string,
 		argParams = make(map[string]string)
 	}
 
+	// Generate database password
+	dbPassword, err := utils.GenerateRandomPassword(utils.DefaultPasswordLength)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate database password: %w", err)
+	}
+
+	// Base64 encode the database password for Kubernetes secret
+	dbPasswordBase64 := base64.StdEncoding.EncodeToString([]byte(dbPassword))
+
 	// Set configure-specific values
 	argParams["backend.adminPasswordHash"] = passwordHash
 	argParams["backend.runtime"] = "podman"
 	argParams["backend.podman.uri"] = podmanURI
+	argParams["db.password"] = dbPasswordBase64
 
 	// Load values from catalog
 	return tp.LoadValues(catalogAppTemplate, nil, argParams)

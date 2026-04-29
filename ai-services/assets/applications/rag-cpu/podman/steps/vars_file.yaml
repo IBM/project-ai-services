@@ -24,6 +24,11 @@ pods:
     default: ""
     alias: SUMMARIZE_API_PORT
 
+  - name: "{{ .AppName }}--similarity-api"
+    format: "index .Ports \"7000/tcp\" 0"
+    default: ""
+    alias: SIMILARITY_API_PORT
+
 containers:
   - name: "{{ .AppName }}--chat-bot-ui"
     format: ".Status"
@@ -35,15 +40,19 @@ containers:
 
   - name: "{{ .AppName }}--digitize-ui"
     format: ".Status"
-    alias: DIGITIZE_API_STATUS
+    alias: DIGITIZE_UI_STATUS
 
   - name: "{{ .AppName }}--digitize-backend-server"
     format: ".Status"
-    alias: DIGITIZE_UI_STATUS
+    alias: DIGITIZE_API_STATUS
 
   - name: "{{ .AppName }}--summarize-api-summarize-api"
     format: ".Status"
     alias: SUMMARIZE_API_STATUS
+
+  - name: "{{ .AppName }}--similarity-api-similarity-api"
+    format: ".Status"
+    alias: SIMILARITY_API_STATUS
 
 hosts:
   - fetch: HOST_IP

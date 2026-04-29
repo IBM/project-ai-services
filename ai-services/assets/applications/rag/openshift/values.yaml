@@ -1,28 +1,34 @@
 ui:
   # @hidden
-  image: icr.io/ai-services-cicd/rag-ui:v0.0.28
+  image: icr.io/ai-services-cicd/rag-ui:v0.0.30
 
 backend:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.90
+  image: icr.io/ai-services-cicd/rag:v0.0.97
   # @hidden
   log_level: "INFO"
 
 summarize:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.90
+  image: icr.io/ai-services-cicd/rag:v0.0.97
+  # @hidden
+  log_level: "INFO"
+
+similarity:
+  # @hidden
+  image: icr.io/ai-services-cicd/rag:v0.0.97
   # @hidden
   log_level: "INFO"
 
 digitize:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.90
+  image: icr.io/ai-services-cicd/rag:v0.0.97
   # @hidden
   log_level: "INFO"
 
 digitizeUi:
   # @hidden
-  image: icr.io/ai-services-cicd/digitize-ui:v0.0.16
+  image: icr.io/ai-services-cicd/digitize-ui:v0.0.17
 
 instruct:
   # @hidden

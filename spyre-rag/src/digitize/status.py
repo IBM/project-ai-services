@@ -10,7 +10,7 @@ from typing import Callable, Any, Mapping
 from digitize.types import JobStatus, DocStatus, OutputFormat
 from digitize.document import DocumentMetadata
 from digitize.job import JobState, JobDocumentSummary, JobStats
-import digitize.config as config
+from digitize.settings import settings
 from common.misc_utils import get_logger
 
 logger = get_logger("status")
@@ -52,7 +52,7 @@ def create_document_metadata(
     output_format: OutputFormat,
     operation: str,
     submitted_at: str,
-    docs_dir: Path = config.DOCS_DIR
+    docs_dir: Path = settings.digitize.docs_dir
 ) -> DocumentMetadata:
     """
     Create and persist a single document metadata file.
@@ -91,7 +91,7 @@ def create_job_state(
     submitted_at: str,
     doc_id_dict: dict[str, str],
     documents_info: list[str],
-    jobs_dir: Path = config.JOBS_DIR,
+    jobs_dir: Path = settings.digitize.jobs_dir,
     job_name: str | None = None
 ) -> JobState:
     """
@@ -135,7 +135,7 @@ def create_job_state(
     return job_state
 
 
-def get_job_document_stats(job_id: str, jobs_dir: Path = config.JOBS_DIR) -> dict:
+def get_job_document_stats(job_id: str, jobs_dir: Path = settings.digitize.jobs_dir) -> dict:
     """
     Get statistics about documents in a job by reading the job status file.
 
@@ -179,9 +179,9 @@ def get_job_document_stats(job_id: str, jobs_dir: Path = config.JOBS_DIR) -> dic
 
 def retry_on_failure(
     func: Callable,
-    max_retries: int = config.RETRY_MAX_ATTEMPTS,
-    delay: float = config.RETRY_INITIAL_DELAY,
-    backoff: float = config.RETRY_BACKOFF_MULTIPLIER
+    max_retries: int = settings.digitize.retry_max_attempts,
+    delay: float = settings.digitize.retry_initial_delay,
+    backoff: float = settings.digitize.retry_backoff_multiplier
 ) -> Any:
     """
     Retry a function on transient failures with exponential backoff.
@@ -198,6 +198,7 @@ def retry_on_failure(
     Raises:
         Last exception if all retries fail
     """
+
     last_exception: Exception = Exception("No attempts made")
     current_delay = delay
 
@@ -223,7 +224,7 @@ class StatusManager:
     """Thread-safe handler for updating Job and Document status files with synchronous writes"""
     def __init__(self, job_id: str):
         self.job_id = job_id
-        self.job_status_file = config.JOBS_DIR / f"{job_id}_status.json"
+        self.job_status_file = settings.digitize.jobs_dir / f"{job_id}_status.json"
         self._job_lock = threading.Lock()
         self._doc_locks: dict[str, threading.Lock] = {}
         self._doc_locks_lock = threading.Lock()
@@ -355,7 +356,7 @@ class StatusManager:
         """
         doc_lock = self._get_doc_lock(doc_id)
         with doc_lock:
-            meta_file = config.DOCS_DIR / f"{doc_id}_metadata.json"
+            meta_file = settings.digitize.docs_dir / f"{doc_id}_metadata.json"
 
             if not self._validate_file_exists(meta_file, f"metadata file {doc_id}_metadata.json"):
                 return
