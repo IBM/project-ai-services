@@ -219,10 +219,15 @@ func (p *PodmanApplication) validateSpyreCardRequirements(req int, actual int) e
 func (p *PodmanApplication) calculateReqSpyreCards(tp templates.Template, podTemplateFileNames []string, appTemplateName, appName string) (int, error) {
 	totalReqSpyreCounts := 0
 
+	// Prepare argParams with baseDir to ensure consistency
+	argParams := map[string]string{
+		"baseDir": constants.GetBaseDir(),
+	}
+
 	// Calculate Req Spyre Counts
 	for _, podTemplateFileName := range podTemplateFileNames {
 		// fetch pod spec
-		podSpec, err := p.fetchPodSpec(tp, appTemplateName, podTemplateFileName, appName, nil, nil)
+		podSpec, err := p.fetchPodSpec(tp, appTemplateName, podTemplateFileName, appName, nil, argParams)
 		if err != nil {
 			return totalReqSpyreCounts, fmt.Errorf("failed to load pod Template: '%s' for appTemplate: '%s' with error: %w", podTemplateFileName, appTemplateName, err)
 		}
@@ -304,6 +309,15 @@ func (p *PodmanApplication) executePodTemplates(tp templates.Template,
 	appName string, appMetadata *templates.AppMetadata,
 	tmpls map[string]*template.Template, pciAddresses []string, existingPods []string,
 	valuesFiles []string, argParams map[string]string) error {
+	// Ensure argParams is initialized
+	if argParams == nil {
+		argParams = make(map[string]string)
+	}
+
+	// Always set baseDir from environment or default to ensure consistency
+	// This overrides any baseDir in values.yaml with the actual runtime base directory
+	argParams["baseDir"] = constants.GetBaseDir()
+
 	// Load values for template rendering
 	values, err := tp.LoadValues(appMetadata.Name, valuesFiles, argParams)
 	if err != nil {
