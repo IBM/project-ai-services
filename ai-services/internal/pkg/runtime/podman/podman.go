@@ -207,45 +207,37 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 
 	// Channel to signal goroutine completion
 	done := make(chan struct{})
-	logsDone := make(chan error, 1)
 
-	// print logs
-	go pc.printLogsFromChannels(logsCtx, stdoutChan, stderrChan, done)
-
-	// stream logs
 	go func() {
-		err := containers.Logs(logsCtx, containerNameOrID, opts, stdoutChan, stderrChan)
-		logsDone <- err
+		defer close(done)
+		waitDone := make(chan struct{})
+		go func() {
+			defer close(waitDone)
+			_, err := containers.Wait(pc.Context, containerNameOrID, nil)
+			if err == nil {
+				// Container exited, cancel the logs streaming
+				cancelLogs()
+			}
+		}()
+
+		// Stream logs
+		_ = containers.Logs(logsCtx, containerNameOrID, opts, stdoutChan, stderrChan)
+
+		// Wait for container wait to complete
+		<-waitDone
 	}()
 
-	// wait for container to exit
-	go func() {
-		_, err := containers.Wait(pc.Context, containerNameOrID, nil)
-		if err == nil {
-			// Container exited, cancel the logs streaming
-			cancelLogs()
-		}
-	}()
+	// Print logs as they arrive
+	pc.printLogsFromChannels(logsCtx, stdoutChan, stderrChan)
 
-	// Wait for either logs to complete or context cancellation
-	select {
-	case <-ctx.Done():
-		<-done
+	// Wait for goroutine to complete
+	<-done
 
-		return nil
-	case err := <-logsDone:
-		<-done
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil
-		}
-
-		return err
-	}
+	return nil
 }
 
 // printLogsFromChannels reads from stdout and stderr channels and prints logs.
-func (pc *PodmanClient) printLogsFromChannels(ctx context.Context, stdoutChan, stderrChan <-chan string, done chan struct{}) {
-	defer close(done)
+func (pc *PodmanClient) printLogsFromChannels(ctx context.Context, stdoutChan, stderrChan <-chan string) {
 	for {
 		select {
 		case <-ctx.Done():
