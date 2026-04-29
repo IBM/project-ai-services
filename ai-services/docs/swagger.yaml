@@ -1,5 +1,114 @@
-basePath: /api/v1
 definitions:
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture:
+    properties:
+      certified_by:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      links:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ArchitectureLinks'
+      name:
+        type: string
+      runtimes:
+        items:
+          type: string
+        type: array
+      services:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceReference'
+        type: array
+      type:
+        description: '"architecture"'
+        type: string
+      version:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ArchitectureLinks:
+    properties:
+      code:
+        type: string
+      demo:
+        type: string
+      documentation:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ArchitectureSummary:
+    properties:
+      certified_by:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      services:
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference:
+    properties:
+      id:
+        type: string
+      version:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service:
+    properties:
+      architectures:
+        items:
+          type: string
+        type: array
+      certified_by:
+        type: string
+      dependencies:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference'
+        type: array
+      dependency_only:
+        type: boolean
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      type:
+        description: '"service"'
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceReference:
+    properties:
+      id:
+        type: string
+      optional:
+        type: boolean
+      version:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceSummary:
+    properties:
+      architectures:
+        items:
+          type: string
+        type: array
+      certified_by:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  internal_pkg_catalog_apiserver_handlers.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
   internal_pkg_catalog_apiserver_handlers.loginReq:
     properties:
       password:
@@ -17,19 +126,8 @@ definitions:
     required:
     - refresh_token
     type: object
-host: localhost:8080
 info:
-  contact:
-    email: support@example.com
-    name: API Support
-    url: https://github.com/project-ai-services/ai-services
-  description: API server for managing AI Services catalog, applications, and authentication
-  license:
-    name: Apache 2.0
-    url: http://www.apache.org/licenses/LICENSE-2.0.html
-  termsOfService: http://swagger.io/terms/
-  title: AI Services Catalog API
-  version: "1.0"
+  contact: {}
 paths:
   /applications:
     post:
@@ -228,6 +326,65 @@ paths:
       summary: List application templates
       tags:
       - Applications
+  /architectures:
+    get:
+      description: Retrieves a list of all available architecture templates with summary
+        information
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ArchitectureSummary'
+            type: array
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List available architectures
+      tags:
+      - Catalog
+  /architectures/{id}:
+    get:
+      description: Retrieves detailed information about a specific architecture template
+      parameters:
+      - description: Architecture template ID (e.g., 'rag')
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture'
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Architecture not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get architecture details
+      tags:
+      - Catalog
   /auth/login:
     post:
       consumes:
@@ -348,15 +505,64 @@ paths:
       summary: Refresh access token
       tags:
       - Authentication
-securityDefinitions:
-  BearerAuth:
-    description: Type "Bearer" followed by a space and JWT token.
-    in: header
-    name: Authorization
-    type: apiKey
+  /services:
+    get:
+      description: Retrieves a list of all deployable service templates. Dependency-only
+        services are excluded from this list. Returns service summaries without endpoints
+        and pod templates.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceSummary'
+            type: array
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List available services
+      tags:
+      - Catalog
+  /services/{id}:
+    get:
+      description: Retrieves detailed information about a specific service template
+      parameters:
+      - description: Service template ID (e.g., 'summarize')
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service'
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Service not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get service details
+      tags:
+      - Catalog
 swagger: "2.0"
-tags:
-- description: Authentication and authorization endpoints
-  name: Authentication
-- description: Application management endpoints
-  name: Applications

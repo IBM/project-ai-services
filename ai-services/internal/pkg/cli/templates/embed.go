@@ -102,8 +102,9 @@ func (e *embedTemplateProvider) ListApplications(hidden bool) ([]string, error) 
 		parts := strings.Split(filepath.ToSlash(path), "/")
 		if len(parts) == minPathPartsForAppName && filepath.Base(path) == "metadata.yaml" {
 			appName := parts[1]
-			md, err := e.LoadMetadata(appName, false)
-			if err != nil {
+			var md AppMetadata
+
+			if err := e.LoadMetadata(appName, false, &md); err != nil {
 				return err
 			}
 			if !md.Hidden || hidden {
@@ -193,7 +194,7 @@ func (e *embedTemplateProvider) LoadAllTemplates(app string) (map[string]*templa
 }
 
 // LoadPodTemplate loads and renders a pod template with the given parameters.
-func (e *embedTemplateProvider) LoadPodTemplate(app, file string, params any) (*models.PodSpec, error) {
+func (e *embedTemplateProvider) loadPodTemplate(app, file string, params any) (*models.PodSpec, error) {
 	path := e.buildPath(app, getRuntime(), "templates", file)
 	data, err := e.fs.ReadFile(path)
 	if err != nil {
@@ -230,7 +231,7 @@ func (e *embedTemplateProvider) LoadPodTemplateWithValues(app, file, appName str
 		"Version":         "",
 	}
 
-	return e.LoadPodTemplate(app, file, params)
+	return e.loadPodTemplate(app, file, params)
 }
 
 func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []string, cliOverrides map[string]string) (map[string]interface{}, error) {
@@ -283,7 +284,8 @@ func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []str
 // LoadMetadata loads the metadata for a given application template.
 // if runtime is empty then it loads the app Metadata.
 // if set it loads the runtime specific metadata.
-func (e *embedTemplateProvider) LoadMetadata(app string, isRuntime bool) (*AppMetadata, error) {
+// target: pointer to the struct where metadata should be unmarshaled (e.g., *AppMetadata, *types.Service, *types.Architecture)
+func (e *embedTemplateProvider) LoadMetadata(app string, isRuntime bool, target interface{}) error {
 	// construct metadata.yaml path
 	var p string
 	if isRuntime {
@@ -294,15 +296,14 @@ func (e *embedTemplateProvider) LoadMetadata(app string, isRuntime bool) (*AppMe
 
 	data, err := e.fs.ReadFile(p)
 	if err != nil {
-		return nil, fmt.Errorf("read metadata: %w", err)
+		return fmt.Errorf("read metadata: %w", err)
 	}
 
-	var appMetadata AppMetadata
-	if err := yaml.Unmarshal(data, &appMetadata); err != nil {
-		return nil, err
+	if err := yaml.Unmarshal(data, target); err != nil {
+		return err
 	}
 
-	return &appMetadata, nil
+	return nil
 }
 
 // LoadMdFiles loads all md files for a given application.
