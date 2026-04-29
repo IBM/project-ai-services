@@ -1,0 +1,239 @@
+pipeline {
+    agent { label 'shared-x86-centos9' }
+
+    parameters {
+        string(
+            name: 'VERSION',
+            description: 'Version to sign (e.g., v0.2.0-rc.1)'
+        )
+        string(
+            name: 'ICR_REGISTRY',
+            defaultValue: 'icr.io/ai-services-cicd',
+            description: 'Registry where images will be pushed'
+        )
+    }
+
+    environment {
+        AI_SERVICES_REPO_URL = 'https://github.com/IBM/project-ai-services.git'
+        REPO_DIR = 'project-ai-services'
+        WS_PRODUCTNAME = credentials('mend-ws-product-name')
+        TWISTLOCK_CLIENT = 'https://na.artifactory.swg-devops.com/artifactory/css-ets-scs-consec-team-public-generic-local/Twistlock%20Executable/tt_latest.zip'
+        TWISTLOCK_URL = 'https://w3twistlock.scs.ibm.com'
+    }
+
+    stages {
+        stage('Clone AI Services') {
+            steps {
+                script {
+                    checkoutRepository()
+                }
+            }
+        }
+
+        stage('List Images') {
+            steps {
+                script {
+                    generateImageList()
+                }
+            }
+        }
+
+        stage('Setup Twistlock CLI') {
+            steps {
+                script {
+                    setupTwistlock()
+                }
+            }
+        }
+
+        stage('Twistlock Scan') {
+            steps {
+                script {
+                    twistlockScan()
+                }
+            }
+        }
+
+        stage('Archive Results') {
+            steps {
+                script {
+                    uploadArtifacts()
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+        success {
+            echo 'Twistlock scan completed successfully'
+        }
+        failure {
+            echo 'Twistlock scan failed'
+        }
+    }
+}
+
+def checkoutRepository() {
+    echo "Checking out repository at version ${params.VERSION}..."
+
+    sh """
+        rm -rf ${env.REPO_DIR}
+        git clone ${env.AI_SERVICES_REPO_URL}
+        cd ${env.REPO_DIR}
+        git checkout ${params.VERSION}
+        ls -lrt
+    """
+}
+
+def generateImageList() {
+    echo 'Generating image list for scanning...'
+
+    def imageMap = [
+        [name: 'rag', path: 'spyre-rag/src/'],
+        [name: 'rag-ui', path: 'spyre-rag/ui/'],
+        [name: 'tools', path: 'images/tools/'],
+        [name: 'ai-services', path: 'ai-services/'],
+        [name: 'catalog-ui', path: 'catalog-ui/'],
+        [name: 'digitize-ui', path: 'digitize-ui/']
+    ]
+
+    def images = []
+
+    for (image in imageMap) {
+        def imageWithTag = getImageWithTag(image.path, image.name)
+        images.add(imageWithTag)
+        echo "Adding image for scan: ${imageWithTag}"
+    }
+
+    env.SCAN_IMAGES = images.join(',')
+}
+
+def getImageWithTag(String imagePath, String imageName) {
+    def icrImage = ''
+    dir("${REPO_DIR}/${imagePath}") {
+        def tag = sh(script: 'make image-tag', returnStdout: true).trim()
+        icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
+    }
+    return icrImage
+}
+
+def setupTwistlock() {
+    downloadTwistlockCli()
+    extractTwistlockCli()
+}
+
+def downloadTwistlockCli() {
+    echo 'Downloading Twistlock CLI...'
+
+    withCredentials([
+        usernamePassword(
+            credentialsId: 'jfrog',
+            passwordVariable: 'password',
+            usernameVariable: 'username'
+        )
+    ]) {
+        def downloadStatus = sh(
+            script: """
+                curl -H "Authorization: Bearer \$password" \
+                     ${env.TWISTLOCK_CLIENT} \
+                     --output tt_latest.zip \
+                     -s -w "%{http_code}"
+            """,
+            returnStdout: true
+        ).trim()
+
+        if (downloadStatus != '200') {
+            error "Failed to download Twistlock CLI. HTTP Status: ${downloadStatus}"
+        }
+
+        echo 'Twistlock CLI downloaded successfully'
+    }
+}
+
+def extractTwistlockCli() {
+    echo 'Extracting Twistlock CLI...'
+
+    sh '''
+        unzip -q tt_latest.zip
+        rm -rf tt_latest.zip
+        ls -lrt
+    '''
+
+    echo 'Twistlock CLI extracted successfully'
+}
+
+def twistlockScan() {
+    echo 'Starting Twistlock security scan...'
+
+    def ttPath = getTwistlockPath()
+
+    withCredentials([
+        usernamePassword(
+            credentialsId: 'w3-ai-services-account',
+            passwordVariable: 'password',
+            usernameVariable: 'username'
+        ),
+        usernamePassword(
+            credentialsId: 'icr-iam-creds',
+            usernameVariable: 'icr_username',
+            passwordVariable: 'icr_key'
+        )
+    ]) {
+        withEnv(["TT_PATH=${ttPath}"]) {
+            sh '''
+                $TT_PATH images pull-and-scan \
+                    --url "${TWISTLOCK_URL}" \
+                    --user $username:$password \
+                    --iam-api-key $icr_key \
+                    --control-group $WS_PRODUCTNAME \
+                    --imagetype prod \
+                    $SCAN_IMAGES
+            '''
+        }
+    }
+
+    echo 'Twistlock scan completed'
+}
+
+def getTwistlockPath() {
+    def path = sh(
+        script: 'ls | grep tt_v | head -n 1',
+        returnStdout: true
+    ).trim()
+
+    if (!path) {
+        error 'Twistlock CLI directory not found'
+    }
+
+    def ttPath = "./${path}/linux_x86_64/tt"
+    echo "Twistlock CLI path: ${ttPath}"
+
+    return ttPath
+}
+
+def uploadArtifacts() {
+    echo 'Uploading scan result artifacts...'
+
+    def filePrefix = "ai-services-${params.VERSION}-tt"
+    def ttResultPrefix = 'twistlock-scan-results'
+
+    // Rename result files
+    sh """
+        mv ${ttResultPrefix}-*.metadata.csv ${filePrefix}.metadata.csv
+        mv ${ttResultPrefix}-*.results.csv ${filePrefix}.results.csv
+        mv ${ttResultPrefix}-*.overview.csv ${filePrefix}.overview.csv
+        ls -lrt
+    """
+
+    // Archive artifacts
+    archiveArtifacts(
+        artifacts: 'ai-services*.csv',
+        fingerprint: true,
+        allowEmptyArchive: false
+    )
+
+    echo 'Artifacts uploaded successfully'
+}

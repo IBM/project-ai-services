@@ -1,0 +1,19 @@
+# Service identification
+id: summarize
+name: "Summarize"
+description: "Consolidates input text into a brief statement of main points"
+type: service
+
+# Certification and support
+certified_by: "IBM"
+
+# Service belongs to these architectures
+architectures:
+  - rag
+
+# Dependencies on other services (version is optional, uses latest if not specified)
+dependencies:
+  - id: instruct
+    version: ">=1.0.0"
+
+# Made with Bob
