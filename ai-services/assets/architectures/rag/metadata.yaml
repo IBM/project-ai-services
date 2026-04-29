@@ -7,9 +7,8 @@ type: architecture
 
 # Certification and support
 certified_by: "IBM"
-supported_runtimes:
+runtimes:
   - podman
-  - openshift
 
 # Service composition (version is optional, uses latest if not specified)
 services:
@@ -24,8 +23,9 @@ services:
     optional: true
 
 # Links
-demo_link: "https://example.com/demo/rag"
-code_link: "https://github.com/project-ai-services/spyre-rag"
-documentation_link: "https://docs.example.com/rag"
+links:
+  demo: "https://example.com/demo/rag"
+  code: "https://github.com/project-ai-services/spyre-rag"
+  documentation: "https://docs.example.com/rag"
 
 # Made with Bob
