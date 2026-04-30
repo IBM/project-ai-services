@@ -7,11 +7,6 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 
-class ReferenceRequest(BaseModel):
-    """Request model for document retrieval"""
-    prompt: str = Field(..., description="Search query to retrieve relevant documents")
-
-
 class Document(BaseModel):
     """Document chunk with metadata"""
     page_content: str = Field(..., description="The text content of the document chunk")
@@ -193,27 +188,3 @@ class HealthResponse(BaseModel):
 
 
 
-class ReferenceResponse(BaseModel):
-    """Response containing retrieved documents and performance metrics"""
-    documents: list[Document] = Field(..., description="List of retrieved document chunks")
-    perf_metrics: dict = Field(..., description="Performance metrics for the retrieval operation")
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "documents": [
-                    {
-                        "page_content": "Artificial intelligence is transforming industries...",
-                        "filename": "ai_report.pdf",
-                        "type": "text",
-                        "source": "/path/to/ai_report.pdf",
-                        "chunk_id": 12345
-                    }
-                ],
-                "perf_metrics": {
-                    "retrieve_time": 0.15,
-                    "rerank_time": 0.12
-                }
-            }
-        }
-    }

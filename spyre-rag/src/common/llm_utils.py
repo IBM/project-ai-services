@@ -162,18 +162,6 @@ def query_vllm_models(llm_endpoint, api_key: str | None = None):
     resp_json = response.json()
     return resp_json
 
-
-def validate_vllm_auth(llm_endpoint, api_key: str | None = None):
-    """
-    Validate that the provided credentials can access vLLM.
-    Returns True on success, raises RuntimeError on failure.
-    
-    Args:
-        api_key: Optional API key for vLLM authentication
-    """
-    query_vllm_models(llm_endpoint, api_key)
-    return True
-
 def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
                 stream, lang, api_key: str | None = None):
     context = "\n\n".join([doc.get("page_content") for doc in documents])
