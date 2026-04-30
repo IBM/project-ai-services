@@ -14,7 +14,7 @@ JENKINS_API_TOKEN="$5"
 POLLER_TIMEOUT_MINS="$6"
 
 # Jenkins job configuration
-JOB_NAME="pr-preview-pipeline"
+JOB_NAME="$7"
 JENKINS_CREDENTIALS="$JENKINS_USERNAME:$JENKINS_API_TOKEN"
 
 echo "Started polling Jenkins queue to find duplicate $JOB_NAME jobs"
