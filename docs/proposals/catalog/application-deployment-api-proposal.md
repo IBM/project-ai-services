@@ -229,11 +229,8 @@ Content-Type: application/json
    - Both tokens include custom claims: `uid` (user ID), issuer ("ai-services-catalog-server"), subject, audience, expiry
    - Access token audience: "access", Refresh token audience: "refresh"
    - Signing method: HS256 with secret key
-5. **Store Refresh Token**: Hash the refresh token using SHA-256 and store in database:
-   - Call `TokenStore.Add(HashToken(refreshToken), "refresh_active", userID, refreshTokenExpiry)`
-   - Inserts into `tokens` table with token_type='refresh_active'
-6. **Response**: Return both tokens with "Bearer" token type (handler returns access_token, refresh_token, token_type)
-7. **Error Handling**: Return 401 for invalid credentials, 400 for malformed requests, 500 for database errors
+5. **Response**: Return both tokens with "Bearer" token type (handler returns access_token, refresh_token, token_type)
+6. **Error Handling**: Return 401 for invalid credentials, 400 for malformed requests, 500 for database errors
 
 **Security Considerations:**
 
@@ -297,31 +294,33 @@ Content-Type: application/json
 
 **Implementation Notes:**
 
-1. **Request Validation**: Use Gin's `ShouldBind` to validate request body against `refreshReq` struct (refresh_token required)
-2. **Check Refresh Token in Database**: Hash the refresh token and check if it exists in database:
-   - Call `TokenStore.Contains(HashToken(refreshToken), "refresh_active")`
-   - Return 401 "token not found or revoked" if not in database
-3. **Token Validation**: Call `TokenManager.ValidateRefreshToken(refreshToken)` to:
+1. **Request Validation**: Use Gin's `ShouldBindJSON` to validate request body against `refreshReq` struct (refresh_token required)
+2. **Verify Refresh Token Signature**: Call `TokenManager.ValidateRefreshToken(refreshToken)` to:
    - Parse JWT token with HS256 signature verification
    - Validate token expiry and claims
    - Check audience field is "refresh" (prevents access token misuse)
    - Extract user ID and expiry time from custom claims
+   - Return 401 if signature is invalid or token is expired
+3. **Check Token Blacklist**: Hash the refresh token and verify it's NOT blacklisted:
+   - Call `TokenStore.Contains(HashToken(refreshToken), "refresh")`
+   - Return 401 "token has been revoked" if found in blacklist
 4. **Token Rotation**: Generate new token pair:
    - New access token with `TokenManager.GenerateAccessToken(userID)`
    - New refresh token with `TokenManager.GenerateRefreshToken(userID)`
    - Both tokens have fresh expiry times
-5. **Update Database**:
-   - Delete old refresh token: `TokenStore.Delete(HashToken(oldRefreshToken), "refresh_active")`
-   - Store new refresh token: `TokenStore.Add(HashToken(newRefreshToken), "refresh_active", userID, newRefreshTokenExpiry)`
+5. **Blacklist Old Refresh Token**: Add the old refresh token to blacklist:
+   - Hash the old refresh token: `oldTokenHash := HashToken(refreshToken)`
+   - Call `TokenStore.Add(oldTokenHash, "refresh", refreshTokenExpiry)`
+   - Inserts into `tokens_blacklist` table with token_type='refresh'
 6. **Response**: Return new access_token, refresh_token, and token_type
-7. **Error Handling**: Return 401 for invalid/expired/revoked tokens, 400 for missing token, 500 for database errors
+7. **Error Handling**: Return 401 for invalid/expired/revoked tokens, 400 for missing or invalid request body, 500 for database errors
 
 **Security Considerations:**
 
 - Refresh tokens are rotated on each use (new tokens generated)
 - Old refresh token is blacklisted after successful refresh to prevent reuse
 - Token audience validation prevents token type confusion
-- Both access and refresh tokens are blacklisted in the same `token_blacklist` table with `token_type` field
+- Both access and refresh tokens are blacklisted in the same `tokens_blacklist` table with `token_type` field
 
 ---
 
@@ -329,12 +328,13 @@ Content-Type: application/json
 
 **Endpoint:** `POST /api/v1/auth/logout`
 
-**Description:** Invalidates the current access token and deletes all refresh tokens for the user.
+**Description:** Invalidates the current access token and deletes the specified refresh token.
 
 **Request Headers:**
 
 ```
 Authorization: Bearer <access_token>
+X-Refresh-Token: <refresh_token>
 ```
 
 **Request Body:** None
@@ -354,50 +354,53 @@ Authorization: Bearer <access_token>
 
 **Error Responses:**
 
+- `400 Bad Request` - Missing refresh token in X-Refresh-Token header
 - `401 Unauthorized` - Invalid or missing access token
 
 **Implementation Notes:**
 
 1. **Access Token Extraction**: Retrieve raw access token from Gin context using `middleware.CtxRawTokenKey`
    - Token was previously extracted and validated by `AuthMiddleware`
-2. **User ID Extraction**: Retrieve user ID from Gin context using `middleware.CtxUserIDKey`
-   - User ID was extracted from JWT token by `AuthMiddleware`
+2. **Refresh Token Extraction**: Retrieve refresh token from `X-Refresh-Token` header
+   - Return 400 if header is missing
 3. **Access Token Validation**: Call `TokenManager.ValidateAccessToken(accessToken)` to:
    - Parse token and extract expiry time
    - If token is already invalid, treat as success (idempotent operation)
 4. **Blacklist Access Token**: Hash and store access token in database:
-   - Call `TokenStore.Add(HashToken(accessToken), "access_blacklist", userID, accessTokenExpiry)`
-   - Inserts into `tokens` table with token_type='access_blacklist'
+   - Call `TokenStore.Add(HashToken(accessToken), "access", accessTokenExpiry)`
+   - Inserts into `tokens_blacklist` table with token_type='access'
    - Use ON CONFLICT DO NOTHING to handle duplicate logout attempts
-5. **Delete All User Refresh Tokens**: Remove all active refresh tokens for the user:
-   - Execute: `DELETE FROM tokens WHERE user_id = $1 AND token_type = 'refresh_active'`
-   - This logs out the user from all devices/sessions
+5. **Blacklist Refresh Token**: Hash and store refresh token in database:
+   - Call `TokenStore.Add(HashToken(refreshToken), "refresh", refreshTokenExpiry)`
+   - Inserts into `tokens_blacklist` table with token_type='refresh'
+   - Use ON CONFLICT DO NOTHING to handle duplicate logout attempts
 6. **Response**: Return success message "logged out"
-7. **Error Handling**: Return 400 for missing token, 500 for database failures
+7. **Error Handling**: Return 400 for missing refresh token header, 500 for database failures
 
 **Token Storage Implementation:**
 
-- Uses PostgreSQL `tokens` table with columns: id, token_hash, token_type, user_id, expires_at, created_at
+- Uses PostgreSQL `tokens_blacklist` table with columns: id, token_hash, token_type, expires_at
 - Tokens are hashed using SHA-256 before storage (64-character hex string)
-- Dual purpose table:
-  - Access tokens: Blacklist approach (token_type='access_blacklist')
-  - Refresh tokens: Whitelist approach (token_type='refresh_active')
-- Periodic cleanup job removes expired tokens: `DELETE FROM tokens WHERE expires_at < NOW()`
+- Blacklist approach for both token types:
+  - Access tokens: Blacklisted on logout (token_type='access')
+  - Refresh tokens: Blacklisted on logout or refresh (token_type='refresh')
+- Token type is stored as PostgreSQL ENUM with values: 'access', 'refresh'
+- Periodic cleanup job removes expired tokens: `DELETE FROM tokens_blacklist WHERE expires_at < NOW()`
 - Database-backed implementation supports multi-instance deployments
 - Replaces the in-memory `InMemoryTokenBlacklist` for production use
 - Server does NOT store plaintext tokens - only SHA-256 hashes
 
 **Middleware Integration:**
 
-- `AuthMiddleware` checks access token against database:
+- `AuthMiddleware` checks access token against blacklist:
   - Hash the token: `tokenHash := HashToken(accessToken)`
-  - Query: `SELECT EXISTS(SELECT 1 FROM tokens WHERE token_hash = $1 AND token_type = 'access_blacklist' AND expires_at > NOW())`
+  - Query: `SELECT EXISTS(SELECT 1 FROM tokens_blacklist WHERE token_hash = $1 AND token_type = 'access' AND expires_at > NOW())`
   - Returns 401 "token revoked" if blacklisted
-- `RefreshTokens` endpoint checks refresh token against database:
+- `RefreshTokens` endpoint checks refresh token against blacklist:
   - Hash the token: `tokenHash := HashToken(refreshToken)`
-  - Query: `SELECT EXISTS(SELECT 1 FROM tokens WHERE token_hash = $1 AND token_type = 'refresh_active' AND expires_at > NOW())`
-  - Returns 401 "token not found" if not in database
-- Ensures revoked/deleted tokens cannot be used even if still valid
+  - Query: `SELECT EXISTS(SELECT 1 FROM tokens_blacklist WHERE token_hash = $1 AND token_type = 'refresh' AND expires_at > NOW())`
+  - Returns 401 "token has been revoked" if blacklisted
+- Ensures revoked tokens cannot be used even if still valid
 
 **Token Hashing:**
 
