@@ -12,6 +12,19 @@ logger = get_logger("summarize")
 
 _pdf_lock = threading.Lock()
 
+# Pre-compute constants at module load time to avoid recalculating on every request
+# Calculate minimum output tokens needed for a valid summary
+MINIMUM_OUTPUT_TOKENS = int(
+    settings.summarize.minimum_summary_words / settings.common.llm.token_to_word_ratio_en
+)
+
+# Hard limit: maximum allowed input tokens (input + prompt + minimum_output must fit in context)
+MAX_ALLOWED_INPUT_TOKENS = (
+    settings.common.llm.granite_3_3_8b_instruct_context_length -
+    settings.summarize.summarization_prompt_token_count -
+    MINIMUM_OUTPUT_TOKENS
+)
+
 # Pre-compute max input word count from context length at startup
 # input_words/ratio + buf + (input_words/ratio)*coeff < max_model_len
 # => input_words * (1 + coeff) / ratio < max_model_len - buf
@@ -28,42 +41,47 @@ def word_count(text: str) -> int:
     return len(text.split())
 
 
-def validate_input_word_count_for_level(input_tokens: int, input_word_count: int, summary_level: str) -> int:
+def validate_input_and_get_available_tokens(
+    input_tokens: int,
+    input_word_count: int,
+    summary_level: Optional[str] = None,
+    summary_length: Optional[int] = None
+) -> int:
     """
-    Validate input using actual token count with hard and soft limits, return available output tokens.
+    Unified validation function for both summary_level and summary_length approaches.
+    Validates input using actual token count with hard and soft limits, returns available output tokens.
     
     Hard limit: input + prompt must not exceed (context_limit - minimum_summary_words)
-    Soft limit: If within hard limit, allow processing even if level's ideal output won't fit
+    Soft limit: For level-based, log warning if level's ideal output won't fit (but don't fail)
     
     Args:
         input_tokens: Actual token count of input text
         input_word_count: Number of words in input text (for logging)
-        summary_level: "brief", "standard", or "detailed"
+        summary_level: Optional abstraction level ("brief", "standard", or "detailed")
+        summary_length: Optional direct word count specification
     
     Returns:
         available_output_tokens: Maximum tokens available for summary generation
     
     Raises:
-        SummarizeException: If input exceeds hard limit
+        SummarizeException: If input exceeds hard limit or summary_length > input_word_count
     """
     
-    # Calculate minimum output tokens needed
-    minimum_output_tokens = int(settings.summarize.minimum_summary_words / settings.common.llm.token_to_word_ratio_en)
+    # Validate summary_length if provided
+    if summary_length is not None and summary_length > input_word_count:
+        raise SummarizeException(
+            400, "INPUT_TEXT_SMALLER_THAN_SUMMARY_LENGTH",
+            "Input text is smaller than summary length",
+        )
     
-    # Hard limit: input + prompt + minimum_output must fit in context
-    max_allowed_input_tokens = (
-        settings.common.llm.granite_3_3_8b_instruct_context_length -
-        settings.summarize.summarization_prompt_token_count -
-        minimum_output_tokens
-    )
-    
-    if input_tokens > max_allowed_input_tokens:
+    # Hard limit check
+    if input_tokens > MAX_ALLOWED_INPUT_TOKENS:
         # Convert to words for user-friendly error message
-        max_allowed_input_words = int(max_allowed_input_tokens * settings.common.llm.token_to_word_ratio_en)
+        max_allowed_input_words = int(MAX_ALLOWED_INPUT_TOKENS * settings.common.llm.token_to_word_ratio_en)
         raise SummarizeException(
             413, "CONTEXT_LIMIT_EXCEEDED",
             f"Input size ({input_word_count} words, {input_tokens} tokens) exceeds maximum allowed. "
-            f"Maximum input: ~{max_allowed_input_words} words ({max_allowed_input_tokens} tokens) "
+            f"Maximum input: ~{max_allowed_input_words} words ({MAX_ALLOWED_INPUT_TOKENS} tokens) "
             f"to ensure at least {settings.summarize.minimum_summary_words} words for summary.",
         )
     
@@ -74,97 +92,127 @@ def validate_input_word_count_for_level(input_tokens: int, input_word_count: int
         settings.summarize.summarization_prompt_token_count
     )
     
-    # Soft limit check: log warning if level's ideal output won't fit, but don't fail
-    level_config = getattr(settings.summarize.summarization_levels, summary_level)
-    
-    # Calculate ideal output tokens for this level
-    ideal_output_tokens = int(
-        (settings.common.llm.granite_3_3_8b_instruct_context_length - settings.summarize.summarization_prompt_token_count) *
-        (settings.summarize.summarization_coefficient * level_config.multiplier) /
-        (1 + settings.summarize.summarization_coefficient * level_config.multiplier)
-    )
-    
-    if available_output_tokens < ideal_output_tokens:
-        available_output_words = int(available_output_tokens * settings.common.llm.token_to_word_ratio_en)
-        ideal_output_words = int(ideal_output_tokens * settings.common.llm.token_to_word_ratio_en)
-        logger.warning(
-            f"Input size ({input_word_count} words, {input_tokens} tokens) limits output space. "
-            f"'{summary_level}' level target is ~{ideal_output_words} words, "
-            f"but only ~{available_output_words} words available for summary."
-        )
+    # Soft limit check for level-based approach: log warning if level's ideal output won't fit
+    if summary_level is not None:
+        level_config = getattr(settings.summarize.summarization_levels, summary_level)
+        
+        # Calculate ideal output tokens for this level based on actual input
+        # ideal_output = input * coefficient * level_multiplier
+        base_target_tokens = int(input_tokens * settings.summarize.summarization_coefficient)
+        ideal_output_tokens = int(base_target_tokens * level_config.multiplier)
+        
+        if available_output_tokens < ideal_output_tokens:
+            available_output_words = int(available_output_tokens * settings.common.llm.token_to_word_ratio_en)
+            ideal_output_words = int(ideal_output_tokens * settings.common.llm.token_to_word_ratio_en)
+            logger.warning(
+                f"Input size ({input_word_count} words, {input_tokens} tokens) limits output space. "
+                f"'{summary_level}' level target is ~{ideal_output_words} words, "
+                f"but only ~{available_output_words} words available for summary."
+            )
     
     return available_output_tokens
 
 
-def compute_target_and_max_tokens_from_level(
+def compute_target_and_max_tokens(
     input_tokens: int,
-    input_word_count: int,
-    summary_level: str,
-    available_output_tokens: int
+    available_output_tokens: int,
+    summary_level: Optional[str] = None,
+    summary_length: Optional[int] = None
 ) -> tuple[int, int, int, int]:
     """
-    Compute target words and tokens based on abstraction level and available space.
+    Unified function to compute target words and tokens for both level-based and length-based approaches.
     
     Args:
         input_tokens: Actual token count of input text
-        input_word_count: Number of words in input text (for logging)
-        summary_level: "brief", "standard", or "detailed"
         available_output_tokens: Maximum tokens available for output (from validation)
+        summary_level: Optional abstraction level ("brief", "standard", or "detailed")
+        summary_length: Optional direct word count specification
     
     Returns:
         (target_words, min_words, max_words, max_tokens)
     """
-    # Get level configuration
-    level_config = getattr(settings.summarize.summarization_levels, summary_level)
     
-    # Calculate ideal target based on input tokens and level multiplier
-    base_target_tokens = int(input_tokens * settings.summarize.summarization_coefficient)
-    ideal_target_tokens = int(base_target_tokens * level_config.multiplier)
-    
-    # Cap target to available space
-    target_tokens = min(ideal_target_tokens, available_output_tokens)
-    
-    # Convert to words for display
-    target_word_count = int(target_tokens * settings.common.llm.token_to_word_ratio_en)
-    
-    # Calculate min/max bounds (85% to 115% of target)
-    min_words = int(target_word_count * 0.85)
-    max_words = int(target_word_count * 1.15)
-    
-    # Cap max_words to available space
-    max_possible_words = int(available_output_tokens * settings.common.llm.token_to_word_ratio_en)
-    max_words = min(max_words, max_possible_words)
-    
-    # Add small buffer to max_tokens
-    buffer = max(20, int(target_tokens * 0.1))  # 10% buffer
-    max_tokens = min(target_tokens + buffer, available_output_tokens)
-    
-    logger.debug(
-        f"Level: {summary_level}, Input: {input_tokens} tokens, Target: {target_word_count} words "
-        f"({min_words}-{max_words}), Max tokens: {max_tokens}, Available: {available_output_tokens}"
-    )
-    
-    return target_word_count, min_words, max_words, max_tokens
-
-
-def compute_target_and_max_tokens(input_tokens: int, input_word_count: int, summary_length: Optional[int]):
-    """Legacy function for backward compatibility with direct length specification."""
-    if summary_length is not None:
+    if summary_level is not None:
+        # Level-based approach: calculate target based on input and level multiplier
+        level_config = getattr(settings.summarize.summarization_levels, summary_level)
+        
+        # Calculate ideal target based on input tokens and level multiplier
+        base_target_tokens = int(input_tokens * settings.summarize.summarization_coefficient)
+        ideal_target_tokens = int(base_target_tokens * level_config.multiplier)
+        
+        # Cap target to available space
+        target_tokens = min(ideal_target_tokens, available_output_tokens)
+        
+        # Convert to words for display
+        target_word_count = int(target_tokens * settings.common.llm.token_to_word_ratio_en)
+        
+        # Calculate min/max bounds (85% to 115% of target)
+        min_words = int(target_word_count * 0.85)
+        max_words = int(target_word_count * 1.15)
+        
+        # Cap max_words to available space
+        max_possible_words = int(available_output_tokens * settings.common.llm.token_to_word_ratio_en)
+        max_words = min(max_words, max_possible_words)
+        
+        """
+        Add buffer to max_tokens to allow the model flexibility to complete thoughts.
+        The 10% buffer accounts for token estimation variance and ensures the model
+        can reach the target length without being cut off mid-sentence.
+        """
+        buffer = max(20, int(target_tokens * 0.1))
+        max_tokens = min(target_tokens + buffer, available_output_tokens)
+        
+        logger.debug(
+            f"Level: {summary_level}, Input: {input_tokens} tokens, Target: {target_word_count} words "
+            f"({min_words}-{max_words}), Max tokens: {max_tokens}, Available: {available_output_tokens}"
+        )
+        
+    elif summary_length is not None:
+        # Length-based approach: use specified word count
         target_word_count = summary_length
+        
+        # Calculate min/max bounds
+        min_words = int(target_word_count * 0.85)
+        max_words = int(target_word_count * 1.15)
+        
+        # Estimate output tokens from target word count
+        est_output_tokens = int(target_word_count / settings.common.llm.token_to_word_ratio_en)
+        
+        """
+        Add buffer to max_tokens to allow the model flexibility to complete thoughts.
+        The 10% buffer accounts for token estimation variance and ensures the model
+        can reach the target length without being cut off mid-sentence.
+        """
+        buffer = max(20, int(est_output_tokens * 0.1))
+        max_tokens = min(est_output_tokens + buffer, available_output_tokens)
+        
+        logger.debug(
+            f"Length: {summary_length} words, Input: {input_tokens} tokens, Target: {target_word_count} words "
+            f"({min_words}-{max_words}), Max tokens: {max_tokens}, Available: {available_output_tokens}"
+        )
+        
     else:
-        # Use actual input tokens for calculation
+        # Automatic approach: use default coefficient
         target_tokens = max(1, int(input_tokens * settings.summarize.summarization_coefficient))
         target_word_count = int(target_tokens * settings.common.llm.token_to_word_ratio_en)
-
-    # Calculate min/max bounds
-    min_words = int(target_word_count * 0.85)
-    max_words = int(target_word_count * 1.15)
+        
+        # Calculate min/max bounds
+        min_words = int(target_word_count * 0.85)
+        max_words = int(target_word_count * 1.15)
+        
+        """
+        Add buffer to max_tokens to allow the model flexibility to complete thoughts.
+        The 10% buffer accounts for token estimation variance and ensures the model
+        can reach the target length without being cut off mid-sentence.
+        """
+        buffer = max(20, int(target_tokens * 0.1))
+        max_tokens = min(target_tokens + buffer, available_output_tokens)
+        
+        logger.debug(
+            f"Automatic, Input: {input_tokens} tokens, Target: {target_word_count} words "
+            f"({min_words}-{max_words}), Max tokens: {max_tokens}, Available: {available_output_tokens}"
+        )
     
-    est_output_tokens = int(target_word_count / settings.common.llm.token_to_word_ratio_en)
-    buffer = max(20, int(est_output_tokens * 0.1))
-    max_tokens = est_output_tokens + buffer
-    
-    logger.debug(f"Input: {input_tokens} tokens, Target: {target_word_count} words, Max tokens: {max_tokens}")
     return target_word_count, min_words, max_words, max_tokens
 
 def extract_text_from_pdf(content: bytes) -> str:
@@ -328,6 +376,6 @@ def validate_summary_level(summary_level: Optional[str]) -> Optional[str]:
     if summary_level not in valid_levels:
         raise SummarizeException(
             400, "INVALID_PARAMETER",
-            f"summary_level must be one of: {', '.join(valid_levels)}"
+            f"level must be one of: {', '.join(valid_levels)}"
         )
     return summary_level
