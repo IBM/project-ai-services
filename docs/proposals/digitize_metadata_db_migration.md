@@ -892,77 +892,53 @@ if __name__ == "__main__":
         print("\nJSON files retained. Use --cleanup flag to remove them after migration.")
 ```
 
-**How to Execute the Migration Script:**
+**How to Execute the Migration:**
 
-**Option 1: Inside the Digitize Container (Recommended)**
-```bash
-# Exec into the running digitize container
-kubectl exec -it <digitize-pod-name> -n <namespace> -- bash
+The migration runs automatically as an **Init Container** before the digitize service starts. This approach works for both Kubernetes and Podman environments.
 
-# Run the migration script
-python -m digitize.scripts.migrate_json_to_postgres
+**Deployment Configuration:**
 
-# With cleanup (deletes JSON files after migration)
-python -m digitize.scripts.migrate_json_to_postgres --cleanup
-```
-
-**Option 2: As a Kubernetes Job (One-time Migration)**
-```yaml
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: digitize-migration
-  namespace: <namespace>
-spec:
-  template:
-    spec:
-      containers:
-      - name: migrate
-        image: <digitize-image>
-        command: ["python", "-m", "digitize.scripts.migrate_json_to_postgres"]
-        env:
-        - name: POSTGRES_HOST
-          value: "postgresql-service"
-        - name: POSTGRES_DB
-          value: "digitize_metadata"
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: postgresql-credentials
-              key: username
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: postgresql-credentials
-              key: password
-        volumeMounts:
-        - name: digitize-data
-          mountPath: /data
-      volumes:
-      - name: digitize-data
-        persistentVolumeClaim:
-          claimName: digitize-pvc
-      restartPolicy: OnFailure
-```
-
-**Option 3: As Init Container (Automatic on Deployment)**
-
-Add to digitize deployment spec:
+Add to digitize deployment spec (works for both Kubernetes and Podman):
 ```yaml
 initContainers:
 - name: migrate-metadata
   image: <digitize-image>
   command: ["python", "-m", "digitize.scripts.migrate_json_to_postgres"]
   env:
-    # Same env vars as main container
+    - name: POSTGRES_HOST
+      value: "postgresql-service"
+    - name: POSTGRES_DB
+      value: "digitize_metadata"
+    - name: POSTGRES_USER
+      valueFrom:
+        secretKeyRef:
+          name: postgresql-credentials
+          key: username
+    - name: POSTGRES_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: postgresql-credentials
+          key: password
+    - name: RUN_MIGRATION
+      value: "true"  # Set to "false" to skip migration
   volumeMounts:
-    # Same volume mounts as main container
+    - name: digitize-data
+      mountPath: /data
 ```
 
-**Recommended Approach:**
-- **For initial migration**: Use **Option 2 (Kubernetes Job)** - provides isolation, logging, and retry capability
-- **For testing**: Use **Option 1 (Inside Container)** - quick and interactive
-- **For automated deployments**: Use **Option 3 (Init Container)** - runs automatically before app starts
+**Migration Control:**
+
+The migration is controlled via the `RUN_MIGRATION` environment variable:
+- `RUN_MIGRATION=true` - Runs migration on container startup (default for init container)
+- `RUN_MIGRATION=false` - Skips migration (useful after initial migration is complete)
+
+**Benefits of Init Container Approach:**
+- ✅ Works for both Kubernetes and Podman deployments
+- ✅ Runs automatically before main application starts
+- ✅ Ensures database is ready before application processes requests
+- ✅ No manual intervention required
+- ✅ Idempotent - safe to run multiple times (uses upsert logic)
+- ✅ Can be disabled via environment variable after initial migration
 
 **Benefits of SQLAlchemy Migration:**
 - Type-safe operations with ORM models
