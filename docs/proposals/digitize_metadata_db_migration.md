@@ -858,13 +858,111 @@ def migrate_jobs():
         session.close()
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Migrate metadata from JSON files to PostgreSQL')
+    parser.add_argument('--cleanup', action='store_true',
+                       help='Delete JSON files after successful migration')
+    args = parser.parse_args()
+
     print("Initializing database schema...")
     init_db()
     print("Starting migration...")
     migrate_jobs()
     migrate_documents()
     print("Migration complete!")
+
+    if args.cleanup:
+        print("\nCleaning up JSON files...")
+        jobs_dir = Path(config.JOBS_DIR)
+        docs_dir = Path(config.DOCS_DIR)
+
+        # Remove job status files
+        for json_file in jobs_dir.glob("*_status.json"):
+            json_file.unlink()
+            print(f"Deleted: {json_file}")
+
+        # Remove document metadata files
+        for json_file in docs_dir.glob("*_metadata.json"):
+            json_file.unlink()
+            print(f"Deleted: {json_file}")
+
+        print("Cleanup complete!")
+    else:
+        print("\nJSON files retained. Use --cleanup flag to remove them after migration.")
 ```
+
+**How to Execute the Migration Script:**
+
+**Option 1: Inside the Digitize Container (Recommended)**
+```bash
+# Exec into the running digitize container
+kubectl exec -it <digitize-pod-name> -n <namespace> -- bash
+
+# Run the migration script
+python -m digitize.scripts.migrate_json_to_postgres
+
+# With cleanup (deletes JSON files after migration)
+python -m digitize.scripts.migrate_json_to_postgres --cleanup
+```
+
+**Option 2: As a Kubernetes Job (One-time Migration)**
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: digitize-migration
+  namespace: <namespace>
+spec:
+  template:
+    spec:
+      containers:
+      - name: migrate
+        image: <digitize-image>
+        command: ["python", "-m", "digitize.scripts.migrate_json_to_postgres"]
+        env:
+        - name: POSTGRES_HOST
+          value: "postgresql-service"
+        - name: POSTGRES_DB
+          value: "digitize_metadata"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-credentials
+              key: username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-credentials
+              key: password
+        volumeMounts:
+        - name: digitize-data
+          mountPath: /data
+      volumes:
+      - name: digitize-data
+        persistentVolumeClaim:
+          claimName: digitize-pvc
+      restartPolicy: OnFailure
+```
+
+**Option 3: As Init Container (Automatic on Deployment)**
+
+Add to digitize deployment spec:
+```yaml
+initContainers:
+- name: migrate-metadata
+  image: <digitize-image>
+  command: ["python", "-m", "digitize.scripts.migrate_json_to_postgres"]
+  env:
+    # Same env vars as main container
+  volumeMounts:
+    # Same volume mounts as main container
+```
+
+**Recommended Approach:**
+- **For initial migration**: Use **Option 2 (Kubernetes Job)** - provides isolation, logging, and retry capability
+- **For testing**: Use **Option 1 (Inside Container)** - quick and interactive
+- **For automated deployments**: Use **Option 3 (Init Container)** - runs automatically before app starts
 
 **Benefits of SQLAlchemy Migration:**
 - Type-safe operations with ORM models
@@ -1168,16 +1266,16 @@ Deep merge is performed in Python (not SQL) because:
 - [ ] Connection pooling configured
 - [ ] Monitoring set up
 - [ ] Backup strategy implemented
-- [ ] Rollback plan documented
 
-#### 4.2 Rollback Plan
+#### 4.2 Handling Migration Failures
 
-If issues arise:
-1. Switch back to JSON file storage (keep old code path)
-2. Export data from PostgreSQL back to JSON files
-3. Investigate and fix issues
-4. Re-attempt migration
+If migration issues arise, they must be fixed in place:
+1. Review migration logs for specific errors
+2. Fix data inconsistencies or schema issues
+3. Rerun migration script (idempotent with upsert logic)
+4. Verify data integrity after fixes
 
+**Note:** There is no rollback to JSON file storage. Once migrated, the system operates exclusively with PostgreSQL. Ensure thorough testing in non-production environments before production migration.
 
 ---
 
