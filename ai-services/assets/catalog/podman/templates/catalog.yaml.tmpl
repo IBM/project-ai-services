@@ -9,6 +9,32 @@ metadata:
   annotations:
     ai-services.io/ports: "{{ .Values.ui.port }}:8081"
 spec:
+  initContainers:
+    - name: db-migration
+      image: "{{ .Values.backend.image }}"
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          echo "Running database migrations..."
+          /usr/bin/ai-services catalog migrate init \
+            --db-host={{ .AppName }}--db \
+            --db-port=5432 \
+            --db-user={{ .Values.db.user }} \
+            --db-password="${DB_PASSWORD}" \
+            --db-name={{ .Values.db.database }} \
+            --db-sslmode=disable
+          echo "Migrations completed successfully"
+      env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: catalog-secret
+              key: db-password
+      resources:
+        requests:
+          memory: "512Mi"
+        limits:
+          memory: "512Mi"
   containers:
     - name: ui
       image: "{{ .Values.ui.image }}"
