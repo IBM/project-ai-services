@@ -43,8 +43,8 @@ http {
         }
 
         # Proxy API requests
-        location /reference {
-          proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};
+        location /v1/similarity-search {
+          proxy_pass http://${SIMILARITY_SEARCH_HOST}:${SIMILARITY_SEARCH_PORT};
           proxy_http_version 1.1;
           proxy_set_header Upgrade $http_upgrade;
           proxy_set_header Connection 'upgrade';

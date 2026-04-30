@@ -18,7 +18,7 @@ export default defineConfig(() => {
           target: "http://localhost:3001",
           changeOrigin: true,
         },
-        "/reference": {
+        "/v1/similarity-search": {
           target: "http://localhost:3001",
           changeOrigin: true,
         },

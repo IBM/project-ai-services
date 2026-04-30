@@ -22,6 +22,10 @@ spec:
           value: "{{ .AppName  }}--chat-bot"
         - name: BACKEND_PORT
           value: "5000" 
+        - name: SIMILARITY_SEARCH_HOST
+          value: "{{ .AppName  }}--similarity-api"
+        - name: SIMILARITY_SEARCH_PORT
+          value: "7000"
       ports:
         - containerPort: 3000
           protocol: TCP
