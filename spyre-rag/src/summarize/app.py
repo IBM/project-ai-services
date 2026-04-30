@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, Request, UploadFile, Header
+from fastapi import FastAPI, Request, UploadFile
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
@@ -208,7 +208,6 @@ async def handle_summarize(
 response_model=SummarizeSuccessResponse,
 responses={
     400: http_error_responses[400],
-    401: http_error_responses[401],
     413: http_error_responses[413],
     415: http_error_responses[415],
     429: http_error_responses[429],
