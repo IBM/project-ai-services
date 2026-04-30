@@ -63,12 +63,15 @@ check migration status, and rollback migrations.`,
 
 	// Subcommand: up - Run pending migrations
 	upCmd := createUpCmd(getDBConfig)
+	upCmd.Hidden = true
 
 	// Subcommand: status - Check migration status
 	statusCmd := createStatusCmd(getDBConfig)
+	statusCmd.Hidden = true
 
 	// Subcommand: down - Rollback the last migration
 	downCmd := createDownCmd(getDBConfig)
+	downCmd.Hidden = true
 
 	// Add subcommands
 	migrateCmd.AddCommand(initCmd)
