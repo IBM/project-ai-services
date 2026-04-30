@@ -2,13 +2,12 @@
 -- +goose StatementBegin
 -- Create applications table
 CREATE TABLE applications (
-    id VARCHAR(100) PRIMARY KEY,
-    deployment_name VARCHAR(100),
-    type VARCHAR(100),
-    deployment_type deployment_type,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100),
+    template VARCHAR(100),
     status status,
     message TEXT,
-    createdby VARCHAR(100),
+    created_by VARCHAR(100),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

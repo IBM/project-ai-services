@@ -3,9 +3,8 @@
 -- Create services table
 CREATE TABLE services (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    app_id VARCHAR(100) NOT NULL,
+    app_id UUID NOT NULL,
     type VARCHAR(100),
-    category service_category,
     status status,
     endpoints JSONB,
     version TEXT,
