@@ -6,6 +6,46 @@ This document outlines the configuration changes and system requirements impleme
 
 ---
 
+## Prerequisites Summary
+
+1. Run these commands before running the bootstrap command:
+   ```bash
+   sudo usermod -aG wheel <username>
+   sudo loginctl enable-linger <username>
+   ```
+2. Run bootstrap command with sudo:
+   ```bash
+   sudo ai-services bootstrap
+   ```
+
+3. Create application data directory (if using default location):
+   ```bash
+   sudo mkdir -p /var/lib/ai-services/{models,cache,data}
+   sudo chown -R <username>:sentient /var/lib/ai-services
+   ```
+
+4. Apply configuration changes for users:
+   ```bash
+   # exit user session
+   exit
+   # Terminate user session to apply group membership and resource limits
+   sudo loginctl terminate-user <username>
+   
+   # Enable lingering to keep user services running
+   sudo loginctl enable-linger <username>
+   ```
+   
+   Then log back in.
+
+**Why This Is Required:**
+- Group membership changes require a new login session
+- Resource limits (nofile, memlock) are applied at login time
+- Systemd user slice limits need the user session to restart
+- `loginctl terminate-user` ensures a clean session restart
+- `loginctl enable-linger` allows user services to persist after logout
+
+---
+
 ## 1. SELinux VFIO Access Configuration
 
 ### Problem
@@ -141,16 +181,22 @@ SupplementaryGroups=sentient
 ## 4. Directory Access Requirements
 
 ### Problem
-Applications need persistent storage for models, cache, and data files in `/var/lib/ai-services`.
+Applications need persistent storage for models, cache, and data files.
 
 ### Error
 ```
 user does not have write permission to directory: /var/lib/ai-services
 ```
 
-### Solution: Prerequisites Documentation
+### Solution: Base Directory Configuration
+Applications can be created with a custom base directory using the `--baseDir` flag. The default base directory is `/var/lib/ai-services`, but users can specify an alternative location.
 
-**Required Directory Structure**:
+**Prerequisites**:
+- The user must have write permissions to the specified base directory
+- If using the default `/var/lib/ai-services`, ensure proper permissions are set (see setup instructions below)
+- If using a custom directory, verify permissions before creating the application
+
+**Required Directory Structure** (example for default location):
 ```
 /var/lib/ai-services/
 ├── models/     # Model files
@@ -158,21 +204,21 @@ user does not have write permission to directory: /var/lib/ai-services
 └── data/       # Application data
 ```
 
-**Setup Commands** (System Administrator):
+**Setup Commands** (for default location):
 ```bash
 # Create directory structure
 sudo mkdir -p /var/lib/ai-services/{models,cache,data}
 
 # Set ownership (replace user:group appropriately)
-sudo chown -R <user>:<group> /var/lib/ai-services
+sudo chown -R <user>:sentient /var/lib/ai-services
 
 # Set permissions
 sudo chmod -R 755 /var/lib/ai-services
 ```
 
 **Rationale**:
-- Not automatically created by bootstrap (requires admin decision on ownership)
-- Permissions depend on deployment model (single user vs multi-user)
+- Default `/var/lib/ai-services` is not automatically created by ai-services tool (requires admin decision on ownership)
+- Custom directories allow users to work without requiring sudo/admin privileges
 - Documented as prerequisite in user guide
 
 ---
@@ -196,72 +242,19 @@ SMT level affects CPU performance for Spyre card operations. Previously configur
 
 ### User Experience
 
-**Non-Root User**:
+**Non-Root/Sudo User**:
 ```bash
 TBA
 ```
 
-**Root/Sudo User**:
+**Root**:
 ```bash
 TBA
 ```
 
 ---
 
-## Prerequisites Summary
-
-### Administrator Tasks
-1. Run bootstrap command with sudo:
-   ```bash
-   sudo ai-services bootstrap configure
-   ```
-
-2. Create application data directory:
-   ```bash
-   sudo mkdir -p /var/lib/ai-services/{models,cache,data}
-   sudo chown -R <user>:<group> /var/lib/ai-services
-   ```
-
-3. Apply configuration changes for users:
-   ```bash
-   # Terminate user session to apply group membership and resource limits
-   sudo loginctl terminate-user <username>
-   
-   # Enable lingering to keep user services running
-   sudo loginctl enable-linger <username>
-   ```
-   
-   Then log back in.
-
-### User Tasks
-
-#### 1. After Bootstrap Configuration - Apply Changes
-After running `sudo ai-services bootstrap configure`, you **must** apply the configuration changes:
-
-```bash
-# Step 1: Terminate current user session to apply group membership and limits
-sudo loginctl terminate-user <username>
-
-# Step 2: Enable lingering for the user (keeps user services running)
-sudo loginctl enable-linger <username>
-
-# Step 3: Log back in as the user
-# (SSH back in)
-
-# Step 4: Verify configuration is active
-groups | grep sentient          # Should show sentient group
-ulimit -n                        # Should show 134217728
-ulimit -l                        # Should show unlimited
-```
-
-**Why This Is Required:**
-- Group membership changes require a new login session
-- Resource limits (nofile, memlock) are applied at login time
-- Systemd user slice limits need the user session to restart
-- `loginctl terminate-user` ensures a clean session restart
-- `loginctl enable-linger` allows user services to persist after logout
-
-#### 2. Verify Configuration
+#### 2. Verify Configuration (Optional)
 ```bash
 # Verify group membership
 groups | grep sentient
@@ -275,11 +268,6 @@ podman ps
 
 # Verify systemd user slice limits (optional)
 systemctl show user-$(id -u).slice | grep -E "LimitNOFILE|LimitMEMLOCK"
-```
-
-#### 3. Deploy Applications
-```bash
-ai-services application create <template-name> <app-name>
 ```
 
 **Important:** If you skip the `loginctl terminate-user` step and just log out/in manually, some systemd configurations may not apply correctly. Always use `loginctl terminate-user` for a clean restart.
@@ -375,9 +363,13 @@ systemctl status smtstate.service
 systemctl status podman.service
 systemctl show podman.service | grep SupplementaryGroups
 
-# Check directory permissions
+# Check directory permissions (default location)
 ls -ld /var/lib/ai-services
 ls -l /var/lib/ai-services/
+
+# Check custom directory permissions
+ls -ld /path/to/custom/directory
+ls -l /path/to/custom/directory/
 ```
 
 ---
