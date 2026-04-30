@@ -2,7 +2,9 @@
 
 ## Executive Summary
 
-This document outlines the migration plan from JSON file-based metadata storage to PostgreSQL for the digitize service. PostgreSQL has been selected as the database solution to address current scalability challenges while providing ACID guarantees, excellent concurrent write performance, and flexible JSON support for evolving metadata schemas.
+This document outlines the migration plan from JSON file-based metadata storage to PostgreSQL **specifically for the digitize service**. PostgreSQL has been selected as the database solution to address current scalability challenges while providing ACID guarantees, excellent concurrent write performance, and flexible JSON support for evolving metadata schemas.
+
+**Scope**: This proposal covers only the digitize service. Other services (summarize, similarity, etc.) will have their own separate databases and schemas, following similar patterns but with service-specific requirements.
 
 ## Current Implementation Analysis
 
@@ -259,10 +261,17 @@ INDEXES:
 - Connection pool settings: pool_size, max_overflow, pool_pre_ping
 
 **Key Configuration:**
+- Database name: `digitize_metadata` (service-specific)
 - Pool size: 5 connections (configurable via `DB_POOL_SIZE`)
 - Max overflow: 5 additional connections (configurable via `DB_MAX_OVERFLOW`)
 - Pool pre-ping: Verify connections before use
 - No `init_db()` function needed - schema created by init container
+
+**Service Isolation:**
+- Each service (digitize, summarize, similarity) uses its own database
+- Database naming convention: `{service_name}_metadata`
+- Separate schemas and ORM models per service
+- No shared tables between services
 
 ### Benefits of ORM Layer:
 
@@ -643,11 +652,13 @@ done
 echo "Database '$POSTGRES_DB' is accessible!"
 
 # Run schema initialization on target database
+# Note: psql automatically closes the connection when the command completes
 echo "Initializing database schema..."
 PGPASSWORD=$POSTGRES_PASSWORD psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   -f /scripts/init_schema.sql
 
 echo "✅ Database initialization completed successfully!"
+# Connection is automatically closed when psql process exits
 ```
 
 **OCP/Podman Deployment Changes:**
@@ -936,9 +947,10 @@ job = session.query(Job).options(selectinload(Job.documents)).filter(Job.job_id 
     **Core Operations:**
     - `save_document()` - Upsert document using INSERT ... ON CONFLICT DO UPDATE
     - `get_document()` - Retrieve single document by ID
-    - `update_document_metadata()` - Update document fields with deep merge for JSONB
+    - `update_document_metadata()` - Update document fields with deep merge for JSONB metadata
     - `save_job()` - Upsert job state
     - `get_job()` - Retrieve job with eager-loaded documents (selectinload)
+    - `update_job_stats()` - Update job statistics with deep merge for JSONB stats
     - `list_documents()` - Paginated document listing with optional status filter
     - `list_jobs()` - Paginated job listing with eager-loaded documents
 
@@ -1166,241 +1178,6 @@ If issues arise:
 3. Investigate and fix issues
 4. Re-attempt migration
 
-
-## Monitoring and Observability
-
-### Key Metrics to Monitor
-
-#### 1. Connection Pool Metrics
-
-**Why Monitor:**
-- Detect connection exhaustion
-- Optimize pool sizing
-- Identify connection leaks
-
-**Metrics:**
-```python
-# Using SQLAlchemy pool events
-from sqlalchemy import event
-
-@event.listens_for(engine, "connect")
-def receive_connect(dbapi_conn, connection_record):
-    # Track connection creation
-    metrics.increment("db.connections.created")
-
-@event.listens_for(engine, "checkout")
-def receive_checkout(dbapi_conn, connection_record, connection_proxy):
-    # Track connection checkout from pool
-    metrics.increment("db.connections.checkout")
-    metrics.gauge("db.pool.size", engine.pool.size())
-    metrics.gauge("db.pool.checked_out", engine.pool.checkedout())
-    metrics.gauge("db.pool.overflow", engine.pool.overflow())
-```
-
-**Key Metrics:**
-- `db.pool.size` - Current pool size
-- `db.pool.checked_out` - Connections currently in use
-- `db.pool.overflow` - Overflow connections created
-- `db.pool.checked_in` - Available connections
-- `db.connections.wait_time` - Time waiting for connection
-
-**Alerts:**
-- Pool utilization > 80% (warning)
-- Pool utilization > 95% (critical)
-- Connection wait time > 100ms (warning)
-
-#### 2. Query Performance Metrics
-
-**Why Monitor:**
-- Identify slow queries
-- Detect N+1 query problems
-- Track query patterns
-
-**Metrics to Track:**
-```python
-# Using SQLAlchemy events
-@event.listens_for(engine, "before_cursor_execute")
-def receive_before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
-    context._query_start_time = time.time()
-
-@event.listens_for(engine, "after_cursor_execute")
-def receive_after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
-    total_time = time.time() - context._query_start_time
-    metrics.histogram("db.query.duration", total_time * 1000)  # milliseconds
-    metrics.increment("db.query.count")
-```
-
-**Key Metrics:**
-- `db.query.duration.p50` - Median query latency
-- `db.query.duration.p95` - 95th percentile latency
-- `db.query.duration.p99` - 99th percentile latency
-- `db.query.count` - Total queries executed
-- `db.query.errors` - Failed queries
-
-**Alerts:**
-- p95 latency > 100ms (warning)
-- p99 latency > 500ms (critical)
-- Query error rate > 1% (critical)
-
-#### 3. Database Health Metrics
-
-**PostgreSQL Queries:**
-
-```sql
--- Connection count
-SELECT count(*) as active_connections
-FROM pg_stat_activity
-WHERE state = 'active';
-
--- Table bloat (dead tuples)
-SELECT schemaname, tablename,
-       n_dead_tup, n_live_tup,
-       ROUND(100.0 * n_dead_tup / NULLIF(n_live_tup + n_dead_tup, 0), 2) as dead_tuple_percent
-FROM pg_stat_user_tables
-WHERE n_dead_tup > 1000
-ORDER BY n_dead_tup DESC;
-
--- Index usage
-SELECT schemaname, tablename, indexname,
-       idx_scan, idx_tup_read, idx_tup_fetch
-FROM pg_stat_user_indexes
-WHERE idx_scan = 0  -- Unused indexes
-ORDER BY pg_relation_size(indexrelid) DESC;
-
--- Cache hit ratio (should be > 99%)
-SELECT
-    sum(heap_blks_read) as heap_read,
-    sum(heap_blks_hit) as heap_hit,
-    ROUND(100.0 * sum(heap_blks_hit) / NULLIF(sum(heap_blks_hit) + sum(heap_blks_read), 0), 2) as cache_hit_ratio
-FROM pg_statio_user_tables;
-
--- Long running queries
-SELECT pid, now() - query_start as duration, query, state
-FROM pg_stat_activity
-WHERE state != 'idle'
-  AND now() - query_start > interval '5 seconds'
-ORDER BY duration DESC;
-```
-
-**Key Metrics:**
-- `db.connections.active` - Active connections
-- `db.connections.idle` - Idle connections
-- `db.table.bloat_percent` - Dead tuple percentage
-- `db.cache.hit_ratio` - Cache hit ratio (target: >99%)
-- `db.index.unused` - Count of unused indexes
-- `db.query.long_running` - Queries running > 5s
-
-**Alerts:**
-- Active connections > 80% of max_connections (warning)
-- Table bloat > 20% (warning), > 50% (critical)
-- Cache hit ratio < 95% (warning), < 90% (critical)
-- Long running queries > 30s (warning)
-
-#### 4. Application-Level Metrics
-
-**Business Metrics:**
-```python
-# Track document processing
-metrics.histogram("digitize.document.processing_time", duration_seconds)
-metrics.increment("digitize.document.status", tags={"status": doc_status})
-metrics.gauge("digitize.job.active_count", active_job_count)
-
-# Track database operations
-metrics.histogram("digitize.db.save_document.duration", duration_ms)
-metrics.histogram("digitize.db.get_job.duration", duration_ms)
-metrics.increment("digitize.db.operation.errors", tags={"operation": "save_document"})
-```
-
-**Key Metrics:**
-- `digitize.document.processing_time.p95` - Document processing latency
-- `digitize.job.active_count` - Currently active jobs
-- `digitize.db.operation.duration.p95` - Database operation latency
-- `digitize.db.operation.errors` - Database operation failures
-
-#### 5. Table Size and Growth
-
-**Monitor Table Growth:**
-```sql
--- Table sizes
-SELECT
-    schemaname,
-    tablename,
-    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as total_size,
-    pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) as table_size,
-    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename) - pg_relation_size(schemaname||'.'||tablename)) as index_size
-FROM pg_tables
-WHERE schemaname = 'public'
-ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
-
--- Row counts
-SELECT
-    schemaname,
-    tablename,
-    n_live_tup as row_count,
-    n_dead_tup as dead_rows
-FROM pg_stat_user_tables
-ORDER BY n_live_tup DESC;
-```
-
-**Key Metrics:**
-- `db.table.size_bytes` - Table size in bytes
-- `db.table.row_count` - Number of rows
-- `db.table.growth_rate` - Rows added per day
-- `db.index.size_bytes` - Index size in bytes
-
-### Monitoring Tools
-
-**Recommended Stack:**
-1. **Prometheus** - Metrics collection
-2. **Grafana** - Visualization and dashboards
-3. **pg_stat_statements** - PostgreSQL query statistics
-4. **pgBadger** - PostgreSQL log analyzer
-
-**Dashboard Panels:**
-1. Connection Pool Utilization (gauge)
-2. Query Latency Percentiles (line chart)
-3. Active Connections (time series)
-4. Cache Hit Ratio (gauge)
-5. Table Bloat (bar chart)
-6. Slow Queries (table)
-7. Database Size Growth (area chart)
-8. Error Rate (time series)
-
-### Maintenance Tasks
-
-**Regular Maintenance:**
-```sql
--- Vacuum to reclaim space (run weekly)
-VACUUM ANALYZE jobs;
-VACUUM ANALYZE documents;
-
--- Reindex if needed (run monthly or when bloat > 30%)
-REINDEX TABLE jobs;
-REINDEX TABLE documents;
-
--- Update statistics (run daily)
-ANALYZE jobs;
-ANALYZE documents;
-```
-
-**Automated Maintenance:**
-- Enable autovacuum (should be on by default)
-- Configure autovacuum thresholds based on table size
-- Monitor autovacuum activity
-
-```sql
--- Check autovacuum settings
-SELECT name, setting
-FROM pg_settings
-WHERE name LIKE 'autovacuum%';
-
--- Monitor autovacuum activity
-SELECT schemaname, tablename, last_vacuum, last_autovacuum, last_analyze, last_autoanalyze
-FROM pg_stat_user_tables
-ORDER BY last_autovacuum DESC NULLS LAST;
-```
-
----
 
 ---
 
