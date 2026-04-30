@@ -219,13 +219,10 @@ func (p *PodmanApplication) validateSpyreCardRequirements(req int, actual int) e
 func (p *PodmanApplication) calculateReqSpyreCards(tp templates.Template, podTemplateFileNames []string, appTemplateName, appName string) (int, error) {
 	totalReqSpyreCounts := 0
 
-	// baseDir is supplied at render time from the active runtime environment.
-	argParams := map[string]string{}
-
 	// Calculate Req Spyre Counts
 	for _, podTemplateFileName := range podTemplateFileNames {
 		// fetch pod spec
-		podSpec, err := p.fetchPodSpec(tp, appTemplateName, podTemplateFileName, appName, nil, argParams)
+		podSpec, err := p.fetchPodSpec(tp, appTemplateName, podTemplateFileName, appName, nil, nil)
 		if err != nil {
 			return totalReqSpyreCounts, fmt.Errorf("failed to load pod Template: '%s' for appTemplate: '%s' with error: %w", podTemplateFileName, appTemplateName, err)
 		}
@@ -307,11 +304,6 @@ func (p *PodmanApplication) executePodTemplates(tp templates.Template,
 	appName string, appMetadata *templates.AppMetadata,
 	tmpls map[string]*template.Template, pciAddresses []string, existingPods []string,
 	valuesFiles []string, argParams map[string]string) error {
-	// Ensure argParams is initialized
-	if argParams == nil {
-		argParams = make(map[string]string)
-	}
-
 	// Load values for template rendering
 	values, err := tp.LoadValues(appMetadata.Name, valuesFiles, argParams)
 	if err != nil {

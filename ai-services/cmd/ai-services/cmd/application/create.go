@@ -262,11 +262,6 @@ func validateParamsFlag(cmd *cobra.Command) error {
 		return fmt.Errorf("invalid format: %w", err)
 	}
 
-	// // Reject baseDir parameter - it should only be set via catalog configure
-	// if _, exists := argParams["baseDir"]; exists {
-	// 	return fmt.Errorf("baseDir parameter is not supported in application create. Use 'ai-services catalog configure --basedir' to set a custom base directory")
-	// }
-
 	// Validate params against template values
 	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 	_, err = tp.LoadValues(templateName, nil, argParams)

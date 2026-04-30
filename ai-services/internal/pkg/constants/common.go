@@ -1,8 +1,6 @@
 package constants
 
-import (
-	"time"
-)
+import "time"
 
 const (
 	AIServices           = "ai-services"

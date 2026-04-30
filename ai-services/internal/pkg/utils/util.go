@@ -384,7 +384,7 @@ func GetBaseDir() string {
 		baseDir = dir
 	}
 
-	return filepath.Clean(baseDir)
+	return baseDir
 }
 
 // GetApplicationsPath returns the applications path based on the configured base directory.
@@ -397,27 +397,15 @@ func GetModelsPath() string {
 	return filepath.Join(GetBaseDir(), "models")
 }
 
-// ValidateBaseDir validates that the base directory exists or can be created and is writable.
-// It creates an 'ai-services' subdirectory within the provided base directory for all AI services content.
+// ValidateBaseDir validates that the base directory exists or can be created.
+// It always appends 'ai-services' subdirectory to the provided base directory for all AI services content.
 func ValidateBaseDir(baseDir string) (string, error) {
-	// Clean the path
-	baseDir = filepath.Clean(baseDir)
-	// Only add ai-services subdirectory if not already present
-	if filepath.Base(baseDir) != "ai-services" {
-		baseDir = filepath.Join(baseDir, "ai-services")
-	}
+	// Clean the path and append ai-services subdirectory
+	baseDir = filepath.Join(filepath.Clean(baseDir), "ai-services")
+
 	// Check if directory exists or can be created
 	if err := os.MkdirAll(baseDir, constants.DirPerm); err != nil {
 		return "", fmt.Errorf("cannot create directory: %w", err)
-	}
-	// Check write permissions by creating a test file
-	testFile := filepath.Join(baseDir, ".ai-services-permission-test")
-	if err := os.WriteFile(testFile, []byte("test"), constants.FilePerm); err != nil {
-		return "", fmt.Errorf("no write permission: %w", err)
-	}
-	// Clean up test file
-	if err := os.Remove(testFile); err != nil {
-		logger.Warningf("Failed to remove test file %s: %v\n", testFile, err)
 	}
 
 	return baseDir, nil
