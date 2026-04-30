@@ -10,62 +10,83 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const (
-	// Default database data path from catalog values.yaml
+	// Default database data path from catalog values.yaml.
 	defaultDBDataPath = "/var/lib/ai-services/db"
 )
 
 // UninstallCatalog removes the catalog service and all associated resources.
 func UninstallCatalog(ctx context.Context, autoYes, skipCleanup bool) error {
-	s := spinner.New("Checking catalog service...")
-	s.Start(ctx)
-
 	// Initialize runtime
 	rt, err := podman.NewPodmanClient()
 	if err != nil {
-		s.Fail("failed to initialize podman client")
-
 		return fmt.Errorf("failed to initialize podman client: %w", err)
 	}
 
+	pods, err := validateCatalogExists(rt)
+	if err != nil || len(pods) == 0 {
+		return err
+	}
+
+	// Confirm deletion if not auto-yes
+	if !autoYes {
+		if confirmed, err := confirmDeletion(pods); !confirmed || err != nil {
+			return err
+		}
+	}
+
+	return performCleanup(rt, pods, skipCleanup)
+}
+
+// validateCatalogExists checks if catalog pods exist and returns them.
+func validateCatalogExists(rt *podman.PodmanClient) ([]types.Pod, error) {
 	// Check if catalog pods exist
 	pods, err := rt.ListPods(map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/application=%s", catalog.CatalogAppName)},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to list pods: %w", err)
+		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
-	podsExists := len(pods) != 0
 
-	if !podsExists {
-		s.Stop("No catalog service found")
+	if len(pods) == 0 {
 		logger.Infoln("Catalog service is not deployed")
 
-		return nil
+		return nil, nil
 	}
 
-	s.Stop(fmt.Sprintf("Found %d catalog pod(s)", len(pods)))
+	logger.Infof("Found %d catalog pod(s)\n", len(pods))
 
+	return pods, nil
+}
+
+// confirmDeletion prompts the user to confirm deletion and logs pods to be deleted.
+func confirmDeletion(pods []types.Pod) (bool, error) {
 	// Print pods to be deleted
-	logPodsToBeDeleted(pods)
-
-	// Confirm deletion if not auto-yes
-	if !autoYes {
-		confirmed, err := deleteConfirmation()
-		if err != nil {
-			return err
-		}
-		if !confirmed {
-			logger.Infoln("Deletion cancelled")
-
-			return nil
-		}
+	logger.Infoln("Below are the list of pods to be deleted")
+	for _, pod := range pods {
+		logger.Infof("\t-> %s\n", pod.Name)
 	}
 
+	// Confirm deletion
+	confirmed, err := utils.ConfirmAction("\nDo you want to continue?")
+	if err != nil {
+		return false, fmt.Errorf("failed to get confirmation: %w", err)
+	}
+
+	if !confirmed {
+		logger.Infoln("Deletion cancelled")
+
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// performCleanup executes all cleanup operations.
+func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool) error {
 	logger.Infoln("Proceeding with deletion...")
 
 	// Delete catalog pods
@@ -78,36 +99,18 @@ func UninstallCatalog(ctx context.Context, autoYes, skipCleanup bool) error {
 		return err
 	}
 
+	// Delete database data
 	if !skipCleanup {
-		// Delete database data
 		if err := dbDataDeletion(); err != nil {
 			return err
 		}
 	} else {
-		logger.Infoln("Skipping database data cleanup (--skip-cleanup flag set)", logger.VerbosityLevelDebug)
+		logger.Infoln("Skipping database data cleanup (--skip-cleanup flag set)")
 	}
 
 	logger.Infoln("Catalog service removed successfully")
 
 	return nil
-}
-
-// logPodsToBeDeleted prints the list of pods that will be deleted.
-func logPodsToBeDeleted(pods []types.Pod) {
-	logger.Infoln("Below are the list of pods to be deleted")
-	for _, pod := range pods {
-		logger.Infof("\t-> %s\n", pod.Name)
-	}
-}
-
-// deleteConfirmation prompts the user to confirm deletion.
-func deleteConfirmation() (bool, error) {
-	confirmed, err := utils.ConfirmAction("\nDo you want to continue?")
-	if err != nil {
-		return false, fmt.Errorf("failed to get confirmation: %w", err)
-	}
-
-	return confirmed, nil
 }
 
 // podsDeletion removes all catalog pods.
