@@ -12,7 +12,7 @@ This document outlines the database design required for the Catalog service, inc
    - [Applications Table](#1-applications-table)
    - [Services Table](#2-services-table)
    - [Service Dependencies Table](#3-service-dependencies-table)
-   - [Token Blacklist Table](#4-token-blacklist-table)
+   - [Tokens Blacklist Table](#4-tokens-blacklist-table)
 4. [Entity Relationship Model](#entity-relationship-model)
 5. [Relationships](#relationships)
 6. [Key Design Decisions](#key-design-decisions)
@@ -124,28 +124,31 @@ Chat Bot Service (consumer) → Inference Backend Service (provider)
 Digitization Service (consumer) → Vector Store Service (provider)
 ```
 
-### 4. Tokens Table
+### 4. Tokens Blacklist Table
 
-**Table Name:** `tokens`
+**Table Name:** `tokens_blacklist`
 
-This table manages both revoked access tokens (blacklist) and active refresh tokens. Tokens are stored as SHA-256 hashes for security. Access tokens are blacklisted on logout, while refresh tokens are stored as active sessions and deleted on logout or expiry.
+This table manages blacklisted tokens for both access and refresh tokens. Tokens are stored as SHA-256 hashes for security and are added to the blacklist on logout or revocation.
 
 | Column Name         | Data Type         | Constraints | Description |
 |---------------------|-------------------|-------------|-------------|
 | id                  | SERIAL            | PRIMARY KEY | Auto-incrementing unique identifier |
 | token_hash          | VARCHAR(64)       | NOT NULL, UNIQUE | SHA-256 hash of the JWT token (hex-encoded, 64 characters) |
-| token_type          | VARCHAR(20)       | NOT NULL    | Token type: "access_blacklist" or "refresh_active" |
-| user_id             | UUID              | NOT NULL    | User ID associated with the token |
+| token_type          | TokenType         | ENUM, NOT NULL | Token type: "access" or "refresh" |
 | expires_at          | TIMESTAMPTZ       | NOT NULL    | Token expiry timestamp |
-| created_at          | TIMESTAMPTZ       | DEFAULT NOW() | When the token was created/blacklisted |
+
+**Custom Types:**
+
+```sql
+CREATE TYPE token_type AS ENUM (
+    'access',
+    'refresh'
+);
+```
 
 **Indexes:**
 - Primary key index on `id`
 - Unique index on `token_hash` for fast lookup
-
-**Token Type Values:**
-- `access_blacklist`: Revoked access tokens (blacklist approach)
-- `refresh_active`: Active refresh tokens (whitelist approach)
 
 **Security Note:**
 - Tokens are hashed using SHA-256 before storage
@@ -185,17 +188,15 @@ This table manages both revoked access tokens (blacklist) and active refresh tok
 │ created_at       │                        │
 │ updated_at       │                        │
 └──────────────────┘◄───────────────────────┘
-|
-|
+
+
 ┌──────────────────┐
-│     tokens       │
+│tokens_blacklist  │
 ├──────────────────┤
 │ id (PK)          │
 │ token_hash       │
 │ token_type       │
-│ user_id          │
 │ expires_at       │
-│ created_at       │
 └──────────────────┘
 ```
 
@@ -214,7 +215,7 @@ This table manages both revoked access tokens (blacklist) and active refresh tok
    - Enables tracking of service relationships and dependencies
    - Supports scenarios like: multiple services sharing a vector store, or a service using multiple backend services
 
-3. **Token Blacklist**: Independent table
+3. **Tokens Blacklist**: Independent table
    - Stores revoked tokens for authentication middleware
    - Self-contained for security and performance
    - Tokens are automatically cleaned up after expiry
@@ -246,21 +247,19 @@ The template field in applications table stores:
 - **Simpler Schema**: Single template field replaces type and deployment_type columns
 - **Clear Identification**: Template directly identifies which architecture or service is being deployed
 
-### 5. Tokens Table
-The tokens table provides dual-purpose token management with enhanced security:
+### 5. Tokens Blacklist Table
+The tokens_blacklist table provides token revocation management with enhanced security:
 - **Database-backed**: Replaces in-memory implementation for multi-instance support
 - **SERIAL Primary Key**: Auto-incrementing integer for simplicity and performance
 - **Hashed Storage**: Tokens stored as SHA-256 hashes (64-character hex strings)
 - **Unique Hash Constraint**: Ensures no duplicate entries and enables fast lookups
-- **Dual Purpose Design**:
-  - **Access Tokens**: Blacklist approach (token_type='access_blacklist') - revoked tokens stored
-  - **Refresh Tokens**: Whitelist approach (token_type='refresh_active') - active refresh tokens stored
-- **User Tracking**: Includes user_id for audit and user-specific token management
+- **Blacklist Approach**: Stores revoked tokens for both access and refresh token types
+- **Token Type Enum**: Uses PostgreSQL ENUM type with values 'access' and 'refresh'
 - **Automatic Expiry**: Tokens stored only until their natural expiry time
-- **Created Timestamp**: Tracks when token was created/blacklisted for audit purposes
+- **Minimal Design**: Only essential fields for token validation
 - **Security**: Even if database is compromised, actual tokens cannot be extracted
 
-### 5. Unified Services Table
+### 6. Unified Services Table
 All services (including infrastructure components like vector stores, databases, inference backends) are stored in a single table:
 - **Simplified Schema**: 4 tables (applications, services, service_dependencies, tokens)
 - **Flexible Design**: Easy to add new service types
@@ -268,7 +267,7 @@ All services (including infrastructure components like vector stores, databases,
 - **Type-based Filtering**: Use type field to distinguish service types
 - **Explicit Dependency Tracking**: Separate service_dependencies table tracks service relationships
 
-### 6. Service Dependencies Table
+### 7. Service Dependencies Table
 The service_dependencies table provides explicit many-to-many relationship tracking:
 - **Minimal Design**: Only 2 columns (consumer_service_id, provider_service_id)
 - **Composite Primary Key**: Ensures unique service-to-service relationships
@@ -277,21 +276,21 @@ The service_dependencies table provides explicit many-to-many relationship track
 - **No Metadata**: Intentionally minimal - additional fields can be added later if needed
 - **Bidirectional Queries**: Easy to find both dependencies and dependents
 
-### 7. UUID Consistency
+### 8. UUID Consistency
 - UUID used for all primary keys (applications, services)
 - UUID used for all foreign key references (app_id, user_id)
 - Provides global uniqueness and security across the system
 - Consistent data type for identifiers throughout the schema
 
-### 8. Timestamps
+### 9. Timestamps
 Applications and services tables include `created_at` and `updated_at` with `TIMESTAMPTZ` for:
 - Complete audit trail
 - Time-zone aware timestamps
 - Automatic timestamp generation and updates
 - Tracking both creation and modification times
-- Note: service_dependencies and token_blacklist tables intentionally exclude created_at/updated_at for minimal design
+- Note: service_dependencies and tokens_blacklist tables intentionally exclude timestamps for minimal design
 
-### 9. Immutable UUID Primary Key
+### 10. Immutable UUID Primary Key
 The `id` field (UUID) serves as the primary key:
 - Immutable to ensure consistent references across the system
 - UUID provides stable, globally unique identifiers
@@ -411,7 +410,7 @@ SELECT EXISTS(
 ## Conclusion
 
 This database design provides a solid foundation for the Catalog service with:
-- Simple and maintainable schema with 4 tables (applications, services, service_dependencies, tokens)
+- Simple and maintainable schema with 4 tables (applications, services, service_dependencies, tokens_blacklist)
 - Unified services table storing all service types (deployable services and infrastructure components)
 - Explicit service dependency tracking through service_dependencies junction table
 - Support for many-to-many service relationships (services can depend on multiple services, and be used by multiple services)
@@ -422,7 +421,7 @@ This database design provides a solid foundation for the Catalog service with:
 - Clear application-to-services relationship (one-to-many)
 - Clear service-to-service dependency tracking (many-to-many)
 - Enables tracking of shared services and dependency graphs
-- Dual-purpose tokens table for access token blacklist and refresh token whitelist
+- Tokens blacklist table for revoked access and refresh tokens
 - Tokens stored as SHA-256 hashes for enhanced security
 - Database-backed token management replacing in-memory implementation
-- Server-side session management via refresh token storage
+- Minimal token blacklist design with only essential fields
