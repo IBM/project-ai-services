@@ -3,6 +3,7 @@ package podman
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	catalog "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli"
@@ -13,8 +14,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
+const (
+	// Default database data path from catalog values.yaml
+	defaultDBDataPath = "/var/lib/ai-services/db"
+)
+
 // UninstallCatalog removes the catalog service and all associated resources.
-func UninstallCatalog(ctx context.Context, autoYes bool) error {
+func UninstallCatalog(ctx context.Context, autoYes, skipCleanup bool) error {
 	s := spinner.New("Checking catalog service...")
 	s.Start(ctx)
 
@@ -70,6 +76,15 @@ func UninstallCatalog(ctx context.Context, autoYes bool) error {
 	// Delete catalog secret
 	if err := secretDeletion(rt); err != nil {
 		return err
+	}
+
+	if !skipCleanup {
+		// Delete database data
+		if err := dbDataDeletion(); err != nil {
+			return err
+		}
+	} else {
+		logger.Infoln("Skipping database data cleanup (--skip-cleanup flag set)", logger.VerbosityLevelDebug)
 	}
 
 	logger.Infoln("Catalog service removed successfully")
@@ -142,6 +157,29 @@ func secretDeletion(rt *podman.PodmanClient) error {
 			return fmt.Errorf("failed to remove secret: %w", err)
 		}
 	}
+
+	return nil
+}
+
+// dbDataDeletion removes the database data directory.
+func dbDataDeletion() error {
+	// Check if database data directory exists
+	if _, err := os.Stat(defaultDBDataPath); os.IsNotExist(err) {
+		logger.Infof("Database data directory does not exist: %s\n", defaultDBDataPath)
+
+		return nil
+	}
+
+	logger.Infof("\nDatabase data found at: %s\n", defaultDBDataPath, logger.VerbosityLevelDebug)
+
+	logger.Infof("Deleting database data at: %s\n", defaultDBDataPath)
+
+	// Remove the database data directory
+	if err := os.RemoveAll(defaultDBDataPath); err != nil {
+		return fmt.Errorf("failed to remove database data directory: %w", err)
+	}
+
+	logger.Infof("Successfully removed database data at: %s\n", defaultDBDataPath)
 
 	return nil
 }

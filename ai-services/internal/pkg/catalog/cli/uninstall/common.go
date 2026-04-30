@@ -10,8 +10,9 @@ import (
 
 // UninstallOptions contains the configuration for uninstalling the catalog service.
 type UninstallOptions struct {
-	Runtime types.RuntimeType
-	AutoYes bool
+	Runtime     types.RuntimeType
+	AutoYes     bool
+	SkipCleanup bool
 }
 
 // Uninstall removes the catalog service and cleans up resources.
@@ -21,7 +22,7 @@ func Uninstall(opts UninstallOptions) error {
 	// Remove catalog service based on runtime
 	switch opts.Runtime {
 	case types.RuntimeTypePodman:
-		return catalogPodman.UninstallCatalog(ctx, opts.AutoYes)
+		return catalogPodman.UninstallCatalog(ctx, opts.AutoYes, opts.SkipCleanup)
 
 	case types.RuntimeTypeOpenShift:
 		return fmt.Errorf("openshift runtime is not yet supported for catalog uninstall")

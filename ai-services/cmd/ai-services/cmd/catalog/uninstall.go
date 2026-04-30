@@ -16,6 +16,8 @@ import (
 var (
 	// Auto-yes flag for catalog uninstall command.
 	uninstallAutoYes bool
+	// skipCleanup flag will skip deleting database data.
+	skipCleanup bool
 )
 
 // NewUninstallCmd creates a new uninstall command for the catalog service.
@@ -23,14 +25,16 @@ func NewUninstallCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "uninstall",
 		Short: "Remove the catalog service and clean up resources",
-		Long: `Removes the catalog service and all associated resources including pods, secrets, and data.
+		Long: `Removes the catalog service and all associated resources including pods, secrets, and database data.
+
+The uninstall process will:
+	 - Remove all catalog pods
+	 - Delete catalog secrets
+	 - Delete database data directory
 
 Examples:
 	 # Uninstall catalog service for podman
-	 ai-services catalog uninstall --runtime podman
-	 
-	 # Uninstall without confirmation prompt
-	 ai-services catalog uninstall --runtime podman -y`,
+	 ai-services catalog uninstall --runtime podman`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
@@ -38,8 +42,9 @@ Examples:
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return uninstall.Uninstall(uninstall.UninstallOptions{
-				Runtime: vars.RuntimeFactory.GetRuntimeType(),
-				AutoYes: uninstallAutoYes,
+				Runtime:     vars.RuntimeFactory.GetRuntimeType(),
+				AutoYes:     uninstallAutoYes,
+				SkipCleanup: skipCleanup,
 			})
 		},
 	}
@@ -72,4 +77,5 @@ func configureUninstallFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&runtimeType, "runtime", "r", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
 	_ = cmd.MarkFlagRequired("runtime")
 	cmd.Flags().BoolVarP(&uninstallAutoYes, "yes", "y", false, "Automatically accept all confirmation prompts (default=false)")
+	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "Skip deleting catalog db data (default=false)")
 }
