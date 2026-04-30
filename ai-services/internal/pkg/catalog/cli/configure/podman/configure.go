@@ -116,11 +116,8 @@ func prepareCatalogValues(tp templates.Template, podmanURI, passwordHash string,
 	}
 
 	// Extract baseDir before passing to LoadValues (it's not a template parameter)
-	var baseDir string
-	if dir, ok := argParams["basedir"]; ok {
-		baseDir = dir
-		delete(argParams, "basedir") // Remove from argParams so LoadValues doesn't validate it
-	}
+	baseDir := argParams["basedir"]
+	delete(argParams, "basedir") // Remove from argParams so LoadValues doesn't validate it
 
 	// Generate database password
 	dbPassword, err := utils.GenerateRandomPassword(utils.DefaultPasswordLength)
@@ -137,13 +134,11 @@ func prepareCatalogValues(tp templates.Template, podmanURI, passwordHash string,
 	argParams["backend.podman.uri"] = podmanURI
 	argParams["db.password"] = dbPasswordBase64
 
-	// Add baseDir if provided
-	if baseDir != "" {
-		argParams["backend.baseDir"] = baseDir
-	}
-
 	// Load values from catalog
-	return tp.LoadValues(catalogAppTemplate, nil, argParams)
+	values, err := tp.LoadValues(catalogAppTemplate, nil, argParams)
+	argParams["basedir"] = baseDir
+
+	return values, err
 }
 
 // executePodLayers executes all pod template layers.
@@ -205,17 +200,23 @@ func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 	valuesFiles []string, argParams map[string]string) error {
 	logger.Infof("Processing template: %s\n", podTemplateName)
 
+	baseDir := argParams["basedir"]
+	delete(argParams, "basedir")
+
 	// Fetch pod spec
 	podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, podTemplateName, appName, valuesFiles, argParams)
 	if err != nil {
 		return fmt.Errorf("failed to load pod template: %w", err)
 	}
 
+	argParams["basedir"] = baseDir
+
 	// Prepare template parameters
 	params := map[string]any{
 		"AppName":         appName,
 		"AppTemplateName": appTemplateName,
 		"Version":         version,
+		"BaseDir":         baseDir,
 		"Values":          values,
 		"env":             map[string]map[string]string{},
 	}

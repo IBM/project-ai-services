@@ -57,9 +57,9 @@ spec:
   volumes:
     - name: docs
       hostPath:
-        path: "{{ .Values.baseDir }}/applications/{{ .AppName }}/docs"
+        path: "{{ .BaseDir }}/applications/{{ .AppName }}/docs"
         type: DirectoryOrCreate
     - name: cache
       hostPath:
-        path: "{{ .Values.baseDir }}/applications/{{ .AppName }}/cache"
+        path: "{{ .BaseDir }}/applications/{{ .AppName }}/cache"
         type: DirectoryOrCreate

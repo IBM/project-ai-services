@@ -219,10 +219,8 @@ func (p *PodmanApplication) validateSpyreCardRequirements(req int, actual int) e
 func (p *PodmanApplication) calculateReqSpyreCards(tp templates.Template, podTemplateFileNames []string, appTemplateName, appName string) (int, error) {
 	totalReqSpyreCounts := 0
 
-	// Prepare argParams with baseDir to ensure consistency
-	argParams := map[string]string{
-		"baseDir": utils.GetBaseDir(),
-	}
+	// baseDir is supplied at render time from the active runtime environment.
+	argParams := map[string]string{}
 
 	// Calculate Req Spyre Counts
 	for _, podTemplateFileName := range podTemplateFileNames {
@@ -314,10 +312,6 @@ func (p *PodmanApplication) executePodTemplates(tp templates.Template,
 		argParams = make(map[string]string)
 	}
 
-	// Always set baseDir from environment or default to ensure consistency
-	// This overrides any baseDir in values.yaml with the actual runtime base directory
-	argParams["baseDir"] = utils.GetBaseDir()
-
 	// Load values for template rendering
 	values, err := tp.LoadValues(appMetadata.Name, valuesFiles, argParams)
 	if err != nil {
@@ -328,6 +322,7 @@ func (p *PodmanApplication) executePodTemplates(tp templates.Template,
 		"AppName":         appName,
 		"AppTemplateName": appMetadata.Name,
 		"Version":         appMetadata.Version,
+		"BaseDir":         utils.GetBaseDir(),
 		"Values":          values,
 		// Key -> container name
 		// Value -> range of key-value env pairs

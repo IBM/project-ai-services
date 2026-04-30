@@ -1,6 +1,3 @@
-# @description Base directory (read from environment AI_SERVICES_BASE_DIR which is set to default /var/lib/ai-services if not specified)
-baseDir: ""
-
 ui:
   # @description Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
