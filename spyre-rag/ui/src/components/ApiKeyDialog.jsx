@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, InlineNotification, Modal, TextInput } from '@carbon/react';
+import { InlineNotification, Modal, TextInput } from '@carbon/react';
 import './ApiKeyDialog.scss';
 
 /**
