@@ -5,7 +5,7 @@ from typing import List, Optional
 from contextlib import asynccontextmanager
 import uvicorn
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status, Request, Header
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status, Request
 from fastapi.openapi.docs import get_swagger_ui_html
 
 from common.diagnostic_logger import setup_comprehensive_crash_handler

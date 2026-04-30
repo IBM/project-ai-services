@@ -185,6 +185,3 @@ class HealthResponse(BaseModel):
             }
         }
     }
-
-
-
