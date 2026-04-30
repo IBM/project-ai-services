@@ -32,21 +32,24 @@ function App() {
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    // Check if authentication is required
+    // Check if authentication is required by probing the models endpoint
     const checkAuthRequirement = async () => {
       try {
-        const response = await fetch('/v1/auth-required');
-        const data = await response.json();
-        setAuthRequired(data.auth_required);
+        const response = await fetch('/v1/models');
 
-        if (data.auth_required) {
-          // Auth is required, always show dialog on page load/refresh
+        if (response.status === 401) {
+          setAuthRequired(true);
           setShowApiKeyDialog(true);
-        } else {
-          // Auth not required, proceed without API key
-          setApiKey('not-needed');
-          setIsReady(true);
+          return;
         }
+
+        if (!response.ok) {
+          throw new Error(`Unexpected status while checking auth requirement: ${response.status}`);
+        }
+
+        setAuthRequired(false);
+        setApiKey('not-needed');
+        setIsReady(true);
       } catch (error) {
         console.error('Error checking auth requirement:', error);
         // On error, assume auth is required to be safe

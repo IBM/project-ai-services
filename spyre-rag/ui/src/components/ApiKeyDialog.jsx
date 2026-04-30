@@ -31,21 +31,24 @@ export function ApiKeyDialog({ isOpen, onApiKeyValidated }) {
     setError(null);
 
     try {
-      const response = await fetch('/v1/validate-api-key', {
-        method: 'POST',
+      const response = await fetch('/v1/models', {
+        method: 'GET',
         headers: {
           'Authorization': `Bearer ${apiKey.trim()}`,
-          'Content-Type': 'application/json',
         },
       });
 
       if (response.ok) {
-        // API key is valid, pass it to parent component
         setShowDialog(false);
         onApiKeyValidated(apiKey.trim());
       } else {
-        const errorData = await response.json();
-        const errorMessage = errorData?.error?.message || 'Invalid API key';
+        let errorMessage = 'Invalid API key';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData?.error?.message || errorMessage;
+        } catch {
+          // Ignore non-JSON error responses and keep fallback message
+        }
         setError(errorMessage);
       }
     } catch (err) {

@@ -22,14 +22,6 @@ export default defineConfig(() => {
           target: "http://localhost:3001",
           changeOrigin: true,
         },
-        "/v1/validate-api-key": {
-          target: "http://localhost:3001",
-          changeOrigin: true,
-        },
-        "/v1/auth-required": {
-          target: "http://localhost:3001",
-          changeOrigin: true,
-        },
         "/v1/models": {
           target: "http://localhost:3001",
           changeOrigin: true,

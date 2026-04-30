@@ -243,56 +243,6 @@ async def is_auth_required() -> bool:
             return True
 
 
-@app.get("/v1/auth-required", include_in_schema=False)
-async def check_auth_required():
-    """Internal API for UI/bootstrap flows to detect whether the configured vLLM endpoint enforces authentication.
-
-    Usage:
-    - Method: GET
-    - Path: /v1/auth-required
-    - Response: {"auth_required": true|false}
-
-    """
-    logging.debug("Checking if auth is required...")
-    auth_required = await is_auth_required()
-    return {"auth_required": auth_required}
-
-
-@app.post("/v1/validate-api-key", include_in_schema=False)
-async def validate_api_key(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
-    """Internal API for validating a bearer token against the configured vLLM endpoint.
-
-    Usage:
-    - Method: POST
-    - Path: /v1/validate-api-key
-    - Required header: Authorization: Bearer <api-key>
-    - Success response: {"status": "valid", "message": "API key is valid"}
-    - Failure modes:
-      - 401 when the API key is missing or invalid
-      - 500 for unexpected upstream/service errors
-
-    """
-    logging.debug("Validating API key...")
-    
-    # Extract API key from credentials
-    api_key = credentials.credentials if credentials else None
-    
-    if not api_key:
-        APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "API key is required")
-    
-    try:
-        llm_endpoint = llm_model_dict['llm_endpoint']
-        # Use validate_vllm_auth which will raise an exception if auth fails
-        await asyncio.to_thread(validate_vllm_auth, llm_endpoint, api_key)
-        return {"status": "valid", "message": "API key is valid"}
-    except Exception as e:
-        # Check if it's an authentication error
-        error_str = str(e).lower()
-        if "401" in error_str or "unauthorized" in error_str or "forbidden" in error_str:
-            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "Invalid API key")
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
-
-
 @app.get(
     "/v1/models",
     response_model=ModelsResponse,
