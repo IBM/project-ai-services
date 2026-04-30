@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   BusEventType,
   ChatCustomElement,
@@ -9,10 +9,10 @@ import {
 import './App.scss';
 import { Column, Content, Grid, Theme } from '@carbon/react';
 import { AIExplanationCard } from './AIExplanationCard.jsx';
+import { ApiKeyDialog } from './ApiKeyDialog.jsx';
 import { customSendMessage } from './customSendMessage.jsx';
 import HeaderNav from './Header.jsx';
 import { renderUserDefinedResponse } from './renderUserDefinedResponse.jsx';
-import { ApiKeyDialog } from './ApiKeyDialog.jsx';
 
 const header = {
   title: 'DigitalAssistant',
@@ -44,7 +44,9 @@ function App() {
         }
 
         if (!response.ok) {
-          throw new Error(`Unexpected status while checking auth requirement: ${response.status}`);
+          throw new Error(
+            `Unexpected status while checking auth requirement: ${response.status}`,
+          );
         }
 
         setAuthRequired(false);

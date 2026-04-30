@@ -2,7 +2,13 @@ import { UserType } from '@carbon/ai-chat';
 import axios from 'axios';
 import { OpenAI } from 'openai';
 
-async function customSendMessage(request, _options, instance, apiKey, onAuthError) {
+async function customSendMessage(
+  request,
+  _options,
+  instance,
+  apiKey,
+  onAuthError,
+) {
   const userInput = request.input.text;
 
   // Create OpenAI client with the provided API key
@@ -232,8 +238,12 @@ async function customSendMessage(request, _options, instance, apiKey, onAuthErro
     let errorMessage = '⚠️ Error occurred during active stream.';
 
     // Handle authentication errors
-    if (err.status === 401 || (err.error && err.error.code === 'AUTHENTICATION_FAILED')) {
-      errorMessage = '⚠️ Authentication failed. Please provide a valid API key.';
+    if (
+      err.status === 401 ||
+      (err.error && err.error.code === 'AUTHENTICATION_FAILED')
+    ) {
+      errorMessage =
+        '⚠️ Authentication failed. Please provide a valid API key.';
       // Trigger auth error callback to show API key dialog
       if (onAuthError) {
         setTimeout(() => onAuthError(), 1000);

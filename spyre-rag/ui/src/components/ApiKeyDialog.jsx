@@ -1,10 +1,5 @@
-import { useState, useEffect } from 'react';
-import {
-  Modal,
-  TextInput,
-  Button,
-  InlineNotification,
-} from '@carbon/react';
+import { useEffect, useState } from 'react';
+import { Button, InlineNotification, Modal, TextInput } from '@carbon/react';
 import './ApiKeyDialog.scss';
 
 /**
@@ -34,7 +29,7 @@ export function ApiKeyDialog({ isOpen, onApiKeyValidated }) {
       const response = await fetch('/v1/models', {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${apiKey.trim()}`,
+          Authorization: `Bearer ${apiKey.trim()}`,
         },
       });
 
@@ -52,7 +47,9 @@ export function ApiKeyDialog({ isOpen, onApiKeyValidated }) {
         setError(errorMessage);
       }
     } catch (err) {
-      setError('Failed to validate API key. Please check your connection and try again.');
+      setError(
+        'Failed to validate API key. Please check your connection and try again.',
+      );
       console.error('API key validation error:', err);
     } finally {
       setIsValidating(false);
