@@ -1,0 +1,57 @@
+name: Post Deployment Status Link
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+# Without this, GitHub may reject the commit status POST!
+permissions:
+  statuses: write        # allow posting commit statuses
+  contents: read       
+
+jobs:
+  post-status:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Build Jenkins Deployment URL
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Jenkins job users will click to open "Build with Parameters"
+
+          JOB_NAME="ai-services/job/pr-preview-pipeline"
+          JENKINS_URL="https://sys-powercloud-team-jenkins.swg-devops.com"
+
+          # Default ApplicationList value
+          DEFAULT_APP="rag-dev"
+
+          # Add encoding
+          ENCODED_PR=$(printf %s "$PR_NUMBER" | jq -sRr @uri)
+          ENCODED_APP=$(printf %s "$DEFAULT_APP" | jq -sRr @uri)
+   
+          # Construct Jenkins Build-with-Parameters URL
+          # updateGitStatus=true allows downstream Jenkins pipeline to post/update GitHub status
+          DEPLOY_URL="${JENKINS_URL}/job/${JOB_NAME}/parambuild/?CHECKOUT=${ENCODED_PR}&ApplicationList=${ENCODED_APP}&updateGitStatus=true"
+
+          echo "DEPLOY_URL=${DEPLOY_URL}" >> $GITHUB_ENV
+          echo "Generated Deployment URL: ${DEPLOY_URL}"
+
+      - name: Post GitHub Commit Status (Pending)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          echo "Posting pending status to GitHub..."
+          curl -sS -H "Authorization: Bearer ${GH_TOKEN}" \
+                   -H "Accept: application/vnd.github+json" \
+                   -X POST \
+                   -d "{
+                     \"state\": \"pending\",
+                     \"target_url\": \"${DEPLOY_URL}\",
+                     \"description\": \"Click to open Jenkins → Build with Parameters\",
+                     \"context\": \"Manual Deployment\"
+                   }" \
+                   "https://api.github.com/repos/${{ github.repository }}/statuses/${COMMIT_SHA}"
+          echo "Status posted successfully."
