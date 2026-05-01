@@ -20,6 +20,12 @@ class SimilarityConfig(BaseSettings):
         description="Number of results to return when top_k is not specified by the caller",
     )
 
+    max_query_token_length: int = Field(
+        default=512,
+        gt=0,
+        description="Maximum token length for similarity search queries",
+    )
+
     @field_validator('num_chunks_post_search')
     @classmethod
     def validate_num_chunks_post_search(cls, v):

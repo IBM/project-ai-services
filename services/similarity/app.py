@@ -23,7 +23,7 @@ set_log_level(log_level)
 import common.db_utils as db
 from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
-from chatbot.backend_utils import validate_query_length
+from common.validation_utils import validate_query_length as _validate_query_length
 from similarity.settings import settings
 from similarity.similarity_utils import (
     SimilaritySearchRequest,
@@ -133,7 +133,7 @@ async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchRes
         # reuses the same token-length guard as /reference and /v1/chat/completions.
         # keeps the query-too-long behaviour consistent across all retrieval endpoints rather than each one inventing its own limit.
         is_valid, error_msg = await asyncio.to_thread(
-            validate_query_length, req.query, emb_endpoint
+            _validate_query_length, req.query, emb_endpoint, settings.similarity.max_query_token_length
         )
         if not is_valid:
             APIError.raise_error(ErrorCode.INVALID_REQUEST, error_msg)
