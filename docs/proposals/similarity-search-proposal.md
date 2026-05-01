@@ -231,7 +231,7 @@ After the `/v1/similarity-search` endpoint is implemented and validated, the `/r
    - Remove `ReferenceRequest` and `ReferenceResponse` models if not used elsewhere
    - Remove `search_only()` function if it's `/reference`-specific
 
-2. **Chatbot UI Frontend** (`spyre-rag/ui/`)
+2. **Chatbot UI Frontend** (`ui/chatbot/`)
    - **React Component** (`src/components/customSendMessage.jsx`):
      - Change `/reference` POST to `/v1/similarity-search`
      - Update request body from `{ prompt: userInput }` to `{ query: userInput, mode: "hybrid", rerank: true }`
@@ -271,7 +271,7 @@ After the `/v1/similarity-search` endpoint is implemented and validated, the `/r
          value: "5000"
        ```
 
-   - **UI Nginx Config** (`spyre-rag/ui/nginx.conf.tmpl`):
+   - **UI Nginx Config** (`ui/chatbot/nginx.conf.tmpl`):
      - Update the `/v1/similarity-search` location block to use the new variables:
        ```nginx
        location /v1/similarity-search {
@@ -284,7 +284,7 @@ After the `/v1/similarity-search` endpoint is implemented and validated, the `/r
        }
        ```
 
-   - **UI Containerfile** (`spyre-rag/ui/Containerfile`):
+   - **UI Containerfile** (`ui/chatbot/Containerfile`):
      - Update the `envsubst` command to include the new variables:
        ```bash
        CMD /bin/bash -c "envsubst '\$BACKEND_HOST \$BACKEND_PORT \$SIMILARITY_SEARCH_HOST \$SIMILARITY_SEARCH_PORT' < /etc/nginx.conf.tmpl > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"
