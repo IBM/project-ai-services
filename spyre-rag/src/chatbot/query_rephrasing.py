@@ -188,16 +188,6 @@ async def rephrase_query_with_context(
     
     # Get configuration from settings
     from chatbot.settings import settings
-    default_config = {
-        "timeout_seconds": settings.query_rephrasing.timeout_seconds,
-        "max_tokens": settings.query_rephrasing.max_tokens,
-        "temperature": settings.query_rephrasing.temperature,
-    }
-    
-    # Merge with provided config
-    if config:
-        default_config.update(config)
-    cfg = default_config
     
     # Always skip rephrasing if no conversation history
     if not previous_messages or len(previous_messages) == 0:
@@ -230,9 +220,9 @@ async def rephrase_query_with_context(
             prompt=prompt,
             llm_endpoint=llm_endpoint,
             llm_model=llm_model,
-            max_tokens=cfg["max_tokens"],
-            temperature=cfg["temperature"],
-            timeout=cfg["timeout_seconds"]
+            max_tokens=settings.query_rephrasing.max_tokens,
+            temperature=settings.query_rephrasing.temperature,
+            timeout=settings.query_rephrasing.timeout_seconds
         )
         
         # Calculate latency
