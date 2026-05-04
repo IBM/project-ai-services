@@ -7,7 +7,6 @@ import {
   TableRow,
   TableHeader,
   TableBody,
-  TableCell,
   TableContainer,
   TableToolbar,
   TableToolbarContent,
@@ -23,7 +22,6 @@ import {
   TextInput,
   InlineLoading,
   OverflowMenu,
-  OverflowMenuItem,
   MenuButton,
   MenuItem,
 } from "@carbon/react";
@@ -42,6 +40,7 @@ import {
   appReducer,
   getUniqueTypes,
 } from "./types";
+import { renderCell } from "./CellRenderers";
 
 const AiDeploymentsPage = () => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
@@ -53,7 +52,7 @@ const AiDeploymentsPage = () => {
     if (!state.selectedRowId) {
       dispatch({
         type: ACTION_TYPES.SHOW_ERROR,
-        payload: { message: "No application selected for deletion" },
+        payload: { message: "No AI Deployment selected for deletion" },
       });
       return;
     }
@@ -75,7 +74,7 @@ const AiDeploymentsPage = () => {
       dispatch({ type: ACTION_TYPES.DELETE_ROW, payload: state.selectedRowId });
     } catch (err) {
       const msg =
-        err instanceof Error ? err.message : "Failed deleting application";
+        err instanceof Error ? err.message : "Failed deleting AI Deployment";
       const name =
         state.rowsData.find((r) => r.id === state.selectedRowId)?.name ?? "";
       dispatch({
@@ -384,7 +383,6 @@ const AiDeploymentsPage = () => {
                               <Button
                                 kind="secondary"
                                 size="sm"
-                                className={styles.overflowMenuButton}
                                 onClick={() =>
                                   dispatch({
                                     type: ACTION_TYPES.RESET_COLUMN_VISIBILITY,
@@ -422,8 +420,8 @@ const AiDeploymentsPage = () => {
 
                     {noApplications ? (
                       <NoDataEmptyState
-                        title="Start by adding an application"
-                        subtitle="To deploy an application using a template, click Deploy."
+                        title="Start by adding an AI Deployment"
+                        subtitle="To deploy an AI Deployment using a template, click Deploy."
                         className={styles.noDataContent}
                       />
                     ) : noSearchResults ? (
@@ -461,32 +459,15 @@ const AiDeploymentsPage = () => {
                                   const { key: cellKey, ...cellProps } =
                                     getCellProps({ cell });
 
-                                  if (cell.info.header === "actions") {
-                                    return (
-                                      <TableCell key={cellKey} {...cellProps}>
-                                        <OverflowMenu
-                                          size="sm"
-                                          flipped
-                                          aria-label="Actions"
-                                        >
-                                          <OverflowMenuItem
-                                            itemText="Delete"
-                                            onClick={() => {
-                                              dispatch({
-                                                type: ACTION_TYPES.OPEN_DELETE_DIALOG,
-                                                payload: row.id as string,
-                                              });
-                                            }}
-                                          />
-                                        </OverflowMenu>
-                                      </TableCell>
-                                    );
-                                  }
-                                  return (
-                                    <TableCell key={cellKey} {...cellProps}>
-                                      {cell.value}
-                                    </TableCell>
-                                  );
+                                  return renderCell({
+                                    header: cell.info.header,
+                                    value: cell.value,
+                                    rowId: row.id as string,
+                                    dispatch,
+                                    selectedRowId: state.selectedRowId,
+                                    cellKey,
+                                    cellProps,
+                                  });
                                 })}
                               </TableRow>
                             );
@@ -521,7 +502,7 @@ const AiDeploymentsPage = () => {
             <Modal
               open={state.isDeleteDialogOpen}
               size="sm"
-              modalLabel={`Delete ${state.rowsData.find((r) => r.id === state.selectedRowId)?.name || "Application"}`}
+              modalLabel={`Delete ${state.rowsData.find((r) => r.id === state.selectedRowId)?.name || "AI Deployment"}`}
               modalHeading="Confirm delete"
               primaryButtonText="Delete"
               secondaryButtonText="Cancel"
@@ -533,14 +514,14 @@ const AiDeploymentsPage = () => {
               onRequestSubmit={handleDelete}
             >
               <p>
-                Deleting an application permanently removes all associated
+                Deleting an AI Deployment permanently removes all associated
                 components, including connected services, runtime metadata, and
                 any data or configurations created.
               </p>
               <div>
                 <CheckboxGroup
                   className={styles.deleteConfirmation}
-                  legendText="Confirm application to be deleted"
+                  legendText="Confirm AI Deployment to be deleted"
                 >
                   <Checkbox
                     id="checkbox-label-1"

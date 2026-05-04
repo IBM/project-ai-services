@@ -174,6 +174,12 @@ class ModelEndpointsConfig(BaseSettings):
         description="LLM model name",
     )
 
+    # vLLM API Key for authentication (used by digitize and summarize services)
+    vllm_api_key: str = Field(
+        default="",
+        description="API key for vLLM authentication (optional, read from VLLM_API_KEY env var)",
+    )
+
     # Reranker model
     reranker_endpoint: str = Field(
         default="",

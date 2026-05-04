@@ -20,6 +20,7 @@ deploying services, and managing service metadata`,
 	catalogCMD.AddCommand(NewLoginCmd())
 	catalogCMD.AddCommand(NewLogoutCmd())
 	catalogCMD.AddCommand(NewWhoamiCmd())
+	catalogCMD.AddCommand(NewMigrateCmd())
 
 	return catalogCMD
 }

@@ -3,7 +3,8 @@ import logging
 import asyncio
 import uuid
 from typing import Optional
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Header, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import StreamingResponse
 import json
@@ -45,6 +46,10 @@ vectorstore_lock = asyncio.Lock()
 emb_model_dict = {}
 llm_model_dict = {}
 reranker_model_dict = {}
+
+# Cache for auth requirement check
+auth_required_cache = {"checked": False, "required": False}
+auth_cache_lock = asyncio.Lock()
 
 concurrency_limiter = BoundedSemaphore(settings.chatbot.max_concurrent_requests)
 
@@ -111,6 +116,9 @@ app = FastAPI(
     version="1.0.0",
     openapi_tags=tags_metadata
 )
+
+# Simple Bearer token security scheme for Swagger UI
+security = HTTPBearer(auto_error=False, description="Enter your vLLM API key")
 app.add_exception_handler(HTTPException, http_exception_handler)
 
 @app.middleware("http")
@@ -141,20 +149,75 @@ def limit_concurrency(f):
             concurrency_limiter.release()
     return wrapper
 
+async def is_auth_required() -> bool:
+    """
+    Check if vLLM authentication is required and cache the result.
+    Returns True if auth is required, False otherwise.
+    """
+    global auth_required_cache
+    
+    # Check cache first
+    if auth_required_cache["checked"]:
+        return auth_required_cache["required"]
+    
+    async with auth_cache_lock:
+        # Double-check after acquiring lock
+        if auth_required_cache["checked"]:
+            return auth_required_cache["required"]
+        
+        try:
+            llm_endpoint = llm_model_dict['llm_endpoint']
+            # Try to access without API key
+            await asyncio.to_thread(query_vllm_models, llm_endpoint, None)
+            # If successful, auth is not required
+            auth_required_cache["checked"] = True
+            auth_required_cache["required"] = False
+            logging.debug("vLLM authentication is NOT required")
+            return False
+        except Exception as e:
+            # Check if it's an authentication error
+            error_str = str(e).lower()
+            if "401" in error_str or "unauthorized" in error_str or "forbidden" in error_str:
+                # Auth is required
+                auth_required_cache["checked"] = True
+                auth_required_cache["required"] = True
+                logging.debug("vLLM authentication IS required")
+                return True
+            # For other errors, allow subsequent calls
+            logging.debug(f"Error checking auth requirement: {e}, assuming auth is required")
+            auth_required_cache["checked"] = True
+            auth_required_cache["required"] = True
+            return False
+
+
 @app.get(
     "/v1/models",
     response_model=ModelsResponse,
-    responses={500: http_error_responses[500]},
+    responses={401: http_error_responses[401], 500: http_error_responses[500]},
     tags=["models"],
     summary="List LLM models",
-    description="List available models from the configured vLLM endpoint."
+    description="List available models from the configured vLLM endpoint. **Requires API key in Authorization header** (Bearer token) if vLLM authentication is enabled."
 )
-async def list_models():
+async def list_models(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """List available LLM models. Requires Authorization header with Bearer token if authentication is enabled."""
     logging.debug("List models..")
+    
+    # Extract API key from credentials
+    api_key = credentials.credentials if credentials else None
+    
+    # Check if auth is required and enforce it
+    if await is_auth_required():
+        if not api_key:
+            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "API key is required when vLLM authentication is enabled")
+    
     try:
         llm_endpoint = llm_model_dict['llm_endpoint']
-        return await asyncio.to_thread(query_vllm_models, llm_endpoint)
+        return await asyncio.to_thread(query_vllm_models, llm_endpoint, api_key)
     except Exception as e:
+        # Check if it's an authentication error
+        error_str = str(e).lower()
+        if "401" in error_str or "unauthorized" in error_str or "forbidden" in error_str:
+            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "Invalid or missing API key")
         APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
 
 
@@ -202,7 +265,7 @@ async def locked_stream(stream_g, perf_stat_dict):
     response_model=ChatCompletionResponse,
     tags=["chat"],
     summary="Chat with RAG",
-    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON.",
+    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON. **Requires API key in Authorization header** (Bearer token) if vLLM authentication is enabled.",
     responses={
         200: {
             "description": "Successful Response",
@@ -228,12 +291,26 @@ async def locked_stream(stream_g, perf_stat_dict):
             }
         },
         400: http_error_responses[400],
+        401: http_error_responses[401],
         429: http_error_responses[429],
         500: http_error_responses[500],
         503: http_error_responses[503]
     }
 )
-async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse | StreamingResponse:
+async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> ChatCompletionResponse | StreamingResponse:
+    # Extract API key from credentials
+    api_key = credentials.credentials if credentials else None
+    
+    # Check if auth is required and enforce it
+    if await is_auth_required():
+        if not api_key:
+            message = "API key is required when vLLM authentication is enabled"
+            if req.stream:
+                async def stream_auth_error():
+                    yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
+                return StreamingResponse(stream_auth_error(), media_type="text/event-stream", status_code=401)
+            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, message)
+    
     if not req.messages:
         APIError.raise_error(ErrorCode.EMPTY_INPUT, "messages can't be empty")
 
@@ -255,6 +332,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
         llm_endpoint = llm_model_dict['llm_endpoint']
         reranker_model = reranker_model_dict['reranker_model']
         reranker_endpoint = reranker_model_dict['reranker_endpoint']
+
 
         # Validate query length
         is_valid, error_msg = await asyncio.to_thread(
@@ -311,13 +389,13 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
         try:
             if req.stream:
                 vllm_stream = await asyncio.to_thread(
-                    query_vllm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
+                    query_vllm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang, api_key
                 )
                 # For streaming, release is handled in locked_stream's finally block
                 return StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
 
             vllm_non_stream = await asyncio.to_thread(
-                query_vllm_non_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
+                query_vllm_non_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang, api_key
             )
             # Store metrics in registry for non-stream
             perf_registry.add_metric(perf_stat_dict)

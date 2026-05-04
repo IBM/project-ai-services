@@ -46,6 +46,13 @@ spec:
               value: ibm-granite/granite-3.3-8b-instruct
             - name: LOG_LEVEL
               value: "{{ .Values.summarize.log_level }}"
+            {{- if .Values.instruct.apiKey }}
+            - name: VLLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: "vllm-instruct-api-key"
+                  key: apiKey
+            {{- end }}
           ports:
             - containerPort: 6000
               protocol: TCP

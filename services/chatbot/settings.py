@@ -11,8 +11,57 @@ from common.settings import Settings as CommonSettings
 logger = get_logger("settings")
 
 
+class QueryRephrasingConfig(BaseSettings):
+    """Query rephrasing configuration for conversational RAG."""
+    
+    model_config = SettingsConfigDict(env_prefix="QUERY_REPHRASING_")
+    
+    timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        description="Timeout for rephrasing LLM call in seconds"
+    )
+    
+    max_tokens: int = Field(
+        default=100,
+        gt=0,
+        le=512,
+        description="Maximum tokens for rephrased query"
+    )
+    
+    temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Temperature for rephrasing (0=deterministic)"
+    )
+    
+    rephrase_prompt_template: str = Field(
+        default=(
+            "Given the conversation history and the current question, create a standalone query for semantic search.\n\n"
+            "Instructions:\n"
+            "1. If the current question is already standalone and clear, return it EXACTLY as-is (preserve original wording)\n"
+            "2. If the question references previous context (uses pronouns like 'it', 'this', 'that', 'they'), replace them with specific nouns from the conversation history\n"
+            "3. Only merge context if the current question is clearly a follow-up that requires previous information\n"
+            "4. Remove conversational filler words (e.g., 'Can you tell me', 'Also', 'Thanks', 'Please')\n"
+            "5. Keep the query concise and focused on the core search intent\n"
+            "6. If the conversation history is irrelevant to the current question, ignore it\n"
+            "7. Return ONLY the rephrased query, no explanation or additional text\n\n"
+            "Conversation History:\n{conversation_history}\n\n"
+            "Current Question: {current_query}\n\n"
+            "Rephrased Query:"
+        ),
+        description="Prompt template for query rephrasing with placeholders: {conversation_history}, {current_query}"
+    )
+
+
 class RAGConfig(BaseSettings):
     """RAG retrieval and ranking settings."""
+
+    conversational_mode: bool = Field(
+        default=True,
+        description="Enable conversational RAG mode with query rephrasing and context management"
+    )
 
     score_threshold: float = Field(
         default=0.4,
@@ -86,6 +135,7 @@ class RAGConfig(BaseSettings):
 class Settings(BaseSettings):
     common: CommonSettings = Field(default_factory=CommonSettings)
     chatbot: RAGConfig = Field(default_factory=RAGConfig)
+    query_rephrasing: QueryRephrasingConfig = Field(default_factory=QueryRephrasingConfig)
 
 # Global settings instance
 settings = Settings()
