@@ -187,7 +187,7 @@ async function customSendMessage(
     try {
       const context_response = await referencePromise;
       // get docs out of context_response
-      docs = context_response.data?.documents || [];
+      docs = context_response.data?.results || [];
     } catch (refError) {
       // If reference call fails (e.g., query too long), continue without docs
       // The chat response has already been streamed successfully
