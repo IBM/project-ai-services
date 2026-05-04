@@ -145,7 +145,7 @@ const ServicesPage = () => {
 
               <Accordion className={styles.filtersAccordion}>
                 <AccordionItem title="Provider" open>
-                  <CheckboxGroup legendText="">
+                  <CheckboxGroup legendText="" className={styles.checkboxGroup}>
                     {providerOptions.map((option) => {
                       const isDisabled = option.count === 0;
                       const label = `${option.label}${option.count > 0 ? ` (${option.count})` : ""}`;
@@ -169,7 +169,7 @@ const ServicesPage = () => {
                 </AccordionItem>
 
                 <AccordionItem title="Architectures" open>
-                  <CheckboxGroup legendText="">
+                  <CheckboxGroup legendText="" className={styles.checkboxGroup}>
                     {architectureOptions.map((option) => {
                       const label = `${option.label}${option.count > 0 ? ` (${option.count})` : ""}`;
 
