@@ -1,0 +1,28 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/type";
+
+.container {
+  padding: spacing.$spacing-07;
+  max-width: 1584px;
+  margin: 0 auto;
+}
+
+.pageTitle {
+  @include type.type-style("heading-05");
+  color: var(--cds-text-primary);
+  margin: 0 0 spacing.$spacing-07 0;
+}
+
+.section {
+  margin-bottom: spacing.$spacing-09;
+}
+
+.sectionTitle {
+  @include type.type-style("heading-03");
+  color: var(--cds-text-primary);
+  margin: 0 0 spacing.$spacing-06 0;
+}
+
+.solutionCardColumn {
+  height: 272px;
+}
