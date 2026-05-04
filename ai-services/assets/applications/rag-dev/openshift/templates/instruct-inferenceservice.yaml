@@ -26,6 +26,13 @@ spec:
       env:
       - name: VLLM_SPYRE_USE_CB
         value: "1"
+      {{- if .Values.instruct.apiKey }}
+      - name: VLLM_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: vllm-instruct-api-key
+            key: apiKey
+      {{- end }}
       modelFormat:
         name: vLLM
       resources:

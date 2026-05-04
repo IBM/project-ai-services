@@ -1,4 +1,5 @@
 import logging
+import os
 import requests
 import time
 import json
@@ -43,7 +44,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
     }
 
     try:
-        response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload)
+        response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=get_vllm_headers(settings.model_endpoints.vllm_api_key))
         response.raise_for_status()
         data = response.json() or {}
         choices = data.get("choices", [])
@@ -123,19 +124,46 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, 
 
     return summaries, decisions
 
+def get_vllm_headers(api_key: str | None = None):
+    """Get headers for vLLM API calls, including auth if provided.
+    
+    Args:
+        api_key: Optional API key to include in Authorization header.
+                 If not provided, no auth header is added.
+    """
+    headers = {
+        "accept": "application/json",
+        "Content-type": "application/json",
+    }
+
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+        logger.debug("Using vLLM API key for authentication")
+
+    return headers
+
+
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def query_vllm_models(llm_endpoint):
+def query_vllm_models(llm_endpoint, api_key: str | None = None):
+    """Used both for listing models and as an auth/availability preflight check.
+    
+    Args:
+        api_key: Optional API key for vLLM authentication
+    """
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     logger.debug('Querying VLLM models')
-    response = misc_utils.SESSION.get(f"{llm_endpoint}/v1/models")
+    response = misc_utils.SESSION.get(
+        f"{llm_endpoint}/v1/models",
+        headers=get_vllm_headers(api_key),
+    )
     response.raise_for_status()
     resp_json = response.json()
     return resp_json
 
 def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
-                stream, lang):
+                stream, lang, api_key: str | None = None):
     context = "\n\n".join([doc.get("page_content") for doc in documents])
 
     logger.debug(f'Original Context: {context}')
@@ -152,11 +180,8 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     prompt_template = get_prompt_for_language(lang)
     prompt = prompt_template.format(context=context, question=question)
 
-    logger.debug("PROMPT:  ", prompt)
-    headers = {
-        "accept": "application/json",
-        "Content-type": "application/json"
-    }
+    logger.debug(f"PROMPT: {prompt}")
+    headers = get_vllm_headers(api_key)
     payload = {
         "messages": [{"role": "user", "content": prompt}],
         "model": llm_model,
@@ -173,11 +198,11 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     return headers, payload
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang):
+def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang, api_key: str | None = None):
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False, lang)
+    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False, lang, api_key)
 
     # Use requests for synchronous HTTP requests
     start_time = time.time()
@@ -192,12 +217,12 @@ def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_wor
 
     return response_json
 
-def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang):
+def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang, api_key: str | None = None):
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
     headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens,
-                                          temperature, True, lang)
+                                          temperature, True, lang, api_key)
     try:
         # Use requests for synchronous HTTP requests
         logger.debug("STREAMING RESPONSE")
@@ -262,10 +287,7 @@ def query_vllm_summarize(
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers = {
-        "accept": "application/json",
-        "Content-type": "application/json",
-    }
+    headers = get_vllm_headers(settings.model_endpoints.vllm_api_key)
     stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,
@@ -306,10 +328,7 @@ def query_vllm_summarize_stream(
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers = {
-        "accept": "application/json",
-        "Content-type": "application/json",
-    }
+    headers = get_vllm_headers(settings.model_endpoints.vllm_api_key)
     stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,
