@@ -6,10 +6,9 @@
 }
 
 .sidebarColumn {
-  margin-left:spacing.$spacing-07;
-  margin-right:0;
+  margin-left: spacing.$spacing-07;
+  margin-right: 0;
 }
-
 
 .sidebar {
   display: flex;
@@ -53,6 +52,3 @@
   font-weight: 600;
   color: var(--cds-text-primary);
 }
-
-
-

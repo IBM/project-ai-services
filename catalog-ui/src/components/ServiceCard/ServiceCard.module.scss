@@ -9,7 +9,7 @@
   flex-direction: column;
   gap: spacing.$spacing-06;
   height: 100%;
-  margin-left:spacing.$spacing-05;
+  margin-left: spacing.$spacing-05;
 }
 
 .cardHeader {
@@ -86,7 +86,6 @@
   gap: spacing.$spacing-02;
   max-height: calc(2 * 1.5rem + spacing.$spacing-02);
   overflow: hidden;
-
 }
 
 .cardActions {
@@ -97,5 +96,5 @@
 }
 :global(.cds--popover-container),
 :global(.cds--tooltip) {
-  z-index: 8000 ;
+  z-index: 8000;
 }
