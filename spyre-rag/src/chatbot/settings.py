@@ -38,13 +38,15 @@ class QueryRephrasingConfig(BaseSettings):
     
     rephrase_prompt_template: str = Field(
         default=(
-            "Given the conversation history and the current question, rephrase the current question to be a standalone, self-contained query that can be used for semantic search.\n\n"
-            "Requirements:\n"
-            "1. Replace pronouns (this, that, it, they) with specific nouns from context\n"
-            "2. Include all necessary context to understand what is being asked\n"
-            "3. Be concise and focused on the search intent\n"
-            "4. Maintain the original question's meaning\n"
-            "5. Return ONLY the rephrased query, no explanation\n\n"
+            "Given the conversation history and the current question, create a standalone query for semantic search.\n\n"
+            "Instructions:\n"
+            "1. If the current question is already standalone and clear, return it EXACTLY as-is (preserve original wording)\n"
+            "2. If the question references previous context (uses pronouns like 'it', 'this', 'that', 'they'), replace them with specific nouns from the conversation history\n"
+            "3. Only merge context if the current question is clearly a follow-up that requires previous information\n"
+            "4. Remove conversational filler words (e.g., 'Can you tell me', 'Also', 'Thanks', 'Please')\n"
+            "5. Keep the query concise and focused on the core search intent\n"
+            "6. If the conversation history is irrelevant to the current question, ignore it\n"
+            "7. Return ONLY the rephrased query, no explanation or additional text\n\n"
             "Conversation History:\n{conversation_history}\n\n"
             "Current Question: {current_query}\n\n"
             "Rephrased Query:"
