@@ -1,0 +1,107 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/theme";
+@use "@carbon/colors" as *;
+
+.card {
+  background-color: var(--cds-layer-01);
+  padding: spacing.$spacing-05;
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-06;
+  height: 100%;
+  margin-top: spacing.$spacing-02;
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: spacing.$spacing-03;
+  margin-top: spacing.$spacing-03;
+}
+
+.cardTitle {
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: $blue-60;
+  line-height: 1.29;
+  margin: 0;
+  flex: 1;
+  background-color: $blue-20;
+  border-radius: 16px;
+  padding: 4px 12px;
+  max-width: fit-content;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: spacing.$spacing-02;
+}
+
+.category {
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+  white-space: nowrap;
+}
+
+.certifiedBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--cds-support-success);
+  position: relative;
+  z-index: 1;
+
+  &:hover {
+    opacity: 0.8;
+  }
+}
+
+.badgeIcon {
+  fill: var(--cds-support-success);
+}
+
+.cardDescription {
+  font-size: 0.875rem;
+  color: var(--cds-text-primary);
+  font-weight: 500;
+  line-height: 1.5;
+  margin: 0;
+  flex: 1;
+}
+
+.tagsSection {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-03;
+  margin-top: auto;
+}
+
+.tagsHeading {
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-02;
+  max-height: calc(2 * 1.5rem + spacing.$spacing-02);
+  overflow: hidden;
+}
+
+.cardActions {
+  display: flex;
+  gap: spacing.$spacing-03;
+}
+:global(.cds--popover-container),
+:global(.cds--tooltip) {
+  z-index: 5000 !important; // lower than modal
+}
