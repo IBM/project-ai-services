@@ -63,6 +63,10 @@ spec:
           value: "32"
         - name: MASTER_PORT
           value: "12355"
+        {{- if .Values.instruct.apiKey }}
+        - name: VLLM_API_KEY
+          value: "{{ .Values.instruct.apiKey }}"
+        {{- end }}
         {{- /* Check if .env.instruct exists and is a non-empty map */}}
         {{- with .env.instruct }}
           {{- /* If it does, '.' (dot) is now scoped to .env.instruct */}}

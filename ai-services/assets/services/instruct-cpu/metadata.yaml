@@ -1,0 +1,17 @@
+# Service identification
+id: instruct-cpu
+name: "Instruct CPU"
+description: "CPU-based language model inference service for instruction-following tasks"
+type: service
+
+# Certification and support
+certified_by: "IBM"
+
+# Service belongs to these architectures
+architectures:
+  - rag-dev
+
+# This service is only used as a dependency by other services
+dependency_only: true
+
+# Made with Bob

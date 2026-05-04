@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .AppName }}--instruct"
+  labels:
+    ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
+  annotations:
+    io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
+    io.podman.annotations.userns: "keep-id"
+    run.oci.keep_original_groups: "1"
+    ai-services.io/model: ibm-granite/granite-3.3-8b-instruct
+    ai-services.io/instruct--spyre-cards: "4"
+spec:
+  volumes:
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 64Gi
+    - name: models
+      hostPath:
+        path: "/var/lib/ai-services/models"
+        type: Directory
+  containers:
+    - name: instruct
+      image: "{{ .Values.instruct.image }}"
+      command: ["/bin/bash"]
+      args:
+        - "-c"
+        - |
+          /opt/app-root/spyre_entrypoint.sh \
+          --model ${VLLM_MODEL_PATH} \
+          -tp ${AIU_WORLD_SIZE} \
+          --max-model-len ${MAX_MODEL_LEN} \
+          --max-num-seqs ${MAX_BATCH_SIZE} \
+          --served-model-name ibm-granite/granite-3.3-8b-instruct --port 8000
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 420
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+      env:
+        - name: VLLM_MODEL_PATH
+          value: "/models/ibm-granite/granite-3.3-8b-instruct"
+        - name: AIU_WORLD_SIZE
+          value: "4"
+        - name: VLLM_SPYRE_USE_CB
+          value: "1"
+        - name: MAX_MODEL_LEN
+          value: "32768"
+        - name: MAX_BATCH_SIZE
+          value: "32"
+        - name: MASTER_PORT
+          value: "12355"
+        {{- /* Check if .env.instruct exists and is a non-empty map */}}
+        {{- with .env.instruct }}
+          {{- /* If it does, '.' (dot) is now scoped to .env.instruct */}}
+          {{- range $k, $v := . }}
+        - name: {{ $k }}
+          value: "{{ $v }}"
+          {{- end }}
+        {{- end }}
+      resources:
+        requests:
+          podman.io/device=/dev/vfio: 4
+          memory: "150Gi"
+        limits:
+          memory: "150Gi"
+      ports:
+        - containerPort: 8000
+      volumeMounts:
+        - mountPath: /models:z
+          name: models
+          readOnly: true
+        - mountPath: /dev/shm
+          name: dshm

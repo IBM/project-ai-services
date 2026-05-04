@@ -1,0 +1,5 @@
+instruct:
+  # @hidden
+  image: icr.io/ppc64le-oss/vllm-ppc64le:0.18.0
+
+# Made with Bob

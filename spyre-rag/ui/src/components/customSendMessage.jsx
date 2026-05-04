@@ -2,14 +2,21 @@ import { UserType } from '@carbon/ai-chat';
 import axios from 'axios';
 import { OpenAI } from 'openai';
 
-const client = new OpenAI({
-  baseURL: window.location.origin + '/v1',
-  apiKey: 'not-needed',
-  dangerouslyAllowBrowser: true, // Required for browser-side use to allow api-key
-});
-
-async function customSendMessage(request, _options, instance) {
+async function customSendMessage(
+  request,
+  _options,
+  instance,
+  apiKey,
+  onAuthError,
+) {
   const userInput = request.input.text;
+
+  // Create OpenAI client with the provided API key
+  const client = new OpenAI({
+    baseURL: window.location.origin + '/v1',
+    apiKey: apiKey || 'not-needed',
+    dangerouslyAllowBrowser: true, // Required for browser-side use to allow api-key
+  });
 
   try {
     const res = await axios.get('/db-status');
@@ -106,8 +113,10 @@ async function customSendMessage(request, _options, instance) {
 
     const stream = await client.chat.completions.create(payload);
 
-    const referencePromise = axios.post('/reference', {
-      prompt: userInput,
+    const referencePromise = axios.post('/v1/similarity-search', {
+      query: userInput,
+      mode: 'hybrid',
+      rerank: true,
       headers: {
         'Content-Type': 'application/json',
       },
@@ -178,7 +187,7 @@ async function customSendMessage(request, _options, instance) {
     try {
       const context_response = await referencePromise;
       // get docs out of context_response
-      docs = context_response.data?.documents || [];
+      docs = context_response.data?.results || [];
     } catch (refError) {
       // If reference call fails (e.g., query too long), continue without docs
       // The chat response has already been streamed successfully
@@ -228,8 +237,20 @@ async function customSendMessage(request, _options, instance) {
 
     let errorMessage = '⚠️ Error occurred during active stream.';
 
+    // Handle authentication errors
+    if (
+      err.status === 401 ||
+      (err.error && err.error.code === 'AUTHENTICATION_FAILED')
+    ) {
+      errorMessage =
+        '⚠️ Authentication failed. Please provide a valid API key.';
+      // Trigger auth error callback to show API key dialog
+      if (onAuthError) {
+        setTimeout(() => onAuthError(), 1000);
+      }
+    }
     // Handle specific HTTP status codes
-    if (err.status === 429) {
+    else if (err.status === 429) {
       errorMessage = '⚠️ Server busy. Try again shortly.';
     } else if (err.status >= 500 && err.status < 600) {
       errorMessage =
