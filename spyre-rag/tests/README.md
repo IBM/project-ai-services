@@ -83,32 +83,16 @@ source venv/bin/activate
 venv\Scripts\activate
 ```
 
-### Step 2: Install Application Dependencies
 
-```bash
-
-# If requirements.txt doesn't exist, install core dependencies:
-pip install fastapi uvicorn pydantic lingua-language-detector tqdm cohere numpy
-```
-
-### Step 3: Install Test Dependencies
+### Step 2: Install Test Dependencies
 
 ```bash
 # Install all test dependencies
 pip install -r requirements-test.txt
 ```
 
-This installs:
-- `pytest` - Testing framework
-- `pytest-asyncio` - Async test support
-- `pytest-cov` - Coverage reporting
-- `pytest-mock` - Enhanced mocking
-- `httpx` - HTTP client for FastAPI testing
-- `faker` - Test data generation
-- `freezegun` - Time-based testing
-- And more...
 
-### Step 4: Verify Installation
+### Step 3: Verify Installation
 
 ```bash
 # Verify pytest is installed
