@@ -16,6 +16,8 @@ import (
 const (
 	// Default database data path from catalog values.yaml.
 	defaultDBDataPath = "/var/lib/ai-services/db"
+	// catalog secret name
+	catalogSecretName = "catalog-secret"
 )
 
 // UninstallCatalog removes the catalog service and all associated resources.
@@ -140,7 +142,7 @@ func podsDeletion(rt *podman.PodmanClient, pods []types.Pod) error {
 // secretDeletion removes the catalog secret.
 func secretDeletion(rt *podman.PodmanClient) error {
 	secrets, err := rt.ListSecrets(map[string][]string{
-		"label": {fmt.Sprintf("ai-services.io/application=%s", catalog.CatalogAppName)},
+		"name": {catalogSecretName},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to list secrets: %w", err)
