@@ -30,7 +30,7 @@
 .cardsGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
-  column-gap: spacing.$spacing-07;
+  column-gap: spacing.$spacing-05;
   row-gap: spacing.$spacing-05;
 }
 

@@ -9,14 +9,13 @@
   flex-direction: column;
   gap: spacing.$spacing-06;
   height: 100%;
+  margin-left:spacing.$spacing-05;
 }
 
 .cardHeader {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: spacing.$spacing-03;
-  margin-top: spacing.$spacing-03;
 }
 
 .cardTitle {
@@ -28,14 +27,8 @@
   flex: 1;
   background-color: $blue-20;
   border-radius: 16px;
-  padding: 4px 12px;
+  padding: spacing.$spacing-03;
   max-width: fit-content;
-}
-
-.headerRight {
-  display: flex;
-  align-items: center;
-  gap: spacing.$spacing-02;
 }
 
 .category {
@@ -78,7 +71,6 @@
   display: flex;
   flex-direction: column;
   gap: spacing.$spacing-03;
-  margin-top: auto;
 }
 
 .tagsHeading {
@@ -94,13 +86,16 @@
   gap: spacing.$spacing-02;
   max-height: calc(2 * 1.5rem + spacing.$spacing-02);
   overflow: hidden;
+
 }
 
 .cardActions {
   display: flex;
+  justify-content: flex-start;
+  margin-top: spacing.$spacing-06;
   gap: spacing.$spacing-03;
 }
 :global(.cds--popover-container),
 :global(.cds--tooltip) {
-  z-index: 5000 !important; // lower than modal
+  z-index: 8000 ;
 }
