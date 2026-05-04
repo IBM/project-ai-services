@@ -46,13 +46,14 @@ COMPONENTS = {
         ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "similarity"),
         ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "similarity"),
     ],
-    "spyre-rag/ui/Makefile": [
+    "ui/chatbot/Makefile": [
         ("ai-services/assets/applications/rag/podman/values.yaml", "ui"),
         ("ai-services/assets/applications/rag-dev/podman/values.yaml", "ui"),
         ("ai-services/assets/applications/rag/openshift/values.yaml", "ui"),
         ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "ui"),
+        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "ui"),
     ],
-    "digitize-ui/Makefile": [
+    "ui/digitize/Makefile": [
         ("ai-services/assets/applications/rag/openshift/values.yaml", "digitizeUi"),
         ("ai-services/assets/applications/rag/podman/values.yaml", "digitizeUi"),
         ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "digitizeUi"),
