@@ -1,8 +1,15 @@
-# spyre-rag/src/similarity/test_similarity_search.py
+# services/similarity/tests/unit/test_similarity_search.py
 
 import pytest
+import sys
+from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 from fastapi.testclient import TestClient
+
+# Add services directory to path for imports
+services_path = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(services_path))
+
 from similarity.app import app
 from similarity.similarity_utils import SimilaritySearchRequest
 
@@ -15,8 +22,8 @@ def mock_dependencies():
     with patch('similarity.app.vectorstore') as mock_vs, \
          patch('similarity.app.emb_model_dict') as mock_emb, \
          patch('similarity.app.reranker_model_dict') as mock_reranker, \
-         patch('similarity.similarity_utils.retrieve_documents') as mock_retrieve, \
-         patch('similarity.similarity_utils.rerank_documents') as mock_rerank:
+         patch('common.retrieval_utils.retrieve_documents') as mock_retrieve, \
+         patch('common.reranker_utils.rerank_documents') as mock_rerank:
         
         # Setup mock returns
         mock_emb.return_value = {
