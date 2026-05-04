@@ -1,28 +1,28 @@
 ui:
   # @hidden
-  image: icr.io/ai-services-cicd/rag-ui:v0.0.32
+  image: icr.io/ai-services-cicd/rag-ui:v0.0.34
 
 backend:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.98
+  image: icr.io/ai-services-cicd/rag:v0.0.99
   # @hidden
   log_level: "INFO"
 
 summarize:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.98
+  image: icr.io/ai-services-cicd/rag:v0.0.99
   # @hidden
   log_level: "INFO"
 
 similarity:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.98
+  image: icr.io/ai-services-cicd/rag:v0.0.99
   # @hidden
   log_level: "INFO"
 
 digitize:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.98
+  image: icr.io/ai-services-cicd/rag:v0.0.99
   # @hidden
   log_level: "INFO"
 
@@ -33,6 +33,8 @@ digitizeUi:
 instruct:
   # @hidden
   storageUri: hf://ibm-granite/granite-3.3-8b-instruct
+  # @description API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication.
+  apiKey: ""
 
 embedding:
   # @hidden
