@@ -164,7 +164,7 @@ async def handle_summarize(
     else:
         logger.info(
             f"Received {input_type} request with input size: {input_word_count} words ({input_tokens} tokens), "
-            f"automatic length: {target_words} words"
+            f"automatic length"
         )
 
     messages = build_messages(content_text, target_words, min_words, max_words,

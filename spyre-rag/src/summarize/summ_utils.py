@@ -118,7 +118,7 @@ def compute_target_and_max_tokens(
     available_output_tokens: int,
     summary_level: Optional[str] = None,
     summary_length: Optional[int] = None
-) -> tuple[int, int, int, int]:
+) -> tuple[Optional[int], Optional[int], Optional[int], int]:
     """
     Unified function to compute target words and tokens for both level-based and length-based approaches.
     
@@ -130,6 +130,7 @@ def compute_target_and_max_tokens(
     
     Returns:
         (target_words, min_words, max_words, max_tokens)
+        Note: In automatic mode, target_words, min_words, and max_words are None
     """
     
     if summary_level is not None:
@@ -175,6 +176,11 @@ def compute_target_and_max_tokens(
         min_words = int(target_word_count * 0.85)
         max_words = int(target_word_count * 1.15)
         
+        # Cap target_word_count and max_words to available space
+        max_possible_words = int(available_output_tokens * settings.common.llm.token_to_word_ratio_en)
+        target_word_count = min(target_word_count, max_possible_words)
+        max_words = min(max_words, max_possible_words)
+        
         # Estimate output tokens from target word count
         est_output_tokens = int(target_word_count / settings.common.llm.token_to_word_ratio_en)
         
@@ -193,12 +199,12 @@ def compute_target_and_max_tokens(
         
     else:
         # Automatic approach: use default coefficient
-        target_tokens = max(1, int(input_tokens * settings.summarize.summarization_coefficient))
-        target_word_count = int(target_tokens * settings.common.llm.token_to_word_ratio_en)
+        # Word counts are not used in automatic mode (not included in prompt)
+        target_word_count = None
+        min_words = None
+        max_words = None
         
-        # Calculate min/max bounds
-        min_words = int(target_word_count * 0.85)
-        max_words = int(target_word_count * 1.15)
+        target_tokens = max(1, int(input_tokens * settings.summarize.summarization_coefficient))
         
         """
         Add buffer to max_tokens to allow the model flexibility to complete thoughts.
@@ -209,8 +215,8 @@ def compute_target_and_max_tokens(
         max_tokens = min(target_tokens + buffer, available_output_tokens)
         
         logger.debug(
-            f"Automatic, Input: {input_tokens} tokens, Target: {target_word_count} words "
-            f"({min_words}-{max_words}), Max tokens: {max_tokens}, Available: {available_output_tokens}"
+            f"Automatic mode, Input: {input_tokens} tokens, "
+            f"Max tokens: {max_tokens}, Available: {available_output_tokens}"
         )
     
     return target_word_count, min_words, max_words, max_tokens
@@ -267,15 +273,15 @@ class SummarizeException(Exception):
         self.status = status
 
 
-def build_messages(text: str, target_words: int, min_words: int, max_words: int, has_length_spec: bool) -> list:
+def build_messages(text: str, target_words: Optional[int], min_words: Optional[int], max_words: Optional[int], has_length_spec: bool) -> list:
     """
     Build messages for summarization with explicit length constraints.
     
     Args:
         text: Text to summarize
-        target_words: Target word count
-        min_words: Minimum acceptable word count
-        max_words: Maximum acceptable word count
+        target_words: Target word count (None in automatic mode)
+        min_words: Minimum acceptable word count (None in automatic mode)
+        max_words: Maximum acceptable word count (None in automatic mode)
         has_length_spec: Whether user specified a length (vs automatic)
     """
     if has_length_spec:
