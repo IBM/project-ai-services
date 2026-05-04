@@ -14,6 +14,7 @@ from chatbot.settings import settings as chatbot_settings
 from summarize.settings import settings as summarize_settings
 from digitize.settings import settings as digitize_settings
 import common.misc_utils as misc_utils
+from common.tokenizer_utils import tokenize, detokenize
 
 logger = get_logger("LLM")
 
@@ -169,11 +170,11 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     logger.debug(f'Original Context: {context}')
 
     # dynamic chunk truncation: truncates the context, if doesn't fit in the sequence length
-    question_token_count = len(tokenize_with_llm(question, llm_endpoint))
+    question_token_count = len(tokenize(question))
     reamining_tokens = settings.llm.max_input_length - (
         chatbot_settings.chatbot.prompt_template_token_count + question_token_count
     )
-    context = detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:reamining_tokens], llm_endpoint)
+    context = detokenize(tokenize(context)[:reamining_tokens])
     logger.debug(f"Truncated Context: {context}")
 
     # Get the appropriate prompt template based on language and format it
@@ -365,64 +366,3 @@ def query_vllm_summarize_stream(
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
         yield "data: [DONE]\n\n"
 
-@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def tokenize_with_llm(prompt, emb_endpoint, max_retries=3):
-    """
-    Tokenize text using the LLM embedding endpoint with retry logic.
-
-    Args:
-        prompt: Text to tokenize
-        emb_endpoint: Embedding endpoint URL
-        max_retries: Maximum number of retry attempts (default: 3)
-
-    Returns:
-        List of tokens
-
-    Raises:
-        RuntimeError: If SESSION is not initialized
-        requests.exceptions.RequestException: If all retries fail
-    """
-    if misc_utils.SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
-    payload = {
-        "prompt": prompt
-    }
-
-    response = misc_utils.SESSION.post(f"{emb_endpoint}/tokenize", json=payload)
-    response.raise_for_status()
-    result = response.json()
-    tokens = result.get("tokens", [])
-
-    return tokens
-
-@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def detokenize_with_llm(tokens, emb_endpoint, max_retries=3):
-    """
-    Detokenize tokens using the LLM embedding endpoint with retry logic.
-
-    Args:
-        tokens: List of tokens to detokenize
-        emb_endpoint: Embedding endpoint URL
-        max_retries: Maximum number of retry attempts (default: 3)
-
-    Returns:
-        Detokenized text string
-
-    Raises:
-        RuntimeError: If SESSION is not initialized
-        requests.exceptions.RequestException: If all retries fail
-    """
-    if misc_utils.SESSION is None:
-        raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
-
-    payload = {
-        "tokens": tokens
-    }
-
-    response = misc_utils.SESSION.post(f"{emb_endpoint}/detokenize", json=payload)
-    response.raise_for_status()
-    result = response.json()
-    prompt = result.get("prompt", "")
-
-    return prompt

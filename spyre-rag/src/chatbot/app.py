@@ -25,6 +25,7 @@ import common.db_utils as db
 from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
 from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
 from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models
+from common.tokenizer_utils import initialize_tokenizer
 from common.perf_utils import perf_registry
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from chatbot.backend_utils import search_only, validate_query_length
@@ -83,6 +84,17 @@ diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_ha
 async def lifespan(app):
     filtered_paths = ['/health']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
+    
+    # Initialize tokenizer
+    if settings.common.app.tokenizer_model_path:
+        try:
+            initialize_tokenizer(settings.common.app.tokenizer_model_path)
+            logging.info(f"Tokenizer initialized from {settings.common.app.tokenizer_model_path}")
+        except Exception as e:
+            logging.error(f"Failed to initialize tokenizer: {e}", exc_info=True)
+    else:
+        logging.warning("tokenizer_model_path not set in settings, tokenizer not initialized")
+    
     initialize_models()
     setup_language_detector([Language.ENGLISH, Language.GERMAN])
     create_llm_session(pool_maxsize=settings.common.llm.llm_max_batch_size)

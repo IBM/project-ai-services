@@ -1,6 +1,7 @@
 import asyncio
 import json
 import uuid
+import os
 from typing import List, Optional
 from contextlib import asynccontextmanager
 import uvicorn
@@ -15,6 +16,7 @@ from digitize.settings import settings
 set_log_level(settings.common.app.log_level)
 
 from common.misc_utils import validate_pdf_file, set_request_id, configure_uvicorn_logging
+from common.tokenizer_utils import initialize_tokenizer
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 import digitize.digitize_utils as dg_util
 import digitize.types as types
@@ -38,6 +40,16 @@ async def lifespan(app: FastAPI):
     filtered_paths = ['/health', '/v1/jobs']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     logger.info("Application starting up...")
+
+    # Initialize tokenizer
+    if settings.common.app.tokenizer_model_path:
+        try:
+            initialize_tokenizer(settings.common.app.tokenizer_model_path)
+            logger.info(f"Tokenizer initialized from {settings.common.app.tokenizer_model_path}")
+        except Exception as e:
+            logger.error(f"Failed to initialize tokenizer: {e}", exc_info=True)
+    else:
+        logger.warning("tokenizer_model_path not set in settings, tokenizer not initialized")
 
     # Scan for orphan jobs and mark them as failed
     try:

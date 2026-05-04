@@ -96,12 +96,21 @@ spec:
         - name: VLLM_API_KEY
           value: "{{ .Values.instruct.apiKey }}"
         {{- end }}
+        - name: TOKENIZER_MODEL_PATH
+          value: "/models/{{ .Values.embedding.model }}"
       volumeMounts:
         - mountPath: /var/cache:z
           name: cache
+        - mountPath: /models/{{ .Values.embedding.model }}:z
+          name: embedding-model
+          readOnly: true
   restartPolicy: Always
   volumes:
     - name: cache
       hostPath:
         path: "/var/lib/ai-services/applications/{{ .AppName }}/cache"
         type: DirectoryOrCreate
+    - name: embedding-model
+      hostPath:
+        path: "/var/lib/ai-services/models/{{ .Values.embedding.model }}"
+        type: Directory

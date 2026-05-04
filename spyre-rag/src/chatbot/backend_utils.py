@@ -1,5 +1,5 @@
 from common.misc_utils import get_logger
-from common.llm_utils import tokenize_with_llm
+from common.tokenizer_utils import tokenize
 from chatbot.reranker_utils import rerank_documents
 from chatbot.retrieval_utils import retrieve_documents
 from chatbot.settings import settings
@@ -12,7 +12,7 @@ def validate_query_length(query, emb_endpoint):
     # Validate that the query length does not exceed the maximum allowed tokens.
 
     try:
-        tokens = tokenize_with_llm(query, emb_endpoint)
+        tokens = tokenize(query)
         token_count = len(tokens)
         
         if token_count > settings.chatbot.max_query_token_length:

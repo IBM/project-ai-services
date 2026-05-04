@@ -83,9 +83,15 @@ spec:
           value: "1"
         - name: LOG_LEVEL
           value: "{{ .Values.backend.log_level}}"
+        - name: TOKENIZER_MODEL_PATH
+          value: "/models/{{ .Values.instruct.model }}"
       ports:
         - containerPort: 5000
           protocol: TCP
+      volumeMounts:
+        - mountPath: /models/{{ .Values.instruct.model }}:z
+          name: chat-model
+          readOnly: true
       livenessProbe:
         httpGet:
           path: /health
@@ -99,3 +105,8 @@ spec:
           memory: "1Gi"
         limits:
           memory: "1Gi"
+  volumes:
+    - name: chat-model
+      hostPath:
+        path: "/var/lib/ai-services/models/{{ .Values.instruct.model }}"
+        type: Directory

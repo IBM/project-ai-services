@@ -134,6 +134,11 @@ class AppConfig(BaseSettings):
         description="Application port number",
     )
 
+    tokenizer_model_path: str = Field(
+        default="",
+        description="Path to the tokenizer model directory",
+    )
+
     @field_validator('log_level')
     @classmethod
     def validate_log_level(cls, v):
