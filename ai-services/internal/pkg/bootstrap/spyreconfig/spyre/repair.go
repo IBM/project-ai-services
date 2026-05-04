@@ -25,7 +25,7 @@ const (
 	// expectedKeyValueParts is the expected number of parts when splitting a key:value pair.
 	expectedKeyValueParts = 2
 	// maxVfioRuleParts is the maximum number of comma-separated parts in a valid VFIO rule.
-	maxVfioRuleParts = 3
+	maxVfioRuleParts = 4
 )
 
 // RepairResult represents the result of a repair operation.
@@ -58,7 +58,7 @@ func Repair(checks []check.CheckResult) []RepairResult {
 	results = append(results, fixVFIOPermissions(checkMap, userGroupResult))
 	results = append(results, fixSystemdUserSliceLimits(checkMap))
 
-	results = append(results, fixSELinuxVFIOPolicy(checkMap))
+	results = append(results, fixSELinuxVFIOPolicy())
 	return results
 }
 
@@ -239,8 +239,8 @@ func fixUdevRule(checkMap map[string]check.CheckResult) RepairResult {
 	}
 
 	expectedRules := []string{
-		`SUBSYSTEM=="vfio", GROUP:="sentient", MODE:="0660"`,
-		`KERNEL=="vfio", GROUP:="sentient", MODE:="0660"`,
+		`SUBSYSTEM=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`,
+		`KERNEL=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`,
 	}
 
 	// Read existing file if it exists.
@@ -482,7 +482,7 @@ LimitMEMLOCK=infinity
 
 // fixSELinuxVFIOPolicy configures SELinux policy for VFIO device access.
 // This allows containers with container_t type to access VFIO devices.
-func fixSELinuxVFIOPolicy(checkMap map[string]check.CheckResult) RepairResult {
+func fixSELinuxVFIOPolicy() RepairResult {
 	checkName := "SELinux VFIO policy configuration"
 
 	// Check if SELinux is enabled
@@ -534,17 +534,10 @@ func fixSELinuxVFIOPolicy(checkMap map[string]check.CheckResult) RepairResult {
 		}
 	}
 
-	// Update file context database
-	if err := updateSELinuxFileContext(); err != nil {
-		return RepairResult{
-			CheckName: checkName,
-			Status:    StatusFailedToFix,
-			Error:     err,
-		}
-	}
-
-	// Apply labels to existing devices
-	if err := applySELinuxLabels(); err != nil {
+	// Reload udev rules to apply SELinux labels to existing devices.
+	// The udev rules include SECLABEL{selinux} directive which automatically
+	// labels devices on creation (including hotplug)
+	if err := utils.ReloadUdevRules(); err != nil {
 		return RepairResult{
 			CheckName: checkName,
 			Status:    StatusFailedToFix,
@@ -599,51 +592,6 @@ allow container_t vfio_device_t:chr_file { ioctl open read write getattr };
 	exitCode, _, stderr, err = utils.ExecuteCommand("semodule", "-i", ppPath)
 	if err != nil || exitCode != 0 {
 		return fmt.Errorf("failed to install policy module: %v, stderr: %s", err, stderr)
-	}
-
-	return nil
-}
-
-// updateSELinuxFileContext updates the SELinux file context database.
-func updateSELinuxFileContext() error {
-	const vfioPath = "/dev/vfio(/.*)?"
-	const label = "vfio_device_t"
-
-	// Check if context already exists
-	exitCode, stdout, _, err := utils.ExecuteCommand("semanage", "fcontext", "-l")
-	if err == nil && exitCode == 0 && strings.Contains(stdout, vfioPath) {
-		return nil // Already exists
-	}
-
-	// Add file context
-	exitCode, _, stderr, err := utils.ExecuteCommand("semanage", "fcontext", "-a", "-t", label, vfioPath)
-	if err != nil || exitCode != 0 {
-		// Check if it's an "already exists" error
-		if strings.Contains(stderr, "already exists") {
-			return nil
-		}
-		return fmt.Errorf("failed to add file context: %v, stderr: %s", err, stderr)
-	}
-
-	return nil
-}
-
-// applySELinuxLabels applies SELinux labels to existing VFIO devices.
-func applySELinuxLabels() error {
-	if !utils.FileExists("/dev/vfio") {
-		// No VFIO devices to label - this is OK
-		return nil
-	}
-
-	exitCode, _, stderr, err := utils.ExecuteCommand("restorecon", "-Rv", "/dev/vfio")
-	if err != nil || exitCode != 0 {
-		// Check if it's a permission denied error - this can happen if SELinux is in permissive mode
-		// or if the devices are already correctly labeled
-		if strings.Contains(stderr, "Permission denied") {
-			// Not a fatal error - labels will be applied when devices are accessed
-			return nil
-		}
-		return fmt.Errorf("failed to apply labels: %v, stderr: %s", err, stderr)
 	}
 
 	return nil

@@ -197,8 +197,8 @@ func checkDriverConfig() *check.ConfigurationFileCheck {
 func checkUdevRule() *check.ConfigurationFileCheck {
 	configFile := "/etc/udev/rules.d/95-vfio-3.rules"
 	expectedRules := []string{
-		`SUBSYSTEM=="vfio", GROUP:="sentient", MODE:="0660"`,
-		`KERNEL=="vfio", GROUP:="sentient", MODE:="0660"`,
+		`SUBSYSTEM=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`,
+		`KERNEL=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`,
 	}
 	confCheck := check.NewConfigurationFileCheck("VFIO udev rules configuration", configFile)
 
