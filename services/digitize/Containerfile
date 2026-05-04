@@ -1,14 +1,14 @@
 FROM services-common:latest
 
-WORKDIR /opt/services/digitize
+WORKDIR /opt/services
 
 ENV PYTHONPATH=/opt/services
 
-COPY requirements.txt .
-RUN source /var/venv/bin/activate && pip install -r requirements.txt && pip cache purge
+COPY requirements.txt digitize/
+RUN source /var/venv/bin/activate && pip install -r digitize/requirements.txt && pip cache purge
 
-COPY . .
+COPY . digitize/
 
-CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", \
+CMD ["/var/venv/bin/python", "-m", "uvicorn", "digitize.app:app", \
      "--host", "0.0.0.0", "--port", "4000", \
      "--loop", "uvloop", "--http", "httptools"]
