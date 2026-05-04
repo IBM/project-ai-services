@@ -13,6 +13,7 @@ from pathlib import Path
 src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
+import common.diagnostic_logger
 
 @pytest.fixture(scope="session", autouse=True)
 def mock_diagnostic_crash_handler():
