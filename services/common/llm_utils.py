@@ -9,8 +9,6 @@ from common.lang_utils import get_prompt_for_language
 from common.misc_utils import get_logger
 from common.settings import settings
 from common.retry_utils import retry_on_transient_error
-from summarize.settings import settings as summarize_settings
-from digitize.settings import settings as digitize_settings
 import common.misc_utils as misc_utils
 
 logger = get_logger("LLM")
@@ -30,6 +28,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
     Combined function to summarize and classify a table in a single LLM call.
     Returns tuple: (summary, decision)
     """
+    from summarize.settings import settings as summarize_settings
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
@@ -92,6 +91,7 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, 
     Combined function to summarize and classify tables using a single prompt.
     Returns tuple: (summaries, decisions)
     """
+    from digitize.settings import settings as digitize_settings
     all_prompts = [digitize_settings.digitize.table_summary_and_classify.format(content=md) for md in table_mds]
 
     results: list[tuple[str, bool] | None] = [None] * len(all_prompts)
@@ -258,6 +258,7 @@ def query_vllm_summarize(
     max_tokens: int,
     temperature: float,
 ):
+    from summarize.settings import settings as summarize_settings
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
@@ -302,6 +303,7 @@ def query_vllm_summarize_stream(
     temperature: float,
 ):
     """Stream a summarization request to vLLM, yielding raw SSE lines."""
+    from summarize.settings import settings as summarize_settings
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
