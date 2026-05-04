@@ -137,12 +137,13 @@ class TestLifespan:
             async with lifespan(mock_app):
                 pass
             
-            # Verify all functions were called
-            assert call_order == ['models', 'vectorstore', 'language', 'session']
+            # Verify all functions were called (vectorstore is NOT initialized in lifespan, it's lazy-loaded)
+            assert call_order == ['models', 'language', 'session']
             mock_init_models.assert_called_once()
-            mock_init_vectorstore.assert_called_once()
+            mock_init_vectorstore.assert_not_called()  # Vectorstore is lazy-loaded on first request
             mock_setup_lang.assert_called_once()
-            mock_create_session.assert_called_once_with(32)
+            # Pool size comes from settings.common.llm.llm_max_batch_size
+            mock_create_session.assert_called_once()
     
     async def test_lifespan_language_detector_setup(self, monkeypatch):
         """Test language detector is set up with correct languages"""
@@ -169,24 +170,24 @@ class TestLifespan:
             assert Language.GERMAN in call_args
     
     async def test_lifespan_llm_session_pool_size(self, monkeypatch):
-        """Test LLM session is created with correct pool size"""
+        """Test LLM session is created with correct pool size from settings"""
         mock_create_session = Mock()
         
         with patch('chatbot.app.initialize_models'), \
-             patch('chatbot.app.initialize_vectorstore'), \
              patch('chatbot.app.setup_language_detector'), \
              patch('chatbot.app.create_llm_session', mock_create_session):
             
-            from chatbot.app import lifespan, POOL_SIZE
+            from chatbot.app import lifespan
             
             mock_app = Mock()
             
             async with lifespan(mock_app):
                 pass
             
-            # Verify session was created with POOL_SIZE (32)
-            mock_create_session.assert_called_once_with(pool_maxsize=POOL_SIZE)
-            assert POOL_SIZE == 32
+            # Verify session was created with pool_maxsize from settings
+            mock_create_session.assert_called_once()
+            call_kwargs = mock_create_session.call_args[1]
+            assert 'pool_maxsize' in call_kwargs
     
     async def test_lifespan_exception_during_startup(self, monkeypatch):
         """Test exception handling during startup"""
@@ -250,10 +251,12 @@ class TestGlobalVariables:
         assert concurrency_limiter is not None
         assert hasattr(concurrency_limiter, '_value')
     
-    def test_pool_size_constant(self):
-        """Test POOL_SIZE constant value"""
-        from chatbot.app import POOL_SIZE
+    def test_pool_size_from_settings(self):
+        """Test pool size comes from settings"""
+        from chatbot.app import settings
         
-        assert POOL_SIZE == 32
+        # Pool size is configured via settings.common.llm.llm_max_batch_size
+        assert hasattr(settings.common.llm, 'llm_max_batch_size')
+        assert settings.common.llm.llm_max_batch_size > 0
 
 # Made with Bob

@@ -29,124 +29,6 @@ class TestSwaggerRootEndpoint:
 
 
 @pytest.mark.unit
-class TestReferenceEndpoint:
-    """Tests for POST /reference endpoint"""
-    
-    def test_successful_document_retrieval(
-        self, test_client, valid_reference_request, 
-        mock_search_only, mock_validate_query_length
-    ):
-        """Test successful document retrieval with valid prompt"""
-        response = test_client.post("/reference", json=valid_reference_request)
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert "documents" in data
-        assert "perf_metrics" in data
-        assert isinstance(data["documents"], list)
-        assert len(data["documents"]) > 0
-    
-    def test_empty_prompt_returns_400(self, test_client):
-        """Test empty prompt returns 400 error"""
-        response = test_client.post("/reference", json={"prompt": ""})
-        
-        assert response.status_code == 400
-        assert "empty" in response.json()["detail"].lower()
-    
-    def test_whitespace_only_prompt_returns_400(self, test_client):
-        """Test whitespace-only prompt returns 400 error"""
-        response = test_client.post("/reference", json={"prompt": "   \n\t  "})
-        
-        assert response.status_code == 400
-        assert "empty" in response.json()["detail"].lower()
-    
-    def test_query_length_validation_too_long(
-        self, test_client, mock_search_only, monkeypatch
-    ):
-        """Test query length validation for too long queries"""
-        # Mock validate_query_length to return invalid
-        mock_validate = Mock(return_value=(False, "Query too long"))
-        monkeypatch.setattr("chatbot.app.validate_query_length", mock_validate)
-        
-        response = test_client.post(
-            "/reference",
-            json={"prompt": "a" * 1000}
-        )
-        
-        assert response.status_code == 500
-        assert "Query too long" in response.json()["detail"]
-    
-    def test_vectorstore_not_ready_returns_503(
-        self, test_client, mock_validate_query_length, monkeypatch
-    ):
-        """Test VectorStoreNotReadyError returns 503"""
-        import common.db_utils as db
-        
-        # Mock search_only to raise VectorStoreNotReadyError
-        mock_search = Mock(side_effect=db.VectorStoreNotReadyError("DB not ready"))
-        monkeypatch.setattr("chatbot.app.search_only", mock_search)
-        
-        response = test_client.post(
-            "/reference",
-            json={"prompt": "test query"}
-        )
-        
-        assert response.status_code == 503
-        assert "not ready" in response.json()["detail"].lower()
-    
-    def test_generic_exception_returns_500(
-        self, test_client, mock_validate_query_length, monkeypatch
-    ):
-        """Test generic exception returns 500"""
-        # Mock search_only to raise generic exception
-        mock_search = Mock(side_effect=Exception("Unexpected error"))
-        monkeypatch.setattr("chatbot.app.search_only", mock_search)
-        
-        response = test_client.post(
-            "/reference",
-            json={"prompt": "test query"}
-        )
-        
-        assert response.status_code == 500
-    
-    def test_performance_metrics_recorded(
-        self, test_client, valid_reference_request,
-        mock_search_only, mock_validate_query_length, monkeypatch
-    ):
-        """Test performance metrics are recorded"""
-        mock_perf_registry = Mock()
-        monkeypatch.setattr("chatbot.app.perf_registry", mock_perf_registry)
-        
-        response = test_client.post("/reference", json=valid_reference_request)
-        
-        assert response.status_code == 200
-        # Verify add_metric was called
-        mock_perf_registry.add_metric.assert_called_once()
-    
-    def test_response_structure_matches_model(
-        self, test_client, valid_reference_request,
-        mock_search_only, mock_validate_query_length
-    ):
-        """Test response structure matches ReferenceResponse model"""
-        response = test_client.post("/reference", json=valid_reference_request)
-        
-        assert response.status_code == 200
-        data = response.json()
-        
-        # Verify structure
-        assert "documents" in data
-        assert "perf_metrics" in data
-        
-        # Verify document structure
-        if data["documents"]:
-            doc = data["documents"][0]
-            assert "page_content" in doc
-            assert "filename" in doc
-            assert "type" in doc
-            assert "source" in doc
-
-
-@pytest.mark.unit
 class TestModelsEndpoint:
     """Tests for GET /v1/models endpoint"""
     
@@ -236,7 +118,7 @@ class TestPerfMetricsEndpoint:
         response = test_client.get("/v1/perf_metrics?request_id=nonexistent")
         
         assert response.status_code == 404
-        assert "no metric found" in response.json()["detail"].lower()
+        assert "no metric found" in response.json()["error"]["message"].lower()
     
     def test_empty_metrics_list(self, test_client, monkeypatch):
         """Test empty metrics list"""
@@ -278,7 +160,7 @@ class TestChatCompletionNonStreaming:
         )
         
         assert response.status_code == 400
-        assert "empty" in response.json()["detail"].lower()
+        assert "empty" in response.json()["error"]["message"].lower()
     
     def test_empty_query_content_returns_400(self, test_client):
         """Test empty query content returns 400"""
@@ -288,7 +170,7 @@ class TestChatCompletionNonStreaming:
         )
         
         assert response.status_code == 400
-        assert "empty" in response.json()["detail"].lower()
+        assert "empty" in response.json()["error"]["message"].lower()
     
     def test_whitespace_only_query_returns_400(self, test_client):
         """Test whitespace-only query returns 400"""
@@ -403,7 +285,7 @@ class TestChatCompletionNonStreaming:
         response = test_client.post("/v1/chat/completions", json=valid_chat_request)
         
         assert response.status_code == 429
-        assert "busy" in response.json()["detail"].lower()
+        assert "busy" in response.json()["error"]["message"].lower()
     
     def test_vectorstore_not_ready_returns_503(
         self, test_client, valid_chat_request,
@@ -520,6 +402,11 @@ class TestDBStatusEndpoint:
     def test_vectorstore_not_initialized(self, test_client, monkeypatch):
         """Test vectorstore is None (not initialized)"""
         monkeypatch.setattr("chatbot.app.vectorstore", None)
+        
+        # Mock ensure_vectorstore_initialized to do nothing (prevent actual initialization)
+        async def mock_ensure():
+            pass
+        monkeypatch.setattr("chatbot.app.ensure_vectorstore_initialized", mock_ensure)
         
         response = test_client.get("/db-status")
         

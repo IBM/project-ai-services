@@ -20,10 +20,19 @@ class SimilarityConfig(BaseSettings):
         description="Number of results to return when top_k is not specified by the caller",
     )
 
-    @field_validator('num_chunks_post_search')
+    @field_validator('num_chunks_post_search', mode='before')
     @classmethod
     def validate_num_chunks_post_search(cls, v):
         """Validate num_chunks_post_search with warning fallback."""
+        # Convert to int if it's a string
+        if isinstance(v, str):
+            try:
+                v = int(v)
+            except ValueError:
+                logger.warning(f"Setting num_chunks_post_search to default '10' as it is missing or malformed in the settings")
+                return 10
+        
+        # Check if value is valid (greater than 0)
         if not (isinstance(v, int) and v > 0):
             logger.warning(f"Setting num_chunks_post_search to default '10' as it is missing or malformed in the settings")
             return 10

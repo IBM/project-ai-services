@@ -99,12 +99,6 @@ def sample_perf_metrics():
 
 
 @pytest.fixture
-def valid_reference_request():
-    """Valid reference request payload."""
-    return {"prompt": "What is artificial intelligence?"}
-
-
-@pytest.fixture
 def valid_chat_request():
     """Valid chat completion request payload."""
     return {
@@ -205,6 +199,18 @@ def reset_global_state(monkeypatch):
     # This fixture runs automatically before each test
     # to ensure clean state
     pass
+
+
+@pytest.fixture(autouse=True)
+def disable_crash_handler(monkeypatch):
+    """
+    Disable crash handler during tests to avoid stderr conflicts with pytest.
+    
+    The diagnostic logger's stderr monitoring creates pipes and manipulates
+    file descriptors, which conflicts with pytest's output capturing mechanism,
+    causing "OSError: [Errno 29] Illegal seek" errors.
+    """
+    monkeypatch.setenv('DISABLE_CRASH_HANDLER', '1')
 
 
 @pytest.fixture

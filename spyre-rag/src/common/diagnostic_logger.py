@@ -774,6 +774,21 @@ def setup_comprehensive_crash_handler(logger: logging.Logger) -> tuple:
         # In lifespan shutdown:
         stderr_monitor.stop()
     """
+    # Check if crash handler should be disabled (e.g., during tests)
+    if os.environ.get('DISABLE_CRASH_HANDLER', '').lower() in ('1', 'true', 'yes'):
+        logger.info("Crash handler disabled via DISABLE_CRASH_HANDLER environment variable")
+        # Return dummy objects that do nothing
+        diagnostic_logger = DiagnosticLogger(logger)
+        
+        class DummyMonitor:
+            def start(self): pass
+            def stop(self): pass
+        
+        class DummyHandler:
+            def setup(self): pass
+        
+        return diagnostic_logger, DummyMonitor(), DummyHandler()
+    
     # Layer 1: Python exception handler
     diagnostic_logger = setup_crash_handler(logger)
     
