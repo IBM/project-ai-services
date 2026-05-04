@@ -1,7 +1,7 @@
 from lingua import Language, LanguageDetectorBuilder
 
 from common.misc_utils import get_logger
-from chatbot.settings import settings
+from common.settings import settings
 
 logger = get_logger("LANG")
 
@@ -21,15 +21,15 @@ def get_prompt_for_language(lang: str) -> str:
         The appropriate prompt template for the language
     """
     prompt_map = {
-        lang_de: settings.chatbot.query_vllm_stream_de_prompt,
-        lang_en: settings.chatbot.query_vllm_stream_prompt
+        lang_de: settings.prompts.query_vllm_stream_de_prompt,
+        lang_en: settings.prompts.query_vllm_stream_prompt
     }
-    return prompt_map.get(lang, settings.chatbot.query_vllm_stream_prompt)
+    return prompt_map.get(lang, settings.prompts.query_vllm_stream_prompt)
 
 max_tokens_map = {
-                lang_en: settings.common.llm.llm_max_tokens,
-                lang_de: settings.common.llm.llm_max_tokens_de
-            }
+    lang_en: settings.llm.llm_max_tokens,
+    lang_de: settings.llm.llm_max_tokens_de,
+}
 
 def setup_language_detector(languages: list[Language]):
     """Call once at app startup, before serving requests."""
@@ -43,7 +43,7 @@ def setup_language_detector(languages: list[Language]):
         .build()
     )
 
-def detect_language(text: str, min_confidence: float = settings.common.language.language_detection_min_confidence) -> str:
+def detect_language(text: str, min_confidence: float = settings.language.language_detection_min_confidence) -> str:
     """
     Detect the language of a text string.
 

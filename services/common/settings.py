@@ -236,12 +236,47 @@ class VectorStoreConfig(BaseSettings):
     )
 
 
+class PromptsConfig(BaseSettings):
+    """RAG prompt templates shared across services."""
+
+    query_vllm_stream_prompt: str = Field(
+        default=(
+            "You are given:\n1. **A short context text** containing factual information.\n"
+            "2. **A user's question** seeking clarification or advice.\n"
+            "3. **Return a concise, to-the-point answer grounded strictly in the provided context.**\n\n"
+            "The answer should be accurate, easy to follow, based on the context(s), and include clear reasoning or justification.\n"
+            "If the context does not provide enough information, answer using your general knowledge.\n\n"
+            "Context:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
+        ),
+        description="English prompt template for RAG query streaming",
+    )
+
+    query_vllm_stream_de_prompt: str = Field(
+        default=(
+            "Sie erhalten: 1. **Einen kurzen Kontexttext** mit sachlichen Informationen.\n"
+            "2. **Die Frage eines Nutzers**, der um Klärung oder Rat bittet.\n"
+            "3. **Geben Sie eine prägnante und aussagekräftige Antwort, die sich strikt auf den gegebenen Kontext stützt.**\n\n"
+            "Die Antwort sollte korrekt, leicht verständlich und kontextbezogen sein sowie eine klare Begründung enthalten.\n"
+            "Wenn der Kontext nicht genügend Informationen liefert, antworten Sie mit Ihrem Allgemeinwissen.\n\n"
+            "Kontext:{context}\n\nFrage:{question}\n\nAntwort:"
+        ),
+        description="German prompt template for RAG query streaming",
+    )
+
+    prompt_template_token_count: int = Field(
+        default=250,
+        ge=0,
+        description="Estimated token count for the RAG prompt template (used for context window math)",
+    )
+
+
 class Settings(BaseSettings):
     """Main settings class combining all common configuration sections."""
 
     app: AppConfig = Field(default_factory=AppConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     language: LanguageConfig = Field(default_factory=LanguageConfig)
+    prompts: PromptsConfig = Field(default_factory=PromptsConfig)
     model_endpoints: ModelEndpointsConfig = Field(default_factory=ModelEndpointsConfig)
     vector_store: VectorStoreConfig = Field(default_factory=VectorStoreConfig)
 
