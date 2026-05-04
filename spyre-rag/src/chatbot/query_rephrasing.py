@@ -16,23 +16,6 @@ import common.misc_utils as misc_utils
 
 logger = get_logger("query_rephrasing")
 
-# Rephrasing prompt template
-REPHRASE_PROMPT_TEMPLATE = """Given the conversation history and the current question, rephrase the current question to be a standalone, self-contained query that can be used for semantic search.
-
-Requirements:
-1. Replace pronouns (this, that, it, they) with specific nouns from context
-2. Include all necessary context to understand what is being asked
-3. Be concise and focused on the search intent
-4. Maintain the original question's meaning
-5. Return ONLY the rephrased query, no explanation
-
-Conversation History:
-{conversation_history}
-
-Current Question: {current_query}
-
-Rephrased Query:"""
-
 
 def format_messages_for_rephrasing(messages: List[Dict[str, str]]) -> str:
     """
@@ -203,11 +186,12 @@ async def rephrase_query_with_context(
         logger.debug("Query rephrasing skipped: conversational_mode is disabled")
         return current_query
     
-    # Default configuration
+    # Get configuration from settings
+    from chatbot.settings import settings
     default_config = {
-        "timeout_seconds": 5.0,
-        "max_tokens": 100,
-        "temperature": 0.0,
+        "timeout_seconds": settings.query_rephrasing.timeout_seconds,
+        "max_tokens": settings.query_rephrasing.max_tokens,
+        "temperature": settings.query_rephrasing.temperature,
     }
     
     # Merge with provided config
@@ -230,8 +214,11 @@ async def rephrase_query_with_context(
             logger.debug("Skipping query rephrasing: empty conversation history")
             return current_query
         
+        # Get prompt template from settings (already imported above)
+        prompt_template = settings.query_rephrasing.rephrase_prompt_template
+        
         # Build rephrasing prompt
-        prompt = REPHRASE_PROMPT_TEMPLATE.format(
+        prompt = prompt_template.format(
             conversation_history=conversation_history,
             current_query=current_query
         )

@@ -35,6 +35,22 @@ class QueryRephrasingConfig(BaseSettings):
         le=1.0,
         description="Temperature for rephrasing (0=deterministic)"
     )
+    
+    rephrase_prompt_template: str = Field(
+        default=(
+            "Given the conversation history and the current question, rephrase the current question to be a standalone, self-contained query that can be used for semantic search.\n\n"
+            "Requirements:\n"
+            "1. Replace pronouns (this, that, it, they) with specific nouns from context\n"
+            "2. Include all necessary context to understand what is being asked\n"
+            "3. Be concise and focused on the search intent\n"
+            "4. Maintain the original question's meaning\n"
+            "5. Return ONLY the rephrased query, no explanation\n\n"
+            "Conversation History:\n{conversation_history}\n\n"
+            "Current Question: {current_query}\n\n"
+            "Rephrased Query:"
+        ),
+        description="Prompt template for query rephrasing with placeholders: {conversation_history}, {current_query}"
+    )
 
 
 class RAGConfig(BaseSettings):
