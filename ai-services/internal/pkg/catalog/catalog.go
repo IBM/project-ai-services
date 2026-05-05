@@ -6,6 +6,7 @@ import (
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
@@ -96,7 +97,8 @@ func ListServices() ([]types.Service, error) {
 	for _, id := range serviceIDs {
 		service, err := LoadService(id)
 		if err != nil {
-			// Log error but continue with other services
+			logger.Infof("service %s loading failed with: %w", id, err, logger.VerbosityLevelDebug)
+
 			continue
 		}
 
