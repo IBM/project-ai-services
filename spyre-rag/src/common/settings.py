@@ -41,6 +41,12 @@ class LLMConfig(BaseSettings):
         description="Maximum tokens for LLM generation (German)",
     )
 
+    llm_max_tokens_it: int = Field(
+        default=650,
+        gt=0,
+        description="Maximum tokens for LLM generation (Italian)",
+    )
+
     temperature: float = Field(
         default=0.0,
         ge=0.0,

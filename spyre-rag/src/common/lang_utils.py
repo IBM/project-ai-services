@@ -8,6 +8,7 @@ logger = get_logger("LANG")
 _language_detector = None
 lang_en = "EN"
 lang_de = "DE"
+lang_it = "IT"
 
 def get_prompt_for_language(lang: str) -> str:
     """
@@ -22,13 +23,15 @@ def get_prompt_for_language(lang: str) -> str:
     """
     prompt_map = {
         lang_de: settings.chatbot.query_vllm_stream_de_prompt,
-        lang_en: settings.chatbot.query_vllm_stream_prompt
+        lang_en: settings.chatbot.query_vllm_stream_prompt,
+        lang_it: settings.chatbot.query_vllm_stream_it_prompt
     }
     return prompt_map.get(lang, settings.chatbot.query_vllm_stream_prompt)
 
 max_tokens_map = {
                 lang_en: settings.common.llm.llm_max_tokens,
-                lang_de: settings.common.llm.llm_max_tokens_de
+                lang_de: settings.common.llm.llm_max_tokens_de,
+                lang_it: settings.common.llm.llm_max_tokens_it
             }
 
 def setup_language_detector(languages: list[Language]):
@@ -58,5 +61,6 @@ def detect_language(text: str, min_confidence: float = settings.common.language.
     confidences = _language_detector.compute_language_confidence_values(text)
     if confidences and confidences[0].value >= min_confidence:
         top = confidences[0]
+        logger.debug(f" Detected language: {top.language.iso_code_639_1.name}")
         return top.language.iso_code_639_1.name
     return lang_en

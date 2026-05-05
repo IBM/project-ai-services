@@ -84,7 +84,7 @@ async def lifespan(app):
     filtered_paths = ['/health']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     initialize_models()
-    setup_language_detector([Language.ENGLISH, Language.GERMAN])
+    setup_language_detector([Language.ENGLISH, Language.GERMAN, Language.ITALIAN])
     create_llm_session(pool_maxsize=settings.common.llm.llm_max_batch_size)
     yield
     stderr_monitor.stop()

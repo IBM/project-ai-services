@@ -127,6 +127,21 @@ class RAGConfig(BaseSettings):
         description="German prompt template for query streaming",
     )
 
+    query_vllm_stream_it_prompt: str = Field(
+        default=(
+            "Ti vengono forniti:\n1. **Un breve testo di contesto** contenente informazioni fattuali.\n"
+            "2. **Una domanda dell'utente** che richiede chiarimenti o consigli.\n"
+            "3. **Il tuo compito: fornire una risposta concisa e puntuale, basata rigorosamente sul contesto fornito.**\n\n"
+            "La risposta deve essere accurata, facile da seguire, basata sul contesto e includere un ragionamento o una giustificazione chiari.\n"
+            
+            "Se il contesto non fornisce informazioni sufficienti, rispondi utilizzando le tue conoscenze generali.\n\n"
+            
+            "Contesto:\n{context}\n\nDomanda:\n{question}\n\nRisposta:"
+
+        ),
+        description="Italian prompt template for query streaming",
+    )
+
     @field_validator('score_threshold')
     @classmethod
     def validate_score_threshold(cls, v):
