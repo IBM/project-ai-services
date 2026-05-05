@@ -374,3 +374,11 @@ func FlattenMapToKeys(m map[string]any, prefix string) map[string]string {
 
 	return result
 }
+
+// GetEnv retrieves an environment variable or returns a default value if not set.
+func GetEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}

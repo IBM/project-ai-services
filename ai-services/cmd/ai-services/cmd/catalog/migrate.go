@@ -33,12 +33,12 @@ check migration status, and rollback migrations.`,
 	}
 
 	// Add persistent flags for database connection
-	migrateCmd.PersistentFlags().StringVar(&dbHost, "db-host", "localhost", "Database host")
+	migrateCmd.PersistentFlags().StringVar(&dbHost, "db-host", db.DefaultDBHost, "Database host")
 	migrateCmd.PersistentFlags().IntVar(&dbPort, "db-port", db.DefaultDBPort, "Database port")
-	migrateCmd.PersistentFlags().StringVar(&dbUser, "db-user", "admin", "Database user")
+	migrateCmd.PersistentFlags().StringVar(&dbUser, "db-user", db.DefaultDBUser, "Database user")
 	migrateCmd.PersistentFlags().StringVar(&dbPassword, "db-password", "", "Database password")
 	migrateCmd.PersistentFlags().StringVar(&dbName, "db-name", db.DefaultDBName, "Database name")
-	migrateCmd.PersistentFlags().StringVar(&dbSSLMode, "db-sslmode", "disable", "Database SSL mode (disable, require, verify-ca, verify-full)")
+	migrateCmd.PersistentFlags().StringVar(&dbSSLMode, "db-sslmode", db.DefaultSSLMode, "Database SSL mode (disable, require, verify-ca, verify-full)")
 
 	// Helper function to get database config from flags
 	getDBConfig := func() db.Config {

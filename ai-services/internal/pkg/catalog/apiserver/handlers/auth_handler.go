@@ -104,13 +104,17 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 //	@Failure		500	{object}	map[string]interface{}	"Failed to logout"
 //	@Router			/auth/logout [post]
 func (h *AuthHandler) Logout(c *gin.Context) {
-	token := c.GetString(middleware.CtxRawTokenKey)
-	if token == "" {
+	accessToken := c.GetString(middleware.CtxRawTokenKey)
+	if accessToken == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing token"})
 
 		return
 	}
-	if err := h.svc.Logout(c.Request.Context(), token); err != nil {
+
+	// Get refresh token from X-Refresh-Token header
+	refreshToken := c.GetHeader("X-Refresh-Token")
+
+	if err := h.svc.Logout(c.Request.Context(), accessToken, refreshToken); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to logout"})
 
 		return

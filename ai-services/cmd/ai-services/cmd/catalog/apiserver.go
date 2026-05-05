@@ -1,16 +1,21 @@
 package catalog
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
+	apirepository "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
@@ -22,7 +27,7 @@ func NewAPIServerCmd() *cobra.Command {
 	var (
 		port                   = 8080
 		defaultAccessTokenTTL  = time.Minute * 15
-		defaultRefreshTokenTTL = time.Hour * 24 * 7
+		defaultRefreshTokenTTL = time.Hour * 24 * 1
 		adminUserName          string
 		adminPasswordHash      string
 		runtimeType            string
@@ -55,9 +60,42 @@ func NewAPIServerCmd() *cobra.Command {
 				secretKey = string(byteSecretKey)
 			}
 
+			// Load database configuration from environment variables
+			portStr := utils.GetEnv("DB_PORT", strconv.Itoa(db.DefaultDBPort))
+			dbPort, err := strconv.Atoi(portStr)
+			if err != nil {
+				return fmt.Errorf("invalid DB_PORT value '%s': %w", portStr, err)
+			}
+
+			dbConfig := db.Config{
+				Host:     utils.GetEnv("DB_HOST", db.DefaultDBHost),
+				Port:     dbPort,
+				User:     utils.GetEnv("DB_USER", db.DefaultDBUser),
+				Password: os.Getenv("DB_PASSWORD"),
+				DBName:   utils.GetEnv("DB_NAME", db.DefaultDBName),
+				SSLMode:  utils.GetEnv("DB_SSLMODE", db.DefaultSSLMode),
+			}
+
+			// Validate required password
+			if dbConfig.Password == "" {
+				return fmt.Errorf("DB_PASSWORD environment variable is required")
+			}
+
+			// Connect to database
+			ctx := context.Background()
+			pool, err := db.ConnectPool(ctx, dbConfig)
+			if err != nil {
+				return fmt.Errorf("failed to connect to database: %w", err)
+			}
+			defer pool.Close()
+
+			logger.Infoln("Connected to database successfully")
+
 			// Repositories
-			userRepo := repository.NewInMemoryUserRepoWithAdminHash("uid_1", adminUserName, "Admin", adminPasswordHash)
-			blacklist := repository.NewInMemoryTokenBlacklist()
+			userRepo := apirepository.NewInMemoryUserRepoWithAdminHash("uid_1", adminUserName, "Admin", adminPasswordHash)
+			tokenBlacklistRepo := repository.NewTokenBlacklistRepository(pool)
+			blacklist := apirepository.NewDBTokenBlacklist(tokenBlacklistRepo)
+			defer blacklist.Stop()
 
 			// JWT manager
 			tokenMgr := auth.NewTokenManager(secretKey, defaultAccessTokenTTL, defaultRefreshTokenTTL)
