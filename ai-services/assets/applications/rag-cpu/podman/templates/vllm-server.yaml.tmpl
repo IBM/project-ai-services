@@ -8,9 +8,9 @@ metadata:
     ai-services.io/version: "{{ .Version }}"
   annotations:
     io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
-    ai-services.io/model1: BAAI/bge-reranker-v2-m3
-    ai-services.io/model2: ibm-granite/granite-embedding-278m-multilingual
-    ai-services.io/model3: ibm-granite/granite-3.3-8b-instruct
+    ai-services.io/model1: {{ .Values.reranker.model }}
+    ai-services.io/model2: {{ .Values.embedding.model }}
+    ai-services.io/model3: {{ .Values.instruct.model }}
 spec:
   volumes:
     - name: models
@@ -22,9 +22,9 @@ spec:
       image: "{{ .Values.instruct.image }}"
       args:
       - --model
-      - /models/ibm-granite/granite-3.3-8b-instruct
+      - /models/{{ .Values.instruct.model }}
       - --served-model-name
-      - ibm-granite/granite-3.3-8b-instruct
+      - {{ .Values.instruct.model }}
       - --max-num-batched-tokens=26208
       - --max-model-len=26208
       - --port=8000
@@ -60,9 +60,9 @@ spec:
       image: "{{ .Values.embedding.image }}"
       args:
       - --model
-      - /models/ibm-granite/granite-embedding-278m-multilingual
+      - /models/{{ .Values.embedding.model }}
       - --served-model-name
-      - ibm-granite/granite-embedding-278m-multilingual
+      - {{ .Values.embedding.model }}
       - --port=8001
       livenessProbe:
         httpGet:
@@ -90,9 +90,9 @@ spec:
       image: "{{ .Values.reranker.image }}"
       args:
       - --model
-      - /models/BAAI/bge-reranker-v2-m3
+      - /models/{{ .Values.reranker.model }}
       - --served-model-name
-      - BAAI/bge-reranker-v2-m3
+      - {{ .Values.reranker.model }}
       - --port=8002
       livenessProbe:
         httpGet:

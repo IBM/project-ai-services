@@ -10,9 +10,9 @@ metadata:
     io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
     io.podman.annotations.userns: "keep-id"
     run.oci.keep_original_groups: "1"
-    ai-services.io/model1: BAAI/bge-reranker-v2-m3
-    ai-services.io/model2: ibm-granite/granite-embedding-278m-multilingual
-    ai-services.io/model3: ibm-granite/granite-3.3-8b-instruct
+    ai-services.io/model1: {{ .Values.reranker.model }}
+    ai-services.io/model2: {{ .Values.embedding.model }}
+    ai-services.io/model3: {{ .Values.instruct.model }}
     ai-services.io/instruct--spyre-cards: "4"
 spec:
   volumes:
@@ -40,7 +40,7 @@ spec:
           -tp ${AIU_WORLD_SIZE} \
           --max-model-len ${MAX_MODEL_LEN} \
           --max-num-seqs ${MAX_BATCH_SIZE} \
-          --served-model-name ibm-granite/granite-3.3-8b-instruct --port 8000
+          --served-model-name {{ .Values.instruct.model }} --port 8000
       livenessProbe:
         httpGet:
           path: /health
@@ -51,7 +51,7 @@ spec:
         failureThreshold: 3
       env:
         - name: VLLM_MODEL_PATH
-          value: "/models/ibm-granite/granite-3.3-8b-instruct"
+          value: "/models/{{ .Values.instruct.model }}"
         - name: AIU_WORLD_SIZE
           value: "4"
         - name: VLLM_SPYRE_USE_CB
@@ -92,7 +92,7 @@ spec:
       image: "{{ .Values.embedding.image }}"
       command: ["/bin/sh", "-c"]
       args: [
-          "vllm serve /models/ibm-granite/granite-embedding-278m-multilingual --served-model-name ibm-granite/granite-embedding-278m-multilingual --port 8001"
+          "vllm serve /models/{{ .Values.embedding.model }} --served-model-name {{ .Values.embedding.model }} --port 8001"
       ]
       livenessProbe:
         httpGet:
@@ -117,7 +117,7 @@ spec:
       image: "{{ .Values.reranker.image }}"
       command: ["/bin/sh", "-c"]
       args: [
-          "vllm serve /models/BAAI/bge-reranker-v2-m3 --served-model-name BAAI/bge-reranker-v2-m3 --port 8002"
+          "vllm serve /models/{{ .Values.reranker.model }} --served-model-name {{ .Values.reranker.model }} --port 8002"
       ]
       livenessProbe:
         httpGet:
