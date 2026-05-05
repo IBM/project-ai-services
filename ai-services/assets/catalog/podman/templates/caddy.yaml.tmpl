@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .AppName }}--caddy"
+  labels:
+    ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
+    ai-services.io/component: "proxy"
+spec:
+  containers:
+    - name: caddy
+      image: "{{ .Values.caddy.image }}"
+      command: ["caddy", "run", "--config", "/data/Caddyfile", "--adapter", "caddyfile"]
+      ports:
+        - containerPort: {{ .Values.caddy.httpsPort }}
+          hostPort: {{ .Values.caddy.httpsPort }}
+          protocol: TCP
+        - containerPort: 2019
+          hostPort: 2019
+          protocol: TCP
+      volumeMounts:
+        - name: caddy-data
+          mountPath: /data:z
+      resources:
+        requests:
+          memory: "256Mi"
+        limits:
+          memory: "512Mi"
+      livenessProbe:
+        tcpSocket:
+          port: 2019
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      readinessProbe:
+        tcpSocket:
+          port: 2019
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+  volumes:
+    - name: caddy-data
+      hostPath:
+        path: {{ .Values.caddy.dataPath }}
+        type: DirectoryOrCreate

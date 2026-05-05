@@ -374,3 +374,20 @@ func FlattenMapToKeys(m map[string]any, prefix string) map[string]string {
 
 	return result
 }
+
+// ConstructServiceDomain constructs a service domain name
+// Format: <podName>-<containerName>.<domain>
+func ConstructServiceDomain(podName, containerName, domain string) string {
+	return fmt.Sprintf("%s-%s.%s", podName, containerName, domain)
+}
+
+// ConstructServiceURL constructs a full service URL
+func ConstructServiceURL(protocol, domain string, port int) string {
+	if port == 443 && protocol == "https" {
+		return fmt.Sprintf("%s://%s", protocol, domain)
+	}
+	if port == 80 && protocol == "http" {
+		return fmt.Sprintf("%s://%s", protocol, domain)
+	}
+	return fmt.Sprintf("%s://%s:%d", protocol, domain, port)
+}
