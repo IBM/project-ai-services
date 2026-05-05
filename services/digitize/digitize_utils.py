@@ -7,7 +7,7 @@ from typing import List, Optional
 import uuid
 
 from common.misc_utils import get_logger
-from digitize.types import (
+from digitize.models import (
     OutputFormat,
     DocumentListItem,
     DocumentDetailResponse,
@@ -21,7 +21,7 @@ from digitize.status import (
 )
 from digitize.job import JobState
 from digitize.document import DocumentMetadata
-from digitize.types import JobStatus
+from digitize.models import JobStatus
 
 logger = get_logger("digitize_utils")
 
@@ -701,7 +701,7 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = settings.digitize.jobs_dir) ->
         Number of orphan jobs recovered
     """
     from digitize.status import StatusManager
-    from digitize.types import JobStatus, DocStatus
+    from digitize.models import JobStatus, DocStatus
     from digitize.doc_utils import clean_intermediate_files
     import digitize.settings as config
 

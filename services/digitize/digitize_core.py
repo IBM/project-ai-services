@@ -1,7 +1,7 @@
 from common.misc_utils import *
 from pathlib import Path
 from digitize.status import StatusManager,get_utc_timestamp
-from digitize.types import JobStatus, DocStatus, OutputFormat
+from digitize.models import JobStatus, DocStatus, OutputFormat
 from digitize.pdf_utils import get_pdf_page_count
 from digitize.doc_utils import convert_document_format
 from concurrent.futures import ProcessPoolExecutor

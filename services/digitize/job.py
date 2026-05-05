@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from digitize.types import JobStatus
+from digitize.models import JobStatus
 from digitize.settings import settings
 
 

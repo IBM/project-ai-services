@@ -7,7 +7,7 @@ from common.emb_utils import get_embedder
 from common.misc_utils import *
 from digitize.doc_utils import process_documents
 from digitize.status import StatusManager, get_utc_timestamp, get_job_document_stats
-from digitize.types import JobStatus, DocStatus
+from digitize.models import JobStatus, DocStatus
 from digitize.settings import settings
 
 logger = get_logger("ingest")

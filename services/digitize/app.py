@@ -17,8 +17,8 @@ set_log_level(settings.common.app.log_level)
 from common.misc_utils import validate_pdf_file, set_request_id, configure_uvicorn_logging
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 import digitize.digitize_utils as dg_util
-import digitize.types as types
-from digitize.digitize import digitize
+import digitize.models as models
+from digitize.digitize_core import digitize
 from digitize.cleanup import reset_db
 from digitize.ingest import ingest
 from digitize.status import StatusManager
@@ -119,7 +119,7 @@ async def health_check():
     """
     return {"status": "ok"}
 
-async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat):
+async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: models.OutputFormat):
     status_mgr = StatusManager(job_id)
     job_staging_path = settings.digitize.staging_dir / f"{job_id}"
 
@@ -130,7 +130,7 @@ async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: type
         logger.info(f"Digitization for job {job_id} completed successfully")
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
-        status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing digitization pipeline: {str(e)}")
+        status_mgr.update_job_progress("", models.DocStatus.FAILED, models.JobStatus.FAILED, error=f"Error occurred while processing digitization pipeline: {str(e)}")
     finally:
         # Always clean up staging directory, even on crashes
         dg_util.cleanup_staging_directory(job_id, settings.digitize.staging_dir)
@@ -150,7 +150,7 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
         logger.info(f"Ingestion for {job_id} completed successfully")
     except Exception as e:
         logger.error(f"Error in job {job_id}: {e}")
-        status_mgr.update_job_progress("", types.DocStatus.FAILED, types.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline: {str(e)}")
+        status_mgr.update_job_progress("", models.DocStatus.FAILED, models.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline: {str(e)}")
     finally:
         # Always clean up staging directory, even on crashes
         dg_util.cleanup_staging_directory(job_id, settings.digitize.staging_dir)
@@ -194,7 +194,7 @@ async def validate_pdf_files(
 @app.post(
     "/v1/jobs",
     status_code=status.HTTP_202_ACCEPTED,
-    response_model=types.JobCreatedResponse,
+    response_model=models.JobCreatedResponse,
     responses=http_error_responses,
     tags=["jobs"],
     summary="Create async jobs to upload and process documents",
@@ -209,12 +209,12 @@ async def validate_pdf_files(
 async def digitize_document(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(..., description="PDF files to process (multiple for ingestion, single for digitization)"),
-    operation: types.OperationType = Query(
-        types.OperationType.INGESTION,
+    operation: models.OperationType = Query(
+        models.OperationType.INGESTION,
         description="Operation type: 'ingestion' (index into vector DB) or 'digitization' (convert to text/md/json)"
     ),
-    output_format: types.OutputFormat = Query(
-        types.OutputFormat.JSON,
+    output_format: models.OutputFormat = Query(
+        models.OutputFormat.JSON,
         description="Output format for digitization: 'json', 'md', or 'txt' (only applies to digitization operation)"
     ),
     job_name: Optional[str] = Query(None, description="Optional human-readable name for the job")
@@ -224,11 +224,11 @@ async def digitize_document(
         if not files or len(files) == 0:
             APIError.raise_error(ErrorCode.INVALID_REQUEST, "No files provided. Please submit at least one file.")
 
-        if operation == types.OperationType.DIGITIZATION and len(files) > 1:
+        if operation == models.OperationType.DIGITIZATION and len(files) > 1:
             APIError.raise_error(ErrorCode.INVALID_REQUEST, "Only 1 file allowed for digitization.")
 
         # 2. Check for active ingestion jobs BEFORE semaphore check (cross-process coordination)
-        if operation == types.OperationType.INGESTION:
+        if operation == models.OperationType.INGESTION:
             has_active, active_job_ids = dg_util.has_active_jobs(operation=operation.value)
             if has_active:
                 error_msg = "An ingestion job is already running"
@@ -238,7 +238,7 @@ async def digitize_document(
                 APIError.raise_error(ErrorCode.RATE_LIMIT_EXCEEDED, error_msg)
 
         # 3. Check semaphore availability (for digitization or as backup for ingestion)
-        sem = ingestion_semaphore if operation == types.OperationType.INGESTION else digitization_semaphore
+        sem = ingestion_semaphore if operation == models.OperationType.INGESTION else digitization_semaphore
         if sem.locked():
             APIError.raise_error(ErrorCode.RATE_LIMIT_EXCEEDED, f"Too many concurrent {operation} requests.")
 
@@ -256,7 +256,7 @@ async def digitize_document(
             # files are written to disk here before creating background task to avoid OOM crashes in the thread. Useful for retrying the ingestion if background task crashes
             await dg_util.stage_upload_files(job_id, filenames, str(settings.digitize.staging_dir / job_id), file_contents)
             doc_id_dict = dg_util.initialize_job_state(job_id, operation, output_format, filenames, job_name)
-            if operation == types.OperationType.INGESTION:
+            if operation == models.OperationType.INGESTION:
                 background_tasks.add_task(ingest_documents, job_id, filenames, doc_id_dict)
             else:
                 background_tasks.add_task(digitize_documents, job_id, doc_id_dict, output_format)
@@ -275,7 +275,7 @@ async def digitize_document(
 
 @app.get(
     "/v1/jobs",
-    response_model=types.JobsListResponse,
+    response_model=models.JobsListResponse,
     responses={500: http_error_responses[500]},
     tags=["jobs"],
     summary="List all jobs",
@@ -286,8 +286,8 @@ async def get_all_jobs(
     latest: bool = Query(False, description="Return only the latest job"),
     limit: int = Query(20, ge=1, le=100, description="Number of records per page"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
-    status: Optional[types.JobStatus] = Query(None, description="Filter by job status"),
-    operation: Optional[types.OperationType] = Query(None, description="Filter by operation type")
+    status: Optional[models.JobStatus] = Query(None, description="Filter by job status"),
+    operation: Optional[models.OperationType] = Query(None, description="Filter by operation type")
 ):
     """Retrieve information about all submitted jobs with pagination and filtering."""
     try:
@@ -320,8 +320,8 @@ async def get_all_jobs(
         # Convert to response format
         jobs_data = [job.to_dict() for job in paginated_jobs]
 
-        return types.JobsListResponse(
-            pagination=types.PaginationInfo(total=total, limit=limit, offset=offset),
+        return models.JobsListResponse(
+            pagination=models.PaginationInfo(total=total, limit=limit, offset=offset),
             data=jobs_data
         )
     except HTTPException as e:
@@ -392,7 +392,7 @@ async def delete_job(job_id: str):
             return  # This line should never be reached, but helps type checker
 
         # Compare with JobStatus enum
-        if job_state.status in (types.JobStatus.ACCEPTED, types.JobStatus.IN_PROGRESS):
+        if job_state.status in (models.JobStatus.ACCEPTED, models.JobStatus.IN_PROGRESS):
             APIError.raise_error(ErrorCode.RESOURCE_LOCKED, f"Job '{job_id}' is still active and cannot be deleted")
 
         # Delete the job status file (missing_ok=True handles race conditions)
@@ -411,7 +411,7 @@ async def delete_job(job_id: str):
 
 @app.get(
     "/v1/documents",
-    response_model=types.DocumentsListResponse,
+    response_model=models.DocumentsListResponse,
     responses={400: http_error_responses[400], 500: http_error_responses[500]},
     tags=["documents"],
     summary="List all documents",
@@ -441,7 +441,7 @@ async def list_documents(
     try:
         logger.debug(f"Fetching documents with filters: limit={limit}, offset={offset}, status={status}, name={name}")
         # Validate status if provided
-        valid_statuses = {s.value for s in types.DocStatus}
+        valid_statuses = {s.value for s in models.DocStatus}
         if status and status.lower() not in valid_statuses:
             APIError.raise_error(
                 ErrorCode.INVALID_REQUEST,
@@ -461,8 +461,8 @@ async def list_documents(
         logger.debug(f"Returning {len(paginated_documents)} documents out of {total} total (offset={offset}, limit={limit})")
 
         # Return properly typed response
-        return types.DocumentsListResponse(
-            pagination=types.PaginationInfo(total=total, limit=limit, offset=offset),
+        return models.DocumentsListResponse(
+            pagination=models.PaginationInfo(total=total, limit=limit, offset=offset),
             data=paginated_documents
         )
 
@@ -476,7 +476,7 @@ async def list_documents(
 
 @app.get(
     "/v1/documents/{doc_id}",
-    response_model=types.DocumentDetailResponse,
+    response_model=models.DocumentDetailResponse,
     responses={404: http_error_responses[404], 500: http_error_responses[500]},
     tags=["documents"],
     summary="Get document metadata",
@@ -515,7 +515,7 @@ async def get_document_metadata(doc_id: str, details: bool = Query(False, descri
 
 @app.get(
     "/v1/documents/{doc_id}/content",
-    response_model=types.DocumentContentResponse,
+    response_model=models.DocumentContentResponse,
     responses={404: http_error_responses[404], 500: http_error_responses[500]},
     tags=["documents"],
     summary="Get document content",

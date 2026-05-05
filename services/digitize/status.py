@@ -7,7 +7,7 @@ from pathlib import Path
 import threading
 import time
 from typing import Callable, Any, Mapping
-from digitize.types import JobStatus, DocStatus, OutputFormat
+from digitize.models import JobStatus, DocStatus, OutputFormat
 from digitize.document import DocumentMetadata
 from digitize.job import JobState, JobDocumentSummary, JobStats
 from digitize.settings import settings

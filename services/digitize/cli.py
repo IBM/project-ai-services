@@ -31,7 +31,7 @@ set_log_level(log_level)
 
 from digitize.digitize_utils import generate_uuid, initialize_job_state, has_active_jobs
 from common.misc_utils import get_logger, validate_pdf_file
-from digitize.types import OperationType, OutputFormat
+from digitize.models import OperationType, OutputFormat
 from digitize.ingest import ingest
 from digitize.cleanup import reset_db
 

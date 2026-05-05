@@ -4,7 +4,7 @@ from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 
 from digitize.settings import settings
-from digitize.types import DocStatus, OutputFormat
+from digitize.models import DocStatus, OutputFormat
 
 
 class TimingInfo(BaseModel):
