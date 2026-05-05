@@ -15,6 +15,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 )
 
@@ -24,7 +25,7 @@ const (
 
 type Service interface {
 	Login(ctx context.Context, username, password string) (accessToken, refreshToken string, err error)
-	Logout(ctx context.Context, accessToken string) error
+	Logout(ctx context.Context, accessToken, refreshToken string) error
 	RefreshTokens(ctx context.Context, refreshToken string) (newAccess, newRefresh string, err error)
 	GetUser(ctx context.Context, id string) (*models.User, error)
 }
@@ -61,30 +62,41 @@ func (s *service) Login(ctx context.Context, username, password string) (string,
 	return access, refresh, nil
 }
 
-// Logout invalidates the provided access token by adding it to the blacklist until its natural expiry time.
-// This ensures that even if the token is still valid, it cannot be used for authentication after logout.
-func (s *service) Logout(ctx context.Context, accessToken string) error {
-	// Parse to get expiry for blacklist TTL
-	_, exp, err := s.tokens.ValidateAccessToken(accessToken)
-	if err != nil {
-		// If token is already invalid, treat as success (idempotent)
-		return nil
+// Logout invalidates both the refresh token and access token by adding them to the blacklist until their
+// natural expiry time. This operation is idempotent - it always succeeds and only blacklists tokens if they
+// are valid. Invalid tokens are ignored, making logout safe to call multiple times.
+func (s *service) Logout(ctx context.Context, accessToken, refreshToken string) error {
+	// If refresh token exists, try to validate and blacklist it
+	if refreshToken != "" {
+		_, refreshExp, err := s.tokens.ValidateRefreshToken(refreshToken)
+		if err == nil {
+			s.blacklist.Add(refreshToken, catalogconstants.TokenTypeRefresh, refreshExp)
+		}
+		// Ignore invalid tokens
 	}
-	s.blacklist.Add(accessToken, exp)
+
+	// If access token exists, try to validate and blacklist it
+	if accessToken != "" {
+		_, accessExp, err := s.tokens.ValidateAccessToken(accessToken)
+		if err == nil {
+			s.blacklist.Add(accessToken, catalogconstants.TokenTypeAccess, accessExp)
+		}
+		// Ignore invalid tokens
+	}
 
 	return nil
 }
 
 // RefreshTokens validates the provided refresh token and, if valid, generates and returns a new access token
-// and refresh token pair. It also optionally blacklists the old refresh token to prevent reuse (not implemented
-// here but can be added with a separate blacklist store for refresh tokens).
+// and refresh token pair. It also blacklists the old refresh token to prevent reuse.
 func (s *service) RefreshTokens(ctx context.Context, refreshToken string) (string, string, error) {
 	uid, exp, err := s.tokens.ValidateRefreshToken(refreshToken)
 	if err != nil {
 		return "", "", err
 	}
-	// Optional: rotate refresh by blacklisting the old refresh token (if you also protect refresh endpoints with blacklist)
-	_ = exp // here not blacklisting refresh; can be added with separate store.
+
+	// Blacklist the old refresh token to prevent reuse
+	s.blacklist.Add(refreshToken, catalogconstants.TokenTypeRefresh, exp)
 
 	access, _, err := s.tokens.GenerateAccessToken(uid)
 	if err != nil {

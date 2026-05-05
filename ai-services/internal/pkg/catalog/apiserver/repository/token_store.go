@@ -1,34 +1,43 @@
 package repository
 
 import (
-	"sync"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 // TokenBlacklist defines the interface for managing revoked tokens. It allows adding tokens to the blacklist
 // with their expiry times and checking if a token is currently blacklisted.
 type TokenBlacklist interface {
-	Add(token string, exp time.Time)
-	Contains(token string) bool
+	Add(token string, tokenType string, exp time.Time)
+	Contains(token string, tokenType string) bool
 	Stop()
 }
 
-// InMemoryTokenBlacklist is a simple in-memory implementation of a token blacklist.
-// It stores revoked tokens along with their expiry times and provides methods to add tokens,
-// check for their presence, and clean up expired tokens.
-type InMemoryTokenBlacklist struct {
-	mu     sync.RWMutex
-	tokens map[string]time.Time // token -> expiry
+// HashToken creates a SHA-256 hash of the token for secure storage.
+func HashToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+
+	return hex.EncodeToString(hash[:])
+}
+
+// DBTokenBlacklist is a database-backed implementation of TokenBlacklist.
+// It stores revoked tokens in PostgreSQL with SHA-256 hashing for security.
+// Suitable for multi-instance deployments.
+type DBTokenBlacklist struct {
+	repo   repository.TokenBlacklistRepository
 	stopCh chan struct{}
 }
 
-// TODO: Use a more robust for multi-instance deployments, e.g. Redis with TTL or a distributed cache like Memcached.
-// This in-memory version is only suitable for single-instance setups or testing.
-
-// NewInMemoryTokenBlacklist creates a new instance of InMemoryTokenBlacklist and starts the garbage collection goroutine.
-func NewInMemoryTokenBlacklist() *InMemoryTokenBlacklist {
-	b := &InMemoryTokenBlacklist{
-		tokens: make(map[string]time.Time),
+// NewDBTokenBlacklist creates a new database-backed token blacklist and starts the cleanup goroutine.
+func NewDBTokenBlacklist(repo repository.TokenBlacklistRepository) *DBTokenBlacklist {
+	b := &DBTokenBlacklist{
+		repo:   repo,
 		stopCh: make(chan struct{}),
 	}
 	go b.gc()
@@ -36,64 +45,53 @@ func NewInMemoryTokenBlacklist() *InMemoryTokenBlacklist {
 	return b
 }
 
-// Add adds a token to the blacklist with its expiry time. The token will be considered invalid until it expires.
-func (b *InMemoryTokenBlacklist) Add(token string, exp time.Time) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.tokens[token] = exp
+// Add adds a token to the blacklist with its expiry time.
+// The token is hashed using SHA-256 before storage for security.
+func (b *DBTokenBlacklist) Add(token string, tokenType string, exp time.Time) {
+	ctx := context.Background()
+	tokenHash := HashToken(token)
+
+	if err := b.repo.Add(ctx, tokenHash, models.TokenType(tokenType), exp); err != nil {
+		logger.Errorf("failed to add token to blacklist: %v", err)
+	}
 }
 
-// Contains checks if the provided token string is in the blacklist and has not yet expired.
-// If the token is found in the blacklist but has expired, it will be removed from the blacklist.
-func (b *InMemoryTokenBlacklist) Contains(token string) bool {
-	now := time.Now()
+// Contains checks if the provided token is in the blacklist and has not yet expired.
+func (b *DBTokenBlacklist) Contains(token string, tokenType string) bool {
+	ctx := context.Background()
+	tokenHash := HashToken(token)
 
-	// Fast path: read lock
-	b.mu.RLock()
-	exp, ok := b.tokens[token]
-	if !ok {
-		b.mu.RUnlock()
+	exists, err := b.repo.Contains(ctx, tokenHash, models.TokenType(tokenType))
+	if err != nil {
+		logger.Errorf("failed to check token blacklist: %v", err)
 
 		return false
 	}
-	if now.Before(exp) {
-		b.mu.RUnlock()
 
-		return true // revoked and not yet expired
-	}
-	b.mu.RUnlock()
-
-	// Slow path: token found but expired -> delete under write lock
-	b.mu.Lock()
-	// Re-check under write lock in case of races
-	if exp2, ok2 := b.tokens[token]; ok2 && now.After(exp2) {
-		delete(b.tokens, token)
-	}
-	b.mu.Unlock()
-
-	return false
+	return exists
 }
 
-// Stop signals the garbage collection goroutine to stop. This should be called when the blacklist is no longer needed to clean up resources.
-func (b *InMemoryTokenBlacklist) Stop() { close(b.stopCh) }
+// Stop signals the cleanup goroutine to stop.
+func (b *DBTokenBlacklist) Stop() {
+	close(b.stopCh)
+}
 
-// gc runs periodically to clean up expired tokens from the blacklist to prevent unbounded memory growth.
-func (b *InMemoryTokenBlacklist) gc() {
-	ticker := time.NewTicker(1 * time.Minute)
+// gc runs periodically to clean up expired tokens from the database.
+func (b *DBTokenBlacklist) gc() {
+	const cleanupInterval = 5 * time.Minute
+	ticker := time.NewTicker(cleanupInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-b.stopCh:
 			return
 		case <-ticker.C:
-			now := time.Now()
-			b.mu.Lock()
-			for t, exp := range b.tokens {
-				if now.After(exp) {
-					delete(b.tokens, t)
-				}
+			ctx := context.Background()
+			if err := b.repo.CleanupExpired(ctx); err != nil {
+				logger.Errorf("failed to cleanup expired tokens: %v", err)
 			}
-			b.mu.Unlock()
 		}
 	}
 }
+
+// Made with Bob
