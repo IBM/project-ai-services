@@ -65,8 +65,8 @@ func getOperationTimeout(ctx context.Context, tp templates.Template, opts types.
 	// populate the operation timeout if its either not set or set negatively
 	if timeout <= 0 {
 		// load metadata.yml to read the app metadata
-		appMetadata, err := tp.LoadMetadata(opts.TemplateName, false)
-		if err != nil {
+		var appMetadata templates.AppMetadata
+		if err := tp.LoadMetadata(opts.TemplateName, false, &appMetadata); err != nil {
 			s.Fail("failed to read the app metadata")
 
 			return 0, fmt.Errorf("failed to read the app metadata: %w", err)

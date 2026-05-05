@@ -51,8 +51,8 @@ var templatesCmd = &cobra.Command{
 			}
 
 			logger.Infof("- %s\n", name)
-			metadata, err := tp.LoadMetadata(name, false)
-			if err != nil {
+			var metadata templates.AppMetadata
+			if err := tp.LoadMetadata(name, false, &metadata); err != nil {
 				logger.Errorf("failed to load application metadata: %v", err)
 
 				continue
