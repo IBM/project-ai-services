@@ -1,0 +1,47 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/type";
+
+.pageContent {
+  padding: 0 spacing.$spacing-05 spacing.$spacing-07;
+  margin-top: spacing.$spacing-07;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-05;
+  padding-bottom: spacing.$spacing-05;
+}
+
+.filterHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: spacing.$spacing-03 0;
+}
+
+.filterTitle {
+  @include type.type-style("label-01");
+  font-weight: 600;
+}
+
+.cardsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  column-gap: spacing.$spacing-05;
+  row-gap: spacing.$spacing-05;
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: spacing.$spacing-09;
+  text-align: center;
+  color: var(--cds-text-secondary);
+
+  p {
+    margin-bottom: spacing.$spacing-05;
+  }
+}
