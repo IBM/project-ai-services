@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"maps"
 	"net"
@@ -451,4 +453,94 @@ func ConstructServiceURL(protocol, domain string, port int) string {
 		return fmt.Sprintf("%s://%s", protocol, domain)
 	}
 	return fmt.Sprintf("%s://%s:%d", protocol, domain, port)
+}
+
+// ValidateCertificateFiles validates that SSL certificate and key files exist and are readable
+func ValidateCertificateFiles(certPath, keyPath string) error {
+	// Check certificate file
+	certInfo, err := os.Stat(certPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("certificate file does not exist: %s", certPath)
+		}
+		return fmt.Errorf("cannot access certificate file: %w", err)
+	}
+	if certInfo.IsDir() {
+		return fmt.Errorf("certificate path is a directory, not a file: %s", certPath)
+	}
+
+	// Check key file
+	keyInfo, err := os.Stat(keyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("key file does not exist: %s", keyPath)
+		}
+		return fmt.Errorf("cannot access key file: %w", err)
+	}
+	if keyInfo.IsDir() {
+		return fmt.Errorf("key path is a directory, not a file: %s", keyPath)
+	}
+
+	// Try to read the files to ensure they're readable
+	if _, err := os.ReadFile(certPath); err != nil {
+		return fmt.Errorf("cannot read certificate file: %w", err)
+	}
+	if _, err := os.ReadFile(keyPath); err != nil {
+		return fmt.Errorf("cannot read key file: %w", err)
+	}
+
+	return nil
+}
+
+// ExtractDomainFromCertificate extracts the base domain from a certificate file
+// It looks for wildcard domains in CN or SANs (e.g., *.example.com -> example.com)
+// Returns the base domain or error if extraction fails
+func ExtractDomainFromCertificate(certPath string) (string, error) {
+	// Read certificate file
+	certPEM, err := os.ReadFile(certPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read certificate: %w", err)
+	}
+
+	// Decode PEM block
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return "", fmt.Errorf("failed to decode PEM block from certificate")
+	}
+
+	// Parse certificate
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse certificate: %w", err)
+	}
+
+	// Try to extract domain from SANs first (preferred)
+	for _, dnsName := range cert.DNSNames {
+		if domain := extractBaseDomain(dnsName); domain != "" {
+			return domain, nil
+		}
+	}
+
+	// Fallback to Common Name
+	if domain := extractBaseDomain(cert.Subject.CommonName); domain != "" {
+		return domain, nil
+	}
+
+	return "", fmt.Errorf("no valid domain found in certificate (CN: %s, SANs: %v)",
+		cert.Subject.CommonName, cert.DNSNames)
+}
+
+// extractBaseDomain extracts base domain from a DNS name
+// Examples: *.example.com -> example.com, example.com -> example.com
+func extractBaseDomain(dnsName string) string {
+	if dnsName == "" {
+		return ""
+	}
+
+	// Remove wildcard prefix if present
+	if strings.HasPrefix(dnsName, "*.") {
+		return dnsName[2:] // Remove "*."
+	}
+
+	return dnsName
 }

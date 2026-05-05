@@ -30,7 +30,7 @@ const (
 )
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
-func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParams map[string]string, domainName string) error {
+func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParams map[string]string, domainName, sslCertPath, sslKeyPath string) error {
 	s := spinner.New("Deploying catalog service...")
 	s.Start(ctx)
 
@@ -62,7 +62,7 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 	}
 
 	// Setup HTTPS configuration
-	httpsConfig, err := setupHTTPSConfig(domainName, s)
+	httpsConfig, err := setupHTTPSConfig(domainName, sslCertPath, sslKeyPath, s)
 	if err != nil {
 		s.Fail("failed to setup HTTPS configuration")
 		return fmt.Errorf("failed to setup HTTPS configuration: %w", err)
@@ -99,12 +99,15 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 
 // HTTPSConfig contains HTTPS configuration
 type HTTPSConfig struct {
-	Domain string
-	HostIP string
+	Domain         string
+	HostIP         string
+	UseUserCerts   bool
+	UserCertPath   string
+	UserKeyPath    string
 }
 
 // setupHTTPSConfig prepares HTTPS configuration
-func setupHTTPSConfig(domainName string, s *spinner.Spinner) (*HTTPSConfig, error) {
+func setupHTTPSConfig(domainName, sslCertPath, sslKeyPath string, s *spinner.Spinner) (*HTTPSConfig, error) {
 	config := &HTTPSConfig{}
 
 	// Get host IP
@@ -125,6 +128,14 @@ func setupHTTPSConfig(domainName string, s *spinner.Spinner) (*HTTPSConfig, erro
 		logger.Infof("Using nip.io domain: %s", config.Domain)
 	}
 
+	// Check if user provided certificates
+	if sslCertPath != "" && sslKeyPath != "" {
+		config.UseUserCerts = true
+		config.UserCertPath = sslCertPath
+		config.UserKeyPath = sslKeyPath
+		logger.Infof("Using user-provided SSL certificates")
+	}
+
 	// Create Caddy configuration directory and Caddyfile
 	if err := createCaddyConfig(config); err != nil {
 		return nil, fmt.Errorf("failed to create Caddy configuration: %w", err)
@@ -140,9 +151,40 @@ func createCaddyConfig(config *HTTPSConfig) error {
 		return fmt.Errorf("failed to create Caddy data directory: %w", err)
 	}
 
+	// If user provided certificates, copy them to Caddy directory
+	var tlsConfig string
+	if config.UseUserCerts {
+		// Copy certificate files to Caddy directory
+		certDestPath := filepath.Join(caddyDataDir, "cert.pem")
+		keyDestPath := filepath.Join(caddyDataDir, "key.pem")
+
+		// Read and write certificate
+		certData, err := os.ReadFile(config.UserCertPath)
+		if err != nil {
+			return fmt.Errorf("failed to read certificate file: %w", err)
+		}
+		if err := os.WriteFile(certDestPath, certData, 0644); err != nil {
+			return fmt.Errorf("failed to write certificate to Caddy directory: %w", err)
+		}
+
+		// Read and write key
+		keyData, err := os.ReadFile(config.UserKeyPath)
+		if err != nil {
+			return fmt.Errorf("failed to read key file: %w", err)
+		}
+		if err := os.WriteFile(keyDestPath, keyData, 0600); err != nil {
+			return fmt.Errorf("failed to write key to Caddy directory: %w", err)
+		}
+
+		logger.Infof("Copied user certificates to %s", caddyDataDir)
+		tlsConfig = "\ttls /data/caddy/cert.pem /data/caddy/key.pem"
+	} else {
+		tlsConfig = "\ttls internal"
+	}
+
 	// Create Caddyfile in /data/caddy directory (Caddy's default location)
 	caddyfilePath := filepath.Join(caddyDataDir, "Caddyfile")
-	caddyfileContent := `{
+	caddyfileContent := fmt.Sprintf(`{
 	# Admin API - accessible from host
 	admin 0.0.0.0:2019
 
@@ -152,13 +194,13 @@ func createCaddyConfig(config *HTTPSConfig) error {
 	}
 }
 
-# Default HTTPS configuration with self-signed certificates
+# Default HTTPS configuration
 :443 {
-	tls internal
+%s
 }
 
 # Routes will be dynamically added via Caddy Admin API
-`
+`, tlsConfig)
 
 	if err := os.WriteFile(caddyfilePath, []byte(caddyfileContent), 0644); err != nil {
 		return fmt.Errorf("failed to write Caddyfile: %w", err)
@@ -210,8 +252,14 @@ func printNextSteps(tp templates.Template, rt *podman.PodmanClient, config *HTTP
 	logger.Infof("1. Access the Catalog UI via HTTPS:\n")
 	logger.Infof("   %s\n", catalogURL)
 	logger.Infoln("")
-	logger.Infof("   Note: Using self-signed certificate for %s.\n", config.Domain)
-	logger.Infof("         Your browser may show a security warning.\n")
+
+	// Show certificate information
+	if config.UseUserCerts {
+		logger.Infof("   Note: Using user-provided SSL certificate for %s.\n", config.Domain)
+	} else {
+		logger.Infof("   Note: Using self-signed certificate for %s.\n", config.Domain)
+		logger.Infof("         Your browser may show a security warning.\n")
+	}
 
 	// Show DNS configuration note for custom domains
 	if config.Domain != fmt.Sprintf("%s.nip.io", config.HostIP) {

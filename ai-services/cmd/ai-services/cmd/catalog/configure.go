@@ -20,6 +20,10 @@ var (
 	runtimeType string
 	// Custom domain name for HTTPS
 	domainName string
+	// SSL certificate file path
+	sslCertPath string
+	// SSL key file path
+	sslKeyPath string
 )
 
 // NewConfigureCmd creates a new configure command for the catalog service.
@@ -60,6 +64,8 @@ Examples:
 				Runtime:       vars.RuntimeFactory.GetRuntimeType(),
 				ArgParams:     argParams,
 				DomainName:    domainName,
+				SSLCertPath:   sslCertPath,
+				SSLKeyPath:    sslKeyPath,
 			})
 		},
 	}
@@ -85,8 +91,34 @@ func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
 		return nil, err
 	}
 
-	// Validate domain name if provided
-	if domainName != "" {
+	// Validate SSL certificate files if provided
+	if sslCertPath != "" || sslKeyPath != "" {
+		// Both cert and key must be provided together
+		if sslCertPath == "" || sslKeyPath == "" {
+			return nil, fmt.Errorf("both --ssl-cert and --ssl-key must be provided together")
+		}
+
+		// Validate certificate files exist and are readable
+		if err := utils.ValidateCertificateFiles(sslCertPath, sslKeyPath); err != nil {
+			return nil, fmt.Errorf("invalid SSL certificate files: %w", err)
+		}
+
+		// Extract domain from certificate
+		extractedDomain, err := utils.ExtractDomainFromCertificate(sslCertPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract domain from certificate: %w", err)
+		}
+
+		// If user also provided --domain-name, warn that certificate domain takes precedence
+		if domainName != "" && domainName != extractedDomain {
+			logger.Infof("Warning: Ignoring --domain-name '%s', using domain from certificate: %s", domainName, extractedDomain)
+		}
+
+		// Override domainName with extracted domain
+		domainName = extractedDomain
+		logger.Infof("Extracted domain from certificate: %s", extractedDomain)
+	} else if domainName != "" {
+		// Validate domain name only if no certificates provided
 		if err := utils.ValidateDomainName(domainName); err != nil {
 			return nil, fmt.Errorf("invalid domain name: %w", err)
 		}
@@ -131,6 +163,25 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 			"If not provided, uses nip.io format: <service>.<ip>.nip.io\n"+
 			"Example: --domain-name example.com\n"+
 			"Note: Requires DNS configuration to point domain to host IP.",
+	)
+
+	cmd.Flags().StringVar(
+		&sslCertPath,
+		"ssl-cert",
+		"",
+		"Path to SSL certificate file (PEM format).\n"+
+			"Must be used together with --ssl-key.\n"+
+			"If not provided, self-signed certificates will be generated.\n"+
+			"Example: --ssl-cert /path/to/cert.pem",
+	)
+
+	cmd.Flags().StringVar(
+		&sslKeyPath,
+		"ssl-key",
+		"",
+		"Path to SSL private key file (PEM format).\n"+
+			"Must be used together with --ssl-cert.\n"+
+			"Example: --ssl-key /path/to/key.pem",
 	)
 }
 

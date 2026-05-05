@@ -11,7 +11,7 @@ spec:
   containers:
     - name: caddy
       image: "{{ .Values.caddy.image }}"
-      command: ["caddy", "run", "--config", "/data/Caddyfile", "--adapter", "caddyfile"]
+      command: ["caddy", "run", "--config", "/data/caddy/Caddyfile", "--adapter", "caddyfile"]
       ports:
         - containerPort: {{ .Values.caddy.httpsPort }}
           hostPort: {{ .Values.caddy.httpsPort }}
@@ -21,7 +21,7 @@ spec:
           protocol: TCP
       volumeMounts:
         - name: caddy-data
-          mountPath: /data:z
+          mountPath: /data/caddy:z
       resources:
         requests:
           memory: "256Mi"
