@@ -20,8 +20,6 @@ import (
 const (
 	// FilePermissions defines the default file permissions (rw-r--r--).
 	FilePermissions = 0644
-	// DirPermissions is the default permission for creating directories.
-	DirPermissions = 0755
 )
 
 // ExecuteCommand executes a shell command and returns exit code, stdout, and stderr.

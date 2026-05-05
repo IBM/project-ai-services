@@ -435,7 +435,7 @@ func getUserIDForSlice(sudoUser string) (string, error) {
 
 // writeSystemdSliceLimits writes the systemd slice limits configuration file.
 func writeSystemdSliceLimits(sliceDir, limitsFile string) error {
-	if err := os.MkdirAll(sliceDir, utils.DirPermissions); err != nil {
+	if err := os.MkdirAll(sliceDir, dirPermissions); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", sliceDir, err)
 	}
 
@@ -455,7 +455,11 @@ LimitMEMLOCK=infinity
 func fixSystemdUserSliceLimits(checkMap map[string]check.CheckResult) RepairResult {
 	checkName := "Systemd user slice limits configuration"
 	chk, ok := getCheckFromMap(checkMap, checkName)
-  	if chk.GetStatus() {
+	if !ok {
+		return RepairResult{CheckName: checkName, Status: StatusSkipped}
+	}
+
+	if chk.GetStatus() {
 		return RepairResult{CheckName: checkName, Status: StatusSkipped}
 	}
 
@@ -583,10 +587,10 @@ allow container_t vfio_device_t:chr_file { ioctl open read write getattr };
 	exitCode, _, stderr, err = utils.ExecuteCommand("semodule", "-i", ppPath)
 	if err != nil || exitCode != 0 {
 		return fmt.Errorf("failed to install policy module: %v, stderr: %s", err, stderr)
-  }
-  
-  return nil
-}  
+	}
+
+	return nil
+}
 
 // fixPodmanServiceSupplementaryGroups repairs the podman service SupplementaryGroups configuration.
 //
@@ -609,8 +613,8 @@ func fixPodmanServiceSupplementaryGroups(checkMap map[string]check.CheckResult) 
 	if !ok {
 		return RepairResult{CheckName: checkName, Status: StatusSkipped}
 	}
-  
-  if err := createPodmanServiceDropIn(); err != nil {
+
+	if err := createPodmanServiceDropIn(); err != nil {
 		return RepairResult{
 			CheckName: checkName,
 			Status:    StatusFailedToFix,
