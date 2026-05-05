@@ -333,7 +333,11 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
     table_page_numbers = [merged_table_dict[key]["page_number"] for key in sorted(merged_table_dict)]
 
     # Summarize and classify tables - use markdown directly
-    table_summaries, decisions = summarize_and_classify_tables(table_markdowns, gen_model, gen_endpoint, pdf_path)
+    table_summaries, decisions = summarize_and_classify_tables(
+        table_markdowns, gen_model, gen_endpoint, pdf_path,
+        prompt_template=settings.digitize.table_summary_and_classify,
+        max_tokens=settings.digitize.table_summary_max_tokens,
+    )
 
     filtered_table_dicts = {
         idx: {
