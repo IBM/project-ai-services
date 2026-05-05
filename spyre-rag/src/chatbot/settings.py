@@ -59,7 +59,7 @@ class RAGConfig(BaseSettings):
     """RAG retrieval and ranking settings."""
 
     conversational_mode: bool = Field(
-        default=True,
+        default=False,
         description="Enable conversational RAG mode with query rephrasing and context management"
     )
 
