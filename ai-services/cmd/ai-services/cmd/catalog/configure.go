@@ -8,6 +8,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -18,6 +19,8 @@ import (
 var (
 	// Runtime type flag for catalog configure command.
 	runtimeType string
+	// Base directory flag for catalog configure command.
+	baseDir string
 )
 
 // NewConfigureCmd creates a new configure command for the catalog service.
@@ -35,7 +38,7 @@ func NewConfigureCmd() *cobra.Command {
 Examples:
 	 # Configure catalog service for podman
 	 ai-services catalog configure --runtime podman
-	 
+
 	 # Configure with custom UI port
 	 ai-services catalog configure --runtime podman --params ui.port=8081`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -53,9 +56,22 @@ Examples:
 				return fmt.Errorf("failed to read admin password: %w", err)
 			}
 
+			var aiServicesDir string
+
+			// Use default base directory if not specified, otherwise validate
+			if baseDir == "" {
+				aiServicesDir = constants.DefaultBaseDir
+			} else {
+				aiServicesDir, err = utils.ValidateBaseDir(baseDir)
+				if err != nil {
+					return fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
+				}
+			}
+
 			return configure.Run(configure.ConfigureOptions{
 				AdminPassword: adminPassword,
 				Runtime:       vars.RuntimeFactory.GetRuntimeType(),
+				BaseDir:       aiServicesDir,
 				ArgParams:     argParams,
 			})
 		},
@@ -82,6 +98,8 @@ func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
 		return nil, err
 	}
 
+	logger.Infof("Using base directory: %s\n", baseDir, logger.VerbosityLevelDebug)
+
 	// Parse params if provided
 	var argParams map[string]string
 	if len(rawArgParams) > 0 {
@@ -100,6 +118,15 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 	// Add runtime flag as required
 	cmd.Flags().StringVarP(&runtimeType, "runtime", "r", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
 	_ = cmd.MarkFlagRequired("runtime")
+
+	// Add basedir flag
+	cmd.Flags().StringVar(
+		&baseDir,
+		"basedir",
+		"",
+		"Base directory for AI services data (applications, models, cache).\n"+
+			"Example: --basedir /custom/path\n",
+	)
 
 	cmd.Flags().StringSliceVar(
 		rawArgParams,

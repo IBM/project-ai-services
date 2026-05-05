@@ -177,7 +177,7 @@ func (p *PodmanApplication) downloadModels(ctx context.Context, templateName, ap
 	for _, model := range models {
 		s.UpdateMessage("Downloading model: " + model + "...")
 		err = utils.Retry(vars.RetryCount, vars.RetryInterval, nil, func() error {
-			return helpers.DownloadModel(model, vars.ModelDirectory)
+			return helpers.DownloadModel(model, utils.GetModelsPath())
 		})
 		if err != nil {
 			s.Fail("failed to download model: " + model)
@@ -314,6 +314,7 @@ func (p *PodmanApplication) executePodTemplates(tp templates.Template,
 		"AppName":         appName,
 		"AppTemplateName": appMetadata.Name,
 		"Version":         appMetadata.Version,
+		"BaseDir":         utils.GetBaseDir(),
 		"Values":          values,
 		// Key -> container name
 		// Value -> range of key-value env pairs

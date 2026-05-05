@@ -15,7 +15,7 @@ spec:
   volumes:
     - name: models
       hostPath:
-        path: "/var/lib/ai-services/models"
+        path: "{{ .BaseDir }}/models"
         type: Directory
   containers:
     - name: instruct
