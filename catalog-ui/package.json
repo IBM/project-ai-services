@@ -19,7 +19,7 @@
     "@carbon/ibm-products": "^2.84.0",
     "@carbon/icons-react": "^11.75.0",
     "@carbon/react": "^1.101.0",
-    "axios": "^1.13.6",
+    "axios": "^1.15.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-is": "^19.2.4",

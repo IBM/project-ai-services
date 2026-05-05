@@ -1,0 +1,17 @@
+# Service identification
+id: reranker
+name: "Reranker"
+description: "Document reranking service for improved search relevance"
+type: service
+
+# Certification and support
+certified_by: "IBM"
+
+# Service belongs to these architectures
+architectures:
+  - rag
+
+# This service is only used as a dependency by other services
+dependency_only: true
+
+# Made with Bob

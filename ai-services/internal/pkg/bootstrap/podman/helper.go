@@ -3,7 +3,6 @@ package podman
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -173,98 +172,6 @@ func setupPodman() error {
 	}
 
 	logger.Infof("Podman configured successfully.")
-
-	return nil
-}
-
-func configurePodmanGroups() error {
-	logger.Infoln("Configuring podman service supplementary groups...", logger.VerbosityLevelDebug)
-
-	// Check if Spyre cards are present - only needed if Spyre cards exist
-	if !spyre.IsApplicable() {
-		logger.Infoln("No Spyre cards detected. Skipping podman service supplementary groups configuration.", logger.VerbosityLevelDebug)
-
-		return nil
-	}
-
-	// Run the check
-	checkResult := spyre.CheckPodmanServiceSupplementaryGroups()
-	if checkResult.GetStatus() {
-		logger.Infoln("✓ Podman service supplementary groups already configured", logger.VerbosityLevelDebug)
-
-		return nil
-	}
-
-	// Attempt repair
-	logger.Infoln("Fixing podman service supplementary groups configuration...", logger.VerbosityLevelDebug)
-	if err := fixPodmanServiceSupplementaryGroups(); err != nil {
-		return fmt.Errorf("failed to configure podman service supplementary groups: %w", err)
-	}
-
-	logger.Infof("✓ Podman service supplementary groups configured successfully")
-
-	return nil
-}
-
-// fixPodmanServiceSupplementaryGroups repairs the podman service SupplementaryGroups configuration.
-//
-// This function addresses the issue where Podman operations invoked via the socket (e.g., through
-// systemd or remote API calls) lack access to VFIO devices because the service doesn't inherit
-// the user's supplementary groups. While shell-based Podman commands work fine (inheriting the
-// user's 'sentient' group), socket-based operations fail without explicit configuration.
-//
-// The repair process:
-//  1. Creates a systemd drop-in file at /etc/systemd/system/podman.service.d/override.conf
-//     containing: [Service]\nSupplementaryGroups=sentient
-//  2. Reloads the systemd daemon to pick up the new configuration
-//  3. Restarts both podman.service and podman.socket to apply the changes
-//
-// This ensures that all Podman operations, regardless of invocation method, have the necessary
-// permissions to access VFIO devices (/dev/vfio/*) required for Spyre card functionality.
-func fixPodmanServiceSupplementaryGroups() error {
-	if err := createPodmanServiceDropIn(); err != nil {
-		return err
-	}
-
-	if err := reloadAndRestartPodmanServices(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func createPodmanServiceDropIn() error {
-	dropInDir := "/etc/systemd/system/podman.service.d"
-	if err := os.MkdirAll(dropInDir, utils.DirPermissions); err != nil {
-		return err
-	}
-
-	dropInFile := dropInDir + "/override.conf"
-	dropInContent := `[Service]
-SupplementaryGroups=sentient
-`
-
-	return os.WriteFile(dropInFile, []byte(dropInContent), utils.FilePermissions)
-}
-
-func reloadAndRestartPodmanServices() error {
-	// Reload systemd daemon
-	cmd := exec.Command("systemctl", "daemon-reload")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to reload systemd daemon: %v, output: %s", err, string(out))
-	}
-
-	// Restart podman service
-	cmd = exec.Command("systemctl", "restart", "podman.service")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to restart podman.service: %v, output: %s", err, string(out))
-	}
-
-	// Restart podman socket
-	cmd = exec.Command("systemctl", "restart", "podman.socket")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to restart podman.socket: %v, output: %s", err, string(out))
-	}
 
 	return nil
 }

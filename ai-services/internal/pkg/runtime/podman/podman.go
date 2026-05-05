@@ -237,37 +237,58 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 	stdoutChan := make(chan string, logChannelBufferSize)
 	stderrChan := make(chan string, logChannelBufferSize)
 
+	logsCtx, cancelLogs := context.WithCancel(ctx)
+	defer cancelLogs()
+
 	// Channel to signal goroutine completion
 	done := make(chan struct{})
 
 	go func() {
 		defer close(done)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case line, ok := <-stdoutChan:
-				if !ok {
-					return
-				}
-				logger.Infoln(line)
-			case line, ok := <-stderrChan:
-				if !ok {
-					return
-				}
-				logger.Infoln(line)
+		waitDone := make(chan struct{})
+		go func() {
+			defer close(waitDone)
+			_, err := containers.Wait(pc.Context, containerNameOrID, nil)
+			if err == nil {
+				// Container exited, cancel the logs streaming
+				cancelLogs()
 			}
-		}
+		}()
+
+		// Stream logs
+		_ = containers.Logs(logsCtx, containerNameOrID, opts, stdoutChan, stderrChan)
+
+		// Wait for container wait to complete
+		<-waitDone
 	}()
 
-	err := containers.Logs(ctx, containerNameOrID, opts, stdoutChan, stderrChan)
+	// Print logs as they arrive
+	pc.printLogsFromChannels(logsCtx, stdoutChan, stderrChan)
+
+	// Wait for goroutine to complete
 	<-done
 
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return nil
-	}
+	return nil
+}
 
-	return err
+// printLogsFromChannels reads from stdout and stderr channels and prints logs.
+func (pc *PodmanClient) printLogsFromChannels(ctx context.Context, stdoutChan, stderrChan <-chan string) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case line, ok := <-stdoutChan:
+			if !ok {
+				return
+			}
+			logger.Infoln(line)
+		case line, ok := <-stderrChan:
+			if !ok {
+				return
+			}
+			logger.Infoln(line)
+		}
+	}
 }
 
 func (pc *PodmanClient) PodLogs(podNameOrID string) error {
