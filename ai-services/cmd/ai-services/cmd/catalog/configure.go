@@ -18,6 +18,8 @@ import (
 var (
 	// Runtime type flag for catalog configure command.
 	runtimeType string
+	// Custom domain name for HTTPS
+	domainName string
 )
 
 // NewConfigureCmd creates a new configure command for the catalog service.
@@ -35,7 +37,7 @@ func NewConfigureCmd() *cobra.Command {
 Examples:
 	 # Configure catalog service for podman
 	 ai-services catalog configure --runtime podman
-	 
+
 	 # Configure with custom UI port
 	 ai-services catalog configure --runtime podman --params ui.port=8081`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -57,6 +59,7 @@ Examples:
 				AdminPassword: adminPassword,
 				Runtime:       vars.RuntimeFactory.GetRuntimeType(),
 				ArgParams:     argParams,
+				DomainName:    domainName,
 			})
 		},
 	}
@@ -80,6 +83,13 @@ func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
 	// Check if podman runtime is being used on unsupported platform
 	if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
 		return nil, err
+	}
+
+	// Validate domain name if provided
+	if domainName != "" {
+		if err := utils.ValidateDomainName(domainName); err != nil {
+			return nil, fmt.Errorf("invalid domain name: %w", err)
+		}
 	}
 
 	// Parse params if provided
@@ -111,6 +121,16 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 			"- Example: --params ui.port=8081\n\n"+
 			"Available parameters:\n"+
 			"- ui.port: Port for the catalog UI (default: random available port)\n",
+	)
+
+	cmd.Flags().StringVar(
+		&domainName,
+		"domain-name",
+		"",
+		"Custom domain name for HTTPS access.\n"+
+			"If not provided, uses nip.io format: <service>.<ip>.nip.io\n"+
+			"Example: --domain-name example.com\n"+
+			"Note: Requires DNS configuration to point domain to host IP.",
 	)
 }
 

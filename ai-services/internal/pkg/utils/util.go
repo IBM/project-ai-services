@@ -375,6 +375,67 @@ func FlattenMapToKeys(m map[string]any, prefix string) map[string]string {
 	return result
 }
 
+// ValidateDomainName validates a domain name according to RFC 1035
+func ValidateDomainName(domain string) error {
+	if domain == "" {
+		return fmt.Errorf("domain name cannot be empty")
+	}
+
+	// Maximum length is 253 characters
+	if len(domain) > 253 {
+		return fmt.Errorf("domain name exceeds maximum length of 253 characters")
+	}
+
+	// Split into labels
+	labels := strings.Split(domain, ".")
+	if len(labels) < 2 {
+		return fmt.Errorf("domain name must have at least two labels (e.g., example.com)")
+	}
+
+	for _, label := range labels {
+		if err := validateDomainLabel(label); err != nil {
+			return fmt.Errorf("invalid label '%s': %w", label, err)
+		}
+	}
+
+	return nil
+}
+
+// validateDomainLabel validates a single domain label
+func validateDomainLabel(label string) error {
+	if label == "" {
+		return fmt.Errorf("label cannot be empty")
+	}
+
+	if len(label) > 63 {
+		return fmt.Errorf("label exceeds maximum length of 63 characters")
+	}
+
+	// Label must start with alphanumeric
+	if !isAlphanumeric(rune(label[0])) {
+		return fmt.Errorf("label must start with alphanumeric character")
+	}
+
+	// Label must end with alphanumeric
+	if !isAlphanumeric(rune(label[len(label)-1])) {
+		return fmt.Errorf("label must end with alphanumeric character")
+	}
+
+	// Check all characters
+	for _, ch := range label {
+		if !isAlphanumeric(ch) && ch != '-' {
+			return fmt.Errorf("label contains invalid character '%c'", ch)
+		}
+	}
+
+	return nil
+}
+
+// isAlphanumeric checks if a character is alphanumeric
+func isAlphanumeric(ch rune) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
+}
+
 // ConstructServiceDomain constructs a service domain name
 // Format: <podName>-<containerName>.<domain>
 func ConstructServiceDomain(podName, containerName, domain string) string {

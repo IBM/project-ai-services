@@ -30,7 +30,7 @@ const (
 )
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
-func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParams map[string]string) error {
+func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParams map[string]string, domainName string) error {
 	s := spinner.New("Deploying catalog service...")
 	s.Start(ctx)
 
@@ -62,7 +62,7 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 	}
 
 	// Setup HTTPS configuration
-	httpsConfig, err := setupHTTPSConfig(s)
+	httpsConfig, err := setupHTTPSConfig(domainName, s)
 	if err != nil {
 		s.Fail("failed to setup HTTPS configuration")
 		return fmt.Errorf("failed to setup HTTPS configuration: %w", err)
@@ -104,7 +104,7 @@ type HTTPSConfig struct {
 }
 
 // setupHTTPSConfig prepares HTTPS configuration
-func setupHTTPSConfig(s *spinner.Spinner) (*HTTPSConfig, error) {
+func setupHTTPSConfig(domainName string, s *spinner.Spinner) (*HTTPSConfig, error) {
 	config := &HTTPSConfig{}
 
 	// Get host IP
@@ -114,9 +114,16 @@ func setupHTTPSConfig(s *spinner.Spinner) (*HTTPSConfig, error) {
 	}
 	config.HostIP = hostIP
 
-	// Use nip.io with host IP
-	config.Domain = fmt.Sprintf("%s.nip.io", hostIP)
-	logger.Infof("Using nip.io domain: %s", config.Domain)
+	// Determine domain name
+	if domainName != "" {
+		// Use custom domain name
+		config.Domain = domainName
+		logger.Infof("Using custom domain: %s", domainName)
+	} else {
+		// Use nip.io with host IP
+		config.Domain = fmt.Sprintf("%s.nip.io", hostIP)
+		logger.Infof("Using nip.io domain: %s", config.Domain)
+	}
 
 	// Create Caddy configuration directory and Caddyfile
 	if err := createCaddyConfig(config); err != nil {
@@ -205,6 +212,13 @@ func printNextSteps(tp templates.Template, rt *podman.PodmanClient, config *HTTP
 	logger.Infoln("")
 	logger.Infof("   Note: Using self-signed certificate for %s.\n", config.Domain)
 	logger.Infof("         Your browser may show a security warning.\n")
+
+	// Show DNS configuration note for custom domains
+	if config.Domain != fmt.Sprintf("%s.nip.io", config.HostIP) {
+		logger.Infoln("")
+		logger.Infof("   IMPORTANT: Ensure DNS is configured to point %s to %s\n", config.Domain, config.HostIP)
+	}
+
 	logger.Infoln("")
 	logger.Infoln("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
