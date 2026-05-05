@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"fmt"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -61,6 +62,9 @@ func BootstrapCmd() *cobra.Command {
 			if rt == types.RuntimeTypePodman {
 				logger.Infoln("LPAR bootstrapped successfully")
 				logger.Infoln("----------------------------------------------------------------------------")
+				style := lipgloss.NewStyle().Foreground(lipgloss.Color("#32BD27"))
+				message := style.Render("Re-login to the shell to reflect necessary permissions assigned to vfio cards")
+				logger.Infoln(message)
 			}
 
 			return nil

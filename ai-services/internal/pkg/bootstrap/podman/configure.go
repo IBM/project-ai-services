@@ -2,12 +2,13 @@ package podman
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/spyreconfig/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/root"
 )
 
 const (
@@ -17,10 +18,11 @@ const (
 
 // Configure performs the complete configuration of the Podman environment.
 func (p *PodmanBootstrap) Configure() error {
-	rootCheck := root.NewRootRule()
-	if err := rootCheck.Verify(); err != nil {
-		return err
+	euid := os.Geteuid()
+	if euid != 0 {
+		return fmt.Errorf("podman bootstrap requires root privileges, either run as root or use sudo")
 	}
+
 	ctx := context.Background()
 
 	s := spinner.New("Checking podman installation")

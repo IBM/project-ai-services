@@ -47,13 +47,31 @@ func ListModels(template, appName string) ([]string, error) {
 }
 
 func DownloadModel(model, targetDir string) error {
-	// check for target model directory, if not present create it
-	if _, err := os.Stat(targetDir); os.IsNotExist(err) {
-		err := os.MkdirAll(targetDir, os.ModePerm)
-		if err != nil {
-			return fmt.Errorf("failed to create target model directory: %w", err)
-		}
+	// check for target model directory
+	fileInfo, err := os.Stat(targetDir)
+	if err != nil {
+		return fmt.Errorf("cannot access directory: %s, err: %w", targetDir, err)
 	}
+
+	// verify it's a directory
+	if !fileInfo.IsDir() {
+		return fmt.Errorf("path is not a directory: %s", targetDir)
+	}
+
+	// check if user has write permissions to the directory
+	// try to create a temporary file to verify write access
+	testFile := targetDir + "/.write_test"
+	f, err := os.Create(testFile)
+	if err != nil {
+		return fmt.Errorf("user does not have write permission to directory: %s, err: %w", targetDir, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("failed to close test file: %w", err)
+	}
+	if err := os.Remove(testFile); err != nil {
+		return fmt.Errorf("failed to remove test file: %w", err)
+	}
+
 	logger.Infof("Downloading model %s to %s\n", model, targetDir)
 
 	// Get Podman client
@@ -68,13 +86,7 @@ func DownloadModel(model, targetDir string) error {
 	stdin := true
 	s.Terminal = &terminal
 	s.Stdin = &stdin
-	s.Command = []string{
-		"hf",
-		"download",
-		model,
-		"--local-dir",
-		fmt.Sprintf("/models/%s", model),
-	}
+	s.Command = []string{"hf", "download", model, "--local-dir", fmt.Sprintf("/models/%s", model)}
 	rm := true
 	s.Remove = &rm
 

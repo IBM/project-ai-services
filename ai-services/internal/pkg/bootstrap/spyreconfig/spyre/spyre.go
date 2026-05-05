@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -20,7 +21,6 @@ const (
 	spyreDeviceIDRev2 = "06a8"
 	sentientGroup     = "sentient"
 	vfioConfigFile    = "/etc/modprobe.d/vfio-pci.conf"
-	memLimitPerCard   = 134234112 // 128MB in bytes - memory lock limit per Spyre card
 )
 
 // Package-level regex patterns compiled once for performance.
@@ -71,10 +71,13 @@ func RunChecks() []check.CheckResult {
 		checkDriverConfig(),
 		checkUdevRule(),
 		checkMemlockConf(),
+		checkNofileConf(),
 		checkVfioPciConf(),
 		checkUserGroup(),
 		checkVfioModule(),
 		checkVfioAccessPermission(),
+		checkSELinuxVFIOPolicy(),
+		checkSystemdUserSliceLimits(),
 		checkPodmanServiceSupplementaryGroups(),
 	}
 }
@@ -187,36 +190,44 @@ func checkDriverConfig() *check.ConfigurationFileCheck {
 // checkUdevRule validates VFIO udev rules configuration.
 func checkUdevRule() *check.ConfigurationFileCheck {
 	configFile := "/etc/udev/rules.d/95-vfio-3.rules"
-	expectedRule := `SUBSYSTEM=="vfio", GROUP:="sentient", MODE:="0660"`
+	expectedRules := []string{
+		`SUBSYSTEM=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`,
+		`KERNEL=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`,
+	}
 	confCheck := check.NewConfigurationFileCheck("VFIO udev rules configuration", configFile)
 
-	status := false
 	lines, ok := readConfigFileLines(configFile)
-	if ok {
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
+	if !ok {
+		for _, rule := range expectedRules {
+			confCheck.AddAttribute(rule, false, "", "")
+		}
+		confCheck.SetStatus(false)
 
+		return confCheck
+	}
+
+	foundRules := make(map[string]bool)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		for _, expectedRule := range expectedRules {
 			if line == expectedRule {
-				status = true
-
-				break
-			}
-
-			// Check for incorrect vfio rules.
-			if strings.Contains(line, `SUBSYSTEM=="vfio"`) &&
-				(strings.Contains(line, "GROUP:=") || strings.Contains(line, "MODE:=")) {
-				status = false
-
-				break
+				foundRules[expectedRule] = true
 			}
 		}
 	}
 
-	confCheck.AddAttribute(expectedRule, status, "", "")
-	confCheck.SetStatus(status)
+	allFound := true
+	for _, rule := range expectedRules {
+		found := foundRules[rule]
+		confCheck.AddAttribute(rule, found, "", "")
+		allFound = allFound && found
+	}
+
+	confCheck.SetStatus(allFound)
 
 	return confCheck
 }
@@ -298,9 +309,7 @@ func isMemLimitConfigValid(configFile, expectedConf string) bool {
 
 // checkMemlockConf validates user memlock configuration.
 func checkMemlockConf() *check.ConfigurationFileCheck {
-	numCards := GetNumberOfSpyreCards()
-	memlimit := numCards * memLimitPerCard
-	expectedConf := fmt.Sprintf("@sentient - memlock %d", memlimit)
+	expectedConf := "@sentient - memlock unlimited"
 	configFile := "/etc/security/limits.d/memlock.conf"
 
 	confCheck := check.NewConfigurationFileCheck("User memlock configuration", configFile)
@@ -310,6 +319,66 @@ func checkMemlockConf() *check.ConfigurationFileCheck {
 	confCheck.SetStatus(status)
 
 	return confCheck
+}
+
+// checkNofileConf validates user nofile limit configuration.
+func checkNofileConf() *check.ConfigurationFileCheck {
+	expectedConf := "@sentient hard nofile 134217728"
+	configFile := "/etc/security/limits.conf"
+
+	confCheck := check.NewConfigurationFileCheck("User nofile limit configuration", configFile)
+
+	status := isNofileLimitConfigValid(configFile, expectedConf)
+	confCheck.AddAttribute(expectedConf, status, "", "")
+	confCheck.SetStatus(status)
+
+	return confCheck
+}
+
+// isNofileLimitConfigValid checks if nofile limit configuration is valid.
+func isNofileLimitConfigValid(configFile, expectedConf string) bool {
+	lines, err := utils.ReadFileLines(configFile)
+	if err != nil {
+		log.Printf("Error reading %s: %v", configFile, err)
+
+		return false
+	}
+
+	// Pattern to match: @sentient hard nofile <value>
+	nofilePattern := regexp.MustCompile(`^@sentient\s+hard\s+nofile\s+(\d+)$`)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Check for exact match first
+		if line == expectedConf {
+			return true
+		}
+
+		// Parse current line
+		matches := nofilePattern.FindStringSubmatch(line)
+		if matches != nil {
+			// Found a nofile config for @sentient group
+			lineValue := matches[1]
+			lineInt, err := strconv.Atoi(lineValue)
+			if err != nil {
+				continue
+			}
+
+			// Check if the value meets or exceeds the expected value (134217728)
+			expectedInt, _ := strconv.Atoi("134217728")
+			if lineInt >= expectedInt {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // checkVfioPciConf validates VFIO module dep configuration.
@@ -396,11 +465,6 @@ func checkVfioAccessPermission() *check.FilesCheck {
 
 	status := true
 	for _, entry := range entries {
-		// Skip /dev/vfio/vfio file.
-		if entry.Name() == "vfio" {
-			continue
-		}
-
 		fullPath := filepath.Join(vfioDir, entry.Name())
 		info, err := entry.Info()
 		if err != nil {
@@ -517,13 +581,61 @@ func isSentientGroupPresent(value string) bool {
 
 	// Check if it's in a space-separated list of groups
 	groups := strings.Fields(value)
-	for _, group := range groups {
-		if group == sentientGroup {
-			return true
-		}
+
+	return slices.Contains(groups, sentientGroup)
+}
+
+// checkSELinuxVFIOPolicy validates SELinux policy for VFIO device access.
+func checkSELinuxVFIOPolicy() *check.Check {
+	selinuxCheck := check.NewCheck("SELinux VFIO policy configuration")
+
+	// Check if SELinux is enabled
+	exitCode, stdout, _, err := utils.ExecuteCommand("getenforce")
+	if err != nil || exitCode != 0 {
+		// SELinux not available - skip check (pass)
+		selinuxCheck.SetStatus(true)
+
+		return selinuxCheck
 	}
 
-	return false
+	status := strings.TrimSpace(stdout)
+	if status == "Disabled" {
+		// SELinux disabled - skip check (pass)
+		selinuxCheck.SetStatus(true)
+
+		return selinuxCheck
+	}
+
+	// Check if VFIO devices exist
+	if !utils.FileExists("/dev/vfio") {
+		// No VFIO devices - skip check (pass)
+		selinuxCheck.SetStatus(true)
+
+		return selinuxCheck
+	}
+
+	// Check if policy is installed (requires root/sudo)
+	var stderr string
+	exitCode, stdout, stderr, err = utils.ExecuteCommand("semodule", "-l")
+	if err != nil || exitCode != 0 {
+		// If permission denied, assume policy needs to be checked with sudo
+		// This is expected when running without sudo - skip check (pass)
+		if strings.Contains(stderr, "Permission denied") || strings.Contains(stderr, "access") {
+			selinuxCheck.SetStatus(true)
+
+			return selinuxCheck
+		}
+		// Other errors mean policy is not installed
+		selinuxCheck.SetStatus(false)
+
+		return selinuxCheck
+	}
+
+	// Policy should be installed
+	policyInstalled := strings.Contains(stdout, "vllm_vfio_policy")
+	selinuxCheck.SetStatus(policyInstalled)
+
+	return selinuxCheck
 }
 
 func setCheckResult(confCheck *check.ConfigurationFileCheck, found, correctValue bool) {
@@ -537,6 +649,72 @@ func setCheckResult(confCheck *check.ConfigurationFileCheck, found, correctValue
 		confCheck.AddAttribute("SupplementaryGroups=sentient", false, "not found", sentientGroup)
 		confCheck.SetStatus(false)
 	}
+}
+
+// checkSystemdUserSliceLimits validates that systemd user slice limits are configured for rootless podman.
+func checkSystemdUserSliceLimits() *check.ConfigurationFileCheck {
+	checkName := "Systemd user slice limits configuration"
+	confCheck := check.NewConfigurationFileCheck(checkName, "")
+
+	// Get the SUDO_USER to check their slice
+	sudoUser := os.Getenv("SUDO_USER")
+	if sudoUser == "" {
+		// Not running via sudo, skip this check
+		confCheck.SetStatus(true)
+
+		return confCheck
+	}
+
+	// Get user ID
+	exitCode, stdout, stderr, err := utils.ExecuteCommand("id", "-u", sudoUser)
+	if err != nil || exitCode != 0 {
+		log.Printf("Failed to get user ID for %s: %v, stderr: %s", sudoUser, err, stderr)
+		confCheck.SetStatus(false)
+
+		return confCheck
+	}
+
+	userID := strings.TrimSpace(stdout)
+	limitsFile := fmt.Sprintf("/etc/systemd/system/user-%s.slice.d/limits.conf", userID)
+	confCheck.FilePath = limitsFile
+
+	// Check if limits file exists
+	if !utils.FileExists(limitsFile) {
+		confCheck.AddAttribute("LimitNOFILE=134217728", false, "not found", "134217728")
+		confCheck.AddAttribute("LimitMEMLOCK=infinity", false, "not found", "infinity")
+		confCheck.SetStatus(false)
+
+		return confCheck
+	}
+
+	// Read and validate limits file
+	lines, err := utils.ReadFileLines(limitsFile)
+	if err != nil {
+		log.Printf("Failed to read %s: %v", limitsFile, err)
+		confCheck.SetStatus(false)
+
+		return confCheck
+	}
+
+	hasNofile := false
+	hasMemlock := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, "LimitNOFILE="); ok {
+			value := after
+			hasNofile = value == "134217728"
+		}
+		if after, ok := strings.CutPrefix(line, "LimitMEMLOCK="); ok {
+			value := after
+			hasMemlock = value == "infinity"
+		}
+	}
+
+	confCheck.AddAttribute("LimitNOFILE=134217728", hasNofile, "", "134217728")
+	confCheck.AddAttribute("LimitMEMLOCK=infinity", hasMemlock, "", "infinity")
+	confCheck.SetStatus(hasNofile && hasMemlock)
+
+	return confCheck
 }
 
 // Made with Bob
