@@ -3,6 +3,7 @@ import time
 import logging
 import os
 import shutil
+import random
 
 # Set environment variables before importing third-party libraries
 os.environ['GRPC_VERBOSITY'] = 'ERROR'
@@ -13,6 +14,7 @@ from pathlib import Path
 from docling_core.types.doc.document import DoclingDocument
 from concurrent.futures import as_completed, ProcessPoolExecutor
 from sentence_splitter import SentenceSplitter
+from collections import Counter
 
 # Set third-party library log levels before importing project modules
 logging.getLogger('docling').setLevel(logging.CRITICAL)
@@ -21,6 +23,7 @@ logging.getLogger('docling').setLevel(logging.CRITICAL)
 from common.thread_utils import ContextAwareThreadPoolExecutor
 from common.llm_utils import summarize_and_classify_tables, tokenize_with_llm
 from common.misc_utils import get_logger, text_suffix, table_suffix, text_chunk_suffix, table_chunk_suffix
+from common.lang_utils import detect_language, setup_language_detector
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.status import (
     StatusManager,
@@ -711,8 +714,88 @@ def count_tokens(text, emb_endpoint):
     token_len = len(tokenize_with_llm(text, emb_endpoint))
     return token_len
 
-def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50):
-    sentences = SentenceSplitter(language='en').split(text)
+
+def detect_document_language(text: str) -> str:
+    """
+    Detect the language of a document by sampling random chunks.
+    
+    Args:
+        text: The full text to analyze
+        
+    Returns:
+        Language code compatible with SentenceSplitter ('en', 'de', 'it', 'fr')
+        Falls back to 'en' if detection fails or language is not supported
+    """
+    # Mapping from lingua ISO codes to SentenceSplitter language codes
+    lang_map = {
+        'EN': 'en',
+        'DE': 'de',
+        'IT': 'it',
+        'FR': 'fr'
+    }
+    
+    # If text is too short, directly detect and map the language
+    if len(text) < 200:
+        detected_lang = detect_language(text)
+        return lang_map.get(detected_lang, 'en')
+    
+    try:
+        # Sample 3 random chunks from the text
+        detected_languages = []
+        text_length = len(text)
+        
+        for _ in range(3):
+            # Random chunk size between 200-500 characters
+            chunk_size = random.randint(200, min(500, text_length))
+            
+            # Random start position ensuring we don't go out of bounds
+            max_start = max(0, text_length - chunk_size)
+            start_pos = random.randint(0, max_start) if max_start > 0 else 0
+            
+            chunk = text[start_pos:start_pos + chunk_size]
+            
+            # Detect language for this chunk
+            detected_lang = detect_language(chunk)
+            detected_languages.append(detected_lang)
+        
+        # Get the most common detected language
+        most_common_lang = Counter(detected_languages).most_common(1)[0][0]
+        
+        # Map to SentenceSplitter language code
+        sentence_splitter_lang = lang_map.get(most_common_lang, 'en')
+        
+        logger.info(f"Detected languages: {detected_languages}, using: {sentence_splitter_lang}")
+        
+        return sentence_splitter_lang
+        
+    except Exception as e:
+        logger.warning(f"Language detection failed: {e}, falling back to 'en'")
+        return 'en'
+
+
+def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50, language=None):
+    """
+    Split text into token-based chunks using sentence boundaries.
+    
+    Args:
+        text: The text to split
+        emb_endpoint: Embedding endpoint for token counting
+        max_tokens: Maximum tokens per chunk
+        overlap: Number of tokens to overlap between chunks
+        language: Optional language code ('en', 'de', 'it', 'fr'). If None, auto-detect.
+        
+    Returns:
+        List of text chunks
+    """
+    # Detect language if not provided
+    # keeping the parameter option in case we implement language selection in the UI later
+    if language is None:
+        language = detect_document_language(text)
+        logger.info(f"Auto-detected language for chunking: {language}")
+    else:
+        logger.info(f"Using provided language for chunking: {language}")
+    
+    sentences = SentenceSplitter(language=language).split(text)
     chunks = []
     current_chunk = []
     current_token_count = 0
