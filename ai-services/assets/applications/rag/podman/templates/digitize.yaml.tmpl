@@ -90,6 +90,20 @@ spec:
           value: "{{ .Values.opensearch.auth.password }}"
         - name: OPENSEARCH_NUM_SHARDS
           value: "1"
+        - name: POSTGRES_HOST
+          value: "{{ .AppName }}--postgres"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.postgres.database }}"
+        - name: POSTGRES_USER
+          value: "{{ .Values.postgres.user }}"
+        - name: POSTGRES_PASSWORD
+          value: "{{ .Values.postgres.password }}"
+        - name: DB_POOL_SIZE
+          value: "5"
+        - name: DB_MAX_OVERFLOW
+          value: "5"
         - name: LOG_LEVEL
           value: "{{ .Values.digitize.log_level }}"
         {{- if .Values.instruct.apiKey }}
