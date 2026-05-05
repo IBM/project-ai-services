@@ -7,6 +7,7 @@ import Login from "./pages/Login";
 import Logout from "./pages/Logout";
 import ApplicationsListPage from "./pages/AiDeployments";
 import { ProtectedRoute } from "@/components";
+import ServicesPage from "./pages/Services";
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
               path={ROUTES.AI_DEPLOYMENTS}
               element={<ApplicationsListPage />}
             />
+            <Route path={ROUTES.SERVICES} element={<ServicesPage />} />
           </Route>
         </Route>
 
