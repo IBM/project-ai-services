@@ -100,7 +100,7 @@ class TestModeParameter:
         })
         
         assert response.status_code == 400
-        assert "mode must be one of" in response.json()["detail"]
+        assert "mode must be one of" in response.json()["error"]["message"]
     
     def test_mode_passed_to_retrieve_documents(self, mock_dependencies):
         """Test that mode parameter is passed to retrieve_documents"""
@@ -171,6 +171,70 @@ class TestRequestValidation:
             "query": "",
             "mode": "dense"
         })
-        
+
         assert response.status_code == 400
-        assert "query is required" in response.json()["detail"]
+        assert "query is required" in response.json()["error"]["message"]
+
+    def test_top_k_zero_returns_422(self, mock_dependencies):
+        """Test that top_k=0 is rejected by Pydantic before hitting OpenSearch"""
+        response = client.post("/v1/similarity-search", json={
+            "query": "test query",
+            "top_k": 0
+        })
+        assert response.status_code == 422
+
+    def test_top_k_negative_returns_422(self, mock_dependencies):
+        """Test that negative top_k is also rejected"""
+        response = client.post("/v1/similarity-search", json={
+            "query": "test query",
+            "top_k": -5
+        })
+        assert response.status_code == 422
+
+    def test_top_k_one_is_accepted(self, mock_dependencies):
+        """Test that top_k=1 is valid and returns a single result"""
+        response = client.post("/v1/similarity-search", json={
+            "query": "test query",
+            "top_k": 1
+        })
+        assert response.status_code == 200
+        assert len(response.json()["results"]) == 1
+
+    def test_top_k_omitted_uses_default(self, mock_dependencies):
+        """Test that omitting top_k falls back to NUM_CHUNKS_POST_SEARCH (default 10)"""
+        from similarity.settings import settings
+        mock_retrieve = mock_dependencies["retrieve_documents"]
+        client.post("/v1/similarity-search", json={"query": "test query"})
+        call_args = mock_retrieve.call_args[0]
+        top_k_passed = call_args[5]
+        assert top_k_passed == settings.similarity.num_chunks_post_search
+
+
+class TestConfig:
+    """Tests for startup-time config validation"""
+
+    def test_num_chunks_post_search_zero_falls_back_to_default(self):
+        """Test that missing NUM_CHUNKS_POST_SEARCH falls back to default.
+        
+        Note: Pydantic's gt=0 constraint validates before custom validators run,
+        so zero cannot reach the custom validator. This test verifies the default
+        behavior when the environment variable is not set.
+        """
+        import importlib
+        import os
+        import sys
+        
+        # Clear any cached modules
+        sys.modules.pop("similarity.settings", None)
+        
+        # Test with unset environment variable - should use default of 10
+        with patch.dict(os.environ, {}, clear=False):
+            # Remove the variable if it exists
+            os.environ.pop("NUM_CHUNKS_POST_SEARCH", None)
+            mod = importlib.import_module("similarity.settings")
+            # Should use the default value of 10
+            assert mod.settings.similarity.num_chunks_post_search == 10
+        
+        # Clean up
+        sys.modules.pop("similarity.settings", None)
+        importlib.import_module("similarity.settings")

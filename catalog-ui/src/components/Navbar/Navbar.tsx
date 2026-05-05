@@ -8,7 +8,6 @@ import {
 import { NavLink } from "react-router-dom";
 import { useRef, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import styles from "./Navbar.module.scss";
 
 type NavbarProps = {
   isSideNavOpen: boolean;
@@ -40,37 +39,21 @@ const Navbar = (props: NavbarProps) => {
         ref={navRef}
       >
         <SideNavItems>
-          <SideNavMenuItem
-            as={NavLink}
-            to="/ai-deployments"
-            className={styles.sideNavItem}
-          >
+          <SideNavMenuItem as={NavLink} to="/ai-deployments">
             AI Deployments
           </SideNavMenuItem>
 
-          <SideNavMenuItem
-            as={NavLink}
-            to="/architectures"
-            className={styles.sideNavItem}
-          >
+          <SideNavMenuItem as={NavLink} to="/architectures">
             Architectures
           </SideNavMenuItem>
 
-          <SideNavMenuItem
-            as={NavLink}
-            to="/services"
-            className={styles.sideNavItem}
-          >
+          <SideNavMenuItem as={NavLink} to="/services">
             Services
           </SideNavMenuItem>
 
           <SideNavDivider />
 
-          <SideNavMenuItem
-            as={NavLink}
-            to="/solutions-and-use-cases"
-            className={styles.sideNavItem}
-          >
+          <SideNavMenuItem as={NavLink} to="/solutions-and-use-cases">
             Solutions and use cases
           </SideNavMenuItem>
         </SideNavItems>
