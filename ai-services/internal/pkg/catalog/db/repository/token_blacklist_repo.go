@@ -67,6 +67,7 @@ func (r *tokenBlacklistRepo) Contains(ctx context.Context, tokenHash string, tok
 		if err == pgx.ErrNoRows {
 			return false, nil
 		}
+
 		return false, fmt.Errorf("failed to check token blacklist: %w", err)
 	}
 

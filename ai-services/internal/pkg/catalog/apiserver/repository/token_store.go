@@ -22,6 +22,7 @@ type TokenBlacklist interface {
 // HashToken creates a SHA-256 hash of the token for secure storage.
 func HashToken(token string) string {
 	hash := sha256.Sum256([]byte(token))
+
 	return hex.EncodeToString(hash[:])
 }
 
@@ -74,7 +75,8 @@ func (b *DBTokenBlacklist) Stop() {
 
 // gc runs periodically to clean up expired tokens from the database.
 func (b *DBTokenBlacklist) gc() {
-	ticker := time.NewTicker(5 * time.Minute)
+	const cleanupInterval = 5 * time.Minute
+	ticker := time.NewTicker(cleanupInterval)
 	defer ticker.Stop()
 	for {
 		select {
