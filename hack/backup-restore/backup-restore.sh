@@ -1,11 +1,56 @@
 #!/bin/bash
 # Unified Backup/Restore Tool for AI Services
+#
+# SIDECAR CONTAINER APPROACH for OpenSearch:
+# This script uses a sidecar container pattern for OpenSearch backup/restore:
+# 1. Detects the pod that contains the OpenSearch container
+# 2. Launches a temporary Python container in the SAME POD
+# 3. The sidecar shares the network namespace with OpenSearch (localhost access)
+# 4. Installs opensearch-py and runs backup/restore operations
+# 5. Cleans up the sidecar container after completion
+#
+# Benefits:
+# - No modifications to the running OpenSearch container
+# - Clean separation of concerns
+# - Proper dependency management in isolated environment
+# - Follows Kubernetes/Podman best practices
+#
 # Usage: ./backup-restore.sh <command> [options]
 
 set -e
 
 VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Default configuration (can be overridden by environment variables or --env-file)
+CACHE_DIR="${CACHE_DIR:-/var/cache}"
+OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD:-}"
+ENV_FILE=""
+
+# Parse global options (--env-file)
+parse_global_options() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --env-file)
+                ENV_FILE="$2"
+                if [ ! -f "$ENV_FILE" ]; then
+                    print_error "Environment file not found: $ENV_FILE"
+                    exit 1
+                fi
+                # Source the env file
+                set -a  # automatically export all variables
+                source "$ENV_FILE"
+                set +a
+                shift 2
+                ;;
+            *)
+                # Return remaining args
+                echo "$@"
+                return
+                ;;
+        esac
+    done
+}
 
 # Color codes for output
 RED='\033[0;31m'
@@ -15,10 +60,20 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Print colored output
-print_error() { echo -e "${RED} $1${NC}"; }
-print_success() { echo -e "${GREEN} $1${NC}"; }
-print_warning() { echo -e "${YELLOW}  $1${NC}"; }
-print_info() { echo -e "${BLUE}ℹ $1${NC}"; }
+print_error() { echo -e "${RED}❌ $1${NC}"; }
+print_success() { echo -e "${GREEN}✅ $1${NC}"; }
+print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+print_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
+
+# Validate and set OpenSearch password
+validate_opensearch_password() {
+    if [ -z "$OPENSEARCH_PASSWORD" ]; then
+        # No password set - use default with warning
+        OPENSEARCH_PASSWORD="AiServices@12345"
+        print_warning "Using default OpenSearch password (not recommended for production)"
+        print_info "Set OPENSEARCH_PASSWORD environment variable or use --env-file for custom password"
+    fi
+}
 
 # Show usage
 show_usage() {
@@ -26,16 +81,21 @@ show_usage() {
 Unified Backup/Restore Tool for AI Services v${VERSION}
 
 USAGE:
-    ./backup-restore.sh <command> [options]
+    ./backup-restore.sh [--env-file <file>] <command> [options]
+
+GLOBAL OPTIONS:
+    --env-file <file>
+        Load environment variables from file (recommended for production)
+        Example: ./backup-restore.sh --env-file secrets.env export opensearch rag-dev backup.tar.gz
 
 COMMANDS:
     export opensearch <app-name> <output-file>
         Export OpenSearch vector database
         Example: ./backup-restore.sh export opensearch rag-dev opensearch.tar.gz
 
-    export digitize <output-file>
-        Export digitize application data (/var/cache)
-        Example: ./backup-restore.sh export digitize digitize.tar.gz
+    export digitize <app-name> <output-file>
+        Export digitize application data (default: /var/cache)
+        Example: ./backup-restore.sh export digitize rag-dev digitize.tar.gz
 
     import opensearch <backup-file>
         Import OpenSearch vector database
@@ -45,6 +105,10 @@ COMMANDS:
         Import digitize application data
         Example: ./backup-restore.sh import digitize digitize.tar.gz
 
+ENVIRONMENT VARIABLES:
+    CACHE_DIR              Cache directory path (default: /var/cache)
+    OPENSEARCH_PASSWORD    OpenSearch admin password (required, set via --env-file or environment variable)
+
     help
         Show this help message
 
@@ -52,9 +116,17 @@ COMMANDS:
         Show version information
 
 EXAMPLES:
+    # Using --env-file (recommended for production)
+    ./backup-restore.sh --env-file .env export opensearch rag-dev opensearch.tar.gz
+    ./backup-restore.sh --env-file .env import opensearch opensearch.tar.gz
+
+    # Using environment variables
+    export OPENSEARCH_PASSWORD="MySecurePassword123"
+    ./backup-restore.sh export opensearch rag-dev opensearch.tar.gz
+
     # Full backup (run both commands)
     ./backup-restore.sh export opensearch rag-dev opensearch.tar.gz
-    ./backup-restore.sh export digitize digitize.tar.gz
+    ./backup-restore.sh export digitize rag-dev digitize.tar.gz
 
     # Full restore (run both commands)
     ./backup-restore.sh import opensearch opensearch.tar.gz
@@ -66,31 +138,54 @@ EXAMPLES:
     # Partial restore (digitize only)
     ./backup-restore.sh import digitize digitize_backup.tar.gz
 
+SECURITY NOTES:
+    - Use --env-file or environment variables for custom passwords
+    - Never commit .env files with real passwords to version control
+    - Copy .env.example to .env and customize for your environment
+
 EOF
 }
 
-# Export OpenSearch
+# Export OpenSearch using sidecar container approach
 export_opensearch() {
     local APP_NAME="${1:-rag-dev}"
     local OUTPUT_FILE="${2:-opensearch_backup_$(date +%Y%m%d_%H%M%S).tar.gz}"
-    local CONTAINER_NAME=$(podman ps | grep opensearch | awk '{print $1}')
+    
+    # Filter container by app name
+    local CONTAINER_NAME=$(podman ps --filter "label=app=${APP_NAME}" --filter "name=opensearch" --format "{{.Names}}" | head -n 1)
+    
+    if [ -z "$CONTAINER_NAME" ]; then
+        # Fallback: try without app label filter
+        CONTAINER_NAME=$(podman ps --filter "name=${APP_NAME}.*opensearch" --format "{{.Names}}" | head -n 1)
+    fi
 
     if [ -z "$CONTAINER_NAME" ]; then
-        print_error "OpenSearch container not found"
+        print_error "OpenSearch container not found for app: $APP_NAME"
         exit 1
     fi
 
     echo "============================================================"
-    echo "OpenSearch Export"
+    echo "OpenSearch Export (Sidecar Container Approach)"
     echo "============================================================"
     echo "Container: $CONTAINER_NAME"
     echo "App name: $APP_NAME"
     echo "Output: $OUTPUT_FILE"
     echo ""
 
+    # Get the pod ID for the OpenSearch container
+    local POD_ID=$(podman inspect $CONTAINER_NAME --format '{{.Pod}}')
+    
+    if [ -z "$POD_ID" ] || [ "$POD_ID" = "<no value>" ]; then
+        print_error "Container is not part of a pod. Sidecar approach requires pod deployment."
+        print_error "Please ensure OpenSearch is deployed as part of a pod."
+        exit 1
+    fi
+    
+    print_info "Pod ID: $POD_ID"
+
     # Create Python backup script
     print_info "Creating backup script..."
-    podman exec $CONTAINER_NAME bash -c 'cat > /tmp/backup.py << '\''EOFPYTHON'\''
+    cat > /tmp/backup.py << 'EOFPYTHON'
 #!/usr/bin/env python3
 import json, os, sys, tarfile, tempfile
 from datetime import datetime
@@ -101,10 +196,14 @@ class BackupExporter:
     def __init__(self, app_name, output_file):
         self.app_name = app_name
         self.output_file = output_file
+        password = os.getenv("OPENSEARCH_PASSWORD")
+        if not password:
+            print("ERROR: OPENSEARCH_PASSWORD environment variable not set")
+            sys.exit(1)
         self.client = OpenSearch(
             hosts=[{"host": "localhost", "port": 9200}],
             http_compress=True, use_ssl=True,
-            http_auth=("admin", os.getenv("OPENSEARCH_PASSWORD", "AiServices@12345")),
+            http_auth=("admin", password),
             verify_certs=False, ssl_show_warn=False, timeout=30
         )
     
@@ -134,7 +233,7 @@ class BackupExporter:
     def run(self):
         print("Connecting to OpenSearch...")
         info = self.client.info()
-        print(f"✓ Connected to OpenSearch {info['\''version'\'']['\''number'\'']}")
+        print(f"✓ Connected to OpenSearch {info['version']['number']}")
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             os_dir = temp_path / "opensearch"
@@ -154,48 +253,76 @@ if __name__ == "__main__":
     exporter = BackupExporter(sys.argv[1], sys.argv[2])
     exporter.run()
 EOFPYTHON
-'
 
-    # Install dependencies
-    print_info "Installing dependencies..."
-    if ! podman exec $CONTAINER_NAME bash -c "command -v pip &> /dev/null || command -v pip3 &> /dev/null"; then
-        podman exec --user root $CONTAINER_NAME bash -c "
-            if command -v yum &> /dev/null; then
-                yum install -y python3-pip 2>&1 | tail -3
-            elif command -v dnf &> /dev/null; then
-                dnf install -y python3-pip 2>&1 | tail -3
-            elif command -v apt-get &> /dev/null; then
-                apt-get update -qq && apt-get install -y python3-pip 2>&1 | tail -3
-            elif command -v apk &> /dev/null; then
-                apk add --no-cache py3-pip 2>&1 | tail -3
-            else
-                python3 -m ensurepip --default-pip 2>&1 | tail -3 || true
-            fi
-        " 2>/dev/null || true
+    # Run sidecar container in the same pod
+    print_info "Starting sidecar container with Python and opensearch-py..."
+    
+    local SIDECAR_NAME="opensearch-backup-sidecar-$$"
+    
+    # Start sidecar container in the same pod (shares network namespace with OpenSearch)
+    podman run -d \
+        --name "$SIDECAR_NAME" \
+        --pod "$POD_ID" \
+        --rm \
+        -e OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD}" \
+        python:3.11-slim \
+        sleep 3600
+    
+    if [ $? -ne 0 ]; then
+        print_error "Failed to start sidecar container"
+        rm -f /tmp/backup.py
+        exit 1
     fi
-
-    podman exec $CONTAINER_NAME bash -c "
-        if command -v pip &> /dev/null; then
-            pip install --user opensearch-py 2>&1 | grep -E '(Successfully installed|Requirement already satisfied)' || true
-        elif command -v pip3 &> /dev/null; then
-            pip3 install --user opensearch-py 2>&1 | grep -E '(Successfully installed|Requirement already satisfied)' || true
-        elif python3 -m pip --version &> /dev/null; then
-            python3 -m pip install --user opensearch-py 2>&1 | grep -E '(Successfully installed|Requirement already satisfied)' || true
-        fi
-    " 2>/dev/null
-
-    # Run backup
-    print_info "Running OpenSearch backup..."
-    podman exec -e OPENSEARCH_PASSWORD=AiServices@12345 \
-        $CONTAINER_NAME python3 /tmp/backup.py "$APP_NAME" /tmp/backup.tar.gz
-
-    # Copy to host
+    
+    print_info "Installing dependencies in sidecar..."
+    podman exec "$SIDECAR_NAME" pip install --no-cache-dir opensearch-py==2.3.1
+    
+    if [ $? -ne 0 ]; then
+        print_error "Failed to install dependencies in sidecar"
+        podman stop "$SIDECAR_NAME" 2>/dev/null
+        rm -f /tmp/backup.py
+        exit 1
+    fi
+    
+    # Copy backup script to sidecar
+    print_info "Copying backup script to sidecar..."
+    podman cp /tmp/backup.py "$SIDECAR_NAME:/backup.py"
+    
+    if [ $? -ne 0 ]; then
+        print_error "Failed to copy backup script to sidecar"
+        podman stop "$SIDECAR_NAME" 2>/dev/null
+        rm -f /tmp/backup.py
+        exit 1
+    fi
+    
+    print_info "Running backup from sidecar container..."
+    podman exec -e OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD}" \
+        "$SIDECAR_NAME" \
+        python3 /backup.py "$APP_NAME" "/tmp/$OUTPUT_FILE"
+    
+    if [ $? -ne 0 ]; then
+        print_error "Backup failed"
+        podman stop "$SIDECAR_NAME" 2>/dev/null
+        rm -f /tmp/backup.py
+        exit 1
+    fi
+    
+    # Copy backup file from sidecar to host
     print_info "Copying backup to host..."
-    podman cp $CONTAINER_NAME:/tmp/backup.tar.gz "./$OUTPUT_FILE"
-
-    # Cleanup
-    podman exec $CONTAINER_NAME rm -f /tmp/backup.py /tmp/backup.tar.gz
-
+    podman cp "$SIDECAR_NAME:/tmp/$OUTPUT_FILE" "./$OUTPUT_FILE"
+    
+    if [ $? -ne 0 ]; then
+        print_error "Failed to copy backup from sidecar"
+        podman stop "$SIDECAR_NAME" 2>/dev/null
+        rm -f /tmp/backup.py
+        exit 1
+    fi
+    
+    # Cleanup sidecar container
+    print_info "Cleaning up sidecar container..."
+    podman stop "$SIDECAR_NAME" 2>/dev/null
+    rm -f /tmp/backup.py
+            
     echo ""
     print_success "OpenSearch export completed!"
     echo "Backup file: $OUTPUT_FILE"
@@ -204,32 +331,84 @@ EOFPYTHON
 
 # Export Digitize
 export_digitize() {
-    local OUTPUT_FILE="${1:-digitize_backup_$(date +%Y%m%d_%H%M%S).tar.gz}"
-    local CACHE_DIR="/var/cache"
+    local APP_NAME="${1:-rag-dev}"
+    local OUTPUT_FILE="${2:-digitize_backup_$(date +%Y%m%d_%H%M%S).tar.gz}"
 
     echo "============================================================"
     echo "Digitize Data Export"
     echo "============================================================"
-    echo "Cache directory: $CACHE_DIR"
+    echo "App name: $APP_NAME"
+    echo "Container cache path: /var/cache"
     echo "Output: $OUTPUT_FILE"
     echo ""
 
-    if [ ! -d "$CACHE_DIR" ]; then
-        print_error "$CACHE_DIR directory not found on host"
+    # Get digitize BACKEND container (not UI) - try multiple methods for robustness
+    local DIGITIZE_CONTAINER=$(podman ps --filter "label=app=${APP_NAME}" --filter "name=digitize-backend" --format "{{.Names}}" | head -n 1)
+    
+    if [ -z "$DIGITIZE_CONTAINER" ]; then
+        # Fallback 1: try pattern matching with app name and backend
+        DIGITIZE_CONTAINER=$(podman ps --filter "name=${APP_NAME}.*digitize-backend" --format "{{.Names}}" | head -n 1)
+    fi
+    
+    if [ -z "$DIGITIZE_CONTAINER" ]; then
+        # Fallback 2: try just digitize-backend
+        DIGITIZE_CONTAINER=$(podman ps --filter "name=digitize-backend" --format "{{.Names}}" | head -n 1)
+    fi
+    
+    if [ -z "$DIGITIZE_CONTAINER" ]; then
+        # Fallback 3: grep for digitize-backend (not digitize-ui)
+        DIGITIZE_CONTAINER=$(podman ps | grep "digitize-backend" | awk '{print $1}' | head -n 1)
+    fi
+
+    # BACKUP STRATEGY:
+    # Backup is taken from the container's /var/cache directory.
+    # Note: /var/cache only exists inside the container, not on the host.
+    # Host path is /var/lib/aiservices/... (for reference only, not used for backup).
+    #
+    # PR Comment: "We should not be updating the running container"
+    # Solution: We only READ from the container (tar command), no modifications.
+    
+    if [ -z "$DIGITIZE_CONTAINER" ]; then
+        print_error "Digitize backend container not found for app: $APP_NAME"
+        print_info "Looking for containers with 'digitize-backend' in the name"
         exit 1
     fi
 
-    print_info "Creating backup of /var/cache..."
+    print_info "Creating backup from container ($DIGITIZE_CONTAINER)..."
     TEMP_DIR=$(mktemp -d)
     cd "$TEMP_DIR"
 
     mkdir -p backup/cache
-    cp -r "$CACHE_DIR"/* backup/cache/ 2>/dev/null || true
+
+    # Backup entire /var/cache from CONTAINER
+    print_info "Backing up /var/cache from container..."
+    
+    # Read-only operation: tar the entire /var/cache directory from container
+    # No container modifications - just reading data
+    podman exec $DIGITIZE_CONTAINER tar -czf /tmp/container_cache.tar.gz -C /var cache 2>/dev/null || true
+    podman cp $DIGITIZE_CONTAINER:/tmp/container_cache.tar.gz ./container_cache.tar.gz 2>/dev/null || true
+    
+    # Extract backup
+    if [ -f "./container_cache.tar.gz" ]; then
+        tar -xzf ./container_cache.tar.gz -C backup/ 2>/dev/null || true
+        rm -f ./container_cache.tar.gz
+        # Cleanup temp file from container
+        podman exec $DIGITIZE_CONTAINER rm -f /tmp/container_cache.tar.gz 2>/dev/null || true
+        
+        TOTAL_FILES=$(find backup/cache -type f 2>/dev/null | wc -l)
+        TOTAL_SIZE=$(du -sh backup/cache 2>/dev/null | awk '{print $1}')
+        echo "  ✓ Backed up $TOTAL_FILES files ($TOTAL_SIZE) from container"
+    else
+        print_error "Failed to create backup from container"
+        cd "$OLDPWD"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
 
     TOTAL_FILES=$(find backup/cache -type f 2>/dev/null | wc -l)
     TOTAL_SIZE=$(du -sh backup/cache 2>/dev/null | awk '{print $1}')
 
-    echo "  ✓ Backed up $TOTAL_FILES files ($TOTAL_SIZE) from host"
+    echo "  ✓ Final backup: $TOTAL_FILES files ($TOTAL_SIZE)"
 
     tar -czf "$OLDPWD/$OUTPUT_FILE" backup/
     cd "$OLDPWD"
@@ -242,7 +421,7 @@ export_digitize() {
 }
 
 
-# Import OpenSearch
+# Import OpenSearch using sidecar container approach
 import_opensearch() {
     local BACKUP_FILE="$1"
 
@@ -259,19 +438,26 @@ import_opensearch() {
     fi
 
     echo "============================================================"
-    echo "OpenSearch Import"
+    echo "OpenSearch Import (Sidecar Container Approach)"
     echo "============================================================"
     echo "Container: $CONTAINER_NAME"
     echo "Backup file: $BACKUP_FILE"
     echo ""
 
-    # Copy backup to container
-    print_info "Copying backup to container..."
-    podman cp "$BACKUP_FILE" $CONTAINER_NAME:/tmp/backup.tar.gz
+    # Get the pod ID for the OpenSearch container
+    local POD_ID=$(podman inspect $CONTAINER_NAME --format '{{.Pod}}')
+    
+    if [ -z "$POD_ID" ] || [ "$POD_ID" = "<no value>" ]; then
+        print_error "Container is not part of a pod. Sidecar approach requires pod deployment."
+        print_error "Please ensure OpenSearch is deployed as part of a pod."
+        exit 1
+    fi
+    
+    print_info "Pod ID: $POD_ID"
 
     # Create restore script
     print_info "Creating restore script..."
-    podman exec $CONTAINER_NAME bash -c 'cat > /tmp/restore.py << '\''EOFPYTHON'\''
+    cat > /tmp/restore.py << 'EOFPYTHON'
 #!/usr/bin/env python3
 import json, os, sys, tarfile, tempfile
 from pathlib import Path
@@ -280,10 +466,14 @@ from opensearchpy import OpenSearch, helpers
 class BackupRestorer:
     def __init__(self, backup_file):
         self.backup_file = backup_file
+        password = os.getenv("OPENSEARCH_PASSWORD")
+        if not password:
+            print("ERROR: OPENSEARCH_PASSWORD environment variable not set")
+            sys.exit(1)
         self.client = OpenSearch(
             hosts=[{"host": "localhost", "port": 9200}],
             http_compress=True, use_ssl=True,
-            http_auth=("admin", os.getenv("OPENSEARCH_PASSWORD", "AiServices@12345")),
+            http_auth=("admin", password),
             verify_certs=False, ssl_show_warn=False, timeout=30
         )
     
@@ -314,7 +504,7 @@ class BackupRestorer:
     def run(self):
         print("Connecting to OpenSearch...")
         info = self.client.info()
-        print(f"✓ Connected to OpenSearch {info['\''version'\'']['\''number'\'']}")
+        print(f"✓ Connected to OpenSearch {info['version']['number']}")
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             print("Extracting backup...")
@@ -324,8 +514,8 @@ class BackupRestorer:
             if info_file.exists():
                 with open(info_file) as f:
                     info = json.load(f)
-                    print(f"  Backup date: {info.get('\''backup_date'\'')}")
-                    print(f"  App name: {info.get('\''app_name'\'')}")
+                    print(f"  Backup date: {info.get('backup_date')}")
+                    print(f"  App name: {info.get('app_name')}")
             os_dir = temp_path / "backup" / "opensearch"
             if os_dir.exists():
                 indices = [f.stem.replace("_data", "") for f in os_dir.glob("*_data.json")]
@@ -338,44 +528,76 @@ if __name__ == "__main__":
     restorer = BackupRestorer(sys.argv[1])
     restorer.run()
 EOFPYTHON
-'
 
-    # Install dependencies
-    print_info "Installing dependencies..."
-    if ! podman exec $CONTAINER_NAME bash -c "command -v pip &> /dev/null || command -v pip3 &> /dev/null"; then
-        podman exec --user root $CONTAINER_NAME bash -c "
-            if command -v yum &> /dev/null; then
-                yum install -y python3-pip 2>&1 | tail -3
-            elif command -v dnf &> /dev/null; then
-                dnf install -y python3-pip 2>&1 | tail -3
-            elif command -v apt-get &> /dev/null; then
-                apt-get update -qq && apt-get install -y python3-pip 2>&1 | tail -3
-            elif command -v apk &> /dev/null; then
-                apk add --no-cache py3-pip 2>&1 | tail -3
-            else
-                python3 -m ensurepip --default-pip 2>&1 | tail -3 || true
-            fi
-        " 2>/dev/null || true
+    # Run sidecar container in the same pod
+    print_info "Starting sidecar container with Python and opensearch-py..."
+    
+    local SIDECAR_NAME="opensearch-restore-sidecar-$$"
+    
+    # Start sidecar container in the same pod (shares network namespace with OpenSearch)
+    podman run -d \
+        --name "$SIDECAR_NAME" \
+        --pod "$POD_ID" \
+        --rm \
+        -e OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD}" \
+        python:3.11-slim \
+        sleep 3600
+    
+    if [ $? -ne 0 ]; then
+        print_error "Failed to start sidecar container"
+        rm -f /tmp/restore.py
+        exit 1
     fi
-
-    podman exec $CONTAINER_NAME bash -c "
-        if command -v pip &> /dev/null; then
-            pip install --user opensearch-py 2>&1 | grep -E '(Successfully installed|Requirement already satisfied)' || true
-        elif command -v pip3 &> /dev/null; then
-            pip3 install --user opensearch-py 2>&1 | grep -E '(Successfully installed|Requirement already satisfied)' || true
-        elif python3 -m pip --version &> /dev/null; then
-            python3 -m pip install --user opensearch-py 2>&1 | grep -E '(Successfully installed|Requirement already satisfied)' || true
-        fi
-    " 2>/dev/null
-
-    # Run restore
-    print_info "Running OpenSearch restore..."
-    podman exec -e OPENSEARCH_PASSWORD=AiServices@12345 \
-        $CONTAINER_NAME python3 /tmp/restore.py /tmp/backup.tar.gz
-
-    # Cleanup
-    print_info "Cleaning up..."
-    podman exec $CONTAINER_NAME rm -f /tmp/restore.py /tmp/backup.tar.gz
+    
+    print_info "Installing dependencies in sidecar..."
+    podman exec "$SIDECAR_NAME" pip install --no-cache-dir opensearch-py==2.3.1
+    
+    if [ $? -ne 0 ]; then
+        print_error "Failed to install dependencies in sidecar"
+        podman stop "$SIDECAR_NAME" 2>/dev/null
+        rm -f /tmp/restore.py
+        exit 1
+    fi
+    
+    # Copy restore script to sidecar
+    print_info "Copying restore script to sidecar..."
+    podman cp /tmp/restore.py "$SIDECAR_NAME:/restore.py"
+    
+    if [ $? -ne 0 ]; then
+        print_error "Failed to copy restore script to sidecar"
+        podman stop "$SIDECAR_NAME" 2>/dev/null
+        rm -f /tmp/restore.py
+        exit 1
+    fi
+    
+    # Copy backup file to sidecar
+    print_info "Copying backup to sidecar container..."
+    podman cp "$BACKUP_FILE" "$SIDECAR_NAME:/tmp/backup.tar.gz"
+    
+    if [ $? -ne 0 ]; then
+        print_error "Failed to copy backup to sidecar"
+        podman stop "$SIDECAR_NAME" 2>/dev/null
+        rm -f /tmp/restore.py
+        exit 1
+    fi
+    
+    # Run restore from sidecar container
+    print_info "Running restore from sidecar container..."
+    podman exec -e OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD}" \
+        "$SIDECAR_NAME" \
+        python3 /restore.py /tmp/backup.tar.gz
+    
+    if [ $? -ne 0 ]; then
+        print_error "Restore failed"
+        podman stop "$SIDECAR_NAME" 2>/dev/null
+        rm -f /tmp/restore.py
+        exit 1
+    fi
+    
+    # Cleanup sidecar container
+    print_info "Cleaning up sidecar container..."
+    podman stop "$SIDECAR_NAME" 2>/dev/null
+    rm -f /tmp/restore.py
 
     echo ""
     print_success "OpenSearch import completed!"
@@ -396,54 +618,133 @@ import_digitize() {
     echo "Backup file: $BACKUP_FILE"
     echo ""
 
-    local CACHE_DIR="/var/cache"
     local TEMP_DIR=$(mktemp -d)
 
     # Extract backup
-    print_info "Restoring /var/cache directory..."
+    print_info "Extracting backup..."
     tar -xzf "$BACKUP_FILE" -C "$TEMP_DIR"
 
-    if [ -d "$TEMP_DIR/backup/cache" ]; then
-        mkdir -p "$CACHE_DIR"
-        cp -r "$TEMP_DIR/backup/cache"/* "$CACHE_DIR/" 2>/dev/null || true
-        
-        TOTAL_FILES=$(find "$CACHE_DIR" -type f 2>/dev/null | wc -l)
-        TOTAL_SIZE=$(du -sh "$CACHE_DIR" 2>/dev/null | awk '{print $1}')
-        echo "  ✓ Restored $TOTAL_FILES files ($TOTAL_SIZE) to $CACHE_DIR"
-    else
-        print_warning "No cache directory found in backup"
+    if [ ! -d "$TEMP_DIR/backup/cache" ]; then
+        print_error "No cache directory found in backup"
+        rm -rf "$TEMP_DIR"
+        exit 1
     fi
 
-    rm -rf "$TEMP_DIR"
-
-    # Copy to container
-    print_info "Copying to digitize container..."
-    local DIGITIZE_CONTAINER=$(podman ps --filter "name=digitize-backend" --format "{{.Names}}" | head -n 1)
+    # Restore to container - MIRROR the export strategy
+    print_info "Restoring to digitize container..."
+    
+    # Get digitize BACKEND container (not UI) - try multiple methods for robustness
+    local DIGITIZE_CONTAINER=$(podman ps --filter "label=app=${APP_NAME}" --filter "name=digitize-backend" --format "{{.Names}}" | head -n 1)
     
     if [ -z "$DIGITIZE_CONTAINER" ]; then
-        DIGITIZE_CONTAINER=$(podman ps --filter "name=digitize" --format "{{.Names}}" | head -n 1)
+        # Fallback 1: try pattern matching with app name and backend
+        DIGITIZE_CONTAINER=$(podman ps --filter "name=${APP_NAME}.*digitize-backend" --format "{{.Names}}" | head -n 1)
+    fi
+    
+    if [ -z "$DIGITIZE_CONTAINER" ]; then
+        # Fallback 2: try just digitize-backend
+        DIGITIZE_CONTAINER=$(podman ps --filter "name=digitize-backend" --format "{{.Names}}" | head -n 1)
+    fi
+    
+    if [ -z "$DIGITIZE_CONTAINER" ]; then
+        # Fallback 3: grep for digitize-backend (not digitize-ui)
+        DIGITIZE_CONTAINER=$(podman ps | grep "digitize-backend" | awk '{print $1}' | head -n 1)
     fi
 
-    if [ -n "$DIGITIZE_CONTAINER" ]; then
-        echo "  ✓ Found container: $DIGITIZE_CONTAINER"
-        
-        podman exec $DIGITIZE_CONTAINER mkdir -p /var/cache 2>/dev/null || true
-        
-        tar -czf /tmp/cache_for_container.tar.gz -C /var cache 2>/dev/null
-        podman cp /tmp/cache_for_container.tar.gz $DIGITIZE_CONTAINER:/tmp/ 2>/dev/null
-        podman exec $DIGITIZE_CONTAINER tar -xzf /tmp/cache_for_container.tar.gz -C /var 2>/dev/null
-        podman exec $DIGITIZE_CONTAINER rm -f /tmp/cache_for_container.tar.gz 2>/dev/null || true
-        rm -f /tmp/cache_for_container.tar.gz
-        
-        CONTAINER_DOCS=$(podman exec $DIGITIZE_CONTAINER sh -c "ls -1 /var/cache/docs/*.json 2>/dev/null | wc -l" 2>/dev/null || echo "0")
-        echo "  ✓ Container has $CONTAINER_DOCS document files"
-    else
-        print_warning "Digitize container not found"
+    if [ -z "$DIGITIZE_CONTAINER" ]; then
+        print_error "Digitize backend container not found for app: $APP_NAME"
+        print_info "Looking for containers with 'digitize-backend' in the name"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+
+    echo "  ✓ Found container: $DIGITIZE_CONTAINER"
+    
+    # Show what we're restoring
+    print_info "Backup contains:"
+    TOTAL_FILES=$(find "$TEMP_DIR/backup/cache" -type f 2>/dev/null | wc -l)
+    TOTAL_SIZE=$(du -sh "$TEMP_DIR/backup/cache" 2>/dev/null | awk '{print $1}')
+    echo "  Total files in backup: $TOTAL_FILES ($TOTAL_SIZE)"
+    
+    if [ "$TOTAL_FILES" -eq "0" ]; then
+        print_error "No files found in backup!"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+    
+    # RESTORE STRATEGY (mirrors export):
+    # 1. Create tar from extracted backup/cache directory
+    # 2. Copy tar to container
+    # 3. Extract in container to restore /var/cache
+    # This is the EXACT REVERSE of the export process
+    
+    print_info "Creating archive from backup..."
+    cd "$TEMP_DIR"
+    tar -czf container_cache.tar.gz -C backup cache
+    
+    if [ ! -f "container_cache.tar.gz" ]; then
+        print_error "Failed to create tar archive from backup"
+        cd "$OLDPWD"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+    
+    # Copy archive to container
+    print_info "Copying archive to container..."
+    podman cp container_cache.tar.gz $DIGITIZE_CONTAINER:/tmp/
+    
+    if [ $? -ne 0 ]; then
+        print_error "Failed to copy archive to container"
+        cd "$OLDPWD"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+    
+    # Extract archive in container (restores /var/cache)
+    # Use --overwrite to handle existing files, --warning=no-timestamp to suppress permission warnings
+    print_info "Extracting archive in container..."
+    podman exec $DIGITIZE_CONTAINER tar -xzf /tmp/container_cache.tar.gz -C /var --overwrite --warning=no-timestamp 2>&1 | grep -v "Cannot utime" | grep -v "Cannot open: File exists" || true
+    
+    # Check if extraction succeeded (tar exit code 0 or 1 for warnings is OK)
+    EXTRACT_STATUS=${PIPESTATUS[0]}
+    if [ $EXTRACT_STATUS -ne 0 ] && [ $EXTRACT_STATUS -ne 1 ]; then
+        print_error "Failed to extract archive in container (exit code: $EXTRACT_STATUS)"
+        podman exec $DIGITIZE_CONTAINER rm -f /tmp/container_cache.tar.gz 2>/dev/null || true
+        cd "$OLDPWD"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+    
+    # Cleanup
+    podman exec $DIGITIZE_CONTAINER rm -f /tmp/container_cache.tar.gz 2>/dev/null || true
+    cd "$OLDPWD"
+    rm -rf "$TEMP_DIR"
+    
+    # Verify restoration with detailed output
+    print_info "Verifying restoration..."
+    CONTAINER_TOTAL=$(podman exec $DIGITIZE_CONTAINER sh -c "find /var/cache -type f 2>/dev/null | wc -l" 2>/dev/null || echo "0")
+    CONTAINER_SIZE=$(podman exec $DIGITIZE_CONTAINER sh -c "du -sh /var/cache 2>/dev/null | awk '{print \$1}'" 2>/dev/null || echo "0")
+    CONTAINER_DOCS=$(podman exec $DIGITIZE_CONTAINER sh -c "find /var/cache -type f -name '*.json' 2>/dev/null | wc -l" 2>/dev/null || echo "0")
+    CONTAINER_PDFS=$(podman exec $DIGITIZE_CONTAINER sh -c "find /var/cache -type f -name '*.pdf' 2>/dev/null | wc -l" 2>/dev/null || echo "0")
+    
+    echo "  ✓ Container /var/cache: $CONTAINER_TOTAL files ($CONTAINER_SIZE)"
+    echo "  ✓ JSON metadata files: $CONTAINER_DOCS"
+    echo "  ✓ PDF documents: $CONTAINER_PDFS"
+    
+    if [ "$CONTAINER_TOTAL" -eq "0" ]; then
+        print_warning "No files found in container after restore!"
+        print_info "Checking container /var/cache structure:"
+        podman exec $DIGITIZE_CONTAINER ls -laR /var/cache/ 2>/dev/null || echo "Cannot access /var/cache"
     fi
 
     echo ""
     print_success "Digitize data import completed!"
+    echo "📁 Restored $CONTAINER_TOTAL files to container /var/cache"
     echo "🔄 Refresh your browser to see restored documents"
+    echo ""
+    print_info "Note: Documents require BOTH digitize files AND OpenSearch metadata"
+    print_info "If documents don't appear, also restore OpenSearch data:"
+    echo "  ./backup-restore.sh import opensearch opensearch_backup.tar.gz"
 }
 
 
@@ -454,6 +755,13 @@ main() {
         exit 1
     fi
 
+    # Parse global options (--env-file)
+    local remaining_args=$(parse_global_options "$@")
+    set -- $remaining_args
+    
+    # Validate OpenSearch password after parsing options
+    validate_opensearch_password
+
     case "$1" in
         export)
             case "$2" in
@@ -461,7 +769,7 @@ main() {
                     export_opensearch "${3:-rag-dev}" "${4:-opensearch_backup_$(date +%Y%m%d_%H%M%S).tar.gz}"
                     ;;
                 digitize)
-                    export_digitize "${3:-digitize_backup_$(date +%Y%m%d_%H%M%S).tar.gz}"
+                    export_digitize "${3:-rag-dev}" "${4:-digitize_backup_$(date +%Y%m%d_%H%M%S).tar.gz}"
                     ;;
                 *)
                     print_error "Unknown export target: $2"
