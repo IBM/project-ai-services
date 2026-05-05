@@ -61,6 +61,43 @@ func getOrGenerateSecretKey() (string, error) {
 	return secretKey, nil
 }
 
+// runAPIServer initializes and starts the API server with the provided configuration.
+func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, adminPassHash string) error {
+	secretKey, err := getOrGenerateSecretKey()
+	if err != nil {
+		return err
+	}
+
+	dbConfig, err := loadDBConfig()
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	pool, err := db.ConnectPool(ctx, dbConfig)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer pool.Close()
+
+	logger.Infoln("Connected to database successfully")
+
+	userRepo := apirepository.NewInMemoryUserRepoWithAdminHash("uid_1", adminUser, "Admin", adminPassHash)
+	tokenBlacklistRepo := repository.NewTokenBlacklistRepository(pool)
+	blacklist := apirepository.NewDBTokenBlacklist(tokenBlacklistRepo)
+	defer blacklist.Stop()
+
+	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
+	authSvc := auth.NewAuthService(userRepo, tokenMgr, blacklist)
+
+	return apiserver.NewAPIserver(apiserver.APIServerOptions{
+		Port:         port,
+		AuthService:  authSvc,
+		TokenManager: tokenMgr,
+		Blacklist:    blacklist,
+	}).Start()
+}
+
 func NewAPIServerCmd() *cobra.Command {
 	var (
 		port                   = 8080
@@ -87,39 +124,7 @@ func NewAPIServerCmd() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			secretKey, err := getOrGenerateSecretKey()
-			if err != nil {
-				return err
-			}
-
-			dbConfig, err := loadDBConfig()
-			if err != nil {
-				return err
-			}
-
-			ctx := context.Background()
-			pool, err := db.ConnectPool(ctx, dbConfig)
-			if err != nil {
-				return fmt.Errorf("failed to connect to database: %w", err)
-			}
-			defer pool.Close()
-
-			logger.Infoln("Connected to database successfully")
-
-			userRepo := apirepository.NewInMemoryUserRepoWithAdminHash("uid_1", adminUserName, "Admin", adminPasswordHash)
-			tokenBlacklistRepo := repository.NewTokenBlacklistRepository(pool)
-			blacklist := apirepository.NewDBTokenBlacklist(tokenBlacklistRepo)
-			defer blacklist.Stop()
-
-			tokenMgr := auth.NewTokenManager(secretKey, defaultAccessTokenTTL, defaultRefreshTokenTTL)
-			authSvc := auth.NewAuthService(userRepo, tokenMgr, blacklist)
-
-			return apiserver.NewAPIserver(apiserver.APIServerOptions{
-				Port:         port,
-				AuthService:  authSvc,
-				TokenManager: tokenMgr,
-				Blacklist:    blacklist,
-			}).Start()
+			return runAPIServer(port, defaultAccessTokenTTL, defaultRefreshTokenTTL, adminUserName, adminPasswordHash)
 		},
 	}
 
