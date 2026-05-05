@@ -41,6 +41,7 @@ func NewDBTokenBlacklist(repo repository.TokenBlacklistRepository) *DBTokenBlack
 		stopCh: make(chan struct{}),
 	}
 	go b.gc()
+
 	return b
 }
 
@@ -63,8 +64,10 @@ func (b *DBTokenBlacklist) Contains(token string, tokenType string) bool {
 	exists, err := b.repo.Contains(ctx, tokenHash, models.TokenType(tokenType))
 	if err != nil {
 		logger.Errorf("failed to check token blacklist: %v", err)
+
 		return false
 	}
+
 	return exists
 }
 

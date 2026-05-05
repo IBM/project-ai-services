@@ -111,6 +111,7 @@ func ConnectPool(ctx context.Context, cfg Config) (*pgxpool.Pool, error) {
 
 	if err := pool.Ping(pingCtx); err != nil {
 		pool.Close()
+
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
