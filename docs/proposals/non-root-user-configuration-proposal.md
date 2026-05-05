@@ -1,8 +1,10 @@
 # Non-Root User Configuration Proposal
 
+> **Note:** This document is specific to the **Podman runtime** configuration. The configurations and requirements described here apply to Podman-based deployments only.
+
 ## Overview
 
-This document outlines the configuration changes and system requirements implemented to enable non-root users to run AI workloads with Spyre cards securely and efficiently on the AI Services platform.
+This document outlines the configuration changes and system requirements implemented to enable non-root users to run AI workloads with Spyre cards securely and efficiently on the AI Services platform using Podman runtime.
 
 ---
 
@@ -226,7 +228,7 @@ sudo chmod -R 755 /var/lib/ai-services
 ## 5. SMT Level Configuration
 
 ### Problem
-SMT level affects CPU performance for Spyre card operations. Previously configured as part of application create. Since applicataion create run in rootless mode, SMT configuration will fail.
+SMT level affects CPU performance for Spyre card operations. Previously configured as part of application create. Since application create run in rootless mode, SMT configuration will fail.
 
 ### Solution Implemented
 **Function**: `setupSMTLevel()` in `internal/pkg/bootstrap/podman/helper.go`
