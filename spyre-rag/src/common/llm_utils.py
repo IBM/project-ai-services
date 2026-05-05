@@ -190,11 +190,12 @@ def query_vllm_payload(
             for msg in previous_messages:
                 history_tokens += len(tokenize_with_llm(msg.get("content", ""), llm_endpoint))
 
-        remaining_tokens = settings.llm.max_input_length - (
+        remaining_tokens = settings.llm.granite_3_3_8b_instruct_context_length - (
             chatbot_settings.chatbot.initial_system_token_overhead +
             chatbot_settings.chatbot.rag_system_token_overhead +
             question_token_count +
-            history_tokens
+            history_tokens +
+            max_new_tokens  # Reserve space for model's response
         )
         remaining_tokens = max(0, remaining_tokens)
 
@@ -234,9 +235,13 @@ def query_vllm_payload(
         # Legacy mode: use simple prompt template without conversation history
         # Dynamic chunk truncation: truncates the context if it doesn't fit in the sequence length
         question_token_count = len(tokenize_with_llm(question, llm_endpoint))
-        remaining_tokens = settings.llm.max_input_length - (
-            chatbot_settings.chatbot.prompt_template_token_count + question_token_count
+        remaining_tokens = settings.llm.granite_3_3_8b_instruct_context_length - (
+            chatbot_settings.chatbot.prompt_template_token_count +
+            question_token_count +
+            max_new_tokens  # Reserve space for model's response
         )
+        remaining_tokens = max(0, remaining_tokens)
+        
         context = detokenize_with_llm(
             tokenize_with_llm(context, llm_endpoint)[:remaining_tokens],
             llm_endpoint
