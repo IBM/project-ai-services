@@ -20,7 +20,7 @@
 
 1. **Navigate to the UI directory**:
    ```bash
-   cd digitize-ui
+   cd ui/digitize
    ```
 
 2. **Install dependencies**:

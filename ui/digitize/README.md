@@ -16,9 +16,9 @@ A modern React application built with IBM Carbon Design System to provide a user
 
 ## Installation
 
-1. Navigate to the digitize-ui directory:
+1. Navigate to the ui/digitize directory:
 ```bash
-cd digitize-ui
+cd ui/digitize
 ```
 
 2. Install dependencies:
@@ -139,7 +139,7 @@ The UI communicates with the following backend endpoints:
 ## Project Structure
 
 ```
-digitize-ui/
+ui/digitize/
 ├── src/
 │   ├── components/          # Reusable UI components
 │   │   ├── DocumentUpload.jsx
