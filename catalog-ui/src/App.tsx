@@ -6,7 +6,9 @@ import AuthLayout from "./layouts/AuthLayout";
 import Login from "./pages/Login";
 import Logout from "./pages/Logout";
 import ApplicationsListPage from "./pages/AiDeployments";
-import CatalogDemo from "./pages/CatalogDemo";
+import Architectures from "./pages/Architectures";
+import Services from "./pages/Services";
+import SolutionsAndUseCases from "./pages/SolutionsAndUseCases";
 import { ProtectedRoute } from "@/components";
 
 function App() {
@@ -22,7 +24,12 @@ function App() {
               path={ROUTES.AI_DEPLOYMENTS}
               element={<ApplicationsListPage />}
             />
-            <Route path={ROUTES.CATALOG_DEMO} element={<CatalogDemo />} />
+            <Route path={ROUTES.ARCHITECTURES} element={<Architectures />} />
+            <Route path={ROUTES.SERVICES} element={<Services />} />
+            <Route
+              path={ROUTES.SOLUTIONS_AND_USE_CASES}
+              element={<SolutionsAndUseCases />}
+            />
           </Route>
         </Route>
 

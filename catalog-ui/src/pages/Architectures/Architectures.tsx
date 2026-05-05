@@ -3,48 +3,48 @@ import { AccordionItem, Checkbox } from "@carbon/react";
 import CatalogBrowseLayout from "@/layouts/CatalogBrowseLayout";
 import ArchitectureCard from "@/components/ArchitectureCard";
 
-// Mock data for demonstration
+// Mock data
 const mockArchitectures = [
   {
     id: "1",
     title: "Digital assistant",
     description:
-      "Enable digital assistants using Retrieval-Augmented Generation (RAG) to query a message, including custom documents and data.",
+      "Enable digital assistants using Retrieval-Augmented Generation (RAG), including custom documents and data to answer questions from a knowledge base.",
     tags: ["Digitize documents", "Find similar items", "Question and answer"],
     isCertified: true,
   },
   {
     id: "2",
-    title: "Summarization",
+    title: "Sample (future)",
     description:
-      "Consolidates (a longer) input text into a brief statement or account of the main points.",
-    tags: ["Digitize documents", "Extract and tag info"],
-    isCertified: true,
+      "Infuse AI into business processes with purpose-built AI services like translation, extraction, and translation that you can deploy in minutes.",
+    tags: ["Digitize documents", "Find similar items", "Question and answer"],
+    isCertified: false,
   },
   {
     id: "3",
-    title: "Sample Architecture",
-    description: "Description of the architecture goes here.",
-    tags: ["Question and answer", "Find similar items"],
+    title: "Sample (future)",
+    description: "[Description of the architecture goes here]",
+    tags: ["Digitize documents", "Find similar items", "Question and answer"],
     isCertified: false,
   },
   {
     id: "4",
-    title: "Document Processing",
-    description: "Advanced document processing with AI capabilities.",
-    tags: ["Extract and tag info", "Digitize documents"],
-    isCertified: true,
+    title: "Sample (future)",
+    description: "[Description of the architecture goes here]",
+    tags: ["Question and answer", "Digitize documents"],
+    isCertified: false,
   },
   {
     id: "5",
-    title: "Third-party Certified Solution",
-    description: "A certified solution from a third-party provider.",
-    tags: ["Question and answer", "Digitize documents"],
-    isCertified: true,
+    title: "Sample (future)",
+    description: "[Description of the architecture goes here]",
+    tags: ["Question and answer", "Digitize documents", "Summarization"],
+    isCertified: false,
   },
 ];
 
-const CatalogDemo = () => {
+const Architectures = () => {
   const [searchValue, setSearchValue] = useState("");
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
@@ -70,36 +70,38 @@ const CatalogDemo = () => {
   const totalSelectedFilters =
     selectedProviders.length + selectedServices.length;
 
-  // Calculate dynamic counts
-  const ibmCertifiedCount = mockArchitectures.filter(
-    (arch) => arch.isCertified,
-  ).length;
-  const nonCertifiedCount = mockArchitectures.filter(
-    (arch) => !arch.isCertified,
-  ).length;
+  // Calculate dynamic counts based on mock data
+  const providerCounts = useMemo(() => {
+    return {
+      ibmCertified: mockArchitectures.filter((arch) => arch.isCertified).length,
+      nonCertified: mockArchitectures.filter((arch) => !arch.isCertified)
+        .length,
+    };
+  }, []);
 
   const serviceCounts = useMemo(() => {
-    const counts: Record<string, number> = {
-      digitize: 0,
-      extract: 0,
-      similar: 0,
-      qa: 0,
-    };
+    const counts: Record<string, number> = {};
 
     mockArchitectures.forEach((arch) => {
       arch.tags.forEach((tag) => {
-        const lowerTag = tag.toLowerCase();
-        if (lowerTag.includes("digitize")) counts.digitize++;
-        if (lowerTag.includes("extract")) counts.extract++;
-        if (lowerTag.includes("similar")) counts.similar++;
-        if (lowerTag.includes("question")) counts.qa++;
+        const key = tag.toLowerCase().replace(/\s+/g, "-");
+        counts[key] = (counts[key] || 0) + 1;
       });
     });
 
     return counts;
   }, []);
 
-  // Filter architectures based on selected filters only (not search)
+  // Get unique service tags dynamically
+  const uniqueServices = useMemo(() => {
+    const services = new Set<string>();
+    mockArchitectures.forEach((arch) => {
+      arch.tags.forEach((tag) => services.add(tag));
+    });
+    return Array.from(services).sort();
+  }, []);
+
+  // Filter architectures based on selected filters
   const filteredArchitectures = useMemo(() => {
     return mockArchitectures.filter((arch) => {
       const matchesProvider =
@@ -109,28 +111,27 @@ const CatalogDemo = () => {
 
       const matchesService =
         selectedServices.length === 0 ||
-        arch.tags.some((tag) =>
-          selectedServices.some((service) =>
-            tag.toLowerCase().includes(service.toLowerCase()),
-          ),
-        );
+        arch.tags.some((tag) => {
+          const normalizedTag = tag.toLowerCase().replace(/\s+/g, "-");
+          return selectedServices.includes(normalizedTag);
+        });
 
       return matchesProvider && matchesService;
     });
   }, [selectedProviders, selectedServices]);
 
-  // Filter options based on search
+  // Filter options based on search - dynamically generated
   const providerOptions = useMemo(() => {
     const options = [
       {
         label: "IBM certified (any provider)",
         value: "ibm-certified",
-        count: ibmCertifiedCount,
+        count: providerCounts.ibmCertified,
       },
       {
         label: "Non-certified",
         value: "non-certified",
-        count: nonCertifiedCount,
+        count: providerCounts.nonCertified,
       },
     ];
 
@@ -139,34 +140,24 @@ const CatalogDemo = () => {
     return options.filter((opt) =>
       opt.label.toLowerCase().includes(searchValue.toLowerCase()),
     );
-  }, [searchValue, ibmCertifiedCount, nonCertifiedCount]);
+  }, [searchValue, providerCounts]);
 
   const serviceOptions = useMemo(() => {
-    const options = [
-      {
-        label: "Digitize documents",
-        value: "digitize",
-        count: serviceCounts.digitize,
-      },
-      {
-        label: "Extract and tag info",
-        value: "extract",
-        count: serviceCounts.extract,
-      },
-      {
-        label: "Find similar items",
-        value: "similar",
-        count: serviceCounts.similar,
-      },
-      { label: "Question and answer", value: "qa", count: serviceCounts.qa },
-    ];
+    const options = uniqueServices.map((service) => {
+      const key = service.toLowerCase().replace(/\s+/g, "-");
+      return {
+        label: service,
+        value: key,
+        count: serviceCounts[key] || 0,
+      };
+    });
 
     if (!searchValue) return options;
 
     return options.filter((opt) =>
       opt.label.toLowerCase().includes(searchValue.toLowerCase()),
     );
-  }, [searchValue, serviceCounts]);
+  }, [searchValue, uniqueServices, serviceCounts]);
 
   const filterAccordions = (
     <>
@@ -224,8 +215,8 @@ const CatalogDemo = () => {
 
   return (
     <CatalogBrowseLayout
-      title="Catalog Demo"
-      subtitle="Production-ready AI solutions - Demo page showing CatalogBrowseLayout in action"
+      title="Architectures"
+      subtitle="Production-ready AI solutions ..."
       searchValue={searchValue}
       onSearchChange={setSearchValue}
       totalSelectedFilters={totalSelectedFilters}
@@ -237,4 +228,4 @@ const CatalogDemo = () => {
   );
 };
 
-export default CatalogDemo;
+export default Architectures;
