@@ -1,0 +1,82 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/type";
+@use "@carbon/react/scss/motion";
+
+.card {
+  background-color: var(--cds-layer);
+  border: 1px solid var(--cds-border-subtle);
+  padding: spacing.$spacing-05;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: spacing.$spacing-05;
+}
+
+.iconContainer {
+  flex-shrink: 0;
+  color: var(--cds-icon-primary);
+
+  svg {
+    display: block;
+  }
+}
+
+.indicatorIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--cds-support-success);
+  position: relative;
+
+  &:hover {
+    opacity: 0.8;
+  }
+
+  svg {
+    fill: var(--cds-support-success);
+  }
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.category {
+  @include type.type-style("label-01");
+  color: var(--cds-text-secondary);
+  margin: 0;
+  margin-bottom: spacing.$spacing-02;
+}
+
+.title {
+  @include type.type-style("heading-03");
+  color: var(--cds-text-primary);
+  margin: 0;
+  margin-bottom: spacing.$spacing-03;
+}
+
+.description {
+  @include type.type-style("body-compact-01");
+  color: var(--cds-text-secondary);
+  margin: 0 0 spacing.$spacing-05 0;
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: auto;
+}
