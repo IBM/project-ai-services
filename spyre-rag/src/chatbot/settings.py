@@ -102,7 +102,47 @@ class RAGConfig(BaseSettings):
         description="Estimated token count for query prompt template",
     )
 
-    # Query streaming prompts
+    initial_system_message: str = Field(
+        default=(
+            "You are a helpful, conversational AI assistant. "
+            "Engage naturally with users across multiple turns of conversation. "
+            "Provide clear, accurate, and contextually relevant responses. "
+            "Reference previous exchanges when appropriate to maintain conversation flow."
+        ),
+        description="Initial system prompt for conversational behavior",
+    )
+
+    rag_system_message: str = Field(
+        default=(
+            "Retrieved Context:\n{context}\n\n"
+            "Rephrased Query: {rephrased_query}\n\n"
+            "Instructions: Answer the user's question based on the retrieved context above. "
+            "Consider the conversation history to provide contextually relevant responses. "
+            "Be conversational and reference previous exchanges when relevant. "
+            "If the context doesn't contain enough information, acknowledge this clearly."
+        ),
+        description="RAG system prompt template with context and rephrased query",
+    )
+
+    history_token_budget: int = Field(
+        default=2000,
+        gt=0,
+        description="Maximum tokens allocated for conversation history",
+    )
+
+    initial_system_token_overhead: int = Field(
+        default=100,
+        gt=0,
+        description="Estimated tokens for initial system message",
+    )
+
+    rag_system_token_overhead: int = Field(
+        default=200,
+        gt=0,
+        description="Estimated tokens for RAG system message (excluding context)",
+    )
+
+    # Legacy prompt fields retained for compatibility with language prompt helpers.
     query_vllm_stream_prompt: str = Field(
         default=(
             "You are given:\n1. **A short context text** containing factual information.\n"
@@ -112,7 +152,7 @@ class RAGConfig(BaseSettings):
             "If the context does not provide enough information, answer using your general knowledge.\n\n"
             "Context:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
         ),
-        description="English prompt template for query streaming",
+        description="Legacy English prompt template for query streaming",
     )
 
     query_vllm_stream_de_prompt: str = Field(
