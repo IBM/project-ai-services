@@ -233,5 +233,3 @@ const Architectures = () => {
 };
 
 export default Architectures;
-
-// Made with Bob
