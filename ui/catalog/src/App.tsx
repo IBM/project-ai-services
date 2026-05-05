@@ -6,8 +6,14 @@ import AuthLayout from "./layouts/AuthLayout";
 import Login from "./pages/Login";
 import Logout from "./pages/Logout";
 import ApplicationsListPage from "./pages/AiDeployments";
+<<<<<<< HEAD
 import Services from "./pages/Services";
 import ReferenceUseCases from "./pages/ReferenceUseCases";
+=======
+import Architectures from "./pages/Architectures";
+import Services from "./pages/Services";
+import SolutionsAndUseCases from "./pages/SolutionsAndUseCases";
+>>>>>>> 6fd5e63 (feat(catalog-ui): Three catalog pages)
 import { ProtectedRoute } from "@/components";
 
 function App() {
