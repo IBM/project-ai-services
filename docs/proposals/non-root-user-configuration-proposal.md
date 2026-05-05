@@ -26,16 +26,16 @@ This document outlines the configuration changes and system requirements impleme
 
 4. Apply configuration changes for users:
    ```bash
-   # exit user session
-   exit
    # Terminate user session to apply group membership and resource limits
    sudo loginctl terminate-user <username>
-   
+   ```
+
+   Then log back in.
+
+   ```
    # Enable lingering to keep user services running
    sudo loginctl enable-linger <username>
    ```
-   
-   Then log back in.
 
 **Why This Is Required:**
 - Group membership changes require a new login session
@@ -240,40 +240,6 @@ SMT level affects CPU performance for Spyre card operations. Previously configur
 
 ---
 
-### User Experience
-
-**Non-Root/Sudo User**:
-```bash
-TBA
-```
-
-**Root**:
-```bash
-TBA
-```
-
----
-
-#### 2. Verify Configuration (Optional)
-```bash
-# Verify group membership
-groups | grep sentient
-
-# Verify resource limits
-ulimit -n  # Should be 134217728
-ulimit -l  # Should be unlimited
-
-# Verify podman access
-podman ps
-
-# Verify systemd user slice limits (optional)
-systemctl show user-$(id -u).slice | grep -E "LimitNOFILE|LimitMEMLOCK"
-```
-
-**Important:** If you skip the `loginctl terminate-user` step and just log out/in manually, some systemd configurations may not apply correctly. Always use `loginctl terminate-user` for a clean restart.
-
----
-
 ## Security Considerations
 
 ### SELinux Policy
@@ -344,8 +310,7 @@ groups
 ### Resource Limits Diagnostics
 ```bash
 # Check current limits
-ulimit -a
-ulimit -n  # nofile
+ulimit -Hn  # nofile
 ulimit -l  # memlock
 
 # Verify limits configuration
