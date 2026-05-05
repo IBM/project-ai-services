@@ -1,4 +1,5 @@
 @use "@carbon/react/scss/spacing";
+@use "@carbon/motion";
 
 html,
 body {
@@ -12,7 +13,8 @@ body {
 }
 
 .mainContent {
-  transition: margin-left 0.2s ease;
+  transition: margin-left motion.$duration-moderate-01
+    motion.motion(standard, productive);
 }
 
 .mainContent.shifted {

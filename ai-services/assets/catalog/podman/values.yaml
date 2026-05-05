@@ -1,10 +1,10 @@
 ui:
   port: ""
-  image: icr.io/ai-services-cicd/catalog-ui:v0.0.1
+  image: icr.io/ai-services-cicd/catalog-ui:v0.0.3
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/ai-services:0.0.2
+  image: icr.io/ai-services-cicd/ai-services:0.0.3
   runtime: ""
   adminPasswordHash: ""
   podman:
@@ -14,7 +14,7 @@ db:
   port: ""
   image: icr.io/ai-services-private/postgres:18
   user: "admin"
-  database: "postgres"
+  database: "ai_services"
   password: ""
   dataPath: "/var/lib/ai-services/db"
   resources:

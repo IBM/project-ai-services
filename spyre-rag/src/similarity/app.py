@@ -138,7 +138,7 @@ async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchRes
         if not is_valid:
             APIError.raise_error(ErrorCode.INVALID_REQUEST, error_msg)
 
-        top_k = req.top_k if req.top_k is not None else settings.similarity.num_chunks_post_search
+        top_k = req.top_k
 
         # reranker config when the caller actually asked for it.
         # avoids a KeyError if RERANKER_ENDPOINT / RERANKER_MODEL env vars are not set in a deployment that doesn't need reranking.

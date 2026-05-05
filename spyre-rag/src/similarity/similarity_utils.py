@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from chatbot.retrieval_utils import retrieve_documents
 from chatbot.reranker_utils import rerank_documents
 from common.error_utils import http_error_responses
-
+from similarity.settings import settings
 
 
 class SimilaritySearchRequest(BaseModel):
@@ -15,9 +15,10 @@ class SimilaritySearchRequest(BaseModel):
         default="dense",
         description="A mode parameter to select the search strategy: dense  K-NN, sparse BM25, or hybrid (both)"
     )
-    top_k: Optional[int] = Field(
-        default=None,
-        description="Number of results to return. Defaults to num_chunks_post_search from settings."
+    top_k: int = Field(
+        default=settings.similarity.num_chunks_post_search,
+        ge=1,
+        description="Number of results to return (minimum 1). Defaults to num_chunks_post_search from settings."
     )
     rerank: bool = Field(
         default=False,

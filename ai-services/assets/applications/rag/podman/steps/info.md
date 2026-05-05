@@ -20,13 +20,18 @@ Day N:
 {{- end }}
 {{- end }}
 
+{{- if .Values.instruct.apiKey }}
+
+- vLLM exposed via Q&A is authenticated with user provided API Key: {{ .Values.instruct.apiKey }}
+{{- end }}
+
 {{- if ne .DIGITIZE_UI_PORT "" }}
 {{- if eq .DIGITIZE_UI_STATUS "running" }}
 
 - Add documents to your RAG application using the Digitize Documents UI: http://{{ .HOST_IP }}:{{ .DIGITIZE_UI_PORT }}.
 {{- else }}
 
-- Digitize Documents UI is unavailable to use. Please make sure '{{ .AppName }}--digitize-api' pod is running.
+- Digitize Documents UI is unavailable to use. Please make sure '{{ .AppName }}--digitize' pod is running.
 {{- end }}
 {{- end }}
 
@@ -36,7 +41,7 @@ Day N:
 - Digitize Documents API is available to use at http://{{ .HOST_IP }}:{{ .DIGITIZE_API_PORT }}. Use this endpoint for programmatic access and direct API integration.
 {{- else }}
 
-- Digitize Documents API is unavailable to use. Please make sure '{{ .AppName }}--digitize-api' pod is running.
+- Digitize Documents API is unavailable to use. Please make sure '{{ .AppName }}--digitize' pod is running.
 {{- end }}
 {{- end }}
 
@@ -45,7 +50,7 @@ Day N:
 - Summarize API is available to use at http://{{ .HOST_IP }}:{{ .SUMMARIZE_API_PORT }}. Use this endpoint for document summarization via programmatic access.
 {{- else }}
 
-- Summarize API is unavailable to use. Please make sure 'summarize-api' pod is running.
+- Summarize API is unavailable to use. Please make sure '{{ .AppName }}--summarize-api' pod is running.
 {{- end }}
 
 {{- if ne .SIMILARITY_API_PORT "" }}

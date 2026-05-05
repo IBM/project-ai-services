@@ -18,6 +18,7 @@ class ErrorCode(str, Enum):
     MISSING_INPUT = "MISSING_INPUT"
     EMPTY_INPUT = "EMPTY_INPUT"
     INVALID_PARAMETER = "INVALID_PARAMETER"
+    AUTHENTICATION_FAILED = "AUTHENTICATION_FAILED"
     RESOURCE_NOT_FOUND = "RESOURCE_NOT_FOUND"
     RESOURCE_LOCKED = "RESOURCE_LOCKED"
     UNSUPPORTED_MEDIA_TYPE = "UNSUPPORTED_MEDIA_TYPE"
@@ -58,6 +59,23 @@ class BadRequestErrorResponse(BaseModel):
                     "code": "INVALID_REQUEST",
                     "message": "Request validation failed",
                     "status": 400
+                }
+            }
+        }
+    }
+
+
+class UnauthorizedErrorResponse(BaseModel):
+    """401 Unauthorized error response."""
+    error: ErrorDetail
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "error": {
+                    "code": "AUTHENTICATION_FAILED",
+                    "message": "Authentication failed",
+                    "status": 401
                 }
             }
         }
@@ -186,6 +204,7 @@ class ServiceUnavailableErrorResponse(BaseModel):
 # HTTP error responses dictionary for use in endpoint decorators
 http_error_responses: Dict[int | str, Dict[str, Any]] = {
     400: {"description": "Bad Request - Invalid input or validation error", "model": BadRequestErrorResponse},
+    401: {"description": "Unauthorized - Authentication failed", "model": UnauthorizedErrorResponse},
     404: {"description": "Not Found - Resource does not exist", "model": NotFoundErrorResponse},
     409: {"description": "Conflict - Resource is locked or in use", "model": ConflictErrorResponse},
     413: {"description": "Payload Too Large - Input exceeds size limits", "model": PayloadTooLargeErrorResponse},
@@ -210,6 +229,7 @@ class APIError:
         ErrorCode.MISSING_INPUT: (400, "Required input is missing"),
         ErrorCode.EMPTY_INPUT: (400, "Input cannot be empty"),
         ErrorCode.INVALID_PARAMETER: (400, "Invalid parameter value"),
+        ErrorCode.AUTHENTICATION_FAILED: (401, "Authentication failed"),
         ErrorCode.RESOURCE_NOT_FOUND: (404, "The requested resource was not found"),
         ErrorCode.RESOURCE_LOCKED: (409, "Resource is locked by an active operation"),
         ErrorCode.UNSUPPORTED_MEDIA_TYPE: (415, "File format not supported"),

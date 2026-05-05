@@ -1,0 +1,34 @@
+name: Spyre RAG Unit Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'spyre-rag/**'
+      - '.github/workflows/spyre-rag-unit-tests.yaml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      
+      - name: Install test dependencies
+        run: |
+          pip install -r requirements-test.txt
+        working-directory: spyre-rag
+      
+      - name: Run tests with pytest
+        run: |
+          pytest tests/ -v
+        working-directory: spyre-rag
+

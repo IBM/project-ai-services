@@ -34,6 +34,10 @@ spec:
           value: "ibm-granite/granite-3.3-8b-instruct"
         - name: LOG_LEVEL
           value: "{{ .Values.summarize.log_level}}"
+        {{- if .Values.instruct.apiKey }}
+        - name: VLLM_API_KEY
+          value: "{{ .Values.instruct.apiKey }}"
+        {{- end }}
       resources:
         requests:
           memory: "512Mi"

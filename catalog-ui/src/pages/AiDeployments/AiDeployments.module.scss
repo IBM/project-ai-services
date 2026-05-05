@@ -1,18 +1,61 @@
 @use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/type";
 
-.rowActions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: spacing.$spacing-03;
-  padding: spacing.$spacing-03;
+.tableContent {
+  padding: spacing.$spacing-07;
+
+  :global(.cds--data-table) {
+    :global(th:last-child) {
+      position: sticky;
+      right: 0;
+      z-index: 1;
+      text-align: right;
+      padding-right: spacing.$spacing-03;
+      padding-left: 0;
+      width: spacing.$spacing-09;
+      background-color: var(--cds-layer-accent);
+      box-shadow: calc(-1 * spacing.$spacing-01) 0 spacing.$spacing-02
+        rgba(0, 0, 0, 0.05);
+    }
+
+    :global(td:last-child) {
+      position: sticky;
+      right: 0;
+      z-index: 2;
+      padding-right: spacing.$spacing-03;
+      padding-left: 0;
+      background-color: var(--cds-layer);
+      box-shadow: calc(-1 * spacing.$spacing-01) 0 spacing.$spacing-02
+        rgba(0, 0, 0, 0.05);
+    }
+
+    :global(tr:hover td:last-child) {
+      background-color: var(--cds-layer-hover);
+    }
+
+    :global(th:first-child) {
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      background-color: var(--cds-layer-accent);
+      box-shadow: spacing.$spacing-01 0 spacing.$spacing-02 rgba(0, 0, 0, 0.05);
+    }
+
+    :global(td:first-child) {
+      position: sticky;
+      left: 0;
+      z-index: 2;
+      background-color: var(--cds-layer);
+      box-shadow: spacing.$spacing-01 0 spacing.$spacing-02 rgba(0, 0, 0, 0.05);
+    }
+
+    :global(tr:hover td:first-child) {
+      background-color: var(--cds-layer-hover);
+    }
+  }
 }
 
 .noDataContent {
-  padding: spacing.$spacing-07;
-}
-
-.tableContent {
   padding: spacing.$spacing-07;
 }
 
@@ -22,77 +65,107 @@
 
 .deleteConfirmation {
   margin-top: spacing.$spacing-07;
-  font-weight: bolder;
-  border: none;
-}
-
-:global(
-  .cds--checkbox-wrapper
-    input:focus:not(:focus-visible)
-    + .cds--checkbox-label::before
-) {
-  outline: none;
-  box-shadow: none;
-}
-
-:global(.cds--btn:focus:not(:focus-visible)) {
-  outline: none;
-  box-shadow: none;
-  border: none;
-}
-
-.deleteButton {
-  transition: background-color 0.2s ease;
-
-  &:hover {
-    background-color: var(--cds-button-danger-primary);
-    color: var(--cds-background);
-
-    svg {
-      fill: var(--cds-icon-on-color);
-    }
-  }
-}
-
-.selectedDelete {
-  background-color: var(--cds-layer-hover);
+  @include type.type-style("heading-compact-01");
 }
 
 .customToast {
   position: fixed;
-  top: 4rem;
-  right: 2rem;
-  z-index: 46567;
-
-  :global(.cds--actionable-notification__action-button) {
-    border: 1px solid var(--cds-text-on-color);
-    color: var(--cds-text-on-color);
-    font-weight: lighter;
-    background-color: transparent;
-
-    &:hover {
-      border: 1px solid var(--cds-text-on-color);
-      color: var(--cds-text-on-color);
-      background-color: transparent;
-    }
-
-    &:focus {
-      border: 1px solid var(--cds-text-on-color);
-      color: var(--cds-text-on-color);
-      background-color: transparent;
-      outline-offset: 2px;
-    }
-
-    &:active {
-      border: 1px solid var(--cds-text-on-color);
-      color: var(--cds-text-on-color);
-      background-color: var(--cds-layer-active);
-    }
-  }
+  top: spacing.$spacing-10;
+  right: spacing.$spacing-07;
+  z-index: 9000;
 }
 
 .exportStatus {
   display: flex;
   align-items: center;
   gap: spacing.$spacing-02;
+}
+
+.deployButtonWrapper {
+  :global(.cds--menu-button__trigger) {
+    width: spacing.$spacing-13;
+    min-width: spacing.$spacing-13;
+    max-width: spacing.$spacing-13;
+  }
+}
+
+:global(.cds--overflow-menu-options) {
+  &:has(.overflowMenuContent) {
+    min-width: 234px;
+    width: 234px;
+  }
+}
+
+.overflowMenuContent {
+  padding: spacing.$spacing-05;
+  padding-bottom: 0;
+  width: 100%;
+}
+
+.overflowMenuHeading {
+  margin-bottom: spacing.$spacing-03;
+  @include type.type-style("heading-compact-01");
+}
+
+.overflowMenuActions {
+  margin-top: spacing.$spacing-03;
+  margin-left: calc(-1 * spacing.$spacing-05);
+  margin-right: calc(-1 * spacing.$spacing-05);
+  display: flex;
+  gap: 0;
+
+  :global(.cds--btn) {
+    flex: 1;
+    border-radius: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.deleteMenuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.messageWithIcon {
+  display: flex;
+  align-items: center;
+  gap: spacing.$spacing-03;
+}
+
+.messageIconError {
+  flex-shrink: 0;
+  color: var(--cds-support-error);
+}
+
+.messageIconInfo {
+  flex-shrink: 0;
+  color: var(--cds-support-info);
+}
+
+.statusTagError {
+  :global(svg) {
+    fill: var(--cds-support-error);
+  }
+}
+
+.statusTagSuccess {
+  :global(svg) {
+    fill: var(--cds-support-success);
+  }
+}
+
+.statusTagInfo {
+  :global(svg) {
+    fill: var(--cds-support-info);
+  }
+}
+
+.statusTagSecondary {
+  :global(svg) {
+    fill: var(--cds-text-secondary);
+  }
 }

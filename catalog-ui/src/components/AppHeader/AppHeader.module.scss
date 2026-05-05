@@ -1,6 +1,8 @@
-@use "@carbon/react/scss/spacing";
+@use "@carbon/motion";
 @use "@carbon/react/scss/colors";
+@use "@carbon/react/scss/spacing";
 @use "@carbon/react/scss/theme";
+@use "@carbon/react/scss/type";
 
 .appHeader {
   :global(.cds--header) {
@@ -11,24 +13,10 @@
   :global(.cds--header__menu-trigger) {
     background-color: colors.$black-100;
     border: none;
-    border-bottom: none;
-    box-shadow: none;
 
-    &:hover {
-      background-color: colors.$black-100;
-      border: none;
-      box-shadow: none;
-    }
-
+    &:hover,
     &:focus {
       background-color: colors.$black-100;
-      border: none;
-      box-shadow: none;
-      outline: none;
-    }
-
-    svg {
-      vertical-align: middle;
     }
   }
 
@@ -57,29 +45,6 @@
   width: spacing.$spacing-10;
 }
 
-.menuBtn {
-  border: none;
-  border-bottom: none;
-  background-color: colors.$black-100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: none;
-
-  &:hover {
-    background-color: colors.$black-100;
-    border: none;
-    box-shadow: none;
-  }
-
-  &:focus {
-    background-color: colors.$black-100;
-    border: none;
-    box-shadow: none;
-    outline: none;
-  }
-}
-
 .usercircle {
   width: spacing.$spacing-09;
   height: spacing.$spacing-09;
@@ -89,7 +54,8 @@
   align-items: center;
   justify-content: center;
   color: theme.$text-on-color;
-  transition: background-color 0.2s ease;
+  transition: background-color motion.$duration-fast-01
+    motion.motion(standard, productive);
 
   &:hover {
     background-color: theme.$layer-hover-02;
@@ -102,13 +68,12 @@
   align-items: center;
   margin: spacing.$spacing-03;
   padding: spacing.$spacing-04;
-  font-size: 1.1rem;
+  @include type.type-style("body-compact-02");
 }
 
 .logout {
-  border-top: spacing.$spacing-01 solid theme.$border-subtle-01;
-  background: none;
   border: none;
+  background: none;
   width: 100%;
   text-align: left;
   cursor: pointer;
@@ -118,4 +83,20 @@
   padding: spacing.$spacing-05;
   background-color: theme.$layer-01;
   color: theme.$text-primary;
+  transition: background-color motion.$duration-fast-01
+    motion.motion(standard, productive);
+  @include type.type-style("body-compact-01");
+
+  &:hover {
+    background-color: theme.$layer-hover-01;
+  }
+
+  &:active {
+    background-color: theme.$layer-active-01;
+  }
+
+  &:focus {
+    outline: 2px solid theme.$focus;
+    outline-offset: -2px;
+  }
 }
