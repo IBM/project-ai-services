@@ -10,6 +10,7 @@ import (
 	"text/template"
 
 	"github.com/project-ai-services/ai-services/assets"
+	catalog "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -21,7 +22,6 @@ import (
 )
 
 const (
-	catalogAppName     = "ai-services"
 	catalogAppTemplate = "catalog"
 )
 
@@ -47,7 +47,7 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 	}
 
 	// Check if catalog pod already exists
-	existingPods, err := helpers.CheckExistingPodsForApplication(rt, catalogAppName)
+	existingPods, err := helpers.CheckExistingPodsForApplication(rt, catalog.CatalogAppName)
 	if err != nil {
 		s.Fail("failed to check existing pods")
 
@@ -78,7 +78,7 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 	logger.Infoln("-------")
 
 	// Print next steps similar to application create
-	if err := helpers.PrintNextSteps(tp, rt, catalogAppName, catalogAppTemplate); err != nil {
+	if err := helpers.PrintNextSteps(tp, rt, catalog.CatalogAppName, catalogAppTemplate); err != nil {
 		// do not want to fail the overall configure if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)
 	}
@@ -164,7 +164,7 @@ func executeLayer(rt *podman.PodmanClient, tp templates.Template, tmpls map[stri
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
-			if err := executePodTemplate(rt, tp, tmpls, t, catalogAppTemplate, catalogAppName, values, version, nil, argParams); err != nil {
+			if err := executePodTemplate(rt, tp, tmpls, t, catalogAppTemplate, catalog.CatalogAppName, values, version, nil, argParams); err != nil {
 				errCh <- err
 			}
 		}(podTemplateName)
