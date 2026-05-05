@@ -96,37 +96,6 @@ class RAGConfig(BaseSettings):
         description="Maximum token length for user queries",
     )
 
-    prompt_template_token_count: int = Field(
-        default=250,
-        ge=0,
-        description="Estimated token count for query prompt template",
-    )
-
-    # Query streaming prompts
-    query_vllm_stream_prompt: str = Field(
-        default=(
-            "You are given:\n1. **A short context text** containing factual information.\n"
-            "2. **A user's question** seeking clarification or advice.\n"
-            "3. **Return a concise, to-the-point answer grounded strictly in the provided context.**\n\n"
-            "The answer should be accurate, easy to follow, based on the context(s), and include clear reasoning or justification.\n"
-            "If the context does not provide enough information, answer using your general knowledge.\n\n"
-            "Context:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
-        ),
-        description="English prompt template for query streaming",
-    )
-
-    query_vllm_stream_de_prompt: str = Field(
-        default=(
-            "Sie erhalten: 1. **Einen kurzen Kontexttext** mit sachlichen Informationen.\n"
-            "2. **Die Frage eines Nutzers**, der um Klärung oder Rat bittet.\n"
-            "3. **Geben Sie eine prägnante und aussagekräftige Antwort, die sich strikt auf den gegebenen Kontext stützt.**\n\n"
-            "Die Antwort sollte korrekt, leicht verständlich und kontextbezogen sein sowie eine klare Begründung enthalten.\n"
-            "Wenn der Kontext nicht genügend Informationen liefert, antworten Sie mit Ihrem Allgemeinwissen.\n\n"
-            "Kontext:{context}\n\nFrage:{question}\n\nAntwort:"
-        ),
-        description="German prompt template for query streaming",
-    )
-
     @field_validator('score_threshold')
     @classmethod
     def validate_score_threshold(cls, v):
@@ -162,16 +131,6 @@ class RAGConfig(BaseSettings):
             logger.warning(f"Setting num_chunks_post_reranker to default '3' as it is missing or malformed in the settings")
             return 3
         return v
-
-    @field_validator('prompt_template_token_count')
-    @classmethod
-    def validate_prompt_template_token_count(cls, v):
-        """Validate prompt_template_token_count with warning fallback."""
-        if not isinstance(v, int):
-            logger.warning(f"Setting prompt_template_token_count to default '250' as it is missing in the settings")
-            return 250
-        return v
-
 
 class Settings(BaseSettings):
     common: CommonSettings = Field(default_factory=CommonSettings)

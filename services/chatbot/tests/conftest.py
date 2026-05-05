@@ -9,9 +9,9 @@ from typing import Dict, List
 import sys
 from pathlib import Path
 
-# Add src directory to path for imports
-src_path = Path(__file__).parent.parent / "src"
-sys.path.insert(0, str(src_path))
+# Add services directory to path for imports
+services_path = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(services_path))
 
 import common.diagnostic_logger
 

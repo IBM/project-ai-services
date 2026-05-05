@@ -10,9 +10,6 @@ from common.lang_utils import get_prompt_for_language
 from common.misc_utils import get_logger
 from common.settings import settings
 from common.retry_utils import retry_on_transient_error
-from chatbot.settings import settings as chatbot_settings
-from summarize.settings import settings as summarize_settings
-from digitize.settings import settings as digitize_settings
 import common.misc_utils as misc_utils
 
 logger = get_logger("LLM")
@@ -27,7 +24,7 @@ def tqdm_wrapper(iterable, **kwargs):
         return iterable
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
+def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tokens: int = 1024):
     """
     Combined function to summarize and classify a table in a single LLM call.
     Returns tuple: (summary, decision)
@@ -39,7 +36,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
         "model": gen_model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
-        "max_tokens": summarize_settings.summarize.table_summary_max_tokens,
+        "max_tokens": max_tokens,
         "stream": False,
     }
 
@@ -89,18 +86,18 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
         logger.error(f"Error summarizing/classifying table: {e}")
         return "No summary.", False
 
-def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, max_workers=32):
+def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, prompt_template: str, max_tokens: int = 1024, max_workers=32):
     """
     Combined function to summarize and classify tables using a single prompt.
     Returns tuple: (summaries, decisions)
     """
-    all_prompts = [digitize_settings.digitize.table_summary_and_classify.format(content=md) for md in table_mds]
+    all_prompts = [prompt_template.format(content=md) for md in table_mds]
 
     results: list[tuple[str, bool] | None] = [None] * len(all_prompts)
 
     with ThreadPoolExecutor(max_workers=min(max_workers, len(all_prompts))) as executor:
         futures = {
-            executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint): idx
+            executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint, max_tokens): idx
             for idx, prompt in enumerate(all_prompts)
         }
         for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts),
@@ -171,7 +168,7 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
     # dynamic chunk truncation: truncates the context, if doesn't fit in the sequence length
     question_token_count = len(tokenize_with_llm(question, llm_endpoint))
     reamining_tokens = settings.llm.max_input_length - (
-        chatbot_settings.chatbot.prompt_template_token_count + question_token_count
+        settings.prompts.prompt_template_token_count + question_token_count
     )
     context = detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:reamining_tokens], llm_endpoint)
     logger.debug(f"Truncated Context: {context}")
@@ -284,6 +281,7 @@ def query_vllm_summarize(
     max_tokens: int,
     temperature: float,
 ):
+    from summarize.settings import settings as summarize_settings
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
@@ -325,6 +323,7 @@ def query_vllm_summarize_stream(
     temperature: float,
 ):
     """Stream a summarization request to vLLM, yielding raw SSE lines."""
+    from summarize.settings import settings as summarize_settings
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 

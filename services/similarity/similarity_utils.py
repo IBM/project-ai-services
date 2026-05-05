@@ -2,8 +2,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from chatbot.retrieval_utils import retrieve_documents
-from chatbot.reranker_utils import rerank_documents
+from common.retrieval_utils import retrieve_documents
+from common.reranker_utils import rerank_documents
 from common.error_utils import http_error_responses
 from similarity.settings import settings
 

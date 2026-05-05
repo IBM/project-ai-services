@@ -1,12 +1,12 @@
 REGISTRY?=icr.io/ai-services-private
-IMAGE=rag-base
-TAG?=v0.0.24
+IMAGE=digitize-service
+TAG?=v0.0.1
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
 CONTAINER_BUILDER?=podman
+
 build:
-	cd prebuilder && $(CONTAINER_BUILDER) build -t prebuilder . && cd -
-	$(CONTAINER_BUILDER) build -t $(REGISTRY)/$(IMAGE):$(TAG) .
+	$(CONTAINER_BUILDER) build $(CREDS_ARG) -t $(REGISTRY)/$(IMAGE):$(TAG) .
 .PHONY: build
 
 push:
@@ -16,3 +16,7 @@ push:
 image-tag:
 	@echo $(TAG)
 .PHONY: image-tag
+
+run:
+	PORT=$${PORT:-4000} /var/venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port $$PORT
+.PHONY: run

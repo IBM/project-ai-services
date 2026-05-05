@@ -114,6 +114,13 @@ class DigitizeConfig(BaseSettings):
         description="Prompt for LLM-based text classification",
     )
 
+    # Table processing
+    table_summary_max_tokens: int = Field(
+        default=1024,
+        ge=0,
+        description="Maximum tokens for table summarization",
+    )
+
     # Table summary prompt
     table_summary_and_classify: str = Field(
         default="""You are an intelligent assistant analyzing tables extracted from documents.
