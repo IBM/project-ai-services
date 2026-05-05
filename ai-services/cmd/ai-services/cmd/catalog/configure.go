@@ -18,6 +18,12 @@ import (
 var (
 	// Runtime type flag for catalog configure command.
 	runtimeType string
+	// Custom domain name for HTTPS
+	domainName string
+	// SSL certificate file path
+	sslCertPath string
+	// SSL key file path
+	sslKeyPath string
 )
 
 // NewConfigureCmd creates a new configure command for the catalog service.
@@ -35,7 +41,7 @@ func NewConfigureCmd() *cobra.Command {
 Examples:
 	 # Configure catalog service for podman
 	 ai-services catalog configure --runtime podman
-	 
+
 	 # Configure with custom UI port
 	 ai-services catalog configure --runtime podman --params ui.port=8081`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -57,6 +63,9 @@ Examples:
 				AdminPassword: adminPassword,
 				Runtime:       vars.RuntimeFactory.GetRuntimeType(),
 				ArgParams:     argParams,
+				DomainName:    domainName,
+				SSLCertPath:   sslCertPath,
+				SSLKeyPath:    sslKeyPath,
 			})
 		},
 	}
@@ -80,6 +89,39 @@ func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
 	// Check if podman runtime is being used on unsupported platform
 	if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
 		return nil, err
+	}
+
+	// Validate SSL certificate files if provided
+	if sslCertPath != "" || sslKeyPath != "" {
+		// Both cert and key must be provided together
+		if sslCertPath == "" || sslKeyPath == "" {
+			return nil, fmt.Errorf("both --ssl-cert and --ssl-key must be provided together")
+		}
+
+		// Validate certificate files exist and are readable
+		if err := utils.ValidateCertificateFiles(sslCertPath, sslKeyPath); err != nil {
+			return nil, fmt.Errorf("invalid SSL certificate files: %w", err)
+		}
+
+		// Extract domain from certificate
+		extractedDomain, err := utils.ExtractDomainFromCertificate(sslCertPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract domain from certificate: %w", err)
+		}
+
+		// If user also provided --domain-name, warn that certificate domain takes precedence
+		if domainName != "" && domainName != extractedDomain {
+			logger.Infof("Warning: Ignoring --domain-name '%s', using domain from certificate: %s", domainName, extractedDomain)
+		}
+
+		// Override domainName with extracted domain
+		domainName = extractedDomain
+		logger.Infof("Extracted domain from certificate: %s", extractedDomain)
+	} else if domainName != "" {
+		// Validate domain name only if no certificates provided
+		if err := utils.ValidateDomainName(domainName); err != nil {
+			return nil, fmt.Errorf("invalid domain name: %w", err)
+		}
 	}
 
 	// Parse params if provided
@@ -111,6 +153,35 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 			"- Example: --params ui.port=8081\n\n"+
 			"Available parameters:\n"+
 			"- ui.port: Port for the catalog UI (default: random available port)\n",
+	)
+
+	cmd.Flags().StringVar(
+		&domainName,
+		"domain-name",
+		"",
+		"Custom domain name for HTTPS access.\n"+
+			"If not provided, uses nip.io format: <service>.<ip>.nip.io\n"+
+			"Example: --domain-name example.com\n"+
+			"Note: Requires DNS configuration to point domain to host IP.",
+	)
+
+	cmd.Flags().StringVar(
+		&sslCertPath,
+		"ssl-cert",
+		"",
+		"Path to SSL certificate file (PEM format).\n"+
+			"Must be used together with --ssl-key.\n"+
+			"If not provided, self-signed certificates will be generated.\n"+
+			"Example: --ssl-cert /path/to/cert.pem",
+	)
+
+	cmd.Flags().StringVar(
+		&sslKeyPath,
+		"ssl-key",
+		"",
+		"Path to SSL private key file (PEM format).\n"+
+			"Must be used together with --ssl-cert.\n"+
+			"Example: --ssl-key /path/to/key.pem",
 	)
 }
 
