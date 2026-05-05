@@ -136,7 +136,7 @@ When `DEPLOY_APP` is set to `auto`, Jenkins analyzes the git diff between `origi
 
 Conditionally rebuilds container images based on modified directories:
 
-* **RAG UI Image**: Rebuilt if `spyre-rag/ui` contains changes
+* **RAG UI Image**: Rebuilt if `ui/chatbot` contains changes
 * **RAG Backend Image**: Rebuilt if `spyre-rag/src` contains changes
 
 After building, the pipeline updates `values.yaml` using `yq` to reference the new local image tags.

@@ -28,7 +28,7 @@ spec:
             - "/var/venv/bin/python"
             - "-m"
             - "uvicorn"
-            - "similarity.app:app"
+            - "app:app"
             - "--host"
             - "0.0.0.0"
             - "--port"

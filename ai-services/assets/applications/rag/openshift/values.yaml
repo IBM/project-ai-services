@@ -1,28 +1,28 @@
 ui:
   # @hidden
-  image: icr.io/ai-services-cicd/rag-ui:v0.0.34
+  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.1
 
 backend:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.100
+  image: icr.io/ai-services-cicd/chatbot-service:v0.0.1
   # @hidden
   log_level: "INFO"
 
 summarize:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.100
+  image: icr.io/ai-services-cicd/summarize-service:v0.0.1
   # @hidden
   log_level: "INFO"
 
 similarity:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.100
+  image: icr.io/ai-services-cicd/similarity-service:v0.0.1
   # @hidden
   log_level: "INFO"
 
 digitize:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.100
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.1
   # @hidden
   log_level: "INFO"
 
