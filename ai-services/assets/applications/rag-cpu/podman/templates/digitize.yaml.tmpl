@@ -10,6 +10,25 @@ metadata:
     ai-services.io/ports: "{{ .Values.digitizeUi.port }}:4001, {{ .Values.digitize.port }}:4000"
     io.podman.annotations.pids-limit/backend-server: "4096"
 spec:
+  initContainers:
+    - name: digitize-db-init
+      image: "{{ .Values.postgres.image }}"
+      command: ["/bin/sh", "/scripts/init_db.sh"]
+      env:
+        - name: POSTGRES_HOST
+          value: "{{ .AppName }}--postgres"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.postgres.database }}"
+        - name: POSTGRES_USER
+          value: "{{ .Values.postgres.user }}"
+        - name: POSTGRES_PASSWORD
+          value: "{{ .Values.postgres.password }}"
+      volumeMounts:
+        - name: db-init-scripts
+          mountPath: /scripts
+          readOnly: true
   containers:
     - name: ui
       image: "{{ .Values.digitizeUi.image }}"
@@ -96,6 +115,20 @@ spec:
         - name: VLLM_API_KEY
           value: "{{ .Values.instruct.apiKey }}"
         {{- end }}
+        - name: POSTGRES_HOST
+          value: "{{ .AppName }}--postgres"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.postgres.database }}"
+        - name: POSTGRES_USER
+          value: "{{ .Values.postgres.user }}"
+        - name: POSTGRES_PASSWORD
+          value: "{{ .Values.postgres.password }}"
+        - name: DB_POOL_SIZE
+          value: "5"
+        - name: DB_MAX_OVERFLOW
+          value: "5"
       volumeMounts:
         - mountPath: /var/cache:z
           name: cache
@@ -104,4 +137,8 @@ spec:
     - name: cache
       hostPath:
         path: "/var/lib/ai-services/applications/{{ .AppName }}/cache"
+        type: DirectoryOrCreate
+    - name: db-init-scripts
+      hostPath:
+        path: "/var/lib/ai-services/applications/{{ .AppName }}/db-scripts"
         type: DirectoryOrCreate
