@@ -10,31 +10,33 @@ import (
 )
 
 var (
-	// architectureProvider handles architecture catalog operations
+	// architectureProvider handles architecture catalog operations.
 	architectureProvider = templates.NewEmbedTemplateProvider(&assets.CatalogFS, "architectures")
-	// serviceProvider handles service catalog operations
+	// serviceProvider handles service catalog operations.
 	serviceProvider = templates.NewEmbedTemplateProvider(&assets.CatalogFS, "services")
 )
 
-// LoadArchitecture loads an architecture by ID
+// LoadArchitecture loads an architecture by ID.
 func LoadArchitecture(id string) (*types.Architecture, error) {
 	var arch types.Architecture
 	if err := architectureProvider.LoadMetadata(id, false, &arch); err != nil {
 		return nil, fmt.Errorf("failed to load architecture '%s': %w", id, err)
 	}
+
 	return &arch, nil
 }
 
-// LoadService loads a service by ID (base metadata only)
+// LoadService loads a service by ID (base metadata only).
 func LoadService(id string) (*types.Service, error) {
 	var service types.Service
 	if err := serviceProvider.LoadMetadata(id, false, &service); err != nil {
 		return nil, fmt.Errorf("failed to load service '%s': %w", id, err)
 	}
+
 	return &service, nil
 }
 
-// ToServiceSummary converts a Service to ServiceSummary
+// ToServiceSummary converts a Service to ServiceSummary.
 func ToServiceSummary(service *types.Service) types.ServiceSummary {
 	return types.ServiceSummary{
 		ID:            service.ID,
@@ -45,7 +47,7 @@ func ToServiceSummary(service *types.Service) types.ServiceSummary {
 	}
 }
 
-// ToArchitectureSummary converts an Architecture to ArchitectureSummary
+// ToArchitectureSummary converts an Architecture to ArchitectureSummary.
 func ToArchitectureSummary(arch *types.Architecture) types.ArchitectureSummary {
 	// Extract just the service IDs as strings
 	services := make([]string, len(arch.Services))
@@ -62,14 +64,14 @@ func ToArchitectureSummary(arch *types.Architecture) types.ArchitectureSummary {
 	}
 }
 
-// ListArchitectures lists all available architectures
+// ListArchitectures lists all available architectures.
 func ListArchitectures() ([]types.Architecture, error) {
 	archIDs, err := architectureProvider.ListApplications(true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list architectures: %w", err)
 	}
 
-	var architectures []types.Architecture
+	architectures := make([]types.Architecture, 0, len(archIDs))
 	for _, id := range archIDs {
 		arch, err := LoadArchitecture(id)
 		if err != nil {
@@ -83,7 +85,7 @@ func ListArchitectures() ([]types.Architecture, error) {
 }
 
 // ListServices lists all available deployable services
-// Only returns services where DependencyOnly is false (default)
+// Only returns services where DependencyOnly is false (default).
 func ListServices() ([]types.Service, error) {
 	serviceIDs, err := serviceProvider.ListApplications(true)
 	if err != nil {
@@ -109,26 +111,28 @@ func ListServices() ([]types.Service, error) {
 
 // ListServicesWithRuntime lists all available deployable services
 // Runtime parameter kept for API compatibility but not used
-// Only returns services where DependencyOnly is false (default)
+// Only returns services where DependencyOnly is false (default).
 func ListServicesWithRuntime(runtime runtimeTypes.RuntimeType) ([]types.Service, error) {
 	return ListServices()
 }
 
-// ArchitectureExists checks if an architecture exists
+// ArchitectureExists checks if an architecture exists.
 func ArchitectureExists(id string) bool {
 	_, err := LoadArchitecture(id)
+
 	return err == nil
 }
 
-// ServiceExists checks if a service exists
+// ServiceExists checks if a service exists.
 func ServiceExists(id string) bool {
 	_, err := LoadService(id)
+
 	return err == nil
 }
 
 // ResolveServiceDependencies resolves all dependencies for one or more services recursively
 // Returns a flat list of all unique service IDs needed (including the services themselves)
-// Accepts either service IDs (strings) or ServiceReferences
+// Accepts either service IDs (strings) or ServiceReferences.
 func ResolveServiceDependencies(services ...interface{}) ([]string, error) {
 	visited := make(map[string]bool)
 	var result []string
@@ -152,7 +156,7 @@ func ResolveServiceDependencies(services ...interface{}) ([]string, error) {
 	return result, nil
 }
 
-// resolveDependenciesRecursive performs depth-first traversal of dependencies
+// resolveDependenciesRecursive performs depth-first traversal of dependencies.
 func resolveDependenciesRecursive(serviceID string, visited map[string]bool, result *[]string) error {
 	// Check for circular dependencies
 	if visited[serviceID] {
@@ -181,10 +185,25 @@ func resolveDependenciesRecursive(serviceID string, visited map[string]bool, res
 	return nil
 }
 
-// GetDeploymentOrder returns services grouped into deployment layers
-// Services in the same layer can be deployed in parallel
+// GetDeploymentOrder returns services grouped into deployment layers.
+// Services in the same layer can be deployed in parallel.
 func GetDeploymentOrder(serviceIDs []string) ([][]string, error) {
-	// Build dependency graph
+	graph, inDegree, err := buildDependencyGraph(serviceIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	layers := performTopologicalSort(graph, inDegree)
+
+	if err := validateNoCircularDependencies(layers, serviceIDs); err != nil {
+		return nil, err
+	}
+
+	return layers, nil
+}
+
+// buildDependencyGraph creates a dependency graph for the given services.
+func buildDependencyGraph(serviceIDs []string) (map[string][]string, map[string]int, error) {
 	graph := make(map[string][]string)
 	inDegree := make(map[string]int)
 
@@ -200,7 +219,7 @@ func GetDeploymentOrder(serviceIDs []string) ([][]string, error) {
 	for _, svcID := range serviceIDs {
 		service, err := LoadService(svcID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load service '%s': %w", svcID, err)
+			return nil, nil, fmt.Errorf("failed to load service '%s': %w", svcID, err)
 		}
 
 		for _, dep := range service.Dependencies {
@@ -212,50 +231,66 @@ func GetDeploymentOrder(serviceIDs []string) ([][]string, error) {
 		}
 	}
 
-	// Topological sort using Kahn's algorithm
-	var layers [][]string
-	queue := []string{}
+	return graph, inDegree, nil
+}
 
-	// Find all services with no dependencies (in-degree = 0)
+// performTopologicalSort performs Kahn's algorithm for topological sorting.
+func performTopologicalSort(graph map[string][]string, inDegree map[string]int) [][]string {
+	var layers [][]string
+	queue := getServicesWithNoDependencies(inDegree)
+
+	for len(queue) > 0 {
+		currentLayer := make([]string, len(queue))
+		copy(currentLayer, queue)
+		layers = append(layers, currentLayer)
+
+		queue = processLayer(queue, graph, inDegree)
+	}
+
+	return layers
+}
+
+// getServicesWithNoDependencies returns services with no dependencies.
+func getServicesWithNoDependencies(inDegree map[string]int) []string {
+	var queue []string
 	for svcID, degree := range inDegree {
 		if degree == 0 {
 			queue = append(queue, svcID)
 		}
 	}
 
-	for len(queue) > 0 {
-		// Current layer contains all services with no remaining dependencies
-		currentLayer := make([]string, len(queue))
-		copy(currentLayer, queue)
-		layers = append(layers, currentLayer)
+	return queue
+}
 
-		// Process current layer
-		nextQueue := []string{}
-		for _, svcID := range queue {
-			// Reduce in-degree for all dependent services
-			for _, dependent := range graph[svcID] {
-				inDegree[dependent]--
-				if inDegree[dependent] == 0 {
-					nextQueue = append(nextQueue, dependent)
-				}
+// processLayer processes a layer and returns the next queue.
+func processLayer(queue []string, graph map[string][]string, inDegree map[string]int) []string {
+	var nextQueue []string
+	for _, svcID := range queue {
+		for _, dependent := range graph[svcID] {
+			inDegree[dependent]--
+			if inDegree[dependent] == 0 {
+				nextQueue = append(nextQueue, dependent)
 			}
 		}
-		queue = nextQueue
 	}
 
-	// Check for circular dependencies
+	return nextQueue
+}
+
+// validateNoCircularDependencies checks for circular dependencies.
+func validateNoCircularDependencies(layers [][]string, serviceIDs []string) error {
 	processedCount := 0
 	for _, layer := range layers {
 		processedCount += len(layer)
 	}
 	if processedCount != len(serviceIDs) {
-		return nil, fmt.Errorf("circular dependency detected in services")
+		return fmt.Errorf("circular dependency detected in services")
 	}
 
-	return layers, nil
+	return nil
 }
 
-// ValidateDependencies checks if all dependencies for given services exist
+// ValidateDependencies checks if all dependencies for given services exist.
 func ValidateDependencies(serviceIDs []string) error {
 	for _, svcID := range serviceIDs {
 		service, err := LoadService(svcID)

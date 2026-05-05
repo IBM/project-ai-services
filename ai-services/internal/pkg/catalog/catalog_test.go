@@ -76,6 +76,7 @@ func TestListArchitectures(t *testing.T) {
 		for _, arch := range architectures {
 			if arch.ID == "rag" {
 				found = true
+
 				break
 			}
 		}
@@ -489,6 +490,7 @@ func indexOf(slice []string, value string) int {
 			return i
 		}
 	}
+
 	return -1
 }
 
@@ -497,6 +499,7 @@ func flattenLayers(layers [][]string) []string {
 	for _, layer := range layers {
 		result = append(result, layer...)
 	}
+
 	return result
 }
 

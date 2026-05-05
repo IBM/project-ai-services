@@ -1,3 +1,4 @@
+basePath: /api/v1
 definitions:
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture:
     properties:
@@ -126,8 +127,19 @@ definitions:
     required:
     - refresh_token
     type: object
+host: localhost:8080
 info:
-  contact: {}
+  contact:
+    email: support@example.com
+    name: API Support
+    url: https://github.com/project-ai-services/ai-services
+  description: API server for managing AI Services catalog, applications, and authentication
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: AI Services Catalog API
+  version: "1.0"
 paths:
   /applications:
     post:
@@ -565,4 +577,17 @@ paths:
       summary: Get service details
       tags:
       - Catalog
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"
+tags:
+- description: Authentication and authorization endpoints
+  name: Authentication
+- description: Application management endpoints
+  name: Applications
+- description: Catalog endpoints for architectures and services
+  name: Catalog

@@ -10,10 +10,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-// CatalogHandler handles catalog-related HTTP requests
+// CatalogHandler handles catalog-related HTTP requests.
 type CatalogHandler struct{}
 
-// NewCatalogHandler creates a new catalog handler
+// NewCatalogHandler creates a new catalog handler.
 func NewCatalogHandler() *CatalogHandler {
 	return &CatalogHandler{}
 }
@@ -35,6 +35,7 @@ func (h *CatalogHandler) ListArchitectures(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to list architectures: %v", err),
 		})
+
 		return
 	}
 
@@ -68,6 +69,7 @@ func (h *CatalogHandler) GetArchitectureDetails(c *gin.Context) {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Architecture '%s' not found: %v", id, err),
 		})
+
 		return
 	}
 
@@ -94,6 +96,7 @@ func (h *CatalogHandler) ListServices(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to list services: %v", err),
 		})
+
 		return
 	}
 
@@ -127,13 +130,14 @@ func (h *CatalogHandler) GetServiceDetails(c *gin.Context) {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Service '%s' not found: %v", id, err),
 		})
+
 		return
 	}
 
 	c.JSON(http.StatusOK, service)
 }
 
-// ErrorResponse represents an error response
+// ErrorResponse represents an error response.
 type ErrorResponse struct {
 	Error string `json:"error"`
 }

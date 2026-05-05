@@ -893,7 +893,29 @@ const docTemplate = `{
                 }
             }
         }
-    }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "Type \"Bearer\" followed by a space and JWT token.",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    },
+    "tags": [
+        {
+            "description": "Authentication and authorization endpoints",
+            "name": "Authentication"
+        },
+        {
+            "description": "Application management endpoints",
+            "name": "Applications"
+        },
+        {
+            "description": "Catalog endpoints for architectures and services",
+            "name": "Catalog"
+        }
+    ]
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
