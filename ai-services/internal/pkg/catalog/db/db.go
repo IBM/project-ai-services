@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -14,10 +15,16 @@ import (
 const (
 	// DriverName is the PostgreSQL driver name used for database connections.
 	DriverName = "pgx"
+	// DefaultDBHost is the default database host.
+	DefaultDBHost = "localhost"
 	// DefaultDBName is the default database name for the catalog service.
 	DefaultDBName = "ai_services"
 	// DefaultDBPort is the default PostgreSQL port.
 	DefaultDBPort = 5432
+	// DefaultDBUser is the default database user.
+	DefaultDBUser = "admin"
+	// DefaultSSLMode is the default SSL mode for database connections.
+	DefaultSSLMode = "disable"
 	// DefaultMaxOpenConns is the default maximum number of open connections.
 	DefaultMaxOpenConns = 25
 	// DefaultMaxIdleConns is the default maximum number of idle connections.
@@ -38,7 +45,7 @@ type Config struct {
 	SSLMode  string
 }
 
-// ConnectionString builds a PostgreSQL connection string from the config.
+// ConnectionString builds a PostgreSQL connection string from the config (for sql.DB).
 func (c *Config) ConnectionString() string {
 	return fmt.Sprintf(
 		"host=%s port=%d user=%s password='%s' dbname=%s sslmode=%s",
@@ -46,7 +53,15 @@ func (c *Config) ConnectionString() string {
 	)
 }
 
-// Connect establishes a connection to the PostgreSQL database.
+// ConnectionURL builds a PostgreSQL connection URL from the config (for pgxpool).
+func (c *Config) ConnectionURL() string {
+	return fmt.Sprintf(
+		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		c.User, c.Password, c.Host, c.Port, c.DBName, c.SSLMode,
+	)
+}
+
+// Connect establishes a connection to the PostgreSQL database using sql.DB (for migrations).
 func Connect(cfg Config) (*sql.DB, error) {
 	db, err := sql.Open(DriverName, cfg.ConnectionString())
 	if err != nil {
@@ -71,6 +86,35 @@ func Connect(cfg Config) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+// ConnectPool establishes a connection pool to the PostgreSQL database using pgxpool.
+func ConnectPool(ctx context.Context, cfg Config) (*pgxpool.Pool, error) {
+	poolConfig, err := pgxpool.ParseConfig(cfg.ConnectionURL())
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse pool config: %w", err)
+	}
+
+	// Set connection pool settings
+	poolConfig.MaxConns = int32(DefaultMaxOpenConns)
+	poolConfig.MinConns = int32(DefaultMaxIdleConns)
+	poolConfig.MaxConnLifetime = DefaultConnMaxLifetime
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create connection pool: %w", err)
+	}
+
+	// Verify connection
+	pingCtx, cancel := context.WithTimeout(ctx, DefaultPingTimeout)
+	defer cancel()
+
+	if err := pool.Ping(pingCtx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	return pool, nil
 }
 
 // CreateDatabaseIfNotExists creates the database if it doesn't exist.

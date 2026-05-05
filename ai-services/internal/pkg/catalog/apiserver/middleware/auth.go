@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 )
 
 const (
@@ -34,7 +35,7 @@ func AuthMiddleware(tokenMgr *auth.TokenManager, blacklist repository.TokenBlack
 
 			return
 		}
-		if blacklist.Contains(raw) {
+		if blacklist.Contains(raw, constants.TokenTypeAccess) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token revoked"})
 
 			return
