@@ -12,8 +12,8 @@ metadata:
 spec:
   initContainers:
     - name: digitize-db-init
-      image: "{{ .Values.postgres.image }}"
-      command: ["/bin/sh", "/scripts/init_db.sh"]
+      image: "{{ .Values.digitize.image }}"
+      command: ["/var/venv/bin/python", "/opt/rag/digitize/db/scripts/init_db.py"]
       env:
         - name: POSTGRES_HOST
           value: "{{ .AppName }}--postgres"
@@ -25,10 +25,6 @@ spec:
           value: "{{ .Values.postgres.user }}"
         - name: POSTGRES_PASSWORD
           value: "{{ .Values.postgres.password }}"
-      volumeMounts:
-        - name: db-init-scripts
-          mountPath: /scripts
-          readOnly: true
   containers:
     - name: ui
       image: "{{ .Values.digitizeUi.image }}"
@@ -137,8 +133,4 @@ spec:
     - name: cache
       hostPath:
         path: "{{ .BaseDir }}/applications/{{ .AppName }}/cache"
-        type: DirectoryOrCreate
-    - name: db-init-scripts
-      hostPath:
-        path: "/var/lib/ai-services/applications/{{ .AppName }}/db-scripts"
         type: DirectoryOrCreate

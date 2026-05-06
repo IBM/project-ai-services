@@ -65,5 +65,3 @@ $$;
 -- Grant permissions
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO digitize_user;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO digitize_user;
-
--- Made with Bob
