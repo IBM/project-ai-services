@@ -92,18 +92,22 @@ COMMANDS:
     export opensearch <app-name> <output-file>
         Export OpenSearch vector database
         Example: ./backup-restore.sh export opensearch rag-dev opensearch.tar.gz
+        Note: app-name is required
 
     export digitize <app-name> <output-file>
         Export digitize application data (default: /var/cache)
         Example: ./backup-restore.sh export digitize rag-dev digitize.tar.gz
+        Note: app-name is required
 
-    import opensearch <backup-file>
-        Import OpenSearch vector database
-        Example: ./backup-restore.sh import opensearch opensearch.tar.gz
+    import opensearch <app-name> <backup-file>
+        Import OpenSearch vector database to specific app
+        Example: ./backup-restore.sh import opensearch rag-dev opensearch.tar.gz
+        Note: app-name is required
 
-    import digitize <backup-file>
-        Import digitize application data
-        Example: ./backup-restore.sh import digitize digitize.tar.gz
+    import digitize <app-name> <backup-file>
+        Import digitize application data to specific app
+        Example: ./backup-restore.sh import digitize rag-dev digitize.tar.gz
+        Note: app-name is required
 
 ENVIRONMENT VARIABLES:
     CACHE_DIR              Cache directory path (default: /var/cache)
@@ -118,7 +122,7 @@ ENVIRONMENT VARIABLES:
 EXAMPLES:
     # Using --env-file (recommended for production)
     ./backup-restore.sh --env-file .env export opensearch rag-dev opensearch.tar.gz
-    ./backup-restore.sh --env-file .env import opensearch opensearch.tar.gz
+    ./backup-restore.sh --env-file .env import opensearch rag-dev opensearch.tar.gz
 
     # Using environment variables
     export OPENSEARCH_PASSWORD="MySecurePassword123"
@@ -129,14 +133,14 @@ EXAMPLES:
     ./backup-restore.sh export digitize rag-dev digitize.tar.gz
 
     # Full restore (run both commands)
-    ./backup-restore.sh import opensearch opensearch.tar.gz
-    ./backup-restore.sh import digitize digitize.tar.gz
+    ./backup-restore.sh import opensearch rag-dev opensearch.tar.gz
+    ./backup-restore.sh import digitize rag-dev digitize.tar.gz
 
     # Partial backup (OpenSearch only)
     ./backup-restore.sh export opensearch rag-prod opensearch_prod.tar.gz
 
     # Partial restore (digitize only)
-    ./backup-restore.sh import digitize digitize_backup.tar.gz
+    ./backup-restore.sh import digitize rag-dev digitize_backup.tar.gz
 
 SECURITY NOTES:
     - Use --env-file or environment variables for custom passwords
@@ -148,19 +152,25 @@ EOF
 
 # Export OpenSearch using sidecar container approach
 export_opensearch() {
-    local APP_NAME="${1:-rag-dev}"
-    local OUTPUT_FILE="${2:-opensearch_backup_$(date +%Y%m%d_%H%M%S).tar.gz}"
+    local APP_NAME="$1"
+    local OUTPUT_FILE="$2"
     
-    # Filter container by app name
-    local CONTAINER_NAME=$(podman ps --filter "label=app=${APP_NAME}" --filter "name=opensearch" --format "{{.Names}}" | head -n 1)
-    
-    if [ -z "$CONTAINER_NAME" ]; then
-        # Fallback: try without app label filter
-        CONTAINER_NAME=$(podman ps --filter "name=${APP_NAME}.*opensearch" --format "{{.Names}}" | head -n 1)
+    # Validate required parameters
+    if [ -z "$APP_NAME" ]; then
+        print_error "App name is required"
+        echo "Usage: ./backup-restore.sh export opensearch <app-name> <output-file>"
+        exit 1
     fi
+    
+    if [ -z "$OUTPUT_FILE" ]; then
+        OUTPUT_FILE="opensearch_backup_$(date +%Y%m%d_%H%M%S).tar.gz"
+    fi
+    
+    local CONTAINER_NAME=$(podman ps --filter "label=ai-services.io/application=${APP_NAME}" --filter "name=opensearch" --format "{{.Names}}" | head -n 1)
 
     if [ -z "$CONTAINER_NAME" ]; then
         print_error "OpenSearch container not found for app: $APP_NAME"
+        print_error "Make sure the container has label 'ai-services.io/application=${APP_NAME}' and name contains 'opensearch'"
         exit 1
     fi
 
@@ -260,12 +270,13 @@ EOFPYTHON
     local SIDECAR_NAME="opensearch-backup-sidecar-$$"
     
     # Start sidecar container in the same pod (shares network namespace with OpenSearch)
+    # Using UBI (Universal Base Image)
     podman run -d \
         --name "$SIDECAR_NAME" \
         --pod "$POD_ID" \
         --rm \
         -e OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD}" \
-        python:3.11-slim \
+        registry.access.redhat.com/ubi9/python-311 \
         sleep 3600
     
     if [ $? -ne 0 ]; then
@@ -296,8 +307,7 @@ EOFPYTHON
     fi
     
     print_info "Running backup from sidecar container..."
-    podman exec -e OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD}" \
-        "$SIDECAR_NAME" \
+    podman exec "$SIDECAR_NAME" \
         python3 /backup.py "$APP_NAME" "/tmp/$OUTPUT_FILE"
     
     if [ $? -ne 0 ]; then
@@ -331,8 +341,19 @@ EOFPYTHON
 
 # Export Digitize
 export_digitize() {
-    local APP_NAME="${1:-rag-dev}"
-    local OUTPUT_FILE="${2:-digitize_backup_$(date +%Y%m%d_%H%M%S).tar.gz}"
+    local APP_NAME="$1"
+    local OUTPUT_FILE="$2"
+    
+    # Validate required parameters
+    if [ -z "$APP_NAME" ]; then
+        print_error "App name is required"
+        echo "Usage: ./backup-restore.sh export digitize <app-name> <output-file>"
+        exit 1
+    fi
+    
+    if [ -z "$OUTPUT_FILE" ]; then
+        OUTPUT_FILE="digitize_backup_$(date +%Y%m%d_%H%M%S).tar.gz"
+    fi
 
     echo "============================================================"
     echo "Digitize Data Export"
@@ -342,35 +363,11 @@ export_digitize() {
     echo "Output: $OUTPUT_FILE"
     echo ""
 
-    # Get digitize BACKEND container (not UI) - try multiple methods for robustness
-    local DIGITIZE_CONTAINER=$(podman ps --filter "label=app=${APP_NAME}" --filter "name=digitize-backend" --format "{{.Names}}" | head -n 1)
-    
-    if [ -z "$DIGITIZE_CONTAINER" ]; then
-        # Fallback 1: try pattern matching with app name and backend
-        DIGITIZE_CONTAINER=$(podman ps --filter "name=${APP_NAME}.*digitize-backend" --format "{{.Names}}" | head -n 1)
-    fi
-    
-    if [ -z "$DIGITIZE_CONTAINER" ]; then
-        # Fallback 2: try just digitize-backend
-        DIGITIZE_CONTAINER=$(podman ps --filter "name=digitize-backend" --format "{{.Names}}" | head -n 1)
-    fi
-    
-    if [ -z "$DIGITIZE_CONTAINER" ]; then
-        # Fallback 3: grep for digitize-backend (not digitize-ui)
-        DIGITIZE_CONTAINER=$(podman ps | grep "digitize-backend" | awk '{print $1}' | head -n 1)
-    fi
+    local DIGITIZE_CONTAINER=$(podman ps --filter "label=ai-services.io/application=${APP_NAME}" --format "{{.Names}}" | grep -E "digitize.*(backend|server)" | head -n 1)
 
-    # BACKUP STRATEGY:
-    # Backup is taken from the container's /var/cache directory.
-    # Note: /var/cache only exists inside the container, not on the host.
-    # Host path is /var/lib/aiservices/... (for reference only, not used for backup).
-    #
-    # PR Comment: "We should not be updating the running container"
-    # Solution: We only READ from the container (tar command), no modifications.
-    
     if [ -z "$DIGITIZE_CONTAINER" ]; then
         print_error "Digitize backend container not found for app: $APP_NAME"
-        print_info "Looking for containers with 'digitize-backend' in the name"
+        print_error "Make sure the container has label 'ai-services.io/application=${APP_NAME}' and name contains 'digitize' with 'backend' or 'server'"
         exit 1
     fi
 
@@ -384,7 +381,6 @@ export_digitize() {
     print_info "Backing up /var/cache from container..."
     
     # Read-only operation: tar the entire /var/cache directory from container
-    # No container modifications - just reading data
     podman exec $DIGITIZE_CONTAINER tar -czf /tmp/container_cache.tar.gz -C /var cache 2>/dev/null || true
     podman cp $DIGITIZE_CONTAINER:/tmp/container_cache.tar.gz ./container_cache.tar.gz 2>/dev/null || true
     
@@ -417,23 +413,31 @@ export_digitize() {
     echo ""
     print_success "Digitize data export completed!"
     echo "Backup file: $OUTPUT_FILE"
-    ls -lh "$OUTPUT_FILE"
 }
 
 
 # Import OpenSearch using sidecar container approach
 import_opensearch() {
-    local BACKUP_FILE="$1"
+    local APP_NAME="$1"
+    local BACKUP_FILE="$2"
+    
+    # Validate required parameters
+    if [ -z "$APP_NAME" ]; then
+        print_error "App name is required"
+        echo "Usage: ./backup-restore.sh import opensearch <app-name> <backup-file>"
+        exit 1
+    fi
 
     if [ -z "$BACKUP_FILE" ] || [ ! -f "$BACKUP_FILE" ]; then
         print_error "Backup file not found: $BACKUP_FILE"
         exit 1
     fi
 
-    local CONTAINER_NAME=$(podman ps | grep opensearch | awk '{print $1}')
+    local CONTAINER_NAME=$(podman ps --filter "label=ai-services.io/application=${APP_NAME}" --filter "name=opensearch" --format "{{.Names}}" | head -n 1)
 
     if [ -z "$CONTAINER_NAME" ]; then
-        print_error "OpenSearch container not found"
+        print_error "OpenSearch container not found for app: $APP_NAME"
+        print_error "Make sure the container has label 'ai-services.io/application=${APP_NAME}' and name contains 'opensearch'"
         exit 1
     fi
 
@@ -540,7 +544,7 @@ EOFPYTHON
         --pod "$POD_ID" \
         --rm \
         -e OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD}" \
-        python:3.11-slim \
+        registry.access.redhat.com/ubi9/python-311 \
         sleep 3600
     
     if [ $? -ne 0 ]; then
@@ -583,8 +587,7 @@ EOFPYTHON
     
     # Run restore from sidecar container
     print_info "Running restore from sidecar container..."
-    podman exec -e OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD}" \
-        "$SIDECAR_NAME" \
+    podman exec "$SIDECAR_NAME" \
         python3 /restore.py /tmp/backup.tar.gz
     
     if [ $? -ne 0 ]; then
@@ -605,7 +608,15 @@ EOFPYTHON
 
 # Import Digitize
 import_digitize() {
-    local BACKUP_FILE="$1"
+    local APP_NAME="$1"
+    local BACKUP_FILE="$2"
+    
+    # Validate required parameters
+    if [ -z "$APP_NAME" ]; then
+        print_error "App name is required"
+        echo "Usage: ./backup-restore.sh import digitize <app-name> <backup-file>"
+        exit 1
+    fi
 
     if [ -z "$BACKUP_FILE" ] || [ ! -f "$BACKUP_FILE" ]; then
         print_error "Backup file not found: $BACKUP_FILE"
@@ -615,6 +626,7 @@ import_digitize() {
     echo "============================================================"
     echo "Digitize Data Import"
     echo "============================================================"
+    echo "App name: $APP_NAME"
     echo "Backup file: $BACKUP_FILE"
     echo ""
 
@@ -633,27 +645,11 @@ import_digitize() {
     # Restore to container - MIRROR the export strategy
     print_info "Restoring to digitize container..."
     
-    # Get digitize BACKEND container (not UI) - try multiple methods for robustness
-    local DIGITIZE_CONTAINER=$(podman ps --filter "label=app=${APP_NAME}" --filter "name=digitize-backend" --format "{{.Names}}" | head -n 1)
-    
-    if [ -z "$DIGITIZE_CONTAINER" ]; then
-        # Fallback 1: try pattern matching with app name and backend
-        DIGITIZE_CONTAINER=$(podman ps --filter "name=${APP_NAME}.*digitize-backend" --format "{{.Names}}" | head -n 1)
-    fi
-    
-    if [ -z "$DIGITIZE_CONTAINER" ]; then
-        # Fallback 2: try just digitize-backend
-        DIGITIZE_CONTAINER=$(podman ps --filter "name=digitize-backend" --format "{{.Names}}" | head -n 1)
-    fi
-    
-    if [ -z "$DIGITIZE_CONTAINER" ]; then
-        # Fallback 3: grep for digitize-backend (not digitize-ui)
-        DIGITIZE_CONTAINER=$(podman ps | grep "digitize-backend" | awk '{print $1}' | head -n 1)
-    fi
+    local DIGITIZE_CONTAINER=$(podman ps --filter "label=ai-services.io/application=${APP_NAME}" --format "{{.Names}}" | grep -E "digitize.*(backend|server)" | head -n 1)
 
     if [ -z "$DIGITIZE_CONTAINER" ]; then
         print_error "Digitize backend container not found for app: $APP_NAME"
-        print_info "Looking for containers with 'digitize-backend' in the name"
+        print_error "Make sure the container has label 'ai-services.io/application=${APP_NAME}' and name contains 'digitize' with 'backend' or 'server'"
         rm -rf "$TEMP_DIR"
         exit 1
     fi
@@ -676,7 +672,6 @@ import_digitize() {
     # 1. Create tar from extracted backup/cache directory
     # 2. Copy tar to container
     # 3. Extract in container to restore /var/cache
-    # This is the EXACT REVERSE of the export process
     
     print_info "Creating archive from backup..."
     cd "$TEMP_DIR"
@@ -744,7 +739,7 @@ import_digitize() {
     echo ""
     print_info "Note: Documents require BOTH digitize files AND OpenSearch metadata"
     print_info "If documents don't appear, also restore OpenSearch data:"
-    echo "  ./backup-restore.sh import opensearch opensearch_backup.tar.gz"
+    echo "  ./backup-restore.sh import opensearch $APP_NAME opensearch_backup.tar.gz"
 }
 
 
@@ -781,20 +776,20 @@ main() {
         import)
             case "$2" in
                 opensearch)
-                    if [ -z "$3" ]; then
-                        print_error "Backup file required"
-                        echo "Usage: ./backup-restore.sh import opensearch <backup-file>"
+                    if [ -z "$3" ] || [ -z "$4" ]; then
+                        print_error "App name and backup file required"
+                        echo "Usage: ./backup-restore.sh import opensearch <app-name> <backup-file>"
                         exit 1
                     fi
-                    import_opensearch "$3"
+                    import_opensearch "$3" "$4"
                     ;;
                 digitize)
-                    if [ -z "$3" ]; then
-                        print_error "Backup file required"
-                        echo "Usage: ./backup-restore.sh import digitize <backup-file>"
+                    if [ -z "$3" ] || [ -z "$4" ]; then
+                        print_error "App name and backup file required"
+                        echo "Usage: ./backup-restore.sh import digitize <app-name> <backup-file>"
                         exit 1
                     fi
-                    import_digitize "$3"
+                    import_digitize "$3" "$4"
                     ;;
                 *)
                     print_error "Unknown import target: $2"
