@@ -10,6 +10,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver"
 	apirepository "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -24,19 +25,19 @@ const defaultRandomSecretKeyLength = 32
 
 // loadDBConfig loads database configuration from environment variables.
 func loadDBConfig() (db.Config, error) {
-	portStr := utils.GetEnv("DB_PORT", strconv.Itoa(db.DefaultDBPort))
+	portStr := utils.GetEnv("DB_PORT", strconv.Itoa(constants.DefaultDBPort))
 	dbPort, err := strconv.Atoi(portStr)
 	if err != nil {
 		return db.Config{}, fmt.Errorf("invalid DB_PORT value '%s': %w", portStr, err)
 	}
 
 	dbConfig := db.Config{
-		Host:     utils.GetEnv("DB_HOST", db.DefaultDBHost),
+		Host:     utils.GetEnv("DB_HOST", constants.DefaultDBHost),
 		Port:     dbPort,
-		User:     utils.GetEnv("DB_USER", db.DefaultDBUser),
+		User:     utils.GetEnv("DB_USER", constants.DefaultDBUser),
 		Password: os.Getenv("DB_PASSWORD"),
-		DBName:   utils.GetEnv("DB_NAME", db.DefaultDBName),
-		SSLMode:  utils.GetEnv("DB_SSLMODE", db.DefaultSSLMode),
+		DBName:   utils.GetEnv("DB_NAME", constants.DefaultDBName),
+		SSLMode:  utils.GetEnv("DB_SSLMODE", constants.DefaultSSLMode),
 	}
 
 	if dbConfig.Password == "" {

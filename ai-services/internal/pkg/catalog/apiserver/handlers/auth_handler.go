@@ -112,6 +112,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	}
 
 	// Get refresh token from X-Refresh-Token header
+	// TODO: Once the consumers starts providing refreshToken in the header, make it mandatory
 	refreshToken := c.GetHeader("X-Refresh-Token")
 
 	if err := h.svc.Logout(c.Request.Context(), accessToken, refreshToken); err != nil {

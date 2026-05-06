@@ -10,9 +10,9 @@ type TokenType = string
 
 // TokenBlacklist represents a blacklisted token in the database.
 // Tokens are stored as SHA-256 hashes for security.
+// token_hash serves as the primary key.
 type TokenBlacklist struct {
-	ID        int       `json:"id"`
-	TokenHash string    `json:"token_hash"` // SHA-256 hash of the JWT token (64-character hex string)
+	TokenHash string    `json:"token_hash"` // SHA-256 hash of the JWT token (64-character hex string) - Primary Key
 	TokenType TokenType `json:"token_type"` // Token type: "access" or "refresh"
 	ExpiresAt time.Time `json:"expires_at"` // Token expiry timestamp
 }

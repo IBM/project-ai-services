@@ -72,16 +72,12 @@ func (s *service) Logout(ctx context.Context, accessToken, refreshToken string) 
 		if err == nil {
 			s.blacklist.Add(refreshToken, catalogconstants.TokenTypeRefresh, refreshExp)
 		}
-		// Ignore invalid tokens
 	}
 
-	// If access token exists, try to validate and blacklist it
-	if accessToken != "" {
-		_, accessExp, err := s.tokens.ValidateAccessToken(accessToken)
-		if err == nil {
-			s.blacklist.Add(accessToken, catalogconstants.TokenTypeAccess, accessExp)
-		}
-		// Ignore invalid tokens
+	// validate and blacklist access token
+	_, accessExp, err := s.tokens.ValidateAccessToken(accessToken)
+	if err == nil {
+		s.blacklist.Add(accessToken, catalogconstants.TokenTypeAccess, accessExp)
 	}
 
 	return nil
