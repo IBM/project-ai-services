@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
@@ -24,7 +23,7 @@ func PrepareDocs(appName string, fileName string) error {
 	srcDir := filepath.Join(filepath.Dir(filename), "docs", fileName)
 
 	dstDir := filepath.Join(
-		constants.GetApplicationsPath(),
+		"/var/lib/ai-services/applications",
 		appName,
 		"docs",
 	)
@@ -92,7 +91,7 @@ func StartIngestion(
 // CleanDocsFolder removes the documents from the application documents folder.
 func CleanDocsFolder(appName string) error {
 	docsDir := filepath.Join(
-		constants.GetApplicationsPath(),
+		"/var/lib/ai-services/applications",
 		appName,
 		"docs",
 	)
