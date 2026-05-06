@@ -78,7 +78,7 @@ spec:
         - name: DB_HOST
           value: {{ .AppName }}--db
         - name: DB_PORT
-          value: 5432
+          value: "5432"
         - name: DB_USER
           value: "{{ .Values.db.user }}"
         - name: DB_PASSWORD
