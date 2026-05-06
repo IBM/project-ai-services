@@ -218,7 +218,14 @@ async function customSendMessage(
     ];
 
     // Only add reference docs button if docs were actually found
-    if (docs && docs.length > 0) {
+    // AND the response doesn't indicate no documents were found
+    const noDocsMessages = [
+      'No documents found in the knowledge base for this query.',
+      'Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden.'
+    ];
+    const hasNoDocsMessage = noDocsMessages.some(msg => fullText.includes(msg));
+    
+    if (docs && docs.length > 0 && !hasNoDocsMessage) {
       responseBlocks.push({
         response_type: 'user_defined',
         user_defined: {
