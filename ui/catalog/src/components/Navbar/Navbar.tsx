@@ -40,7 +40,7 @@ const Navbar = (props: NavbarProps) => {
       >
         <SideNavItems>
           <SideNavMenuItem as={NavLink} to="/ai-deployments">
-            AI Deployments
+            AI deployments
           </SideNavMenuItem>
 
           <SideNavMenuItem as={NavLink} to="/architectures">
