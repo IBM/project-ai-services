@@ -8,8 +8,7 @@ CREATE TYPE token_type AS ENUM (
 
 -- Create tokens_blacklist table
 CREATE TABLE tokens_blacklist (
-    id SERIAL PRIMARY KEY,
-    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    token_hash VARCHAR(64) PRIMARY KEY,
     token_type token_type NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL
 );

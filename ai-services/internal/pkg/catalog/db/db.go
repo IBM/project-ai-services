@@ -6,28 +6,11 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-)
-
-const (
-	// DriverName is the PostgreSQL driver name used for database connections.
-	DriverName = "pgx"
-	// DefaultDBName is the default database name for the catalog service.
-	DefaultDBName = "ai_services"
-	// DefaultDBPort is the default PostgreSQL port.
-	DefaultDBPort = 5432
-	// DefaultMaxOpenConns is the default maximum number of open connections.
-	DefaultMaxOpenConns = 25
-	// DefaultMaxIdleConns is the default maximum number of idle connections.
-	DefaultMaxIdleConns = 5
-	// DefaultConnMaxLifetime is the default maximum lifetime of a connection.
-	DefaultConnMaxLifetime = 5 * time.Minute
-	// DefaultPingTimeout is the default timeout for database ping operations.
-	DefaultPingTimeout = 5 * time.Second
 )
 
 // Config holds database configuration parameters.
@@ -58,18 +41,18 @@ func (c *Config) ConnectionURL() string {
 
 // Connect establishes a connection to the PostgreSQL database using sql.DB (for migrations).
 func Connect(cfg Config) (*sql.DB, error) {
-	db, err := sql.Open(DriverName, cfg.ConnectionString())
+	db, err := sql.Open(constants.DriverName, cfg.ConnectionString())
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database connection: %w", err)
 	}
 
 	// Set connection pool settings
-	db.SetMaxOpenConns(DefaultMaxOpenConns)
-	db.SetMaxIdleConns(DefaultMaxIdleConns)
-	db.SetConnMaxLifetime(DefaultConnMaxLifetime)
+	db.SetMaxOpenConns(constants.DefaultMaxOpenConns)
+	db.SetMaxIdleConns(constants.DefaultMaxIdleConns)
+	db.SetConnMaxLifetime(constants.DefaultConnMaxLifetime)
 
 	// Verify connection
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultPingTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.DefaultPingTimeout)
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
@@ -91,9 +74,9 @@ func ConnectPool(ctx context.Context, cfg Config) (*pgxpool.Pool, error) {
 	}
 
 	// Set connection pool settings
-	poolConfig.MaxConns = int32(DefaultMaxOpenConns)
-	poolConfig.MinConns = int32(DefaultMaxIdleConns)
-	poolConfig.MaxConnLifetime = DefaultConnMaxLifetime
+	poolConfig.MaxConns = int32(constants.DefaultMaxOpenConns)
+	poolConfig.MinConns = int32(constants.DefaultMaxIdleConns)
+	poolConfig.MaxConnLifetime = constants.DefaultConnMaxLifetime
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
@@ -101,7 +84,7 @@ func ConnectPool(ctx context.Context, cfg Config) (*pgxpool.Pool, error) {
 	}
 
 	// Verify connection
-	pingCtx, cancel := context.WithTimeout(ctx, DefaultPingTimeout)
+	pingCtx, cancel := context.WithTimeout(ctx, constants.DefaultPingTimeout)
 	defer cancel()
 
 	if err := pool.Ping(pingCtx); err != nil {
