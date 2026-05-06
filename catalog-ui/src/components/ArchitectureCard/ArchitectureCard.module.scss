@@ -1,0 +1,86 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/type";
+
+.card {
+  background-color: var(--cds-layer);
+  border: 1px solid var(--cds-border-subtle);
+  padding: spacing.$spacing-05;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: spacing.$spacing-03;
+  margin-bottom: spacing.$spacing-05;
+}
+
+.cardTitle {
+  @include type.type-style("heading-compact-02");
+  color: var(--cds-text-primary);
+  margin: 0;
+  flex: 1;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: spacing.$spacing-02;
+}
+
+.certifiedBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--cds-support-success);
+
+  &:hover {
+    opacity: 0.8;
+  }
+
+  svg {
+    fill: var(--cds-support-success);
+  }
+}
+
+.cardDescription {
+  @include type.type-style("body-compact-01");
+  color: var(--cds-text-secondary);
+  margin: 0 0 spacing.$spacing-05 0;
+  min-height: 100px;
+}
+
+.tagsSection {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-03;
+  margin-bottom: spacing.$spacing-06;
+}
+
+.tagsHeading {
+  @include type.type-style("label-01");
+  font-weight: 600;
+  color: var(--cds-text-secondary);
+  margin: 0;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-02;
+  max-height: calc(2 * 1.5rem + spacing.$spacing-02);
+  overflow: hidden;
+}
+
+.cardActions {
+  display: flex;
+  gap: spacing.$spacing-03;
+  margin-top: auto;
+}
