@@ -123,7 +123,7 @@ const CatalogDemo = () => {
   const providerOptions = useMemo(() => {
     const options = [
       {
-        label: "IBM certified (any provider)",
+        label: "IBM certified",
         value: "ibm-certified",
         count: ibmCertifiedCount,
       },

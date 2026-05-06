@@ -64,9 +64,9 @@ const CatalogBrowseLayout = ({
                 size="lg"
               />
 
-              {totalSelectedFilters > 0 && (
-                <div className={styles.filterHeader}>
-                  <span className={styles.filterTitle}>Filters</span>
+              <div className={styles.filterHeader}>
+                <span className={styles.filterTitle}>Filters</span>
+                {totalSelectedFilters > 0 && (
                   <Tag
                     type="high-contrast"
                     size="md"
@@ -75,8 +75,8 @@ const CatalogBrowseLayout = ({
                   >
                     {totalSelectedFilters}
                   </Tag>
-                </div>
-              )}
+                )}
+              </div>
 
               <Accordion>{filterAccordions}</Accordion>
             </div>
