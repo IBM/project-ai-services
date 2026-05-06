@@ -87,7 +87,7 @@ const mockSolutions = [
     },
 ];
 
-const SolutionsAndUseCases = () => {
+const ReferenceUseCases = () => {
     const [searchValue, setSearchValue] = useState("");
     const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
     const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
@@ -386,7 +386,7 @@ const SolutionsAndUseCases = () => {
 
     return (
         <CatalogBrowseLayout
-            title="Solutions and use cases"
+            title="Reference use cases"
             subtitle="Pre-built AI demos from real-world use cases to help you envision how AI can solve common business problems."
             searchValue={searchValue}
             onSearchChange={setSearchValue}
@@ -399,6 +399,6 @@ const SolutionsAndUseCases = () => {
     );
 };
 
-export default SolutionsAndUseCases;
+export default ReferenceUseCases;
 
 // Made with Bob

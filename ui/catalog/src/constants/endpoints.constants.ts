@@ -4,5 +4,5 @@ export const ROUTES = {
   AI_DEPLOYMENTS: "/ai-deployments",
   ARCHITECTURES: "/architectures",
   SERVICES: "/services",
-  SOLUTIONS_AND_USE_CASES: "/solutions-and-use-cases",
+  REFERENCE_USE_CASES: "/reference-use-cases",
 } as const;
