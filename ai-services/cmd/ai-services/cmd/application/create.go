@@ -3,7 +3,6 @@ package application
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -17,7 +16,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -67,37 +65,6 @@ var createCmd = &cobra.Command{
 		if err := utils.VerifyAppName(appName); err != nil {
 			return err
 		}
-
-		// Extract baseDir from argParams if provided, otherwise use default
-		var baseDir string
-		if argParams != nil {
-			if bd, ok := argParams["baseDir"]; ok {
-				baseDir = bd
-			}
-		}
-		if baseDir == "" {
-			baseDir = constants.GetBaseDir()
-		}
-
-		// Validate baseDir and get the ai-services subdirectory path
-		aiServicesDir, err := utils.ValidateBaseDir(baseDir)
-		if err != nil {
-			return fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
-		}
-
-		// Set AI_SERVICES_BASE_DIR environment variable to the ai-services subdirectory
-		if err := os.Setenv("AI_SERVICES_BASE_DIR", aiServicesDir); err != nil {
-			return fmt.Errorf("failed to set AI_SERVICES_BASE_DIR: %w", err)
-		}
-
-		// Update vars.ModelDirectory to use the new path
-		vars.ModelDirectory = constants.GetModelsPath()
-
-		// Update argParams with the validated baseDir (ai-services subdirectory)
-		if argParams == nil {
-			argParams = make(map[string]string)
-		}
-		argParams["baseDir"] = aiServicesDir
 
 		return nil
 	},
@@ -170,12 +137,8 @@ func initCreateCommonFlags() {
 		"Inline parameters to configure the application.\n\n"+
 			"Format:\n"+
 			"- Comma-separated key=value pairs\n"+
-			"- Example: --params key1=value1,key2=value2,baseDir=/custom/path\n\n"+
+			"- Example: --params key1=value1,key2=value2\n\n"+
 			"- Use \"ai-services application templates\" to view the list of supported parameters\n\n"+
-			"Available parameters:\n"+
-			"- baseDir: Base directory for AI services data (default: "+constants.DefaultBaseDir+")\n"+
-			"  Note: An 'ai-services' subdirectory will be created within this path\n"+
-			"  Example: --params baseDir=/custom/path creates /custom/path/ai-services\n\n"+
 			"Precedence:\n"+
 			"- When both --values and --params are provided, --params overrides --values\n",
 	)
@@ -302,6 +265,11 @@ func validateParamsFlag(cmd *cobra.Command) error {
 	argParams, err = utils.ParseKeyValues(rawArgParams)
 	if err != nil {
 		return fmt.Errorf("invalid format: %w", err)
+	}
+
+	// Reject baseDir parameter - it should only be set via catalog configure
+	if _, exists := argParams["baseDir"]; exists {
+		return fmt.Errorf("baseDir parameter is not supported in application create. Use 'ai-services catalog configure --basedir' to set a custom base directory")
 	}
 
 	// Validate params against template values
