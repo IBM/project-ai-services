@@ -8,7 +8,7 @@ backend:
   # @description Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.
   port: "0"
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.100
+  image: icr.io/ai-services-cicd/rag:v0.0.101
   # @hidden
   log_level: "INFO"
 
@@ -16,7 +16,7 @@ digitize:
   # @description Host port for the DIGITIZE API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.100
+  image: icr.io/ai-services-cicd/rag:v0.0.101
   # @hidden
   log_level: "INFO"
 
@@ -58,7 +58,7 @@ summarize:
   # @description Host port for the Summarize API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.100
+  image: icr.io/ai-services-cicd/rag:v0.0.101
   # @hidden
   log_level: "INFO"
 
@@ -66,6 +66,6 @@ similarity:
   # @description Host port for the Similarity Search API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.100
+  image: icr.io/ai-services-cicd/rag:v0.0.101
   # @hidden
   log_level: "INFO"
