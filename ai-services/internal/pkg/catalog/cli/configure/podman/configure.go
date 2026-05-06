@@ -91,8 +91,8 @@ func loadCatalogTemplates(s *spinner.Spinner) (templates.Template, *templates.Ap
 	tp := templates.NewEmbedTemplateProvider(&assets.CatalogFS, "")
 
 	// Load metadata from catalog/podman
-	appMetadata, err := tp.LoadMetadata(catalogAppTemplate, true)
-	if err != nil {
+	var appMetadata templates.AppMetadata
+	if err := tp.LoadMetadata(catalogAppTemplate, true, &appMetadata); err != nil {
 		s.Fail("failed to load catalog metadata")
 
 		return nil, nil, nil, fmt.Errorf("failed to load catalog metadata: %w", err)
@@ -106,7 +106,7 @@ func loadCatalogTemplates(s *spinner.Spinner) (templates.Template, *templates.Ap
 		return nil, nil, nil, fmt.Errorf("failed to load catalog templates: %w", err)
 	}
 
-	return tp, appMetadata, tmpls, nil
+	return tp, &appMetadata, tmpls, nil
 }
 
 // prepareCatalogValues prepares the values map with configure-specific configuration.

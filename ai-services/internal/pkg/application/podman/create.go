@@ -46,12 +46,12 @@ func (p *PodmanApplication) Create(ctx context.Context, opts types.CreateOptions
 	}
 
 	// load metadata.yml to read the app metadata
-	appMetadata, err := tp.LoadMetadata(opts.TemplateName, true)
-	if err != nil {
+	var appMetadata templates.AppMetadata
+	if err := tp.LoadMetadata(opts.TemplateName, true, &appMetadata); err != nil {
 		return fmt.Errorf("failed to read the app metadata: %w", err)
 	}
 
-	if err := p.verifyPodTemplateExists(tmpls, appMetadata); err != nil {
+	if err := p.verifyPodTemplateExists(tmpls, &appMetadata); err != nil {
 		return fmt.Errorf("failed to verify pod template: %w", err)
 	}
 
@@ -81,7 +81,7 @@ func (p *PodmanApplication) Create(ctx context.Context, opts types.CreateOptions
 	// Loop through all pod templates, render and run kube play
 	logger.Infof("Total Pod Templates to be processed: %d\n", len(tmpls))
 
-	return p.deployApplication(ctx, opts, tmpls, appMetadata, pciAddresses)
+	return p.deployApplication(ctx, opts, tmpls, &appMetadata, pciAddresses)
 }
 
 func (p *PodmanApplication) validateAndAllocateSpyreCards(templateName, appName string, tmpls map[string]*template.Template) ([]string, error) {

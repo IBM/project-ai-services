@@ -22,6 +22,9 @@
 //	@tag.name					Applications
 //	@tag.description			Application management endpoints
 //
+//	@tag.name					Catalog
+//	@tag.description			Catalog endpoints for architectures and services
+//
 //	@securityDefinitions.apikey	BearerAuth
 //	@in							header
 //	@name						Authorization
