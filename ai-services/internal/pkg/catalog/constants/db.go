@@ -1,4 +1,3 @@
-// Package constants defines common constants used across the catalog service.
 package constants
 
 import "time"
