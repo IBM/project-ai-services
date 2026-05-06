@@ -62,11 +62,7 @@ var createCmd = &cobra.Command{
 
 		appName := args[0]
 
-		if err := utils.VerifyAppName(appName); err != nil {
-			return err
-		}
-
-		return nil
+		return utils.VerifyAppName(appName)
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appName := args[0]
@@ -172,8 +168,7 @@ func initCreatePodmanFlags() {
 		appFlags.Create.SkipModelDownload,
 		false,
 		"Skip model download during application creation\n\n"+
-			"Use this if local models already exist at $AI_SERVICES_BASE_DIR/models/\n"+
-			"(default: /var/lib/ai-services/ai-services/models/)\n"+
+			"Use this if local models already exist at /var/lib/ai-services/models/\n"+
 			"Recommended for air-gapped networks\n\n"+
 			"Warning:\n"+
 			"- If set to true and models are missing → command will fail\n"+
