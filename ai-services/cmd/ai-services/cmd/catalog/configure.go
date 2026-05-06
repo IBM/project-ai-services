@@ -2,8 +2,6 @@ package catalog
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -21,8 +19,8 @@ import (
 var (
 	// Runtime type flag for catalog configure command.
 	runtimeType string
-	// Application directory flag for catalog configure command.
-	appDir string
+	// Base directory flag for catalog configure command.
+	baseDir string
 )
 
 // NewConfigureCmd creates a new configure command for the catalog service.
@@ -58,11 +56,17 @@ Examples:
 				return fmt.Errorf("failed to read admin password: %w", err)
 			}
 
-			// Add appDir to argParams
+			// Validate baseDir and get the ai-services subdirectory path
+			aiServicesDir, err := utils.ValidateBaseDir(baseDir)
+			if err != nil {
+				return fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
+			}
+
+			// Add baseDir (ai-services subdirectory) to argParams
 			if argParams == nil {
 				argParams = make(map[string]string)
 			}
-			argParams["appdir"] = appDir
+			argParams["basedir"] = aiServicesDir
 
 			return configure.Run(configure.ConfigureOptions{
 				AdminPassword: adminPassword,
@@ -93,11 +97,7 @@ func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
 		return nil, err
 	}
 
-	// Validate appDir permissions
-	if err := validateAppDir(appDir); err != nil {
-		return nil, fmt.Errorf("invalid app directory '%s': %w", appDir, err)
-	}
-	logger.Infof("Using app directory: %s\n", appDir, logger.VerbosityLevelDebug)
+	logger.Infof("Using base directory: %s\n", baseDir, logger.VerbosityLevelDebug)
 
 	// Parse params if provided
 	var argParams map[string]string
@@ -112,44 +112,21 @@ func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
 	return argParams, nil
 }
 
-// validateAppDir validates that the app directory exists or can be created and is writable.
-func validateAppDir(dir string) error {
-	// Clean the path
-	dir = filepath.Clean(dir)
-
-	// Check if directory exists or can be created
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("cannot create directory: %w", err)
-	}
-
-	// Check write permissions by creating a test file
-	testFile := filepath.Join(dir, ".ai-services-permission-test")
-	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
-		return fmt.Errorf("no write permission: %w", err)
-	}
-
-	// Clean up test file
-	if err := os.Remove(testFile); err != nil {
-		logger.Warningf("Failed to remove test file %s: %v\n", testFile, err)
-	}
-
-	return nil
-}
-
 // configureConfigureFlags configures the flags for the configure command.
 func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 	// Add runtime flag as required
 	cmd.Flags().StringVarP(&runtimeType, "runtime", "r", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
 	_ = cmd.MarkFlagRequired("runtime")
 
-	// Add appdir flag with default
+	// Add basedir flag with default
 	cmd.Flags().StringVar(
-		&appDir,
-		"appdir",
-		constants.DefaultAppDir,
+		&baseDir,
+		"basedir",
+		constants.DefaultBaseDir,
 		"Base directory for AI services data (applications, models, cache).\n\n"+
-			fmt.Sprintf("Default: %s\n", constants.DefaultAppDir)+
-			"Example: --appdir /custom/path/ai-services\n\n"+
+			fmt.Sprintf("Default: %s\n", constants.DefaultBaseDir)+
+			"Example: --basedir /custom/path\n\n"+
+			"Note: An 'ai-services' subdirectory will be created within this path.\n"+
 			"The directory will be created if it doesn't exist.\n"+
 			"User must have write permissions to this directory.\n",
 	)

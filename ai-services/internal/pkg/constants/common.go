@@ -3,6 +3,7 @@ package constants
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -18,26 +19,37 @@ const (
 	SMTLevel             = 2
 )
 
-// DefaultAppDir is the single source of truth for the default application directory.
+// DefaultBaseDir is the single source of truth for the default base directory.
 // Change this constant to update the default directory everywhere in the application.
-const DefaultAppDir = "/var/lib/ai-services"
+const DefaultBaseDir = "/var/lib/ai-services"
 
-// GetAppDir returns the app directory from environment variable or default.
-func GetAppDir() string {
-	if dir := os.Getenv("AI_SERVICES_APP_DIR"); dir != "" {
-		return dir
+// GetBaseDir returns the base directory from environment variable or default.
+// It automatically appends "/ai-services" suffix if not already present.
+func GetBaseDir() string {
+	baseDir := DefaultBaseDir
+	if dir := os.Getenv("AI_SERVICES_BASE_DIR"); dir != "" {
+		baseDir = dir
 	}
-	return DefaultAppDir
+
+	// Clean the path to remove trailing slashes and normalize
+	baseDir = filepath.Clean(baseDir)
+
+	// Ensure the path ends with /ai-services
+	if !strings.HasSuffix(baseDir, "/ai-services") {
+		baseDir = filepath.Join(baseDir, "ai-services")
+	}
+
+	return baseDir
 }
 
-// GetApplicationsPath returns the applications path based on the configured app directory.
+// GetApplicationsPath returns the applications path based on the configured base directory.
 func GetApplicationsPath() string {
-	return filepath.Join(GetAppDir(), "applications")
+	return filepath.Join(GetBaseDir(), "applications")
 }
 
-// GetModelsPath returns the models path based on the configured app directory.
+// GetModelsPath returns the models path based on the configured base directory.
 func GetModelsPath() string {
-	return filepath.Join(GetAppDir(), "models")
+	return filepath.Join(GetBaseDir(), "models")
 }
 
 // OperatorConfig defines configuration for an operator.

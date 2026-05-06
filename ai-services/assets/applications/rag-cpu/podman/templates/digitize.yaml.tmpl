@@ -103,5 +103,5 @@ spec:
   volumes:
     - name: cache
       hostPath:
-        path: "{{ .Values.appDir }}/applications/{{ .AppName }}/cache"
+        path: "{{ .Values.baseDir }}/applications/{{ .AppName }}/cache"
         type: DirectoryOrCreate

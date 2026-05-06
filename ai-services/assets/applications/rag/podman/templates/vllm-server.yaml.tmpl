@@ -27,7 +27,7 @@ spec:
         sizeLimit: 64Gi
     - name: models
       hostPath:
-        path: "{{ .Values.appDir }}/models"
+        path: "{{ .Values.baseDir }}/models"
         type: Directory
   containers:
     - name: instruct

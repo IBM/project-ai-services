@@ -115,7 +115,13 @@ func prepareCatalogValues(tp templates.Template, podmanURI, passwordHash string,
 		argParams = make(map[string]string)
 	}
 
-<<<<<<< HEAD
+	// Extract baseDir before passing to LoadValues (it's not a template parameter)
+	var baseDir string
+	if dir, ok := argParams["basedir"]; ok {
+		baseDir = dir
+		delete(argParams, "basedir") // Remove from argParams so LoadValues doesn't validate it
+	}
+
 	// Generate database password
 	dbPassword, err := utils.GenerateRandomPassword(utils.DefaultPasswordLength)
 	if err != nil {
@@ -125,28 +131,16 @@ func prepareCatalogValues(tp templates.Template, podmanURI, passwordHash string,
 	// Base64 encode the database password for Kubernetes secret
 	dbPasswordBase64 := base64.StdEncoding.EncodeToString([]byte(dbPassword))
 
-=======
-	// Extract appDir before passing to LoadValues (it's not a template parameter)
-	var appDir string
-	if dir, ok := argParams["appdir"]; ok {
-		appDir = dir
-		delete(argParams, "appdir") // Remove from argParams so LoadValues doesn't validate it
-	}
-
->>>>>>> 7a91624 (feat: add configurable app directory with --appdir flag)
 	// Set configure-specific values
 	argParams["backend.adminPasswordHash"] = passwordHash
 	argParams["backend.runtime"] = "podman"
 	argParams["backend.podman.uri"] = podmanURI
-<<<<<<< HEAD
 	argParams["db.password"] = dbPasswordBase64
-=======
-	
-	// Add appDir if provided
-	if appDir != "" {
-		argParams["backend.appDir"] = appDir
+
+	// Add baseDir if provided
+	if baseDir != "" {
+		argParams["backend.baseDir"] = baseDir
 	}
->>>>>>> 7a91624 (feat: add configurable app directory with --appdir flag)
 
 	// Load values from catalog
 	return tp.LoadValues(catalogAppTemplate, nil, argParams)
