@@ -25,7 +25,7 @@ import common.db_utils as db
 from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
 from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
 from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models
-from common.tokenizer_utils import initialize_tokenizer
+from common.tokenizer_utils import initialize_local_tokenizer
 from common.perf_utils import perf_registry
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from chatbot.backend_utils import search_only, validate_query_length
@@ -85,15 +85,16 @@ async def lifespan(app):
     filtered_paths = ['/health']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     
-    # Initialize tokenizer
+    # Initialize local tokenizer for offline tokenization (optional)
     if settings.common.app.tokenizer_model_path:
         try:
-            initialize_tokenizer(settings.common.app.tokenizer_model_path)
-            logging.info(f"Tokenizer initialized from {settings.common.app.tokenizer_model_path}")
+            initialize_local_tokenizer(settings.common.app.tokenizer_model_path)
+            logging.info(f"Local tokenizer initialized from {settings.common.app.tokenizer_model_path}")
         except Exception as e:
-            logging.error(f"Failed to initialize tokenizer: {e}", exc_info=True)
+            logging.error(f"Failed to initialize local tokenizer: {e}", exc_info=True)
+            logging.info("Will fall back to LLM-based tokenization via API")
     else:
-        logging.warning("tokenizer_model_path not set in settings, tokenizer not initialized")
+        logging.info("TOKENIZER_MODEL_PATH not set, will use LLM-based tokenization via API")
     
     initialize_models()
     setup_language_detector([Language.ENGLISH, Language.GERMAN])

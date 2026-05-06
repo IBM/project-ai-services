@@ -350,7 +350,7 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
 
     return table_count, process_time
 
-def process_converted_document(converted_json_path, pdf_path, out_path, gen_model, gen_endpoint, emb_endpoint, max_tokens, doc_id):
+def process_converted_document(converted_json_path, pdf_path, out_path, gen_model, gen_endpoint, doc_id):
     """
     Process converted document to extract text and tables.
     No caching - always process fresh.
@@ -418,7 +418,7 @@ def clean_intermediate_files(doc_id, out_path):
             except Exception as e:
                 logger.warning(f"Failed to clean up {file_path}: {e}")
 
-def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoint, max_tokens, job_id, doc_id_dict, indexing_callback=None):
+def process_documents(input_paths, out_path, llm_model, llm_endpoint, max_tokens, job_id, doc_id_dict, indexing_callback=None):
     """
     Process documents for ingestion pipeline.
     Each request is treated as fresh.
@@ -507,7 +507,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
                     p_future = processor_executor.submit(
                         process_converted_document, converted_json, path, out_path,
-                        llm_model, llm_endpoint, emb_endpoint, max_tokens, doc_id=doc_id
+                        llm_model, llm_endpoint, doc_id=doc_id
                     )
                     process_futures[p_future] = str(path)
                 except Exception as e:
@@ -555,7 +555,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
                     c_future = chunker_executor.submit(
                         chunk_single_file, txt_json, tab_json, out_path,
-                        emb_endpoint, max_tokens, doc_id=doc_id
+                        max_tokens, doc_id=doc_id
                     )
                     chunk_futures[c_future] = str(path)
                 except Exception as e:
@@ -708,18 +708,18 @@ def get_header_level(text, font_size, sorted_font_sizes):
     return level, text
 
 
-def count_tokens(text, emb_endpoint):
+def count_tokens(text):
     token_len = len(tokenize(text))
     return token_len
 
-def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50):
+def split_text_into_token_chunks(text, max_tokens=512, overlap=50):
     sentences = SentenceSplitter(language='en').split(text)
     chunks = []
     current_chunk = []
     current_token_count = 0
 
     for sentence in sentences:
-        token_len = count_tokens(sentence, emb_endpoint)
+        token_len = count_tokens(sentence)
 
         if current_token_count + token_len > max_tokens:
             # save current chunk
@@ -729,7 +729,7 @@ def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50)
             if overlap > 0 and len(current_chunk) > 0:
                 overlap_text = current_chunk[-1]
                 current_chunk = [overlap_text]
-                current_token_count = count_tokens(overlap_text, emb_endpoint)
+                current_token_count = count_tokens(overlap_text)
             else:
                 current_chunk = []
                 current_token_count = 0
@@ -745,13 +745,13 @@ def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50)
     return chunks
 
 
-def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens):
+def flush_chunk(current_chunk, chunks, max_tokens):
     content = current_chunk["content"].strip()
     if not content:
         return
 
     # Split content into token chunks
-    token_chunks = split_text_into_token_chunks(content, emb_endpoint, max_tokens=max_tokens)
+    token_chunks = split_text_into_token_chunks(content, max_tokens=max_tokens)
 
     for i, part in enumerate(token_chunks):
         chunk = {
@@ -777,7 +777,7 @@ def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens):
     current_chunk["source_nodes"] = []
 
 
-def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
+def chunk_text(input_path, out_path, max_tokens=512, doc_id=None):
     """
     Chunk text content from a document into smaller pieces based on token limits.
     """
@@ -830,7 +830,7 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
                         current_subsubsection = full_title
 
                     # Flush current chunk and update
-                    flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens)
+                    flush_chunk(current_chunk, chunks, max_tokens)
                     current_chunk["chapter_title"] = current_chapter
                     current_chunk["section_title"] = current_section
                     current_chunk["subsection_title"] = current_subsection
@@ -859,7 +859,7 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
                     logger.debug(f'Skipping adding "{label}".')
 
             # Flush any remaining content
-            flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens)
+            flush_chunk(current_chunk, chunks, max_tokens)
 
         # Save the processed chunks to the output file
         with open(processed_chunk_json_path, "w") as f:
@@ -872,7 +872,7 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
         logger.error(f"Error chunking text from '{input_path}': {e}")
         return None, None
 
-def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
+def chunk_single_file(input_path, table_json_path, out_path, max_tokens=512, doc_id=None):
     """
     Orchestrates chunking of both text and tables for a single document.
     """
@@ -880,10 +880,10 @@ def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_t
 
     try:
         # Chunk text content
-        text_chunk_json, text_chunk_time = chunk_text(input_path, out_path, emb_endpoint, max_tokens, doc_id)
+        text_chunk_json, text_chunk_time = chunk_text(input_path, out_path, max_tokens, doc_id)
 
         # Chunk tables
-        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id)
+        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, max_tokens, doc_id)
 
         total_time = time.time() - t0
         return text_chunk_json, table_chunk_json, total_time
@@ -891,7 +891,7 @@ def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_t
         logger.error(f"Error chunking document '{input_path}': {e}")
         return None, None, None
 
-def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
+def chunk_tables(input_path, out_path, max_tokens=512, doc_id=None):
     """
     Chunk table summaries into smaller pieces if they exceed token limits.
     Called internally by chunk_single_file() for sequential processing.
@@ -915,12 +915,12 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
                 page_number = block.get('page_number')
 
                 # Use summary for chunking - summaries are more concise and meaningful for RAG
-                summary_token_count = count_tokens(summary, emb_endpoint)
+                summary_token_count = count_tokens(summary)
 
                 if summary_token_count > max_tokens:
                     tables_chunked_count += 1
                     # Chunk the summary
-                    chunks = split_text_into_token_chunks(summary, emb_endpoint, max_tokens=max_tokens, overlap=50)
+                    chunks = split_text_into_token_chunks(summary, max_tokens=max_tokens, overlap=50)
 
                     for chunk_part_idx, chunk in enumerate(chunks):
                         # TODO: Consider adding chunking properties ("is_chunked", "chunk_part", "total_parts")

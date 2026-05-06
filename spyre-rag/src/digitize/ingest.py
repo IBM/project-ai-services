@@ -151,7 +151,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         # Reserve 100 tokens from embedding model's max_tokens to account for metadata
         # that will be prepended to content during final merge, ensuring total tokens stay within embedding model limits
         _, converted_pdf_stats = process_documents(
-            input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'],  emb_model_dict["emb_endpoint"],
+            input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'],
             max_tokens=emb_model_dict['max_tokens'] - 100, job_id=job_id, doc_id_dict=doc_id_dict,
             indexing_callback=indexing_handler)
         # converted_pdf_stats holds { file_name: {page_count: int, table_count: int, timings: {conversion: time_in_secs, process_text: time_in_secs, process_tables: time_in_secs, chunking: time_in_secs}} }
