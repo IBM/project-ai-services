@@ -26,12 +26,24 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	authHandler := handlers.NewAuthHandler(authSvc)
+	catalogHandler := handlers.NewCatalogHandler()
+
 	v1 := router.Group("/api/v1")
 	{
 		v1.POST("/auth/login", authHandler.Login)
 		v1.POST("/auth/logout", middleware.AuthMiddleware(tokenMgr, blacklist), authHandler.Logout)
 		v1.POST("/auth/refresh", authHandler.Refresh)
 		v1.GET("/auth/me", middleware.AuthMiddleware(tokenMgr, blacklist), authHandler.Me)
+	}
+
+	// Catalog endpoints
+	catalog := v1.Group("")
+	catalog.Use(middleware.AuthMiddleware(tokenMgr, blacklist))
+	{
+		catalog.GET("/architectures", catalogHandler.ListArchitectures)
+		catalog.GET("/architectures/:id", catalogHandler.GetArchitectureDetails)
+		catalog.GET("/services", catalogHandler.ListServices)
+		catalog.GET("/services/:id", catalogHandler.GetServiceDetails)
 	}
 
 	applications := v1.Group("applications")

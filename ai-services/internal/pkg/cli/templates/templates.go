@@ -56,13 +56,13 @@ type Template interface {
 	ListApplicationTemplateValues(app string) (map[string]string, error)
 	// LoadAllTemplates loads all templates for a given application
 	LoadAllTemplates(app string) (map[string]*template.Template, error)
-	// LoadPodTemplate loads and renders a pod template with the given parameters
-	LoadPodTemplate(app, file string, params any) (*models.PodSpec, error)
 	// LoadPodTemplateWithValues loads and renders a pod template with values from application
 	LoadPodTemplateWithValues(app, file, appName string, valuesFileOverrides []string, cliOverrides map[string]string) (*models.PodSpec, error)
+	// LoadValues loads the values for a given template
 	LoadValues(app string, valuesFileOverrides []string, cliOverrides map[string]string) (map[string]interface{}, error)
 	// LoadMetadata loads the metadata for a given application template
-	LoadMetadata(app string, isRuntime bool) (*AppMetadata, error)
+	// target: pointer to the struct where metadata should be unmarshaled (e.g., *AppMetadata, *types.Service, *types.Architecture)
+	LoadMetadata(app string, isRuntime bool, target interface{}) error
 	// LoadMdFiles loads all md files for a given application
 	LoadMdFiles(app string) (map[string]*template.Template, error)
 	// LoadVarsFile loads the var template file
