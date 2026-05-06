@@ -22,3 +22,11 @@ db:
       memory: "512Mi"
     limits:
       memory: "1Gi"
+
+caddy:
+  image: "docker.io/library/caddy:2.8-alpine"
+  httpsPort: 443
+  serverName: "ai_services_server"
+  dataPath: "/var/lib/ai-services/catalog/caddy"
+  domain: ""  # Will be set by configure command
+  externalPort: 443  # Will be set by configure command

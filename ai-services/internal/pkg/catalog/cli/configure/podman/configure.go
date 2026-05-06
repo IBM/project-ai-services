@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"text/template"
 
@@ -14,6 +16,7 @@ import (
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
@@ -21,12 +24,13 @@ import (
 )
 
 const (
-	catalogAppName     = "ai-services"
+	catalogAppName  = "ai-services"
 	catalogAppTemplate = "catalog"
+	caddyDataDir    = "/var/lib/ai-services/catalog/caddy"
 )
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
-func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParams map[string]string) error {
+func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParams map[string]string, domainName, sslCertPath, sslKeyPath string) error {
 	s := spinner.New("Deploying catalog service...")
 	s.Start(ctx)
 
@@ -34,7 +38,6 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 	rt, err := podman.NewPodmanClient()
 	if err != nil {
 		s.Fail("failed to initialize podman client")
-
 		return fmt.Errorf("failed to initialize podman client: %w", err)
 	}
 
@@ -42,7 +45,6 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 	tp, appMetadata, tmpls, err := loadCatalogTemplates(s)
 	if err != nil {
 		s.Fail("failed to load catalog templates")
-
 		return fmt.Errorf("failed to load catalog templates: %w", err)
 	}
 
@@ -50,22 +52,26 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 	existingPods, err := helpers.CheckExistingPodsForApplication(rt, catalogAppName)
 	if err != nil {
 		s.Fail("failed to check existing pods")
-
 		return fmt.Errorf("failed to check existing pods: %w", err)
 	}
 
 	if len(existingPods) == len(tmpls) {
 		s.Stop("Catalog service already deployed")
 		logger.Infof("Catalog pod already exists: %v\n", existingPods)
-
 		return nil
 	}
 
+	// Setup HTTPS configuration
+	httpsConfig, err := setupHTTPSConfig(domainName, sslCertPath, sslKeyPath, s)
+	if err != nil {
+		s.Fail("failed to setup HTTPS configuration")
+		return fmt.Errorf("failed to setup HTTPS configuration: %w", err)
+	}
+
 	// Prepare values with configure-specific configuration
-	values, err := prepareCatalogValues(tp, podmanURI, passwordHash, argParams)
+	values, err := prepareCatalogValues(tp, podmanURI, passwordHash, argParams, httpsConfig)
 	if err != nil {
 		s.Fail("failed to load values")
-
 		return fmt.Errorf("failed to load values: %w", err)
 	}
 
@@ -75,13 +81,194 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 	}
 
 	s.Stop("Catalog service deployed successfully")
+
+	// Register catalog routes with Caddy
+	if err := registerCatalogRoutes(rt, httpsConfig); err != nil {
+		logger.Infof("Warning: Failed to register catalog routes with Caddy: %v", err)
+	}
+
 	logger.Infoln("-------")
 
-	// Print next steps similar to application create
-	if err := helpers.PrintNextSteps(tp, rt, catalogAppName, catalogAppTemplate); err != nil {
-		// do not want to fail the overall configure if we cannot print next steps
+	// Print next steps
+	if err := printNextSteps(tp, rt, httpsConfig); err != nil {
 		logger.Infof("failed to display next steps: %v\n", err)
 	}
+
+	return nil
+}
+
+// HTTPSConfig contains HTTPS configuration
+type HTTPSConfig struct {
+	Domain         string
+	HostIP         string
+	UseUserCerts   bool
+	UserCertPath   string
+	UserKeyPath    string
+}
+
+// setupHTTPSConfig prepares HTTPS configuration
+func setupHTTPSConfig(domainName, sslCertPath, sslKeyPath string, s *spinner.Spinner) (*HTTPSConfig, error) {
+	config := &HTTPSConfig{}
+
+	// Get host IP
+	hostIP, err := utils.GetHostIP()
+	if err != nil {
+		return nil, fmt.Errorf("failed to detect host IP: %w", err)
+	}
+	config.HostIP = hostIP
+
+	// Determine domain name
+	if domainName != "" {
+		// Use custom domain name
+		config.Domain = domainName
+		logger.Infof("Using custom domain: %s", domainName)
+	} else {
+		// Use nip.io with host IP
+		config.Domain = fmt.Sprintf("%s.nip.io", hostIP)
+		logger.Infof("Using nip.io domain: %s", config.Domain)
+	}
+
+	// Check if user provided certificates
+	if sslCertPath != "" && sslKeyPath != "" {
+		config.UseUserCerts = true
+		config.UserCertPath = sslCertPath
+		config.UserKeyPath = sslKeyPath
+		logger.Infof("Using user-provided SSL certificates")
+	}
+
+	// Create Caddy configuration directory and Caddyfile
+	if err := createCaddyConfig(config); err != nil {
+		return nil, fmt.Errorf("failed to create Caddy configuration: %w", err)
+	}
+
+	return config, nil
+}
+
+// createCaddyConfig creates the Caddy data directory and Caddyfile
+func createCaddyConfig(config *HTTPSConfig) error {
+	// Create data directory
+	if err := os.MkdirAll(caddyDataDir, 0755); err != nil {
+		return fmt.Errorf("failed to create Caddy data directory: %w", err)
+	}
+
+	// If user provided certificates, copy them to Caddy directory
+	var tlsConfig string
+	if config.UseUserCerts {
+		// Copy certificate files to Caddy directory
+		certDestPath := filepath.Join(caddyDataDir, "cert.pem")
+		keyDestPath := filepath.Join(caddyDataDir, "key.pem")
+
+		// Read and write certificate
+		certData, err := os.ReadFile(config.UserCertPath)
+		if err != nil {
+			return fmt.Errorf("failed to read certificate file: %w", err)
+		}
+		if err := os.WriteFile(certDestPath, certData, 0644); err != nil {
+			return fmt.Errorf("failed to write certificate to Caddy directory: %w", err)
+		}
+
+		// Read and write key
+		keyData, err := os.ReadFile(config.UserKeyPath)
+		if err != nil {
+			return fmt.Errorf("failed to read key file: %w", err)
+		}
+		if err := os.WriteFile(keyDestPath, keyData, 0600); err != nil {
+			return fmt.Errorf("failed to write key to Caddy directory: %w", err)
+		}
+
+		logger.Infof("Copied user certificates to %s", caddyDataDir)
+		tlsConfig = "\ttls /data/caddy/cert.pem /data/caddy/key.pem"
+	} else {
+		tlsConfig = "\ttls internal"
+	}
+
+	// Create Caddyfile in /data/caddy directory (Caddy's default location)
+	caddyfilePath := filepath.Join(caddyDataDir, "Caddyfile")
+	caddyfileContent := fmt.Sprintf(`{
+	# Admin API - accessible from host
+	admin 0.0.0.0:2019
+
+	# Configure HTTPS server
+	servers :443 {
+		name ai_services_server
+	}
+}
+
+# Default HTTPS configuration
+:443 {
+%s
+}
+
+# Routes will be dynamically added via Caddy Admin API
+`, tlsConfig)
+
+	if err := os.WriteFile(caddyfilePath, []byte(caddyfileContent), 0644); err != nil {
+		return fmt.Errorf("failed to write Caddyfile: %w", err)
+	}
+
+	logger.Infof("Created Caddyfile at %s", caddyfilePath)
+	return nil
+}
+
+// registerCatalogRoutes registers catalog service routes with Caddy
+func registerCatalogRoutes(rt *podman.PodmanClient, config *HTTPSConfig) error {
+	logger.Infof("Registering catalog routes with Caddy...")
+
+	// Wait for Caddy to be ready
+	caddyClient := proxy.NewCaddyClient()
+	if err := caddyClient.HealthCheck(); err != nil {
+		return fmt.Errorf("caddy is not available: %w", err)
+	}
+
+	// Register route for catalog UI
+	catalogUIRoute := proxy.Route{
+		ID:              "route-ai-services--catalog-ui",
+		Host:            utils.ConstructServiceDomain(catalogAppName, "catalog", config.Domain),
+		UpstreamAddress: fmt.Sprintf("%s--catalog:8081", catalogAppName),
+		Terminal:        true,
+	}
+
+	if err := caddyClient.RegisterRoute(catalogUIRoute); err != nil {
+		return fmt.Errorf("failed to register catalog UI route: %w", err)
+	}
+
+	logger.Infof("Successfully registered catalog routes")
+	return nil
+}
+
+// printNextSteps prints the next steps after deployment
+func printNextSteps(tp templates.Template, rt *podman.PodmanClient, config *HTTPSConfig) error {
+	// Construct catalog URL (port 443 is default for HTTPS, so omit it)
+	catalogURL := utils.ConstructServiceURL(
+		"https",
+		utils.ConstructServiceDomain(catalogAppName, "catalog", config.Domain),
+		443,
+	)
+
+	// Print custom next steps
+	logger.Infoln("Next Steps:")
+	logger.Infoln("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	logger.Infoln("")
+	logger.Infof("1. Access the Catalog UI via HTTPS:\n")
+	logger.Infof("   %s\n", catalogURL)
+	logger.Infoln("")
+
+	// Show certificate information
+	if config.UseUserCerts {
+		logger.Infof("   Note: Using user-provided SSL certificate for %s.\n", config.Domain)
+	} else {
+		logger.Infof("   Note: Using self-signed certificate for %s.\n", config.Domain)
+		logger.Infof("         Your browser may show a security warning.\n")
+	}
+
+	// Show DNS configuration note for custom domains
+	if config.Domain != fmt.Sprintf("%s.nip.io", config.HostIP) {
+		logger.Infoln("")
+		logger.Infof("   IMPORTANT: Ensure DNS is configured to point %s to %s\n", config.Domain, config.HostIP)
+	}
+
+	logger.Infoln("")
+	logger.Infoln("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 	return nil
 }
@@ -94,7 +281,6 @@ func loadCatalogTemplates(s *spinner.Spinner) (templates.Template, *templates.Ap
 	appMetadata, err := tp.LoadMetadata(catalogAppTemplate, true)
 	if err != nil {
 		s.Fail("failed to load catalog metadata")
-
 		return nil, nil, nil, fmt.Errorf("failed to load catalog metadata: %w", err)
 	}
 
@@ -102,7 +288,6 @@ func loadCatalogTemplates(s *spinner.Spinner) (templates.Template, *templates.Ap
 	tmpls, err := tp.LoadAllTemplates(catalogAppTemplate)
 	if err != nil {
 		s.Fail("failed to load catalog templates")
-
 		return nil, nil, nil, fmt.Errorf("failed to load catalog templates: %w", err)
 	}
 
@@ -110,7 +295,7 @@ func loadCatalogTemplates(s *spinner.Spinner) (templates.Template, *templates.Ap
 }
 
 // prepareCatalogValues prepares the values map with configure-specific configuration.
-func prepareCatalogValues(tp templates.Template, podmanURI, passwordHash string, argParams map[string]string) (map[string]any, error) {
+func prepareCatalogValues(tp templates.Template, podmanURI, passwordHash string, argParams map[string]string, httpsConfig *HTTPSConfig) (map[string]any, error) {
 	if argParams == nil {
 		argParams = make(map[string]string)
 	}
@@ -130,6 +315,11 @@ func prepareCatalogValues(tp templates.Template, podmanURI, passwordHash string,
 	argParams["backend.podman.uri"] = podmanURI
 	argParams["db.password"] = dbPasswordBase64
 
+	// Set Caddy configuration
+	argParams["caddy.httpsPort"] = "443"
+	argParams["caddy.domain"] = httpsConfig.Domain
+	argParams["caddy.externalPort"] = "443"
+
 	// Load values from catalog
 	return tp.LoadValues(catalogAppTemplate, nil, argParams)
 }
@@ -143,7 +333,6 @@ func executePodLayers(rt *podman.PodmanClient, tp templates.Template, tmpls map[
 
 		if err := executeLayer(rt, tp, tmpls, layer, appMetadata.Version, values, argParams, i); err != nil {
 			s.Fail("failed to deploy catalog pod")
-
 			return err
 		}
 
