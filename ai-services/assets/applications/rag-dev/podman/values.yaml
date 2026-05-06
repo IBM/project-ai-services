@@ -43,14 +43,16 @@ opensearch:
 postgres:
   # @hidden
   image: icr.io/ai-services-private/postgres:18
-  # @description Sets the memory limit for the PostgreSQL service (Default: 2Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
+  # @hidden
   memoryLimit: 2Gi
-  # @description PostgreSQL database name for digitize metadata storage.
-  database: "digitize_metadata"
-  # @description PostgreSQL user for digitize service.
-  user: "digitize_user"
   # @description Password for PostgreSQL authentication. Must be at least 8 characters. Use this to override the default password.
   password: "DigitizeDB@12345"
+  # Service-specific database configurations
+  digitize:
+    # @hidden
+    database: "digitize_metadata"
+    # @hidden
+    user: "digitize_user"
 
 instruct:
   # @description API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication.

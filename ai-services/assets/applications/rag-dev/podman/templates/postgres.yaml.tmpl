@@ -23,9 +23,9 @@ spec:
       image: "{{ .Values.postgres.image }}"
       env:
         - name: POSTGRES_DB
-          value: "{{ .Values.postgres.database }}"
+          value: "{{ .Values.postgres.digitize.database }}"
         - name: POSTGRES_USER
-          value: "{{ .Values.postgres.user }}"
+          value: "{{ .Values.postgres.digitize.user }}"
         - name: POSTGRES_PASSWORD
           value: "{{ .Values.postgres.password }}"
         - name: PGDATA
@@ -49,9 +49,9 @@ spec:
           command:
           - pg_isready
           - -U
-          - {{ .Values.postgres.user }}
+          - {{ .Values.postgres.digitize.user }}
           - -d
-          - {{ .Values.postgres.database }}
+          - {{ .Values.postgres.digitize.database }}
         initialDelaySeconds: 30
         periodSeconds: 10
         timeoutSeconds: 5
@@ -61,9 +61,9 @@ spec:
           command:
           - pg_isready
           - -U
-          - {{ .Values.postgres.user }}
+          - {{ .Values.postgres.digitize.user }}
           - -d
-          - {{ .Values.postgres.database }}
+          - {{ .Values.postgres.digitize.database }}
         initialDelaySeconds: 10
         periodSeconds: 5
         timeoutSeconds: 3
