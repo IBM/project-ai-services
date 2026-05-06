@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -16,6 +18,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -28,6 +31,7 @@ var (
 	templateName string
 	rawArgParams []string
 	argParams    map[string]string
+	appDir       string
 
 	// podman flags.
 	skipModelDownload     bool
@@ -49,6 +53,24 @@ var createCmd = &cobra.Command{
 	`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// If no --appdir provided, use default from constants
+		if appDir == "" {
+			appDir = constants.GetAppDir()
+		}
+		
+		// Validate appDir permissions early - BEFORE any operations
+		if err := validateAppDir(appDir); err != nil {
+			return fmt.Errorf("invalid app directory '%s': %w", appDir, err)
+		}
+		
+		// Set AI_SERVICES_APP_DIR environment variable
+		if err := os.Setenv("AI_SERVICES_APP_DIR", appDir); err != nil {
+			return fmt.Errorf("failed to set AI_SERVICES_APP_DIR: %w", err)
+		}
+		
+		// Update vars.ModelDirectory to use the new path
+		vars.ModelDirectory = constants.GetModelsPath()
+
 		// Check if podman runtime is being used on unsupported platform
 		if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
 			return err
@@ -73,6 +95,14 @@ var createCmd = &cobra.Command{
 
 		if err := doBootstrapValidate(); err != nil {
 			return err
+		}
+
+		// Add appDir to argParams if provided
+		if appDir != "" {
+			if argParams == nil {
+				argParams = make(map[string]string)
+			}
+			argParams["appDir"] = appDir
 		}
 
 		// Create application instance using factory
@@ -126,6 +156,16 @@ func initCreateCommonFlags() {
 	createCmd.Flags().StringVarP(&templateName, appFlags.Create.Template, "t", "", "Application template to use (required)")
 	_ = createCmd.MarkFlagRequired(appFlags.Create.Template)
 
+	createCmd.Flags().StringVar(
+		&appDir,
+		"appdir",
+		"",
+		"Base directory for AI services data (applications, models, cache).\n\n"+
+			fmt.Sprintf("If not specified, uses AI_SERVICES_APP_DIR environment variable or default %s\n", constants.DefaultAppDir)+
+			"Example: --appdir /custom/path/ai-services\n\n"+
+			"Note: This should match the --appdir used in 'catalog configure'\n",
+	)
+
 	createCmd.Flags().StringSliceVar(
 		&rawArgParams,
 		appFlags.Create.Params,
@@ -168,7 +208,8 @@ func initCreatePodmanFlags() {
 		appFlags.Create.SkipModelDownload,
 		false,
 		"Skip model download during application creation\n\n"+
-			"Use this if local models already exist at /var/lib/ai-services/models/\n"+
+			"Use this if local models already exist at $AI_SERVICES_APP_DIR/models/\n"+
+			"(default: /var/lib/ai-services/models/)\n"+
 			"Recommended for air-gapped networks\n\n"+
 			"Warning:\n"+
 			"- If set to true and models are missing → command will fail\n"+
@@ -323,5 +364,29 @@ func validateSkipChecksFlag(cmd *cobra.Command) error {
 
 	return nil
 }
+// validateAppDir validates that the app directory exists or can be created and is writable.
+func validateAppDir(dir string) error {
+	// Clean the path
+	dir = filepath.Clean(dir)
+
+	// Check if directory exists or can be created
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("cannot create directory: %w", err)
+	}
+
+	// Check write permissions by creating a test file
+	testFile := filepath.Join(dir, ".ai-services-permission-test")
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		return fmt.Errorf("no write permission: %w", err)
+	}
+
+	// Clean up test file
+	if err := os.Remove(testFile); err != nil {
+		logger.Warningf("Failed to remove test file %s: %v\n", testFile, err)
+	}
+
+	return nil
+}
+
 
 // Made with Bob

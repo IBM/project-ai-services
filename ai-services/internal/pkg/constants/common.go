@@ -1,12 +1,15 @@
 package constants
 
-import "time"
+import (
+	"os"
+	"path/filepath"
+	"time"
+)
 
 const (
 	AIServices           = "ai-services"
 	PodStartOn           = "on"
 	PodStartOff          = "off"
-	ApplicationsPath     = "/var/lib/ai-services/applications"
 	OperatorPollInterval = 5 * time.Second
 	OperatorPollTimeout  = 3 * time.Minute
 	VersionV2            = "v2"
@@ -14,6 +17,28 @@ const (
 	DSCIKind             = "DSCInitialization"
 	SMTLevel             = 2
 )
+
+// DefaultAppDir is the single source of truth for the default application directory.
+// Change this constant to update the default directory everywhere in the application.
+const DefaultAppDir = "/var/lib/ai-services"
+
+// GetAppDir returns the app directory from environment variable or default.
+func GetAppDir() string {
+	if dir := os.Getenv("AI_SERVICES_APP_DIR"); dir != "" {
+		return dir
+	}
+	return DefaultAppDir
+}
+
+// GetApplicationsPath returns the applications path based on the configured app directory.
+func GetApplicationsPath() string {
+	return filepath.Join(GetAppDir(), "applications")
+}
+
+// GetModelsPath returns the models path based on the configured app directory.
+func GetModelsPath() string {
+	return filepath.Join(GetAppDir(), "models")
+}
 
 // OperatorConfig defines configuration for an operator.
 type OperatorConfig struct {

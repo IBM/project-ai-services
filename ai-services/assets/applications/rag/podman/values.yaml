@@ -1,3 +1,6 @@
+# Application directory (read from environment AI_SERVICES_APP_DIR or default)
+appDir: "/var/lib/ai-services"
+
 ui:
   # @description Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""

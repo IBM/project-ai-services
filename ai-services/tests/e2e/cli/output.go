@@ -398,9 +398,9 @@ func ValidateModelDownloadOutput(output string, templateName string, appRuntime 
 	required := map[string][]string{
 		"podman": {
 			fmt.Sprintf("Downloaded Models in application template%s:", templateName),
-			"Downloading model ibm-granite/granite-embedding-278m-multilingual to /var/lib/ai-services/models",
-			"Downloading model ibm-granite/granite-3.3-8b-instruct to /var/lib/ai-services/models",
-			"Downloading model BAAI/bge-reranker-v2-m3 to /var/lib/ai-services/models",
+			"Downloading model ibm-granite/granite-embedding-278m-multilingual to",
+			"Downloading model ibm-granite/granite-3.3-8b-instruct to",
+			"Downloading model BAAI/bge-reranker-v2-m3 to",
 			"Model downloaded successfully",
 		},
 		"openshift": {
