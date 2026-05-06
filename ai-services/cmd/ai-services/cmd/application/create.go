@@ -30,7 +30,6 @@ var (
 	templateName string
 	rawArgParams []string
 	argParams    map[string]string
-	appDir       string
 
 	// podman flags.
 	skipModelDownload     bool

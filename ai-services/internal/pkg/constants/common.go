@@ -19,6 +19,11 @@ const (
 	SMTLevel             = 2
 )
 
+const (
+	DirPerm  = 0755
+	FilePerm = 0644
+)
+
 // DefaultBaseDir is the single source of truth for the default base directory.
 // Change this constant to update the default directory everywhere in the application.
 const DefaultBaseDir = "/var/lib/ai-services"
