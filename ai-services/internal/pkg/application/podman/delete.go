@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -16,7 +15,7 @@ import (
 
 // Delete removes an application and its associated resources.
 func (p *PodmanApplication) Delete(_ context.Context, opts appTypes.DeleteOptions) error {
-	appDir := filepath.Join(constants.ApplicationsPath, filepath.Base(opts.Name))
+	appDir := filepath.Join(utils.GetApplicationsPath(), filepath.Base(opts.Name))
 	appExists := utils.FileExists(appDir)
 
 	pods, err := p.runtime.ListPods(map[string][]string{

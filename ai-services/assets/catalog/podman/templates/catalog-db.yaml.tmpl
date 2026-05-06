@@ -44,5 +44,5 @@ spec:
   volumes:
   - name: postgres-data
     hostPath:
-      path: {{ .Values.db.dataPath }}
+      path: {{ .BaseDir }}/db
       type: DirectoryOrCreate

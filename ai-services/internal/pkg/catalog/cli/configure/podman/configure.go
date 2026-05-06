@@ -26,7 +26,7 @@ const (
 )
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
-func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParams map[string]string) error {
+func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string, argParams map[string]string) error {
 	s := spinner.New("Deploying catalog service...")
 	s.Start(ctx)
 
@@ -70,7 +70,7 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash string, argParam
 	}
 
 	// Execute pod templates
-	if err := executePodLayers(rt, tp, tmpls, appMetadata, values, argParams, s); err != nil {
+	if err := executePodLayers(rt, tp, tmpls, appMetadata, values, baseDir, argParams, s); err != nil {
 		return err
 	}
 
@@ -136,12 +136,12 @@ func prepareCatalogValues(tp templates.Template, podmanURI, passwordHash string,
 
 // executePodLayers executes all pod template layers.
 func executePodLayers(rt *podman.PodmanClient, tp templates.Template, tmpls map[string]*template.Template,
-	appMetadata *templates.AppMetadata, values map[string]any, argParams map[string]string, s *spinner.Spinner) error {
+	appMetadata *templates.AppMetadata, values map[string]any, baseDir string, argParams map[string]string, s *spinner.Spinner) error {
 	for i, layer := range appMetadata.PodTemplateExecutions {
 		logger.Infof("\n Executing Layer %d/%d: %v\n", i+1, len(appMetadata.PodTemplateExecutions), layer)
 		logger.Infoln("-------")
 
-		if err := executeLayer(rt, tp, tmpls, layer, appMetadata.Version, values, argParams, i); err != nil {
+		if err := executeLayer(rt, tp, tmpls, layer, appMetadata.Version, values, baseDir, argParams, i); err != nil {
 			s.Fail("failed to deploy catalog pod")
 
 			return err
@@ -155,7 +155,7 @@ func executePodLayers(rt *podman.PodmanClient, tp templates.Template, tmpls map[
 
 // executeLayer executes a single layer of pod templates.
 func executeLayer(rt *podman.PodmanClient, tp templates.Template, tmpls map[string]*template.Template,
-	layer []string, version string, values map[string]any, argParams map[string]string, layerIndex int) error {
+	layer []string, version string, values map[string]any, baseDir string, argParams map[string]string, layerIndex int) error {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(layer))
 
@@ -164,7 +164,7 @@ func executeLayer(rt *podman.PodmanClient, tp templates.Template, tmpls map[stri
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
-			if err := executePodTemplate(rt, tp, tmpls, t, catalogAppTemplate, catalogAppName, values, version, nil, argParams); err != nil {
+			if err := executePodTemplate(rt, tp, tmpls, t, catalogAppTemplate, catalogAppName, values, version, nil, baseDir, argParams); err != nil {
 				errCh <- err
 			}
 		}(podTemplateName)
@@ -190,7 +190,7 @@ func executeLayer(rt *podman.PodmanClient, tp templates.Template, tmpls map[stri
 // executePodTemplate executes a single pod template.
 func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls map[string]*template.Template,
 	podTemplateName, appTemplateName, appName string, values map[string]any, version string,
-	valuesFiles []string, argParams map[string]string) error {
+	valuesFiles []string, baseDir string, argParams map[string]string) error {
 	logger.Infof("Processing template: %s\n", podTemplateName)
 
 	// Fetch pod spec
@@ -204,6 +204,7 @@ func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 		"AppName":         appName,
 		"AppTemplateName": appTemplateName,
 		"Version":         version,
+		"BaseDir":         baseDir,
 		"Values":          values,
 		"env":             map[string]map[string]string{},
 	}

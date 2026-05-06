@@ -5,9 +5,11 @@ import (
 	"maps"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"go.yaml.in/yaml/v3"
@@ -382,4 +384,38 @@ func GetEnv(key, defaultValue string) string {
 	}
 
 	return defaultValue
+}
+
+// GetBaseDir returns the base directory from environment variable or default.
+func GetBaseDir() string {
+	baseDir := constants.DefaultBaseDir
+	if dir := os.Getenv("AI_SERVICES_BASE_DIR"); dir != "" {
+		baseDir = dir
+	}
+
+	return baseDir
+}
+
+// GetApplicationsPath returns the applications path based on the configured base directory.
+func GetApplicationsPath() string {
+	return filepath.Join(GetBaseDir(), "applications")
+}
+
+// GetModelsPath returns the models path based on the configured base directory.
+func GetModelsPath() string {
+	return filepath.Join(GetBaseDir(), "models")
+}
+
+// ValidateBaseDir validates that the base directory exists or can be created.
+// It always appends 'ai-services' subdirectory to the provided base directory for all AI services content.
+func ValidateBaseDir(baseDir string) (string, error) {
+	// Clean the path and append ai-services subdirectory
+	baseDir = filepath.Join(filepath.Clean(baseDir), "ai-services")
+
+	// Check if directory exists or can be created
+	if err := os.MkdirAll(baseDir, constants.DirPerm); err != nil {
+		return "", fmt.Errorf("cannot create directory: %w", err)
+	}
+
+	return baseDir, nil
 }

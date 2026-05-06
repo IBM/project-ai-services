@@ -16,7 +16,6 @@ db:
   user: "admin"
   database: "ai_services"
   password: ""
-  dataPath: "/var/lib/ai-services/db"
   resources:
     requests:
       memory: "512Mi"
