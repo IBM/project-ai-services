@@ -16,9 +16,10 @@ from summarize.settings import settings
 
 set_log_level(settings.common.app.log_level)
 
-from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream, tokenize_with_llm
+from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream
 from common.misc_utils import get_model_endpoints, set_request_id, configure_uvicorn_logging, create_llm_session
 from common.diagnostic_logger import setup_comprehensive_crash_handler
+from common.tokenizer_utils import tokenize
 
 from common.error_utils import http_error_responses
 from summarize.summ_utils import (
@@ -131,7 +132,7 @@ async def handle_summarize(
     
     # Get actual token count from the input text
     input_tokens = await asyncio.to_thread(
-        lambda: len(tokenize_with_llm(content_text, llm_endpoint))
+        lambda: len(tokenize(content_text))
     )
     
     # Validate that both parameters are not provided simultaneously
