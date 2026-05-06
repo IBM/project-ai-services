@@ -56,21 +56,22 @@ Examples:
 				return fmt.Errorf("failed to read admin password: %w", err)
 			}
 
-			// Validate baseDir and get the ai-services subdirectory path
-			aiServicesDir, err := utils.ValidateBaseDir(baseDir)
-			if err != nil {
-				return fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
-			}
+			var aiServicesDir string
 
-			// Add baseDir (ai-services subdirectory) to argParams
-			if argParams == nil {
-				argParams = make(map[string]string)
+			// Use default base directory if not specified, otherwise validate
+			if baseDir == "" {
+				aiServicesDir = constants.DefaultBaseDir
+			} else {
+				aiServicesDir, err = utils.ValidateBaseDir(baseDir)
+				if err != nil {
+					return fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
+				}
 			}
-			argParams["basedir"] = aiServicesDir
 
 			return configure.Run(configure.ConfigureOptions{
 				AdminPassword: adminPassword,
 				Runtime:       vars.RuntimeFactory.GetRuntimeType(),
+				BaseDir:       aiServicesDir,
 				ArgParams:     argParams,
 			})
 		},
@@ -118,11 +119,11 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 	cmd.Flags().StringVarP(&runtimeType, "runtime", "r", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
 	_ = cmd.MarkFlagRequired("runtime")
 
-	// Add basedir flag with default
+	// Add basedir flag
 	cmd.Flags().StringVar(
 		&baseDir,
 		"basedir",
-		constants.DefaultBaseDir,
+		"",
 		"Base directory for AI services data (applications, models, cache).\n"+
 			"Example: --basedir /custom/path\n",
 	)

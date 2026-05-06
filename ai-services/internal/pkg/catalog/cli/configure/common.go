@@ -21,6 +21,7 @@ const (
 type ConfigureOptions struct {
 	AdminPassword string
 	Runtime       types.RuntimeType
+	BaseDir       string
 	ArgParams     map[string]string
 }
 
@@ -43,7 +44,7 @@ func Run(opts ConfigureOptions) error {
 		// Determine Podman URI
 		podmanURI := getPodmanURI()
 
-		return catalogPodman.DeployCatalog(ctx, podmanURI, passwordHashBase64, opts.ArgParams)
+		return catalogPodman.DeployCatalog(ctx, podmanURI, passwordHashBase64, opts.BaseDir, opts.ArgParams)
 
 	case types.RuntimeTypeOpenShift:
 		return fmt.Errorf("openshift runtime is not yet supported for catalog configure")
