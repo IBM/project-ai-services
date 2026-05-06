@@ -90,40 +90,13 @@ func TestGetArchitecture(t *testing.T) {
 			name:           "Successfully get rag architecture",
 			archID:         "rag",
 			expectedStatus: http.StatusOK,
-			validateBody: func(t *testing.T, body []byte) {
-				var arch types.Architecture
-				err := json.Unmarshal(body, &arch)
-				require.NoError(t, err)
-
-				assert.Equal(t, "rag", arch.ID)
-				assert.Equal(t, "Digital Assistant", arch.Name)
-				assert.NotEmpty(t, arch.Description)
-				assert.Equal(t, "1.0.0", arch.Version)
-				assert.Equal(t, "architecture", arch.Type)
-				assert.Equal(t, "IBM", arch.CertifiedBy)
-				assert.Contains(t, arch.Runtimes, "podman")
-
-				// Verify services
-				assert.NotEmpty(t, arch.Services)
-				serviceIDs := make(map[string]bool)
-				for _, svc := range arch.Services {
-					serviceIDs[svc.ID] = true
-				}
-				assert.True(t, serviceIDs["chat"])
-				assert.True(t, serviceIDs["digitize"])
-				assert.True(t, serviceIDs["summarize"])
-			},
+			validateBody:   validateRagArchitecture,
 		},
 		{
 			name:           "Architecture not found",
 			archID:         "nonexistent",
 			expectedStatus: http.StatusNotFound,
-			validateBody: func(t *testing.T, body []byte) {
-				var errResp map[string]string
-				err := json.Unmarshal(body, &errResp)
-				require.NoError(t, err)
-				assert.Contains(t, errResp["error"], "not found")
-			},
+			validateBody:   validateArchitectureNotFound,
 		},
 	}
 
@@ -139,6 +112,36 @@ func TestGetArchitecture(t *testing.T) {
 			}
 		})
 	}
+}
+
+func validateRagArchitecture(t *testing.T, body []byte) {
+	var arch types.Architecture
+	err := json.Unmarshal(body, &arch)
+	require.NoError(t, err)
+
+	assert.Equal(t, "rag", arch.ID)
+	assert.Equal(t, "Digital Assistant", arch.Name)
+	assert.NotEmpty(t, arch.Description)
+	assert.Equal(t, "1.0.0", arch.Version)
+	assert.Equal(t, "architecture", arch.Type)
+	assert.Equal(t, "IBM", arch.CertifiedBy)
+	assert.Contains(t, arch.Runtimes, "podman")
+
+	assert.NotEmpty(t, arch.Services)
+	serviceIDs := make(map[string]bool)
+	for _, svc := range arch.Services {
+		serviceIDs[svc.ID] = true
+	}
+	assert.True(t, serviceIDs["chat"])
+	assert.True(t, serviceIDs["digitize"])
+	assert.True(t, serviceIDs["summarize"])
+}
+
+func validateArchitectureNotFound(t *testing.T, body []byte) {
+	var errResp map[string]string
+	err := json.Unmarshal(body, &errResp)
+	require.NoError(t, err)
+	assert.Contains(t, errResp["error"], "not found")
 }
 
 func TestListServices(t *testing.T) {
@@ -217,56 +220,19 @@ func TestGetService(t *testing.T) {
 			name:           "Successfully get chat service",
 			serviceID:      "chat",
 			expectedStatus: http.StatusOK,
-			validateBody: func(t *testing.T, body []byte) {
-				var svc types.Service
-				err := json.Unmarshal(body, &svc)
-				require.NoError(t, err)
-
-				assert.Equal(t, "chat", svc.ID)
-				assert.Equal(t, "Question and Answer", svc.Name)
-				assert.Equal(t, "service", svc.Type)
-				assert.Equal(t, "IBM", svc.CertifiedBy)
-				assert.Contains(t, svc.Architectures, "rag")
-
-				// Verify dependencies
-				assert.NotEmpty(t, svc.Dependencies)
-				depIDs := make(map[string]bool)
-				for _, dep := range svc.Dependencies {
-					depIDs[dep.ID] = true
-				}
-				assert.True(t, depIDs["opensearch"])
-				assert.True(t, depIDs["embedding"])
-				assert.True(t, depIDs["instruct"])
-				assert.True(t, depIDs["reranker"])
-
-				assert.NotEmpty(t, svc.Architectures)
-			},
+			validateBody:   validateChatService,
 		},
 		{
 			name:           "Successfully get dependency-only service (opensearch)",
 			serviceID:      "opensearch",
 			expectedStatus: http.StatusOK,
-			validateBody: func(t *testing.T, body []byte) {
-				var svc types.Service
-				err := json.Unmarshal(body, &svc)
-				require.NoError(t, err)
-
-				assert.Equal(t, "opensearch", svc.ID)
-				assert.Equal(t, "OpenSearch", svc.Name)
-				assert.True(t, svc.DependencyOnly)
-				assert.Empty(t, svc.Dependencies) // Dependency-only services have no dependencies
-			},
+			validateBody:   validateOpensearchService,
 		},
 		{
 			name:           "Service not found",
 			serviceID:      "nonexistent",
 			expectedStatus: http.StatusNotFound,
-			validateBody: func(t *testing.T, body []byte) {
-				var errResp map[string]string
-				err := json.Unmarshal(body, &errResp)
-				require.NoError(t, err)
-				assert.Contains(t, errResp["error"], "not found")
-			},
+			validateBody:   validateServiceNotFound,
 		},
 	}
 
@@ -282,6 +248,47 @@ func TestGetService(t *testing.T) {
 			}
 		})
 	}
+}
+
+func validateChatService(t *testing.T, body []byte) {
+	var svc types.Service
+	err := json.Unmarshal(body, &svc)
+	require.NoError(t, err)
+
+	assert.Equal(t, "chat", svc.ID)
+	assert.Equal(t, "Question and Answer", svc.Name)
+	assert.Equal(t, "service", svc.Type)
+	assert.Equal(t, "IBM", svc.CertifiedBy)
+	assert.Contains(t, svc.Architectures, "rag")
+
+	assert.NotEmpty(t, svc.Dependencies)
+	depIDs := make(map[string]bool)
+	for _, dep := range svc.Dependencies {
+		depIDs[dep.ID] = true
+	}
+	assert.True(t, depIDs["opensearch"])
+	assert.True(t, depIDs["embedding"])
+	assert.True(t, depIDs["instruct"])
+	assert.True(t, depIDs["reranker"])
+	assert.NotEmpty(t, svc.Architectures)
+}
+
+func validateOpensearchService(t *testing.T, body []byte) {
+	var svc types.Service
+	err := json.Unmarshal(body, &svc)
+	require.NoError(t, err)
+
+	assert.Equal(t, "opensearch", svc.ID)
+	assert.Equal(t, "OpenSearch", svc.Name)
+	assert.True(t, svc.DependencyOnly)
+	assert.Empty(t, svc.Dependencies)
+}
+
+func validateServiceNotFound(t *testing.T, body []byte) {
+	var errResp map[string]string
+	err := json.Unmarshal(body, &errResp)
+	require.NoError(t, err)
+	assert.Contains(t, errResp["error"], "not found")
 }
 
 // Made with Bob
