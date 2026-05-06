@@ -276,7 +276,7 @@ EOFPYTHON
         --pod "$POD_ID" \
         --rm \
         -e OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD}" \
-        registry.access.redhat.com/ubi9/python-311 \
+        registry.access.redhat.com/ubi9/python-312-minimal:9.7 \
         sleep 3600
     
     if [ $? -ne 0 ]; then
@@ -544,7 +544,7 @@ EOFPYTHON
         --pod "$POD_ID" \
         --rm \
         -e OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD}" \
-        registry.access.redhat.com/ubi9/python-311 \
+        registry.access.redhat.com/ubi9/python-312-minimal:9.7 \
         sleep 3600
     
     if [ $? -ne 0 ]; then
