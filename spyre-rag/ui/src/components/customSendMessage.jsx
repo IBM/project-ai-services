@@ -8,6 +8,8 @@ async function customSendMessage(
   instance,
   apiKey,
   onAuthError,
+  conversationHistory,
+  setConversationHistory,
 ) {
   const userInput = request.input.text;
 
@@ -94,8 +96,15 @@ async function customSendMessage(
     },
   });
 
+  // Build messages array with conversation history
+  // Format: [{ role: "user", content: "..." }, { role: "assistant", content: "..." }, ...]
+  const messages = [
+    ...conversationHistory,
+    { role: 'user', content: userInput }
+  ];
+
   const payload = {
-    messages: [{ role: 'user', content: userInput }],
+    messages: messages,
     model: 'ibm-granite/granite-3.3-8b-instruct',
     temperature: 0.0,
     stream: true,
@@ -208,7 +217,8 @@ async function customSendMessage(
       },
     ];
 
-    if (docs?.length > 0) {
+    // Only add reference docs button if docs were actually found
+    if (docs && docs.length > 0) {
       responseBlocks.push({
         response_type: 'user_defined',
         user_defined: {
@@ -232,6 +242,14 @@ async function customSendMessage(
         },
       },
     });
+
+    // Update conversation history with the new exchange
+    // Add user message and assistant response to history with proper roles
+    setConversationHistory([
+      ...conversationHistory,
+      { role: 'user', content: userInput },
+      { role: 'assistant', content: fullText }
+    ]);
   } catch (err) {
     instance.updateIsMessageLoadingCounter('decrease');
 
