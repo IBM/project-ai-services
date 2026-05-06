@@ -186,7 +186,10 @@ func (c *Client) Logout() error {
 	_ = c.httpClient.Do(httpclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/api/v1/auth/logout",
-		Headers:  map[string]string{"Authorization": "Bearer " + c.creds.AccessToken},
+		Headers: map[string]string{
+			"Authorization":   "Bearer " + c.creds.AccessToken,
+			"X-Refresh-Token": c.creds.RefreshToken,
+		},
 	})
 
 	return config.Delete()
