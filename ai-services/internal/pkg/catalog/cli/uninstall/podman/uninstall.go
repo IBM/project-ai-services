@@ -169,7 +169,7 @@ func secretDeletion(rt *podman.PodmanClient) error {
 func dbDataDeletion() error {
 	// Get the currently used base directory
 	baseDir := utils.GetBaseDir()
-	dbDataPath := filepath.Join(baseDir, "db")
+	dbDataPath := filepath.Join(baseDir, "ai-services/db")
 
 	// Check if database data directory exists
 	if _, err := os.Stat(dbDataPath); os.IsNotExist(err) {
