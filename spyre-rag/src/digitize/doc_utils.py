@@ -764,7 +764,7 @@ def detect_document_language(text: str) -> str:
         # Map to SentenceSplitter language code
         sentence_splitter_lang = lang_map.get(most_common_lang, 'en')
         
-        logger.info(f"Detected languages: {detected_languages}, using: {sentence_splitter_lang}")
+        logger.debug(f"Detected languages: {detected_languages}, using: {sentence_splitter_lang}")
         
         return sentence_splitter_lang
         
@@ -773,7 +773,7 @@ def detect_document_language(text: str) -> str:
         return 'en'
 
 
-def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50, language=None):
+def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50, language='en'):
     """
     Split text into token-based chunks using sentence boundaries.
     
@@ -782,18 +782,12 @@ def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50,
         emb_endpoint: Embedding endpoint for token counting
         max_tokens: Maximum tokens per chunk
         overlap: Number of tokens to overlap between chunks
-        language: Optional language code ('en', 'de', 'it', 'fr'). If None, auto-detect.
+        language: Language code ('en', 'de', 'it', 'fr'). Defaults to 'en'.
         
     Returns:
         List of text chunks
     """
-    # Detect language if not provided
-    # keeping the parameter option in case we implement language selection in the UI later
-    if language is None:
-        language = detect_document_language(text)
-        logger.info(f"Auto-detected language for chunking: {language}")
-    else:
-        logger.info(f"Using provided language for chunking: {language}")
+    logger.info(f"Using language for chunking: {language}")
     
     sentences = SentenceSplitter(language=language).split(text)
     chunks = []
@@ -827,13 +821,13 @@ def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50,
     return chunks
 
 
-def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens):
+def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, language='en'):
     content = current_chunk["content"].strip()
     if not content:
         return
 
     # Split content into token chunks
-    token_chunks = split_text_into_token_chunks(content, emb_endpoint, max_tokens=max_tokens)
+    token_chunks = split_text_into_token_chunks(content, emb_endpoint, max_tokens=max_tokens, language=language)
 
     for i, part in enumerate(token_chunks):
         chunk = {
@@ -869,6 +863,11 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
     try:
         with open(input_path, "r") as f:
             data = json.load(f)
+
+            # Detect document language once by collecting all text content
+            all_text = " ".join([block.get("text", "") for block in data if block.get("text")])
+            detected_language = detect_document_language(all_text)
+            logger.info(f"Detected language for document '{doc_id}': {detected_language}")
 
             font_size_levels = collect_header_font_sizes(data)
 
@@ -912,7 +911,7 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
                         current_subsubsection = full_title
 
                     # Flush current chunk and update
-                    flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens)
+                    flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, detected_language)
                     current_chunk["chapter_title"] = current_chapter
                     current_chunk["section_title"] = current_section
                     current_chunk["subsection_title"] = current_subsection
@@ -941,7 +940,7 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
                     logger.debug(f'Skipping adding "{label}".')
 
             # Flush any remaining content
-            flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens)
+            flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, detected_language)
 
         # Save the processed chunks to the output file
         with open(processed_chunk_json_path, "w") as f:
@@ -949,10 +948,10 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
 
         elapsed = time.time() - t0
         logger.debug(f"{len(chunks)} text chunks saved to {processed_chunk_json_path} in {elapsed:.2f}s")
-        return processed_chunk_json_path, elapsed
+        return processed_chunk_json_path, elapsed, detected_language
     except Exception as e:
         logger.error(f"Error chunking text from '{input_path}': {e}")
-        return None, None
+        return None, None, 'en'
 
 def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
     """
@@ -961,11 +960,11 @@ def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_t
     t0 = time.time()
 
     try:
-        # Chunk text content
-        text_chunk_json, text_chunk_time = chunk_text(input_path, out_path, emb_endpoint, max_tokens, doc_id)
+        # Chunk text content and get detected language
+        text_chunk_json, text_chunk_time, detected_language = chunk_text(input_path, out_path, emb_endpoint, max_tokens, doc_id)
 
-        # Chunk tables
-        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id)
+        # Chunk tables using the same detected language
+        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id, detected_language)
 
         total_time = time.time() - t0
         return text_chunk_json, table_chunk_json, total_time
@@ -973,10 +972,18 @@ def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_t
         logger.error(f"Error chunking document '{input_path}': {e}")
         return None, None, None
 
-def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
+def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language='en'):
     """
     Chunk table summaries into smaller pieces if they exceed token limits.
     Called internally by chunk_single_file() for sequential processing.
+    
+    Args:
+        input_path: Path to the table JSON file
+        out_path: Output directory path
+        emb_endpoint: Embedding endpoint for token counting
+        max_tokens: Maximum tokens per chunk
+        doc_id: Document ID
+        language: Language code for sentence splitting (detected from document text)
     """
     t0 = time.time()
     processed_table_chunk_json_path = (Path(out_path) / f"{doc_id}{table_chunk_suffix}")
@@ -1001,8 +1008,8 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
 
                 if summary_token_count > max_tokens:
                     tables_chunked_count += 1
-                    # Chunk the summary
-                    chunks = split_text_into_token_chunks(summary, emb_endpoint, max_tokens=max_tokens, overlap=50)
+                    # Chunk the summary using the detected language
+                    chunks = split_text_into_token_chunks(summary, emb_endpoint, max_tokens=max_tokens, overlap=50, language=language)
 
                     for chunk_part_idx, chunk in enumerate(chunks):
                         # TODO: Consider adding chunking properties ("is_chunked", "chunk_part", "total_parts")
