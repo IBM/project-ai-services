@@ -73,8 +73,8 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 		return fmt.Errorf("failed to load values: %w", err)
 	}
 
-	// Copy and write Caddyfile before deploying
-	if err := copyCaddyfile(baseDir); err != nil {
+	// Generate and write Caddyfile before deploying
+	if err := generateCaddyfile(baseDir, values); err != nil {
 		s.Fail("failed to generate Caddyfile")
 
 		return fmt.Errorf("failed to generate Caddyfile: %w", err)
@@ -240,21 +240,20 @@ func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 	return nil
 }
 
-// copyCaddyfile copies the static Caddyfile from assets to the caddy directory.
-func copyCaddyfile(baseDir string) error {
-	// Read the static Caddyfile from embedded assets
+// generateCaddyfile copies the static Caddyfile to the caddy directory.
+func generateCaddyfile(baseDir string, values map[string]any) error {
+	// Read the static Caddyfile
 	caddyfileContent, err := assets.CatalogFS.ReadFile("catalog/podman/Caddyfile")
 	if err != nil {
-		return fmt.Errorf("failed to read static Caddyfile from assets: %w", err)
+		return fmt.Errorf("failed to read Caddyfile: %w", err)
 	}
 
-	// Ensure the caddy directory exists
-	caddyDir := filepath.Join(baseDir, "catalog", "caddy")
+	// Ensure directory exists and write Caddyfile
+	caddyDir := filepath.Join(baseDir, "common", "caddy")
 	if err := os.MkdirAll(caddyDir, dirPerm); err != nil {
 		return fmt.Errorf("failed to create caddy directory: %w", err)
 	}
 
-	// Write Caddyfile
 	caddyfilePath := filepath.Join(caddyDir, "Caddyfile")
 	if err := os.WriteFile(caddyfilePath, caddyfileContent, filePerm); err != nil {
 		return fmt.Errorf("failed to write Caddyfile: %w", err)

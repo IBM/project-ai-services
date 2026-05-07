@@ -7,21 +7,27 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/component: "proxy"
+  annotations:
+    ai-services.io/ports: "{{ .Values.caddy.adminPort }}:2019, {{ .Values.caddy.httpsPort }}:443"
 spec:
   containers:
     - name: caddy
       image: "{{ .Values.caddy.image }}"
-      command: ["caddy", "run", "--config", "/data/caddy/Caddyfile", "--adapter", "caddyfile"]
+      imagePullPolicy: IfNotPresent
+      args: ["caddy", "run", "--config", "/data/caddy/Caddyfile", "--resume"]
+      env:
+        - name: CADDY_ADMIN
+          value: "0.0.0.0:2019"
       ports:
-        - containerPort: {{ .Values.caddy.httpsPort }}
-          hostPort: {{ .Values.caddy.httpsPort }}
-          protocol: TCP
         - containerPort: 2019
-          hostPort: 2019
-          protocol: TCP
+          hostIP: 127.0.0.1
+        - containerPort: 443
+          hostIP: 0.0.0.0
       volumeMounts:
         - name: caddy-data
           mountPath: /data/caddy:z
+        - name: caddy-config
+          mountPath: /config:z
       resources:
         requests:
           memory: "256Mi"
@@ -34,15 +40,12 @@ spec:
         periodSeconds: 10
         timeoutSeconds: 3
         failureThreshold: 3
-      readinessProbe:
-        tcpSocket:
-          port: 2019
-        initialDelaySeconds: 3
-        periodSeconds: 5
-        timeoutSeconds: 2
-        failureThreshold: 3
   volumes:
     - name: caddy-data
       hostPath:
-        path: {{ .BaseDir }}/catalog/caddy
+        path: {{ .BaseDir }}/common/caddy
+        type: DirectoryOrCreate
+    - name: caddy-config
+      hostPath:
+        path: {{ .BaseDir }}/common/caddy-config
         type: DirectoryOrCreate

@@ -24,4 +24,7 @@ db:
 
 caddy:
   image: "docker.io/library/caddy:2.8-alpine"
-  httpsPort: 443
+  # @description https port for caddy. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
+  httpsPort: ""
+  # @description admin port for caddy. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
+  adminPort: ""
