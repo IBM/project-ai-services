@@ -9,38 +9,9 @@ const mockArchitectures = [
     id: "1",
     title: "Digital assistant",
     description:
-      "Enable digital assistants using Retrieval-Augmented Generation (RAG), including custom documents and data to answer questions from a knowledge base.",
+      "Enable digital assistants using Retrieval-Augmented Generation (RAG), including AI services that query a managed knowledge base to answer questions from custom documents and data.",
     tags: ["Digitize documents", "Find similar items", "Question and answer"],
     isCertified: true,
-  },
-  {
-    id: "2",
-    title: "Sample (future)",
-    description:
-      "Infuse AI into business processes with purpose-built AI services like translation, extraction, and translation that you can deploy in minutes.",
-    tags: ["Digitize documents", "Find similar items", "Question and answer"],
-    isCertified: false,
-  },
-  {
-    id: "3",
-    title: "Sample (future)",
-    description: "[Description of the architecture goes here]",
-    tags: ["Digitize documents", "Find similar items", "Question and answer"],
-    isCertified: false,
-  },
-  {
-    id: "4",
-    title: "Sample (future)",
-    description: "[Description of the architecture goes here]",
-    tags: ["Question and answer", "Digitize documents"],
-    isCertified: false,
-  },
-  {
-    id: "5",
-    title: "Sample (future)",
-    description: "[Description of the architecture goes here]",
-    tags: ["Question and answer", "Digitize documents", "Summarization"],
-    isCertified: false,
   },
 ];
 
@@ -101,7 +72,7 @@ const Architectures = () => {
     return Array.from(services).sort();
   }, []);
 
-  // Filter architectures based on selected filters
+  // Filter architectures based on selected filters and search
   const filteredArchitectures = useMemo(() => {
     return mockArchitectures.filter((arch) => {
       const matchesProvider =
@@ -116,13 +87,22 @@ const Architectures = () => {
           return selectedServices.includes(normalizedTag);
         });
 
-      return matchesProvider && matchesService;
-    });
-  }, [selectedProviders, selectedServices]);
+      // Search in card content (title, description, tags)
+      const matchesSearch =
+        !searchValue ||
+        arch.title.toLowerCase().includes(searchValue.toLowerCase()) ||
+        arch.description.toLowerCase().includes(searchValue.toLowerCase()) ||
+        arch.tags.some((tag) =>
+          tag.toLowerCase().includes(searchValue.toLowerCase()),
+        );
 
-  // Filter options based on search - dynamically generated
+      return matchesProvider && matchesService && matchesSearch;
+    });
+  }, [selectedProviders, selectedServices, searchValue]);
+
+  // Filter options
   const providerOptions = useMemo(() => {
-    const options = [
+    return [
       {
         label: "IBM certified",
         value: "ibm-certified",
@@ -134,16 +114,10 @@ const Architectures = () => {
         count: providerCounts.nonCertified,
       },
     ];
-
-    if (!searchValue) return options;
-
-    return options.filter((opt) =>
-      opt.label.toLowerCase().includes(searchValue.toLowerCase()),
-    );
-  }, [searchValue, providerCounts]);
+  }, [providerCounts]);
 
   const serviceOptions = useMemo(() => {
-    const options = uniqueServices.map((service) => {
+    return uniqueServices.map((service) => {
       const key = service.toLowerCase().replace(/\s+/g, "-");
       return {
         label: service,
@@ -151,13 +125,7 @@ const Architectures = () => {
         count: serviceCounts[key] || 0,
       };
     });
-
-    if (!searchValue) return options;
-
-    return options.filter((opt) =>
-      opt.label.toLowerCase().includes(searchValue.toLowerCase()),
-    );
-  }, [searchValue, uniqueServices, serviceCounts]);
+  }, [uniqueServices, serviceCounts]);
 
   const filterAccordions = (
     <>
@@ -216,7 +184,7 @@ const Architectures = () => {
   return (
     <CatalogBrowseLayout
       title="Architectures"
-      subtitle="Production-ready AI solutions ..."
+      subtitle="Production-ready AI solutions that combine multiple services into complete, integrated systems for complex use cases."
       searchValue={searchValue}
       onSearchChange={setSearchValue}
       totalSelectedFilters={totalSelectedFilters}

@@ -189,7 +189,7 @@ const ReferenceUseCases = () => {
     return Array.from(architectures).sort();
   }, []);
 
-  // Filter solutions based on selected filters
+  // Filter solutions based on selected filters and search
   const filteredSolutions = useMemo(() => {
     return mockSolutions.filter((sol) => {
       const matchesProvider =
@@ -219,8 +219,25 @@ const ReferenceUseCases = () => {
           return selectedArchitectures.includes(normalizedArch);
         });
 
+      // Search in card content (title, description, domain, assets, architectures)
+      const matchesSearch =
+        !searchValue ||
+        sol.title.toLowerCase().includes(searchValue.toLowerCase()) ||
+        sol.description.toLowerCase().includes(searchValue.toLowerCase()) ||
+        sol.domain.toLowerCase().includes(searchValue.toLowerCase()) ||
+        sol.assets.some((asset) =>
+          asset.toLowerCase().includes(searchValue.toLowerCase()),
+        ) ||
+        sol.architectures.some((arch) =>
+          arch.toLowerCase().includes(searchValue.toLowerCase()),
+        );
+
       return (
-        matchesProvider && matchesDomain && matchesAsset && matchesArchitecture
+        matchesProvider &&
+        matchesDomain &&
+        matchesAsset &&
+        matchesArchitecture &&
+        matchesSearch
       );
     });
   }, [
@@ -228,18 +245,13 @@ const ReferenceUseCases = () => {
     selectedDomains,
     selectedAssets,
     selectedArchitectures,
+    searchValue,
   ]);
 
-  // Filter options based on search
+  // Filter options
   const providerOptions = useMemo(() => {
-    const options = [{ label: "IBM", value: "ibm", count: ibmCount }];
-
-    if (!searchValue) return options;
-
-    return options.filter((opt) =>
-      opt.label.toLowerCase().includes(searchValue.toLowerCase()),
-    );
-  }, [searchValue, ibmCount]);
+    return [{ label: "IBM", value: "ibm", count: ibmCount }];
+  }, [ibmCount]);
 
   const domainOptions = useMemo(() => {
     // Dynamically generate domain options from actual data
@@ -247,7 +259,7 @@ const ReferenceUseCases = () => {
       new Set(mockSolutions.map((sol) => sol.domain)),
     );
 
-    const options = uniqueDomains
+    return uniqueDomains
       .map((domain) => {
         const key = domain.toLowerCase().replace(/\s+/g, "-");
         return {
@@ -257,16 +269,10 @@ const ReferenceUseCases = () => {
         };
       })
       .sort((a, b) => a.label.localeCompare(b.label));
-
-    if (!searchValue) return options;
-
-    return options.filter((opt) =>
-      opt.label.toLowerCase().includes(searchValue.toLowerCase()),
-    );
-  }, [searchValue, domainCounts]);
+  }, [domainCounts]);
 
   const assetOptions = useMemo(() => {
-    const options = uniqueAssets.map((asset) => {
+    return uniqueAssets.map((asset) => {
       const key = asset.toLowerCase().replace(/\s+/g, "-");
       return {
         label: asset,
@@ -274,16 +280,10 @@ const ReferenceUseCases = () => {
         count: assetCounts[key] || 0,
       };
     });
-
-    if (!searchValue) return options;
-
-    return options.filter((opt) =>
-      opt.label.toLowerCase().includes(searchValue.toLowerCase()),
-    );
-  }, [searchValue, uniqueAssets, assetCounts]);
+  }, [uniqueAssets, assetCounts]);
 
   const architectureOptions = useMemo(() => {
-    const options = uniqueArchitectures.map((arch) => {
+    return uniqueArchitectures.map((arch) => {
       const key = arch.toLowerCase().replace(/\s+/g, "-");
       return {
         label: arch,
@@ -291,13 +291,7 @@ const ReferenceUseCases = () => {
         count: architectureCounts[key] || 0,
       };
     });
-
-    if (!searchValue) return options;
-
-    return options.filter((opt) =>
-      opt.label.toLowerCase().includes(searchValue.toLowerCase()),
-    );
-  }, [searchValue, uniqueArchitectures, architectureCounts]);
+  }, [uniqueArchitectures, architectureCounts]);
 
   const filterAccordions = (
     <>
