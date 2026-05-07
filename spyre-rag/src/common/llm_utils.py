@@ -185,20 +185,32 @@ def query_vllm_payload(
     if chatbot_settings.chatbot.conversational_mode and lang == "EN":
         # Conversational RAG mode with message history
         question_token_count = len(tokenize_with_llm(question, llm_endpoint))
+        context_tokens = tokenize_with_llm(context, llm_endpoint)
+        context_token_count = len(context_tokens)
 
-        remaining_tokens = settings.llm.granite_3_3_8b_instruct_context_length - (
+        # Calculate budget for context first (prioritize context over history)
+        budget_for_context = settings.llm.granite_3_3_8b_instruct_context_length - (
             chatbot_settings.chatbot.initial_system_token_overhead +
             chatbot_settings.chatbot.rag_system_token_overhead +
             question_token_count +
-            history_token_count +
             max_new_tokens  # Reserve space for model's response
         )
-        remaining_tokens = max(0, remaining_tokens)
+        budget_for_context = max(0, budget_for_context)
 
-        context = detokenize_with_llm(
-            tokenize_with_llm(context, llm_endpoint)[:remaining_tokens],
-            llm_endpoint
-        )
+        # Check if context fits within budget
+        if context_token_count <= budget_for_context:
+            # Context fits completely, use remaining budget for history
+            remaining_budget_for_history = budget_for_context - context_token_count
+            # Cap history budget at configured limit or remaining budget, whichever is smaller
+            history_budget = min(chatbot_settings.chatbot.history_token_budget, remaining_budget_for_history)
+            logger.debug(f"Context fits completely ({context_token_count} tokens). History budget: {history_budget} tokens")
+        else:
+            # Context exceeds budget, truncate context and no history
+            context = detokenize_with_llm(context_tokens[:budget_for_context], llm_endpoint)
+            history_budget = 0
+            previous_messages = None
+            logger.debug(f"Context truncated from {context_token_count} to {budget_for_context} tokens. No history included.")
+
         logger.debug(f"Truncated Context: {context}")
 
         message_array = [
@@ -208,7 +220,7 @@ def query_vllm_payload(
             }
         ]
 
-        if previous_messages:
+        if previous_messages and history_budget > 0:
             message_array.extend(previous_messages)
 
         final_system_content = chatbot_settings.chatbot.rag_system_message.format(
@@ -226,7 +238,7 @@ def query_vllm_payload(
 
         logger.debug(f"Message array length: {len(message_array)}")
         logger.debug(f"History messages: {len(previous_messages) if previous_messages else 0}")
-        logger.debug(f"History tokens: {history_token_count}")
+        logger.debug(f"History tokens used: {history_token_count if history_budget > 0 else 0}")
     else:
         # Legacy mode: use simple prompt template without conversation history
         # Dynamic chunk truncation: truncates the context if it doesn't fit in the sequence length

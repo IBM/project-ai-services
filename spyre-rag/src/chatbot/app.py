@@ -378,14 +378,6 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     llm_endpoint=llm_endpoint,
                     llm_model=llm_model,
                 )
-            
-            # Truncate history for vLLM with 2000 token budget
-            truncated_history, history_token_count = await asyncio.to_thread(
-                truncate_history_by_tokens,
-                previous_messages,
-                settings.chatbot.history_token_budget,
-                llm_endpoint
-            )
 
         docs, perf_stat_dict = await asyncio.to_thread(
             search_only,
@@ -397,6 +389,17 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
             settings.chatbot.num_chunks_post_reranker,
             vectorstore=vectorstore
         )
+        
+        # Calculate history budget after getting docs (context is prioritized)
+        # History truncation will happen inside query_vllm_payload based on actual context size
+        if settings.chatbot.conversational_mode and previous_messages and lang == "EN":
+            # Pre-truncate history with max budget for token counting
+            truncated_history, history_token_count = await asyncio.to_thread(
+                truncate_history_by_tokens,
+                previous_messages,
+                settings.chatbot.history_token_budget,
+                llm_endpoint
+            )
 
         if not docs:
             message = "No documents found in the knowledge base for this query."
