@@ -16,13 +16,13 @@ import { logout } from "@/services/auth";
 
 type AppHeaderProps =
   | {
-      minimal: true;
-    }
+    minimal: true;
+  }
   | {
-      minimal?: false;
-      isSideNavOpen: boolean;
-      setIsSideNavOpen: React.Dispatch<React.SetStateAction<boolean>>;
-    };
+    minimal?: false;
+    isSideNavOpen: boolean;
+    setIsSideNavOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  };
 
 interface HeaderState {
   isProfileOpen: boolean;
