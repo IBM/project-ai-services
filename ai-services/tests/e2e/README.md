@@ -85,6 +85,7 @@ export RAG_UI_PORT=3100
 export DIGITIZE_PORT=4100
 export DIGITIZE_UI_PORT=7100
 export SUMMARIZE_PORT=6100
+export SIMILARITY_PORT=9100
 export LLM_JUDGE_PORT=8000
 
 # Golden dataset filename
