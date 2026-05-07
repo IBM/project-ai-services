@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "instruct": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "title": "Model",
+          "description": "HuggingFace model path for instruct/LLM",
+          "default": "ibm-granite/granite-3.3-8b-instruct",
+          "enum": [
+            "ibm-granite/granite-3.3-8b-instruct"
+          ]
+        },
+        "apiSecretKey": {
+          "type": "string",
+          "title": "API Secret Key",
+          "description": "Secret key for API authentication",
+          "minLength": 16
+        }
+      }
+    }
+  }
+}

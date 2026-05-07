@@ -1,0 +1,8 @@
+# Component identification
+type: component
+id: vllm-cpu
+label: "vLLM CPU Embeddings"
+description: "Deploy embedding models on vLLM inference engine (CPU-only)"
+
+# Component type this provider belongs to
+component_type: embedding
