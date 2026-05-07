@@ -8,14 +8,6 @@
 # 3. The sidecar shares the network namespace with OpenSearch (localhost access)
 # 4. Installs opensearch-py and runs backup/restore operations
 # 5. Cleans up the sidecar container after completion
-#
-# Benefits:
-# - No modifications to the running OpenSearch container
-# - Clean separation of concerns
-# - Proper dependency management in isolated environment
-# - Follows Kubernetes/Podman best practices
-#
-# Usage: ./backup-restore.sh <command> [options]
 
 set -e
 
