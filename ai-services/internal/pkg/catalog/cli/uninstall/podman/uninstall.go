@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	catalog "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli"
@@ -14,9 +15,7 @@ import (
 )
 
 const (
-	// Default database data path from catalog values.yaml.
-	defaultDBDataPath = "/var/lib/ai-services/db"
-	// catalog secret name
+	// catalog secret name.
 	catalogSecretName = "catalog-secret"
 )
 
@@ -168,23 +167,27 @@ func secretDeletion(rt *podman.PodmanClient) error {
 
 // dbDataDeletion removes the database data directory.
 func dbDataDeletion() error {
+	// Get the currently used base directory
+	baseDir := utils.GetBaseDir()
+	dbDataPath := filepath.Join(baseDir, "db")
+
 	// Check if database data directory exists
-	if _, err := os.Stat(defaultDBDataPath); os.IsNotExist(err) {
-		logger.Infof("Database data directory does not exist: %s\n", defaultDBDataPath)
+	if _, err := os.Stat(dbDataPath); os.IsNotExist(err) {
+		logger.Infof("Database data directory does not exist: %s\n", dbDataPath)
 
 		return nil
 	}
 
-	logger.Infof("\nDatabase data found at: %s\n", defaultDBDataPath, logger.VerbosityLevelDebug)
+	logger.Infof("\nDatabase data found at: %s\n", dbDataPath, logger.VerbosityLevelDebug)
 
-	logger.Infof("Deleting database data at: %s\n", defaultDBDataPath)
+	logger.Infof("Deleting database data at: %s\n", dbDataPath)
 
 	// Remove the database data directory
-	if err := os.RemoveAll(defaultDBDataPath); err != nil {
+	if err := os.RemoveAll(dbDataPath); err != nil {
 		return fmt.Errorf("failed to remove database data directory: %w", err)
 	}
 
-	logger.Infof("Successfully removed database data at: %s\n", defaultDBDataPath)
+	logger.Infof("Successfully removed database data at: %s\n", dbDataPath)
 
 	return nil
 }
