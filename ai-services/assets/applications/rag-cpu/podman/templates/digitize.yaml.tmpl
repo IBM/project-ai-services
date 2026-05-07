@@ -20,9 +20,9 @@ spec:
         - name: POSTGRES_PORT
           value: "5432"
         - name: POSTGRES_DB
-          value: "{{ .Values.postgres.database }}"
+          value: "{{ .Values.postgres.digitize.database }}"
         - name: POSTGRES_USER
-          value: "{{ .Values.postgres.user }}"
+          value: "{{ .Values.postgres.digitize.user }}"
         - name: POSTGRES_PASSWORD
           value: "{{ .Values.postgres.password }}"
   containers:
@@ -116,9 +116,9 @@ spec:
         - name: POSTGRES_PORT
           value: "5432"
         - name: POSTGRES_DB
-          value: "{{ .Values.postgres.database }}"
+          value: "{{ .Values.postgres.digitize.database }}"
         - name: POSTGRES_USER
-          value: "{{ .Values.postgres.user }}"
+          value: "{{ .Values.postgres.digitize.user }}"
         - name: POSTGRES_PASSWORD
           value: "{{ .Values.postgres.password }}"
         - name: DB_POOL_SIZE
