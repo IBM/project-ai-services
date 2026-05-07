@@ -395,7 +395,6 @@ const ReferenceUseCases = () => {
     ) : null;
 
   return (
-<<<<<<<< HEAD:ui/catalog/src/pages/ReferenceUseCases/ReferenceUseCases.tsx
     <>
       <CatalogBrowseLayout
         title="Reference use cases"
@@ -417,19 +416,6 @@ const ReferenceUseCases = () => {
         solutionId={selectedSolutionId}
       />
     </>
-========
-    <CatalogBrowseLayout
-      title="Reference use cases"
-      subtitle="Pre-built AI demos from real-world use cases to help you envision how AI can solve common business problems."
-      searchValue={searchValue}
-      onSearchChange={setSearchValue}
-      totalSelectedFilters={totalSelectedFilters}
-      onClearFilters={handleClearFilters}
-      filterAccordions={filterAccordions}
-      results={results}
-      emptyMessage="No solutions match your filters. Try adjusting your search or clearing filters."
-    />
->>>>>>>> 0da6fc39 (Rename solutions and use cases to reference use cases):catalog-ui/src/pages/ReferenceUseCases/ReferenceUseCases.tsx
   );
 };
 
