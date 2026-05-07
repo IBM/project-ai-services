@@ -25,6 +25,8 @@ import (
 const (
 	catalogAppName     = "ai-services"
 	catalogAppTemplate = "catalog"
+	dirPerm            = 0o755
+	filePerm           = 0o644
 )
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
@@ -238,7 +240,6 @@ func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 	return nil
 }
 
-
 // generateCaddyfile creates a minimal Caddyfile configuration for Caddy.
 func generateCaddyfile(baseDir string) error {
 	// Minimal Caddyfile with Admin API enabled and basic HTTPS setup
@@ -260,13 +261,13 @@ func generateCaddyfile(baseDir string) error {
 
 	// Ensure the caddy directory exists
 	caddyDir := filepath.Join(baseDir, "catalog", "caddy")
-	if err := os.MkdirAll(caddyDir, 0755); err != nil {
+	if err := os.MkdirAll(caddyDir, dirPerm); err != nil {
 		return fmt.Errorf("failed to create caddy directory: %w", err)
 	}
 
 	// Write Caddyfile
 	caddyfilePath := filepath.Join(caddyDir, "Caddyfile")
-	if err := os.WriteFile(caddyfilePath, []byte(caddyfileContent), 0644); err != nil {
+	if err := os.WriteFile(caddyfilePath, []byte(caddyfileContent), filePerm); err != nil {
 		return fmt.Errorf("failed to write Caddyfile: %w", err)
 	}
 
