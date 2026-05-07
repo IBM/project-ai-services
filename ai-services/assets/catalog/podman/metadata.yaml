@@ -4,4 +4,5 @@ description: "Catalog Services for Project AI-Service"
 podTemplateExecutions:
   - [catalog-secret.yaml.tmpl]
   - [catalog-db.yaml.tmpl]
+  - [caddy.yaml.tmpl]
   - [catalog.yaml.tmpl]
