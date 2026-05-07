@@ -1,0 +1,43 @@
+---
+# Headless service for StatefulSet pod discovery
+apiVersion: v1
+kind: Service
+metadata:
+  name: "postgres-headless"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: database
+spec:
+  clusterIP: None
+  selector:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/component: database
+  ports:
+    - name: postgres-port
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+---
+# Regular service for application access
+apiVersion: v1
+kind: Service
+metadata:
+  name: "postgres"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: database
+spec:
+  selector:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/component: database
+  ports:
+    - name: postgres-port
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+
+# Made with Bob
