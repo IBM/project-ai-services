@@ -60,5 +60,5 @@ spec:
   volumes:
     - name: opensearch-data
       hostPath:
-        path: "/var/lib/ai-services/applications/{{ .AppName }}/volumes/opensearch"
+        path: "{{ .BaseDir }}/applications/{{ .AppName }}/volumes/opensearch"
         type: DirectoryOrCreate
