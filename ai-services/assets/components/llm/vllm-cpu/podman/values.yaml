@@ -4,5 +4,3 @@ instruct:
   model: "ibm-granite/granite-3.3-8b-instruct"
   # @description API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication.
   apiKey: ""
-
-# Made with Bob
