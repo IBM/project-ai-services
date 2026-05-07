@@ -19,6 +19,8 @@ import os
 import sys
 import time
 from pathlib import Path
+from contextlib import contextmanager
+from typing import Generator
 
 try:
     import psycopg2
@@ -44,6 +46,25 @@ def get_env_var(name: str, default: str | None = None) -> str:
     return value
 
 
+@contextmanager
+def get_connection(host: str, port: str, database: str, user: str, password: str) -> Generator:
+    """Context manager for database connections."""
+    conn = None
+    try:
+        conn = psycopg2.connect(
+            host=host,
+            port=port,
+            database=database,
+            user=user,
+            password=password,
+            connect_timeout=5
+        )
+        yield conn
+    finally:
+        if conn:
+            conn.close()
+
+
 def wait_for_postgres(host: str, port: str, user: str, password: str, max_attempts: int = 30) -> bool:
     """Wait for PostgreSQL to be ready."""
     print(f"Waiting for PostgreSQL at {host}:{port} to be ready...")
@@ -51,158 +72,104 @@ def wait_for_postgres(host: str, port: str, user: str, password: str, max_attemp
     for attempt in range(1, max_attempts + 1):
         try:
             # Try to connect to the default 'postgres' database
-            conn = psycopg2.connect(
-                host=host,
-                port=port,
-                database='postgres',
-                user=user,
-                password=password,
-                connect_timeout=5
-            )
-            conn.close()
-            print(f"✅ PostgreSQL is ready! (attempt {attempt}/{max_attempts})")
-            return True
-        except psycopg2.OperationalError as e:
+            with get_connection(host, port, 'postgres', user, password):
+                print(f"✅ PostgreSQL is ready! (attempt {attempt}/{max_attempts})")
+                return True
+        except psycopg2.OperationalError:
             if attempt < max_attempts:
                 print(f"Attempt {attempt}/{max_attempts}: PostgreSQL not ready yet, waiting...")
                 time.sleep(2)
             else:
                 print(f"❌ Failed to connect to PostgreSQL after {max_attempts} attempts")
-                print(f"Error: {e}")
                 return False
     
     return False
 
 
-def database_exists(host: str, port: str, user: str, password: str, dbname: str) -> bool:
-    """Check if database exists."""
+def database_exists(conn, dbname: str) -> bool:
+    """Check if database exists using existing connection."""
+    cursor = conn.cursor()
     try:
-        conn = psycopg2.connect(
-            host=host,
-            port=port,
-            database='postgres',
-            user=user,
-            password=password
-        )
-        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-        cursor = conn.cursor()
-        
         cursor.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s",
             (dbname,)
         )
-        exists = cursor.fetchone() is not None
-        
+        return cursor.fetchone() is not None
+    finally:
         cursor.close()
-        conn.close()
-        return exists
-    except Exception as e:
-        print(f"❌ Error checking if database exists: {e}")
-        return False
 
 
 def create_database(host: str, port: str, user: str, password: str, dbname: str) -> bool:
     """Create database if it doesn't exist."""
     try:
-        if database_exists(host, port, user, password, dbname):
-            print(f"✅ Database '{dbname}' already exists")
-            return True
-        
-        print(f"Creating database '{dbname}'...")
-        conn = psycopg2.connect(
-            host=host,
-            port=port,
-            database='postgres',
-            user=user,
-            password=password
-        )
-        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-        cursor = conn.cursor()
-        
-        # Use sql.Identifier to safely create database name
-        cursor.execute(
-            sql.SQL("CREATE DATABASE {}").format(sql.Identifier(dbname))
-        )
-        
-        cursor.close()
-        conn.close()
-        print(f"✅ Database '{dbname}' created successfully")
-        return True
+        with get_connection(host, port, 'postgres', user, password) as conn:
+            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+
+            if database_exists(conn, dbname):
+                print(f"✅ Database '{dbname}' already exists")
+                return True
+
+            print(f"Creating database '{dbname}'...")
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    sql.SQL("CREATE DATABASE {}").format(sql.Identifier(dbname))
+                )
+                print(f"✅ Database '{dbname}' created successfully")
+                return True
+            finally:
+                cursor.close()
     except Exception as e:
         print(f"❌ Error creating database: {e}")
         return False
 
 
-def run_schema_sql(host: str, port: str, user: str, password: str, dbname: str, sql_file: Path) -> bool:
-    """Run the schema SQL file."""
+def initialize_schema(host: str, port: str, user: str, password: str, dbname: str, sql_file: Path) -> bool:
+    """Run schema SQL and verify tables using a single connection."""
     try:
         if not sql_file.exists():
             print(f"❌ Error: Schema file not found: {sql_file}")
             return False
-        
+
         print(f"Reading schema from {sql_file}...")
         schema_sql = sql_file.read_text()
-        
-        print(f"Executing schema SQL on database '{dbname}'...")
-        conn = psycopg2.connect(
-            host=host,
-            port=port,
-            database=dbname,
-            user=user,
-            password=password
-        )
-        cursor = conn.cursor()
-        
-        # Execute the entire schema SQL
-        cursor.execute(schema_sql)
-        conn.commit()
-        
-        cursor.close()
-        conn.close()
-        print("✅ Schema created successfully")
-        return True
-    except Exception as e:
-        print(f"❌ Error executing schema SQL: {e}")
-        return False
 
+        # Use a single connection for both schema creation and verification
+        with get_connection(host, port, dbname, user, password) as conn:
+            cursor = conn.cursor()
+            try:
+                # Step 1: Execute schema SQL
+                print(f"Executing schema SQL on database '{dbname}'...")
+                cursor.execute(schema_sql)
+                conn.commit()
+                print("✅ Schema created successfully")
 
-def verify_schema(host: str, port: str, user: str, password: str, dbname: str) -> bool:
-    """Verify that tables were created."""
-    try:
-        conn = psycopg2.connect(
-            host=host,
-            port=port,
-            database=dbname,
-            user=user,
-            password=password
-        )
-        cursor = conn.cursor()
-        
-        # Check for expected tables
-        cursor.execute("""
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = 'public' 
-            AND table_type = 'BASE TABLE'
-            ORDER BY table_name
-        """)
-        tables = [row[0] for row in cursor.fetchall()]
-        
-        cursor.close()
-        conn.close()
-        
-        expected_tables = {'jobs', 'documents'}
-        found_tables = set(tables)
-        
-        if expected_tables.issubset(found_tables):
-            print(f"✅ Schema verification passed. Tables found: {', '.join(sorted(tables))}")
-            return True
-        else:
-            missing = expected_tables - found_tables
-            print(f"❌ Schema verification failed. Missing tables: {', '.join(missing)}")
-            return False
+                # Step 2: Verify tables were created (reuse same connection)
+                print("Verifying schema...")
+                cursor.execute("""
+                    SELECT table_name
+                    FROM information_schema.tables
+                    WHERE table_schema = 'public'
+                    AND table_type = 'BASE TABLE'
+                    ORDER BY table_name
+                """)
+                tables = [row[0] for row in cursor.fetchall()]
+
+                expected_tables = {'jobs', 'documents'}
+                found_tables = set(tables)
+
+                if expected_tables.issubset(found_tables):
+                    print(f"✅ Schema verification passed. Tables found: {', '.join(sorted(tables))}")
+                    return True
+                else:
+                    missing = expected_tables - found_tables
+                    print(f"❌ Schema verification failed. Missing tables: {', '.join(missing)}")
+                    return False
+            finally:
+                cursor.close()
+
     except Exception as e:
-        print(f"❌ Error verifying schema: {e}")
+        print(f"❌ Error during schema initialization: {e}")
         return False
 
 
@@ -211,41 +178,36 @@ def main():
     print("=" * 60)
     print("PostgreSQL Database Initialization")
     print("=" * 60)
-    
+
     # Get configuration from environment
     host = get_env_var('POSTGRES_HOST')
     port = get_env_var('POSTGRES_PORT', '5432')
     dbname = get_env_var('POSTGRES_DB')
     user = get_env_var('POSTGRES_USER')
     password = get_env_var('POSTGRES_PASSWORD')
-    
+
     print(f"Configuration:")
     print(f"  Host: {host}")
     print(f"  Port: {port}")
     print(f"  Database: {dbname}")
     print(f"  User: {user}")
     print()
-    
+
     # Step 1: Wait for PostgreSQL to be ready
     if not wait_for_postgres(host, port, user, password):
         print("❌ Database initialization failed: PostgreSQL not ready")
         sys.exit(1)
-    
+
     # Step 2: Create database if it doesn't exist
     if not create_database(host, port, user, password, dbname):
         print("❌ Database initialization failed: Could not create database")
         sys.exit(1)
-    
-    # Step 3: Run schema SQL
-    if not run_schema_sql(host, port, user, password, dbname, SCHEMA_FILE):
-        print("❌ Database initialization failed: Could not create schema")
+
+    # Step 3: Initialize schema and verify (single connection)
+    if not initialize_schema(host, port, user, password, dbname, SCHEMA_FILE):
+        print("❌ Database initialization failed: Schema initialization failed")
         sys.exit(1)
-    
-    # Step 4: Verify schema
-    if not verify_schema(host, port, user, password, dbname):
-        print("❌ Database initialization failed: Schema verification failed")
-        sys.exit(1)
-    
+
     print()
     print("=" * 60)
     print("✅ Database initialization complete!")
