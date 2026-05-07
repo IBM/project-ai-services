@@ -22,36 +22,6 @@ set -e
 VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Default configuration (can be overridden by environment variables or --env-file)
-CACHE_DIR="${CACHE_DIR:-/var/cache}"
-OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD:-}"
-ENV_FILE=""
-
-# Parse global options (--env-file)
-parse_global_options() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --env-file)
-                ENV_FILE="$2"
-                if [ ! -f "$ENV_FILE" ]; then
-                    print_error "Environment file not found: $ENV_FILE"
-                    exit 1
-                fi
-                # Source the env file
-                set -a  # automatically export all variables
-                source "$ENV_FILE"
-                set +a
-                shift 2
-                ;;
-            *)
-                # Return remaining args
-                echo "$@"
-                return
-                ;;
-        esac
-    done
-}
-
 # Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -65,13 +35,25 @@ print_success() { echo -e "${GREEN}✅ $1${NC}"; }
 print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
 print_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
 
+# Auto-source .env file if it exists in script directory
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    print_info "Loading environment variables from $SCRIPT_DIR/.env"
+    set -a  # automatically export all variables
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
+# Default configuration (can be overridden by environment variables from .env)
+CACHE_DIR="${CACHE_DIR:-/var/cache}"
+OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD:-}"
+
 # Validate and set OpenSearch password
 validate_opensearch_password() {
     if [ -z "$OPENSEARCH_PASSWORD" ]; then
         # No password set - use default with warning
         OPENSEARCH_PASSWORD="AiServices@12345"
         print_warning "Using default OpenSearch password (not recommended for production)"
-        print_info "Set OPENSEARCH_PASSWORD environment variable or use --env-file for custom password"
+        print_info "Set OPENSEARCH_PASSWORD in .env file or as environment variable for custom password"
     fi
 }
 
@@ -81,12 +63,7 @@ show_usage() {
 Unified Backup/Restore Tool for AI Services v${VERSION}
 
 USAGE:
-    ./backup-restore.sh [--env-file <file>] <command> [options]
-
-GLOBAL OPTIONS:
-    --env-file <file>
-        Load environment variables from file (recommended for production)
-        Example: ./backup-restore.sh --env-file secrets.env export opensearch rag-dev backup.tar.gz
+    ./backup-restore.sh <command> [options]
 
 COMMANDS:
     export opensearch <app-name> <output-file>
@@ -109,24 +86,27 @@ COMMANDS:
         Example: ./backup-restore.sh import digitize rag-dev digitize.tar.gz
         Note: app-name is required
 
-ENVIRONMENT VARIABLES:
-    CACHE_DIR              Cache directory path (default: /var/cache)
-    OPENSEARCH_PASSWORD    OpenSearch admin password (required, set via --env-file or environment variable)
-
     help
         Show this help message
 
     version
         Show version information
 
-EXAMPLES:
-    # Using --env-file (recommended for production)
-    ./backup-restore.sh --env-file .env export opensearch rag-dev opensearch.tar.gz
-    ./backup-restore.sh --env-file .env import opensearch rag-dev opensearch.tar.gz
+ENVIRONMENT CONFIGURATION:
+    The script automatically loads environment variables from .env file in the script directory.
+    
+    Create a .env file with your configuration:
+        OPENSEARCH_PASSWORD=YourCustomPassword
+        CACHE_DIR=/var/cache
+    
+    Available variables:
+        CACHE_DIR              Cache directory path (default: /var/cache)
+        OPENSEARCH_PASSWORD    OpenSearch admin password (required for production)
 
-    # Using environment variables
-    export OPENSEARCH_PASSWORD="MySecurePassword123"
-    ./backup-restore.sh export opensearch rag-dev opensearch.tar.gz
+EXAMPLES:
+    # Setup: Create .env file first
+    cp .env.example .env
+    # Edit .env and set OPENSEARCH_PASSWORD=YourPassword
 
     # Full backup (run both commands)
     ./backup-restore.sh export opensearch rag-dev opensearch.tar.gz
@@ -142,10 +122,14 @@ EXAMPLES:
     # Partial restore (digitize only)
     ./backup-restore.sh import digitize rag-dev digitize_backup.tar.gz
 
+    # Override environment variables for single command
+    OPENSEARCH_PASSWORD="TempPassword" ./backup-restore.sh export opensearch rag-dev backup.tar.gz
+
 SECURITY NOTES:
-    - Use --env-file or environment variables for custom passwords
+    - Create .env file from .env.example and set your passwords
     - Never commit .env files with real passwords to version control
-    - Copy .env.example to .env and customize for your environment
+    - The .env file is automatically loaded from the script directory
+    - You can override .env variables by setting them before the command
 
 EOF
 }
@@ -749,12 +733,8 @@ main() {
         show_usage
         exit 1
     fi
-
-    # Parse global options (--env-file)
-    local remaining_args=$(parse_global_options "$@")
-    set -- $remaining_args
     
-    # Validate OpenSearch password after parsing options
+    # Validate OpenSearch password
     validate_opensearch_password
 
     case "$1" in
