@@ -36,6 +36,12 @@ class QueryRephrasingConfig(BaseSettings):
         description="Temperature for rephrasing (0=deterministic)"
     )
     
+    history_token_budget: int = Field(
+        default=1000,
+        gt=0,
+        description="Maximum tokens allocated for conversation history during query rephrasing"
+    )
+    
     rephrase_prompt_template: str = Field(
         default=(
             "Given the conversation history and the current question, create a standalone query for semantic search.\n\n"

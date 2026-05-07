@@ -363,20 +363,29 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         # Only process conversation history and rephrase query in conversational mode
         # Conversational mode only works for English language
         if settings.chatbot.conversational_mode and previous_messages and lang == "EN":
+            # Truncate history for query rephrasing with 1000 token budget
+            truncated_history_for_rephrasing, _ = await asyncio.to_thread(
+                truncate_history_by_tokens,
+                previous_messages,
+                settings.query_rephrasing.history_token_budget,
+                llm_endpoint
+            )
+            
+            if truncated_history_for_rephrasing:
+                rephrased_query = await rephrase_query_with_context(
+                    current_query=current_query,
+                    previous_messages=truncated_history_for_rephrasing,
+                    llm_endpoint=llm_endpoint,
+                    llm_model=llm_model,
+                )
+            
+            # Truncate history for vLLM with 2000 token budget
             truncated_history, history_token_count = await asyncio.to_thread(
                 truncate_history_by_tokens,
                 previous_messages,
                 settings.chatbot.history_token_budget,
                 llm_endpoint
             )
-            
-            if truncated_history:
-                rephrased_query = await rephrase_query_with_context(
-                    current_query=current_query,
-                    previous_messages=truncated_history,
-                    llm_endpoint=llm_endpoint,
-                    llm_model=llm_model,
-                )
 
         docs, perf_stat_dict = await asyncio.to_thread(
             search_only,
