@@ -50,6 +50,7 @@ var (
 	digitizePort                string
 	digitizeUiPort              string
 	summarizePort               string
+	similarityPort              string
 	judgePort                   string
 	goldenDatasetFile           string
 	defaultRagAccuracyThreshold = 0.70
@@ -120,6 +121,7 @@ var _ = ginkgo.BeforeSuite(func() {
 	digitizePort = getEnvWithDefault("DIGITIZE_PORT", "4100")
 	digitizeUiPort = getEnvWithDefault("DIGITIZE_UI_PORT", "7100")
 	summarizePort = getEnvWithDefault("SUMMARIZE_PORT", "6100")
+	similarityPort = getEnvWithDefault("SIMILARITY_PORT", "9100")
 	judgePort = getEnvWithDefault("LLM_JUDGE_PORT", "8000")
 	if ragAccuracyThreshold, err := strconv.ParseFloat(
 		getEnvWithDefault("RAG_ACCURACY_THRESHOLD", "0.70"),
@@ -129,7 +131,7 @@ var _ = ginkgo.BeforeSuite(func() {
 	} else {
 		logger.Warningf("[SETUP][WARN] Invalid RAG_ACCURACY_THRESHOLD, using default %.2f", defaultRagAccuracyThreshold)
 	}
-	logger.Infof("[SETUP] Ports: backend=%s ui=%s digitize=%s digitizeUi = %s summarize=%s judge=%s | accuracy=%.2f", backendPort, uiPort, digitizePort, digitizeUiPort, summarizePort, judgePort, defaultRagAccuracyThreshold)
+	logger.Infof("[SETUP] Ports: backend=%s ui=%s digitize=%s digitizeUi = %s summarize=%s similarity=%s judge=%s | accuracy=%.2f", backendPort, uiPort, digitizePort, digitizeUiPort, summarizePort, similarityPort, judgePort, defaultRagAccuracyThreshold)
 
 	ginkgo.By("Building or verifying ai-services CLI")
 	var err error
@@ -289,7 +291,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			params := ""
 			cliOptions := cli.CreateOptions{}
 			if appRuntime == "podman" {
-				params = "ui.port=" + uiPort + ",backend.port=" + backendPort + ",digitize.port=" + digitizePort + ",digitizeUi.port=" + digitizeUiPort + ",summarize.port=" + summarizePort
+				params = "ui.port=" + uiPort + ",backend.port=" + backendPort + ",digitize.port=" + digitizePort + ",digitizeUi.port=" + digitizeUiPort + ",summarize.port=" + summarizePort + ",similarity.port=" + similarityPort
 				cliOptions = cli.CreateOptions{
 					SkipModelDownload: false,
 					ImagePullPolicy:   "IfNotPresent",
@@ -366,7 +368,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				psWideArgs := []string{"-o", "wide"}
 				widePsOutput, err := cli.ApplicationPS(ctx, cfg, appName, appRuntime, psWideArgs...)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedPorts := []string{uiPort, backendPort, digitizePort, digitizeUiPort, summarizePort}
+				expectedPorts := []string{uiPort, backendPort, digitizePort, digitizeUiPort, summarizePort, similarityPort}
 				gomega.Expect(podman.VerifyExposedPorts(appName, expectedPorts, appRuntime, widePsOutput)).NotTo(gomega.HaveOccurred(), "Verify exposed ports/routes failed")
 			} else {
 				output, err := podman.GetOpenshiftRoutes(appName)
@@ -481,9 +483,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "test_doc.pdf")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)).To(gomega.Succeed())
-
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false, appRuntime)
+			logs, err := ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -499,9 +499,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "blank.pdf")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)).To(gomega.Succeed())
-
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false, appRuntime)
+			logs, err := ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -517,9 +515,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "sample_png.pdf")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)).To(gomega.Succeed())
-
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false, appRuntime)
+			logs, err := ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -535,9 +531,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			gomega.Expect(ingestion.PrepareDocs(appName, "sample_txt.txt")).To(gomega.Succeed())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)).To(gomega.Succeed())
-
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, false, appRuntime)
+			logs, err := ingestion.StartIngestion(ctx, cfg, appName, completionStr, false, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring("Ingestion started"))
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
@@ -689,9 +683,8 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			completionStr := "DB cleanup completed successfully"
 			gomega.Expect(appName).NotTo(gomega.BeEmpty())
 
-			gomega.Expect(ingestion.StartIngestion(ctx, cfg, appName, completionStr, true, appRuntime)).To(gomega.Succeed())
+			logs, err := ingestion.StartIngestion(ctx, cfg, appName, completionStr, true, appRuntime)
 
-			logs, err := ingestion.WaitForIngestionLogs(ctx, cfg, appName, completionStr, true, appRuntime)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(logs).To(gomega.ContainSubstring(completionStr))
 

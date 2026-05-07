@@ -2,7 +2,6 @@ package ingestion
 
 import (
 	"context"
-	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -111,62 +110,4 @@ func areRequiredPodsHealthy(
 	}
 
 	return true
-}
-
-// WaitForIngestionLogs waits until ingestion completes successfully.
-// It ONLY checks for the success log and ignores pod state.
-func WaitForIngestionLogs(
-	ctx context.Context,
-	cfg *config.Config,
-	appName string,
-	completionStr string,
-	cleanDocs bool,
-	appRuntime string,
-) (string, error) {
-	podSuffix := "--ingest-docs"
-	if cleanDocs {
-		podSuffix = "--clean-docs"
-	}
-	podName := fmt.Sprintf("%s%s", appName, podSuffix)
-
-	ctx, cancel := context.WithTimeout(ctx, ingestionTimeout)
-	defer cancel()
-
-	ticker := time.NewTicker(waitTickerInterval)
-	defer ticker.Stop()
-
-	logger.Infof("[WAIT] Waiting for ingestion completion logs")
-
-	for {
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-
-		case <-ticker.C:
-			cmd := exec.CommandContext(
-				ctx,
-				cfg.AIServiceBin,
-				"application",
-				"logs",
-				appName,
-				"--pod",
-				podName,
-				"--runtime",
-				appRuntime,
-			)
-
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				continue
-			}
-
-			logs := string(out)
-
-			if strings.Contains(logs, completionStr) {
-				logger.Infof("[WAIT] Ingestion completed successfully")
-
-				return logs, nil
-			}
-		}
-	}
 }
