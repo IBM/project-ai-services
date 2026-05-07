@@ -1,6 +1,5 @@
 @use "@carbon/react/scss/spacing";
 @use "@carbon/react/scss/type";
-@use "@carbon/react/scss/motion";
 
 .card {
   background-color: var(--cds-layer);
@@ -8,7 +7,6 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  position: relative;
 
   :global(.cds--popover) {
     z-index: 8500;
@@ -19,19 +17,23 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  gap: spacing.$spacing-03;
   margin-bottom: spacing.$spacing-05;
 }
 
-.iconContainer {
-  flex-shrink: 0;
-  color: var(--cds-icon-primary);
-
-  svg {
-    display: block;
-  }
+.cardTitle {
+  @include type.type-style("heading-compact-02");
+  margin: 0;
+  flex: 1;
 }
 
-.indicatorIcon {
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: spacing.$spacing-02;
+}
+
+.certifiedBadge {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -42,31 +44,30 @@
   color: var(--cds-support-success);
 }
 
-.content {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-}
-
-.category {
-  @include type.type-style("label-01");
-  color: var(--cds-text-secondary);
-  margin: 0 0 spacing.$spacing-02 0;
-}
-
-.title {
-  @include type.type-style("heading-03");
-  margin: 0 0 spacing.$spacing-03 0;
-}
-
-.description {
+.cardDescription {
   @include type.type-style("body-compact-01");
   margin: 0 0 spacing.$spacing-05 0;
+  min-height: auto;
 }
 
-.footer {
+.tagsSection {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: auto;
+  flex-direction: column;
+  gap: spacing.$spacing-03;
+}
+
+.tagsHeading {
+  @include type.type-style("label-01");
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: spacing.$spacing-03;
+  padding: 0 0 spacing.$spacing-06 0;
+}
+
+.cardActions {
+  display: flex;
+  gap: spacing.$spacing-03;
 }

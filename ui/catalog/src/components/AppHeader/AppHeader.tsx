@@ -100,7 +100,7 @@ const AppHeader = (props: AppHeaderProps) => {
   return (
     <Theme theme="g100">
       <div className={styles.appHeader}>
-        <Header aria-label="IBM Open-Source AI Foundation for Power">
+        <Header aria-label="IBM AI Foundation for Power">
           {!minimal && (
             <HeaderMenuButton
               aria-label="Open menu"

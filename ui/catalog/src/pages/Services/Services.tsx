@@ -5,12 +5,6 @@ import CatalogBrowseLayout from "@/layouts/CatalogBrowseLayout";
 const Services = () => {
   const [searchValue, setSearchValue] = useState("");
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
-<<<<<<< HEAD
-=======
-  const [selectedArchitectures, setSelectedArchitectures] = useState<string[]>(
-    [],
-  );
->>>>>>> 9cded35 (main merge)
 
   const handleProviderChange = (checked: boolean, value: string) => {
     setSelectedProviders((prev) =>
@@ -31,7 +25,7 @@ const Services = () => {
 
   // Filter options based on search
   const providerOptions = useMemo(() => {
-    const options = [
+    return [
       { label: "IBM", value: "ibm", count: ibmCount },
       {
         label: "IBM certified (any provider)",
@@ -39,13 +33,7 @@ const Services = () => {
         count: ibmCertifiedAnyProviderCount,
       },
     ];
-
-    if (!searchValue) return options;
-
-    return options.filter((opt) =>
-      opt.label.toLowerCase().includes(searchValue.toLowerCase()),
-    );
-  }, [searchValue, ibmCount, ibmCertifiedAnyProviderCount]);
+  }, [ibmCount, ibmCertifiedAnyProviderCount]);
 
   const filterAccordions = (
     <>
@@ -75,7 +63,7 @@ const Services = () => {
   return (
     <CatalogBrowseLayout
       title="Services"
-      subtitle="Pre-built AI demos from real-world use cases to help you envision how AI can solve common business problems."
+      subtitle="Single-purpose AI capabilities designed to perform specific tasks independently or as part of larger solutions."
       searchValue={searchValue}
       onSearchChange={setSearchValue}
       totalSelectedFilters={totalSelectedFilters}
