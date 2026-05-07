@@ -95,10 +95,6 @@ COMMANDS:
 ENVIRONMENT CONFIGURATION:
     The script automatically loads environment variables from .env file in the script directory.
     
-    Create a .env file with your configuration:
-        OPENSEARCH_PASSWORD=YourCustomPassword
-        CACHE_DIR=/var/cache
-    
     Available variables:
         CACHE_DIR              Cache directory path (default: /var/cache)
         OPENSEARCH_PASSWORD    OpenSearch admin password (required for production)
