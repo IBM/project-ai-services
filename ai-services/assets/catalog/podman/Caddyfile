@@ -1,0 +1,14 @@
+{
+	admin 0.0.0.0:2019
+
+	servers :443 {
+		name my_app_server
+	}
+}
+
+:443 {
+	tls internal
+}
+
+# This file serves as the base configuration
+# Routes will be dynamically added via Caddy Admin API

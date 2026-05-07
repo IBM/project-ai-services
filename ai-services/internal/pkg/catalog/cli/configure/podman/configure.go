@@ -73,8 +73,8 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 		return fmt.Errorf("failed to load values: %w", err)
 	}
 
-	// Generate and write Caddyfile before deploying
-	if err := generateCaddyfile(baseDir); err != nil {
+	// Copy and write Caddyfile before deploying
+	if err := copyCaddyfile(baseDir); err != nil {
 		s.Fail("failed to generate Caddyfile")
 
 		return fmt.Errorf("failed to generate Caddyfile: %w", err)
@@ -240,24 +240,13 @@ func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 	return nil
 }
 
-// generateCaddyfile creates a minimal Caddyfile configuration for Caddy.
-func generateCaddyfile(baseDir string) error {
-	// Minimal Caddyfile with Admin API enabled and basic HTTPS setup
-	caddyfileContent := `{
-	admin 0.0.0.0:2019
-
-	servers :443 {
-		name my_app_server
+// copyCaddyfile copies the static Caddyfile from assets to the caddy directory.
+func copyCaddyfile(baseDir string) error {
+	// Read the static Caddyfile from embedded assets
+	caddyfileContent, err := assets.CatalogFS.ReadFile("catalog/podman/Caddyfile")
+	if err != nil {
+		return fmt.Errorf("failed to read static Caddyfile from assets: %w", err)
 	}
-}
-
-:443 {
-	tls internal
-}
-
-# This file serves as the base configuration
-# Routes will be dynamically added via Caddy Admin API
-`
 
 	// Ensure the caddy directory exists
 	caddyDir := filepath.Join(baseDir, "catalog", "caddy")
@@ -267,11 +256,11 @@ func generateCaddyfile(baseDir string) error {
 
 	// Write Caddyfile
 	caddyfilePath := filepath.Join(caddyDir, "Caddyfile")
-	if err := os.WriteFile(caddyfilePath, []byte(caddyfileContent), filePerm); err != nil {
+	if err := os.WriteFile(caddyfilePath, caddyfileContent, filePerm); err != nil {
 		return fmt.Errorf("failed to write Caddyfile: %w", err)
 	}
 
-	logger.Infof("Generated Caddyfile at: %s\n", caddyfilePath)
+	logger.Infof("Copied Caddyfile to: %s\n", caddyfilePath)
 
 	return nil
 }
