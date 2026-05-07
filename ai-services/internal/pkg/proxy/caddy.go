@@ -1,9 +1,7 @@
 package proxy
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 )
@@ -48,32 +46,6 @@ func (c *CaddyClient) HealthCheck() error {
 	}
 
 	return nil
-}
-
-// GetConfig retrieves the current Caddy configuration.
-func (c *CaddyClient) GetConfig() (map[string]interface{}, error) {
-	url := fmt.Sprintf("%s/config/", c.adminURL)
-
-	resp, err := c.client.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get config: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-
-		return nil, fmt.Errorf("caddy returned error (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	var config map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
-		return nil, fmt.Errorf("failed to decode config: %w", err)
-	}
-
-	return config, nil
 }
 
 // Made with Bob
