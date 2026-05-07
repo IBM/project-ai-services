@@ -220,7 +220,29 @@ def query_vllm_payload(
         ]
 
         if previous_messages and history_budget > 0:
-            message_array.extend(previous_messages)
+            # Truncate previous messages to fit within history budget
+            truncated_messages = []
+            current_token_count = 0
+            
+            for message in reversed(previous_messages):
+                message_content = message.get("content", "")
+                message_tokens = tokenize_with_llm(message_content, llm_endpoint)
+                message_token_count = len(message_tokens)
+                
+                if current_token_count + message_token_count <= history_budget:
+                    # Message fits within budget
+                    truncated_messages.insert(0, message)
+                    current_token_count += message_token_count
+                else:
+                    # No more space for additional messages
+                    logger.debug(f"History truncated: included {len(truncated_messages)} messages ({current_token_count} tokens) out of {len(previous_messages)} total messages")
+                    break
+            
+            if truncated_messages:
+                message_array.extend(truncated_messages)
+                logger.debug(f"Included {len(truncated_messages)} history messages using {current_token_count} tokens (budget: {history_budget})")
+            else:
+                logger.debug(f"No history messages fit within budget of {history_budget} tokens")
 
         final_system_content = chatbot_settings.chatbot.rag_system_message.format(
             context=context,
