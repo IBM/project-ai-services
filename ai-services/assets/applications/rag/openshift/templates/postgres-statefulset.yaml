@@ -46,7 +46,7 @@ spec:
                   name: "postgres-credentials"
                   key: password
             - name: PGDATA
-              value: "/var/lib/pgsql/18/data"
+              value: "/var/lib/pgsql/data"
           ports:
             - name: postgres-port
               containerPort: 5432
