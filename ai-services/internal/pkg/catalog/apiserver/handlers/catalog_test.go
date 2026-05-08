@@ -155,17 +155,16 @@ func TestListServices(t *testing.T) {
 		validateBody   func(t *testing.T, body []byte)
 	}{
 		{
-			name:           "Successfully list services (excludes dependency-only)",
+			name:           "Successfully list services",
 			expectedStatus: http.StatusOK,
 			validateBody: func(t *testing.T, body []byte) {
 				var services []types.ServiceSummary
 				err := json.Unmarshal(body, &services)
 				require.NoError(t, err)
 
-				// Should have deployable services only
+				// Should have deployable services
 				assert.NotEmpty(t, services)
 
-				// Verify dependency-only services are excluded
 				serviceIDs := make(map[string]bool)
 				for _, svc := range services {
 					serviceIDs[svc.ID] = true
@@ -182,7 +181,7 @@ func TestListServices(t *testing.T) {
 				assert.True(t, serviceIDs["digitize"])
 				assert.True(t, serviceIDs["summarize"])
 
-				// Should NOT include dependency-only services
+				// Components (opensearch, embedding, instruct, reranker) are not services
 				assert.False(t, serviceIDs["opensearch"])
 				assert.False(t, serviceIDs["embedding"])
 				assert.False(t, serviceIDs["instruct"])
@@ -221,12 +220,6 @@ func TestGetService(t *testing.T) {
 			serviceID:      "chat",
 			expectedStatus: http.StatusOK,
 			validateBody:   validateChatService,
-		},
-		{
-			name:           "Successfully get dependency-only service (opensearch)",
-			serviceID:      "opensearch",
-			expectedStatus: http.StatusOK,
-			validateBody:   validateOpensearchService,
 		},
 		{
 			name:           "Service not found",
@@ -271,17 +264,6 @@ func validateChatService(t *testing.T, body []byte) {
 	assert.True(t, depIDs["instruct"])
 	assert.True(t, depIDs["reranker"])
 	assert.NotEmpty(t, svc.Architectures)
-}
-
-func validateOpensearchService(t *testing.T, body []byte) {
-	var svc types.Service
-	err := json.Unmarshal(body, &svc)
-	require.NoError(t, err)
-
-	assert.Equal(t, "opensearch", svc.ID)
-	assert.Equal(t, "OpenSearch", svc.Name)
-	assert.True(t, svc.DependencyOnly)
-	assert.Empty(t, svc.Dependencies)
 }
 
 func validateServiceNotFound(t *testing.T, body []byte) {
