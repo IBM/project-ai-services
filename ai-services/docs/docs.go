@@ -804,9 +804,6 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference"
                     }
                 },
-                "dependency_only": {
-                    "type": "boolean"
-                },
                 "description": {
                     "type": "string"
                 },

@@ -52,9 +52,9 @@ spyre-rag/
 
 ### System Requirements
 
-- **Python**: 3.9 or higher
+- **Python**: 3.12 or higher
 - **pip**: Latest version
-- **Virtual Environment**: Recommended (venv or conda)
+- **Virtual Environment**: Recommended venv
 
 ### Application Dependencies
 
