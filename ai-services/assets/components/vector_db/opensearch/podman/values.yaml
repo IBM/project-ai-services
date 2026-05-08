@@ -1,0 +1,6 @@
+opensearch:
+  image: icr.io/ppc64le-oss/opensearch-ppc64le:3.3.0
+  memoryLimit: 8Gi
+  auth:
+    username: "admin"
+    password: "AiServices@12345"

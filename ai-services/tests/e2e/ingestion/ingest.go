@@ -47,10 +47,10 @@ func StartIngestion(
 	completionStr string,
 	cleanDocs bool,
 	appRuntime string,
-) error {
+) (string, error) {
 	// Wait for vLLM pod to be ready.
 	if err := WaitForAllPodsHealthy(ctx, cfg, appName, appRuntime); err != nil {
-		return err
+		return "", err
 	}
 
 	// Start ingestion pod.
@@ -77,15 +77,10 @@ func StartIngestion(
 	logger.Infof("[CLI] Output: %s", output)
 
 	if err != nil {
-		return fmt.Errorf("failed to start ingestion pod: %w\n%s", err, output)
+		return "", fmt.Errorf("failed to start ingestion pod: %w\n%s", err, output)
 	}
 
-	// Wait for ingestion to complete.
-	if _, err := WaitForIngestionLogs(ctx, cfg, appName, completionStr, cleanDocs, appRuntime); err != nil {
-		return err
-	}
-
-	return nil
+	return output, nil
 }
 
 // CleanDocsFolder removes the documents from the application documents folder.

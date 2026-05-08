@@ -21,5 +21,3 @@ dependencies:
     version: ">=1.0.0"
   - id: reranker
     version: ">=1.0.0"
-
-# Made with Bob

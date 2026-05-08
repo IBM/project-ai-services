@@ -1,0 +1,8 @@
+# Component identification
+type: component
+id: vllm
+label: "vLLM Instruct"
+description: "Deploy instruct models on vLLM inference engine"
+
+# Component type this provider belongs to
+component_type: llm
