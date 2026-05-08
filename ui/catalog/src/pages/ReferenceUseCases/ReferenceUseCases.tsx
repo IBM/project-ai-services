@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { AccordionItem, Checkbox, CheckboxGroup } from "@carbon/react";
 import CatalogBrowseLayout from "@/layouts/CatalogBrowseLayout";
 import SolutionCard from "@/components/SolutionCard";
+import SolutionDetailPanel from "@/components/SolutionDetailPanel";
 
 // Mock data
 const mockSolutions = [
@@ -94,6 +95,10 @@ const ReferenceUseCases = () => {
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
   const [selectedArchitectures, setSelectedArchitectures] = useState<string[]>(
     [],
+  );
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(
+    null,
   );
 
   const handleProviderChange = (checked: boolean, value: string) => {
@@ -380,24 +385,37 @@ const ReferenceUseCases = () => {
             description={sol.description}
             tags={sol.assets}
             category={sol.domain}
-            onViewDetails={(id) => console.log("View details:", id)}
+            onViewDetails={(id) => {
+              setSelectedSolutionId(id);
+              setIsPanelOpen(true);
+            }}
           />
         ))}
       </>
     ) : null;
 
   return (
-    <CatalogBrowseLayout
-      title="Reference use cases"
-      subtitle="Pre-built AI demos from real-world use cases to help you envision how AI can solve common business problems."
-      searchValue={searchValue}
-      onSearchChange={setSearchValue}
-      totalSelectedFilters={totalSelectedFilters}
-      onClearFilters={handleClearFilters}
-      filterAccordions={filterAccordions}
-      results={results}
-      emptyMessage="No solutions match your filters. Try adjusting your search or clearing filters."
-    />
+    <>
+      <CatalogBrowseLayout
+        title="Reference use cases"
+        subtitle="Pre-built AI demos from real-world use cases to help you envision how AI can solve common business problems."
+        searchValue={searchValue}
+        onSearchChange={setSearchValue}
+        totalSelectedFilters={totalSelectedFilters}
+        onClearFilters={handleClearFilters}
+        filterAccordions={filterAccordions}
+        results={results}
+        emptyMessage="No solutions match your filters. Try adjusting your search or clearing filters."
+      />
+      <SolutionDetailPanel
+        open={isPanelOpen}
+        onClose={() => {
+          setIsPanelOpen(false);
+          setSelectedSolutionId(null);
+        }}
+        solutionId={selectedSolutionId}
+      />
+    </>
   );
 };
 
