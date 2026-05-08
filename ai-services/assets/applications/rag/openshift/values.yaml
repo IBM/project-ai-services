@@ -66,7 +66,7 @@ opensearch:
 
 postgres:
   # @hidden
-  image: icr.io/ai-services-private/postgres:18
+  image: icr.io/ai-services-cicd/postgres:18
   # @description Sets the storage limit for the PostgreSQL service (Default: 5Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
   storage: 5Gi
   # @description Password for PostgreSQL authentication. Must be at least 8 characters. Use this to override the default password.
