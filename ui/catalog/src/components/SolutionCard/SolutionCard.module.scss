@@ -9,6 +9,22 @@
   flex-direction: column;
   height: 100%;
   position: relative;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+
+  &:hover,
+  &:focus,
+  &:active,
+  &:visited {
+    text-decoration: none !important;
+    color: inherit !important;
+    outline: none !important;
+  }
+
+  &:hover {
+    background-color: var(--cds-layer-hover);
+  }
 
   :global(.cds--popover) {
     z-index: 8500;
