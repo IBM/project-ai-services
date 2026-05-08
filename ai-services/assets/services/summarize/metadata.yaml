@@ -15,5 +15,3 @@ architectures:
 dependencies:
   - id: instruct
     version: ">=1.0.0"
-
-# Made with Bob

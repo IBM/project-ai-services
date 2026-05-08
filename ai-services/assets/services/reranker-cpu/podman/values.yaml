@@ -1,5 +1,0 @@
-reranker:
-  # @hidden
-  image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
-
-# Made with Bob

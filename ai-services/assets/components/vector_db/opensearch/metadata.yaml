@@ -1,0 +1,8 @@
+# Component identification
+type: component
+id: opensearch
+label: "OpenSearch"
+description: "Distributed search and analytics engine for vector storage"
+
+# Component type this provider belongs to
+component_type: vector_store
