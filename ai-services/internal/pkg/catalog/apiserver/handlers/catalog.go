@@ -22,6 +22,7 @@ func NewCatalogHandler() *CatalogHandler {
 		// Log error but don't fail - let individual requests handle it
 		panic(fmt.Sprintf("Failed to initialize catalog provider: %v", err))
 	}
+
 	return &CatalogHandler{
 		provider: provider,
 	}

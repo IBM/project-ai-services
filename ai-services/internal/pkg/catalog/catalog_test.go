@@ -17,6 +17,7 @@ func TestListArchitectures(t *testing.T) {
 
 	if err != nil {
 		t.Errorf("ListArchitectures() error = %v", err)
+
 		return
 	}
 
@@ -57,6 +58,7 @@ func TestLoadArchitecture(t *testing.T) {
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("LoadArchitecture() error = %v, wantErr %v", err, tt.wantErr)
+
 				return
 			}
 
@@ -81,6 +83,7 @@ func TestListServices(t *testing.T) {
 
 	if err != nil {
 		t.Errorf("ListServices() error = %v", err)
+
 		return
 	}
 
@@ -121,6 +124,7 @@ func TestLoadService(t *testing.T) {
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("LoadService() error = %v, wantErr %v", err, tt.wantErr)
+
 				return
 			}
 
@@ -145,6 +149,7 @@ func TestListComponents(t *testing.T) {
 
 	if err != nil {
 		t.Errorf("ListComponents() error = %v", err)
+
 		return
 	}
 
@@ -200,6 +205,7 @@ func TestLoadComponent(t *testing.T) {
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("LoadComponent() error = %v, wantErr %v", err, tt.wantErr)
+
 				return
 			}
 

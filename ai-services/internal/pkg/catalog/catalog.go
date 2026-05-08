@@ -46,97 +46,133 @@ func NewCatalogProvider() (*CatalogProvider, error) {
 	return &CatalogProvider{}, nil
 }
 
+const (
+	minPathPartsForArchOrService = 3
+	minPathPartsForComponent     = 4
+)
+
 // loadCatalogItems loads all catalog items into the provided map.
 func loadCatalogItems(items map[string]*catalogItem) error {
-
 	// Walk the catalog filesystem to find all metadata.yaml files
 	err := fs.WalkDir(&assets.CatalogFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+
 		if d.IsDir() || filepath.Base(path) != "metadata.yaml" {
 			return nil
 		}
 
-		// Determine the type based on the path
-		parts := strings.Split(path, "/")
-		if len(parts) < 3 {
-			return nil
-		}
-
-		catalogType := parts[0] // "architectures", "services", or "components"
-
-		// Skip runtime-specific metadata files (e.g., services/chat/podman/metadata.yaml)
-		// Valid patterns:
-		// - architectures/rag/metadata.yaml (3 parts)
-		// - services/chat/metadata.yaml (3 parts)
-		// - components/embedding/vllm-cpu/metadata.yaml (4 parts)
-		switch catalogType {
-		case "architectures", "services":
-			if len(parts) != 3 {
-				return nil
-			}
-		case "components":
-			if len(parts) != 4 {
-				return nil
-			}
-		default:
-			return nil
-		}
-
-		// Read and parse metadata
-		data, readErr := assets.CatalogFS.ReadFile(path)
-		if readErr != nil {
-			logger.Infof("failed to read metadata at %s: %v", path, readErr, logger.VerbosityLevelDebug)
-			return nil
-		}
-
-		// Get the application path (everything except "metadata.yaml")
-		appPath := filepath.Dir(path)
-
-		switch catalogType {
-		case "architectures":
-			var arch types.Architecture
-			if unmarshalErr := yaml.Unmarshal(data, &arch); unmarshalErr != nil {
-				logger.Infof("failed to parse architecture at %s: %v", path, unmarshalErr, logger.VerbosityLevelDebug)
-				return nil
-			}
-			items[arch.ID] = &catalogItem{
-				Path:         appPath,
-				Architecture: &arch,
-			}
-
-		case "services":
-			var svc types.Service
-			if unmarshalErr := yaml.Unmarshal(data, &svc); unmarshalErr != nil {
-				logger.Infof("failed to parse service at %s: %v", path, unmarshalErr, logger.VerbosityLevelDebug)
-				return nil
-			}
-			items[svc.ID] = &catalogItem{
-				Path:    appPath,
-				Service: &svc,
-			}
-
-		case "components":
-			var comp types.Component
-			if unmarshalErr := yaml.Unmarshal(data, &comp); unmarshalErr != nil {
-				logger.Infof("failed to parse component at %s: %v", path, unmarshalErr, logger.VerbosityLevelDebug)
-				return nil
-			}
-			// Use composite key for components: {component_type}/{id}
-			// This allows same ID across different component types
-			componentKey := fmt.Sprintf("%s/%s", comp.ComponentType, comp.ID)
-			items[componentKey] = &catalogItem{
-				Path:      appPath,
-				Component: &comp,
-			}
-		}
-
-		return nil
+		return processMetadataFile(path, items)
 	})
 
 	if err != nil {
 		return fmt.Errorf("failed to walk catalog filesystem: %w", err)
+	}
+
+	return nil
+}
+
+// processMetadataFile processes a single metadata.yaml file.
+func processMetadataFile(path string, items map[string]*catalogItem) error {
+	parts := strings.Split(path, "/")
+	if len(parts) < minPathPartsForArchOrService {
+		return nil
+	}
+
+	catalogType := parts[0] // "architectures", "services", or "components"
+
+	if !isValidMetadataPath(catalogType, len(parts)) {
+		return nil
+	}
+
+	data, readErr := assets.CatalogFS.ReadFile(path)
+	if readErr != nil {
+		logger.Infof("failed to read metadata at %s: %v", path, readErr, logger.VerbosityLevelDebug)
+
+		return nil
+	}
+
+	appPath := filepath.Dir(path)
+
+	return parseAndStoreMetadata(catalogType, path, appPath, data, items)
+}
+
+// isValidMetadataPath checks if the metadata file path is valid for the catalog type.
+func isValidMetadataPath(catalogType string, pathLength int) bool {
+	switch catalogType {
+	case "architectures", "services":
+		return pathLength == minPathPartsForArchOrService
+	case "components":
+		return pathLength == minPathPartsForComponent
+	default:
+		return false
+	}
+}
+
+// parseAndStoreMetadata parses metadata and stores it in the items map.
+func parseAndStoreMetadata(catalogType, path, appPath string, data []byte, items map[string]*catalogItem) error {
+	switch catalogType {
+	case "architectures":
+		return parseArchitecture(path, appPath, data, items)
+	case "services":
+		return parseService(path, appPath, data, items)
+	case "components":
+		return parseComponent(path, appPath, data, items)
+	}
+
+	return nil
+}
+
+// parseArchitecture parses and stores an architecture.
+func parseArchitecture(path, appPath string, data []byte, items map[string]*catalogItem) error {
+	var arch types.Architecture
+	if unmarshalErr := yaml.Unmarshal(data, &arch); unmarshalErr != nil {
+		logger.Infof("failed to parse architecture at %s: %v", path, unmarshalErr, logger.VerbosityLevelDebug)
+
+		return nil
+	}
+
+	items[arch.ID] = &catalogItem{
+		Path:         appPath,
+		Architecture: &arch,
+	}
+
+	return nil
+}
+
+// parseService parses and stores a service.
+func parseService(path, appPath string, data []byte, items map[string]*catalogItem) error {
+	var svc types.Service
+	if unmarshalErr := yaml.Unmarshal(data, &svc); unmarshalErr != nil {
+		logger.Infof("failed to parse service at %s: %v", path, unmarshalErr, logger.VerbosityLevelDebug)
+
+		return nil
+	}
+
+	items[svc.ID] = &catalogItem{
+		Path:    appPath,
+		Service: &svc,
+	}
+
+	return nil
+}
+
+// parseComponent parses and stores a component.
+func parseComponent(path, appPath string, data []byte, items map[string]*catalogItem) error {
+	var comp types.Component
+	if unmarshalErr := yaml.Unmarshal(data, &comp); unmarshalErr != nil {
+		logger.Infof("failed to parse component at %s: %v", path, unmarshalErr, logger.VerbosityLevelDebug)
+
+		return nil
+	}
+
+	// Use composite key for components: {component_type}/{id}
+	// This allows same ID across different component types
+	componentKey := fmt.Sprintf("%s/%s", comp.ComponentType, comp.ID)
+	items[componentKey] = &catalogItem{
+		Path:      appPath,
+		Component: &comp,
 	}
 
 	return nil
@@ -148,6 +184,7 @@ func (p *CatalogProvider) LoadArchitecture(id string) (*types.Architecture, erro
 	if !ok || item.Architecture == nil {
 		return nil, fmt.Errorf("architecture '%s' not found", id)
 	}
+
 	return item.Architecture, nil
 }
 
@@ -157,17 +194,19 @@ func (p *CatalogProvider) LoadService(id string) (*types.Service, error) {
 	if !ok || item.Service == nil {
 		return nil, fmt.Errorf("service '%s' not found", id)
 	}
+
 	return item.Service, nil
 }
 
 // LoadComponent loads a component by component type and ID from cache.
-// componentType examples: "embedding", "llm", "reranker", "vector_db"
+// componentType examples: "embedding", "llm", "reranker", "vector_db".
 func (p *CatalogProvider) LoadComponent(componentType, id string) (*types.Component, error) {
 	componentKey := fmt.Sprintf("%s/%s", componentType, id)
 	item, ok := sharedItems[componentKey]
 	if !ok || item.Component == nil {
 		return nil, fmt.Errorf("component '%s/%s' not found", componentType, id)
 	}
+
 	return item.Component, nil
 }
 
@@ -178,6 +217,7 @@ func (p *CatalogProvider) GetCatalogItemPath(id string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("item '%s' not found", id)
 	}
+
 	return item.Path, nil
 }
 
@@ -227,6 +267,7 @@ func (p *CatalogProvider) ListArchitectures() ([]types.Architecture, error) {
 			architectures = append(architectures, *item.Architecture)
 		}
 	}
+
 	return architectures, nil
 }
 
@@ -238,6 +279,7 @@ func (p *CatalogProvider) ListServices() ([]types.Service, error) {
 			services = append(services, *item.Service)
 		}
 	}
+
 	return services, nil
 }
 
@@ -249,6 +291,7 @@ func (p *CatalogProvider) ListComponents() ([]types.Component, error) {
 			components = append(components, *item.Component)
 		}
 	}
+
 	return components, nil
 }
 
@@ -262,18 +305,21 @@ func (p *CatalogProvider) ListServicesWithRuntime(runtime runtimeTypes.RuntimeTy
 // ArchitectureExists checks if an architecture exists.
 func (p *CatalogProvider) ArchitectureExists(id string) bool {
 	_, err := p.LoadArchitecture(id)
+
 	return err == nil
 }
 
 // ServiceExists checks if a service exists.
 func (p *CatalogProvider) ServiceExists(id string) bool {
 	_, err := p.LoadService(id)
+
 	return err == nil
 }
 
 // ComponentExists checks if a component exists.
 func (p *CatalogProvider) ComponentExists(componentType, id string) bool {
 	_, err := p.LoadComponent(componentType, id)
+
 	return err == nil
 }
 
