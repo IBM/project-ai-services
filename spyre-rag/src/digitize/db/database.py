@@ -10,9 +10,10 @@ from typing import Generator
 
 from sqlalchemy import create_engine, event, Engine
 from sqlalchemy.orm import sessionmaker, Session, scoped_session
-from sqlalchemy.pool import NullPool, QueuePool
+from sqlalchemy.pool import QueuePool
 
 from common.misc_utils import get_logger
+from digitize.settings import settings
 
 logger = get_logger("database")
 
@@ -49,13 +50,6 @@ def get_database_url() -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 
-# Connection pool configuration
-DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
-DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "5"))
-DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "30"))
-DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "3600"))  # 1 hour
-
-
 def create_db_engine(echo: bool = False) -> Engine:
     """
     Create SQLAlchemy engine with connection pooling.
@@ -72,10 +66,10 @@ def create_db_engine(echo: bool = False) -> Engine:
     engine = create_engine(
         database_url,
         poolclass=QueuePool,
-        pool_size=DB_POOL_SIZE,
-        max_overflow=DB_MAX_OVERFLOW,
-        pool_timeout=DB_POOL_TIMEOUT,
-        pool_recycle=DB_POOL_RECYCLE,
+        pool_size=settings.database.pool_size,
+        max_overflow=settings.database.max_overflow,
+        pool_timeout=settings.database.pool_timeout,
+        pool_recycle=settings.database.pool_recycle,
         pool_pre_ping=True,  # Verify connections before using
         echo=echo,
         future=True  # Use SQLAlchemy 2.0 style
@@ -151,24 +145,6 @@ def get_db_session() -> Generator[Session, None, None]:
         session.close()
 
 
-def init_db() -> None:
-    """
-    Initialize database schema.
-    
-    Creates all tables defined in models if they don't exist.
-    This is typically called during application startup or migration.
-    
-    Note: For production, use Alembic migrations instead.
-    """
-    if not engine:
-        raise RuntimeError("Database engine not initialized")
-    
-    from digitize.db.models import Base
-    
-    logger.info("Initializing database schema...")
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database schema initialized successfully")
-
 
 def check_db_connection() -> bool:
     """
@@ -208,7 +184,6 @@ __all__ = [
     "SessionLocal",
     "ScopedSession",
     "get_db_session",
-    "init_db",
     "check_db_connection",
     "close_db_connections",
 ]
