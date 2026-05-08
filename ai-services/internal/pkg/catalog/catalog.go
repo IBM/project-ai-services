@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/project-ai-services/ai-services/assets"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -46,11 +47,6 @@ func NewCatalogProvider() (*CatalogProvider, error) {
 	return &CatalogProvider{}, nil
 }
 
-const (
-	minPathPartsForArchOrService = 3
-	minPathPartsForComponent     = 4
-)
-
 // loadCatalogItems loads all catalog items into the provided map.
 func loadCatalogItems(items map[string]*catalogItem) error {
 	// Walk the catalog filesystem to find all metadata.yaml files
@@ -76,7 +72,7 @@ func loadCatalogItems(items map[string]*catalogItem) error {
 // processMetadataFile processes a single metadata.yaml file.
 func processMetadataFile(path string, items map[string]*catalogItem) error {
 	parts := strings.Split(path, "/")
-	if len(parts) < minPathPartsForArchOrService {
+	if len(parts) < constants.MinPathPartsForArchOrService {
 		return nil
 	}
 
@@ -101,10 +97,10 @@ func processMetadataFile(path string, items map[string]*catalogItem) error {
 // isValidMetadataPath checks if the metadata file path is valid for the catalog type.
 func isValidMetadataPath(catalogType string, pathLength int) bool {
 	switch catalogType {
-	case "architectures", "services":
-		return pathLength == minPathPartsForArchOrService
-	case "components":
-		return pathLength == minPathPartsForComponent
+	case constants.CatalogTypeArchitectures, constants.CatalogTypeServices:
+		return pathLength == constants.MinPathPartsForArchOrService
+	case constants.CatalogTypeComponents:
+		return pathLength == constants.MinPathPartsForComponent
 	default:
 		return false
 	}
@@ -113,11 +109,11 @@ func isValidMetadataPath(catalogType string, pathLength int) bool {
 // parseAndStoreMetadata parses metadata and stores it in the items map.
 func parseAndStoreMetadata(catalogType, path, appPath string, data []byte, items map[string]*catalogItem) error {
 	switch catalogType {
-	case "architectures":
+	case constants.CatalogTypeArchitectures:
 		return parseArchitecture(path, appPath, data, items)
-	case "services":
+	case constants.CatalogTypeServices:
 		return parseService(path, appPath, data, items)
-	case "components":
+	case constants.CatalogTypeComponents:
 		return parseComponent(path, appPath, data, items)
 	}
 
