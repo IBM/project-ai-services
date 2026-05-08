@@ -50,11 +50,6 @@ spec:
           ports:
             - name: postgres-port
               containerPort: 5432
-          resources:
-            requests:
-              memory: "{{ .Values.postgres.memoryLimit }}"
-            limits:
-              memory: "{{ .Values.postgres.memoryLimit }}"
           securityContext:
             runAsUser: 26
           volumeMounts:
