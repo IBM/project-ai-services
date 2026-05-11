@@ -30,16 +30,6 @@ spec:
         - name: postgres
           image: "{{ .Values.postgres.image }}"
           env:
-            - name: POSTGRES_DB
-              valueFrom:
-                secretKeyRef:
-                  name: "postgres-credentials"
-                  key: digitize-database
-            - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: "postgres-credentials"
-                  key: digitize-user
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -60,9 +50,7 @@ spec:
               command:
                 - pg_isready
                 - -U
-                - $(POSTGRES_USER)
-                - -d
-                - $(POSTGRES_DB)
+                - postgres
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 5
@@ -72,9 +60,7 @@ spec:
               command:
                 - pg_isready
                 - -U
-                - $(POSTGRES_USER)
-                - -d
-                - $(POSTGRES_DB)
+                - postgres
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
@@ -84,9 +70,7 @@ spec:
               command:
                 - pg_isready
                 - -U
-                - $(POSTGRES_USER)
-                - -d
-                - $(POSTGRES_DB)
+                - postgres
             initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3
