@@ -22,14 +22,9 @@ from pathlib import Path
 from contextlib import contextmanager
 from typing import Generator
 
-try:
-    import psycopg2
-    from psycopg2 import sql
-    from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
-except ImportError:
-    print("❌ Error: psycopg2 is not installed")
-    print("Install it with: pip install psycopg2-binary")
-    sys.exit(1)
+import psycopg2
+from psycopg2 import sql
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 
 # Script directory and schema file path
