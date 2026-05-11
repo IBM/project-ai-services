@@ -20,9 +20,9 @@ spec:
         - name: POSTGRES_PORT
           value: "5432"
         - name: POSTGRES_DB
-          value: "{{ .Values.postgres.digitize.database }}"
+          value: "{{ .Values.digitize.database }}"
         - name: POSTGRES_USER
-          value: "{{ .Values.postgres.digitize.user }}"
+          value: "postgres"
         - name: POSTGRES_PASSWORD
           value: "{{ .Values.postgres.password }}"
   containers:
@@ -81,6 +81,16 @@ spec:
         limits:
           memory: "50Gi"
       env:
+        - name: POSTGRES_HOST
+          value: "{{ .AppName }}--postgres"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.digitize.database }}"
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          value: "{{ .Values.postgres.password }}"
         - name: EMB_ENDPOINT
           value: "http://{{ .AppName }}--vllm-server:8001"
         - name: EMB_MODEL

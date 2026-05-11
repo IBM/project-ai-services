@@ -33,15 +33,9 @@ spec:
             - name: POSTGRES_PORT
               value: "5432"
             - name: POSTGRES_DB
-              valueFrom:
-                secretKeyRef:
-                  name: "postgres-credentials"
-                  key: digitize-database
+              value: "{{ .Values.digitize.database }}"
             - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: "postgres-credentials"
-                  key: digitize-user
+              value: "postgres"
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -64,6 +58,19 @@ spec:
             - "--http"
             - "httptools"
           env:
+            - name: POSTGRES_HOST
+              value: "postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: "{{ .Values.digitize.database }}"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "postgres-credentials"
+                  key: password
             - name: EMB_ENDPOINT
               value: http://embedding-predictor:8080
             - name: EMB_MODEL
