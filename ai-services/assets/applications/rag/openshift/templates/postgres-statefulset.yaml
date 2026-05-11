@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: "postgres"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: database
+spec:
+  serviceName: "postgres-headless"
+  replicas: 1
+  persistentVolumeClaimRetentionPolicy:
+    whenScaled: Delete
+  selector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: database
+  template:
+    metadata:
+      labels:
+        ai-services.io/application: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+        ai-services.io/component: database
+    spec:
+      securityContext:
+        fsGroup: 26
+      containers:
+        - name: postgres
+          image: "{{ .Values.postgres.image }}"
+          env:
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "postgres-credentials"
+                  key: password
+            - name: POSTGRES_DB
+              value: "postgres"
+            - name: PGDATA
+              value: "/var/lib/pgsql/data"
+          ports:
+            - name: postgres-port
+              containerPort: 5432
+          securityContext:
+            runAsUser: 26
+          volumeMounts:
+            - mountPath: /var/lib/pgsql
+              name: data
+          startupProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          ai-services.io/application: {{ .Release.Name }}
+          ai-services.io/template: {{ .Chart.Name }}
+          ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+          ai-services.io/component: database
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: "{{ .Values.postgres.storage }}"
+
+# Made with Bob

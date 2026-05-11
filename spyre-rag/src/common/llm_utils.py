@@ -162,28 +162,136 @@ def query_vllm_models(llm_endpoint, api_key: str | None = None):
     resp_json = response.json()
     return resp_json
 
-def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
-                stream, lang, api_key: str | None = None):
+def query_vllm_payload(
+    question,
+    documents,
+    llm_endpoint,
+    llm_model,
+    stop_words,
+    max_new_tokens,
+    temperature,
+    stream,
+    lang,
+    api_key: str | None = None,
+    previous_messages: list | None = None,
+    rephrased_query: str | None = None,
+):
     context = "\n\n".join([doc.get("page_content") for doc in documents])
 
-    logger.debug(f'Original Context: {context}')
+    logger.debug(f"Original Context: {context}")
 
-    # dynamic chunk truncation: truncates the context, if doesn't fit in the sequence length
-    question_token_count = len(tokenize_with_llm(question, llm_endpoint))
-    reamining_tokens = settings.llm.max_input_length - (
-        chatbot_settings.chatbot.prompt_template_token_count + question_token_count
-    )
-    context = detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:reamining_tokens], llm_endpoint)
-    logger.debug(f"Truncated Context: {context}")
+    # Use conversational mode if enabled AND language is English, otherwise use legacy prompts
+    if chatbot_settings.chatbot.conversational_mode and lang == "EN":
+        # Conversational RAG mode with message history
+        question_token_count = len(tokenize_with_llm(question, llm_endpoint))
+        context_tokens = tokenize_with_llm(context, llm_endpoint)
+        context_token_count = len(context_tokens)
 
-    # Get the appropriate prompt template based on language and format it
-    prompt_template = get_prompt_for_language(lang)
-    prompt = prompt_template.format(context=context, question=question)
+        # Calculate budget for context first (prioritize context over history)
+        budget_for_context = settings.llm.granite_3_3_8b_instruct_context_length - (
+            chatbot_settings.chatbot.initial_system_token_overhead +
+            chatbot_settings.chatbot.rag_system_token_overhead +
+            question_token_count +
+            max_new_tokens  # Reserve space for model's response
+        )
+        budget_for_context = max(0, budget_for_context)
 
-    logger.debug(f"PROMPT: {prompt}")
+        # Check if context fits within budget
+        if context_token_count <= budget_for_context:
+            # Context fits completely, use remaining budget for history
+            remaining_budget_for_history = budget_for_context - context_token_count
+            # Cap history budget at configured limit or remaining budget, whichever is smaller
+            history_budget = min(chatbot_settings.chatbot.history_token_budget, remaining_budget_for_history)
+            logger.debug(f"Context fits completely ({context_token_count} tokens). History budget: {history_budget} tokens")
+        else:
+            # Context exceeds budget, truncate context and no history
+            context = detokenize_with_llm(context_tokens[:budget_for_context], llm_endpoint)
+            history_budget = 0
+            previous_messages = None
+            logger.debug(f"Context truncated from {context_token_count} to {budget_for_context} tokens. No history included.")
+
+        logger.debug(f"Truncated Context: {context}")
+
+        message_array = [
+            {
+                "role": "system",
+                "content": chatbot_settings.chatbot.initial_system_message,
+            }
+        ]
+
+        if previous_messages and history_budget > 0:
+            # Truncate previous messages to fit within history budget
+            truncated_messages = []
+            current_token_count = 0
+            
+            for message in reversed(previous_messages):
+                message_content = message.get("content", "")
+                message_tokens = tokenize_with_llm(message_content, llm_endpoint)
+                message_token_count = len(message_tokens)
+                
+                if current_token_count + message_token_count <= history_budget:
+                    # Message fits within budget
+                    truncated_messages.insert(0, message)
+                    current_token_count += message_token_count
+                else:
+                    # No more space for additional messages
+                    logger.debug(f"History truncated: included {len(truncated_messages)} messages ({current_token_count} tokens) out of {len(previous_messages)} total messages")
+                    break
+            
+            if truncated_messages:
+                message_array.extend(truncated_messages)
+                logger.debug(f"Included {len(truncated_messages)} history messages using {current_token_count} tokens (budget: {history_budget})")
+            else:
+                logger.debug(f"No history messages fit within budget of {history_budget} tokens")
+
+        final_system_content = chatbot_settings.chatbot.rag_system_message.format(
+            context=context,
+            rephrased_query=rephrased_query or question,
+        )
+        message_array.append({
+            "role": "system",
+            "content": final_system_content,
+        })
+        message_array.append({
+            "role": "user",
+            "content": question,
+        })
+
+        logger.debug(f"Message array length: {len(message_array)}")
+        logger.debug(f"History messages: {len(previous_messages) if previous_messages else 0}")
+    else:
+        # Legacy mode: use simple prompt template without conversation history
+        # Dynamic chunk truncation: truncates the context if it doesn't fit in the sequence length
+        question_token_count = len(tokenize_with_llm(question, llm_endpoint))
+        remaining_tokens = settings.llm.granite_3_3_8b_instruct_context_length - (
+            chatbot_settings.chatbot.prompt_template_token_count +
+            question_token_count +
+            max_new_tokens  # Reserve space for model's response
+        )
+        remaining_tokens = max(0, remaining_tokens)
+        
+        context = detokenize_with_llm(
+            tokenize_with_llm(context, llm_endpoint)[:remaining_tokens],
+            llm_endpoint
+        )
+        logger.debug(f"Truncated Context: {context}")
+
+        # Get the appropriate prompt template based on language and format it
+        prompt_template = get_prompt_for_language(lang)
+        prompt = prompt_template.format(context=context, question=question)
+        
+        message_array = [
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ]
+
+        logger.debug(f"Using legacy prompt mode (conversational_mode=False)")
+
     headers = get_vllm_headers(api_key)
     payload = {
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": message_array,
         "model": llm_model,
         "max_tokens": max_new_tokens,
         "frequency_penalty": 1.1,
@@ -192,17 +300,41 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
         "stream": stream
     }
     if stream:
-        # stream_options is only required for streaming to include the final usage chunk.
-        # For non-streaming requests, the 'usage' field is included by default.
         payload["stream_options"] = {"include_usage": True}
     return headers, payload
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang, api_key: str | None = None):
+def query_vllm_non_stream(
+    question,
+    documents,
+    llm_endpoint,
+    llm_model,
+    stop_words,
+    max_new_tokens,
+    temperature,
+    perf_stat_dict,
+    lang,
+    api_key: str | None = None,
+    previous_messages: list | None = None,
+    rephrased_query: str | None = None,
+):
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False, lang, api_key)
+    headers, payload = query_vllm_payload(
+        question,
+        documents,
+        llm_endpoint,
+        llm_model,
+        stop_words,
+        max_new_tokens,
+        temperature,
+        False,
+        lang,
+        api_key,
+        previous_messages,
+        rephrased_query,
+    )
 
     # Use requests for synchronous HTTP requests
     start_time = time.time()
@@ -217,12 +349,37 @@ def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_wor
 
     return response_json
 
-def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang, api_key: str | None = None):
+def query_vllm_stream(
+    question,
+    documents,
+    llm_endpoint,
+    llm_model,
+    stop_words,
+    max_new_tokens,
+    temperature,
+    perf_stat_dict,
+    lang,
+    api_key: str | None = None,
+    previous_messages: list | None = None,
+    rephrased_query: str | None = None,
+):
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens,
-                                          temperature, True, lang, api_key)
+    headers, payload = query_vllm_payload(
+        question,
+        documents,
+        llm_endpoint,
+        llm_model,
+        stop_words,
+        max_new_tokens,
+        temperature,
+        True,
+        lang,
+        api_key,
+        previous_messages,
+        rephrased_query,
+    )
     try:
         # Use requests for synchronous HTTP requests
         logger.debug("STREAMING RESPONSE")

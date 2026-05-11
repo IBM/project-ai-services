@@ -13,7 +13,12 @@ export const login = async (payload: LoginRequest): Promise<LoginResponse> => {
 };
 
 export const logout = async () => {
-  await api.post(AUTH_ENDPOINTS.LOGOUT);
+  const refreshToken = useAuthStore.getState().refreshToken;
+  await api.post(AUTH_ENDPOINTS.LOGOUT, null, {
+    headers: {
+      "X-Refresh-Token": refreshToken,
+    },
+  });
   useAuthStore.getState().clearTokens();
 };
 
