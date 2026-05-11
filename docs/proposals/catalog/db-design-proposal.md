@@ -12,7 +12,7 @@ This document outlines the database design required for the Catalog service, inc
    - [Applications Table](#1-applications-table)
    - [Services Table](#2-services-table)
    - [Components Table](#3-components-table)
-   - [Service Component Dependencies Table](#4-service-component-dependencies-table)
+   - [Service Dependencies Table](#4-service-dependencies-table)
    - [Tokens Blacklist Table](#5-tokens-blacklist-table)
 4. [Entity Relationship Model](#entity-relationship-model)
 5. [Relationships](#relationships)
@@ -93,10 +93,20 @@ CREATE TYPE status AS ENUM (
 | id                  | UUID              | PRIMARY KEY | Unique service identifier |
 | app_id              | UUID              | FOREIGN KEY | References applications(id) |
 | type                | VARCHAR(100)      |             | Service type (e.g., Summarization, Digitization) |
+| status              | ServiceStatus     | ENUM        | Current status (Running, Error) |
 | endpoints           | JSONB             |             | Array of endpoint objects with name and endpoint fields: `[{"name": "ui", "endpoint": "http://..."}, {"name": "backend", "endpoint": "http://..."}]` |
 | version             | TEXT              |             | Service version |
 | created_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of creation |
 | updated_at          | TIMESTAMPTZ       | DEFAULT NOW() | Timestamp of last update |
+
+**Custom Types:**
+
+```sql
+CREATE TYPE service_status AS ENUM (
+    'Running',
+    'Error'
+);
+```
 
 ---
 
@@ -121,9 +131,9 @@ This table stores reusable infrastructure components that can be shared across m
 
 ---
 
-### 4. Service Component Dependencies Table (Taking it up at the end of Q2)
+### 4. Service Dependencies Table (Taking it up at the end of Q2)
 
-**Table Name:** `service_component_dependencies`
+**Table Name:** `service_dependencies`
 
 This table tracks dependencies between services and components, as well as between services themselves, enabling many-to-many relationships.
 
@@ -131,9 +141,18 @@ This table tracks dependencies between services and components, as well as betwe
 |---------------------|-------------------|-------------|-------------|
 | service_id          | UUID              | PRIMARY KEY, FOREIGN KEY | References services(id) - The service that uses a component or another service |
 | dependency_id       | UUID              | PRIMARY KEY, FOREIGN KEY | References either services(id) or components(id) - The service or component being used |
-| dependency_type     | VARCHAR(20)       | NOT NULL    | Type of dependency: 'service' or 'component' |
+| dependency_type     | DependencyType    | ENUM, NOT NULL | Type of dependency: 'service' or 'component' |
 
 **Composite Primary Key:** (service_id, dependency_id)
+
+**Custom Types:**
+
+```sql
+CREATE TYPE dependency_type AS ENUM (
+    'service',
+    'component'
+);
+```
 
 **Foreign Key Constraints:**
 - service_id references services(id) ON DELETE CASCADE
@@ -157,8 +176,7 @@ This table manages blacklisted tokens for both access and refresh tokens. Tokens
 
 | Column Name         | Data Type         | Constraints | Description |
 |---------------------|-------------------|-------------|-------------|
-| id                  | SERIAL            | PRIMARY KEY | Auto-incrementing unique identifier |
-| token_hash          | VARCHAR(64)       | NOT NULL, UNIQUE | SHA-256 hash of the JWT token (hex-encoded, 64 characters) |
+| token_hash          | VARCHAR(64)       | PRIMARY KEY | SHA-256 hash of the JWT token (hex-encoded, 64 characters) |
 | token_type          | TokenType         | ENUM, NOT NULL | Token type: "access" or "refresh" |
 | expires_at          | TIMESTAMPTZ       | NOT NULL    | Token expiry timestamp |
 
@@ -172,8 +190,7 @@ CREATE TYPE token_type AS ENUM (
 ```
 
 **Indexes:**
-- Primary key index on `id`
-- Unique index on `token_hash` for fast lookup
+- Primary key index on `token_hash` for fast lookup
 
 **Security Note:**
 - Tokens are hashed using SHA-256 before storage
@@ -188,8 +205,8 @@ CREATE TYPE token_type AS ENUM (
 ```mermaid
 erDiagram
     applications ||--o{ services : "has"
-    services ||--o{ service_component_dependencies : "depends_on"
-    components ||--o{ service_component_dependencies : "used_by"
+    services ||--o{ service_dependencies : "depends_on"
+    components ||--o{ service_dependencies : "used_by"
     
     applications {
         UUID id PK
@@ -206,6 +223,7 @@ erDiagram
         UUID id PK
         UUID app_id FK
         VARCHAR type
+        ServiceStatus status
         JSONB endpoints
         TEXT version
         TIMESTAMPTZ created_at
@@ -223,15 +241,14 @@ erDiagram
         TIMESTAMPTZ updated_at
     }
     
-    service_component_dependencies {
+    service_dependencies {
         UUID service_id "PK, FK"
         UUID dependency_id "PK, FK"
-        VARCHAR dependency_type
+        DependencyType dependency_type
     }
     
     tokens_blacklist {
-        SERIAL id PK
-        VARCHAR token_hash
+        VARCHAR token_hash PK
         TokenType token_type
         TIMESTAMPTZ expires_at
     }
@@ -244,18 +261,18 @@ erDiagram
    - Services reference their parent application via app_id
    - Services represent application-specific deployable units
 
-2. **Services → Components**: Many-to-Many (via service_component_dependencies)
+2. **Services → Components**: Many-to-Many (via service_dependencies)
    - Services can depend on multiple components
    - Components can be shared across multiple services and applications
-   - The service_component_dependencies table tracks which service uses which component
+   - The service_dependencies table tracks which service uses which component
    - service_id: The service that requires/uses a component
    - dependency_id: The component or service being used/depended upon
    - dependency_type: Indicates whether the dependency is a 'component' or 'service'
    - Enables tracking of service-to-component and service-to-service relationships
 
-3. **Services → Services**: Many-to-Many (via service_component_dependencies)
+3. **Services → Services**: Many-to-Many (via service_dependencies)
    - Services can depend on other services
-   - The service_component_dependencies table tracks service-to-service dependencies
+   - The service_dependencies table tracks service-to-service dependencies
    - Supports scenarios like: a summarization service depending on an embedding service
 
 4. **Components**: Independent shared resources
@@ -288,7 +305,9 @@ Services table uses UUID as primary key for:
 
 ### 3. Custom Types
 PostgreSQL custom types (ENUM) are used for:
-- **status**: Standardizes status values across tables (includes Deleting for cleanup workflows)
+- **status**: Standardizes application status values (Downloading, Deploying, Running, Deleting, Error)
+- **service_status**: Standardizes service status values (Running, Error) - services only have operational states
+- **dependency_type**: Standardizes dependency type values (service, component) - ensures type safety for service dependencies
 
 ### 4. Application Template Field
 The template field in applications table stores:
@@ -300,9 +319,8 @@ The template field in applications table stores:
 ### 5. Tokens Blacklist Table
 The tokens_blacklist table provides token revocation management with enhanced security:
 - **Database-backed**: Replaces in-memory implementation for multi-instance support
-- **SERIAL Primary Key**: Auto-incrementing integer for simplicity and performance
+- **Token Hash Primary Key**: SHA-256 hash serves as the primary key for direct lookups
 - **Hashed Storage**: Tokens stored as SHA-256 hashes (64-character hex strings)
-- **Unique Hash Constraint**: Ensures no duplicate entries and enables fast lookups
 - **Blacklist Approach**: Stores revoked tokens for both access and refresh token types
 - **Token Type Enum**: Uses PostgreSQL ENUM type with values 'access' and 'refresh'
 - **Automatic Expiry**: Tokens stored only until their natural expiry time
@@ -325,8 +343,8 @@ The components table stores shared infrastructure with specific design choices:
 - **Endpoints Structure**: Uses internal/external naming convention for endpoint objects
 - **Reusability**: Same component can be used by multiple services across different applications
 
-### 8. Service Component Dependencies Table
-The service_component_dependencies table provides explicit many-to-many relationship tracking:
+### 8. Service Dependencies Table
+The service_dependencies table provides explicit many-to-many relationship tracking:
 - **Unified Dependencies**: Tracks both service-to-component and service-to-service relationships
 - **Three Columns**: service_id, dependency_id, dependency_type
 - **Composite Primary Key**: (service_id, dependency_id) ensures unique relationships
@@ -346,7 +364,7 @@ Applications, services, and components tables include `created_at` and `updated_
 - Time-zone aware timestamps
 - Automatic timestamp generation and updates
 - Tracking both creation and modification times
-- Note: service_component_dependencies and tokens_blacklist tables intentionally exclude timestamps for minimal design
+- Note: service_dependencies and tokens_blacklist tables intentionally exclude timestamps for minimal design
 
 ### 11. Immutable UUID Primary Key
 The `id` field (UUID) serves as the primary key:
@@ -405,7 +423,7 @@ SELECT
         WHEN scd.dependency_type = 'component' THEN c.id
         WHEN scd.dependency_type = 'service' THEN s.id
     END as dependency_id
-FROM service_component_dependencies scd
+FROM service_dependencies scd
 LEFT JOIN components c ON scd.dependency_id = c.id AND scd.dependency_type = 'component'
 LEFT JOIN services s ON scd.dependency_id = s.id AND scd.dependency_type = 'service'
 WHERE scd.service_id = 'service-uuid-here';
@@ -415,7 +433,7 @@ WHERE scd.service_id = 'service-uuid-here';
 ```sql
 SELECT s.*
 FROM services s
-JOIN service_component_dependencies scd ON s.id = scd.service_id
+JOIN service_dependencies scd ON s.id = scd.service_id
 WHERE scd.dependency_id = 'component-uuid-here'
   AND scd.dependency_type = 'component';
 ```
@@ -438,7 +456,7 @@ SELECT
     END as dependency_type_name
 FROM applications a
 JOIN services s ON a.id = s.app_id
-LEFT JOIN service_component_dependencies scd ON s.id = scd.service_id
+LEFT JOIN service_dependencies scd ON s.id = scd.service_id
 LEFT JOIN components c ON scd.dependency_id = c.id AND scd.dependency_type = 'component'
 LEFT JOIN services dep_s ON scd.dependency_id = dep_s.id AND scd.dependency_type = 'service'
 WHERE a.id = 'application-uuid-here'
@@ -453,7 +471,7 @@ SELECT
     c.provider,
     COUNT(DISTINCT scd.service_id) as service_count
 FROM components c
-JOIN service_component_dependencies scd ON c.id = scd.dependency_id
+JOIN service_dependencies scd ON c.id = scd.dependency_id
 WHERE scd.dependency_type = 'component'
 GROUP BY c.id, c.type, c.provider
 HAVING COUNT(DISTINCT scd.service_id) > 1
@@ -478,7 +496,7 @@ SELECT * FROM services WHERE type = 'Summarization' ORDER BY created_at DESC;
 ### 13. Check if a service has any dependencies:
 ```sql
 SELECT EXISTS(
-    SELECT 1 FROM service_component_dependencies
+    SELECT 1 FROM service_dependencies
     WHERE service_id = 'service-uuid-here'
 ) as has_dependencies;
 ```
@@ -505,18 +523,18 @@ WHERE id = 'component-uuid-here';
 5. **Partitioning**: Consider table partitioning for large-scale deployments
 6. **Dependency Validation**: Add application-level validation to prevent circular dependencies between services
 7. **Component Versioning**: Track component version compatibility with dependent services
-8. **Dependency Metadata**: Consider adding metadata to service_component_dependencies table (e.g., required vs optional, version constraints)
+8. **Dependency Metadata**: Consider adding metadata to service_dependencies table (e.g., required vs optional, version constraints)
 9. **Component Health Monitoring**: Add health status tracking for shared components
 10. **Component Metadata Schema**: Define standard metadata schemas for different component types
 
 ## Conclusion
 
 This database design provides a solid foundation for the Catalog service with:
-- Clean and maintainable schema with 5 tables (applications, services, components, service_component_dependencies, tokens_blacklist)
+- Clean and maintainable schema with 5 tables (applications, services, components, service_dependencies, tokens_blacklist)
 - Clear separation between application-specific services and shared infrastructure components
 - Services table for application-specific deployable units with app_id foreign key
 - Components table for shared infrastructure resources (vector_store, llm, reranker, embedding) without app_id
-- Explicit dependency tracking through service_component_dependencies junction table
+- Explicit dependency tracking through service_dependencies junction table
 - Support for both service-to-component and service-to-service relationships (many-to-many)
 - Component provider field to identify implementations (e.g., OpenSearch, vLLM)
 - Flexible JSONB metadata field for component-specific configuration (e.g., models list)
