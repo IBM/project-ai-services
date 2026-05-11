@@ -22,12 +22,12 @@ spec:
     - name: postgres
       image: "{{ .Values.postgres.image }}"
       env:
-        - name: POSTGRES_DB
-          value: "{{ .Values.postgres.digitize.database }}"
         - name: POSTGRES_USER
-          value: "{{ .Values.postgres.digitize.user }}"
+          value: "postgres"
         - name: POSTGRES_PASSWORD
           value: "{{ .Values.postgres.password }}"
+        - name: POSTGRES_DB
+          value: "postgres"
         - name: PGDATA
           value: "/var/lib/pgsql/data"
       ports:
@@ -44,9 +44,7 @@ spec:
           command:
           - pg_isready
           - -U
-          - {{ .Values.postgres.digitize.user }}
-          - -d
-          - {{ .Values.postgres.digitize.database }}
+          - postgres
         initialDelaySeconds: 30
         periodSeconds: 10
         timeoutSeconds: 5
@@ -56,9 +54,7 @@ spec:
           command:
           - pg_isready
           - -U
-          - {{ .Values.postgres.digitize.user }}
-          - -d
-          - {{ .Values.postgres.digitize.database }}
+          - postgres
         initialDelaySeconds: 10
         periodSeconds: 5
         timeoutSeconds: 3
