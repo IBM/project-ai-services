@@ -36,7 +36,11 @@
      - 5.3.2 [Get Architecture Details](#532-get-architecture-details)
      - 5.3.3 [List Available Services](#533-list-available-services)
      - 5.3.4 [Get Service Details](#534-get-service-details)
-     - 5.3.5 [Get Service Custom Parameters](#535-get-service-custom-parameters)
+  - 5.4 [Deploy Options Endpoints](#54-deploy-options-endpoints)
+     - 5.4.1 [Get Architecture Deploy Options](#541-get-architecture-deploy-options)
+     - 5.4.2 [Get Service Deploy Options](#542-get-service-deploy-options)
+     - 5.4.3 [Get Component Provider Parameters](#543-get-component-provider-parameters)
+     - 5.4.4 [Get Model Info](#544-get-model-info)
 6. [Error Handling](#6-error-handling)
    - 6.1 [Error Response Format](#61-error-response-format)
    - 6.2 [HTTP Status Codes](#62-http-status-codes)
@@ -762,57 +766,86 @@ Content-Type: application/json
 
 ```json
 {
-  "name": "RAG Production",
-  "template": "rag",
-  "created_by": "admin",
+  "name": "Production RAG System",
+  "architecture": "rag",
   "services": [
     {
-      "id": "chat",
-      "version": "1.0.0"
-    },
-    {
-      "id": "summarization",
-      "version": "1.0.0"
-    },
-    {
-      "id": "digitization",
-      "version": "1.0.0"
-    }
-  ],
-  "params": {
-    "rag": {
-      "digitize": {
-        "port": 8080
-      },
-      "summarize": {
-        "port": 8081
-      },
-      "opensearch": {
-        "memoryLimit": "4Gi",
-        "storage": "20Gi",
-        "auth": {
-          "password": "SecurePassword123!@#"
+      "type": "service",
+      "service_id": "digitize",
+      "enabled": true,
+      "version": "1.0.0",
+      "components": [
+        {
+          "type": "component",
+          "component_type": "vector_db",
+          "provider_id": "opensearch",
+          "params": {
+            "memoryLimit": "8Gi",
+            "auth": {
+              "username": "admin",
+              "password": "AnotherSecurePass456!@#"
+            }
+          }
+        },
+        {
+          "type": "component",
+          "component_type": "llm",
+          "instance_id": "llm-vllm-granite",
+          "provider_id": "vllm"
+        },
+        {
+          "type": "component",
+          "component_type": "embedding",
+          "provider_id": "vllm",
+          "params": {
+            "model": "BAAI/bge-base-en-v1.5"
+          }
+        },
+        {
+          "type": "component",
+          "component_type": "reranker",
+          "instance_id": "reranker-vllm-1",
+          "provider_id": "vllm"
         }
-      }
+      ]
+    },
+    {
+      "type": "service",
+      "service_id": "chat",
+      "enabled": true,
+      "version": "1.0.0",
+      "components": [
+        {
+          "type": "component",
+          "component_type": "vector_db",
+          "instance_id": "opensearch-instance-1",
+          "provider_id": "opensearch"
+        },
+        {
+          "type": "component",
+          "component_type": "llm",
+          "provider_id": "watsonx",
+          "params": {
+            "model": "ibm/granite-13b-chat-v2",
+            "apiKey": "ibm-cloud-api-key-456",
+            "projectId": "wx-project-123",
+            "endpoint": "https://us-south.ml.cloud.ibm.com"
+          }
+        },
+        {
+          "type": "component",
+          "component_type": "embedding",
+          "provider_id": "watsonx",
+          "params": {
+            "model": "ibm/slate-125m-english-rtrvr",
+            "apiKey": "ibm-cloud-api-key-456",
+            "projectId": "wx-project-123",
+            "endpoint": "https://us-south.ml.cloud.ibm.com"
+          }
+        }
+      ]
     }
-  }
-}
-```
-
-**Request Body Example 2 (Service):**
-
-```json
-{
-  "name": "Summarization Service",
-  "template": "summarize",
-  "created_by": "admin",
-  "params": {
-    "summarize": {
-      "instruct": {
-        "apiKey": "sk-1234567890abcdef1234567890"
-      }
-    }
-  }
+  ]
 }
 ```
 
@@ -820,24 +853,40 @@ Content-Type: application/json
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | name | string | Yes | Application name (3-100 chars) |
-| template | string | Yes | Template ID (e.g., rag, summarize, digitize) |
-| created_by | string | Yes | Username of the user creating the application |
-| services | array | No | Array of service objects to deploy. If not provided, all services from the template will be deployed |
-| params | object | No | Key-value pairs of custom parameters for the deployment |
+| architecture | string | Yes | Architecture ID (e.g., rag) |
+| services | array | Yes | Array of service objects to deploy with their component selections |
 
 **Service Object (in services array):**
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| id | string | Yes | Service template ID (e.g., "chat", "summarization", "digitization") - must match available services from catalog |
+| type | string | Yes | Must be "service" |
+| service_id | string | Yes | Service identifier (e.g., "digitize", "chat", "summarize") |
+| enabled | boolean | Yes | Whether the service is enabled |
 | version | string | No | Service version to deploy. If not specified, uses the latest compatible version |
+| components | array | Yes | Array of component selections for this service |
 
-**Params Object:**
+**Component Object (in components array):**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| type | string | Yes | Must be "component" |
+| component_type | string | Yes | Component type (e.g., "vector_db", "llm", "embedding", "reranker") |
+| provider_id | string | Yes | Provider identifier (e.g., "opensearch", "vllm", "watsonx") |
+| instance_id | string | Conditional | Required when reusing an existing component instance |
+| params | object | Conditional | Required when creating a new component (not reusing). Contains provider-specific configuration |
 
-- Nested object structure matching the JSON Schema returned by GET /api/v1/params?id={template}
-- Top-level key is the template ID (e.g., "rag", "summarize")
-- Contains nested objects for each component/service with their respective parameters
-- Parameters must match the schema defined in the template
-- If not provided, default values from the template will be used
+**Component Selection Logic:**
+
+Each component can be specified in one of two ways:
+
+1. **Reuse Existing Component** - When `instance_id` field is present:
+   - The backend will use an existing, already-deployed component instance
+   - Required fields: `type`, `component_type`, `instance_id`, `provider_id`
+   - Example: `{ "type": "component", "component_type": "vector_db", "instance_id": "opensearch-instance-1", "provider_id": "opensearch" }`
+
+2. **Create New Component** - When `instance_id` field is absent:
+   - The backend will create and deploy a new component instance
+   - Required fields: `type`, `component_type`, `provider_id`, `params`
+   - Example: `{ "type": "component", "component_type": "vector_db", "provider_id": "opensearch", "params": { "memoryLimit": "8Gi", "auth": {...} } }`
 
 **Response (202 Accepted):**
 
@@ -868,33 +917,36 @@ Content-Type: application/json
 
 1. **Token Validation**: Validate JWT token from Authorization header
 
-2. **User Validation**:
-   - Validate that `created_by` matches the authenticated user from the JWT token
-   - Extract user ID from JWT token and verify it corresponds to the provided `created_by` username
-   - Return 403 Forbidden if `created_by` doesn't match the authenticated user
-
-3. **ID Generation**:
+2. **ID Generation**:
    - Auto-generate `id` as UUID v4
    - Use standard UUID generation library (e.g., `github.com/google/uuid`)
    - No need to check uniqueness as UUIDs are globally unique
 
-4. **Template Validation**:
-   - Verify template exists in catalog
-   - Retrieve template's JSON Schema for parameter validation
+3. **Architecture Validation**:
+   - Verify architecture exists in catalog
+   - Retrieve architecture metadata and available services
 
-5. **Services Validation** (if services provided):
-   - Validate each service ID exists in the catalog
-   - Verify each service is compatible with the template
-   - Check that service versions meet template requirements
-   - If services array is not provided, use all services defined in the template
-   - Validate service dependencies are satisfied
+4. **Services Validation**:
+   - Validate each service in the services array
+   - Verify `service_id` exists in the catalog and is compatible with the architecture
+   - Check that service versions meet architecture requirements
+   - Validate `enabled` flag is boolean
    - Return 422 error if any service validation fails
 
-6. **Parameter Validation** (if params provided):
-   - Validate each param key exists in template's JSON Schema
-   - Validate each param value against its schema definition (type, pattern, min/max, etc.)
+5. **Components Validation** (for each service):
+   - Validate each component in the service's components array
+   - Verify `component_type` is valid and required by the service
+   - Verify `provider_id` exists for the given component type
+   - For components with `instance_id`:
+     - Verify the instance exists in the system
+     - Verify the instance's provider matches the specified `provider_id`
+     - Verify the instance is compatible with the service requirements
+   - For components without `instance_id` (new components):
+     - Validate `params` object against the provider's JSON Schema
+     - Verify all required fields are present in params
+     - Validate field values against schema constraints (type, pattern, min/max, etc.)
+   - Validate component dependencies are satisfied
    - Return 422 error with details if validation fails
-   - Merge provided params with template defaults
 
 7. **Database Operations**:
    - Begin transaction
@@ -1429,11 +1481,15 @@ GET /api/v1/services/chat
 
 ---
 
-#### 5.3.5 Get Template Parameters
+### 5.4 Deploy Options Endpoints
 
-**Endpoint:** `GET /api/v1/params`
+This section describes the endpoints for retrieving deployment options, component providers, and configuration parameters for dynamic component selection during application deployment.
 
-**Description:** Retrieves custom parameters schema for a specific architecture or service template. Returns JSON Schema format that UI can use to generate dynamic forms with validation.
+#### 5.4.1 Get Architecture Deploy Options
+
+**Endpoint:** `GET /api/v1/architectures/{architecture_id}/deploy-options`
+
+**Description:** Retrieves available providers and dependency rules for all services and their components within an architecture. This endpoint returns providers (blueprints) for creating new components and dependency rules, but does NOT include running instances.
 
 **Request Headers:**
 
@@ -1441,169 +1497,524 @@ GET /api/v1/services/chat
 Authorization: Bearer <access_token>
 ```
 
-**Query Parameters:**
+**Path Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| id | string | Yes | Architecture or service template ID (e.g., "rag", "summarize") |
+| architecture_id | string | Yes | Architecture ID (e.g., "rag") |
 
 **Request Body:** None
 
-**Example Request 1 (Architecture):**
-
-```
-GET /api/v1/params?id=rag
-```
-
-**Response (200 OK) - Architecture Example:**
+**Response (200 OK):**
 
 ```json
 {
-  "$schema": "https://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "properties": {
-    "rag": {
-      "type": "object",
-      "properties": {
-        "digitize": {
-          "type": "object",
-          "properties": {
-            "port": {
-              "type": "integer",
-              "description": "Port number for digitize service",
-              "default": 8080
-            }
-          }
+  "architecture_id": "rag",
+  "architecture_name": "Digital Assistant",
+  "global_components": [
+    {
+      "type": "vector_db",
+      "name": "Vector store",
+      "providers": [
+        {
+          "id": "opensearch",
+          "name": "OpenSearch",
+          "description": "Distributed search and analytics engine",
+          "schema": "/api/v1/components/vector_db/providers/opensearch/params"
         },
-        "summarize": {
-          "type": "object",
-          "properties": {
-            "port": {
-              "type": "integer",
-              "description": "Port number for summarize service",
-              "default": 8081
-            }
-          }
-        },
-        "opensearch": {
-          "type": "object",
-          "properties": {
-            "memoryLimit": {
-              "type": "string",
-              "pattern": "^[0-9]+(Ki|Mi|Gi|Ti|Pi|Ei)$",
-              "description": "Memory limit for OpenSearch (e.g., 2Gi, 4Gi)",
-              "x-advanced": true
-            },
-            "storage": {
-              "type": "string",
-              "pattern": "^[0-9]+(Ki|Mi|Gi|Ti|Pi|Ei)$",
-              "description": "Storage size for OpenSearch (e.g., 10Gi, 20Gi)",
-              "x-advanced": true
-            },
-            "auth": {
-              "type": "object",
-              "properties": {
-                "password": {
-                  "type": "string",
-                  "minLength": 15,
-                  "allOf": [
-                    {
-                      "pattern": ".*[a-z].*",
-                      "description": "Must contain at least one lowercase letter"
-                    },
-                    {
-                      "pattern": ".*[A-Z].*",
-                      "description": "Must contain at least one uppercase letter"
-                    },
-                    {
-                      "pattern": ".*[0-9].*",
-                      "description": "Must contain at least one digit"
-                    },
-                    {
-                      "pattern": ".*[@$!%*?&#^()_+\\-=\\[\\]{};':\"\\\\|,.<>/`~].*",
-                      "description": "Must contain at least one special character"
-                    }
-                  ],
-                  "description": "Password must be at least 15 characters and contain at least one uppercase letter, one lowercase letter, one digit, and one special character"
-                }
+        {
+          "id": "milvus",
+          "name": "Milvus",
+          "description": "Cloud-native vector database",
+          "schema": "/api/v1/components/vector_db/providers/milvus/params"
+        }
+      ]
+    },
+    {
+      "type": "embedding",
+      "name": "Embedding Model",
+      "providers": [
+        {
+          "id": "vllm",
+          "name": "vLLM Embeddings",
+          "specifications": {
+            "supported_models": [
+              {
+                "id": "bge-base-en-v1.5",
+                "name": "BAAI/bge-base-en-v1.5"
               }
-            }
-          }
+            ]
+          },
+          "schema": "/api/v1/components/embedding/providers/vllm/params"
+        },
+        {
+          "id": "watsonx",
+          "name": "IBM watsonx.ai Embeddings",
+          "specifications": {
+            "supported_models": [
+              {
+                "id": "slate-125m-english-rtrvr",
+                "name": "ibm/slate-125m-english-rtrvr"
+              }
+            ]
+          },
+          "schema": "/api/v1/components/embedding/providers/watsonx/params"
         }
-      }
+      ]
     }
-  }
-}
-```
-
-**Example Request 2 (Service):**
-
-```
-GET /api/v1/params?id=summarize
-```
-
-**Response (200 OK) - Service Example:**
-
-```json
-{
-  "$schema": "https://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "properties": {
-    "summarize": {
-      "type": "object",
-      "properties": {
-        "instruct": {
-          "type": "object",
-          "properties": {
-            "apiKey": {
-              "type": "string",
-              "minLength": 20,
-              "description": "API key for instruct service",
-              "x-sensitive": true
+  ],
+  "services": [
+    {
+      "type": "service",
+      "service_id": "digitize",
+      "service_name": "Digitize documents",
+      "components": [
+        {
+          "type": "vector_db",
+          "name": "Vector store",
+          "providers": [
+            {
+              "id": "opensearch",
+              "name": "OpenSearch",
+              "description": "Distributed search and analytics engine",
+              "schema": "/api/v1/components/vector_db/providers/opensearch/params"
+            },
+            {
+              "id": "milvus",
+              "name": "Milvus",
+              "description": "Cloud-native vector database",
+              "schema": "/api/v1/components/vector_db/providers/milvus/params"
             }
-          }
+          ]
+        },
+        {
+          "type": "llm",
+          "name": "LLM Model",
+          "providers": [
+            {
+              "id": "vllm",
+              "name": "vLLM Instruct",
+              "description": "Deploy new instruct model on vLLM",
+              "specifications": {
+                "supported_models": [
+                  {
+                    "id": "granite-3.3-8b-instruct",
+                    "name": "ibm-granite/granite-3.3-8b-instruct"
+                  },
+                  {
+                    "id": "llama-3.1-8b-instruct",
+                    "name": "meta-llama/Llama-3.1-8B-Instruct"
+                  }
+                ]
+              },
+              "schema": "/api/v1/components/llm/providers/vllm/params"
+            },
+            {
+              "id": "watsonx",
+              "name": "IBM watsonx.ai Instruct",
+              "description": "Configure watsonx.ai for instruct models",
+              "specifications": {
+                "supported_models": [
+                  {
+                    "id": "granite-13b-chat-v2",
+                    "name": "ibm/granite-13b-chat-v2"
+                  },
+                  {
+                    "id": "llama-3-70b-instruct",
+                    "name": "meta-llama/llama-3-70b-instruct"
+                  }
+                ]
+              },
+              "schema": "/api/v1/components/llm/providers/watsonx/params"
+            }
+          ]
         }
-      }
+      ]
     }
-  }
+  ]
 }
 ```
 
 **Response Schema:**
-Returns a JSON Schema (draft-07) object that defines:
 
-- Parameter structure and types
-- Validation rules (patterns, minLength, allOf, etc.)
-- Descriptions for each field
-- Nested object properties
+**Root Object:**
+| Field | Type | Description |
+|-------|------|-------------|
+| architecture_id | string | Architecture identifier |
+| architecture_name | string | Architecture display name |
+| global_components | array | Array of global component objects shared across services |
+| services | array | Array of service objects with their specific components |
 
-**UI Integration:**
-The JSON Schema response can be directly consumed by form libraries such as:
+**Global Component Object:**
+| Field | Type | Description |
+|-------|------|-------------|
+| type | string | Component type (e.g., "vector_db", "embedding", "llm", "reranker") |
+| name | string | Display name for the component |
+| providers | array | Array of provider objects available for this component type |
 
-- `react-jsonschema-form` / `@rjsf/core` (React)
-- `vue-form-generator` (Vue)
-- `angular-schema-form` (Angular)
+**Provider Object:**
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Provider identifier (e.g., "opensearch", "vllm", "watsonx") |
+| name | string | Provider display name |
+| description | string | Provider description |
+| specifications | object | Optional provider specifications (e.g., supported_models) |
+| schema | string | URL endpoint to fetch configuration parameters for this provider. Empty string if no parameters are exposed |
 
-These libraries will automatically:
+**Service Object:**
+| Field | Type | Description |
+|-------|------|-------------|
+| type | string | Always "service" |
+| service_id | string | Service identifier |
+| service_name | string | Service display name |
+| components | array | Array of component objects specific to this service |
 
-- Generate form fields based on schema types
-- Apply validation rules (pattern matching, length constraints)
-- Display field descriptions and error messages
-- Handle nested objects and complex structures
+**Component Object (in services):**
+| Field | Type | Description |
+|-------|------|-------------|
+| type | string | Component type |
+| name | string | Display name |
+| providers | array | Array of provider objects for this component |
 
 **Error Responses:**
 
-- `400 Bad Request` - Invalid id parameter
 - `401 Unauthorized` - Invalid or missing access token
-- `404 Not Found` - Template not found
+- `404 Not Found` - Architecture not found
 - `500 Internal Server Error` - Server error
 
 **Implementation Notes:**
+
+1. Read architecture metadata from `ai-services/assets/architectures/{architecture_id}/`
+2. Parse component dependencies and available providers
+3. Return providers for creating new components (not existing instances)
+4. Include dependency rules and metadata for UI rendering
+5. Separate global components (shared across services) from service-specific components
+
+---
+
+#### 5.4.2 Get Service Deploy Options
+
+**Endpoint:** `GET /api/v1/services/{service_id}/deploy-options`
+
+**Description:** Retrieves available providers and dependency rules for a specific service. Returns providers for creating new components, scoped to a single service.
+
+**Request Headers:**
+
+```
+Authorization: Bearer <access_token>
+```
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| service_id | string | Yes | Service ID (e.g., "digitize", "chat") |
+
+**Request Body:** None
+
+**Response (200 OK):**
+
+```json
+{
+  "service_id": "digitize",
+  "service_name": "Digitize documents",
+  "components": [
+    {
+      "type": "vector_db",
+      "name": "Vector store",
+      "providers": [
+        {
+          "id": "opensearch",
+          "name": "OpenSearch",
+          "description": "Distributed search and analytics engine",
+          "default": true,
+          "schema": "/api/v1/components/vector_db/providers/opensearch/params"
+        },
+        {
+          "id": "milvus",
+          "name": "Milvus",
+          "description": "Cloud-native vector database",
+          "default": false,
+          "schema": "/api/v1/components/vector_db/providers/milvus/params"
+        }
+      ]
+    },
+    {
+      "type": "llm",
+      "name": "LLM Model",
+      "providers": [
+        {
+          "id": "vllm",
+          "name": "vLLM Instruct",
+          "description": "Deploy new instruct model on vLLM",
+          "supported_models": [
+            {
+              "id": "granite-3.3-8b-instruct",
+              "name": "ibm-granite/granite-3.3-8b-instruct",
+              "default": true,
+            },
+            {
+              "id": "llama-3.1-8b-instruct",
+              "name": "meta-llama/Llama-3.1-8B-Instruct",
+              "default": false,
+            }
+          ],
+          "schema": "/api/v1/components/llm/providers/vllm/params"
+        },
+        {
+          "id": "watsonx",
+          "name": "IBM watsonx.ai Instruct",
+          "description": "Configure watsonx.ai for instruct models",
+          "supported_models": [
+            {
+              "id": "granite-13b-chat-v2",
+              "name": "ibm/granite-13b-chat-v2",
+              "default": true,
+            },
+            {
+              "id": "llama-3-70b-instruct",
+              "name": "meta-llama/llama-3-70b-instruct",
+              "default": false,
+            }
+          ],
+          "schema": "/api/v1/components/llm/providers/watsonx/params"
+        }
+      ]
+    }
+  ]
+}
+```
+
+
+---
+
+#### 5.4.3 Get Component Provider Parameters
+
+**Endpoint:** `GET /api/v1/components/{component_type}/providers/{provider_id}/params`
+
+**Description:** Retrieves the configuration schema (JSON Schema) for a specific provider within a component type. This is used when a user selects "Create New" for a component and chooses a provider.
+
+**Request Headers:**
+
+```
+Authorization: Bearer <access_token>
+```
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| component_type | string | Yes | Component type (e.g., "vector_db", "llm", "embedding", "reranker") |
+| provider_id | string | Yes | Provider identifier (e.g., "opensearch", "vllm", "watsonx", "milvus") |
+
+**Request Body:** None
+
+**Example Request 1:**
+
+```
+GET /api/v1/components/llm/providers/vllm/params
+```
+
+**Response (200 OK) - vLLM Example:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "vLLM Instruct Configuration",
+  "properties": {
+    "model": {
+      "type": "string",
+      "title": "Model Path",
+      "description": "HuggingFace model path",
+      "default": "ibm-granite/granite-3.3-8b-instruct",
+      "x-model-selector": "supported_models"
+    },
+    "api_key": {
+      "type": "string",
+      "title": "API Key",
+      "description": "API Key for vLLM",
+      "format": "password"
+    }
+  },
+  "required": ["model"]
+}
+```
+
+**Example Request 2:**
+
+```
+GET /api/v1/components/llm/providers/watsonx/params
+```
+
+**Response (200 OK) - watsonx Example:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "IBM watsonx.ai Instruct Configuration",
+  "properties": {
+    "model": {
+      "type": "string",
+      "title": "Model Name",
+      "description": "watsonx.ai model identifier",
+      "x-model-selector": "supported_models"
+    },
+    "api_key": {
+      "type": "string",
+      "title": "watsonx API Key",
+      "description": "IBM Cloud API key for watsonx.ai",
+      "format": "password"
+    }
+  },
+  "required": ["provider", "model", "api_key"]
+}
+```
+
+**Response Schema:**
+
+Returns a JSON Schema (draft-07) object that defines:
+- Provider-specific configuration parameters
+- Parameter types and validation rules (patterns, min/max, enums)
+- Default values and descriptions
+- Required fields for that provider
+- Custom extension fields:
+  - `x-model-selector`: Specifies the data source field name from the deploy-options endpoint that should populate this field's options
+    - Value: `"supported_models"` - Indicates the UI should use the `supported_models` array from the provider in the deploy-options endpoint
+    - The UI will map the `supported_models[].id` as the option value and `supported_models[].name` as the display text
+
+**Error Responses:**
+
+- `400 Bad Request` - Invalid component_type or provider_id
+- `401 Unauthorized` - Invalid or missing access token
+- `404 Not Found` - Component type or provider not found
+- `500 Internal Server Error` - Server error
+
+**Implementation Notes:**
+
+1. Validate component_type and provider_id parameters
+2. Read provider metadata from component assets directory
+3. Load the values.schema.json file for the specific provider
+4. Return JSON Schema for provider-specific configuration
+5. Include `x-model-selector: "supported_models"` for model fields that should be populated from deploy-options
+6. UI uses this schema to generate dynamic configuration forms
+7. User fills in values like model, backend_id, storage, etc.
+8. Compatible with form libraries like `react-jsonschema-form`
+
+**UI Integration Flow:**
+
+1. User selects "Create New" for a component
+2. User selects a provider from available providers
+3. UI calls this endpoint to get the configuration schema
+4. UI renders a dynamic form based on the JSON Schema
+5. For fields with `x-model-selector: "supported_models"`:
+   - UI looks up the corresponding provider in the previously fetched deploy-options response
+   - UI extracts the `supported_models` array from that provider's `specifications` or direct `supported_models` field
+   - UI renders a dropdown/select field populated with these model options
+   - Each dropdown option displays `supported_models[].name` and uses `supported_models[].id` as the value
+   - Example: For vLLM provider, the UI would show "ibm-granite/granite-3.3-8b-instruct" and use "granite-3.3-8b-instruct" as the value
+6. User selects a model from the dropdown and fills in other configuration values
+7. Configuration is submitted as part of the deployment request
 
 1. Validate the `id` query parameter is provided
 2. Check if the template exists in architectures or services catalog
 3. Read the values.schema.json file from the template's asset directory
 4. Wrap the schema properties under the template ID as a nested object
 5. Return the complete JSON Schema with the template ID as the top-level property key
+
+---
+
+#### 5.4.4 Get Model Info
+
+**Endpoint:** `GET /api/v1/models/{id}/info`
+
+**Description:** Retrieves detailed information about a specific AI model, including its description, use cases, strengths, and supported languages. This endpoint provides metadata to help users make informed decisions when selecting models for their deployments.
+
+**Request Headers:**
+
+```
+Authorization: Bearer <access_token>
+```
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| id | string | Yes | Model identifier (e.g., "granite-3.3-8b-instruct", "llama-3.1-8b-instruct") |
+
+**Request Body:** None
+
+**Example Request 1:**
+
+```
+GET /api/v1/models/granite-3.3-8b-instruct/info
+```
+
+**Response (200 OK) - Granite Example:**
+
+```json
+{
+  "id": "granite-3.3-8b-instruct",
+  "name": "ibm-granite/granite-3.3-8b-instruct",
+  "description": "IBM Granite 3.3 8B is an enterprise-focused instruction-tuned language model optimized for business applications with strong reasoning capabilities and efficient performance.",
+  "usecases": [
+    "Question answering",
+    "Text summarization",
+    "Code generation",
+    "Instruction following"
+  ],
+  "strengths": [
+    "Efficient performance on enterprise tasks",
+    "Strong reasoning capabilities",
+    "Optimized for business applications",
+    "Low latency inference"
+  ],
+  "supported_languages": [
+    "English",
+    "Spanish",
+    "French",
+    "German",
+    "Portuguese",
+    "Japanese",
+    "Korean",
+    "Arabic",
+    "Chinese"
+  ]
+}
+```
+
+**Response Schema:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Model identifier |
+| name | string | Full model name/path |
+| description | string | Brief description of the model and its primary characteristics |
+| usecases | string or array | Use cases for this model - can be a string description or array of use case strings |
+| strengths | string or array | Model's key strengths and capabilities - can be a string description or array of strength strings |
+| supported_languages | array | Array of strings listing languages supported by the model |
+
+**Error Responses:**
+
+- `401 Unauthorized` - Invalid or missing access token
+- `404 Not Found` - Model not found
+- `500 Internal Server Error` - Server error
+
+**Implementation Notes:**
+
+1. Read model metadata from a centralized model registry or configuration file
+2. Model information should be maintained separately from provider configurations
+3. `usecases` and `strengths` fields are flexible - can be formatted as arrays or strings depending on the model metadata
+4. `description` provides a concise overview of the model for quick understanding
+5. This endpoint provides static metadata about models to help users make informed choices
+6. UI can display this information in tooltips, info panels, or model selection dialogs
+7. Model IDs should match those used in the `supported_models` arrays from the options endpoints
+
+**UI Integration:**
+
+- Display model description prominently in model selection interfaces
+- Show use cases to help users understand what the model is best suited for
+- Highlight strengths to differentiate between similar models
+- Display supported languages to ensure model compatibility with user requirements
+- Can be used to create model comparison views in the UI
+- Handle both string and array formats for usecases and strengths in the UI rendering
 
 ---
 
