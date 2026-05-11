@@ -38,8 +38,7 @@ type ServiceReference struct {
 
 // DependencyReference represents a reference to a dependency service.
 type DependencyReference struct {
-	ID      string `yaml:"id" json:"id"`
-	Version string `yaml:"version,omitempty" json:"version,omitempty"`
+	ID string `yaml:"id" json:"id"`
 }
 
 // Service represents a deployable AI service.
