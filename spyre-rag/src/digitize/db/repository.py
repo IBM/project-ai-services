@@ -417,7 +417,7 @@ class DatabaseRepository:
                 if error is not None:
                     updates[Document.error] = error
                 if metadata is not None:
-                    updates[Document.metadata] = metadata
+                    updates[Document.doc_metadata] = metadata
                 
                 if not updates:
                     logger.debug(f"No updates provided for document {doc_id}")

@@ -365,7 +365,7 @@ def get_document_from_db(doc_id: str) -> Optional[Dict]:
                 "submitted_at": doc.submitted_at.isoformat().replace("+00:00", "Z"),
                 "completed_at": doc.completed_at.isoformat().replace("+00:00", "Z") if doc.completed_at else None,
                 "error": doc.error,
-                "metadata": doc.metadata
+                "metadata": doc.doc_metadata
             }
             logger.debug(f"Retrieved document {doc_id} from database")
             return doc_dict

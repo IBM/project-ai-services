@@ -148,7 +148,7 @@ class DatabaseStatusManager(StatusManager):
             # Get existing document to merge metadata
             existing_doc = db_repo.get_document_by_id(doc_id)
             if existing_doc:
-                merged_metadata = existing_doc.metadata.copy()
+                merged_metadata = existing_doc.doc_metadata.copy()
                 
                 # Merge timing updates
                 if "timing_in_secs" in metadata_fields:
