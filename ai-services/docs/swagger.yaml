@@ -54,8 +54,6 @@ definitions:
     properties:
       id:
         type: string
-      version:
-        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service:
     properties:
