@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .AppName }}--postgres"
+  labels:
+    ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
+  annotations:
+    io.podman.annotations.pids-limit/postgres: "4096"
+spec:
+  initContainers:
+    - name: fix-permissions
+      image: "{{ .Values.postgres.image }}"
+      command: ["sh", "-c", "chown -R 26:26 /var/lib/pgsql"]
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/pgsql
+  containers:
+    - name: postgres
+      image: "{{ .Values.postgres.image }}"
+      env:
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          value: "{{ .Values.postgres.password }}"
+        - name: POSTGRES_DB
+          value: "postgres"
+        - name: PGDATA
+          value: "/var/lib/pgsql/data"
+      ports:
+        - name: postgres-port
+          containerPort: 5432
+      securityContext:
+        runAsUser: 26
+        fsGroup: 26
+      volumeMounts:
+        - mountPath: /var/lib/pgsql:z
+          name: postgres-data
+      livenessProbe:
+        exec:
+          command:
+          - pg_isready
+          - -U
+          - postgres
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      readinessProbe:
+        exec:
+          command:
+          - pg_isready
+          - -U
+          - postgres
+        initialDelaySeconds: 10
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 3
+
+  volumes:
+    - name: postgres-data
+      hostPath:
+        path: "/var/lib/ai-services/applications/{{ .AppName }}/volumes/postgres"
+        type: DirectoryOrCreate

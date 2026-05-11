@@ -1,7 +1,7 @@
 # Component identification
 type: component
 id: opensearch
-label: "OpenSearch"
+name: "OpenSearch"
 description: "Distributed search and analytics engine for vector storage"
 
 # Component type this provider belongs to

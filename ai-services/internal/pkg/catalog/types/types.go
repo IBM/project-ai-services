@@ -44,14 +44,13 @@ type DependencyReference struct {
 
 // Service represents a deployable AI service.
 type Service struct {
-	ID             string                `yaml:"id" json:"id"`
-	Name           string                `yaml:"name" json:"name"`
-	Description    string                `yaml:"description" json:"description"`
-	Type           string                `yaml:"type" json:"type"` // "service"
-	CertifiedBy    string                `yaml:"certified_by" json:"certified_by"`
-	DependencyOnly bool                  `yaml:"dependency_only,omitempty" json:"dependency_only,omitempty"`
-	Architectures  []string              `yaml:"architectures" json:"architectures"`
-	Dependencies   []DependencyReference `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
+	ID            string                `yaml:"id" json:"id"`
+	Name          string                `yaml:"name" json:"name"`
+	Description   string                `yaml:"description" json:"description"`
+	Type          string                `yaml:"type" json:"type"` // "service"
+	CertifiedBy   string                `yaml:"certified_by" json:"certified_by"`
+	Architectures []string              `yaml:"architectures" json:"architectures"`
+	Dependencies  []DependencyReference `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
 }
 
 // ServiceSummary represents a service for list API responses.
@@ -61,6 +60,23 @@ type ServiceSummary struct {
 	Description   string   `json:"description"`
 	CertifiedBy   string   `json:"certified_by"`
 	Architectures []string `json:"architectures"`
+}
+
+// Component represents an infrastructure component (vector_store, embedding, llm, etc.).
+type Component struct {
+	ID            string `yaml:"id" json:"id"`
+	Name          string `yaml:"name" json:"name"`
+	Description   string `yaml:"description" json:"description"`
+	Type          string `yaml:"type" json:"type"`                     // "component"
+	ComponentType string `yaml:"component_type" json:"component_type"` // "vector_store", "embedding", "llm", etc.
+}
+
+// ComponentSummary represents a component for list API responses.
+type ComponentSummary struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	ComponentType string `json:"component_type"`
 }
 
 // RuntimeMetadata contains runtime-specific metadata.

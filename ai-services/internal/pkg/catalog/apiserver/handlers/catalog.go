@@ -11,11 +11,21 @@ import (
 )
 
 // CatalogHandler handles catalog-related HTTP requests.
-type CatalogHandler struct{}
+type CatalogHandler struct {
+	provider *catalog.CatalogProvider
+}
 
 // NewCatalogHandler creates a new catalog handler.
 func NewCatalogHandler() *CatalogHandler {
-	return &CatalogHandler{}
+	provider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		// Log error but don't fail - let individual requests handle it
+		panic(fmt.Sprintf("Failed to initialize catalog provider: %v", err))
+	}
+
+	return &CatalogHandler{
+		provider: provider,
+	}
 }
 
 // ListArchitectures godoc
@@ -30,7 +40,7 @@ func NewCatalogHandler() *CatalogHandler {
 //	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/architectures [get]
 func (h *CatalogHandler) ListArchitectures(c *gin.Context) {
-	architectures, err := catalog.ListArchitectures()
+	architectures, err := h.provider.ListArchitectures()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to list architectures: %v", err),
@@ -64,7 +74,7 @@ func (h *CatalogHandler) ListArchitectures(c *gin.Context) {
 func (h *CatalogHandler) GetArchitectureDetails(c *gin.Context) {
 	id := c.Param("id")
 
-	architecture, err := catalog.LoadArchitecture(id)
+	architecture, err := h.provider.LoadArchitecture(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Architecture '%s' not found: %v", id, err),
@@ -91,7 +101,7 @@ func (h *CatalogHandler) ListServices(c *gin.Context) {
 	// Get runtime from global factory
 	runtime := vars.RuntimeFactory.GetRuntimeType()
 
-	servicesList, err := catalog.ListServicesWithRuntime(runtime)
+	servicesList, err := h.provider.ListServicesWithRuntime(runtime)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to list services: %v", err),
@@ -125,7 +135,7 @@ func (h *CatalogHandler) ListServices(c *gin.Context) {
 func (h *CatalogHandler) GetServiceDetails(c *gin.Context) {
 	id := c.Param("id")
 
-	service, err := catalog.LoadService(id)
+	service, err := h.provider.LoadService(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Service '%s' not found: %v", id, err),
