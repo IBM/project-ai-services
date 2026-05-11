@@ -96,15 +96,14 @@ async function customSendMessage(
     },
   });
 
-  // Build messages array with conversation history
-  // Format: [{ role: "user", content: "..." }, { role: "assistant", content: "..." }, ...]
-  const messages = [
+  // Update conversation history with user input first
+  const updatedHistory = [
     ...conversationHistory,
     { role: 'user', content: userInput },
   ];
 
   const payload = {
-    messages: messages,
+    messages: updatedHistory,
     model: 'ibm-granite/granite-3.3-8b-instruct',
     temperature: 0.0,
     stream: true,
@@ -252,11 +251,9 @@ async function customSendMessage(
       },
     });
 
-    // Update conversation history with the new exchange
-    // Add user message and assistant response to history with proper roles
+    // Update conversation history with assistant response
     setConversationHistory([
-      ...conversationHistory,
-      { role: 'user', content: userInput },
+      ...updatedHistory,
       { role: 'assistant', content: fullText },
     ]);
   } catch (err) {
