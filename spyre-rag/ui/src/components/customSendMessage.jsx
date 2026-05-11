@@ -100,7 +100,7 @@ async function customSendMessage(
   // Format: [{ role: "user", content: "..." }, { role: "assistant", content: "..." }, ...]
   const messages = [
     ...conversationHistory,
-    { role: 'user', content: userInput }
+    { role: 'user', content: userInput },
   ];
 
   const payload = {
@@ -221,10 +221,12 @@ async function customSendMessage(
     // AND the response doesn't indicate no documents were found
     const noDocsMessages = [
       'No documents found in the knowledge base for this query.',
-      'Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden.'
+      'Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden.',
     ];
-    const hasNoDocsMessage = noDocsMessages.some(msg => fullText.includes(msg));
-    
+    const hasNoDocsMessage = noDocsMessages.some((msg) =>
+      fullText.includes(msg),
+    );
+
     if (docs && docs.length > 0 && !hasNoDocsMessage) {
       responseBlocks.push({
         response_type: 'user_defined',
@@ -255,7 +257,7 @@ async function customSendMessage(
     setConversationHistory([
       ...conversationHistory,
       { role: 'user', content: userInput },
-      { role: 'assistant', content: fullText }
+      { role: 'assistant', content: fullText },
     ]);
   } catch (err) {
     instance.updateIsMessageLoadingCounter('decrease');

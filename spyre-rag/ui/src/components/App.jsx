@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   BusEventType,
   ChatCustomElement,
@@ -7,8 +7,7 @@ import {
   UserType,
 } from '@carbon/ai-chat';
 import './App.scss';
-import { Column, Content, Grid, Theme, Button } from '@carbon/react';
-import { Renew } from '@carbon/icons-react';
+import { Column, Content, Grid, Theme } from '@carbon/react';
 import { AIExplanationCard } from './AIExplanationCard.jsx';
 import { ApiKeyDialog } from './ApiKeyDialog.jsx';
 import { customSendMessage } from './customSendMessage.jsx';
@@ -99,14 +98,14 @@ function App() {
         apiKey,
         handleAuthError,
         conversationHistory,
-        setConversationHistory
+        setConversationHistory,
       ),
   };
 
   function onAfterRender(instance) {
     // Store the chat instance reference
     chatInstanceRef.current = instance;
-    
+
     instance.on({ type: BusEventType.FEEDBACK, handler: feedbackHandler });
 
     instance.messaging.addMessage({
@@ -162,18 +161,18 @@ function App() {
               <div className="chat-container">
                 {isReady && apiKey && (
                   <ChatCustomElement
-                      className="fullScreen"
-                      messaging={messaging}
-                      header={header}
-                      layout={layout}
-                      openChatByDefault={true}
-                      onAfterRender={onAfterRender}
-                      renderUserDefinedResponse={renderUserDefinedResponse}
-                      strings={{
-                        ai_slug_title: undefined,
-                        ai_slug_description: <AIExplanationCard />,
-                      }}
-                    />
+                    className="fullScreen"
+                    messaging={messaging}
+                    header={header}
+                    layout={layout}
+                    openChatByDefault={true}
+                    onAfterRender={onAfterRender}
+                    renderUserDefinedResponse={renderUserDefinedResponse}
+                    strings={{
+                      ai_slug_title: undefined,
+                      ai_slug_description: <AIExplanationCard />,
+                    }}
+                  />
                 )}
               </div>
             </Column>

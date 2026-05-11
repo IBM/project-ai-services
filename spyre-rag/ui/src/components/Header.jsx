@@ -1,5 +1,10 @@
-import { Header, HeaderName, HeaderGlobalBar, HeaderGlobalAction } from '@carbon/react';
 import { Renew } from '@carbon/icons-react';
+import {
+  Header,
+  HeaderGlobalAction,
+  HeaderGlobalBar,
+  HeaderName,
+} from '@carbon/react';
 
 const HeaderNav = ({ onNewChat, showNewChatButton }) => {
   return (
