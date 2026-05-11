@@ -135,13 +135,12 @@ def create_job_state(
     return job_state
 
 
-def get_job_document_stats(job_id: str, jobs_dir: Path = settings.digitize.jobs_dir) -> dict:
+def get_job_document_stats(job_id: str) -> dict:
     """
-    Get statistics about documents in a job by reading the job status file.
+    Get statistics about documents in a job by reading from the database.
 
     Args:
         job_id: Unique identifier for the job
-        jobs_dir: Directory where job status files are stored
 
     Returns:
         Dictionary containing:
@@ -151,16 +150,15 @@ def get_job_document_stats(job_id: str, jobs_dir: Path = settings.digitize.jobs_
         - failed_count: Number of failed documents
         - completed_count: Number of completed documents
     """
-    job_status_file = jobs_dir / f"{job_id}_status.json"
-
-    if not job_status_file.exists():
-        error_msg = f"Job status file not found: {job_status_file}"
-        logger.error(error_msg)
-        raise FileNotFoundError(error_msg)
-
+    from digitize.db.db_utils import get_job_from_db
+    
     try:
-        with open(job_status_file, "r") as f:
-            job_data = json.load(f)
+        job_data = get_job_from_db(job_id)
+        
+        if job_data is None:
+            error_msg = f"Job not found in database: {job_id}"
+            logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
 
         documents = job_data.get("documents", [])
         failed_docs = [doc for doc in documents if doc.get("status") == DocStatus.FAILED.value]
@@ -174,8 +172,8 @@ def get_job_document_stats(job_id: str, jobs_dir: Path = settings.digitize.jobs_
             "completed_count": len(completed_docs)
         }
     except Exception as e:
-        logger.error(f"Error reading job status file {job_status_file}: {e}")
-        raise e
+        logger.error(f"Error reading job {job_id} from database: {e}", exc_info=True)
+        raise
 
 def retry_on_failure(
     func: Callable,
