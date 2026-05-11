@@ -6,3 +6,11 @@ description: "Deploy reranker models on vLLM inference engine (CPU-only)"
 
 # Component type this provider belongs to
 component_type: reranker
+component_name: "Reranker Model"
+
+# Provider specifications
+specifications:
+  supported_models:
+    - id: "bge-reranker-v2-m3"
+      name: "BAAI/bge-reranker-v2-m3"
+      default: true

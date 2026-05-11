@@ -9,10 +9,6 @@
           "type": "string",
           "title": "Model",
           "description": "HuggingFace model path for instruct/LLM",
-          "default": "ibm-granite/granite-3.3-8b-instruct",
-          "enum": [
-            "ibm-granite/granite-3.3-8b-instruct"
-          ]
         },
         "apiSecretKey": {
           "type": "string",

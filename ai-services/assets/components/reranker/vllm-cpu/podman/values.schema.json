@@ -8,11 +8,7 @@
         "model": {
           "type": "string",
           "title": "Model",
-          "description": "HuggingFace model path for reranker",
-          "default": "BAAI/bge-reranker-v2-m3",
-          "enum": [
-            "BAAI/bge-reranker-v2-m3"
-          ]
+          "description": "HuggingFace model path for reranker"
         }
       }
     }

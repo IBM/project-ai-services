@@ -8,11 +8,7 @@
         "model": {
           "type": "string",
           "title": "Model",
-          "description": "HuggingFace model path for embeddings",
-          "default": "ibm-granite/granite-embedding-278m-multilingual",
-          "enum": [
-            "ibm-granite/granite-embedding-278m-multilingual"
-          ]
+          "description": "HuggingFace model path for embeddings"
         }
       }
     }

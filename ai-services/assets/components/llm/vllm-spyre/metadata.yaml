@@ -6,3 +6,11 @@ description: "Deploy instruct models on vLLM inference engine"
 
 # Component type this provider belongs to
 component_type: llm
+component_name: "LLM Model"
+
+# Provider specifications
+specifications:
+  supported_models:
+    - id: "granite-3.3-8b-instruct"
+      name: "ibm-granite/granite-3.3-8b-instruct"
+      default: true
