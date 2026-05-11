@@ -16,3 +16,4 @@ dependencies:
   - id: vector_store
   - id: embedding
   - id: llm
+  - id: reranker
