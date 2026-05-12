@@ -190,17 +190,17 @@ def main():
 
     # Step 1: Wait for PostgreSQL to be ready
     if not wait_for_postgres(host, port, user, password):
-        print("❌ Database initialization failed: PostgreSQL not ready")
+        print("❌ Failed to connect to PostgreSQL server")
         sys.exit(1)
 
     # Step 2: Create database if it doesn't exist
     if not create_database(host, port, user, password, dbname):
-        print("❌ Database initialization failed: Could not create database")
+        print("❌ Failed to create database")
         sys.exit(1)
 
     # Step 3: Initialize schema and verify (single connection)
     if not initialize_schema(host, port, user, password, dbname, SCHEMA_FILE):
-        print("❌ Database initialization failed: Schema initialization failed")
+        print("❌ Database schema initialization failed")
         sys.exit(1)
 
     print()
