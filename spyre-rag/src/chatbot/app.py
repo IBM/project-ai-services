@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import FastAPI, Request, HTTPException, Header, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 import json
 from contextlib import asynccontextmanager
 from asyncio import BoundedSemaphore
@@ -448,7 +448,11 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     rephrased_query,
                 )
                 # For streaming, release is handled in locked_stream's finally block
-                return StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
+                response = StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
+                # Add rephrased query as a custom header if available
+                if rephrased_query and rephrased_query != current_query:
+                    response.headers["X-Rephrased-Query"] = rephrased_query
+                return response
 
             vllm_non_stream = await asyncio.to_thread(
                 query_vllm_non_stream,
@@ -481,7 +485,15 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                         if isinstance(message_dict, dict):
                             message_content = message_dict.get("content", "")
                             choices.append(ChatChoice(message=ChatMessage(content=message_content)))
-                return ChatCompletionResponse(choices=choices)
+                
+                response_data = ChatCompletionResponse(choices=choices)
+                # Add rephrased query as a custom header if available
+                if rephrased_query and rephrased_query != current_query:
+                    return JSONResponse(
+                        content=response_data.model_dump(),
+                        headers={"X-Rephrased-Query": rephrased_query}
+                    )
+                return response_data
 
             APIError.raise_error(ErrorCode.LLM_ERROR, "Unexpected response format from LLM")
         finally:

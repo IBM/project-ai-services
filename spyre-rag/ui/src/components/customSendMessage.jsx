@@ -123,16 +123,11 @@ async function customSendMessage(
   try {
     instance.updateIsMessageLoadingCounter('increase');
 
+    // Make the streaming request using OpenAI client
     const stream = await client.chat.completions.create(payload);
 
-    const referencePromise = axios.post('/v1/similarity-search', {
-      query: userInput,
-      mode: 'hybrid',
-      rerank: true,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    // Extract rephrased query from response headers
+    const rephrasedQuery = stream.response.headers.get('X-Rephrased-Query') || userInput;
 
     instance.updateIsMessageLoadingCounter('decrease');
 
@@ -141,12 +136,6 @@ async function customSendMessage(
     for await (const chunk of stream) {
       if (isCanceled) break;
 
-      // Check for error in the chunk
-      if (chunk.error) {
-        throw new Error(chunk.error);
-      }
-
-      // to extract the content from the parsed JSON chunk
       const textChunk = chunk.choices[0]?.delta?.content || '';
 
       if (textChunk) {
@@ -194,10 +183,17 @@ async function customSendMessage(
       },
     });
 
-    // await for the reference promise to finish
+    // Now fetch reference docs using the rephrased query (or original if not rephrased)
     let docs = [];
     try {
-      const context_response = await referencePromise;
+      const context_response = await axios.post('/v1/similarity-search', {
+        query: rephrasedQuery,
+        mode: 'hybrid',
+        rerank: true,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
       // get docs out of context_response
       docs = context_response.data?.results || [];
     } catch (refError) {
