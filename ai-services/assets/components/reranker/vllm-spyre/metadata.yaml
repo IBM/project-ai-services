@@ -1,7 +1,7 @@
 # Component identification
 type: component
 id: vllm
-label: "vLLM Reranker"
+name: "vLLM Reranker"
 description: "Deploy reranker models on vLLM inference engine"
 
 # Component type this provider belongs to

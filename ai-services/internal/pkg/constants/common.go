@@ -12,6 +12,7 @@ const (
 	DSCKind              = "DataScienceCluster"
 	DSCIKind             = "DSCInitialization"
 	SMTLevel             = 2
+	ErrSecretNotFound    = "no secret with name or id"
 )
 
 const (

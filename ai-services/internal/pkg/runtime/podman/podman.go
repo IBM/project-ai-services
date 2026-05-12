@@ -15,6 +15,7 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/images"
 	"github.com/containers/podman/v5/pkg/bindings/kube"
 	"github.com/containers/podman/v5/pkg/bindings/pods"
+	"github.com/containers/podman/v5/pkg/bindings/secrets"
 	"github.com/containers/podman/v5/pkg/specgen"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -350,6 +351,25 @@ func (pc *PodmanClient) DeletePVCs(appLabel string) error {
 	logger.Errorf("unsupported method called!")
 
 	return fmt.Errorf("unsupported method")
+}
+
+func (pc *PodmanClient) ListSecrets(filters map[string][]string) ([]string, error) {
+	var listOpts secrets.ListOptions
+	if len(filters) >= 1 {
+		listOpts.Filters = filters
+	}
+
+	secretList, err := secrets.List(pc.Context, &listOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list secrets: %w", err)
+	}
+
+	secretIDorNames := make([]string, 0, len(secretList))
+	for _, sec := range secretList {
+		secretIDorNames = append(secretIDorNames, sec.ID)
+	}
+
+	return secretIDorNames, nil
 }
 
 // Type returns the runtime type for PodmanClient.

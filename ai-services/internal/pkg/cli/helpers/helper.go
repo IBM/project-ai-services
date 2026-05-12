@@ -165,8 +165,26 @@ func ParseSkipChecks(skipChecks []string) map[string]bool {
 	return skipMap
 }
 
-// CheckExistingPodsForApplication checks if there are pods already existing for the given application name.
-func CheckExistingPodsForApplication(runtime runtime.Runtime, appName string) ([]string, error) {
+// CheckExistingResourcesForApplication checks if there are resources already existing for the given application name.
+func CheckExistingResourcesForApplication(runtime runtime.Runtime, appName string, secretNames []string) ([]string, error) {
+	// check existing pods for the application
+	podsToSkip, err := existingPods(runtime, appName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check existing pods: %w", err)
+	}
+
+	// check existing secrets for the application
+	secretsToSkip, err := existingSecrets(runtime, secretNames)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check existing secrets: %w", err)
+	}
+
+	resourcesToSkip := append(podsToSkip, secretsToSkip...)
+
+	return resourcesToSkip, nil
+}
+
+func existingPods(runtime runtime.Runtime, appName string) ([]string, error) {
 	//nolint:prealloc // as capacity is unknown and depends on runtime.ListPods response
 	var podsToSkip []string
 	pods, err := runtime.ListPods(map[string][]string{
@@ -189,4 +207,22 @@ func CheckExistingPodsForApplication(runtime runtime.Runtime, appName string) ([
 	}
 
 	return podsToSkip, nil
+}
+
+func existingSecrets(runtime runtime.Runtime, secretNames []string) ([]string, error) {
+	secretsToSkip := make([]string, 0, len(secretNames))
+	for _, secretName := range secretNames {
+		secret, err := runtime.ListSecrets(map[string][]string{
+			"name": {secretName},
+		})
+		if err != nil && !strings.Contains(err.Error(), constants.ErrSecretNotFound) {
+			return nil, fmt.Errorf("failed to list secrets: %w", err)
+		}
+		if len(secret) != 0 {
+			logger.Infof("Existing secret found: %s\n", secret[0])
+			secretsToSkip = append(secretsToSkip, secretName)
+		}
+	}
+
+	return secretsToSkip, nil
 }

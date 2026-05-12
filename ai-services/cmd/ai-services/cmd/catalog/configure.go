@@ -68,6 +68,8 @@ Examples:
 				}
 			}
 
+			logger.Infof("Using base directory: %s\n", aiServicesDir, logger.VerbosityLevelDebug)
+
 			return configure.Run(configure.ConfigureOptions{
 				AdminPassword: adminPassword,
 				Runtime:       vars.RuntimeFactory.GetRuntimeType(),
@@ -97,8 +99,6 @@ func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
 	if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
 		return nil, err
 	}
-
-	logger.Infof("Using base directory: %s\n", baseDir, logger.VerbosityLevelDebug)
 
 	// Parse params if provided
 	var argParams map[string]string

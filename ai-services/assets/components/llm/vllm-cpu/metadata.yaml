@@ -1,7 +1,7 @@
 # Component identification
 type: component
 id: vllm-cpu
-label: "vLLM CPU Instruct"
+name: "vLLM CPU Instruct"
 description: "Deploy instruct models on vLLM inference engine (CPU-only)"
 
 # Component type this provider belongs to

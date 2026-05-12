@@ -15,20 +15,39 @@ spec:
       command: ["/bin/sh", "-c"]
       args:
         - |
-          echo "Running database migrations..."
-          /usr/bin/ai-services catalog migrate init \
-            --db-host={{ .AppName }}--db \
-            --db-port=5432 \
-            --db-user={{ .Values.db.user }} \
-            --db-password="${DB_PASSWORD}" \
-            --db-name={{ .Values.db.database }} \
-            --db-sslmode=disable
-          echo "Migrations completed successfully"
+          set -e  # Exit immediately if any command fails
+          
+          max_retries=5
+          retry_delay=5
+          
+          echo "Running database migrations with retry logic..."
+          for attempt in $(seq 1 $max_retries); do
+            echo "Migration attempt $attempt of $max_retries..."
+            
+            if /usr/bin/ai-services catalog migrate init \
+              --db-host={{ .AppName }}--db \
+              --db-port=5432 \
+              --db-user={{ .Values.db.user }} \
+              --db-password="${DB_PASSWORD}" \
+              --db-name={{ .Values.db.database }} \
+              --db-sslmode=disable; then
+              echo "Migrations completed successfully"
+              exit 0
+            fi
+            
+            if [ $attempt -lt $max_retries ]; then
+              echo "Migration failed, retrying in ${retry_delay} seconds..."
+              sleep $retry_delay
+            else
+              echo "ERROR: Migration failed after $max_retries attempts"
+              exit 1
+            fi
+          done
       env:
         - name: DB_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: catalog-secret
+              name: catalog-db-secret
               key: db-password
       resources:
         requests:
@@ -84,7 +103,7 @@ spec:
         - name: DB_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: catalog-secret
+              name: catalog-db-secret
               key: db-password
         - name: AI_SERVICES_BASE_DIR
           value: "{{ .BaseDir }}"

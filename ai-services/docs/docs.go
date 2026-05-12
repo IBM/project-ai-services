@@ -780,9 +780,6 @@ const docTemplate = `{
             "properties": {
                 "id": {
                     "type": "string"
-                },
-                "version": {
-                    "type": "string"
                 }
             }
         },
@@ -803,9 +800,6 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference"
                     }
-                },
-                "dependency_only": {
-                    "type": "boolean"
                 },
                 "description": {
                     "type": "string"

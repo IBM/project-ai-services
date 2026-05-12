@@ -19,7 +19,7 @@ spec:
     - name: POSTGRES_PASSWORD
       valueFrom:
         secretKeyRef:
-          name: catalog-secret
+          name: catalog-db-secret
           key: db-password
     - name: POSTGRES_DB
       value: "{{ .Values.db.database }}"
