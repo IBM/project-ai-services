@@ -6,7 +6,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // DeployOptionsHandler handles deploy options related HTTP requests.
@@ -85,26 +84,23 @@ func (h *DeployOptionsHandler) GetServiceDeployOptions(c *gin.Context) {
 // GetComponentProviderParams godoc
 //
 //	@Summary		Get component provider parameters
-//	@Description	Retrieves the configuration schema (JSON Schema) for a specific provider within a component type
+//	@Description	Retrieves the configuration schema (JSON Schema) for a specific provider within a component type. Returns a JSON Schema object with properties that may include x-data-id for fields that should be populated from metadata specifications.
 //	@Tags			Deploy Options
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			component_type	path		string	true	"Component type (e.g., 'vector_db', 'llm', 'embedding', 'reranker')"
 //	@Param			provider_id		path		string	true	"Provider identifier (e.g., 'opensearch', 'vllm', 'watsonx')"
-//	@Success		200				{object}	map[string]interface{}
-//	@Failure		400				{object}	ErrorResponse	"Bad Request - Invalid component_type or provider_id"
-//	@Failure		401				{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
-//	@Failure		404				{object}	ErrorResponse	"Component type or provider not found"
-//	@Failure		500				{object}	ErrorResponse	"Internal Server Error"
+//	@Success		200				{object}	map[string]interface{}	"JSON Schema object with $schema, type, and properties. Properties may include x-data-id field indicating data should be populated from metadata specifications (e.g., supported_models)"
+//	@Failure		400				{object}	ErrorResponse			"Bad Request - Invalid component_type or provider_id"
+//	@Failure		401				{object}	ErrorResponse			"Unauthorized - Invalid or missing access token"
+//	@Failure		404				{object}	ErrorResponse			"Component type or provider not found"
+//	@Failure		500				{object}	ErrorResponse			"Internal Server Error"
 //	@Router			/components/{component_type}/providers/{provider_id}/params [get]
 func (h *DeployOptionsHandler) GetComponentProviderParams(c *gin.Context) {
 	componentType := c.Param("component_type")
 	providerID := c.Param("provider_id")
 
-	// Get runtime from global factory
-	runtime := vars.RuntimeFactory.GetRuntimeType()
-
-	schema, err := h.provider.GetComponentProviderParams(componentType, providerID, runtime)
+	schema, err := h.provider.GetComponentProviderParams(componentType, providerID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get parameters for provider '%s/%s': %v", componentType, providerID, err),

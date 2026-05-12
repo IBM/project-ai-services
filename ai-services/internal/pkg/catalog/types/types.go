@@ -111,7 +111,7 @@ type DeployOptionsProvider struct {
 	Description    string                  `json:"description,omitempty"`
 	Default        bool                    `json:"default,omitempty"`
 	Specifications *ProviderSpecifications `json:"specifications,omitempty"`
-	Schema         string                  `json:"schema"`
+	Schema         string                  `json:"schema,omitempty"`
 }
 
 // DeployOptionsComponent represents a component type with its providers.
@@ -124,16 +124,16 @@ type DeployOptionsComponent struct {
 // DeployOptionsService represents a service with its components.
 // The Type field is optional and used when the service is part of an architecture.
 type DeployOptionsService struct {
-	Type        string                   `json:"type,omitempty"`
-	ServiceID   string                   `json:"service_id"`
-	ServiceName string                   `json:"service_name"`
-	Components  []DeployOptionsComponent `json:"components"`
+	Type       string                   `json:"type,omitempty"`
+	ID         string                   `json:"id"`
+	Name       string                   `json:"name"`
+	Components []DeployOptionsComponent `json:"components"`
 }
 
 // DeployOptionsArchitecture represents deploy options for an architecture.
 type DeployOptionsArchitecture struct {
-	ArchitectureID   string                   `json:"architecture_id"`
-	ArchitectureName string                   `json:"architecture_name"`
+	ID               string                   `json:"id"`
+	Name             string                   `json:"name"`
 	GlobalComponents []DeployOptionsComponent `json:"global_components"`
 	Services         []DeployOptionsService   `json:"services"`
 }

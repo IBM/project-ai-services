@@ -66,14 +66,14 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsArchitecture:
     properties:
-      architecture_id:
-        type: string
-      architecture_name:
-        type: string
       global_components:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent'
         type: array
+      id:
+        type: string
+      name:
+        type: string
       services:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService'
@@ -111,9 +111,9 @@ definitions:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent'
         type: array
-      service_id:
+      id:
         type: string
-      service_name:
+      name:
         type: string
       type:
         type: string

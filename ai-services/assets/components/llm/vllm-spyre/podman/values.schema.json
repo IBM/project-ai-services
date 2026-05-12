@@ -8,7 +8,8 @@
         "model": {
           "type": "string",
           "title": "Model",
-          "description": "HuggingFace model path for instruct/LLM"
+          "description": "HuggingFace model path for instruct/LLM",
+          "x-data-id": "supported_models"
         },
         "apiSecretKey": {
           "type": "string",

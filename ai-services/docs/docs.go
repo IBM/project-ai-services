@@ -970,17 +970,17 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsArchitecture": {
             "type": "object",
             "properties": {
-                "architecture_id": {
-                    "type": "string"
-                },
-                "architecture_name": {
-                    "type": "string"
-                },
                 "global_components": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent"
                     }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
                 },
                 "services": {
                     "type": "array",
@@ -1039,10 +1039,10 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent"
                     }
                 },
-                "service_id": {
+                "id": {
                     "type": "string"
                 },
-                "service_name": {
+                "name": {
                     "type": "string"
                 },
                 "type": {

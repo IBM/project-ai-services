@@ -8,7 +8,8 @@
         "model": {
           "type": "string",
           "title": "Model",
-          "description": "HuggingFace model path for embeddings"
+          "description": "HuggingFace model path for embeddings",
+          "x-data-id": "supported_models"
         }
       }
     }

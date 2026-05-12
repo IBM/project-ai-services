@@ -7,7 +7,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
-	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // GetArchitectureDeployOptions returns deploy options for all services in an architecture.
@@ -20,7 +20,7 @@ func (p *CatalogProvider) GetArchitectureDeployOptions(architectureID string) (*
 	}
 
 	// Build global components from architecture metadata
-	var globalComponents []types.DeployOptionsComponent
+	globalComponents := make([]types.DeployOptionsComponent, 0, len(arch.GlobalComponents))
 	for _, compRef := range arch.GlobalComponents {
 		component, err := p.buildDeployOptionsComponent(compRef.Type)
 		if err != nil {
@@ -30,7 +30,7 @@ func (p *CatalogProvider) GetArchitectureDeployOptions(architectureID string) (*
 	}
 
 	// Build services with their components from service metadata
-	var services []types.DeployOptionsService
+	services := make([]types.DeployOptionsService, 0, len(arch.Services))
 	for _, svcRef := range arch.Services {
 		service, err := p.LoadService(svcRef.ID)
 		if err != nil {
@@ -38,7 +38,7 @@ func (p *CatalogProvider) GetArchitectureDeployOptions(architectureID string) (*
 		}
 
 		// Build all components for this service from its dependencies
-		var components []types.DeployOptionsComponent
+		components := make([]types.DeployOptionsComponent, 0, len(service.Dependencies))
 		for _, dep := range service.Dependencies {
 			component, err := p.buildDeployOptionsComponent(dep.ID)
 			if err != nil {
@@ -48,16 +48,16 @@ func (p *CatalogProvider) GetArchitectureDeployOptions(architectureID string) (*
 		}
 
 		services = append(services, types.DeployOptionsService{
-			Type:        "service",
-			ServiceID:   service.ID,
-			ServiceName: service.Name,
-			Components:  components,
+			Type:       "service",
+			ID:         service.ID,
+			Name:       service.Name,
+			Components: components,
 		})
 	}
 
 	return &types.DeployOptionsArchitecture{
-		ArchitectureID:   arch.ID,
-		ArchitectureName: arch.Name,
+		ID:               arch.ID,
+		Name:             arch.Name,
 		GlobalComponents: globalComponents,
 		Services:         services,
 	}, nil
@@ -72,7 +72,7 @@ func (p *CatalogProvider) GetServiceDeployOptions(serviceID string) (*types.Depl
 	}
 
 	// Build components list
-	var components []types.DeployOptionsComponent
+	components := make([]types.DeployOptionsComponent, 0, len(service.Dependencies))
 	for _, dep := range service.Dependencies {
 		component, err := p.buildDeployOptionsComponent(dep.ID)
 		if err != nil {
@@ -82,9 +82,9 @@ func (p *CatalogProvider) GetServiceDeployOptions(serviceID string) (*types.Depl
 	}
 
 	return &types.DeployOptionsService{
-		ServiceID:   service.ID,
-		ServiceName: service.Name,
-		Components:  components,
+		ID:         service.ID,
+		Name:       service.Name,
+		Components: components,
 	}, nil
 }
 
@@ -97,7 +97,7 @@ func (p *CatalogProvider) buildDeployOptionsComponent(componentType string) (*ty
 	}
 
 	// Filter components by type and build providers
-	var providers []types.DeployOptionsProvider
+	providers := make([]types.DeployOptionsProvider, 0, len(allComponents))
 	var componentName string
 
 	for _, comp := range allComponents {
@@ -115,7 +115,11 @@ func (p *CatalogProvider) buildDeployOptionsComponent(componentType string) (*ty
 			ID:          comp.ID,
 			Name:        comp.Name,
 			Description: comp.Description,
-			Schema:      fmt.Sprintf("/api/v1/components/%s/providers/%s/params", componentType, comp.ID),
+		}
+
+		// Only add schema if the schema file has non-empty properties
+		if p.hasNonEmptySchemaProperties(componentType, comp.ID) {
+			provider.Schema = fmt.Sprintf("/api/v1/components/%s/providers/%s/params", componentType, comp.ID)
 		}
 
 		// Add specifications from component metadata
@@ -138,9 +142,42 @@ func (p *CatalogProvider) buildDeployOptionsComponent(componentType string) (*ty
 	}, nil
 }
 
+// hasNonEmptySchemaProperties checks if a component provider has a schema file with non-empty properties.
+func (p *CatalogProvider) hasNonEmptySchemaProperties(componentType, providerID string) bool {
+	// Get the component's catalog path
+	componentKey := fmt.Sprintf("%s/%s", componentType, providerID)
+	componentPath, err := p.GetCatalogItemPath(componentKey)
+	if err != nil {
+		return false
+	}
+
+	// Get runtime from global factory
+	runtime := vars.RuntimeFactory.GetRuntimeType()
+	runtimeStr := string(runtime)
+
+	// Try to load values.schema.json for the current runtime
+	schemaPath := filepath.Join(componentPath, runtimeStr, "values.schema.json")
+	schemaData, err := assets.CatalogFS.ReadFile(schemaPath)
+	if err != nil {
+		return false
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal(schemaData, &schema); err != nil {
+		return false
+	}
+
+	// Check if properties field exists and is not empty
+	if properties, ok := schema["properties"].(map[string]any); ok {
+		return len(properties) > 0
+	}
+
+	return false
+}
+
 // GetComponentProviderParams returns the JSON schema for a specific provider's configuration.
 // If the schema file is not present, returns an empty schema instead of failing.
-func (p *CatalogProvider) GetComponentProviderParams(componentType, providerID string, runtime runtimeTypes.RuntimeType) (map[string]interface{}, error) {
+func (p *CatalogProvider) GetComponentProviderParams(componentType, providerID string) (map[string]any, error) {
 	// Verify component exists and get its path
 	_, err := p.LoadComponent(componentType, providerID)
 	if err != nil {
@@ -154,16 +191,17 @@ func (p *CatalogProvider) GetComponentProviderParams(componentType, providerID s
 		return nil, fmt.Errorf("failed to get component path: %w", err)
 	}
 
-	// Load values.schema.json using the runtime type
+	// Get runtime from global factory
+	runtime := vars.RuntimeFactory.GetRuntimeType()
 	runtimeStr := string(runtime)
 	schemaPath := filepath.Join(componentPath, runtimeStr, "values.schema.json")
 	schemaData, err := assets.CatalogFS.ReadFile(schemaPath)
 	if err != nil {
 		// If schema file doesn't exist, return empty schema instead of failing
-		return map[string]interface{}{}, nil
+		return map[string]any{}, nil
 	}
 
-	var schema map[string]interface{}
+	var schema map[string]any
 	if err := json.Unmarshal(schemaData, &schema); err != nil {
 		return nil, fmt.Errorf("failed to parse schema: %w", err)
 	}

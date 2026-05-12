@@ -8,7 +8,8 @@
         "model": {
           "type": "string",
           "title": "Model",
-          "description": "HuggingFace model path for reranker"
+          "description": "HuggingFace model path for reranker",
+          "x-data-id": "supported_models"
         }
       }
     }
