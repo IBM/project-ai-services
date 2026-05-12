@@ -280,6 +280,8 @@ func generateCaddyfile(baseDir string, values map[string]any) error {
 	logger.Infof("Copied Caddyfile to: %s\n", caddyfilePath)
 
 	return nil
+}
+
 func collectSecretNames(tp templates.Template, tmpls map[string]*template.Template, argParams map[string]string) ([]string, error) {
 	secretNames := make([]string, 0)
 
