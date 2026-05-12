@@ -7,7 +7,7 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
   annotations:
-    ai-services.io/ports: "{{ .Values.ui.port }}:8081"
+    ai-services.io/ports: "{{ .Values.ui.port }}:8081, {{ .Values.backend.port }}:8080"
 spec:
   initContainers:
     - name: db-migration

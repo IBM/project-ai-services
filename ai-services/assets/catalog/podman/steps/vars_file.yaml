@@ -4,6 +4,11 @@ pods:
     default: ""
     alias: UI_PORT
 
+  - name: "{{ .AppName }}--catalog"
+    format: "index .Ports \"8080/tcp\" 0"
+    default: ""
+    alias: BACKEND_PORT
+
 hosts:
   - fetch: HOST_IP
     type: ip
