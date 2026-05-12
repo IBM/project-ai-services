@@ -664,7 +664,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves the configuration schema (JSON Schema) for a specific provider within a component type",
+                "description": "Retrieves the configuration schema (JSON Schema) for a specific provider within a component type. Returns a JSON Schema object with properties that may include x-data-id for fields that should be populated from metadata specifications.",
                 "produces": [
                     "application/json"
                 ],
@@ -690,7 +690,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "JSON Schema object with $schema, type, and properties. Properties may include x-data-id field indicating data should be populated from metadata specifications (e.g., supported_models)",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true

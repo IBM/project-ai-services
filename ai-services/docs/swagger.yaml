@@ -629,7 +629,9 @@ paths:
   /components/{component_type}/providers/{provider_id}/params:
     get:
       description: Retrieves the configuration schema (JSON Schema) for a specific
-        provider within a component type
+        provider within a component type. Returns a JSON Schema object with properties
+        that may include x-data-id for fields that should be populated from metadata
+        specifications.
       parameters:
       - description: Component type (e.g., 'vector_db', 'llm', 'embedding', 'reranker')
         in: path
@@ -645,7 +647,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: JSON Schema object with $schema, type, and properties. Properties
+            may include x-data-id field indicating data should be populated from metadata
+            specifications (e.g., supported_models)
           schema:
             additionalProperties: true
             type: object

@@ -48,7 +48,7 @@ func (p *CatalogProvider) GetArchitectureDeployOptions(architectureID string) (*
 		}
 
 		services = append(services, types.DeployOptionsService{
-			Type:       "service",
+			Type:       service.Type,
 			ID:         service.ID,
 			Name:       service.Name,
 			Components: components,
