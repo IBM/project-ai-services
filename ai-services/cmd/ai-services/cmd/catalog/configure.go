@@ -135,9 +135,10 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 		"Inline parameters to configure the catalog service.\n\n"+
 			"Format:\n"+
 			"- Comma-separated key=value pairs\n"+
-			"- Example: --params ui.port=8081\n\n"+
+			"- Example: --params ui.port=8081,backend.port=8080\n\n"+
 			"Available parameters:\n"+
-			"- ui.port: Port for the catalog UI (default: random available port)\n",
+			"- ui.port: Port for the catalog UI (default: random available port)\n"+
+			"- backend.port: Port for the catalog backend API (default: random available port)\n",
 	)
 }
 
