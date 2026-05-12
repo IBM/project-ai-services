@@ -33,10 +33,10 @@ func NewDeployOptionsHandler() *DeployOptionsHandler {
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			id	path		string	true	"Architecture ID (e.g., 'rag')"
-//	@Success		200				{object}	github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsArchitecture
-//	@Failure		401				{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
-//	@Failure		404				{object}	ErrorResponse	"Architecture not found"
-//	@Failure		500				{object}	ErrorResponse	"Internal Server Error"
+//	@Success		200	{object}	github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsArchitecture
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse	"Architecture not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/architectures/{id}/deploy-options [get]
 func (h *DeployOptionsHandler) GetArchitectureDeployOptions(c *gin.Context) {
 	architectureID := c.Param("id")
@@ -61,10 +61,10 @@ func (h *DeployOptionsHandler) GetArchitectureDeployOptions(c *gin.Context) {
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			id	path		string	true	"Service ID (e.g., 'digitize', 'chat')"
-//	@Success		200			{object}	github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService
-//	@Failure		401			{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
-//	@Failure		404			{object}	ErrorResponse	"Service not found"
-//	@Failure		500			{object}	ErrorResponse	"Internal Server Error"
+//	@Success		200	{object}	github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse	"Service not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/services/{id}/deploy-options [get]
 func (h *DeployOptionsHandler) GetServiceDeployOptions(c *gin.Context) {
 	serviceID := c.Param("id")
@@ -88,8 +88,8 @@ func (h *DeployOptionsHandler) GetServiceDeployOptions(c *gin.Context) {
 //	@Tags			Deploy Options
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			component_type	path		string	true	"Component type (e.g., 'vector_db', 'llm', 'embedding', 'reranker')"
-//	@Param			provider_id		path		string	true	"Provider identifier (e.g., 'opensearch', 'vllm', 'watsonx')"
+//	@Param			component_type	path		string					true	"Component type (e.g., 'vector_db', 'llm', 'embedding', 'reranker')"
+//	@Param			provider_id		path		string					true	"Provider identifier (e.g., 'opensearch', 'vllm', 'watsonx')"
 //	@Success		200				{object}	map[string]interface{}	"JSON Schema object with $schema, type, and properties. Properties may include x-data-id field indicating data should be populated from metadata specifications (e.g., supported_models)"
 //	@Failure		400				{object}	ErrorResponse			"Bad Request - Invalid component_type or provider_id"
 //	@Failure		401				{object}	ErrorResponse			"Unauthorized - Invalid or missing access token"
