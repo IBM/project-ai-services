@@ -105,6 +105,8 @@ spec:
           value: "http://{{ .AppName }}--vllm-server:8000"
         - name: LLM_MODEL
           value: "{{ .Values.instruct.model.name }}"
+        - name: LLM_MAX_BATCH_SIZE
+          value: "{{ .Values.instruct.model.maxBatchSize }}"
         - name: OPENSEARCH_HOST
           value: "{{ .AppName }}--opensearch"
         - name: OPENSEARCH_PORT

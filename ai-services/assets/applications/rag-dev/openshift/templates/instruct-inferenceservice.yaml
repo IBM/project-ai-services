@@ -21,7 +21,7 @@ spec:
       args:
       - '--tensor-parallel-size=4 '
       - '--max-model-len={{ .Values.instruct.model.maxModelLen }} '
-      - --max-num-seqs=32
+      - '--max-num-seqs={{ .Values.instruct.model.maxBatchSize }}'
       - --served-model-name={{ .Values.instruct.model.name }}
       env:
       - name: VLLM_SPYRE_USE_CB

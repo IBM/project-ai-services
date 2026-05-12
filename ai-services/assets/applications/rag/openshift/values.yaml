@@ -42,6 +42,8 @@ instruct:
     name: ibm-granite/granite-3.3-8b-instruct
     # @hidden
     maxModelLen: 32768
+    # @hidden
+    maxBatchSize: 32
 
 embedding:
   # @hidden

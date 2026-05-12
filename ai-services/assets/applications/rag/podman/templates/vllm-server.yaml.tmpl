@@ -60,7 +60,7 @@ spec:
         - name: MAX_MODEL_LEN
           value: "{{ .Values.instruct.model.maxModelLen }}"
         - name: MAX_BATCH_SIZE
-          value: "32"
+          value: "{{ .Values.instruct.model.maxBatchSize }}"
         - name: MASTER_PORT
           value: "12355"
         {{- if .Values.instruct.apiKey }}
