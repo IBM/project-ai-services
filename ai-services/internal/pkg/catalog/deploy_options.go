@@ -11,7 +11,7 @@ import (
 )
 
 // GetArchitectureDeployOptions returns deploy options for all services in an architecture.
-// This includes global components (shared across services) and service-specific components.
+// Global components are read from architecture metadata, service components from service metadata.
 func (p *CatalogProvider) GetArchitectureDeployOptions(architectureID string) (*types.DeployOptionsArchitecture, error) {
 	// Load architecture metadata
 	arch, err := p.LoadArchitecture(architectureID)
@@ -19,68 +19,30 @@ func (p *CatalogProvider) GetArchitectureDeployOptions(architectureID string) (*
 		return nil, fmt.Errorf("architecture not found: %w", err)
 	}
 
-	// Track global component types (shared across multiple services)
-	globalComponentTypes := make(map[string]bool)
-	serviceComponentTypes := make(map[string]map[string]bool) // service_id -> component_type -> true
-
-	// First pass: identify which component types are used by multiple services
-	for _, svcRef := range arch.Services {
-		service, err := p.LoadService(svcRef.ID)
-		if err != nil {
-			continue
-		}
-
-		if serviceComponentTypes[svcRef.ID] == nil {
-			serviceComponentTypes[svcRef.ID] = make(map[string]bool)
-		}
-
-		for _, dep := range service.Dependencies {
-			serviceComponentTypes[svcRef.ID][dep.ID] = true
-		}
-	}
-
-	// Identify global components (used by 2+ services)
-	componentUsageCount := make(map[string]int)
-	for _, compTypes := range serviceComponentTypes {
-		for compType := range compTypes {
-			componentUsageCount[compType]++
-		}
-	}
-
-	for compType, count := range componentUsageCount {
-		if count >= 2 {
-			globalComponentTypes[compType] = true
-		}
-	}
-
-	// Build global components list
+	// Build global components from architecture metadata
 	var globalComponents []types.DeployOptionsComponent
-	for compType := range globalComponentTypes {
-		component, err := p.buildDeployOptionsComponent(compType)
+	for _, compRef := range arch.GlobalComponents {
+		component, err := p.buildDeployOptionsComponent(compRef.Type)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("failed to build global component '%s': %w", compRef.Type, err)
 		}
 		globalComponents = append(globalComponents, *component)
 	}
 
-	// Build service-specific components
+	// Build services with their components from service metadata
 	var services []types.DeployOptionsService
 	for _, svcRef := range arch.Services {
 		service, err := p.LoadService(svcRef.ID)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("failed to load service '%s': %w", svcRef.ID, err)
 		}
 
+		// Build all components for this service from its dependencies
 		var components []types.DeployOptionsComponent
 		for _, dep := range service.Dependencies {
-			// Skip if this is a global component
-			if globalComponentTypes[dep.ID] {
-				continue
-			}
-
 			component, err := p.buildDeployOptionsComponent(dep.ID)
 			if err != nil {
-				continue
+				return nil, fmt.Errorf("failed to build component '%s' for service '%s': %w", dep.ID, service.ID, err)
 			}
 			components = append(components, *component)
 		}
@@ -131,7 +93,7 @@ func (p *CatalogProvider) buildDeployOptionsComponent(componentType string) (*ty
 	// List all components of this type
 	allComponents, err := p.ListComponents()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list components: %w", err)
 	}
 
 	// Filter components by type and build providers
@@ -162,6 +124,11 @@ func (p *CatalogProvider) buildDeployOptionsComponent(componentType string) (*ty
 		}
 
 		providers = append(providers, provider)
+	}
+
+	// Return error if no providers found for this component type
+	if len(providers) == 0 {
+		return nil, fmt.Errorf("no providers found for component type '%s'", componentType)
 	}
 
 	return &types.DeployOptionsComponent{

@@ -6,6 +6,10 @@ definitions:
         type: string
       description:
         type: string
+      global_components:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentReference'
+        type: array
       id:
         type: string
       links:
@@ -49,6 +53,11 @@ definitions:
         items:
           type: string
         type: array
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentReference:
+    properties:
+      type:
+        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference:
     properties:
@@ -430,40 +439,6 @@ paths:
       summary: List available architectures
       tags:
       - Catalog
-  /architectures/{architecture_id}/deploy-options:
-    get:
-      description: Retrieves available providers and dependency rules for all services
-        and their components within an architecture
-      parameters:
-      - description: Architecture ID (e.g., 'rag')
-        in: path
-        name: architecture_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsArchitecture'
-        "401":
-          description: Unauthorized - Invalid or missing access token
-          schema:
-            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
-        "404":
-          description: Architecture not found
-          schema:
-            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Get architecture deploy options
-      tags:
-      - Deploy Options
   /architectures/{id}:
     get:
       description: Retrieves detailed information about a specific architecture template
@@ -497,6 +472,40 @@ paths:
       summary: Get architecture details
       tags:
       - Catalog
+  /architectures/{id}/deploy-options:
+    get:
+      description: Retrieves available providers and dependency rules for all services
+        and their components within an architecture
+      parameters:
+      - description: Architecture ID (e.g., 'rag')
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsArchitecture'
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Architecture not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get architecture deploy options
+      tags:
+      - Deploy Options
   /auth/login:
     post:
       consumes:
@@ -721,14 +730,14 @@ paths:
       summary: Get service details
       tags:
       - Catalog
-  /services/{service_id}/deploy-options:
+  /services/{id}/deploy-options:
     get:
       description: Retrieves available providers and dependency rules for a specific
         service
       parameters:
       - description: Service ID (e.g., 'digitize', 'chat')
         in: path
-        name: service_id
+        name: id
         required: true
         type: string
       produces:

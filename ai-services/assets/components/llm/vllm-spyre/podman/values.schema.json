@@ -8,7 +8,7 @@
         "model": {
           "type": "string",
           "title": "Model",
-          "description": "HuggingFace model path for instruct/LLM",
+          "description": "HuggingFace model path for instruct/LLM"
         },
         "apiSecretKey": {
           "type": "string",

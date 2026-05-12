@@ -2,15 +2,16 @@ package types
 
 // Architecture represents a complete AI solution template.
 type Architecture struct {
-	ID          string             `yaml:"id" json:"id"`
-	Name        string             `yaml:"name" json:"name"`
-	Description string             `yaml:"description" json:"description"`
-	Version     string             `yaml:"version" json:"version"`
-	Type        string             `yaml:"type" json:"type"` // "architecture"
-	CertifiedBy string             `yaml:"certified_by" json:"certified_by"`
-	Runtimes    []string           `yaml:"runtimes" json:"runtimes"`
-	Services    []ServiceReference `yaml:"services" json:"services"`
-	Links       *ArchitectureLinks `yaml:"links,omitempty" json:"links,omitempty"`
+	ID               string               `yaml:"id" json:"id"`
+	Name             string               `yaml:"name" json:"name"`
+	Description      string               `yaml:"description" json:"description"`
+	Version          string               `yaml:"version" json:"version"`
+	Type             string               `yaml:"type" json:"type"` // "architecture"
+	CertifiedBy      string               `yaml:"certified_by" json:"certified_by"`
+	Runtimes         []string             `yaml:"runtimes" json:"runtimes"`
+	GlobalComponents []ComponentReference `yaml:"global_components,omitempty" json:"global_components,omitempty"`
+	Services         []ServiceReference   `yaml:"services" json:"services"`
+	Links            *ArchitectureLinks   `yaml:"links,omitempty" json:"links,omitempty"`
 }
 
 // ArchitectureSummary represents an architecture for list API responses.
@@ -34,6 +35,11 @@ type ServiceReference struct {
 	ID       string `yaml:"id" json:"id"`
 	Version  string `yaml:"version,omitempty" json:"version,omitempty"`
 	Optional bool   `yaml:"optional,omitempty" json:"optional,omitempty"`
+}
+
+// ComponentReference represents a reference to a component type.
+type ComponentReference struct {
+	Type string `yaml:"type" json:"type"`
 }
 
 // DependencyReference represents a reference to a dependency service.
@@ -88,14 +94,14 @@ type RuntimeMetadata struct {
 
 // ProviderSpecifications contains provider-specific specifications.
 type ProviderSpecifications struct {
-	SupportedModels []ModelInfo `json:"supported_models,omitempty"`
+	SupportedModels []ModelInfo `yaml:"supported_models,omitempty" json:"supported_models,omitempty"`
 }
 
 // ModelInfo represents information about a supported model.
 type ModelInfo struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Default bool   `json:"default,omitempty"`
+	ID      string `yaml:"id" json:"id"`
+	Name    string `yaml:"name" json:"name"`
+	Default bool   `yaml:"default,omitempty" json:"default,omitempty"`
 }
 
 // DeployOptionsProvider represents a provider for a component type.

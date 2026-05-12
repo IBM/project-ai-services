@@ -43,10 +43,10 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	{
 		catalog.GET("/architectures", catalogHandler.ListArchitectures)
 		catalog.GET("/architectures/:id", catalogHandler.GetArchitectureDetails)
-		catalog.GET("/architectures/:architecture_id/deploy-options", deployOptionsHandler.GetArchitectureDeployOptions)
+		catalog.GET("/architectures/:id/deploy-options", deployOptionsHandler.GetArchitectureDeployOptions)
 		catalog.GET("/services", catalogHandler.ListServices)
 		catalog.GET("/services/:id", catalogHandler.GetServiceDetails)
-		catalog.GET("/services/:service_id/deploy-options", deployOptionsHandler.GetServiceDeployOptions)
+		catalog.GET("/services/:id/deploy-options", deployOptionsHandler.GetServiceDeployOptions)
 		catalog.GET("/components/:component_type/providers/:provider_id/params", deployOptionsHandler.GetComponentProviderParams)
 	}
 

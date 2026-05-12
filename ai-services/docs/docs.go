@@ -372,58 +372,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/architectures/{architecture_id}/deploy-options": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Retrieves available providers and dependency rules for all services and their components within an architecture",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Deploy Options"
-                ],
-                "summary": "Get architecture deploy options",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Architecture ID (e.g., 'rag')",
-                        "name": "architecture_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsArchitecture"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized - Invalid or missing access token",
-                        "schema": {
-                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Architecture not found",
-                        "schema": {
-                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/architectures/{id}": {
             "get": {
                 "security": [
@@ -453,6 +401,58 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Architecture not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/architectures/{id}/deploy-options": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves available providers and dependency rules for all services and their components within an architecture",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Deploy Options"
+                ],
+                "summary": "Get architecture deploy options",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Architecture ID (e.g., 'rag')",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsArchitecture"
                         }
                     },
                     "401": {
@@ -815,7 +815,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/services/{service_id}/deploy-options": {
+        "/services/{id}/deploy-options": {
             "get": {
                 "security": [
                     {
@@ -834,7 +834,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "Service ID (e.g., 'digitize', 'chat')",
-                        "name": "service_id",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     }
@@ -877,6 +877,12 @@ const docTemplate = `{
                 },
                 "description": {
                     "type": "string"
+                },
+                "global_components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentReference"
+                    }
                 },
                 "id": {
                     "type": "string"
@@ -942,6 +948,14 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentReference": {
+            "type": "object",
+            "properties": {
+                "type": {
+                    "type": "string"
                 }
             }
         },
