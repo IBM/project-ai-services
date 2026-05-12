@@ -1,0 +1,77 @@
+# Builder stage
+FROM registry.access.redhat.com/ubi9/ubi:9.7 as builder
+
+ARG VERSION=${VERSION}
+
+# 1. Install heavy build dependencies (gcc, rust, etc.)
+RUN dnf -y update && \
+    dnf -y install \
+        wget \
+        patch \
+        python3.12 \
+        python3.12-pip \
+        python3.12-devel \
+        gcc \
+        gcc-c++ \
+        rust \
+        cargo \
+        openssl-devel \
+        zlib-devel && \
+    dnf clean all
+
+# 2. Install Poetry & the export plugin
+RUN curl -sSL https://install.python-poetry.org | python3.12 -
+ENV PATH="/root/.local/bin:${PATH}"
+RUN poetry self add poetry-plugin-export
+
+# 3. Set compiler variables for ppc64le
+ENV RUSTC_BOOTSTRAP=1 \
+    GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 \
+    GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1
+
+WORKDIR /build
+
+COPY ppc64le.patch ./ppc64le.patch
+
+# 4. Download litellm & patch it
+RUN wget https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.tar.gz >/dev/null
+RUN tar -xzf v${VERSION}.tar.gz && \
+    cd litellm-${VERSION} && \
+    patch < ../ppc64le.patch && \
+    poetry lock && \
+# 5. Export dependencies to a requirements.txt file
+    poetry export -f requirements.txt \
+    --without-hashes \
+    --only main \
+    -E proxy -E semantic-router \
+    -o requirements.txt
+
+WORKDIR /build/litellm-${VERSION}
+
+# 6. Compile all dependencies into .whl files
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3.12 -m pip wheel -r requirements.txt -w /wheels && \
+    poetry build --format wheel && \
+    cp dist/*.whl /wheels/
+
+# Runtime Stage
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
+
+WORKDIR /app
+
+# 1. Copy ONLY the compiled wheels from Stage 1
+COPY --from=builder /wheels /tmp/wheels
+
+RUN microdnf -y update && \
+    microdnf -y install \
+        python3.12 \
+        python3.12-pip && \
+    python3.12 -m pip install --no-cache-dir --no-index --find-links=/tmp/wheels /tmp/wheels/*.whl && \
+    microdnf remove -y python3.12-pip && \
+    rm -rf /tmp/wheels && \
+    microdnf clean all 
+
+EXPOSE 4000
+
+# Start the proxy
+CMD ["litellm", "--port", "4000"]
