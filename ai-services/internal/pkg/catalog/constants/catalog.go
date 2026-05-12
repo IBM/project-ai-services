@@ -24,8 +24,8 @@ const (
 const (
 	// CatalogAppName represents the catalog name.
 	CatalogAppName = "ai-services"
-	// CatalogDBName represents the catalog database name.
-	CatalogDBName = "catalog-db-secret"
+	// CatalogDBSecretName represents the catalog database name.
+	CatalogDBSecretName = "catalog-db-secret"
 	// CatalogSecretName represents the catalog secret name .
 	CatalogSecretName = "catalog-secret"
 )

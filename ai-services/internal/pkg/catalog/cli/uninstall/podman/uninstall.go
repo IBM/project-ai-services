@@ -98,7 +98,7 @@ func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool)
 
 	// Delete database data and secrets
 	if !skipCleanup {
-		if err := rt.DeleteSecret(catalogConstants.CatalogSecretName); err != nil {
+		if err := rt.DeleteSecret(catalogConstants.CatalogDBSecretName); err != nil {
 			return err
 		}
 		if err := dbDataDeletion(); err != nil {
