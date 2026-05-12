@@ -22,7 +22,7 @@ def mock_dependencies():
         mock_emb.return_value = {
             "emb_model": "test-model",
             "emb_endpoint": "http://test",
-            "max_tokens": 512
+            "max_model_len": 512
         }
         mock_reranker.return_value = {
             "reranker_model": "test-reranker",

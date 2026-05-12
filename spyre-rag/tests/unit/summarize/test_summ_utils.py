@@ -166,7 +166,7 @@ class TestValidateInputAndGetAvailableTokens:
         )
 
         expected = (
-            settings.common.llm.granite_3_3_8b_instruct_context_length
+            settings.common.llm.llm_max_model_len
             - input_tokens
             - settings.summarize.summarization_prompt_token_count
         )

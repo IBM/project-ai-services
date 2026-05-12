@@ -37,14 +37,27 @@ instruct:
   storageUri: hf://ibm-granite/granite-3.3-8b-instruct
   # @description API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication.
   apiKey: ""
+  model:
+    # @hidden
+    name: ibm-granite/granite-3.3-8b-instruct
+    # @hidden
+    maxModelLen: 32768
 
 embedding:
   # @hidden
   storageUri: hf://ibm-granite/granite-embedding-278m-multilingual
+  model:
+    # @hidden
+    name: ibm-granite/granite-embedding-278m-multilingual
+    # @hidden
+    maxModelLen: 512
 
 reranker:
   # @hidden
   storageUri: hf://BAAI/bge-reranker-v2-m3
+  model:
+    # @hidden
+    name: BAAI/bge-reranker-v2-m3
 
 ingest:
   # @hidden

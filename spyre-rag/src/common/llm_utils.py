@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 from common.lang_utils import get_prompt_for_language
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, resolve_model_max_len
 from common.settings import settings
 from common.retry_utils import retry_on_transient_error
 from chatbot.settings import settings as chatbot_settings
@@ -45,7 +45,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
     }
 
     try:
-        response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=get_vllm_headers(settings.model_endpoints.vllm_api_key))
+        response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=get_vllm_headers(settings.llm.api_key))
         response.raise_for_status()
         data = response.json() or {}
         choices = data.get("choices", [])
@@ -163,6 +163,7 @@ def query_vllm_models(llm_endpoint, api_key: str | None = None):
     resp_json = response.json()
     return resp_json
 
+
 def query_vllm_payload(
     question,
     documents,
@@ -188,8 +189,15 @@ def query_vllm_payload(
         context_tokens = tokenize_with_llm(context, llm_endpoint)
         context_token_count = len(context_tokens)
 
+        llm_max_model_len = resolve_model_max_len(
+            llm_endpoint,
+            llm_model,
+            settings.llm.max_model_len,
+            api_key,
+        )
+
         # Calculate budget for context first (prioritize context over history)
-        budget_for_context = settings.llm.granite_3_3_8b_instruct_context_length - (
+        budget_for_context = llm_max_model_len - (
             chatbot_settings.chatbot.initial_system_token_overhead +
             chatbot_settings.chatbot.rag_system_token_overhead +
             question_token_count +
@@ -250,7 +258,13 @@ def query_vllm_payload(
         # Legacy mode: use simple prompt template without conversation history
         # Dynamic chunk truncation: truncates the context if it doesn't fit in the sequence length
         question_token_count = len(tokenize_with_llm(question, llm_endpoint))
-        remaining_tokens = settings.llm.granite_3_3_8b_instruct_context_length - (
+        llm_max_model_len = resolve_model_max_len(
+            llm_endpoint,
+            llm_model,
+            settings.llm.max_model_len,
+            api_key,
+        )
+        remaining_tokens = llm_max_model_len - (
             chatbot_settings.chatbot.prompt_template_token_count +
             question_token_count +
             max_new_tokens  # Reserve space for model's response
@@ -431,7 +445,7 @@ def query_vllm_summarize(
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers = get_vllm_headers(settings.model_endpoints.vllm_api_key)
+    headers = get_vllm_headers(settings.llm.api_key)
     stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,
@@ -472,7 +486,7 @@ def query_vllm_summarize_stream(
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers = get_vllm_headers(settings.model_endpoints.vllm_api_key)
+    headers = get_vllm_headers(settings.llm.api_key)
     stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,

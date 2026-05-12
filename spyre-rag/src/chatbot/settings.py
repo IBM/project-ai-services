@@ -68,6 +68,72 @@ class QueryRephrasingConfig(BaseSettings):
     )
 
 
+class ChatbotLLMConfig(BaseSettings):
+    """Chatbot-specific LLM generation settings."""
+
+    llm_max_tokens: int = Field(
+        default=512,
+        gt=0,
+        description="Maximum tokens for LLM generation (English)",
+    )
+
+    llm_max_tokens_de: int = Field(
+        default=700,
+        gt=0,
+        description="Maximum tokens for LLM generation (German)",
+    )
+
+    temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        lt=1.0,
+        description="Temperature for LLM generation",
+    )
+
+    max_input_length: int = Field(
+        default=6000,
+        ge=3000,
+        le=32000,
+        description="Maximum input length in characters",
+    )
+
+    @field_validator('llm_max_tokens')
+    @classmethod
+    def validate_llm_max_tokens(cls, v):
+        """Validate llm_max_tokens with warning fallback."""
+        if not (isinstance(v, int) and v > 0):
+            logger.warning("Setting llm_max_tokens to default '512' as it is missing or malformed in the settings")
+            return 512
+        return v
+
+    @field_validator('llm_max_tokens_de')
+    @classmethod
+    def validate_llm_max_tokens_de(cls, v):
+        """Validate llm_max_tokens_de with warning fallback."""
+        if not (isinstance(v, int) and v > 0):
+            logger.warning("Setting llm_max_tokens_de to default '700' as it is missing or malformed in the settings")
+            return 700
+        return v
+
+    @field_validator('temperature')
+    @classmethod
+    def validate_temperature(cls, v):
+        """Validate temperature with warning fallback."""
+        if not (isinstance(v, float) and 0 <= v < 1):
+            logger.warning("Setting temperature to default '0.0' as it is missing or malformed in the settings")
+            return 0.0
+        return v
+
+    @field_validator('max_input_length')
+    @classmethod
+    def validate_max_input_length(cls, v):
+        """Validate max_input_length with warning fallback."""
+        if not (isinstance(v, int) and 3000 <= v <= 32000):
+            logger.warning("Setting max_input_length to default '6000' as it is missing or malformed in the settings")
+            return 6000
+        return v
+
+
 class RAGConfig(BaseSettings):
     """RAG retrieval and ranking settings."""
 
@@ -229,6 +295,7 @@ class RAGConfig(BaseSettings):
 class Settings(BaseSettings):
     common: CommonSettings = Field(default_factory=CommonSettings)
     chatbot: RAGConfig = Field(default_factory=RAGConfig)
+    chatbot_llm: ChatbotLLMConfig = Field(default_factory=ChatbotLLMConfig)
     query_rephrasing: QueryRephrasingConfig = Field(default_factory=QueryRephrasingConfig)
 
 # Global settings instance

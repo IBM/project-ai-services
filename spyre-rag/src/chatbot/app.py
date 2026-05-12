@@ -87,7 +87,7 @@ async def lifespan(app):
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     initialize_models()
     setup_language_detector([Language.ENGLISH, Language.GERMAN])
-    create_llm_session(pool_maxsize=settings.common.llm.llm_max_batch_size)
+    create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
     yield
     stderr_monitor.stop()
 
@@ -347,7 +347,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
     try:
         emb_model = emb_model_dict['emb_model']
         emb_endpoint = emb_model_dict['emb_endpoint']
-        emb_max_tokens = emb_model_dict['max_tokens']
+        emb_max_model_len = emb_model_dict['max_model_len']
         llm_model = llm_model_dict['llm_model']
         llm_endpoint = llm_model_dict['llm_endpoint']
         reranker_model = reranker_model_dict['reranker_model']
@@ -372,7 +372,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         max_tokens = req.max_tokens
         # giving priority to max_tokens passed in the request, otherwise according to detected language of query
         if not max_tokens:
-            max_tokens = max_tokens_map.get(lang, settings.common.llm.llm_max_tokens)
+            max_tokens = max_tokens_map.get(lang, settings.chatbot_llm.llm_max_tokens)
 
         rephrased_query = current_query
         
@@ -399,7 +399,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         docs, perf_stat_dict = await asyncio.to_thread(
             search_only,
             rephrased_query,
-            emb_model, emb_endpoint, emb_max_tokens,
+            emb_model, emb_endpoint, emb_max_model_len,
             reranker_model,
             reranker_endpoint,
             settings.chatbot.num_chunks_post_search,
