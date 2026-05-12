@@ -53,26 +53,17 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 	}
 
 	// collect all secret names used as part of deployment
-	catalogSecrets, err := collectSecretNames(tp, tmpls, argParams)
-	if err != nil {
-		s.Fail("failed to collect catalog secret names")
+	isDeployed, existingResources, err := checkCatalogStatus(rt, tp, tmpls, argParams)
+    if err != nil {
+        s.Fail("failed to check existing resources")
+        return fmt.Errorf("failed to check existing resources: %w", err)
+    }
 
-		return fmt.Errorf("failed to collect catalog secret names: %w", err)
-	}
-
-	existingResources, err := helpers.CheckExistingResourcesForApplication(rt, catalogAppName, catalogSecrets)
-	if err != nil {
-		s.Fail("failed to check existing pods")
-
-		return fmt.Errorf("failed to check existing pods: %w", err)
-	}
-
-	if len(existingResources) == len(tmpls) {
-		s.Stop("Catalog service already deployed")
-		logger.Infof("Catalog pod already exists: %v\n", existingResources)
-
-		return nil
-	}
+    if isDeployed {
+        s.Stop("Catalog service already deployed")
+        logger.Infof("Catalog pod already exists: %v\n", existingResources)
+        return nil
+    }
 
 	// Prepare values with configure-specific configuration
 	values, err := prepareCatalogValues(tp, podmanURI, passwordHash, argParams)
@@ -104,6 +95,20 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 	}
 
 	return nil
+}
+
+func checkCatalogStatus(rt *podman.PodmanClient, tp templates.Template, tmpls map[string]*template.Template, argParams map[string]string) (bool, []string, error) {
+    catalogSecrets, err := collectSecretNames(tp, tmpls, argParams)
+    if err != nil {
+        return false, nil, err
+    }
+
+    existingResources, err := helpers.CheckExistingResourcesForApplication(rt, catalogAppName, catalogSecrets)
+    if err != nil {
+        return false, nil, err
+    }
+
+    return len(existingResources) == len(tmpls), existingResources, nil
 }
 
 // loadCatalogTemplates loads the catalog template provider, metadata, and templates.
