@@ -149,12 +149,6 @@ class RAGConfig(BaseSettings):
         description="Minimum similarity score threshold for retrieval",
     )
 
-    max_concurrent_requests: int = Field(
-        default=32,
-        gt=0,
-        description="Maximum concurrent requests for RAG operations",
-    )
-
     num_chunks_post_search: int = Field(
         default=10,
         gt=5,

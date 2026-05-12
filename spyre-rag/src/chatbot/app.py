@@ -53,7 +53,7 @@ reranker_model_dict = {}
 auth_required_cache = {"checked": False, "required": False}
 auth_cache_lock = asyncio.Lock()
 
-concurrency_limiter = BoundedSemaphore(settings.chatbot.max_concurrent_requests)
+concurrency_limiter = BoundedSemaphore(settings.common.llm.max_batch_size)
 
 def initialize_models():
     global emb_model_dict, llm_model_dict, reranker_model_dict
