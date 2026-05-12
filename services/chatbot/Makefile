@@ -1,11 +1,6 @@
 REGISTRY?=icr.io/ai-services-private
-<<<<<<< HEAD:services/chatbot/Makefile
 IMAGE=chatbot-service
 TAG?=v0.0.1
-=======
-IMAGE=rag
-TAG?=v0.0.104
->>>>>>> origin/main:spyre-rag/src/Makefile
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
 CONTAINER_BUILDER?=podman
