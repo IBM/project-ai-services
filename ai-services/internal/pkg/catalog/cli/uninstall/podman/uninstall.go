@@ -7,16 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	catalog "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli"
+	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-)
-
-const (
-	// catalog secret name.
-	catalogSecretName = "catalog-secret"
 )
 
 // UninstallCatalog removes the catalog service and all associated resources.
@@ -42,11 +38,11 @@ func UninstallCatalog(ctx context.Context, autoYes, skipCleanup bool) error {
 	return performCleanup(rt, pods, skipCleanup)
 }
 
-// validateCatalogExists checks if catalog pods exist and returns them.
+// validateCatalogExists checks if catalog resources exist and returns them.
 func validateCatalogExists(rt *podman.PodmanClient) ([]types.Pod, error) {
 	// Check if catalog pods exist
 	pods, err := rt.ListPods(map[string][]string{
-		"label": {fmt.Sprintf("ai-services.io/application=%s", catalog.CatalogAppName)},
+		"label": {fmt.Sprintf("ai-services.io/application=%s", catalogConstants.CatalogAppName)},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
@@ -96,12 +92,15 @@ func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool)
 	}
 
 	// Delete catalog secret
-	if err := secretDeletion(rt); err != nil {
+	if err := rt.DeleteSecret(catalogConstants.CatalogSecretName); err != nil {
 		return err
 	}
 
-	// Delete database data
+	// Delete database data and secrets
 	if !skipCleanup {
+		if err := rt.DeleteSecret(catalogConstants.CatalogSecretName); err != nil {
+			return err
+		}
 		if err := dbDataDeletion(); err != nil {
 			return err
 		}
@@ -138,38 +137,17 @@ func podsDeletion(rt *podman.PodmanClient, pods []types.Pod) error {
 	return nil
 }
 
-// secretDeletion removes the catalog secret.
-func secretDeletion(rt *podman.PodmanClient) error {
-	secrets, err := rt.ListSecrets(map[string][]string{
-		"name": {catalogSecretName},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to list secrets: %w", err)
-	}
-
-	secretsExists := len(secrets) != 0
-
-	if !secretsExists {
-		logger.Infof("No secrets found for: %s\n", catalog.CatalogAppName)
-
-		return nil
-	}
-
-	for _, secret := range secrets {
-		err := rt.DeleteSecret(secret)
-		if err != nil {
-			return fmt.Errorf("failed to remove secret: %w", err)
-		}
-	}
-
-	return nil
-}
-
 // dbDataDeletion removes the database data directory.
 func dbDataDeletion() error {
 	// Get the currently used base directory
 	baseDir := utils.GetBaseDir()
-	dbDataPath := filepath.Join(baseDir, "ai-services/db")
+	var dbDataPath string
+	// this is because we prepend "ai-services" to custom directory and not to default directory
+	if baseDir == constants.DefaultBaseDir {
+		dbDataPath = filepath.Join(baseDir, "db")
+	} else {
+		dbDataPath = filepath.Join(baseDir, "ai-services/db")
+	}
 
 	// Check if database data directory exists
 	if _, err := os.Stat(dbDataPath); os.IsNotExist(err) {
