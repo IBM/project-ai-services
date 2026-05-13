@@ -53,38 +53,28 @@ This proposal covers:
 
 ### Component Overview
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    AI-Services CLI                       │
-│                  catalog configure                       │
-└────────────────────┬────────────────────────────────────┘
-                     │
-         ┌───────────┴───────────┐
-         │                       │
-    ┌────▼─────┐          ┌─────▼──────┐
-    │  Podman  │          │ OpenShift  │
-    │ Runtime  │          │  Runtime   │
-    └────┬─────┘          └─────┬──────┘
-         │                      │
-         └──────────┬───────────┘
-                    │
-         ┌──────────▼──────────┐
-         │  Catalog Services   │
-         ├─────────────────────┤
-         │  ┌───────────────┐  │
-         │  │  Catalog UI   │  │
-         │  └───────┬───────┘  │
-         │          │          │
-         │  ┌───────▼───────┐  │
-         │  │ Backend API   │  │
-         │  │   Server      │  │
-         │  └───────┬───────┘  │
-         │          │          │
-         │  ┌───────▼───────┐  │
-         │  │   Database    │  │
-         │  │  PostgreSQL   │  │
-         │  └───────────────┘  │
-         └─────────────────────┘
+```mermaid
+flowchart TD
+    CLI["AI-Services CLI<br/>catalog configure"]
+    
+    subgraph Runtimes["Runtime Environments"]
+        Podman["Podman Runtime"]
+        OpenShift["OpenShift Runtime"]
+    end
+    
+    subgraph CatalogServices["Catalog Services"]
+        UI["Catalog UI"]
+        Backend["Backend API Server"]
+        DB[("Database<br/>PostgreSQL")]
+        
+        UI --> Backend
+        Backend --> DB
+    end
+    
+    CLI --> Podman
+    CLI --> OpenShift
+    Podman --> CatalogServices
+    OpenShift --> CatalogServices
 ```
 
 ### Technology Stack

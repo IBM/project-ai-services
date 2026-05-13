@@ -84,34 +84,26 @@ Users need a standardized way to:
 
 ### 3.2 Backend System Components
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        API Gateway                           │
-│                   (http://localhost:8080)                    │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Catalog Management                         │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │         Auth Middleware (JWT Bearer Token)             │ │
-│  └────────────────────────────────────────────────────────┘ │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │            Application Management                      │ │
-│  └────────────────────────────────────────────────────────┘ │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │            Application Assets                          │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-                    │                   │
-                    ▼                   ▼
-      ┌──────────────────────┐   ┌──────────────────────┐
-      │Database (PostgreSQL) │   │Runtime Orchestrators │
-      └──────────────────────┘   │  ┌────────────────┐  │
-                                 │  │ Podman         │  │
-                                 │  │ OpenShift      │  │
-                                 │  └────────────────┘  │
-                                 └──────────────────────┘
+```mermaid
+flowchart TD
+    Gateway["API Gateway<br/>(http://localhost:8080)"]
+    
+    subgraph CatalogMgmt["Catalog Management"]
+        Auth["Auth Middleware<br/>(JWT Bearer Token)"]
+        AppMgmt["Application Management"]
+        Assets["Application Assets"]
+    end
+    
+    DB[("Database<br/>(PostgreSQL)")]
+    
+    subgraph Runtime["Runtime Orchestrators"]
+        Podman["Podman"]
+        OpenShift["OpenShift"]
+    end
+    
+    Gateway --> CatalogMgmt
+    CatalogMgmt --> DB
+    CatalogMgmt --> Runtime
 ```
 
 ## 4. API Specification
@@ -638,7 +630,7 @@ Authorization: Bearer <access_token>
   "updated_at": "2026-04-15T10:35:00Z",
   "services": [
     {
-      "id": "789a0123-b45c-67d8-e901-234567890abc",
+      "id": "chat",
       "type": "QA-Chatbot",
       "endpoints": [
         {
@@ -651,11 +643,31 @@ Authorization: Bearer <access_token>
         }
       ],
       "version": "1.0.0",
+      "components": [
+        {
+          "type": "vector_db",
+          "provider": "opensearch"
+        },
+        {
+          "type": "llm",
+          "provider": "vllm",
+          "metadata": {
+            "model": "ibm-granite/granite-3.3-8b-instruct"
+          }
+        },
+        {
+          "type": "embedding",
+          "provider": "vllm",
+          "metadata": {
+            "model": "BAAI/bge-base-en-v1.5"
+          }
+        }
+      ],
       "created_at": "2026-04-15T10:31:00Z",
       "updated_at": "2026-04-15T10:35:00Z"
     },
     {
-      "id": "234b5678-c90d-12e3-f456-789012345def",
+      "id": "summarize",
       "type": "Summary",
       "endpoints": [
         {
@@ -664,6 +676,20 @@ Authorization: Bearer <access_token>
         }
       ],
       "version": "1.0.0",
+      "components": [
+        {
+          "type": "vector_db",
+          "provider": "opensearch"
+        },
+        {
+          "type": "llm",
+          "provider": "watsonx",
+          "metadata": {
+            "model": "ibm/granite-13b-chat-v2",
+            "project_id": "wx-project-123"
+          }
+        }
+      ],
       "created_at": "2026-04-15T10:32:00Z",
       "updated_at": "2026-04-15T10:35:00Z"
     }
@@ -685,7 +711,7 @@ Authorization: Bearer <access_token>
   "updated_at": "2026-04-15T11:05:00Z",
   "services": [
     {
-      "id": "567c8901-d23e-45f6-g789-012345678hij",
+      "id": "summarize",
       "type": "Summary",
       "endpoints": [
         {
@@ -694,6 +720,19 @@ Authorization: Bearer <access_token>
         }
       ],
       "version": "1.0.0",
+      "components": [
+        {
+          "type": "vector_db",
+          "provider": "opensearch"
+        },
+        {
+          "type": "llm",
+          "provider": "vllm",
+          "metadata": {
+            "model": "ibm-granite/granite-3.3-8b-instruct"
+          }
+        }
+      ],
       "created_at": "2026-04-15T11:00:00Z",
       "updated_at": "2026-04-15T11:05:00Z"
     }
@@ -719,10 +758,11 @@ Authorization: Bearer <access_token>
 **Service Object:**
 | Field | Type | Description |
 |-------|------|-------------|
-| id | string | Unique service identifier (UUID) |
+| id | string | Service identifier (e.g., "chat", "summarize", "digitize") |
 | type | string | Service type (e.g., "QA-Chatbot", "Summary", "Digitization") |
 | endpoints | array | Array of endpoint objects |
 | version | string | Service version |
+| components | array | Array of component objects used by this service |
 | created_at | string | Creation timestamp |
 | updated_at | string | Last update timestamp |
 
@@ -731,6 +771,13 @@ Authorization: Bearer <access_token>
 |-------|------|-------------|
 | name | string | Endpoint name: "ui", "backend", or "api". This will be the container name for each service in Podman |
 | url | string | Full endpoint URL |
+
+**Component Object:**
+| Field | Type | Description |
+|-------|------|-------------|
+| type | string | Component type (e.g., "vector_db", "llm", "embedding", "reranker") |
+| provider | string | Provider/implementation (e.g., "opensearch", "vllm", "watsonx") |
+| metadata | object | Optional component-specific configuration and metadata (e.g., model, project_id). Only included when relevant for the component type. |
 
 **Error Responses:**
 
@@ -744,8 +791,11 @@ Authorization: Bearer <access_token>
 1. Validate the incoming JWT token from Authorization header
 2. Execute database query on applications table using `id` as the filter
 3. Perform JOIN with services table to fetch associated services
-4. For each application, use the template field to fetch the corresponding type (Digital Assistant) and deployment_type (architecture or service) from the architecure or service metadata file for the corresponding template id (This will be unique and belongs to either architecture or service).
-5. Return the mapped response with appropriate HTTP status code
+4. For each service, perform JOIN with service_dependencies table to fetch component dependencies
+5. For each component dependency, fetch component details from components table including metadata (excluding endpoints)
+6. For each application, use the template field to fetch the corresponding type (Digital Assistant) and deployment_type (architecture or service) from the architecture or service metadata file for the corresponding template id (This will be unique and belongs to either architecture or service)
+7. Map service IDs to their service identifiers (e.g., "chat", "summarize", "digitize") from the service metadata
+8. Return the mapped response with appropriate HTTP status code including nested components within each service
 
 ---
 
@@ -1487,7 +1537,7 @@ This section describes the endpoints for retrieving deployment options, componen
 
 #### 5.4.1 Get Architecture Deploy Options
 
-**Endpoint:** `GET /api/v1/architectures/{architecture_id}/deploy-options`
+**Endpoint:** `GET /api/v1/architectures/{id}/deploy-options`
 
 **Description:** Retrieves available providers and dependency rules for all services and their components within an architecture. This endpoint returns providers (blueprints) for creating new components and dependency rules, but does NOT include running instances.
 
@@ -1500,7 +1550,7 @@ Authorization: Bearer <access_token>
 **Path Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| architecture_id | string | Yes | Architecture ID (e.g., "rag") |
+| id | string | Yes | Architecture ID (e.g., "rag") |
 
 **Request Body:** None
 
@@ -1508,8 +1558,8 @@ Authorization: Bearer <access_token>
 
 ```json
 {
-  "architecture_id": "rag",
-  "architecture_name": "Digital Assistant",
+  "id": "rag",
+  "name": "Digital Assistant",
   "global_components": [
     {
       "type": "vector_db",
@@ -1565,8 +1615,8 @@ Authorization: Bearer <access_token>
   "services": [
     {
       "type": "service",
-      "service_id": "digitize",
-      "service_name": "Digitize documents",
+      "id": "digitize",
+      "name": "Digitize documents",
       "components": [
         {
           "type": "vector_db",
@@ -1639,8 +1689,8 @@ Authorization: Bearer <access_token>
 **Root Object:**
 | Field | Type | Description |
 |-------|------|-------------|
-| architecture_id | string | Architecture identifier |
-| architecture_name | string | Architecture display name |
+| id | string | Architecture identifier |
+| name | string | Architecture display name |
 | global_components | array | Array of global component objects shared across services |
 | services | array | Array of service objects with their specific components |
 
@@ -1664,8 +1714,8 @@ Authorization: Bearer <access_token>
 | Field | Type | Description |
 |-------|------|-------------|
 | type | string | Always "service" |
-| service_id | string | Service identifier |
-| service_name | string | Service display name |
+| id | string | Service identifier |
+| name | string | Service display name |
 | components | array | Array of component objects specific to this service |
 
 **Component Object (in services):**
@@ -1683,7 +1733,7 @@ Authorization: Bearer <access_token>
 
 **Implementation Notes:**
 
-1. Read architecture metadata from `ai-services/assets/architectures/{architecture_id}/`
+1. Read architecture metadata from `ai-services/assets/architectures/{id}/`
 2. Parse component dependencies and available providers
 3. Return providers for creating new components (not existing instances)
 4. Include dependency rules and metadata for UI rendering
@@ -1693,7 +1743,7 @@ Authorization: Bearer <access_token>
 
 #### 5.4.2 Get Service Deploy Options
 
-**Endpoint:** `GET /api/v1/services/{service_id}/deploy-options`
+**Endpoint:** `GET /api/v1/services/{id}/deploy-options`
 
 **Description:** Retrieves available providers and dependency rules for a specific service. Returns providers for creating new components, scoped to a single service.
 
@@ -1706,7 +1756,7 @@ Authorization: Bearer <access_token>
 **Path Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| service_id | string | Yes | Service ID (e.g., "digitize", "chat") |
+| id | string | Yes | Service ID (e.g., "digitize", "chat") |
 
 **Request Body:** None
 
@@ -1714,8 +1764,8 @@ Authorization: Bearer <access_token>
 
 ```json
 {
-  "service_id": "digitize",
-  "service_name": "Digitize documents",
+  "id": "digitize",
+  "name": "Digitize documents",
   "components": [
     {
       "type": "vector_db",
