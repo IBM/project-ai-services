@@ -123,11 +123,11 @@ async function customSendMessage(
   try {
     instance.updateIsMessageLoadingCounter('increase');
 
-    // Make the streaming request using OpenAI client
-    const stream = await client.chat.completions.create(payload);
+    // Make the streaming request using OpenAI client with withResponse to access headers
+    const { data: stream, response } = await client.chat.completions.create(payload).withResponse();
 
     // Extract rephrased query from response headers
-    const rephrasedQuery = stream.response.headers.get('X-Rephrased-Query') || userInput;
+    const rephrasedQuery = response.headers.get('x-rephrased-query') || userInput;
 
     instance.updateIsMessageLoadingCounter('decrease');
 
