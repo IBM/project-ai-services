@@ -1024,9 +1024,6 @@ const docTemplate = `{
                 },
                 "schema": {
                     "type": "string"
-                },
-                "specifications": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderSpecifications"
                 }
             }
         },
@@ -1047,31 +1044,6 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
-                }
-            }
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelInfo": {
-            "type": "object",
-            "properties": {
-                "default": {
-                    "type": "boolean"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderSpecifications": {
-            "type": "object",
-            "properties": {
-                "supported_models": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelInfo"
-                    }
                 }
             }
         },

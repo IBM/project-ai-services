@@ -102,8 +102,6 @@ definitions:
         type: string
       schema:
         type: string
-      specifications:
-        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderSpecifications'
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService:
     properties:
@@ -117,22 +115,6 @@ definitions:
         type: string
       type:
         type: string
-    type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelInfo:
-    properties:
-      default:
-        type: boolean
-      id:
-        type: string
-      name:
-        type: string
-    type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderSpecifications:
-    properties:
-      supported_models:
-        items:
-          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelInfo'
-        type: array
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service:
     properties:
