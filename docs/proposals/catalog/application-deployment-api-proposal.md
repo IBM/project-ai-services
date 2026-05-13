@@ -40,7 +40,6 @@
      - 5.4.1 [Get Architecture Deploy Options](#541-get-architecture-deploy-options)
      - 5.4.2 [Get Service Deploy Options](#542-get-service-deploy-options)
      - 5.4.3 [Get Component Provider Parameters](#543-get-component-provider-parameters)
-     - 5.4.4 [Get Model Info](#544-get-model-info)
 6. [Error Handling](#6-error-handling)
    - 6.1 [Error Response Format](#61-error-response-format)
    - 6.2 [HTTP Status Codes](#62-http-status-codes)
@@ -828,34 +827,23 @@ Content-Type: application/json
         {
           "type": "component",
           "component_type": "vector_db",
-          "provider_id": "opensearch",
-          "params": {
-            "memoryLimit": "8Gi",
-            "auth": {
-              "username": "admin",
-              "password": "AnotherSecurePass456!@#"
-            }
-          }
+          "provider_id": "opensearch"
         },
         {
           "type": "component",
           "component_type": "llm",
-          "instance_id": "llm-vllm-granite",
-          "provider_id": "vllm"
+          "provider_id": "vllm",
+          "params": {
+            "model": "ibm-granite/granite-3.3-8b-instruct"
+          }
         },
         {
           "type": "component",
           "component_type": "embedding",
           "provider_id": "vllm",
           "params": {
-            "model": "BAAI/bge-base-en-v1.5"
+            "model": "ibm-granite/granite-embedding-278m-multilingual"
           }
-        },
-        {
-          "type": "component",
-          "component_type": "reranker",
-          "instance_id": "reranker-vllm-1",
-          "provider_id": "vllm"
         }
       ]
     },
@@ -868,7 +856,6 @@ Content-Type: application/json
         {
           "type": "component",
           "component_type": "vector_db",
-          "instance_id": "opensearch-instance-1",
           "provider_id": "opensearch"
         },
         {
@@ -885,12 +872,9 @@ Content-Type: application/json
         {
           "type": "component",
           "component_type": "embedding",
-          "provider_id": "watsonx",
+          "provider_id": "vllm",
           "params": {
-            "model": "ibm/slate-125m-english-rtrvr",
-            "apiKey": "ibm-cloud-api-key-456",
-            "projectId": "wx-project-123",
-            "endpoint": "https://us-south.ml.cloud.ibm.com"
+            "model": "ibm-granite/granite-embedding-278m-multilingual"
           }
         }
       ]
@@ -1568,14 +1552,7 @@ Authorization: Bearer <access_token>
         {
           "id": "opensearch",
           "name": "OpenSearch",
-          "description": "Distributed search and analytics engine",
-          "schema": "/api/v1/components/vector_db/providers/opensearch/params"
-        },
-        {
-          "id": "milvus",
-          "name": "Milvus",
-          "description": "Cloud-native vector database",
-          "schema": "/api/v1/components/vector_db/providers/milvus/params"
+          "description": "Distributed search and analytics engine"
         }
       ]
     },
@@ -1586,28 +1563,7 @@ Authorization: Bearer <access_token>
         {
           "id": "vllm",
           "name": "vLLM Embeddings",
-          "specifications": {
-            "supported_models": [
-              {
-                "id": "bge-base-en-v1.5",
-                "name": "BAAI/bge-base-en-v1.5"
-              }
-            ]
-          },
           "schema": "/api/v1/components/embedding/providers/vllm/params"
-        },
-        {
-          "id": "watsonx",
-          "name": "IBM watsonx.ai Embeddings",
-          "specifications": {
-            "supported_models": [
-              {
-                "id": "slate-125m-english-rtrvr",
-                "name": "ibm/slate-125m-english-rtrvr"
-              }
-            ]
-          },
-          "schema": "/api/v1/components/embedding/providers/watsonx/params"
         }
       ]
     }
@@ -1625,14 +1581,7 @@ Authorization: Bearer <access_token>
             {
               "id": "opensearch",
               "name": "OpenSearch",
-              "description": "Distributed search and analytics engine",
-              "schema": "/api/v1/components/vector_db/providers/opensearch/params"
-            },
-            {
-              "id": "milvus",
-              "name": "Milvus",
-              "description": "Cloud-native vector database",
-              "schema": "/api/v1/components/vector_db/providers/milvus/params"
+              "description": "Distributed search and analytics engine"
             }
           ]
         },
@@ -1644,36 +1593,12 @@ Authorization: Bearer <access_token>
               "id": "vllm",
               "name": "vLLM Instruct",
               "description": "Deploy new instruct model on vLLM",
-              "specifications": {
-                "supported_models": [
-                  {
-                    "id": "granite-3.3-8b-instruct",
-                    "name": "ibm-granite/granite-3.3-8b-instruct"
-                  },
-                  {
-                    "id": "llama-3.1-8b-instruct",
-                    "name": "meta-llama/Llama-3.1-8B-Instruct"
-                  }
-                ]
-              },
               "schema": "/api/v1/components/llm/providers/vllm/params"
             },
             {
               "id": "watsonx",
               "name": "IBM watsonx.ai Instruct",
               "description": "Configure watsonx.ai for instruct models",
-              "specifications": {
-                "supported_models": [
-                  {
-                    "id": "granite-13b-chat-v2",
-                    "name": "ibm/granite-13b-chat-v2"
-                  },
-                  {
-                    "id": "llama-3-70b-instruct",
-                    "name": "meta-llama/llama-3-70b-instruct"
-                  }
-                ]
-              },
               "schema": "/api/v1/components/llm/providers/watsonx/params"
             }
           ]
@@ -1795,36 +1720,12 @@ Authorization: Bearer <access_token>
           "id": "vllm",
           "name": "vLLM Instruct",
           "description": "Deploy new instruct model on vLLM",
-          "supported_models": [
-            {
-              "id": "granite-3.3-8b-instruct",
-              "name": "ibm-granite/granite-3.3-8b-instruct",
-              "default": true,
-            },
-            {
-              "id": "llama-3.1-8b-instruct",
-              "name": "meta-llama/Llama-3.1-8B-Instruct",
-              "default": false,
-            }
-          ],
           "schema": "/api/v1/components/llm/providers/vllm/params"
         },
         {
           "id": "watsonx",
           "name": "IBM watsonx.ai Instruct",
           "description": "Configure watsonx.ai for instruct models",
-          "supported_models": [
-            {
-              "id": "granite-13b-chat-v2",
-              "name": "ibm/granite-13b-chat-v2",
-              "default": true,
-            },
-            {
-              "id": "llama-3-70b-instruct",
-              "name": "meta-llama/llama-3-70b-instruct",
-              "default": false,
-            }
-          ],
           "schema": "/api/v1/components/llm/providers/watsonx/params"
         }
       ]
@@ -1856,66 +1757,38 @@ Authorization: Bearer <access_token>
 
 **Request Body:** None
 
-**Example Request 1:**
+**Example Request:**
 
 ```
-GET /api/v1/components/llm/providers/vllm/params
+GET /api/v1/components/reranker/providers/vllm/params
 ```
 
-**Response (200 OK) - vLLM Example:**
+**Response (200 OK):**
 
 ```json
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "title": "vLLM Instruct Configuration",
   "properties": {
-    "model": {
-      "type": "string",
-      "title": "Model Path",
-      "description": "HuggingFace model path",
-      "default": "ibm-granite/granite-3.3-8b-instruct",
-      "x-model-selector": "supported_models"
-    },
-    "api_key": {
-      "type": "string",
-      "title": "API Key",
-      "description": "API Key for vLLM",
-      "format": "password"
+    "reranker": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "title": "Reranker model",
+          "description": "Reranker model",
+          "oneOf": [
+            {
+              "const": "BAAI/bge-reranker-v2-m3",
+              "title": "bge-reranker-v2-m3",
+              "description": "**Languages:** Multilingual (100+ languages)\n\n**Use Cases:** Search result reranking, Document relevance scoring, Query-document matching refinement, RAG pipeline optimization\n\n**Strengths:** State-of-the-art reranking performance, Excellent multilingual support, Efficient inference on CPU, Improved retrieval accuracy for RAG applications"
+            }
+          ],
+          "default": "BAAI/bge-reranker-v2-m3"
+        }
+      }
     }
-  },
-  "required": ["model"]
-}
-```
-
-**Example Request 2:**
-
-```
-GET /api/v1/components/llm/providers/watsonx/params
-```
-
-**Response (200 OK) - watsonx Example:**
-
-```json
-{
-  "$schema": "https://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "title": "IBM watsonx.ai Instruct Configuration",
-  "properties": {
-    "model": {
-      "type": "string",
-      "title": "Model Name",
-      "description": "watsonx.ai model identifier",
-      "x-model-selector": "supported_models"
-    },
-    "api_key": {
-      "type": "string",
-      "title": "watsonx API Key",
-      "description": "IBM Cloud API key for watsonx.ai",
-      "format": "password"
-    }
-  },
-  "required": ["provider", "model", "api_key"]
+  }
 }
 ```
 
@@ -1969,102 +1842,6 @@ Returns a JSON Schema (draft-07) object that defines:
 3. Read the values.schema.json file from the template's asset directory
 4. Wrap the schema properties under the template ID as a nested object
 5. Return the complete JSON Schema with the template ID as the top-level property key
-
----
-
-#### 5.4.4 Get Model Info
-
-**Endpoint:** `GET /api/v1/models/{id}/info`
-
-**Description:** Retrieves detailed information about a specific AI model, including its description, use cases, strengths, and supported languages. This endpoint provides metadata to help users make informed decisions when selecting models for their deployments.
-
-**Request Headers:**
-
-```
-Authorization: Bearer <access_token>
-```
-
-**Path Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| id | string | Yes | Model identifier (e.g., "granite-3.3-8b-instruct", "llama-3.1-8b-instruct") |
-
-**Request Body:** None
-
-**Example Request 1:**
-
-```
-GET /api/v1/models/granite-3.3-8b-instruct/info
-```
-
-**Response (200 OK) - Granite Example:**
-
-```json
-{
-  "id": "granite-3.3-8b-instruct",
-  "name": "ibm-granite/granite-3.3-8b-instruct",
-  "description": "IBM Granite 3.3 8B is an enterprise-focused instruction-tuned language model optimized for business applications with strong reasoning capabilities and efficient performance.",
-  "usecases": [
-    "Question answering",
-    "Text summarization",
-    "Code generation",
-    "Instruction following"
-  ],
-  "strengths": [
-    "Efficient performance on enterprise tasks",
-    "Strong reasoning capabilities",
-    "Optimized for business applications",
-    "Low latency inference"
-  ],
-  "supported_languages": [
-    "English",
-    "Spanish",
-    "French",
-    "German",
-    "Portuguese",
-    "Japanese",
-    "Korean",
-    "Arabic",
-    "Chinese"
-  ]
-}
-```
-
-**Response Schema:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| id | string | Model identifier |
-| name | string | Full model name/path |
-| description | string | Brief description of the model and its primary characteristics |
-| usecases | string or array | Use cases for this model - can be a string description or array of use case strings |
-| strengths | string or array | Model's key strengths and capabilities - can be a string description or array of strength strings |
-| supported_languages | array | Array of strings listing languages supported by the model |
-
-**Error Responses:**
-
-- `401 Unauthorized` - Invalid or missing access token
-- `404 Not Found` - Model not found
-- `500 Internal Server Error` - Server error
-
-**Implementation Notes:**
-
-1. Read model metadata from a centralized model registry or configuration file
-2. Model information should be maintained separately from provider configurations
-3. `usecases` and `strengths` fields are flexible - can be formatted as arrays or strings depending on the model metadata
-4. `description` provides a concise overview of the model for quick understanding
-5. This endpoint provides static metadata about models to help users make informed choices
-6. UI can display this information in tooltips, info panels, or model selection dialogs
-7. Model IDs should match those used in the `supported_models` arrays from the options endpoints
-
-**UI Integration:**
-
-- Display model description prominently in model selection interfaces
-- Show use cases to help users understand what the model is best suited for
-- Highlight strengths to differentiate between similar models
-- Display supported languages to ensure model compatibility with user requirements
-- Can be used to create model comparison views in the UI
-- Handle both string and array formats for usecases and strengths in the UI rendering
 
 ---
 
