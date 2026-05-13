@@ -48,6 +48,8 @@ spec:
               value: http://instruct-predictor:8000
             - name: LLM_MODEL
               value: {{ .Values.instruct.model.name | quote }}
+            - name: LLM_MAX_MODEL_LEN
+              value: {{ .Values.instruct.model.maxModelLen | quote }}
             - name: LLM_MAX_BATCH_SIZE
               value: {{ .Values.instruct.model.maxBatchSize | quote }}
             - name: RERANKER_ENDPOINT

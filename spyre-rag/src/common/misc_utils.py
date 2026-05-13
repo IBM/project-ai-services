@@ -189,7 +189,6 @@ def resolve_model_max_len(endpoint: str, model_name: str, fallback_max_model_len
     if cache_key in _model_max_len_cache:
         return _model_max_len_cache[cache_key]
 
-    logger = get_logger("LLM")
     try:
         resp_json = query_vllm_models(endpoint, api_key)
         for model_info in resp_json.get("data", []):
@@ -197,24 +196,10 @@ def resolve_model_max_len(endpoint: str, model_name: str, fallback_max_model_len
                 max_model_len = model_info.get("max_model_len")
                 if isinstance(max_model_len, int) and max_model_len > 0:
                     _model_max_len_cache[cache_key] = max_model_len
-                    logger.debug(f"Resolved max_model_len={max_model_len} for model '{model_name}' from {endpoint}/v1/models")
                     return max_model_len
-
-                logger.warning(
-                    f"Invalid max_model_len '{max_model_len}' for model '{model_name}' from {endpoint}/v1/models; "
-                    f"falling back to configured value '{fallback_max_model_len}'"
-                )
                 break
-        else:
-            logger.warning(
-                f"Model '{model_name}' not found in {endpoint}/v1/models; "
-                f"falling back to configured value '{fallback_max_model_len}'"
-            )
-    except Exception as e:
-        logger.warning(
-            f"Failed to resolve max_model_len for model '{model_name}' from {endpoint}/v1/models: {e}; "
-            f"falling back to configured value '{fallback_max_model_len}'"
-        )
+    except Exception:
+        pass
 
     _model_max_len_cache[cache_key] = fallback_max_model_len
     return fallback_max_model_len

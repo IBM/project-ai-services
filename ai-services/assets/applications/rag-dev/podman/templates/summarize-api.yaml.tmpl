@@ -32,6 +32,8 @@ spec:
           value: "http://{{ .AppName  }}--vllm-server:8000"
         - name: LLM_MODEL
           value: "{{ .Values.instruct.model.name }}"
+        - name: LLM_MAX_MODEL_LEN
+          value: "{{ .Values.instruct.model.maxModelLen }}"
         - name: LLM_MAX_BATCH_SIZE
           value: "{{ .Values.instruct.model.maxBatchSize}}"
         - name: LOG_LEVEL
