@@ -46,7 +46,7 @@ class LLMConfig(BaseSettings):
 
     api_key: str = Field(
         default="",
-        description="API key for vLLM authentication (optional, read from VLLM_API_KEY env var)",
+        description="API key for vLLM authentication (optional, read from LLM_API_KEY env var)",
     )
 
 
