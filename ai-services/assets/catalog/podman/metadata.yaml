@@ -2,6 +2,6 @@ name: ai-services-catalog
 version: 0.0.1
 description: "Catalog Services for Project AI-Service"
 podTemplateExecutions:
-  - [catalog-secret.yaml.tmpl]
+  - [catalog-secret.yaml.tmpl, catalog-db-secret.yaml.tmpl]
   - [catalog-db.yaml.tmpl]
   - [catalog.yaml.tmpl]

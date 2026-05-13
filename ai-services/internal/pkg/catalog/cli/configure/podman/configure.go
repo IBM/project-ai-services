@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"text/template"
 
@@ -23,6 +24,7 @@ import (
 const (
 	catalogAppName     = "ai-services"
 	catalogAppTemplate = "catalog"
+	kindSecret         = "Secret"
 )
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
@@ -46,17 +48,24 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 		return fmt.Errorf("failed to load catalog templates: %w", err)
 	}
 
-	// Check if catalog pod already exists
-	existingPods, err := helpers.CheckExistingPodsForApplication(rt, catalogAppName)
+	// collect all secret names used as part of deployment
+	catalogSecrets, err := collectSecretNames(tp, tmpls, argParams)
+	if err != nil {
+		s.Fail("failed to collect catalog secret names")
+
+		return fmt.Errorf("failed to collect catalog secret names: %w", err)
+	}
+
+	existingResources, err := helpers.CheckExistingResourcesForApplication(rt, catalogAppName, catalogSecrets)
 	if err != nil {
 		s.Fail("failed to check existing pods")
 
 		return fmt.Errorf("failed to check existing pods: %w", err)
 	}
 
-	if len(existingPods) == len(tmpls) {
+	if len(existingResources) == len(tmpls) {
 		s.Stop("Catalog service already deployed")
-		logger.Infof("Catalog pod already exists: %v\n", existingPods)
+		logger.Infof("Catalog pod already exists: %v\n", existingResources)
 
 		return nil
 	}
@@ -70,7 +79,7 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 	}
 
 	// Execute pod templates
-	if err := executePodLayers(rt, tp, tmpls, appMetadata, values, baseDir, argParams, s); err != nil {
+	if err := executePodLayers(rt, tp, tmpls, appMetadata, values, baseDir, argParams, s, existingResources); err != nil {
 		return err
 	}
 
@@ -136,12 +145,13 @@ func prepareCatalogValues(tp templates.Template, podmanURI, passwordHash string,
 
 // executePodLayers executes all pod template layers.
 func executePodLayers(rt *podman.PodmanClient, tp templates.Template, tmpls map[string]*template.Template,
-	appMetadata *templates.AppMetadata, values map[string]any, baseDir string, argParams map[string]string, s *spinner.Spinner) error {
+	appMetadata *templates.AppMetadata, values map[string]any, baseDir string, argParams map[string]string,
+	s *spinner.Spinner, existingResources []string) error {
 	for i, layer := range appMetadata.PodTemplateExecutions {
 		logger.Infof("\n Executing Layer %d/%d: %v\n", i+1, len(appMetadata.PodTemplateExecutions), layer)
 		logger.Infoln("-------")
 
-		if err := executeLayer(rt, tp, tmpls, layer, appMetadata.Version, values, baseDir, argParams, i); err != nil {
+		if err := executeLayer(rt, tp, tmpls, layer, appMetadata.Version, values, baseDir, argParams, i, existingResources); err != nil {
 			s.Fail("failed to deploy catalog pod")
 
 			return err
@@ -155,7 +165,8 @@ func executePodLayers(rt *podman.PodmanClient, tp templates.Template, tmpls map[
 
 // executeLayer executes a single layer of pod templates.
 func executeLayer(rt *podman.PodmanClient, tp templates.Template, tmpls map[string]*template.Template,
-	layer []string, version string, values map[string]any, baseDir string, argParams map[string]string, layerIndex int) error {
+	layer []string, version string, values map[string]any, baseDir string, argParams map[string]string,
+	layerIndex int, existingResources []string) error {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(layer))
 
@@ -164,7 +175,7 @@ func executeLayer(rt *podman.PodmanClient, tp templates.Template, tmpls map[stri
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
-			if err := executePodTemplate(rt, tp, tmpls, t, catalogAppTemplate, catalogAppName, values, version, nil, baseDir, argParams); err != nil {
+			if err := executePodTemplate(rt, tp, tmpls, t, catalogAppTemplate, catalogAppName, values, version, nil, baseDir, argParams, existingResources); err != nil {
 				errCh <- err
 			}
 		}(podTemplateName)
@@ -190,7 +201,7 @@ func executeLayer(rt *podman.PodmanClient, tp templates.Template, tmpls map[stri
 // executePodTemplate executes a single pod template.
 func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls map[string]*template.Template,
 	podTemplateName, appTemplateName, appName string, values map[string]any, version string,
-	valuesFiles []string, baseDir string, argParams map[string]string) error {
+	valuesFiles []string, baseDir string, argParams map[string]string, existingResources []string) error {
 	logger.Infof("Processing template: %s\n", podTemplateName)
 
 	// Fetch pod spec
@@ -207,6 +218,13 @@ func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 		"BaseDir":         baseDir,
 		"Values":          values,
 		"env":             map[string]map[string]string{},
+	}
+
+	// filter out resources
+	if slices.Contains(existingResources, podSpec.Name) {
+		logger.Infof("%s: Skipping resource deploy as '%s' it already exists", podTemplateName, podSpec.Name)
+
+		return nil
 	}
 
 	// Get the template
@@ -227,6 +245,23 @@ func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 	}
 
 	return nil
+}
+
+func collectSecretNames(tp templates.Template, tmpls map[string]*template.Template, argParams map[string]string) ([]string, error) {
+	secretNames := make([]string, 0)
+
+	for podTemplateName := range tmpls {
+		podSpec, err := tp.LoadPodTemplateWithValues(catalogAppTemplate, podTemplateName, catalogAppName, nil, argParams)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load pod template %s: %w", podTemplateName, err)
+		}
+
+		if podSpec.Kind == kindSecret {
+			secretNames = append(secretNames, podSpec.Name)
+		}
+	}
+
+	return secretNames, nil
 }
 
 // Made with Bob

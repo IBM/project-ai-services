@@ -68,6 +68,8 @@ Examples:
 				}
 			}
 
+			logger.Infof("Using base directory: %s\n", aiServicesDir, logger.VerbosityLevelDebug)
+
 			return configure.Run(configure.ConfigureOptions{
 				AdminPassword: adminPassword,
 				Runtime:       vars.RuntimeFactory.GetRuntimeType(),
@@ -97,8 +99,6 @@ func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
 	if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
 		return nil, err
 	}
-
-	logger.Infof("Using base directory: %s\n", baseDir, logger.VerbosityLevelDebug)
 
 	// Parse params if provided
 	var argParams map[string]string
@@ -135,9 +135,10 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 		"Inline parameters to configure the catalog service.\n\n"+
 			"Format:\n"+
 			"- Comma-separated key=value pairs\n"+
-			"- Example: --params ui.port=8081\n\n"+
+			"- Example: --params ui.port=8081,backend.port=8080\n\n"+
 			"Available parameters:\n"+
-			"- ui.port: Port for the catalog UI (default: random available port)\n",
+			"- ui.port: Port for the catalog UI (default: random available port)\n"+
+			"- backend.port: Port for the catalog backend API (default: random available port)\n",
 	)
 }
 

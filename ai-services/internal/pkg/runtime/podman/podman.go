@@ -15,6 +15,7 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/images"
 	"github.com/containers/podman/v5/pkg/bindings/kube"
 	"github.com/containers/podman/v5/pkg/bindings/pods"
+	"github.com/containers/podman/v5/pkg/bindings/secrets"
 	"github.com/containers/podman/v5/pkg/specgen"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -213,7 +214,7 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 		waitDone := make(chan struct{})
 		go func() {
 			defer close(waitDone)
-			_, err := containers.Wait(pc.Context, containerNameOrID, nil)
+			_, err := containers.Wait(ctx, containerNameOrID, nil)
 			if err == nil {
 				// Container exited, cancel the logs streaming
 				cancelLogs()
@@ -227,8 +228,8 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 		<-waitDone
 	}()
 
-	// Print logs as they arrive
-	pc.printLogsFromChannels(logsCtx, stdoutChan, stderrChan)
+	// passing both contexts so it respects Ctrl+C and container exit
+	pc.printLogsFromChannels(ctx, logsCtx, stdoutChan, stderrChan)
 
 	// Wait for goroutine to complete
 	<-done
@@ -237,10 +238,14 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 }
 
 // printLogsFromChannels reads from stdout and stderr channels and prints logs.
-func (pc *PodmanClient) printLogsFromChannels(ctx context.Context, stdoutChan, stderrChan <-chan string) {
+func (pc *PodmanClient) printLogsFromChannels(parentCtx, logsCtx context.Context, stdoutChan, stderrChan <-chan string) {
 	for {
 		select {
-		case <-ctx.Done():
+		case <-parentCtx.Done():
+			// Parent context cancelled (e.g., Ctrl+C)
+			return
+		case <-logsCtx.Done():
+			// Logs context cancelled (e.g., container exited)
 			return
 		case line, ok := <-stdoutChan:
 			if !ok {
@@ -350,6 +355,25 @@ func (pc *PodmanClient) DeletePVCs(appLabel string) error {
 	logger.Errorf("unsupported method called!")
 
 	return fmt.Errorf("unsupported method")
+}
+
+func (pc *PodmanClient) ListSecrets(filters map[string][]string) ([]string, error) {
+	var listOpts secrets.ListOptions
+	if len(filters) >= 1 {
+		listOpts.Filters = filters
+	}
+
+	secretList, err := secrets.List(pc.Context, &listOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list secrets: %w", err)
+	}
+
+	secretIDorNames := make([]string, 0, len(secretList))
+	for _, sec := range secretList {
+		secretIDorNames = append(secretIDorNames, sec.ID)
+	}
+
+	return secretIDorNames, nil
 }
 
 // Type returns the runtime type for PodmanClient.

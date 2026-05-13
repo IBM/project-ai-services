@@ -22,11 +22,18 @@ class QueryRephrasingConfig(BaseSettings):
         description="Timeout for rephrasing LLM call in seconds"
     )
     
-    max_tokens: int = Field(
+    max_response_tokens: int = Field(
         default=100,
         gt=0,
-        le=512,
-        description="Maximum tokens for rephrased query"
+        le=615,
+        description="Maximum tokens for rephrased query response (used as minimum baseline)"
+    )
+    
+    max_response_tokens_multiplier: float = Field(
+        default=1.2,
+        gt=1.0,
+        le=2.0,
+        description="Multiplier for dynamic max_response_tokens calculation based on input query length"
     )
     
     temperature: float = Field(
