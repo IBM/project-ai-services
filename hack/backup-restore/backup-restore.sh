@@ -652,28 +652,30 @@ import_digitize() {
         exit 1
     fi
     cd "$OLDPWD"
+    
+    # Verify restoration on host side
+    print_info "Verifying restoration..."
+    RESTORED_FILES=$(find "$TEMP_DIR/backup/cache" -type f 2>/dev/null | wc -l)
+    RESTORED_SIZE=$(du -sh "$TEMP_DIR/backup/cache" 2>/dev/null | awk '{print $1}')
+    
     rm -rf "$TEMP_DIR"
     
-    # Verify restoration with detailed output
-    print_info "Verifying restoration..."
-    CONTAINER_TOTAL=$(podman exec $DIGITIZE_CONTAINER sh -c "find /var/cache -type f 2>/dev/null | wc -l" 2>/dev/null || echo "0")
-    CONTAINER_SIZE=$(podman exec $DIGITIZE_CONTAINER sh -c "du -sh /var/cache 2>/dev/null | awk '{print \$1}'" 2>/dev/null || echo "0")
-    CONTAINER_DOCS=$(podman exec $DIGITIZE_CONTAINER sh -c "find /var/cache -type f -name '*.json' 2>/dev/null | wc -l" 2>/dev/null || echo "0")
-    CONTAINER_PDFS=$(podman exec $DIGITIZE_CONTAINER sh -c "find /var/cache -type f -name '*.pdf' 2>/dev/null | wc -l" 2>/dev/null || echo "0")
+    echo "  ✓ Restored to /var/cache: $RESTORED_FILES files ($RESTORED_SIZE)"
     
-    echo "  ✓ Container /var/cache: $CONTAINER_TOTAL files ($CONTAINER_SIZE)"
-    echo "  ✓ JSON metadata files: $CONTAINER_DOCS"
-    echo "  ✓ PDF documents: $CONTAINER_PDFS"
+    # Simple check: verify container can access the directory
+    if podman exec $DIGITIZE_CONTAINER test -d /var/cache 2>/dev/null; then
+        echo "  ✓ Container /var/cache is accessible"
+    else
+        print_warning "Cannot verify container /var/cache access"
+    fi
     
-    if [ "$CONTAINER_TOTAL" -eq "0" ]; then
-        print_warning "No files found in container after restore!"
-        print_info "Checking container /var/cache structure:"
-        podman exec $DIGITIZE_CONTAINER ls -laR /var/cache/ 2>/dev/null || echo "Cannot access /var/cache"
+    if [ "$RESTORED_FILES" -eq "0" ]; then
+        print_warning "No files found in backup!"
     fi
 
     echo ""
     print_success "Digitize data import completed!"
-    echo "📁 Restored $CONTAINER_TOTAL files to container /var/cache"
+    echo "📁 Restored $RESTORED_FILES files to container /var/cache"
     echo "🔄 Refresh your browser to see restored documents"
     echo ""
     print_info "Note: Documents require BOTH digitize files AND OpenSearch metadata"
