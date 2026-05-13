@@ -69,13 +69,12 @@ type ServiceSummary struct {
 
 // Component represents an infrastructure component (vector_store, embedding, llm, etc.).
 type Component struct {
-	ID             string                  `yaml:"id" json:"id"`
-	Name           string                  `yaml:"name" json:"name"`
-	Description    string                  `yaml:"description" json:"description"`
-	Type           string                  `yaml:"type" json:"type"`                     // "component"
-	ComponentType  string                  `yaml:"component_type" json:"component_type"` // "vector_store", "embedding", "llm", etc.
-	ComponentName  string                  `yaml:"component_name" json:"component_name"` // Display name for component type (e.g., "Vector Store", "LLM Model")
-	Specifications *ProviderSpecifications `yaml:"specifications,omitempty" json:"specifications,omitempty"`
+	ID            string `yaml:"id" json:"id"`
+	Name          string `yaml:"name" json:"name"`
+	Description   string `yaml:"description" json:"description"`
+	Type          string `yaml:"type" json:"type"`                     // "component"
+	ComponentType string `yaml:"component_type" json:"component_type"` // "vector_store", "embedding", "llm", etc.
+	ComponentName string `yaml:"component_name" json:"component_name"` // Display name for component type (e.g., "Vector Store", "LLM Model")
 }
 
 // ComponentSummary represents a component for list API responses.
@@ -92,26 +91,13 @@ type RuntimeMetadata struct {
 	Version string `yaml:"version" json:"version"`
 }
 
-// ProviderSpecifications contains provider-specific specifications.
-type ProviderSpecifications struct {
-	SupportedModels []ModelInfo `yaml:"supported_models,omitempty" json:"supported_models,omitempty"`
-}
-
-// ModelInfo represents information about a supported model.
-type ModelInfo struct {
-	ID      string `yaml:"id" json:"id"`
-	Name    string `yaml:"name" json:"name"`
-	Default bool   `yaml:"default,omitempty" json:"default,omitempty"`
-}
-
 // DeployOptionsProvider represents a provider for a component type.
 type DeployOptionsProvider struct {
-	ID             string                  `json:"id"`
-	Name           string                  `json:"name"`
-	Description    string                  `json:"description,omitempty"`
-	Default        bool                    `json:"default,omitempty"`
-	Specifications *ProviderSpecifications `json:"specifications,omitempty"`
-	Schema         string                  `json:"schema,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Default     bool   `json:"default,omitempty"`
+	Schema      string `json:"schema,omitempty"`
 }
 
 // DeployOptionsComponent represents a component type with its providers.

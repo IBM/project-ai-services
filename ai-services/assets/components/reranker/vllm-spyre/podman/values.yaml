@@ -1,4 +1,3 @@
 reranker:
-  # @hidden
   image: registry.redhat.io/rhaiis/vllm-spyre-rhel9:3.3.0
-  model: "BAAI/bge-reranker-v2-m3"
+  model: ""

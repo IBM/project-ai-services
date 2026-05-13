@@ -122,11 +122,6 @@ func (p *CatalogProvider) buildDeployOptionsComponent(componentType string) (*ty
 			provider.Schema = fmt.Sprintf("/api/v1/components/%s/providers/%s/params", componentType, comp.ID)
 		}
 
-		// Add specifications from component metadata
-		if comp.Specifications != nil {
-			provider.Specifications = comp.Specifications
-		}
-
 		providers = append(providers, provider)
 	}
 
