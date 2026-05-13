@@ -84,11 +84,8 @@ id: rag
 name: "Digital Assistant"
 services:
   - id: chat
-    version: ">=1.0.0"
   - id: digitize
-    version: ">=1.0.0"
   - id: summarize
-    version: ">=1.0.0"
     optional: true
 ```
 
@@ -106,27 +103,30 @@ An **independent, deployable component** with its own lifecycle.
 id: chat
 name: "Question and Answer"
 dependencies:
-  - id: opensearch
-    version: ">=1.0.0"
-  - id: instruct
-    version: ">=1.0.0"
+  - id: vector_store
+  - id: llm
   - id: embedding
-    version: ">=1.0.0"
   - id: reranker
-    version: ">=1.0.0"
 ```
 
-#### 3. Service Types
+#### 3. Component System
 
-**Deployable Services** (User-Facing):
-- Can be deployed individually
-- Have their own UI/API endpoints
-- Examples: chat, digitize, summarize
+**Component Types** (Abstract):
+- Define categories of infrastructure (e.g., `vector_store`, `llm`)
+- Services depend on component types, not specific providers
+- Allow runtime selection of implementations
 
-**Infrastructure Services** (Dependencies):
-- Deployed automatically when needed
-- Shared across multiple services
-- Examples: opensearch, instruct, embedding, reranker
+**Component Providers** (Concrete):
+- Specific implementations of component types
+- Examples:
+  - `vector_store` → `opensearch`
+  - `llm` → `vllm-cpu`, `vllm-spyre`
+  - `embedding` → `vllm-cpu`
+  - `reranker` → `vllm-cpu`, `vllm-spyre`
+
+**Service Types:**
+- **Deployable Services** (User-Facing): chat, digitize, summarize
+- **Component Providers** (Infrastructure): Deployed automatically based on dependencies
 
 ---
 
@@ -136,16 +136,17 @@ dependencies:
 
 ```
 assets/
-├── architectures/              # NEW: Architecture definitions
+├── architectures/              # Architecture definitions
 │   └── rag/
 │       └── metadata.yaml       # Lists services, no templates
 │
-├── services/                   # NEW: Reusable service definitions
+├── services/                   # Reusable service definitions
 │   ├── chat/                   # Deployable service
 │   │   ├── metadata.yaml       # Service info + dependencies
 │   │   ├── podman/
 │   │   │   ├── metadata.yaml   # Runtime config
 │   │   │   ├── values.yaml     # Default values
+│   │   │   ├── values.schema.json
 │   │   │   ├── steps/          # Post-deployment guidance
 │   │   │   │   ├── info.md
 │   │   │   │   ├── next.md
@@ -156,11 +157,27 @@ assets/
 │   │       └── ...
 │   │
 │   ├── digitize/               # Deployable service
-│   ├── summarize/              # Deployable service
-│   ├── opensearch/             # Infrastructure service
-│   ├── instruct/               # Infrastructure service (AI model)
-│   ├── embedding/              # Infrastructure service (AI model)
-│   └── reranker/               # Infrastructure service (AI model)
+│   └── summarize/              # Deployable service
+│
+├── components/                 # Component providers (infrastructure)
+│   ├── vector_db/              # Component type
+│   │   └── opensearch/         # Provider implementation
+│   │       ├── metadata.yaml
+│   │       └── podman/
+│   │           ├── metadata.yaml
+│   │           ├── values.yaml
+│   │           └── templates/
+│   │
+│   ├── llm/                    # Component type (instruct models)
+│   │   ├── vllm-cpu/           # CPU provider
+│   │   └── vllm-spyre/         # Spyre accelerator provider
+│   │
+│   ├── embedding/              # Component type (embedding models)
+│   │   └── vllm-cpu/
+│   │
+│   └── reranker/               # Component type (reranker models)
+│       ├── vllm-cpu/
+│       └── vllm-spyre/
 │
 └── applications/               # LEGACY: Existing monolithic apps
     └── rag/                    # Kept for backward compatibility
@@ -179,17 +196,13 @@ version: "1.0.0"
 type: architecture
 
 certified_by: "IBM"
-supported_runtimes:
+runtimes:
   - podman
-  - openshift
 
 services:
   - id: chat
-    version: ">=1.0.0"
   - id: digitize
-    version: ">=1.0.0"
   - id: summarize
-    version: ">=1.0.0"
     optional: true
 ```
 
@@ -199,8 +212,7 @@ services:
 # assets/services/chat/metadata.yaml
 id: chat
 name: "Question and Answer"
-description: "Answer questions using RAG"
-version: "1.0.0"
+description: "Answer questions in natural language by sourcing general & domain-specific knowledge"
 type: service
 
 certified_by: "IBM"
@@ -209,15 +221,16 @@ architectures:
   - rag
 
 dependencies:
-  - id: opensearch
-    version: ">=1.0.0"
-  - id: instruct
-    version: ">=1.0.0"
-  - id: embedding
-    version: ">=1.0.0"
-  - id: reranker
-    version: ">=1.0.0"
+  - id: vector_store      # Component type (not specific provider)
+  - id: embedding         # Component type
+  - id: llm              # Component type
+  - id: reranker         # Component type
 ```
+
+**Key Change:** Dependencies reference **component types** (e.g., `vector_store`, `llm`) rather than specific implementations (e.g., `opensearch`, `vllm-cpu`). This allows:
+- Runtime selection of providers (CPU vs Spyre)
+- Flexibility in choosing implementations
+- Decoupling services from specific infrastructure
 
 #### Runtime Metadata
 
@@ -229,6 +242,32 @@ runtime: podman
 
 # can have runtime specific details in future eg: resource requirements.
 ```
+
+#### Component Metadata
+
+```yaml
+# assets/components/vector_db/opensearch/metadata.yaml
+type: component
+id: opensearch
+name: "OpenSearch"
+description: "Distributed search and analytics engine for vector storage"
+component_type: vector_store
+```
+
+```yaml
+# assets/components/llm/vllm-cpu/metadata.yaml
+type: component
+id: vllm-cpu
+name: "vLLM CPU Instruct"
+description: "Deploy instruct models on vLLM inference engine (CPU-only)"
+component_type: llm
+```
+
+**Component Types:**
+- `vector_store`: Vector database providers (opensearch)
+- `llm`: Large language model providers (vllm-cpu, vllm-spyre)
+- `embedding`: Embedding model providers (vllm-cpu)
+- `reranker`: Reranker model providers (vllm-cpu, vllm-spyre)
 
 ---
 
@@ -265,15 +304,17 @@ ai-services application create my-chat --template chat
 **What happens:**
 1. System detects `chat` is a service
 2. Loads service metadata
-3. Resolves dependencies (opensearch, instruct, embedding, reranker)
-4. Calculates deployment order
-5. Deploys dependencies first, then chat
-6. Prints next steps
+3. Resolves component type dependencies (vector_store, llm, embedding, reranker)
+4. Selects appropriate providers based on runtime/configuration
+5. Calculates deployment order
+6. Deploys component providers first, then chat
+7. Prints next steps
 
 **Result:**
 - Chat service deployed
-- Only required dependencies deployed (not digitize or summarize)
-- Efficient resource usage
+- Only required component providers deployed (e.g., opensearch, vllm-cpu)
+- Not digitize or summarize (efficient resource usage)
+- Provider selection based on available hardware (CPU vs Spyre)
 
 ### Scenario 3: Legacy Compatibility
 
@@ -324,13 +365,18 @@ URL: production-rag--opensearch:9200
 env:
   - name: OPENSEARCH_URL
     value: "{{ .AppName }}--opensearch:9200"
-  - name: INSTRUCT_URL
-    value: "{{ .AppName }}--instruct:8000"
+  - name: LLM_URL
+    value: "{{ .AppName }}--vllm-cpu:8000"  # or vllm-spyre based on selection
   - name: EMBEDDING_URL
-    value: "{{ .AppName }}--embedding:8000"
+    value: "{{ .AppName }}--vllm-cpu-embedding:8000"
   - name: RERANKER_URL
-    value: "{{ .AppName }}--reranker:8000"
+    value: "{{ .AppName }}--vllm-cpu-reranker:8000"
 ```
+
+**Note:** The actual provider ID (e.g., `vllm-cpu`, `vllm-spyre`) is determined at deployment time based on:
+- Available hardware (CPU vs Spyre accelerators)
+- User configuration
+- Runtime constraints
 
 ---
 
@@ -348,11 +394,17 @@ func LoadArchitecture(id string) (*Architecture, error)
 // Load service metadata
 func LoadService(id string) (*Service, error)
 
+// Load component metadata
+func LoadComponent(componentType, providerID string) (*Component, error)
+
 // Load runtime metadata
 func LoadServiceRuntimeMetadata(serviceID, runtime string) (*RuntimeMetadata, error)
 
-// Resolve dependencies recursively
+// Resolve dependencies recursively (resolves component types to providers)
 func ResolveServiceDependencies(serviceIDs ...string) ([]string, error)
+
+// Select component provider based on runtime constraints
+func SelectComponentProvider(componentType, runtime string) (string, error)
 
 // Calculate deployment order (topological sort)
 func GetDeploymentOrder(serviceIDs []string) ([][]string, error)
@@ -375,11 +427,12 @@ func ValidateDependencies(serviceIDs []string) error
 
 3. Load metadata
    ├─> Architecture: Load architecture + all services
-   ├─> Service: Load service + dependencies
+   ├─> Service: Load service + component dependencies
    └─> Legacy: Load application metadata
 
 4. Resolve dependencies
-   ├─> Build dependency graph
+   ├─> Build dependency graph (services → component types)
+   ├─> Select component providers based on runtime
    ├─> Detect circular dependencies
    └─> Calculate deployment order (layers)
 
@@ -426,17 +479,19 @@ func ValidateDependencies(serviceIDs []string) error
 
 **Example:**
 ```
-Services: chat, opensearch, instruct, embedding, reranker
+Services: chat
+Component dependencies: vector_store, llm, embedding, reranker
+Selected providers: opensearch, vllm-cpu (llm), vllm-cpu (embedding), vllm-cpu (reranker)
 
 Dependencies:
-- chat → opensearch, instruct, embedding, reranker
-- instruct → (no dependencies)
-- embedding → (no dependencies)
-- reranker → (no dependencies)
+- chat → opensearch, vllm-cpu (llm), vllm-cpu (embedding), vllm-cpu (reranker)
 - opensearch → (no dependencies)
+- vllm-cpu (llm) → (no dependencies)
+- vllm-cpu (embedding) → (no dependencies)
+- vllm-cpu (reranker) → (no dependencies)
 
 Result:
-Layer 1: [opensearch, instruct, embedding, reranker]
+Layer 1: [opensearch, vllm-cpu-llm, vllm-cpu-embedding, vllm-cpu-reranker]
 Layer 2: [chat]
 ```
 

@@ -51,7 +51,8 @@ This directory contains the design proposal for transforming the AI Services pla
 |---------|-------------|---------|
 | **Architecture** | Logical grouping of services | RAG = chat + digitize + summarize |
 | **Deployable Service** | Independent deployable component | chat, digitize, summarize |
-| **Dependency Service** | Service required by another service | chat depends on opensearch, embedding, instruct, reranker |
+| **Component Type** | Abstract category of infrastructure | vector_store, llm, embedding, reranker |
+| **Component Provider** | Concrete implementation of component type | opensearch (vector_store), vllm-cpu (llm) |
 | **Auto-Detection** | System determines deployment mode | Checks architectures/ → services/ → applications/ |
 
 ### Deployment Examples

@@ -4,9 +4,9 @@
 
 ## Overview
 
-This document illustrates the **proposed** service dependencies for the new architecture-service system. It shows how we plan to decompose the current monolithic RAG application into independent, reusable services.
+This document illustrates the **proposed** service dependencies for the architecture-service system. It shows how the RAG application uses a component-based architecture with services depending on abstract component types rather than specific implementations.
 
-**Key Change:** Breaking down the monolithic vllm-server pod into separate instruct, embedding, and reranker services for independent scaling and deployment.
+**Key Architecture:** Services depend on **component types** (e.g., `vector_store`, `llm`), and the system selects appropriate **component providers** (e.g., `opensearch`, `vllm-cpu`) at deployment time based on runtime constraints.
 
 ---
 
@@ -27,24 +27,27 @@ This document illustrates the **proposed** service dependencies for the new arch
 **Problems:**
 - Cannot reuse individual models across architectures
 
-### Proposed Service Architecture (Modular)
-
-**Proposed Services:**
+### Service Architecture (Component-Based)
 
 **User-Facing Services:**
 1. **chat** - Question and answer service
 2. **digitize** - Document digitize service
 3. **summarize** - Document summarize service (Optional)
 
-**Infrastructure Services:**
-1. **instruct** - Language model service (separate pod)
-2. **embedding** - Embedding model service (separate pod)
-3. **reranker** - Reranking model service (separate pod)
-4. **opensearch** - Vector database service
+**Component Types** (Abstract Dependencies):
+1. **vector_store** - Vector database interface
+2. **llm** - Large language model interface
+3. **embedding** - Embedding model interface
+4. **reranker** - Reranker model interface
+
+**Component Providers** (Concrete Implementations):
+1. **opensearch** - Implements `vector_store`
+2. **vllm-cpu** - Implements `llm`, `embedding`, `reranker` (CPU)
+3. **vllm-spyre** - Implements `llm`, `reranker` (Spyre accelerator)
 
 ---
 
-## Proposed Dependency Graph
+## Dependency Graph
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -60,27 +63,44 @@ This document illustrates the **proposed** service dependencies for the new arch
   │(Required)│      │  (Required)  │  │  (Optional)  │
   └──────────┘      └──────────────┘  └──────────────┘
         │                  │                   │
+        │ Depends on       │ Depends on        │ Depends on
+        │ Component Types  │ Component Types   │ Component Type
         │                  │                   │
    ┌────┴─────┬────────────┴───────────┐       │
    │          │           │            │       │
    ▼          ▼           ▼            ▼       ▼
 ┌──────────┐ ┌────────┐ ┌──────────┐ ┌──────────┐
-│Embedding │ │Reranker│ │OpenSearch│ │ Instruct │
-│(Service) │ │(Service│ │(Service) │ │ (Service)│
+│embedding │ │reranker│ │vector_   │ │   llm    │
+│  (type)  │ │ (type) │ │store     │ │  (type)  │
+│          │ │        │ │ (type)   │ │          │
+└────┬─────┘ └───┬────┘ └────┬─────┘ └────┬─────┘
+     │           │           │            │
+     │ Resolved  │ Resolved  │ Resolved   │ Resolved
+     │ to        │ to        │ to         │ to
+     ▼           ▼           ▼            ▼
+┌──────────┐ ┌────────┐ ┌──────────┐ ┌──────────┐
+│vllm-cpu  │ │vllm-cpu│ │opensearch│ │ vllm-cpu │
+│(provider)│ │(provider│ │(provider)│ │(provider)│
 └──────────┘ └────────┘ └──────────┘ └──────────┘
 ```
 
 ---
 
-## Proposed Service Dependencies Detail
+## Service Dependencies Detail
 
 ### 1. Chat Service
 
-**Dependencies:**
-- `instruct` (required) - For language model inference
+**Component Type Dependencies:**
+- `vector_store` (required) - For vector storage
+- `llm` (required) - For language model inference
 - `embedding` (required) - For query embeddings
 - `reranker` (required) - For result reranking
-- `opensearch` (required) - For vector storage
+
+**Resolved Providers (CPU runtime):**
+- `opensearch` (vector_store provider)
+- `vllm-cpu` (llm provider)
+- `vllm-cpu` (embedding provider)
+- `vllm-cpu` (reranker provider)
 
 **Purpose:** Question and answer using RAG
 
@@ -88,10 +108,15 @@ This document illustrates the **proposed** service dependencies for the new arch
 
 ### 2. Digitize Service
 
-**Dependencies:**
-- `instruct` (required) - For language model inference
+**Component Type Dependencies:**
+- `vector_store` (required) - For document storage
+- `llm` (required) - For language model inference
 - `embedding` (required) - For document embeddings
-- `opensearch` (required) - For document storage
+
+**Resolved Providers (CPU runtime):**
+- `opensearch` (vector_store provider)
+- `vllm-cpu` (llm provider)
+- `vllm-cpu` (embedding provider)
 
 **Purpose:** Transform documents into searchable text
 
@@ -99,68 +124,88 @@ This document illustrates the **proposed** service dependencies for the new arch
 
 ### 3. Summarize Service (Optional)
 
-**Dependencies:**
-- `instruct` (required) - For language model inference
+**Component Type Dependencies:**
+- `llm` (required) - For language model inference
+
+**Resolved Providers (CPU runtime):**
+- `vllm-cpu` (llm provider)
 
 **Purpose:** Consolidate text into brief summaries
 
 ---
 
-### 4. Instruct Service (Infrastructure)
+## Component Providers Detail
 
-**Type:** AI model inference service
+### Vector Store Providers
 
-**Model:** granite-3.3-8b-instruct
-
-**Purpose:** Language model for instruction following
-
----
-
-### 5. Embedding Service (Infrastructure)
-
-**Type:** AI model inference service
-
-**Model:** granite-embedding-278m-multilingual
-
-**Purpose:** Generate text embeddings for documents and queries
+#### OpenSearch
+- **Component Type:** `vector_store`
+- **Purpose:** Distributed search and analytics engine for vector storage
+- **Runtimes:** Podman, OpenShift
 
 ---
 
-### 6. Reranker Service (Infrastructure)
+### LLM Providers
 
-**Type:** AI model inference service
+#### vLLM CPU
+- **Component Type:** `llm`
+- **Purpose:** Deploy instruct models on vLLM inference engine (CPU-only)
+- **Model:** granite-3.3-8b-instruct
+- **Runtimes:** Podman
 
-**Model:** bge-reranker-v2-m3
-
-**Purpose:** Rerank search results for better relevance
-
----
-
-### 7. OpenSearch Service (Infrastructure)
-
-**Type:** Vector database
-
-**Purpose:** Store and retrieve document vectors
+#### vLLM Spyre
+- **Component Type:** `llm`
+- **Purpose:** Deploy instruct models on vLLM with Spyre acceleration
+- **Model:** granite-3.3-8b-instruct
+- **Runtimes:** OpenShift (with Spyre hardware)
 
 ---
 
-## Proposed Deployment Scenarios
+### Embedding Providers
 
-### Scenario 1: Full RAG Architecture
+#### vLLM CPU Embedding
+- **Component Type:** `embedding`
+- **Purpose:** Generate text embeddings for documents and queries
+- **Model:** granite-embedding-278m-multilingual
+- **Runtimes:** Podman
+
+---
+
+### Reranker Providers
+
+#### vLLM CPU Reranker
+- **Component Type:** `reranker`
+- **Purpose:** Rerank search results for better relevance
+- **Model:** bge-reranker-v2-m3
+- **Runtimes:** Podman
+
+#### vLLM Spyre Reranker
+- **Component Type:** `reranker`
+- **Purpose:** Rerank with Spyre acceleration
+- **Model:** bge-reranker-v2-m3
+- **Runtimes:** OpenShift (with Spyre hardware)
+
+---
+
+## Deployment Scenarios
+
+### Scenario 1: Full RAG Architecture (CPU Runtime)
 
 **User Command:**
 ```bash
 ai-services application create my-rag --template rag
 ```
 
+**Component Providers Deployed (Spyre available):**
+1. **opensearch** (vector_store provider)
+2. **vllm-spyre** (llm provider)
+3. **vllm-cpu** (embedding provider)
+4. **vllm-spyre** (reranker provider)
+
 **Services Deployed:**
-1. **instruct** (dependency)
-2. **embedding** (dependency)
-3. **reranker** (dependency)
-4. **opensearch** (dependency)
 5. **chat** (required service)
 6. **digitize** (required service)
-6. **summarize** (optional service, enabled by default)
+7. **summarize** (optional service, enabled by default)
 
 ---
 
@@ -173,11 +218,13 @@ This can be achieved by using `--ignore-service` flag. This will deploy all serv
 ai-services application create my-rag --template rag --ignore-service=summarize
 ```
 
+**Component Providers Deployed:**
+1. **opensearch** (vector_store provider)
+2. **vllm-cpu** (llm provider)
+3. **vllm-cpu** (embedding provider)
+4. **vllm-cpu** (reranker provider)
+
 **Services Deployed:**
-1. **instruct** (dependency, shared)
-2. **embedding** (dependency)
-3. **reranker** (dependency)
-4. **opensearch** (dependency)
 5. **chat** (required service)
 6. **digitize** (required service)
 
@@ -190,14 +237,16 @@ ai-services application create my-rag --template rag --ignore-service=summarize
 ai-services application create my-chat --template chat
 ```
 
+**Component Providers Deployed:**
+1. **opensearch** (vector_store provider)
+2. **vllm-cpu** (llm provider)
+3. **vllm-cpu** (embedding provider)
+4. **vllm-cpu** (reranker provider)
+
 **Services Deployed:**
-1. **instruct** (dependency)
-2. **embedding** (dependency)
-3. **reranker** (dependency)
-4. **opensearch** (dependency)
 5. **chat** (service)
 
-**Note:** Only deploys what chat needs (no digitize or summarize)
+**Note:** Only deploys component providers that chat needs (no digitize or summarize)
 
 ---
 
@@ -208,13 +257,15 @@ ai-services application create my-chat --template chat
 ai-services application create my-digitize --template digitize
 ```
 
+**Component Providers Deployed:**
+1. **opensearch** (vector_store provider)
+2. **vllm-cpu** (llm provider)
+3. **vllm-cpu** (embedding provider)
+
 **Services Deployed:**
-1. **instruct** (dependency)
-2. **embedding** (dependency)
-3. **opensearch** (dependency)
 4. **digitize** (service)
 
-**Note:** No reranker deployed (digitize doesn't need it)
+**Note:** No reranker provider deployed (digitize doesn't need it)
 
 ---
 
@@ -225,59 +276,76 @@ ai-services application create my-digitize --template digitize
 ai-services application create my-summarize --template summarize
 ```
 
+**Component Providers Deployed:**
+1. **vllm-cpu** (llm provider)
+
 **Services Deployed:**
-1. **instruct** (dependency)
 2. **summarize** (service)
 
-**Note:** Minimal deployment - only instruct model needed
+**Note:** Minimal deployment - only llm provider needed
 
 ---
 
-## Proposed Dependency Resolution Logic
+## Dependency Resolution Logic
 
 ### 1. Identify Required Services
 ```
 RAG Architecture requires:
 - chat (user-facing)
 - digitize (user-facing)
+- summarize (optional, user-facing)
 ```
 
-### 2. Resolve Dependencies Recursively
+### 2. Resolve Component Type Dependencies
 ```
-chat requires:
-  - instruct
+chat requires component types:
+  - vector_store
+  - llm
   - embedding
   - reranker
-  - opensearch
 
-digitize requires:
-  - instruct (already in list)
+digitize requires component types:
+  - vector_store (already in list)
+  - llm (already in list)
   - embedding (already in list)
-  - opensearch (already in list)
+
+summarize requires component types:
+  - llm (already in list)
 ```
 
-### 3. Deduplicate Dependencies
+### 3. Select Component Providers
+```
+Based on runtime (Podman/CPU):
+- vector_store → opensearch
+- llm → vllm-cpu
+- embedding → vllm-cpu
+- reranker → vllm-cpu
+```
+
+### 4. Deduplicate Providers
 ```
 Final deployment list:
-1. instruct (dependency, shared)
-2. embedding (dependency, shared)
-3. reranker (dependency)
-4. opensearch (dependency, shared)
+1. opensearch (vector_store provider)
+2. vllm-cpu (llm provider)
+3. vllm-cpu (embedding provider)
+4. vllm-cpu (reranker provider)
 5. chat (user-facing)
 6. digitize (user-facing)
+7. summarize (user-facing, optional)
 ```
 
-### 4. Deploy in Dependency Order
+### 5. Deploy in Dependency Order
 ```
-Phase 1: Deploy infrastructure services
-  - instruct
-  - embedding
-  - reranker
+Phase 1: Deploy component providers
   - opensearch
+  - vllm-cpu (llm)
+  - vllm-cpu (embedding)
+  - vllm-cpu (reranker)
 
 Phase 2: Deploy user-facing services
   - chat
   - digitize
+  - summarize
 ```
 
 ---
@@ -309,7 +377,7 @@ User service endpoints:
 
 ---
 
-## Proposed Metadata Schemas
+## Metadata Schemas
 
 ### Architecture Metadata
 
@@ -317,9 +385,13 @@ User service endpoints:
 # assets/architectures/rag/metadata.yaml
 id: rag
 name: "Digital Assistant"
-description: "RAG architecture with Q&A, digitize, and summarize"
+description: "Enable digital assistants using RAG"
 version: "1.0.0"
 type: architecture
+
+certified_by: "IBM"
+runtimes:
+  - podman
 
 services:
   - id: chat
@@ -330,7 +402,7 @@ services:
   
   - id: summarize
     version: ">=1.0.0"
-    optional: true  # Optional service
+    optional: true
 ```
 
 ### Service Metadata Examples
@@ -340,118 +412,120 @@ services:
 # assets/services/chat/metadata.yaml
 id: chat
 name: "Question and Answer"
-description: "Answer questions in natural language by sourcing general & domain-specific knowledge"
-version: "1.0.0"
+description: "Answer questions in natural language"
 type: service
 
+certified_by: "IBM"
+
+architectures:
+  - rag
+
 dependencies:
-  - id: opensearch
-    version: ">=1.0.0"
-  - id: embedding
-    version: ">=1.0.0"
-  - id: instruct
-    version: ">=1.0.0"
-  - id: reranker
-    version: ">=1.0.0"
+  - id: vector_store    # Component type
+  - id: embedding       # Component type
+  - id: llm            # Component type
+  - id: reranker       # Component type
 ```
 
 #### Digitize Service
 ```yaml
 # assets/services/digitize/metadata.yaml
 id: digitize
-name: "Document Digitization"
-description: "Transform documents into searchable text"
-version: "1.0.0"
+name: "Digitize Documents"
+description: "Transforms documents into texts"
 type: service
 
+certified_by: "IBM"
+
+architectures:
+  - rag
+
 dependencies:
-  - id: opensearch
-    version: ">=1.0.0"
-  - id: embedding
-    version: ">=1.0.0"
-  - id: instruct
-    version: ">=1.0.0"
+  - id: vector_store    # Component type
+  - id: embedding       # Component type
+  - id: llm            # Component type
 ```
 
 #### Summarize Service
 ```yaml
 # assets/services/summarize/metadata.yaml
 id: summarize
-name: "Document Summarization"
+name: "Summarize Documents"
 description: "Consolidate text into brief summaries"
-version: "1.0.0"
 type: service
+
+certified_by: "IBM"
+
+architectures:
+  - rag
 
 dependencies:
-  - id: instruct
-    version: ">=1.0.0"
+  - id: llm            # Component type
 ```
 
-#### Instruct Service (Infrastructure)
+### Component Provider Metadata Examples
+
+#### OpenSearch (Vector Store Provider)
 ```yaml
-# assets/services/instruct/metadata.yaml
-id: instruct
-name: "Instruct Model"
-description: "Language model for instruction following"
-version: "1.0.0"
-type: service
-
-dependency_only: true
-```
-
-#### Embedding Service (Infrastructure)
-```yaml
-# assets/services/embedding/metadata.yaml
-id: embedding
-name: "Embedding Model"
-description: "Text embedding generation"
-version: "1.0.0"
-type: service
-
-dependency_only: true
-```
-
-#### Reranker Service (Infrastructure)
-```yaml
-# assets/services/reranker/metadata.yaml
-id: reranker
-name: "Reranker Model"
-description: "Result reranking for better relevance"
-version: "1.0.0"
-type: service
-
-dependency_only: true
-```
-
-#### OpenSearch Service (Infrastructure)
-```yaml
-# assets/services/opensearch/metadata.yaml
+# assets/components/vector_db/opensearch/metadata.yaml
+type: component
 id: opensearch
 name: "OpenSearch"
-description: "Vector database for document storage"
-version: "1.0.0"
-type: service
+description: "Distributed search and analytics engine for vector storage"
+component_type: vector_store
+```
 
-dependency_only: true
+#### vLLM CPU (LLM Provider)
+```yaml
+# assets/components/llm/vllm-cpu/metadata.yaml
+type: component
+id: vllm-cpu
+name: "vLLM CPU Instruct"
+description: "Deploy instruct models on vLLM inference engine (CPU-only)"
+component_type: llm
+```
+
+#### vLLM CPU Embedding (Embedding Provider)
+```yaml
+# assets/components/embedding/vllm-cpu/metadata.yaml
+type: component
+id: vllm-cpu
+name: "vLLM CPU Embedding"
+description: "Generate text embeddings"
+component_type: embedding
+```
+
+#### vLLM CPU Reranker (Reranker Provider)
+```yaml
+# assets/components/reranker/vllm-cpu/metadata.yaml
+type: component
+id: vllm-cpu
+name: "vLLM CPU Reranker"
+description: "Rerank search results"
+component_type: reranker
 ```
 
 ---
 
 ## Summary
 
-**Proposed RAG Architecture:**
+**RAG Architecture:**
 - **Required Services:** chat, digitize
 - **Optional Services:** summarize
-- **Infrastructure Services:** instruct, embedding, reranker, opensearch (auto-deployed)
+- **Component Types:** vector_store, llm, embedding, reranker
+- **Component Providers (CPU):** opensearch, vllm-cpu (auto-deployed)
 
-**Proposed Dependency Relationships:**
-- chat → opensearch, embedding, instruct, reranker
-- digitize → opensearch, embedding, instruct
-- summarize → instruct
+**Dependency Relationships:**
+- chat → vector_store, llm, embedding, reranker (component types)
+- digitize → vector_store, llm, embedding (component types)
+- summarize → llm (component type)
 
-**Proposed Deployment Strategy:**
-1. Resolve all dependencies recursively
-2. Deduplicate shared infrastructure services
-3. Deploy infrastructure services first (opensearch, embedding, instruct, reranker)
-4. Deploy user-facing services (chat, digitize, summarize)
+**Deployment Strategy:**
+1. Resolve component type dependencies recursively
+2. Select appropriate component providers based on runtime
+3. Deduplicate shared component providers
+4. Deploy component providers first (opensearch, vllm-cpu instances)
+5. Deploy user-facing services (chat, digitize, summarize)
+
+**Key Benefit:** Services depend on abstract component types, allowing runtime selection of providers (CPU vs Spyre) without changing service definitions.
 
