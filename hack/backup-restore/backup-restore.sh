@@ -347,36 +347,31 @@ export_digitize() {
     TEMP_DIR=$(mktemp -d)
     cd "$TEMP_DIR"
 
-    mkdir -p backup/cache
+    mkdir -p backup
 
     # Backup entire /var/cache from CONTAINER
     print_info "Backing up /var/cache from container..."
     
-    # Read-only operation: tar the entire /var/cache directory from container
-    podman exec $DIGITIZE_CONTAINER tar -czf /tmp/container_cache.tar.gz -C /var cache 2>/dev/null || true
-    podman cp $DIGITIZE_CONTAINER:/tmp/container_cache.tar.gz ./container_cache.tar.gz 2>/dev/null || true
+    # Use podman cp to copy directory directly (no tar needed in container)
+    # Copy /var/cache to backup/cache (podman cp creates the target directory)
+    podman cp $DIGITIZE_CONTAINER:/var/cache ./backup/cache
     
-    # Extract backup
-    if [ -f "./container_cache.tar.gz" ]; then
-        tar -xzf ./container_cache.tar.gz -C backup/ 2>/dev/null || true
-        rm -f ./container_cache.tar.gz
-        # Cleanup temp file from container
-        podman exec $DIGITIZE_CONTAINER rm -f /tmp/container_cache.tar.gz 2>/dev/null || true
-        
-        TOTAL_FILES=$(find backup/cache -type f 2>/dev/null | wc -l)
-        TOTAL_SIZE=$(du -sh backup/cache 2>/dev/null | awk '{print $1}')
-        echo "  ✓ Backed up $TOTAL_FILES files ($TOTAL_SIZE) from container"
-    else
-        print_error "Failed to create backup from container"
+    if [ $? -ne 0 ]; then
+        print_error "Failed to copy files from container"
         cd "$OLDPWD"
         rm -rf "$TEMP_DIR"
         exit 1
     fi
-
+    
+    # Verify backup has files
     TOTAL_FILES=$(find backup/cache -type f 2>/dev/null | wc -l)
     TOTAL_SIZE=$(du -sh backup/cache 2>/dev/null | awk '{print $1}')
+    
+    if [ "$TOTAL_FILES" -eq "0" ]; then
+        print_warning "No files found in container /var/cache"
+    fi
 
-    echo "  ✓ Final backup: $TOTAL_FILES files ($TOTAL_SIZE)"
+    echo "  ✓ Backed up $TOTAL_FILES files ($TOTAL_SIZE) from container"
 
     tar -czf "$OLDPWD/$OUTPUT_FILE" backup/
     cd "$OLDPWD"
@@ -641,49 +636,21 @@ import_digitize() {
     fi
     
     # RESTORE STRATEGY (mirrors export):
-    # 1. Create tar from extracted backup/cache directory
-    # 2. Copy tar to container
-    # 3. Extract in container to restore /var/cache
+    # Use podman cp to copy directory directly (no tar needed in container)
     
-    print_info "Creating archive from backup..."
+    print_info "Restoring files to container..."
     cd "$TEMP_DIR"
-    tar -czf container_cache.tar.gz -C backup cache
     
-    if [ ! -f "container_cache.tar.gz" ]; then
-        print_error "Failed to create tar archive from backup"
-        cd "$OLDPWD"
-        rm -rf "$TEMP_DIR"
-        exit 1
-    fi
-    
-    # Copy archive to container
-    print_info "Copying archive to container..."
-    podman cp container_cache.tar.gz $DIGITIZE_CONTAINER:/tmp/
+    # Copy the cache directory directly to container's /var/cache
+    # podman cp will overwrite existing files
+    podman cp backup/cache/. $DIGITIZE_CONTAINER:/var/cache/
     
     if [ $? -ne 0 ]; then
-        print_error "Failed to copy archive to container"
+        print_error "Failed to copy files to container"
         cd "$OLDPWD"
         rm -rf "$TEMP_DIR"
         exit 1
     fi
-    
-    # Extract archive in container (restores /var/cache)
-    # Use --overwrite to handle existing files, --warning=no-timestamp to suppress permission warnings
-    print_info "Extracting archive in container..."
-    podman exec $DIGITIZE_CONTAINER tar -xzf /tmp/container_cache.tar.gz -C /var --overwrite --warning=no-timestamp 2>&1 | grep -v "Cannot utime" | grep -v "Cannot open: File exists" || true
-    
-    # Check if extraction succeeded (tar exit code 0 or 1 for warnings is OK)
-    EXTRACT_STATUS=${PIPESTATUS[0]}
-    if [ $EXTRACT_STATUS -ne 0 ] && [ $EXTRACT_STATUS -ne 1 ]; then
-        print_error "Failed to extract archive in container (exit code: $EXTRACT_STATUS)"
-        podman exec $DIGITIZE_CONTAINER rm -f /tmp/container_cache.tar.gz 2>/dev/null || true
-        cd "$OLDPWD"
-        rm -rf "$TEMP_DIR"
-        exit 1
-    fi
-    
-    # Cleanup
-    podman exec $DIGITIZE_CONTAINER rm -f /tmp/container_cache.tar.gz 2>/dev/null || true
     cd "$OLDPWD"
     rm -rf "$TEMP_DIR"
     
