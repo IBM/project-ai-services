@@ -1,0 +1,200 @@
+{
+  "useCases": [
+    {
+      "id": "1",
+      "title": "Agriculture assistant",
+      "description": "Provides farmers with accurate, validated crop‑growing guidance tailored to their region and preferred language.",
+      "creator": "IBM",
+      "domain": "Agriculture",
+      "architectures": ["Digital assistant"],
+      "assets": ["Digital assistant"],
+      "demo": "https://mediacenter.ibm.com/media/IBM+Spyre+for+Power%3A+Turn-key+AI/1_etcvyc6u"
+    },
+    {
+      "id": "2",
+      "title": "Analyst assistant",
+      "description": "Enables finance teams to investigate fraud, identify high‑value clients, and uncover non‑performing assets using their core data—without needing specialized AI or IT skills such as SQL.",
+      "creator": "IBM",
+      "domain": "Banking & Finance",
+      "architectures": ["Digital assistant"],
+      "assets": ["Digital assistant"],
+      "demo": "https://mediacenter.ibm.com/media/Infusing%20AI%20into%20mission%20critical%20workloads%20with%20PowerVS%20and%20watsonx.ai/1_fzqutamr"
+    },
+    {
+      "id": "3",
+      "title": "BI assistant",
+      "description": "Enables teams to ask a question to analyze their data, understand business logic, and uncover what's happening, why it matters, and what to do next.",
+      "creator": "IBM",
+      "domain": "Enterprise Resource Planning",
+      "architectures": ["Digital assistant"],
+      "assets": ["Digital assistant"],
+      "demo": "https://mediacenter.ibm.com/media/IBM%20watsonx%20BI%2C%20your%20new%20AI-powered%20business%20insights%20agent/1_402dvneq"
+    },
+    {
+      "id": "4",
+      "title": "Claims & policy management agent",
+      "description": "Helps customers create accurate claims by capturing required data, validating it against active policies, and guiding them through next steps.",
+      "creator": "IBM",
+      "domain": "Insurance",
+      "architectures": ["Digital assistant"],
+      "assets": ["Digital assistant"]
+    },
+    {
+      "id": "5",
+      "title": "Conference slide search",
+      "description": "Innovates conference experiences by enabling fast access to presentation slides from current and past events through a search‑driven digital assistant.",
+      "creator": "IBM",
+      "domain": "Professional Services",
+      "architectures": ["Digital assistant"],
+      "assets": ["Digital assistant"],
+      "clientStories": [
+        {
+          "company": "MIDRANGE",
+          "url": "https://www.ibm.com/it-infrastructure/us-en/resources/power/ibm-i-customer-stories/"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "Financial documents assistant",
+      "description": "Enables conversational self‑service for financial FAQs by helping customers quickly find information without digging through documents—reducing support friction.",
+      "creator": "IBM",
+      "domain": "Banking & Finance",
+      "architectures": ["Digital assistant"],
+      "assets": ["Digital assistant"],
+      "partnerStories": [
+        {
+          "company": "Portolan",
+          "url": "https://www.ibm.com/downloads/documents/us-en/1550f7e8f4d0d263"
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "title": "Invoice matching assistant",
+      "description": "Ensures accurate, complete, and compliant financial transactions through automated multi‑way invoice matching within your ERP system.",
+      "creator": "IBM",
+      "domain": "Enterprise Resource Planning",
+      "architectures": ["Digital assistant"],
+      "assets": ["Digital assistant"],
+      "demo": "https://mediacenter.ibm.com/media/Intelligent%20workflow%20automation%20with%20agentic%20AI%20on%20SAP%20and%20IBM%20watsonx/1_c8dzgznk"
+    },
+    {
+      "id": "8",
+      "title": "IT service desk assistant",
+      "description": "Enables teams to quickly resolve everyday IT issues, automate common support tasks, and get instant help—without waiting for a technician.",
+      "creator": "IBM",
+      "domain": "IT operations",
+      "architectures": ["Digital assistant"],
+      "assets": ["Digital assistant"],
+      "demo": "https://mediacenter.ibm.com/media/IBM+Spyre+for+Power%3A+Turn-key+AI/1_etcvyc6u",
+      "clientStories": [
+        {
+          "company": "System House, DACH",
+          "description": "A large system house and IBM Power client uses IBM Spyre™ for Power \"Digital assistant\" AI services to operate an assistant for their IT service desk team. The IT operations team routinely receives tickets where IT users are looking for competent answers to IT-related issues. For helping in such situations, the IT service desk must find a suitable sequence of commands for diagnosing and then treating the issue at hand. It is key to provide these commands competently and quickly, as to fix issues both correctly and in time. Newer members of the IT service desk team are often challenged by these goals, especially when being alone during on-call duty. Their new IT service desk assistant helps bringing these new members up to speed, gives them confidence by reaffirming their envisioned solutions are solid, and even boosts the productivity of senior members of the team."
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "title": "Open account agent",
+      "description": "Streamline account opening by automatically classifying onboarding documents and improving compliance with built‑in PII controls.",
+      "creator": "IBM",
+      "domain": "Banking & Finance",
+      "architectures": ["Deep process integration"],
+      "assets": ["Deep process integration"],
+      "demo": "https://mediacenter.ibm.com/media/AI+on+PowerA+IBM+Power10+Entity+Extraction+%28Demo%29/1_0r3zgnd4",
+      "partnerStories": [
+        {
+          "company": "Crest Infosolutions",
+          "description": "Personally Identifiable Information (PII) redaction helps to protect against data breach & ransom scenarios, which can cause fines on banks, insurance and other customer facing organizations, leading to loss of trust and reputation. We are planning to leverage IBM Spyre for Power for PII redaction, which we believe will decrease the amount of manual work by an organization, improving their ability to onboard customers faster and more efficiently.",
+          "testimonial": "Hemant Prasad, Chief Executive Officer"
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "title": "Order processing assistant",
+      "description": "Streamlines order processing by automatically extracting relevant information and populating the correct ERP forms.",
+      "creator": "IBM",
+      "domain": "Enterprise Resource Planning",
+      "architectures": ["Deep process integration"],
+      "assets": ["Deep process integration"],
+      "demo": "https://mediacenter.ibm.com/media/IBM+Spyre+for+Power%3A+Turn-key+AI/1_etcvyc6u",
+      "clientStories": [
+        {
+          "company": "Hans Geis",
+          "description": "Global logistics provider and IBM Power client Hans Geis has followed the \"Deep process integration\" reference architecture with the \"Extract and tag information\" AI service within their order processing pipeline for incoming quote requests. Their end customers raise thousands of quote requests daily to ask Hans Geis and their competitors for transportation services of cargo they need to get shipped. In this competitive market, answering to requests quickly matters because logistic companies that respond timely are more likely to win an order. In a joint project, Hans Geis and IBM have integrated the \"Extract and tag\" AI service into Hans Geis' ERP system running on IBM i, automating the order processing pipeline for quote requests. In their staging system, Hans Geis has measured a speed-up of 5x for their order processing process and an individual employee productivity gain of 80%.",
+          "url": "https://www.ibm.com/downloads/documents/us-en/1443d5dc5ecf4367"
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "title": "Private documents assistant",
+      "description": "Reduces administrative effort by enabling fast, secure access to relevant information from private documents and keeping content continuously up to date.",
+      "creator": "IBM",
+      "domain": "Public sector",
+      "architectures": ["Digital assistant"],
+      "assets": ["Digital assistant"],
+      "clientStories": [
+        {
+          "company": "Government client, DACH",
+          "description": "A government entity in the DACH region uses a digital assistant to quickly find consolidated information about recent meetings, briefs, new policies, citizen documents, and more. Employees in administration now find the relevant documents and information in seconds and don't have to search for minutes anymore."
+        }
+      ]
+    },
+    {
+      "id": "12",
+      "title": "Product sales assistant",
+      "description": "Drive sales by empowering sales teams to deliver personalized product recommendations based on customer preferences, trends, and real‑time availability at the point of sale.",
+      "creator": "IBM",
+      "domain": "Public sector",
+      "architectures": ["Digital assistant"],
+      "assets": ["Digital assistant"],
+      "clientStories": [
+        {
+          "company": "Retail client, US",
+          "description": "A larger US retailer has increased revenue generation in their store locations with an in-store recommendation system for products. Clerks can now make more tailored suggestions to the individual needs of their customers, taking into consideration personal preferences, style wishes, similarity with other products, and stock availability."
+        }
+      ]
+    },
+    {
+      "id": "13",
+      "title": "Real estate assistant",
+      "description": "Drive growth and optimize costs with accurate, timely data tailored to real‑estate business.",
+      "creator": "IBM",
+      "domain": "Real estate",
+      "architectures": ["Digital assistant"],
+      "assets": ["Digital assistant"],
+      "partnerStories": [
+        {
+          "company": "Edsvärd Hållbarhet AB",
+          "description": "By integrating our digital assistant, Charlie, with IBM Spyre for Power, we'll be delivering a truly plug-and-play AI solution integrated with proprietary data on the IBM Power platform that maintains strict data compliance and, ultimately, accelerates our business forward.",
+          "testimonial": "Alexander Edsvärd, CEO",
+          "url": "https://www.ibm.com/new/product-blog/how-edsvard-makes-sense-of-unstructured-real-estate-data-with-ibm-cloud-and-watsonx-data"
+        },
+        {
+          "company": "BanFast Förvaltning AB",
+          "description": "With IBM Spyre for Power, we can host our digital AI assistant locally in Sweden. This enables us to serve a wide range of clients, including the ones who demand the highest data protection standards and compliance with European and national regulations.",
+          "testimonial": "Lars Nylund, CEO"
+        }
+      ]
+    },
+    {
+      "id": "14",
+      "title": "Production planning",
+      "description": "Reduce volatility, optimize batch sizes, and better coordinate materials and manufacturing capacity across the entire production chain.",
+      "creator": "IBM",
+      "domain": "Manufacturing",
+      "architectures": ["Forecasting"],
+      "assets": ["Forecasting"],
+      "clientStories": [
+        {
+          "company": "BECOM Electronics GmbH",
+          "url": "https://www.ibm.com/downloads/documents/us-en/15db45f02d520e7a"
+        }
+      ]
+    }
+  ]
+}

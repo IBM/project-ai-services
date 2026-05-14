@@ -3,92 +3,11 @@ import { AccordionItem, Checkbox, CheckboxGroup } from "@carbon/react";
 import CatalogBrowseLayout from "@/layouts/CatalogBrowseLayout";
 import SolutionCard from "@/components/SolutionCard";
 import SolutionDetailPanel from "@/components/SolutionDetailPanel";
+import { useUseCases } from "@/hooks/useUseCases";
+import { normalizeString } from "@/utils/string";
 
-// Mock data
-const mockSolutions = [
-  {
-    id: "1",
-    title: "Agriculture assistant",
-    description:
-      "Provides farmers with accurate, explainable crop-growing advice in their native language.",
-    domain: "Agriculture",
-    assets: ["Digital assistant"],
-    architectures: ["Digital assistant"],
-    isCertified: true,
-  },
-  {
-    id: "2",
-    title: "Banking assistant",
-    description:
-      "Enables finance teams to investigate fraud, identify patterns, and uncover their core data—without needing specialized AI skills such as LLMs.",
-    domain: "Banking and finance",
-    assets: ["Digital assistant"],
-    architectures: ["Digital assistant"],
-    isCertified: true,
-  },
-  {
-    id: "3",
-    title: "AI assistant",
-    description:
-      "Enables teams to ask a question to an AI assistant, get an answer, why it matters, and what to do next.",
-    domain: "Enterprise resource plan",
-    assets: ["Digital assistant"],
-    architectures: ["Digital assistant"],
-    isCertified: true,
-  },
-  {
-    id: "4",
-    title: "Claims & policy manager",
-    description:
-      "Helps customers create accurate, complete, and compliant insurance claims against active policies, and guiding them through the process.",
-    domain: "Insurance",
-    assets: ["Digital assistant"],
-    architectures: ["Digital assistant"],
-    isCertified: true,
-  },
-  {
-    id: "5",
-    title: "Conference slide search",
-    description:
-      "Discusses conference experiences by parsing text content from slides from current and past events through natural language conversation.",
-    domain: "Conferences",
-    assets: ["Digital assistant"],
-    architectures: ["Digital assistant"],
-    isCertified: true,
-  },
-  {
-    id: "6",
-    title: "Invoice matching assistant",
-    description:
-      "Ensures accurate, complete, and compliant invoice matching through automated multi-way invoice matching.",
-    domain: "Enterprise resource plan",
-    assets: ["Digital assistant"],
-    architectures: ["Digital assistant"],
-    isCertified: true,
-  },
-  {
-    id: "7",
-    title: "IT service desk assistant",
-    description:
-      "Enables teams to quickly resolve everyday IT issues, automate common support tasks, and get instant help—without waiting for a technician.",
-    domain: "IT operations",
-    assets: ["Digital assistant"],
-    architectures: ["Digital assistant"],
-    isCertified: true,
-  },
-  {
-    id: "8",
-    title: "Financial document assistant",
-    description:
-      "Enables conversational self-service for financial FAQs by helping users quickly find information without digging through documents—reducing support burden.",
-    domain: "Banking and finance",
-    assets: ["Digital assistant"],
-    architectures: ["Digital assistant"],
-    isCertified: true,
-  },
-];
-
-const ReferenceUseCases = () => {
+const UseCaseReferences = () => {
+  const { useCases: solutions, isLoading, error } = useUseCases();
   const [searchValue, setSearchValue] = useState("");
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
   const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
@@ -137,88 +56,85 @@ const ReferenceUseCases = () => {
     selectedArchitectures.length;
 
   // Calculate dynamic counts
-  const ibmCount = mockSolutions.filter((sol) => sol.isCertified).length;
+  const ibmCount = useMemo(() => {
+    return solutions.filter((sol) => sol.creator === "IBM").length;
+  }, [solutions]);
 
   const domainCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    mockSolutions.forEach((sol) => {
-      const key = sol.domain.toLowerCase().replace(/\s+/g, "-");
+    solutions.forEach((sol) => {
+      const key = normalizeString(sol.domain);
       counts[key] = (counts[key] || 0) + 1;
     });
     return counts;
-  }, []);
+  }, [solutions]);
 
   const assetCounts = useMemo(() => {
     const counts: Record<string, number> = {};
 
-    mockSolutions.forEach((sol) => {
+    solutions.forEach((sol) => {
       sol.assets.forEach((asset) => {
-        const key = asset.toLowerCase().replace(/\s+/g, "-");
+        const key = normalizeString(asset);
         counts[key] = (counts[key] || 0) + 1;
       });
     });
 
     return counts;
-  }, []);
+  }, [solutions]);
 
   const architectureCounts = useMemo(() => {
     const counts: Record<string, number> = {};
 
-    mockSolutions.forEach((sol) => {
+    solutions.forEach((sol) => {
       sol.architectures.forEach((arch) => {
-        const key = arch.toLowerCase().replace(/\s+/g, "-");
+        const key = normalizeString(arch);
         counts[key] = (counts[key] || 0) + 1;
       });
     });
 
     return counts;
-  }, []);
+  }, [solutions]);
 
   // Get unique assets and architectures dynamically
   const uniqueAssets = useMemo(() => {
     const assets = new Set<string>();
-    mockSolutions.forEach((sol) => {
+    solutions.forEach((sol) => {
       sol.assets.forEach((asset) => assets.add(asset));
     });
     return Array.from(assets).sort();
-  }, []);
+  }, [solutions]);
 
   const uniqueArchitectures = useMemo(() => {
     const architectures = new Set<string>();
-    mockSolutions.forEach((sol) => {
+    solutions.forEach((sol) => {
       sol.architectures.forEach((arch) => architectures.add(arch));
     });
     return Array.from(architectures).sort();
-  }, []);
+  }, [solutions]);
 
   // Filter solutions based on selected filters and search
   const filteredSolutions = useMemo(() => {
-    return mockSolutions.filter((sol) => {
+    return solutions.filter((sol) => {
       const matchesProvider =
         selectedProviders.length === 0 ||
-        (selectedProviders.includes("ibm") && sol.isCertified);
+        (selectedProviders.includes("ibm") && sol.creator === "IBM");
 
       const matchesDomain =
         selectedDomains.length === 0 ||
         selectedDomains.some((domain) => {
-          const normalizedSolDomain = sol.domain
-            .toLowerCase()
-            .replace(/\s+/g, "-");
-          return normalizedSolDomain === domain;
+          return normalizeString(sol.domain) === domain;
         });
 
       const matchesAsset =
         selectedAssets.length === 0 ||
         sol.assets.some((asset) => {
-          const normalizedAsset = asset.toLowerCase().replace(/\s+/g, "-");
-          return selectedAssets.includes(normalizedAsset);
+          return selectedAssets.includes(normalizeString(asset));
         });
 
       const matchesArchitecture =
         selectedArchitectures.length === 0 ||
         sol.architectures.some((arch) => {
-          const normalizedArch = arch.toLowerCase().replace(/\s+/g, "-");
-          return selectedArchitectures.includes(normalizedArch);
+          return selectedArchitectures.includes(normalizeString(arch));
         });
 
       // Search in card content (title, description, domain, assets, architectures)
@@ -243,6 +159,7 @@ const ReferenceUseCases = () => {
       );
     });
   }, [
+    solutions,
     selectedProviders,
     selectedDomains,
     selectedAssets,
@@ -258,12 +175,12 @@ const ReferenceUseCases = () => {
   const domainOptions = useMemo(() => {
     // Dynamically generate domain options from actual data
     const uniqueDomains = Array.from(
-      new Set(mockSolutions.map((sol) => sol.domain)),
+      new Set(solutions.map((sol) => sol.domain)),
     );
 
     return uniqueDomains
       .map((domain) => {
-        const key = domain.toLowerCase().replace(/\s+/g, "-");
+        const key = normalizeString(domain);
         return {
           label: domain,
           value: key,
@@ -271,11 +188,11 @@ const ReferenceUseCases = () => {
         };
       })
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [domainCounts]);
+  }, [solutions, domainCounts]);
 
   const assetOptions = useMemo(() => {
     return uniqueAssets.map((asset) => {
-      const key = asset.toLowerCase().replace(/\s+/g, "-");
+      const key = normalizeString(asset);
       return {
         label: asset,
         value: key,
@@ -286,7 +203,7 @@ const ReferenceUseCases = () => {
 
   const architectureOptions = useMemo(() => {
     return uniqueArchitectures.map((arch) => {
-      const key = arch.toLowerCase().replace(/\s+/g, "-");
+      const key = normalizeString(arch);
       return {
         label: arch,
         value: key,
@@ -393,8 +310,8 @@ const ReferenceUseCases = () => {
   return (
     <>
       <CatalogBrowseLayout
-        title="Reference use cases"
-        subtitle="Pre-built AI demos from real-world use cases to help you envision how AI can solve common business problems."
+        title="Use case references"
+        subtitle="Ready-to-explore use cases based on real-world AI solutions to help you envision how AI can solve common business problems—and accelerate your AI journey."
         searchValue={searchValue}
         onSearchChange={setSearchValue}
         totalSelectedFilters={totalSelectedFilters}
@@ -402,6 +319,7 @@ const ReferenceUseCases = () => {
         filterAccordions={filterAccordions}
         results={results}
         emptyMessage="No solutions match your filters. Try adjusting your search or clearing filters."
+        showLearnMore={false}
       />
       <SolutionDetailPanel
         open={isPanelOpen}
@@ -413,4 +331,4 @@ const ReferenceUseCases = () => {
   );
 };
 
-export default ReferenceUseCases;
+export default UseCaseReferences;
