@@ -18,6 +18,7 @@ import (
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
@@ -88,6 +89,14 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 	}
 
 	s.Stop("Catalog service deployed successfully")
+	logger.Infoln("-------")
+
+	// Register routes with Caddy using the reusable function
+	logger.Infoln("-------")
+	if err := proxy.RegisterRoutesForApp(rt, tp, catalogAppName, catalogAppTemplate, "my_app_server"); err != nil {
+		// Warnings already logged by RegisterRoutesForApp
+		logger.Infof("Route registration completed with errors: %v\n", err)
+	}
 	logger.Infoln("-------")
 
 	// Print next steps similar to application create

@@ -361,6 +361,22 @@ func (e *embedTemplateProvider) LoadVarsFile(app string, params map[string]strin
 	return &vars, nil
 }
 
+func (e *embedTemplateProvider) LoadRoutesFile(app string) (*Routes, error) {
+	path := e.buildPath(app, getRuntime(), "steps", "routes_file.yaml")
+
+	data, err := e.fs.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read routes file: %w", err)
+	}
+
+	var routes Routes
+	if err := yaml.Unmarshal(data, &routes); err != nil {
+		return nil, fmt.Errorf("unable to parse routes file: %w", err)
+	}
+
+	return &routes, nil
+}
+
 func (e *embedTemplateProvider) LoadChart(app string) (chart.Charter, error) {
 	if getRuntime() != string(types.RuntimeTypeOpenShift) {
 		return nil, errors.New("unsupported runtime type")
