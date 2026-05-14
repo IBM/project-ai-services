@@ -10,5 +10,10 @@
 	tls internal
 }
 
+# Internal health check endpoint (Bypasses automatic HTTPS redirection)
+:8080 {
+    respond /health "OK" 200
+}
+
 # This file serves as the base configuration
 # Routes will be dynamically added via Caddy Admin API

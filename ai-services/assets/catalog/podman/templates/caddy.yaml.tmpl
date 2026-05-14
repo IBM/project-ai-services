@@ -34,10 +34,10 @@ spec:
         limits:
           memory: "512Mi"
       livenessProbe:
-        exec:
-          command:
-            - /usr/bin/caddy
-            - version
+        httpGet:
+          path: /health
+          port: 8080
+          scheme: HTTP
         initialDelaySeconds: 5
         periodSeconds: 10
         timeoutSeconds: 5
