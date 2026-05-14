@@ -14,15 +14,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/platform"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/power"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/rhn"
-	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/root"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/spyre"
 )
 
 // Initialize the default registry with built-in rules.
 func init() {
 	// Podman checks
-	// adding root rule on top to verify this check first
-	PodmanRegistry.Register(root.NewRootRule())
 	PodmanRegistry.Register(numa.NewNumaRule())
 	PodmanRegistry.Register(platform.NewPlatformRule())
 	PodmanRegistry.Register(power.NewPowerRule())

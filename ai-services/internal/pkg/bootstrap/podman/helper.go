@@ -3,6 +3,7 @@ package podman
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -115,7 +116,19 @@ func logRepairResults(results []spyre.RepairResult) {
 }
 
 func configureUsergroup() error {
-	cmd_str := `usermod -aG sentient $USER`
+	username := os.Getenv("SUDO_USER")
+	if username == "" {
+		// Fallback to current user if not running via sudo
+		username = os.Getenv("USER")
+		if username == "" {
+			username = os.Getenv("LOGNAME")
+		}
+	}
+	if username == "" {
+		return fmt.Errorf("failed to determine current username: SUDO_USER, USER and LOGNAME environment variables are not set")
+	}
+
+	cmd_str := fmt.Sprintf("usermod -aG sentient %s", username)
 	cmd := exec.Command("bash", "-c", cmd_str)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -136,13 +149,20 @@ func installPodman() error {
 }
 
 func setupPodman() error {
-	// start podman socket
-	if err := systemctl("restart", "podman.socket"); err != nil {
-		return fmt.Errorf("failed to start podman socket: %w", err)
-	}
-	// enable podman socket
-	if err := systemctl("enable", "podman.socket"); err != nil {
-		return fmt.Errorf("failed to enable podman socket: %w", err)
+	euid := os.Geteuid()
+	sudoUser := os.Getenv("SUDO_USER")
+
+	// if running as root and not via sudo, enable system-wide podman socket
+	// else, enable user podman socket for the sudo user
+	if euid == 0 && sudoUser == "" {
+		if err := systemctl("enable", "podman.socket", "--now"); err != nil {
+			return fmt.Errorf("failed to enable podman socket: %w", err)
+		}
+	} else {
+		machineArg := fmt.Sprintf("--machine=%s@.host", sudoUser)
+		if err := systemctl("enable", "podman.socket", "--now", machineArg, "--user"); err != nil {
+			return fmt.Errorf("failed to enable podman socket: %w", err)
+		}
 	}
 
 	logger.Infoln("Waiting for podman socket to be ready...", logger.VerbosityLevelDebug)
@@ -157,11 +177,15 @@ func setupPodman() error {
 	return nil
 }
 
-func systemctl(action, unit string) error {
+func systemctl(action, unit string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "systemctl", action, unit)
+	cmdArgs := []string{action}
+	cmdArgs = append(cmdArgs, args...)
+	cmdArgs = append(cmdArgs, unit)
+
+	cmd := exec.CommandContext(ctx, "systemctl", cmdArgs...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to %s %s: %v, output: %s", action, unit, err, string(out))
