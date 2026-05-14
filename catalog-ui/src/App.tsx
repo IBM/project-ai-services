@@ -8,7 +8,7 @@ import Logout from "./pages/Logout";
 import ApplicationsListPage from "./pages/AiDeployments";
 import Architectures from "./pages/Architectures";
 import Services from "./pages/Services";
-import ReferenceUseCases from "./pages/ReferenceUseCases";
+import UseCaseReferences from "./pages/UseCaseReferences";
 import { ProtectedRoute } from "@/components";
 
 function App() {
@@ -27,8 +27,8 @@ function App() {
             <Route path={ROUTES.ARCHITECTURES} element={<Architectures />} />
             <Route path={ROUTES.SERVICES} element={<Services />} />
             <Route
-              path={ROUTES.REFERENCE_USE_CASES}
-              element={<ReferenceUseCases />}
+              path={ROUTES.USE_CASE_REFERENCES}
+              element={<UseCaseReferences />}
             />
           </Route>
         </Route>

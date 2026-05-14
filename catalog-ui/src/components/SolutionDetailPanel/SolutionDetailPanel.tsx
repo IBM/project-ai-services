@@ -1,6 +1,7 @@
 import { SidePanel } from "@carbon/ibm-products";
 import { Tag, Button } from "@carbon/react";
 import { Badge, ArrowRight } from "@carbon/icons-react";
+import { useUseCases } from "@/hooks/useUseCases";
 import styles from "./SolutionDetailPanel.module.scss";
 
 interface SolutionDetailPanelProps {
@@ -9,27 +10,48 @@ interface SolutionDetailPanelProps {
   solutionId: string | null;
 }
 
-const SolutionDetailPanel = ({ open, onClose }: SolutionDetailPanelProps) => {
-  // Dummy data based on the reference
-  const solutionData = {
-    title: "IT service desk assistant",
-    description:
-      "Enables teams to quickly resolve everyday IT issues, automate common support tasks, and get instant help—without waiting for a technician.",
-    tags: ["by IBM Power", "IBM certified"],
-    domains: ["IT operations"],
-    referenceArchitectures: ["Digital assistant"],
-    demos: {
-      title: "Watch Spyre for Power + Turnkey AI demo",
-      url: "#",
-    },
-    clientStories: [
-      {
-        company: "System House, DACH",
-        description:
-          'A large system house and IBM Power client uses IBM Spyre™ for Power "Digital assistant" as an assistant for their IT service desk team. The IT operations team routinely receives tickets where IT users are looking for competent answers to IT-related questions. The IT service desk must find a suitable sequence of commands for diagnosing and then issuing the issue at hand. It is key to provide these answers correctly and quickly, as to fix issues both correctly and in time.Newer members of the IT service desk team are often challenged by these goals, especially when being alone during on-call duty. Their new IT service desk assistant helps bringing these team members up to speed, gives them confidence by reaffirming their envisioned solutions are solid, and even boosts the productivity of senior members of the team.',
-      },
-    ],
-  };
+const SolutionDetailPanel = ({
+  open,
+  onClose,
+  solutionId,
+}: SolutionDetailPanelProps) => {
+  const { useCases, isLoading } = useUseCases();
+
+  const solutionData = useCases.find((uc) => uc.id === solutionId);
+
+  if (isLoading) {
+    return (
+      <SidePanel
+        open={open}
+        onRequestClose={onClose}
+        title="Loading..."
+        size="md"
+        includeOverlay
+      >
+        <div className={styles.panelContent}>Loading use case details...</div>
+      </SidePanel>
+    );
+  }
+
+  if (!solutionData) {
+    return (
+      <SidePanel
+        open={open}
+        onRequestClose={onClose}
+        title="Not Found"
+        size="md"
+        includeOverlay
+      >
+        <div className={styles.panelContent}>Use case not found.</div>
+      </SidePanel>
+    );
+  }
+
+  const isCertified = solutionData.creator === "IBM";
+  const allStories = [
+    ...(solutionData.clientStories || []),
+    ...(solutionData.partnerStories || []),
+  ];
 
   return (
     <SidePanel
@@ -44,61 +66,78 @@ const SolutionDetailPanel = ({ open, onClose }: SolutionDetailPanelProps) => {
           <p className={styles.description}>{solutionData.description}</p>
           <div className={styles.tags}>
             <Tag type="outline" size="sm">
-              {solutionData.tags[0]}
+              by IBM Power
             </Tag>
-            {solutionData.referenceArchitectures.map((arch, index) => (
+            {solutionData.architectures.map((arch, index) => (
               <Tag type="gray" size="sm" key={index}>
                 {arch}
               </Tag>
             ))}
-            <div className={styles.certifiedTag}>
-              <Badge size={16} className={styles.badgeIcon} />
-              <span>{solutionData.tags[1]}</span>
-            </div>
+            {isCertified && (
+              <div className={styles.certifiedTag}>
+                <Badge size={16} className={styles.badgeIcon} />
+                <span>IBM certified</span>
+              </div>
+            )}
           </div>
         </div>
 
         <div className={styles.domainSection}>
           <h4 className={styles.domainSectionTitle}>Domain</h4>
           <ul className={styles.domainList}>
-            {solutionData.domains.map((domain, index) => (
-              <li key={index}>{domain}</li>
-            ))}
+            <li>{solutionData.domain}</li>
           </ul>
         </div>
 
-        <div className={styles.demoSection}>
-          <h4 className={styles.demoSectionTitle}>Demos and prototypes</h4>
-          <Button
-            kind="tertiary"
-            size="sm"
-            renderIcon={ArrowRight}
-            onClick={() =>
-              window.open(
-                solutionData.demos.url,
-                "_blank",
-                "noopener,noreferrer",
-              )
-            }
-            className={styles.demoButton}
-          >
-            {solutionData.demos.title}
-          </Button>
-        </div>
-
-        <div className={styles.storiesSection}>
-          <h4 className={styles.storiesSectionTitle}>
-            Client stories and testimonials
-          </h4>
-          <div className={styles.storiesContainer}>
-            {solutionData.clientStories.map((story, index) => (
-              <div key={index} className={styles.story}>
-                <p className={styles.storyCompany}>{story.company}</p>
-                <p className={styles.storyDescription}>{story.description}</p>
-              </div>
-            ))}
+        {solutionData.demo && (
+          <div className={styles.demoSection}>
+            <h4 className={styles.demoSectionTitle}>Demos and prototypes</h4>
+            <Button
+              kind="tertiary"
+              size="sm"
+              renderIcon={ArrowRight}
+              onClick={() =>
+                window.open(solutionData.demo, "_blank", "noopener,noreferrer")
+              }
+              className={styles.demoButton}
+            >
+              Watch demo
+            </Button>
           </div>
-        </div>
+        )}
+
+        {allStories.length > 0 && (
+          <div className={styles.storiesSection}>
+            <h4 className={styles.storiesSectionTitle}>
+              Client stories and testimonials
+            </h4>
+            <div className={styles.storiesContainer}>
+              {allStories.map((story, index) => (
+                <div key={index} className={styles.story}>
+                  <p className={styles.storyCompany}>{story.company}</p>
+                  {story.description && (
+                    <p className={styles.storyDescription}>
+                      {story.description}
+                    </p>
+                  )}
+                  {story.url && (
+                    <Button
+                      kind="tertiary"
+                      size="sm"
+                      renderIcon={ArrowRight}
+                      onClick={() =>
+                        window.open(story.url, "_blank", "noopener,noreferrer")
+                      }
+                      className={styles.demoButton}
+                    >
+                      Read {story.company} client story
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </SidePanel>
   );
