@@ -53,8 +53,8 @@ const Navbar = (props: NavbarProps) => {
 
           <SideNavDivider />
 
-          <SideNavMenuItem as={NavLink} to="/reference-use-cases">
-            Reference use cases
+          <SideNavMenuItem as={NavLink} to="/use-case-references">
+            Use case references
           </SideNavMenuItem>
         </SideNavItems>
       </SideNav>
