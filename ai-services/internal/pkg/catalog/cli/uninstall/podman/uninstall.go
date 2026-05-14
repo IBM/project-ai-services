@@ -144,6 +144,7 @@ func podsDeletion(rt *podman.PodmanClient, pods []types.Pod) error {
 	return nil
 }
 
+// TODO: change the approach of fetching the secret name from pods to fetching secrets via labels.
 // fetchSecretsToDelete fetches the secrets to delete and secrets which are to be deleted when --skip-cleanup is not set.
 func fetchSecretsToDelete(pods []types.Pod) ([]string, []string) {
 	var secretsToDelete, secretsToSkip []string

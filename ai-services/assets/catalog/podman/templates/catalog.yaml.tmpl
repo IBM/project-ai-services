@@ -6,7 +6,7 @@ metadata:
     ai-services.io/application: "{{ .AppName }}"
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
-    ai-services.io/secret: catalog-secret
+    ai-services.io/secret: "catalog-secret"
   annotations:
     ai-services.io/ports: "{{ .Values.ui.port }}:8081, {{ .Values.backend.port }}:8080"
 spec:
