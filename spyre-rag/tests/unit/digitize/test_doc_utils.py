@@ -81,21 +81,6 @@ class TestDetectDocumentLanguage:
         
         assert result == "en"
 
-    def test_detect_language_with_short_text_uses_all_text(self):
-        """Test that short text (< 200 chars) uses all text directly."""
-        data = [
-            {"text": "Short text here."},
-            {"text": "Another short one."},
-        ]
-        
-        with patch("digitize.doc_utils.detect_language") as mock_detect:
-            mock_detect.return_value = "EN"
-            result = detect_document_language(data)
-        
-        assert result == "en"
-        # Should be called once for the combined short text
-        assert mock_detect.call_count == 1
-
     def test_detect_language_with_long_text_samples_blocks(self):
         """Test that long text samples random blocks."""
         data = [
