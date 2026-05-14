@@ -34,11 +34,13 @@ spec:
         limits:
           memory: "512Mi"
       livenessProbe:
-        tcpSocket:
-          port: 2019
+        exec:
+          command:
+            - /usr/bin/caddy
+            - version
         initialDelaySeconds: 5
         periodSeconds: 10
-        timeoutSeconds: 3
+        timeoutSeconds: 5
         failureThreshold: 3
   volumes:
     - name: caddy-data
