@@ -1,6 +1,6 @@
 FROM registry.access.redhat.com/ubi9/ubi:9.7
 
-RUN yum install -y --setopt=tsflags=nodocs gcc-c++ python3.12-devel python3.12-pip && \
+RUN yum install -y --setopt=tsflags=nodocs gcc-c++ python3.12-devel python3.12-pip git rust cargo openssl-devel libffi-devel zlib-devel && \
     yum clean all && rm -rf /var/cache/yum && \
     rm -rf /usr/bin/python && rm -rf /usr/bin/python3 && \
     ln -s /usr/bin/pip3.12 /usr/bin/pip && ln -s /usr/bin/pip3.12 /usr/bin/pip3 && \
@@ -14,3 +14,12 @@ RUN pip install --upgrade pip setuptools wheel && \
     --wheel-dir=/wheels \
     --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \
     --prefer-binary
+
+# Building wheel from source for lingua-language-detector pkg
+RUN git clone https://github.com/pemistahl/lingua-rs && \
+    cd lingua-rs && \
+    git checkout v1.8.0 && \
+    pip install maturin build && \
+    pip install . && \
+    python -m build --wheel --outdir /wheels
+

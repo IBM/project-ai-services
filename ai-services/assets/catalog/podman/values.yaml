@@ -21,3 +21,10 @@ db:
       memory: "512Mi"
     limits:
       memory: "1Gi"
+
+caddy:
+  image: "icr.io/ai-services-cicd/caddy:v2.11.2"
+  # @description https port for caddy. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
+  httpsPort: ""
+  # @description admin port for caddy. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
+  adminPort: ""

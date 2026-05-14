@@ -10,21 +10,23 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-ppc64le
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-      
+
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: IBM/setup-python-pz@291287e36d7c893a50c857d8bc014d67edd58ada
         with:
           python-version: '3.12'
-          cache: 'pip'
+
       
       - name: Install test dependencies
         run: |
-          pip install -r requirements-test.txt
+          pip install -r requirements-test.txt \
+          --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
+          --prefer-binary
         working-directory: spyre-rag
       
       - name: Run tests with pytest

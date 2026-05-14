@@ -1,10 +1,9 @@
 """
 Conversation utilities for conversational RAG message history handling.
 """
-from typing import Any, Sequence
+from typing import Any, Sequence, Callable
 
 from common.misc_utils import get_logger
-from common.llm_utils import tokenize_with_llm
 
 logger = get_logger("conversation_utils")
 
@@ -40,13 +39,18 @@ def get_conversation_context(messages: Sequence[Any]) -> tuple[str, list[dict[st
 def truncate_history_by_tokens(
     messages: Sequence[dict[str, str]],
     token_budget: int,
-    llm_endpoint: str
+    tokenize_fn: Callable[[str], list]
 ) -> list[dict[str, str]]:
     """
     Truncate history using a token-based sliding window.
 
     Keeps the most recent messages that fit within the token budget.
     If the newest single message alone exceeds the budget, it is still kept.
+    
+    Args:
+        messages: List of message dicts with 'content' and 'role' keys
+        token_budget: Maximum number of tokens allowed
+        tokenize_fn: Function that takes a string and returns a list of tokens
     
     Returns:
         list: truncated_messages
@@ -60,7 +64,7 @@ def truncate_history_by_tokens(
 
         for message in reversed(messages):
             content = message.get("content", "")
-            message_tokens = len(tokenize_with_llm(content, llm_endpoint))
+            message_tokens = len(tokenize_fn(content))
 
             if not truncated and message_tokens > token_budget:
                 logger.info(

@@ -12,9 +12,57 @@ from typing import List, Dict, Optional
 
 from common.misc_utils import get_logger
 from common.retry_utils import retry_on_transient_error
+from common.llm_utils import tokenize_with_llm, get_vllm_headers
 import common.misc_utils as misc_utils
 
 logger = get_logger("query_rephrasing")
+
+
+def calculate_dynamic_max_response_tokens(
+    query: str,
+    llm_endpoint: str,
+    base_max_response_tokens: int,
+    multiplier: float,
+    system_max_query_length: int
+) -> int:
+    """
+    Calculate dynamic max_response_tokens for query rephrasing based on input query length.
+    
+    Args:
+        query: The input query to be rephrased
+        llm_endpoint: LLM endpoint for tokenization
+        base_max_response_tokens: Minimum baseline max_response_tokens (from config)
+        multiplier: Multiplier for expansion (e.g., 1.2 = 20% expansion)
+        system_max_query_length: System-wide max query token length
+    
+    Returns:
+        Calculated max_response_tokens value
+    """
+    try:
+        input_tokens = tokenize_with_llm(query, llm_endpoint)
+        input_token_count = len(input_tokens)
+        
+        dynamic_max = int(input_token_count * multiplier)
+        
+        calculated_max_response_tokens = max(
+            base_max_response_tokens,
+            min(dynamic_max, system_max_query_length)
+        )
+        
+        logger.debug(
+            f"Dynamic max_response_tokens calculation: input={input_token_count} tokens, "
+            f"dynamic={dynamic_max}, final={calculated_max_response_tokens} "
+            f"(base={base_max_response_tokens}, multiplier={multiplier}, system_max={system_max_query_length})"
+        )
+        
+        return calculated_max_response_tokens
+        
+    except Exception as e:
+        logger.warning(
+            f"Failed to calculate dynamic max_response_tokens: {e}. "
+            f"Falling back to base_max_response_tokens={base_max_response_tokens}"
+        )
+        return base_max_response_tokens
 
 
 def format_messages_for_rephrasing(messages: List[Dict[str, str]]) -> str:
@@ -60,7 +108,8 @@ def call_llm_for_rephrasing(
     llm_model: str,
     max_tokens: int = 100,
     temperature: float = 0.0,
-    timeout: float = 5.0
+    timeout: float = 5.0,
+    api_key: str | None = None
 ) -> str:
     """
     Call LLM to rephrase a query.
@@ -72,6 +121,7 @@ def call_llm_for_rephrasing(
         max_tokens: Maximum tokens for response
         temperature: Temperature for generation (0.0 = deterministic)
         timeout: Request timeout in seconds
+        api_key: Optional API key for vLLM authentication
     
     Returns:
         Rephrased query string
@@ -96,9 +146,12 @@ def call_llm_for_rephrasing(
     
     logger.debug(f"Calling LLM for query rephrasing with timeout={timeout}s")
     
+    headers = get_vllm_headers(api_key)
+    
     response = misc_utils.SESSION.post(
         f"{llm_endpoint}/v1/chat/completions",
         json=payload,
+        headers=headers,
         timeout=timeout
     )
     response.raise_for_status()
@@ -141,7 +194,8 @@ async def rephrase_query_with_context(
     previous_messages: List[Dict[str, str]],
     llm_endpoint: str,
     llm_model: str,
-    config: Optional[Dict] = None
+    config: Optional[Dict] = None,
+    api_key: str | None = None
 ) -> str:
     """
     Rephrase a conversational query to be self-contained using conversation context.
@@ -164,6 +218,7 @@ async def rephrase_query_with_context(
                - timeout_seconds (float): Timeout for LLM call (default: 5.0)
                - max_tokens (int): Max tokens for rephrased query (default: 100)
                - temperature (float): Temperature for generation (default: 0.0)
+        api_key: Optional API key for vLLM authentication
     
     Returns:
         Rephrased query string (or original query if rephrasing is skipped/fails)
@@ -215,14 +270,24 @@ async def rephrase_query_with_context(
         
         logger.debug(f"Rephrasing query: '{current_query}'")
         
-        # Call LLM for rephrasing
+        # Calculate dynamic max_response_tokens based on input query length
+        dynamic_max_response_tokens = calculate_dynamic_max_response_tokens(
+            query=current_query,
+            llm_endpoint=llm_endpoint,
+            base_max_response_tokens=settings.query_rephrasing.max_response_tokens,
+            multiplier=settings.query_rephrasing.max_response_tokens_multiplier,
+            system_max_query_length=settings.chatbot.max_query_token_length
+        )
+        
+        # Call LLM for rephrasing with dynamic max_response_tokens
         rephrased_query = call_llm_for_rephrasing(
             prompt=prompt,
             llm_endpoint=llm_endpoint,
             llm_model=llm_model,
-            max_tokens=settings.query_rephrasing.max_tokens,
+            max_tokens=dynamic_max_response_tokens,
             temperature=settings.query_rephrasing.temperature,
-            timeout=settings.query_rephrasing.timeout_seconds
+            timeout=settings.query_rephrasing.timeout_seconds,
+            api_key=api_key
         )
         
         # Calculate latency
