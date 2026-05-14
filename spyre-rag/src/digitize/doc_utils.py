@@ -715,17 +715,31 @@ def count_tokens(text, emb_endpoint):
     return token_len
 
 
-def detect_document_language(text: str) -> str:
+def detect_document_language(data: list) -> str:
     """
-    Detect the language of a document by sampling random chunks.
+    Detect the language of a document by sampling random blocks.
     
     Args:
-        text: The full text to analyze
+        data: List of document blocks, where each block is a dict with a 'text' field
         
     Returns:
         Language code compatible with SentenceSplitter ('en', 'de', 'it', 'fr')
         Falls back to 'en' if detection fails or language is not supported
     """
+    # validate input data structure
+    if not isinstance(data, list):
+        logger.warning(f"Invalid input: expected list, got {type(data).__name__}, falling back to 'en'")
+        return 'en'
+    
+    if not data:
+        logger.warning("Empty data list provided for language detection, falling back to 'en'")
+        return 'en'
+    
+    # Validate that data contains dicts with 'text' fields
+    if not all(isinstance(block, dict) for block in data):
+        logger.warning("Invalid input: data list contains non-dict elements, falling back to 'en'")
+        return 'en'
+    
     # Mapping from lingua ISO codes to SentenceSplitter language codes
     lang_map = {
         'EN': 'en',
@@ -734,29 +748,39 @@ def detect_document_language(text: str) -> str:
         'FR': 'fr'
     }
     
-    # If text is too short, directly detect and map the language
-    if len(text) < 200:
-        detected_lang = detect_language(text)
-        return lang_map.get(detected_lang, 'en')
+    # Extract text blocks that have content
+    text_blocks = [block.get("text", "") for block in data if isinstance(block.get("text"), str) and block.get("text", "").strip()]
     
+    if not text_blocks:
+        logger.warning("No text blocks found for language detection, falling back to 'en'")
+        return 'en'
+
     try:
-        # Sample 3 random chunks from the text
+        # Sample 3 random blocks from the data
         detected_languages = []
-        text_length = len(text)
+        num_samples = min(3, len(text_blocks))
         
-        for _ in range(3):
-            # Random chunk size between 200-500 characters
-            chunk_size = random.randint(200, min(500, text_length))
-            
-            # Random start position ensuring we don't go out of bounds
-            max_start = max(0, text_length - chunk_size)
-            start_pos = random.randint(0, max_start) if max_start > 0 else 0
-            
-            chunk = text[start_pos:start_pos + chunk_size]
+        # Randomly select blocks
+        sampled_blocks = random.sample(text_blocks, num_samples)
+        
+        for block_text in sampled_blocks:
+            # For longer blocks, take a random chunk
+            if len(block_text) > 500:
+                chunk_size = random.randint(200, 500)
+                max_start = max(0, len(block_text) - chunk_size)
+                start_pos = random.randint(0, max_start) if max_start > 0 else 0
+                chunk = block_text[start_pos:start_pos + chunk_size]
+            else:
+                chunk = block_text
             
             # Detect language for this chunk
-            detected_lang = detect_language(chunk)
-            detected_languages.append(detected_lang)
+            if chunk.strip():
+                detected_lang = detect_language(chunk)
+                detected_languages.append(detected_lang)
+        
+        if not detected_languages:
+            logger.warning("No languages detected from samples, falling back to 'en'")
+            return 'en'
         
         # Get the most common detected language
         most_common_lang = Counter(detected_languages).most_common(1)[0][0]
@@ -864,9 +888,8 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
         with open(input_path, "r") as f:
             data = json.load(f)
 
-            # Detect document language once by collecting all text content
-            all_text = " ".join([block.get("text", "") for block in data if block.get("text")])
-            detected_language = detect_document_language(all_text)
+            # Detect document language by sampling random blocks
+            detected_language = detect_document_language(data)
             logger.info(f"Detected language for document '{doc_id}': {detected_language}")
 
             font_size_levels = collect_header_font_sizes(data)
