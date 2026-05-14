@@ -12,6 +12,7 @@ import {
   UserService,
   UserMultiple,
   Hotel,
+  Industry,
 } from "@carbon/icons-react";
 import styles from "./SolutionCard.module.scss";
 
@@ -29,7 +30,7 @@ const categoryIcons: Record<
   React.ComponentType<{ size?: string | number }>
 > = {
   Agriculture: AgricultureAnalytics,
-  "Banking and Finance": PiggyBank,
+  "Banking & Finance": PiggyBank,
   "Dev operations": IbmZOpenEditor,
   "Enterprise resource planning": IbmPlanningAnalytics,
   Healthcare: Stethoscope,
@@ -37,7 +38,8 @@ const categoryIcons: Record<
   "IT operations": SettingsServices,
   "Professional services": UserService,
   "Public sector": UserMultiple,
-  "Real estates": Hotel,
+  "Real estate": Hotel,
+  Manufacturing: Industry,
 };
 
 const SolutionCard = ({
