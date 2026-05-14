@@ -7,26 +7,49 @@ from unittest.mock import Mock, MagicMock, AsyncMock, patch
 from fastapi.testclient import TestClient
 from typing import Dict, List
 import sys
+import os
 from pathlib import Path
+
+# CRITICAL: Set environment variable BEFORE any imports that might use diagnostic_logger
+# This prevents stderr monitoring from starting during test collection
+os.environ['DISABLE_CRASH_HANDLER'] = '1'
 
 # Add src directory to path for imports
 src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
+# CRITICAL: Patch the crash handler BEFORE importing any application modules
+# This prevents the StderrMonitor from starting during module imports
 import common.diagnostic_logger
+
+# Create a mock that returns safe objects
+def _mock_crash_handler(logger):
+    """Mock crash handler that doesn't manipulate file descriptors."""
+    mock_stderr_monitor = Mock(name="stderr_monitor")
+    mock_stderr_monitor.start = Mock()
+    mock_stderr_monitor.stop = Mock()
+    
+    return (
+        Mock(name="diagnostic_logger"),
+        mock_stderr_monitor,
+        Mock(name="signal_handler")
+    )
+
+# Patch it at the module level before any app imports
+common.diagnostic_logger.setup_comprehensive_crash_handler = _mock_crash_handler
 
 @pytest.fixture(scope="session", autouse=True)
 def mock_diagnostic_crash_handler():
     """
-    Mock crash handler setup for the full test session.
+    Ensure crash handler remains mocked for the full test session.
 
     This prevents diagnostic stderr monitoring from replacing file descriptors
     during imports of application modules, which conflicts with pytest capture
     and can trigger "OSError: [Errno 29] Illegal seek" on macOS.
     """
-    mocked_tuple = (Mock(name="diagnostic_logger"), Mock(stop=Mock()), Mock(name="signal_handler"))
-    with patch("common.diagnostic_logger.setup_comprehensive_crash_handler", return_value=mocked_tuple):
-        yield mocked_tuple
+    # The patching is already done at module level above
+    # This fixture just ensures it stays in place
+    yield
 
 
 @pytest.fixture
@@ -348,11 +371,27 @@ def summarize_test_client(monkeypatch, summarize_mock_model_dict):
 
 # Markers for test categorization
 def pytest_configure(config):
-    """Register custom markers."""
+    """
+    Register custom markers and ensure crash handler is disabled.
+    
+    This runs very early in pytest initialization, before test collection.
+    """
+    # Ensure environment variable is set (redundant but safe)
+    os.environ['DISABLE_CRASH_HANDLER'] = '1'
+    
     config.addinivalue_line("markers", "unit: Unit tests")
     config.addinivalue_line("markers", "integration: Integration tests")
     config.addinivalue_line("markers", "slow: Slow running tests")
     config.addinivalue_line("markers", "requires_db: Tests requiring database connection")
     config.addinivalue_line("markers", "requires_llm: Tests requiring LLM endpoint")
+
+
+def pytest_sessionstart(session):
+    """
+    Called after the Session object has been created and before performing collection.
+    
+    This is another early hook to ensure the environment variable is set.
+    """
+    os.environ['DISABLE_CRASH_HANDLER'] = '1'
 
 # Made with Bob

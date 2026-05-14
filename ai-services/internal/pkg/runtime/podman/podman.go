@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"os/user"
 	"strings"
 	"syscall"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/images"
 	"github.com/containers/podman/v5/pkg/bindings/kube"
 	"github.com/containers/podman/v5/pkg/bindings/pods"
+	"github.com/containers/podman/v5/pkg/bindings/secrets"
 	"github.com/containers/podman/v5/pkg/specgen"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -39,16 +41,50 @@ func NewPodmanClient() (*PodmanClient, error) {
 	// MacOS instructions running in a remote VM:
 	// export CONTAINER_HOST=ssh://root@127.0.0.1:62904/run/podman/podman.sock
 	// export CONTAINER_SSHKEY=/Users/manjunath/.local/share/containers/podman/machine/machine
-	uri := "unix:///run/podman/podman.sock"
-	if v, found := os.LookupEnv("CONTAINER_HOST"); found {
-		uri = v
+	uri, err := resolvePodmanURI()
+	if err != nil {
+		return nil, err
 	}
+
 	ctx, err := bindings.NewConnection(context.Background(), uri)
 	if err != nil {
 		return nil, err
 	}
 
 	return &PodmanClient{Context: ctx}, nil
+}
+
+func resolvePodmanURI() (string, error) {
+	if v, found := os.LookupEnv("CONTAINER_HOST"); found {
+		return v, nil
+	}
+
+	if os.Geteuid() == 0 {
+		return getPodmanURIAsRoot()
+	}
+
+	return fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", os.Getuid()), nil
+}
+
+// getPodmanURIAsRoot determines the appropriate Podman socket URI when running with root privileges.
+// If the process was elevated via sudo (SUDO_USER is set), it returns the socket path
+// for the original user's rootless Podman instance to maintain user context.
+// Otherwise, it returns the system-wide root Podman socket path.
+func getPodmanURIAsRoot() (string, error) {
+	sudoUser := os.Getenv("SUDO_USER")
+	if sudoUser == "" {
+		return "unix:///run/podman/podman.sock", nil
+	}
+
+	u, err := user.Lookup(sudoUser)
+	if err != nil {
+		return "", fmt.Errorf("failed to lookup user %s: %w", sudoUser, err)
+	}
+
+	return fmt.Sprintf(
+		"unix:///run/user/%s/podman/podman.sock",
+		u.Uid,
+	), nil
 }
 
 // ListImages function to list images (you can expand with more Podman functionalities).
@@ -213,7 +249,7 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 		waitDone := make(chan struct{})
 		go func() {
 			defer close(waitDone)
-			_, err := containers.Wait(pc.Context, containerNameOrID, nil)
+			_, err := containers.Wait(ctx, containerNameOrID, nil)
 			if err == nil {
 				// Container exited, cancel the logs streaming
 				cancelLogs()
@@ -227,8 +263,8 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 		<-waitDone
 	}()
 
-	// Print logs as they arrive
-	pc.printLogsFromChannels(logsCtx, stdoutChan, stderrChan)
+	// passing both contexts so it respects Ctrl+C and container exit
+	pc.printLogsFromChannels(ctx, logsCtx, stdoutChan, stderrChan)
 
 	// Wait for goroutine to complete
 	<-done
@@ -237,10 +273,14 @@ func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOr
 }
 
 // printLogsFromChannels reads from stdout and stderr channels and prints logs.
-func (pc *PodmanClient) printLogsFromChannels(ctx context.Context, stdoutChan, stderrChan <-chan string) {
+func (pc *PodmanClient) printLogsFromChannels(parentCtx, logsCtx context.Context, stdoutChan, stderrChan <-chan string) {
 	for {
 		select {
-		case <-ctx.Done():
+		case <-parentCtx.Done():
+			// Parent context cancelled (e.g., Ctrl+C)
+			return
+		case <-logsCtx.Done():
+			// Logs context cancelled (e.g., container exited)
 			return
 		case line, ok := <-stdoutChan:
 			if !ok {
@@ -350,6 +390,25 @@ func (pc *PodmanClient) DeletePVCs(appLabel string) error {
 	logger.Errorf("unsupported method called!")
 
 	return fmt.Errorf("unsupported method")
+}
+
+func (pc *PodmanClient) ListSecrets(filters map[string][]string) ([]string, error) {
+	var listOpts secrets.ListOptions
+	if len(filters) >= 1 {
+		listOpts.Filters = filters
+	}
+
+	secretList, err := secrets.List(pc.Context, &listOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list secrets: %w", err)
+	}
+
+	secretIDorNames := make([]string, 0, len(secretList))
+	for _, sec := range secretList {
+		secretIDorNames = append(secretIDorNames, sec.ID)
+	}
+
+	return secretIDorNames, nil
 }
 
 // Type returns the runtime type for PodmanClient.

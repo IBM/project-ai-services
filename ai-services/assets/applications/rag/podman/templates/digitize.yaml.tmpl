@@ -10,6 +10,23 @@ metadata:
     ai-services.io/ports: "{{ .Values.digitizeUi.port }}:4001, {{ .Values.digitize.port }}:4000"
     io.podman.annotations.pids-limit/backend-server: "4096"
 spec:
+  initContainers:
+    - name: digitize-db-init
+      image: "{{ .Values.digitize.image }}"
+      command:
+        - "/var/venv/bin/python"
+        - "/opt/rag/digitize/db/scripts/init_db.py"
+      env:
+        - name: POSTGRES_HOST
+          value: "{{ .AppName }}--postgres"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.digitize.database }}"
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          value: "{{ .Values.postgres.password }}"
   containers:
     - name: ui
       image: "{{ .Values.digitizeUi.image }}"
@@ -66,6 +83,20 @@ spec:
         limits:
           memory: "50Gi"
       env:
+        - name: POSTGRES_HOST
+          value: "{{ .AppName }}--postgres"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.digitize.database }}"
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          value: "{{ .Values.postgres.password }}"
+        - name: DB_POOL_SIZE
+          value: "5"
+        - name: DB_MAX_OVERFLOW
+          value: "5"
         - name: EMB_ENDPOINT
           value: "http://{{ .AppName }}--vllm-server:8001"
         - name: EMB_MODEL

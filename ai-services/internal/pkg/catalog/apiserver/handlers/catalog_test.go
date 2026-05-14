@@ -259,10 +259,9 @@ func validateChatService(t *testing.T, body []byte) {
 	for _, dep := range svc.Dependencies {
 		depIDs[dep.ID] = true
 	}
-	assert.True(t, depIDs["opensearch"])
+	assert.True(t, depIDs["vector_store"])
 	assert.True(t, depIDs["embedding"])
-	assert.True(t, depIDs["instruct"])
-	assert.True(t, depIDs["reranker"])
+	assert.True(t, depIDs["llm"])
 	assert.NotEmpty(t, svc.Architectures)
 }
 

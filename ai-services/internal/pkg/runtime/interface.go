@@ -21,6 +21,9 @@ type Runtime interface {
 	PodExists(nameOrID string) (bool, error)
 	PodLogs(nameOrID string) error
 
+	// Secret operations
+	ListSecrets(filters map[string][]string) ([]string, error)
+
 	// Container operations
 	// ListContainers(filters map[string][]string) ([]types.Container, error)
 	InspectContainer(nameOrId string) (*types.Container, error)

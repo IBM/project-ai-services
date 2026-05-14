@@ -780,9 +780,6 @@ const docTemplate = `{
             "properties": {
                 "id": {
                     "type": "string"
-                },
-                "version": {
-                    "type": "string"
                 }
             }
         },

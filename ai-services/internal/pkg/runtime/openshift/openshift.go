@@ -422,3 +422,9 @@ func followLogs(kc *OpenshiftClient, podName string, opts *corev1.PodLogOptions)
 
 	return nil
 }
+
+func (kc *OpenshiftClient) ListSecrets(filters map[string][]string) ([]string, error) {
+	logger.Warningln("Not implemented")
+
+	return nil, nil
+}

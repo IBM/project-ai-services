@@ -26,7 +26,7 @@ from common.diagnostic_logger import setup_comprehensive_crash_handler
 import common.db_utils as db
 from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
 from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
-from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models
+from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models, tokenize_with_llm
 from common.perf_utils import perf_registry
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from chatbot.backend_utils import search_only, validate_query_length
@@ -374,7 +374,6 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         if not max_tokens:
             max_tokens = max_tokens_map.get(lang, settings.common.llm.llm_max_tokens)
 
-        truncated_history = []
         rephrased_query = current_query
         
         # Only process conversation history and rephrase query in conversational mode
@@ -385,7 +384,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                 truncate_history_by_tokens,
                 previous_messages,
                 settings.query_rephrasing.history_token_budget,
-                llm_endpoint
+                lambda text: tokenize_with_llm(text, llm_endpoint)
             )
             
             if truncated_history_for_rephrasing:
@@ -394,6 +393,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     previous_messages=truncated_history_for_rephrasing,
                     llm_endpoint=llm_endpoint,
                     llm_model=llm_model,
+                    api_key=api_key,
                 )
 
         docs, perf_stat_dict = await asyncio.to_thread(
@@ -428,17 +428,6 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
             APIError.raise_error(ErrorCode.SERVER_BUSY, "Try again shortly.")
         await concurrency_limiter.acquire()
 
-        # Calculate history budget after getting docs (context is prioritized)
-        # History truncation will happen inside query_vllm_payload based on actual context size
-        if settings.chatbot.conversational_mode and previous_messages and lang == "EN":
-            # Pre-truncate history with max budget
-            truncated_history = await asyncio.to_thread(
-                truncate_history_by_tokens,
-                previous_messages,
-                settings.chatbot.history_token_budget,
-                llm_endpoint
-            )
-
         try:
             stop_words = get_stop_words_with_special_tokens(req.stop)
             
@@ -455,7 +444,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     perf_stat_dict,
                     lang,
                     api_key,
-                    truncated_history,
+                    previous_messages,
                     rephrased_query,
                 )
                 # For streaming, release is handled in locked_stream's finally block
@@ -473,7 +462,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                 perf_stat_dict,
                 lang,
                 api_key,
-                truncated_history,
+                previous_messages,
                 rephrased_query,
             )
             # Store metrics in registry for non-stream
