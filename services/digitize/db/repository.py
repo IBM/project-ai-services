@@ -4,7 +4,7 @@ Database repository layer for Job and Document operations.
 Provides CRUD operations with proper error handling and transaction management.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy import select, update, delete, func, or_, and_
 from sqlalchemy.orm import Session
@@ -51,7 +51,7 @@ class DatabaseRepository:
                     job_name=job_name,
                     operation=operation,
                     status=status.value,
-                    submitted_at=submitted_at or datetime.utcnow(),
+                    submitted_at=submitted_at or datetime.now(timezone.utc),
                     stats=stats or {
                         "total_documents": 0,
                         "completed": 0,
@@ -89,6 +89,12 @@ class DatabaseRepository:
                 stmt = select(Job).where(Job.job_id == job_id)
                 job = session.scalar(stmt)
                 if job:
+                    # Eagerly access all attributes to load them before session closes
+                    _ = (job.job_id, job.job_name, job.operation, job.status,
+                         job.submitted_at, job.completed_at, job.error,
+                         job.stats, job.updated_at)
+                    # Expunge the object from session to prevent DetachedInstanceError
+                    session.expunge(job)
                     logger.debug(f"Retrieved job from database: {job_id}")
                 else:
                     logger.debug(f"Job not found in database: {job_id}")
@@ -141,6 +147,9 @@ class DatabaseRepository:
                 stmt = stmt.order_by(Job.submitted_at.desc()).limit(limit).offset(offset)
                 
                 jobs = list(session.scalars(stmt).all())
+                # Expunge all jobs from session to prevent DetachedInstanceError
+                for job in jobs:
+                    session.expunge(job)
                 logger.debug(f"Retrieved {len(jobs)} jobs from database (total: {total})")
                 return jobs, total
         except SQLAlchemyError as e:
@@ -175,13 +184,13 @@ class DatabaseRepository:
             with get_db_session() as session:
                 updates = {}
                 if status is not None:
-                    updates[Job.status] = status.value
+                    updates["status"] = status.value
                 if completed_at is not None:
-                    updates[Job.completed_at] = completed_at
+                    updates["completed_at"] = completed_at
                 if error is not None:
-                    updates[Job.error] = error
+                    updates["error"] = error
                 if stats is not None:
-                    updates[Job.stats] = stats
+                    updates["stats"] = stats
                 
                 if not updates:
                     logger.debug(f"No updates provided for job {job_id}")
@@ -268,8 +277,8 @@ class DatabaseRepository:
                     type=doc_type,
                     status=status.value,
                     output_format=output_format,
-                    submitted_at=submitted_at or datetime.utcnow(),
-                    metadata=metadata or {}
+                    submitted_at=submitted_at or datetime.now(timezone.utc),
+                    doc_metadata=metadata or {}
                 )
                 session.add(document)
                 session.flush()
@@ -301,6 +310,13 @@ class DatabaseRepository:
                 stmt = select(Document).where(Document.doc_id == doc_id)
                 document = session.scalar(stmt)
                 if document:
+                    # Eagerly access all attributes to load them before session closes
+                    _ = (document.doc_id, document.job_id, document.name, document.type,
+                         document.status, document.output_format, document.submitted_at,
+                         document.completed_at, document.error, document.doc_metadata,
+                         document.updated_at)
+                    # Expunge the object from session to prevent DetachedInstanceError
+                    session.expunge(document)
                     logger.debug(f"Retrieved document from database: {doc_id}")
                 else:
                     logger.debug(f"Document not found in database: {doc_id}")
@@ -353,6 +369,13 @@ class DatabaseRepository:
                 stmt = stmt.order_by(Document.submitted_at.desc()).limit(limit).offset(offset)
                 
                 documents = list(session.scalars(stmt).all())
+                # Eagerly load all attributes and expunge documents from session
+                for doc in documents:
+                    # Access all attributes to load them before session closes
+                    _ = (doc.doc_id, doc.job_id, doc.name, doc.type, doc.status,
+                         doc.output_format, doc.submitted_at, doc.completed_at,
+                         doc.error, doc.doc_metadata, doc.updated_at)
+                    session.expunge(doc)
                 logger.debug(f"Retrieved {len(documents)} documents from database (total: {total})")
                 return documents, total
         except SQLAlchemyError as e:
@@ -377,6 +400,13 @@ class DatabaseRepository:
             with get_db_session() as session:
                 stmt = select(Document).where(Document.job_id == job_id).order_by(Document.submitted_at)
                 documents = list(session.scalars(stmt).all())
+                # Eagerly load all attributes and expunge documents from session
+                for doc in documents:
+                    # Access all attributes to load them before session closes
+                    _ = (doc.doc_id, doc.job_id, doc.name, doc.type, doc.status,
+                         doc.output_format, doc.submitted_at, doc.completed_at,
+                         doc.error, doc.doc_metadata, doc.updated_at)
+                    session.expunge(doc)
                 logger.debug(f"Retrieved {len(documents)} documents for job {job_id}")
                 return documents
         except SQLAlchemyError as e:
@@ -411,13 +441,13 @@ class DatabaseRepository:
             with get_db_session() as session:
                 updates = {}
                 if status is not None:
-                    updates[Document.status] = status.value
+                    updates["status"] = status.value
                 if completed_at is not None:
-                    updates[Document.completed_at] = completed_at
+                    updates["completed_at"] = completed_at
                 if error is not None:
-                    updates[Document.error] = error
+                    updates["error"] = error
                 if metadata is not None:
-                    updates[Document.doc_metadata] = metadata
+                    updates["doc_metadata"] = metadata
                 
                 if not updates:
                     logger.debug(f"No updates provided for document {doc_id}")

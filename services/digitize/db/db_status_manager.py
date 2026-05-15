@@ -4,7 +4,7 @@ Database-first status manager with optional file system compatibility.
 Uses database as primary source of truth with optional file system writes for migration compatibility.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Mapping, Optional
 from pathlib import Path
 
@@ -226,7 +226,7 @@ class DatabaseStatusManager(StatusManager):
             failed_docs = stats["failed"]
             
             if total_docs > 0 and (completed_docs + failed_docs) == total_docs:
-                update_params["completed_at"] = datetime.utcnow()
+                update_params["completed_at"] = datetime.now(timezone.utc)
         
         # Set error if provided
         if error and job_status == JobStatus.FAILED:

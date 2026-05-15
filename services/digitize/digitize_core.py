@@ -1,9 +1,10 @@
 from common.misc_utils import *
 from pathlib import Path
-from digitize.status import StatusManager,get_utc_timestamp
+from digitize.status import get_utc_timestamp
 from digitize.models import JobStatus, DocStatus, OutputFormat
 from digitize.pdf_utils import get_pdf_page_count, get_document_page_count
 from digitize.doc_utils import convert_document_format
+from digitize.db.db_status_manager import get_status_manager
 from concurrent.futures import ProcessPoolExecutor
 
 logger = get_logger("digitize")
@@ -27,8 +28,8 @@ def digitize(directory_path: Path, job_id: str, doc_id_dict: dict, output_format
     # All validations are done at API level in app.py
     # Files are pre-staged and doc_id_dict is pre-created
 
-    # Initialize StatusManager
-    status_mgr = StatusManager(job_id) if job_id else None
+    # Initialize database-first status manager
+    status_mgr = get_status_manager(job_id) if job_id else None
 
     # Prepare output/cache path
     out_path = setup_digitized_doc_dir()

@@ -31,6 +31,7 @@ from digitize.status import (
 )
 from digitize.models import DocStatus, JobStatus, OutputFormat
 from digitize.settings import settings
+from digitize.db.db_status_manager import get_status_manager
 
 logger = get_logger("doc_utils")
 
@@ -472,7 +473,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
         else:
             light_files.append(path)
 
-    status_mgr = StatusManager(job_id)
+    status_mgr = get_status_manager(job_id)
 
     def _run_batch(batch_paths, convert_worker, max_worker, doc_id_dict, indexing_callback=None):
         batch_stats = {}

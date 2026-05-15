@@ -49,10 +49,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error initializing language detector: {e}", exc_info=True)
 
-    # Check database connection (required for operation)
+    # Check database connection (required for ingestion/digitize operation)
     try:
         if check_db_connection():
             logger.info("✅ Database connection established")
+            
+            # Initialize database schema (create tables if they don't exist)
+            try:
+                from digitize.db.models import Base
+                from digitize.db.database import engine
+                Base.metadata.create_all(bind=engine)
+                logger.info("✅ Database schema initialized")
+            except Exception as schema_error:
+                logger.error(f"❌ Failed to initialize database schema: {schema_error}")
+                raise RuntimeError(f"Database schema initialization failed: {schema_error}")
         else:
             logger.error("❌ Database connection failed - service requires database to operate")
             raise RuntimeError("Database connection required but not available. Please check database configuration.")
@@ -669,7 +679,21 @@ async def delete_document(doc_id: str):
                 logger.error(f"VDB cleaned but file deletion failed for {doc_id}")
                 APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Search data removed but files remain: {e}")
 
-        # 5. Idempotent Success
+        # 5. Step C: Database Cleanup
+        # Delete the document record from the database
+        try:
+            from digitize.db.repository import db_repo
+            success = db_repo.delete_document(doc_id)
+            if success:
+                logger.info(f"Database record for {doc_id} deleted successfully.")
+            else:
+                logger.warning(f"Database record for {doc_id} not found (may have been deleted already).")
+        except Exception as e:
+            logger.error(f"Failed to delete database record for {doc_id}: {e}")
+            # If VDB and files are cleaned but DB fails, report error so user can retry
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Search data and files removed but database cleanup failed: {e}")
+
+        # 6. Idempotent Success
         # If we reach here, either everything is deleted, or metadata was already deleted and VDB is now clean.
         return None
 

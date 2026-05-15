@@ -9,6 +9,7 @@ from digitize.doc_utils import process_documents
 from digitize.status import StatusManager, get_utc_timestamp, get_job_document_stats
 from digitize.models import JobStatus, DocStatus
 from digitize.settings import settings
+from digitize.db.db_status_manager import get_status_manager
 
 logger = get_logger("ingest")
 
@@ -124,10 +125,10 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
     # Initialize LLM session for all API calls (LLM and embedding)
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
 
-    # Initialize status manager
+    # Initialize database-first status manager
     status_mgr = None
     if job_id:
-        status_mgr = StatusManager(job_id)
+        status_mgr = get_status_manager(job_id)
         status_mgr.update_job_progress("", DocStatus.ACCEPTED, JobStatus.IN_PROGRESS)
         logger.info(f"Job {job_id} status updated to IN_PROGRESS")
 
