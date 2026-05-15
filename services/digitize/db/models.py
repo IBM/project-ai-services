@@ -4,7 +4,7 @@ SQLAlchemy ORM models for digitize metadata storage.
 These models map to the PostgreSQL schema defined in init_schema.sql.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 
 from sqlalchemy import (
@@ -57,8 +57,8 @@ class Job(Base):
     # Auto-updated timestamp
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc)
     )
 
     # Relationships
@@ -118,14 +118,13 @@ class Document(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Additional metadata (stored as JSONB)
-    # Note: Using 'doc_metadata' instead of 'metadata' because 'metadata' is reserved by SQLAlchemy
-    doc_metadata: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default={})
+    metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default={})
 
     # Auto-updated timestamp
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc)
     )
 
     # Relationships
