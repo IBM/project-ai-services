@@ -5,6 +5,7 @@ Provides connection pooling, session factory, and database initialization.
 """
 
 import os
+import re
 from contextlib import contextmanager
 from typing import Generator
 from urllib.parse import quote_plus
@@ -68,7 +69,9 @@ def create_db_engine(echo: bool = False) -> Engine:
         SQLAlchemy Engine instance
     """
     database_url = get_database_url()
-    logger.info(f"db url = %s", database_url)
+    # Mask password in URL for logging (replace anything between : and @ with ****)
+    safe_url = re.sub(r'://([^:]+):([^@]+)@', r'://\1:****@', database_url)
+    logger.info(f"db url = %s", safe_url)
     # Create engine with connection pooling
     engine = create_engine(
         database_url,
@@ -184,15 +187,5 @@ def close_db_connections() -> None:
         engine.dispose()
         logger.info("Database connections closed")
 
-
-# Export commonly used components
-__all__ = [
-    "engine",
-    "SessionLocal",
-    "ScopedSession",
-    "get_db_session",
-    "check_db_connection",
-    "close_db_connections",
-]
 
 # Made with Bob
