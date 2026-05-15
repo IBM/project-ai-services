@@ -196,9 +196,40 @@ class DigitizeConfig(BaseSettings):
         return self.cache_dir / "digitized"
 
 
+class DatabaseConfig(BaseSettings):
+    """Database connection pool configuration."""
+
+    pool_size: int = Field(
+        default=5,
+        ge=1,
+        description="Number of connections to keep in the pool",
+    )
+
+    max_overflow: int = Field(
+        default=5,
+        ge=0,
+        description="Maximum number of connections that can be created beyond pool_size",
+    )
+
+    pool_timeout: int = Field(
+        default=30,
+        ge=1,
+        description="Timeout in seconds for getting a connection from the pool",
+    )
+
+    pool_recycle: int = Field(
+        default=3600,
+        ge=1,
+        description="Time in seconds after which connections are recycled (1 hour default)",
+    )
+
+    model_config = SettingsConfigDict(env_prefix="DB_")
+
+
 class Settings(BaseSettings):
     common: CommonSettings = Field(default_factory=CommonSettings)
     digitize: DigitizeConfig = Field(default_factory=DigitizeConfig)
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
 # Global settings instance
 settings = Settings()
