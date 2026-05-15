@@ -38,13 +38,12 @@ RUN wget https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.tar.gz
 RUN tar -xzf v${VERSION}.tar.gz && \
     cd litellm-${VERSION} && \
     patch -p1 < ../ppc64le.patch && \
-    poetry lock && \
+    uv lock && \
 # 5. Export dependencies to a requirements.txt file \
-    poetry export -f requirements.txt \
-        --without-hashes \
-        --only main \
-        -E proxy -E semantic-router \
-        -o requirements.txt && \
+    uv export --no-hashes --no-dev \
+	--extra proxy \
+	--extra semantic-router \
+	-o requirements.txt && \
     cat requirements.txt
 
 WORKDIR /build/litellm-${VERSION}
@@ -55,7 +54,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 	-w /wheels \
 	--extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \
 	--prefer-binary && \
-    poetry build --format wheel -o /wheels
+    uv build --wheel --out-dir /wheels
 
 # Runtime Stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7

@@ -1,2 +1,1 @@
-poetry
-poetry-plugin-export
+uv==0.10.9
