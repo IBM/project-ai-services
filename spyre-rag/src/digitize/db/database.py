@@ -7,8 +7,9 @@ Provides connection pooling, session factory, and database initialization.
 import os
 from contextlib import contextmanager
 from typing import Generator
+from urllib.parse import quote_plus
 
-from sqlalchemy import create_engine, event, Engine
+from sqlalchemy import create_engine, event, Engine, text
 from sqlalchemy.orm import sessionmaker, Session, scoped_session
 from sqlalchemy.pool import QueuePool
 
@@ -22,10 +23,12 @@ logger = get_logger("database")
 def get_database_url() -> str:
     """
     Construct database URL from environment variables.
-    
+
+    Properly URL-encodes credentials to handle special characters like @, :, /, etc.
+
     Returns:
         PostgreSQL connection URL
-        
+
     Raises:
         ValueError: If required environment variables are not set
     """
@@ -34,7 +37,7 @@ def get_database_url() -> str:
     database = os.getenv("POSTGRES_DB")
     user = os.getenv("POSTGRES_USER")
     password = os.getenv("POSTGRES_PASSWORD")
-    
+
     if not all([host, database, user, password]):
         missing = []
         if not host:
@@ -46,8 +49,12 @@ def get_database_url() -> str:
         if not password:
             missing.append("POSTGRES_PASSWORD")
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
-    
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+
+    # URL-encode credentials to handle special characters (@, :, /, etc.)
+    encoded_user = quote_plus(user)
+    encoded_password = quote_plus(password)
+
+    return f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/{database}"
 
 
 def create_db_engine(echo: bool = False) -> Engine:
@@ -61,7 +68,7 @@ def create_db_engine(echo: bool = False) -> Engine:
         SQLAlchemy Engine instance
     """
     database_url = get_database_url()
-    
+    logger.info(f"db url = %s", database_url)
     # Create engine with connection pooling
     engine = create_engine(
         database_url,
@@ -159,7 +166,7 @@ def check_db_connection() -> bool:
     
     try:
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
         logger.info("Database connection check: OK")
         return True
     except Exception as e:
