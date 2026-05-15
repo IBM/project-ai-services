@@ -5,6 +5,8 @@ metadata:
   annotations:
     security.opendatahub.io/enable-auth: "false"
     serving.kserve.io/deploymentMode: RawDeployment
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
   labels:
     networking.kserve.io/visibility: cluster-local
     ai-services.io/application: {{ .Release.Name }}
