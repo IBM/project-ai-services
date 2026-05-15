@@ -170,6 +170,7 @@ def initialize_job_state_with_db(
     Initialize job state with both database and file system persistence.
     
     Creates job status file, document metadata files, and database entries.
+    IMPORTANT: Job must be created BEFORE documents due to foreign key constraint.
     
     Args:
         job_id: Unique identifier for the job
@@ -188,7 +189,18 @@ def initialize_job_state_with_db(
     # Generate document IDs upfront
     doc_id_dict = {doc: generate_uuid() for doc in documents_info}
     
-    # Create document metadata in both database and file system
+    # CRITICAL: Create job FIRST before documents (foreign key constraint)
+    create_job_with_db(
+        job_id=job_id,
+        operation=operation,
+        submitted_at=submitted_at,
+        doc_id_dict=doc_id_dict,
+        documents_info=documents_info,
+        jobs_dir=settings.digitize.jobs_dir,
+        job_name=job_name
+    )
+    
+    # Now create document metadata in both database and file system
     for doc in documents_info:
         doc_id = doc_id_dict[doc]
         logger.debug(f"Generated document id {doc_id} for file: {doc}")
@@ -201,17 +213,6 @@ def initialize_job_state_with_db(
             submitted_at=submitted_at,
             docs_dir=settings.digitize.docs_dir
         )
-    
-    # Create job state in both database and file system
-    create_job_with_db(
-        job_id=job_id,
-        operation=operation,
-        submitted_at=submitted_at,
-        doc_id_dict=doc_id_dict,
-        documents_info=documents_info,
-        jobs_dir=settings.digitize.jobs_dir,
-        job_name=job_name
-    )
     
     return doc_id_dict
 
