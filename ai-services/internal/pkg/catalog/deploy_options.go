@@ -78,6 +78,7 @@ func (p *CatalogProvider) GetServiceDeployOptions(serviceID string) (*types.Depl
 		component, err := p.buildDeployOptionsComponent(dep.ID)
 		if err != nil {
 			logger.Errorf(fmt.Sprintf("failed to build component '%s': %v", dep.ID, err))
+
 			continue
 		}
 		components = append(components, *component)
@@ -196,6 +197,7 @@ func (p *CatalogProvider) GetComponentProviderParams(componentType, providerID s
 	if err != nil {
 		// If schema file doesn't exist, return empty schema instead of failing
 		logger.Warningf(fmt.Sprintf("schema file not found at '%s': %v", schemaPath, err))
+
 		return map[string]any{}, nil
 	}
 
