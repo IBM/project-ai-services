@@ -3,9 +3,6 @@ Query rephrasing utilities for conversational RAG.
 
 This module provides functionality to rephrase conversational queries into
 self-contained, search-optimized queries using LLM-based transformation.
-
-Note: Query rephrasing is only active when conversational_mode is enabled
-in the RAGConfig settings.
 """
 import time
 from typing import List, Dict, Optional
@@ -13,6 +10,7 @@ from typing import List, Dict, Optional
 from common.misc_utils import get_logger
 from common.retry_utils import retry_on_transient_error
 from common.llm_utils import tokenize_with_llm, get_vllm_headers
+from common.lang_utils import detect_language, lang_en
 import common.misc_utils as misc_utils
 
 logger = get_logger("query_rephrasing")
@@ -171,24 +169,6 @@ def call_llm_for_rephrasing(
     return rephrased_text
 
 
-def is_conversational_mode_enabled() -> bool:
-    """
-    Check if conversational mode is enabled in settings.
-    
-    This is the master switch that controls whether conversational RAG features
-    (including query rephrasing) are active.
-    
-    Returns:
-        True if conversational mode is enabled, False otherwise
-    """
-    try:
-        from chatbot.settings import settings
-        return settings.chatbot.conversational_mode
-    except Exception as e:
-        logger.warning(f"Could not check conversational_mode setting: {e}")
-        return False
-
-
 async def rephrase_query_with_context(
     current_query: str,
     previous_messages: List[Dict[str, str]],
@@ -203,10 +183,6 @@ async def rephrase_query_with_context(
     This function transforms queries with pronouns and contextual references into
     standalone queries suitable for semantic search. It uses an LLM to understand
     the conversation context and reformulate the query.
-    
-    Note: This function respects the conversational_mode flag in RAGConfig. If
-    conversational_mode is False, rephrasing is automatically disabled regardless
-    of other configuration.
     
     Args:
         current_query: The user's current query (may contain pronouns/references)
@@ -236,11 +212,10 @@ async def rephrase_query_with_context(
         ... )
         'Is Spyre supported on Power 11?'
     """
-    # Check if conversational mode is enabled (master switch)
-    if not is_conversational_mode_enabled():
-        logger.debug("Query rephrasing skipped: conversational_mode is disabled")
+    if detect_language(current_query) != lang_en:
+        logger.debug("Query rephrasing skipped: Non-english detected")
         return current_query
-    
+
     # Get configuration from settings
     from chatbot.settings import settings
     
