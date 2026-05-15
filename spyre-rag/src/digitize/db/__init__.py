@@ -10,7 +10,6 @@ from digitize.db.database import (
     SessionLocal,
     ScopedSession,
     get_db_session,
-    init_db,
     check_db_connection,
     close_db_connections,
 )
@@ -25,7 +24,6 @@ __all__ = [
     "SessionLocal",
     "ScopedSession",
     "get_db_session",
-    "init_db",
     "check_db_connection",
     "close_db_connections",
 ]
