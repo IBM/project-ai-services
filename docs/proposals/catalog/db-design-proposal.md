@@ -64,6 +64,7 @@ ai_services
 | id                  | UUID              | PRIMARY KEY | Unique application identifier |
 | name                | VARCHAR(100)      |             | Application name |
 | template            | VARCHAR(100)      |             | Architecture/service template ID (e.g., rag, summarize, digitize) |
+| deployment_type     | DeploymentType    | ENUM        | Deployment type (architectures, services) |
 | status              | Status            | ENUM        | Current status (Downloading, Deploying, Running, Deleting, Error) |
 | message             | TEXT              |             | Status message or error details |
 | created_by          | VARCHAR(100)      |             | User who created the application |
@@ -73,6 +74,11 @@ ai_services
 **Custom Types:**
 
 ```sql
+CREATE TYPE deployment_type AS ENUM (
+    'architectures',
+    'services'
+);
+
 CREATE TYPE status AS ENUM (
     'Downloading',
     'Deploying',
@@ -212,6 +218,7 @@ erDiagram
         UUID id PK
         VARCHAR name
         VARCHAR template
+        DeploymentType deployment_type
         Status status
         TEXT message
         VARCHAR created_by

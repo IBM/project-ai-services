@@ -6,6 +6,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// DeploymentType represents the deployment type of an application.
+type DeploymentType string
+
+const (
+	DeploymentTypeArchitectures DeploymentType = "architectures"
+	DeploymentTypeServices      DeploymentType = "services"
+)
+
 // ApplicationStatus represents the status of an application.
 type ApplicationStatus string
 
@@ -19,13 +27,14 @@ const (
 
 // Application represents an application in the catalog.
 type Application struct {
-	ID        uuid.UUID         `json:"id"`
-	Name      string            `json:"name"`
-	Template  string            `json:"template"`
-	Status    ApplicationStatus `json:"status"`
-	Message   string            `json:"message,omitempty"`
-	CreatedBy string            `json:"created_by"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
-	Services  []Service         `json:"services,omitempty"`
+	ID             uuid.UUID         `json:"id"`
+	Name           string            `json:"name"`
+	Template       string            `json:"template"`
+	DeploymentType DeploymentType    `json:"deployment_type"`
+	Status         ApplicationStatus `json:"status"`
+	Message        string            `json:"message,omitempty"`
+	CreatedBy      string            `json:"created_by"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
+	Services       []Service         `json:"services,omitempty"`
 }
