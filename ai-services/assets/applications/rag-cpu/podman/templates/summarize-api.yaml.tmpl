@@ -31,11 +31,15 @@ spec:
         - name: LLM_ENDPOINT
           value: "http://{{ .AppName  }}--vllm-server:8000"
         - name: LLM_MODEL
-          value: "ibm-granite/granite-3.3-8b-instruct"
+          value: "{{ .Values.instruct.model.name }}"
+        - name: LLM_MAX_MODEL_LEN
+          value: "{{ .Values.instruct.model.maxModelLen }}"
+        - name: LLM_MAX_BATCH_SIZE
+          value: "{{ .Values.instruct.model.maxBatchSize}}"
         - name: LOG_LEVEL
           value: "{{ .Values.summarize.log_level}}"
         {{- if .Values.instruct.apiKey }}
-        - name: VLLM_API_KEY
+        - name: LLM_API_KEY
           value: "{{ .Values.instruct.apiKey }}"
         {{- end }}
       resources:

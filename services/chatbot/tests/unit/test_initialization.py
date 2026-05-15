@@ -255,8 +255,8 @@ class TestGlobalVariables:
         """Test pool size comes from settings"""
         from chatbot.app import settings
         
-        # Pool size is configured via settings.common.llm.llm_max_batch_size
-        assert hasattr(settings.common.llm, 'llm_max_batch_size')
-        assert settings.common.llm.llm_max_batch_size > 0
+        # Pool size is configured via settings.common.llm.max_batch_size
+        assert hasattr(settings.common.llm, 'max_batch_size')
+        assert settings.common.llm.max_batch_size > 0
 
 # Made with Bob

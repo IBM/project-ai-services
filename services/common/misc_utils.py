@@ -177,24 +177,62 @@ def get_txt_tab_filenames(file_paths, out_path):
         input_tab_files.append(f'{out_path}/{f}{table_suffix}')
     return original_filenames, input_txt_files, input_tab_files
 
+# Cache for model max lengths to avoid repeated API calls
+_model_max_len_cache: dict[tuple[str, str], int] = {}
+
+
+def resolve_model_max_len(endpoint: str, model_name: str, fallback_max_model_len: int, api_key: str | None = None) -> int:
+    """Resolve model max length from /v1/models using exact model-name matching."""
+    from common.llm_utils import query_vllm_models
+    
+    cache_key = (endpoint, model_name)
+    if cache_key in _model_max_len_cache:
+        return _model_max_len_cache[cache_key]
+
+    try:
+        resp_json = query_vllm_models(endpoint, api_key)
+        for model_info in resp_json.get("data", []):
+            if model_info.get("id") == model_name:
+                max_model_len = model_info.get("max_model_len")
+                if isinstance(max_model_len, int) and max_model_len > 0:
+                    _model_max_len_cache[cache_key] = max_model_len
+                    return max_model_len
+                break
+    except Exception:
+        pass
+
+    _model_max_len_cache[cache_key] = fallback_max_model_len
+    return fallback_max_model_len
+
+
 
 def get_model_endpoints():
     from common.settings import settings
 
     emb_model_dict = {
-        'emb_endpoint': settings.model_endpoints.emb_endpoint,
-        'emb_model':    settings.model_endpoints.emb_model,
-        'max_tokens':   settings.model_endpoints.emb_max_tokens,
+        'emb_endpoint': settings.embedding.endpoint,
+        'emb_model':    settings.embedding.model,
+        'max_model_len': resolve_model_max_len(
+            settings.embedding.endpoint,
+            settings.embedding.model,
+            settings.embedding.max_model_len,
+        ),
     }
 
     llm_model_dict = {
-        'llm_endpoint': settings.model_endpoints.llm_endpoint,
-        'llm_model':    settings.model_endpoints.llm_model,
+        'llm_endpoint': settings.llm.endpoint,
+        'llm_model':    settings.llm.model,
+        'max_model_len': resolve_model_max_len(
+            settings.llm.endpoint,
+            settings.llm.model,
+            settings.llm.max_model_len,
+            settings.llm.api_key,
+        ),
     }
 
     reranker_model_dict = {
-        'reranker_endpoint': settings.model_endpoints.reranker_endpoint,
-        'reranker_model':    settings.model_endpoints.reranker_model,
+        'reranker_endpoint': settings.reranker.endpoint,
+        'reranker_model':    settings.reranker.model,
     }
 
     return emb_model_dict, llm_model_dict, reranker_model_dict

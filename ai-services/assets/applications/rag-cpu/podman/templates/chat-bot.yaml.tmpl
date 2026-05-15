@@ -56,17 +56,21 @@ spec:
         - name: EMB_ENDPOINT
           value: "http://{{ .AppName  }}--vllm-server:8001"
         - name: EMB_MODEL
-          value: "ibm-granite/granite-embedding-278m-multilingual"
-        - name: EMB_MAX_TOKENS
-          value: "512"
+          value: "{{ .Values.embedding.model.name }}"
+        - name: EMB_MAX_MODEL_LEN
+          value: "{{ .Values.embedding.model.maxModelLen }}"
         - name: LLM_ENDPOINT
           value: "http://{{ .AppName  }}--vllm-server:8000"
         - name: LLM_MODEL
-          value: "ibm-granite/granite-3.3-8b-instruct"
+          value: "{{ .Values.instruct.model.name }}"
+        - name: LLM_MAX_MODEL_LEN
+          value: "{{ .Values.instruct.model.maxModelLen }}"
+        - name: LLM_MAX_BATCH_SIZE
+          value: "{{ .Values.instruct.model.maxBatchSize }}"
         - name: RERANKER_ENDPOINT
           value: "http://{{ .AppName  }}--vllm-server:8002"
         - name: RERANKER_MODEL
-          value: "BAAI/bge-reranker-v2-m3"
+          value: "{{ .Values.reranker.model.name }}"
         - name: OPENSEARCH_HOST
           value: "{{ .AppName  }}--opensearch"
         - name: OPENSEARCH_PORT

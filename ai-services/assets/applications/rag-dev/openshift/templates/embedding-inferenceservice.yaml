@@ -24,7 +24,7 @@ spec:
       runtime: cpu-temp
       storageUri: {{ .Values.embedding.storageUri }}
       args:
-      - --served-model-name=ibm-granite/granite-embedding-278m-multilingual
+      - --served-model-name={{ .Values.embedding.model.name }}
     resources:
       limits:
         cpu: "8"

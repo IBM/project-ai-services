@@ -29,7 +29,7 @@ def create_indexing_handler(emb_model_dict: dict, status_mgr: Optional[StatusMan
     embedder = get_embedder(
         emb_model_dict['emb_model'],
         emb_model_dict['emb_endpoint'],
-        emb_model_dict['max_tokens']
+        emb_model_dict['max_model_len']
     )
 
     def index_document_chunks(doc_id: str, chunks: list, path: str) -> bool:
@@ -96,7 +96,7 @@ def create_indexing_handler(emb_model_dict: dict, status_mgr: Optional[StatusMan
                 embedder = get_embedder(
                     emb_model_dict['emb_model'],
                     emb_model_dict['emb_endpoint'],
-                    emb_model_dict['max_tokens']
+                    emb_model_dict['max_model_len']
                 )
             except Exception as reinit_error:
                 logger.error(f"Failed to reinitialize connections: {reinit_error}")
@@ -122,7 +122,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
     logger.info(f"Ingestion started from dir '{directory_path}'")
 
     # Initialize LLM session for all API calls (LLM and embedding)
-    create_llm_session(pool_maxsize=settings.common.llm.llm_max_batch_size)
+    create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
 
     # Initialize status manager
     status_mgr = None
@@ -148,11 +148,11 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
         indexing_handler = create_indexing_handler(emb_model_dict, status_mgr, doc_id_dict)
 
         start_time = time.time()
-        # Reserve 100 tokens from embedding model's max_tokens to account for metadata
+        # Reserve 100 tokens from embedding model's max_model_len to account for metadata
         # that will be prepended to content during final merge, ensuring total tokens stay within embedding model limits
         _, converted_pdf_stats = process_documents(
             input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'],  emb_model_dict["emb_endpoint"],
-            max_tokens=emb_model_dict['max_tokens'] - 100, job_id=job_id, doc_id_dict=doc_id_dict,
+            max_tokens=emb_model_dict['max_model_len'] - 100, job_id=job_id, doc_id_dict=doc_id_dict,
             indexing_callback=indexing_handler)
         # converted_pdf_stats holds { file_name: {page_count: int, table_count: int, timings: {conversion: time_in_secs, process_text: time_in_secs, process_tables: time_in_secs, chunking: time_in_secs}} }
         if converted_pdf_stats is None:

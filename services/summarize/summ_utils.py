@@ -5,37 +5,44 @@ from pydantic import BaseModel, Field
 import threading
 
 from summarize.settings import settings
-from common.misc_utils import set_log_level, get_logger
+from common.misc_utils import set_log_level, get_logger, resolve_model_max_len
 
 set_log_level(settings.common.app.log_level)
 logger = get_logger("summarize")
 
 _pdf_lock = threading.Lock()
 
-# Pre-compute constants at module load time to avoid recalculating on every request
-# Calculate minimum output tokens needed for a valid summary
-MINIMUM_OUTPUT_TOKENS = int(
-    settings.summarize.minimum_summary_words / settings.common.llm.token_to_word_ratio_en
-)
-
-# Hard limit: maximum allowed input tokens (input + prompt + minimum_output must fit in context)
-MAX_ALLOWED_INPUT_TOKENS = (
-    settings.common.llm.granite_3_3_8b_instruct_context_length -
-    settings.summarize.summarization_prompt_token_count -
-    MINIMUM_OUTPUT_TOKENS
-)
-
-# Pre-compute max input word count from context length at startup
-# input_words/ratio + buf + (input_words/ratio)*coeff < max_model_len
-# => input_words * (1 + coeff) / ratio < max_model_len - buf
-MAX_INPUT_WORDS = int(
-    (
-        settings.common.llm.granite_3_3_8b_instruct_context_length
-        - settings.summarize.summarization_prompt_token_count
+def get_llm_max_model_len() -> int:
+    return resolve_model_max_len(
+        settings.common.llm.endpoint,
+        settings.common.llm.model,
+        settings.common.llm.max_model_len,
+        settings.common.llm.api_key,
     )
-    * settings.common.llm.token_to_word_ratio_en
-    / (1 + settings.summarize.summarization_coefficient)
-)
+
+def get_minimum_output_tokens() -> int:
+    return int(
+        settings.summarize.minimum_summary_words / settings.common.llm.token_to_word_ratio_en
+    )
+
+def get_max_allowed_input_tokens() -> int:
+    return (
+        get_llm_max_model_len()
+        - settings.summarize.summarization_prompt_token_count
+        - get_minimum_output_tokens()
+    )
+
+def get_max_input_words() -> int:
+    return int(
+        (
+            get_llm_max_model_len()
+            - settings.summarize.summarization_prompt_token_count
+        )
+        * settings.common.llm.token_to_word_ratio_en
+        / (1 + settings.summarize.summarization_coefficient)
+    )
+
+MAX_INPUT_WORDS = get_max_input_words()
 
 def word_count(text: str) -> int:
     return len(text.split())
@@ -74,22 +81,24 @@ def validate_input_and_get_available_tokens(
             "Input text is smaller than summary length",
         )
     
+    max_allowed_input_tokens = get_max_allowed_input_tokens()
+
     # Hard limit check
-    if input_tokens > MAX_ALLOWED_INPUT_TOKENS:
+    if input_tokens > max_allowed_input_tokens:
         # Convert to words for user-friendly error message
-        max_allowed_input_words = int(MAX_ALLOWED_INPUT_TOKENS * settings.common.llm.token_to_word_ratio_en)
+        max_allowed_input_words = int(max_allowed_input_tokens * settings.common.llm.token_to_word_ratio_en)
         raise SummarizeException(
             413, "CONTEXT_LIMIT_EXCEEDED",
             f"Input size ({input_word_count} words, {input_tokens} tokens) exceeds maximum allowed. "
-            f"Maximum input: ~{max_allowed_input_words} words ({MAX_ALLOWED_INPUT_TOKENS} tokens) "
+            f"Maximum input: ~{max_allowed_input_words} words ({max_allowed_input_tokens} tokens) "
             f"to ensure at least {settings.summarize.minimum_summary_words} words for summary.",
         )
     
     # Calculate available output tokens
     available_output_tokens = (
-        settings.common.llm.granite_3_3_8b_instruct_context_length -
-        input_tokens -
-        settings.summarize.summarization_prompt_token_count
+        get_llm_max_model_len()
+        - input_tokens
+        - settings.summarize.summarization_prompt_token_count
     )
     
     # Soft limit check for level-based approach: log warning if level's ideal output won't fit

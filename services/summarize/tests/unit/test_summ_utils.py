@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import Mock, patch
 
 from summarize.summ_utils import (
-    MAX_ALLOWED_INPUT_TOKENS,
+    get_max_allowed_input_tokens,
     MAX_INPUT_WORDS,
     SummarizeException,
     build_messages,
@@ -166,7 +166,7 @@ class TestValidateInputAndGetAvailableTokens:
         )
 
         expected = (
-            settings.common.llm.granite_3_3_8b_instruct_context_length
+            settings.common.llm.max_model_len
             - input_tokens
             - settings.summarize.summarization_prompt_token_count
         )
@@ -187,7 +187,7 @@ class TestValidateInputAndGetAvailableTokens:
     def test_input_tokens_over_limit_raises_context_limit_exceeded(self):
         with pytest.raises(SummarizeException) as exc:
             validate_input_and_get_available_tokens(
-                input_tokens=MAX_ALLOWED_INPUT_TOKENS + 1,
+                input_tokens=get_max_allowed_input_tokens() + 1,
                 input_word_count=5000,
                 summary_level=None,
                 summary_length=None,
@@ -197,7 +197,7 @@ class TestValidateInputAndGetAvailableTokens:
         assert exc.value.status == "CONTEXT_LIMIT_EXCEEDED"
 
     def test_level_soft_limit_logs_warning_but_does_not_fail(self):
-        input_tokens = MAX_ALLOWED_INPUT_TOKENS
+        input_tokens = get_max_allowed_input_tokens()
         input_word_count = int(input_tokens * settings.common.llm.token_to_word_ratio_en)
 
         with patch("summarize.summ_utils.logger") as mock_logger:
