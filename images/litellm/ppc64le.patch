@@ -1,10 +1,13 @@
 diff --git a/pyproject.toml b/pyproject.toml
-index 654783b78c..684a66e5c2 100644
+index 654783b78c..331fcc6860 100644
 --- a/pyproject.toml
 +++ b/pyproject.toml
-@@ -67,11 +67,11 @@ litellm-proxy-extras = {version = "0.4.65", optional = true}
+@@ -65,13 +65,13 @@ mcp = {version = "1.26.0", optional = true, python = ">=3.10"}
+ a2a-sdk = {version = "0.3.25", optional = true, python = ">=3.10"}
+ litellm-proxy-extras = {version = "0.4.65", optional = true}
  rich = {version = "13.9.4", optional = true}
- litellm-enterprise = {version = "0.1.37", optional = true}
+-litellm-enterprise = {version = "0.1.37", optional = true}
++litellm-enterprise = {version = "0.1.37", optional = true, markers = "platform_machine != 'ppc64le'"}
  diskcache = {version = "5.6.3", optional = true}
 -polars = {version = "1.39.3", optional = true, python = ">=3.10"}
 +polars = {version = "1.39.3", optional = true, python = ">=3.10", markers = "platform_machine != 'ppc64le'"}

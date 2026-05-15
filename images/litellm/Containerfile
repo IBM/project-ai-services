@@ -31,20 +31,21 @@ ENV RUSTC_BOOTSTRAP=1 \
 
 WORKDIR /build
 
-COPY ppc64le.patch ./ppc64le.patch
-
 # 4. Download litellm & patch it
 RUN wget https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.tar.gz >/dev/null
+COPY ppc64le.patch ./ppc64le.patch
 RUN tar -xzf v${VERSION}.tar.gz && \
     cd litellm-${VERSION} && \
-    patch < ../ppc64le.patch && \
+    patch -p1 < ../ppc64le.patch && \
     poetry lock && \
 # 5. Export dependencies to a requirements.txt file
     poetry export -f requirements.txt \
-    --without-hashes \
-    --only main \
-    -E proxy -E semantic-router \
-    -o requirements.txt
+        --without-hashes \
+        --only main \
+        -E proxy -E semantic-router \
+        -o requirements.txt && \
+    echo "litellm==${VERSION//-stable}" >> requirements.txt && \
+    cat requirements.txt
 
 WORKDIR /build/litellm-${VERSION}
 
@@ -57,8 +58,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Runtime Stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
 
-WORKDIR /app
-
 # 1. Copy ONLY the compiled wheels from Stage 1
 COPY --from=builder /wheels /tmp/wheels
 
@@ -70,6 +69,10 @@ RUN microdnf -y update && \
     microdnf remove -y python3.12-pip && \
     rm -rf /tmp/wheels && \
     microdnf clean all 
+
+USER 1001
+
+WORKDIR /app
 
 EXPOSE 4000
 
