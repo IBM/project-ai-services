@@ -5,8 +5,13 @@ import {
   PiggyBank,
   IbmPlanningAnalytics,
   Umbrella,
-  Help,
   Badge,
+  IbmZOpenEditor,
+  Stethoscope,
+  SettingsServices,
+  UserService,
+  UserMultiple,
+  Hotel,
 } from "@carbon/icons-react";
 import styles from "./SolutionCard.module.scss";
 
@@ -25,14 +30,14 @@ const categoryIcons: Record<
 > = {
   Agriculture: AgricultureAnalytics,
   "Banking and Finance": PiggyBank,
-  "Dev operations": Help,
+  "Dev operations": IbmZOpenEditor,
   "Enterprise resource planning": IbmPlanningAnalytics,
-  Healthcare: Help,
+  Healthcare: Stethoscope,
   Insurance: Umbrella,
-  "IT operations": Help,
-  "Professional services": Help,
-  "Public sector": Help,
-  "Real estates": Help,
+  "IT operations": SettingsServices,
+  "Professional services": UserService,
+  "Public sector": UserMultiple,
+  "Real estates": Hotel,
 };
 
 const SolutionCard = ({
@@ -66,7 +71,7 @@ const SolutionCard = ({
       </div>
 
       <div className={styles.footer}>
-        <Tag type="gray" size="sm">
+        <Tag type="gray" size="md">
           {primaryTag}
         </Tag>
         <IconButton

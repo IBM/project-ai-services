@@ -4,12 +4,15 @@
 
 .card {
   background-color: var(--cds-layer);
-  border: 1px solid var(--cds-border-subtle);
   padding: spacing.$spacing-05;
   display: flex;
   flex-direction: column;
   height: 100%;
   position: relative;
+
+  :global(.cds--popover) {
+    z-index: 8500;
+  }
 }
 
 .cardHeader {
@@ -37,15 +40,6 @@
   padding: 0;
   cursor: pointer;
   color: var(--cds-support-success);
-  position: relative;
-
-  &:hover {
-    opacity: 0.8;
-  }
-
-  svg {
-    fill: var(--cds-support-success);
-  }
 }
 
 .content {
@@ -57,20 +51,16 @@
 .category {
   @include type.type-style("label-01");
   color: var(--cds-text-secondary);
-  margin: 0;
-  margin-bottom: spacing.$spacing-02;
+  margin: 0 0 spacing.$spacing-02 0;
 }
 
 .title {
   @include type.type-style("heading-03");
-  color: var(--cds-text-primary);
-  margin: 0;
-  margin-bottom: spacing.$spacing-03;
+  margin: 0 0 spacing.$spacing-03 0;
 }
 
 .description {
   @include type.type-style("body-compact-01");
-  color: var(--cds-text-secondary);
   margin: 0 0 spacing.$spacing-05 0;
 }
 

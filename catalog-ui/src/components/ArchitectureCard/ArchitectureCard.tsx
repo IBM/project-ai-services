@@ -8,7 +8,6 @@ export interface ArchitectureCardProps {
   description: string;
   tags: string[];
   isCertified?: boolean;
-  tagsHeading?: string;
   onDeploy?: (id: string) => void;
   onLearnMore?: (id: string) => void;
 }
@@ -19,7 +18,6 @@ const ArchitectureCard = ({
   description,
   tags,
   isCertified,
-  tagsHeading = "Services",
   onDeploy,
   onLearnMore,
 }: ArchitectureCardProps) => {
@@ -50,7 +48,7 @@ const ArchitectureCard = ({
 
       {tags.length > 0 && (
         <div className={styles.tagsSection}>
-          <h4 className={styles.tagsHeading}>{tagsHeading}</h4>
+          <h4 className={styles.tagsHeading}>Services</h4>
           <div className={styles.tags}>
             {visibleTags.map((tag) => (
               <Tag key={tag} type="blue" size="md">
