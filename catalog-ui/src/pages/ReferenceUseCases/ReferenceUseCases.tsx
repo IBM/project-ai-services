@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { AccordionItem, Checkbox } from "@carbon/react";
+import { AccordionItem, Checkbox, CheckboxGroup } from "@carbon/react";
 import CatalogBrowseLayout from "@/layouts/CatalogBrowseLayout";
 import SolutionCard from "@/components/SolutionCard";
 
@@ -303,65 +303,73 @@ const ReferenceUseCases = () => {
     <>
       {providerOptions.length > 0 && (
         <AccordionItem title="Provider" open>
-          {providerOptions.map((option) => (
-            <Checkbox
-              key={option.value}
-              labelText={`${option.label} (${option.count})`}
-              id={`provider-${option.value}`}
-              checked={selectedProviders.includes(option.value)}
-              onChange={(_, { checked }) =>
-                handleProviderChange(checked, option.value)
-              }
-            />
-          ))}
+          <CheckboxGroup legendText="">
+            {providerOptions.map((option) => (
+              <Checkbox
+                key={option.value}
+                labelText={`${option.label} (${option.count})`}
+                id={`provider-${option.value}`}
+                checked={selectedProviders.includes(option.value)}
+                onChange={(_, { checked }) =>
+                  handleProviderChange(checked, option.value)
+                }
+              />
+            ))}
+          </CheckboxGroup>
         </AccordionItem>
       )}
 
       {domainOptions.length > 0 && (
         <AccordionItem title="Domains" open>
-          {domainOptions.map((option) => (
-            <Checkbox
-              key={option.value}
-              labelText={`${option.label} (${option.count})`}
-              id={`domain-${option.value}`}
-              checked={selectedDomains.includes(option.value)}
-              onChange={(_, { checked }) =>
-                handleDomainChange(checked, option.value)
-              }
-            />
-          ))}
+          <CheckboxGroup legendText="">
+            {domainOptions.map((option) => (
+              <Checkbox
+                key={option.value}
+                labelText={`${option.label} (${option.count})`}
+                id={`domain-${option.value}`}
+                checked={selectedDomains.includes(option.value)}
+                onChange={(_, { checked }) =>
+                  handleDomainChange(checked, option.value)
+                }
+              />
+            ))}
+          </CheckboxGroup>
         </AccordionItem>
       )}
 
       {assetOptions.length > 0 && (
         <AccordionItem title="Assets" open>
-          {assetOptions.map((option) => (
-            <Checkbox
-              key={option.value}
-              labelText={`${option.label} (${option.count})`}
-              id={`asset-${option.value}`}
-              checked={selectedAssets.includes(option.value)}
-              onChange={(_, { checked }) =>
-                handleAssetChange(checked, option.value)
-              }
-            />
-          ))}
+          <CheckboxGroup legendText="">
+            {assetOptions.map((option) => (
+              <Checkbox
+                key={option.value}
+                labelText={`${option.label} (${option.count})`}
+                id={`asset-${option.value}`}
+                checked={selectedAssets.includes(option.value)}
+                onChange={(_, { checked }) =>
+                  handleAssetChange(checked, option.value)
+                }
+              />
+            ))}
+          </CheckboxGroup>
         </AccordionItem>
       )}
 
       {architectureOptions.length > 0 && (
         <AccordionItem title="Architectures" open>
-          {architectureOptions.map((option) => (
-            <Checkbox
-              key={option.value}
-              labelText={`${option.label} (${option.count})`}
-              id={`architecture-${option.value}`}
-              checked={selectedArchitectures.includes(option.value)}
-              onChange={(_, { checked }) =>
-                handleArchitectureChange(checked, option.value)
-              }
-            />
-          ))}
+          <CheckboxGroup legendText="">
+            {architectureOptions.map((option) => (
+              <Checkbox
+                key={option.value}
+                labelText={`${option.label} (${option.count})`}
+                id={`architecture-${option.value}`}
+                checked={selectedArchitectures.includes(option.value)}
+                onChange={(_, { checked }) =>
+                  handleArchitectureChange(checked, option.value)
+                }
+              />
+            ))}
+          </CheckboxGroup>
         </AccordionItem>
       )}
     </>
