@@ -80,7 +80,7 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 	query := `
 		SELECT
 			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at,
-			s.id, s.app_id, s.type, s.status, s.endpoints, s.version, s.created_at, s.updated_at
+			s.id, s.app_id, s.catalog_id, s.status, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM applications a
 		INNER JOIN services s ON a.id = s.app_id
 	`
@@ -225,7 +225,7 @@ func (s *scannedServiceFields) toService() (*models.Service, error) {
 	service := &models.Service{
 		ID:        s.id.UUID,
 		AppID:     s.appID.UUID,
-		Type:      s.typ.String,
+		CatalogID: s.typ.String,
 		Status:    models.ApplicationStatus(s.status.String),
 		CreatedAt: s.created.Time,
 		UpdatedAt: s.updated.Time,

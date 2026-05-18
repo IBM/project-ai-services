@@ -10,7 +10,7 @@ import (
 type Service struct {
 	ID        uuid.UUID         `json:"id"`
 	AppID     uuid.UUID         `json:"app_id"`
-	Type      string            `json:"type"`
+	CatalogID string            `json:"catalog_id"`
 	Status    ApplicationStatus `json:"status"`
 	Endpoints map[string]any    `json:"endpoints,omitempty"`
 	Version   string            `json:"version,omitempty"`

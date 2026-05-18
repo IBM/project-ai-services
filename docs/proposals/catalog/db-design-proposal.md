@@ -98,7 +98,7 @@ CREATE TYPE status AS ENUM (
 |---------------------|-------------------|-------------|-------------|
 | id                  | UUID              | PRIMARY KEY | Unique service identifier |
 | app_id              | UUID              | FOREIGN KEY | References applications(id) |
-| type                | VARCHAR(100)      |             | Service type (e.g., Summarization, Digitization) |
+| catalog_id          | VARCHAR(100)      |             | Service catalog ID (e.g., chat, summarize, digitize) |
 | status              | ServiceStatus     | ENUM        | Current status (Running, Error) |
 | endpoints           | JSONB             |             | Array of endpoint objects with name and endpoint fields: `[{"name": "ui", "endpoint": "http://..."}, {"name": "backend", "endpoint": "http://..."}]` |
 | version             | TEXT              |             | Service version |
@@ -229,7 +229,7 @@ erDiagram
     services {
         UUID id PK
         UUID app_id FK
-        VARCHAR type
+        VARCHAR catalog_id
         ServiceStatus status
         JSONB endpoints
         TEXT version
@@ -336,11 +336,11 @@ The tokens_blacklist table provides token revocation management with enhanced se
 
 ### 6. Services and Components Separation
 The schema separates application-specific services from shared infrastructure components:
-- **Services Table**: Application-specific deployable units (e.g., Summarization, Digitization) with app_id foreign key
+- **Services Table**: Application-specific deployable units (e.g., chat, summarize, digitize) with app_id foreign key and catalog_id referencing the service template
 - **Components Table**: Shared infrastructure resources (e.g., vector_store, llm, reranker, embedding) without app_id
 - **Clear Separation**: Services belong to applications, components are shared across applications
 - **Flexible Design**: Easy to add new service and component types
-- **Type-based Filtering**: Use type field to distinguish different types
+- **Catalog ID**: Use catalog_id field to identify the service template from the catalog
 
 ### 7. Components Table Design
 The components table stores shared infrastructure with specific design choices:

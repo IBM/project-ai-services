@@ -120,8 +120,8 @@ func (s *ApplicationService) buildServiceStatuses(services []models.Service) []t
 
 	for _, svc := range services {
 		// Get service display name from catalog metadata
-		serviceDisplayName := svc.Type // Default to service type
-		if service, err := s.provider.LoadService(svc.Type); err == nil && service.Name != "" {
+		serviceDisplayName := svc.CatalogID // Default to catalog_id
+		if service, err := s.provider.LoadService(svc.CatalogID); err == nil && service.Name != "" {
 			serviceDisplayName = service.Name
 		}
 

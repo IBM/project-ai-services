@@ -37,7 +37,7 @@ func NewServiceRepository(pool *pgxpool.Pool) ServiceRepository {
 // Insert creates a new service in the database.
 func (r *serviceRepo) Insert(ctx context.Context, service *models.Service) error {
 	query := `
-		INSERT INTO services (id, app_id, type, status, endpoints, version)
+		INSERT INTO services (id, app_id, catalog_id, status, endpoints, version)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING created_at, updated_at
 	`
@@ -62,7 +62,7 @@ func (r *serviceRepo) Insert(ctx context.Context, service *models.Service) error
 		query,
 		service.ID,
 		service.AppID,
-		service.Type,
+		service.CatalogID,
 		service.Status,
 		endpointsJSON,
 		sql.NullString{String: service.Version, Valid: service.Version != ""},
@@ -117,7 +117,7 @@ func (r *serviceRepo) GetByAppID(ctx context.Context, appID uuid.UUID) ([]models
 		err := rows.Scan(
 			&service.ID,
 			&service.AppID,
-			&service.Type,
+			&service.CatalogID,
 			&service.Status,
 			&endpointsJSON,
 			&serviceVersion,
@@ -172,7 +172,7 @@ func (r *serviceRepo) Update(ctx context.Context, service *models.Service) error
 	err = r.pool.QueryRow(
 		ctx,
 		query,
-		service.Type,
+		service.CatalogID,
 		service.Status,
 		endpointsJSON,
 		sql.NullString{String: service.Version, Valid: service.Version != ""},
