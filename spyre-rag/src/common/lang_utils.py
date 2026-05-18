@@ -27,8 +27,8 @@ def get_prompt_for_language(lang: str) -> str:
     return prompt_map.get(lang, settings.chatbot.query_vllm_stream_prompt)
 
 max_tokens_map = {
-                lang_en: settings.common.llm.llm_max_tokens,
-                lang_de: settings.common.llm.llm_max_tokens_de
+                lang_en: settings.llm.max_tokens,
+                lang_de: settings.llm.max_tokens_de
             }
 
 def setup_language_detector(languages: list[Language]):

@@ -35,7 +35,7 @@ logger = get_logger("doc_utils")
 WORKER_SIZE = settings.digitize.doc_worker_size
 HEAVY_PDF_CONVERT_WORKER_SIZE = settings.digitize.heavy_pdf_convert_worker_size
 HEAVY_PDF_PAGE_THRESHOLD = settings.digitize.heavy_pdf_page_threshold
-POOL_SIZE = settings.common.llm.llm_max_batch_size
+POOL_SIZE = settings.common.llm.max_batch_size
 
 is_debug = logger.isEnabledFor(logging.DEBUG)
 tqdm_wrapper = tqdm if is_debug else (lambda x, **kwargs: x)

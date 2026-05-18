@@ -31,13 +31,13 @@ spec:
         - name: EMB_ENDPOINT
           value: "http://{{ .AppName  }}--vllm-server:8001"
         - name: EMB_MODEL
-          value: "ibm-granite/granite-embedding-278m-multilingual"
-        - name: EMB_MAX_TOKENS
-          value: "512"
+          value: "{{ .Values.embedding.model.name }}"
+        - name: EMB_MAX_MODEL_LEN
+          value: "{{ .Values.embedding.model.maxModelLen }}"
         - name: RERANKER_ENDPOINT
           value: "http://{{ .AppName  }}--vllm-server:8002"
         - name: RERANKER_MODEL
-          value: "BAAI/bge-reranker-v2-m3"
+          value: "{{ .Values.reranker.model.name }}"
         - name: OPENSEARCH_HOST
           value: "{{ .AppName  }}--opensearch"
         - name: OPENSEARCH_PORT

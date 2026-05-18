@@ -16,6 +16,8 @@ const (
 	CatalogTypeServices = "services"
 	// CatalogTypeComponents represents the components catalog type.
 	CatalogTypeComponents = "components"
+	// CatalogAppName represents the catalog name.
+	CatalogAppName = "ai-services"
 )
 
 // Made with Bob

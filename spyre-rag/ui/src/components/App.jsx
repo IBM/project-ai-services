@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   BusEventType,
   ChatCustomElement,
@@ -14,11 +14,7 @@ import { customSendMessage } from './customSendMessage.jsx';
 import HeaderNav from './Header.jsx';
 import { renderUserDefinedResponse } from './renderUserDefinedResponse.jsx';
 
-const header = {
-  title: 'DigitalAssistant',
-  hideMinimizeButton: true,
-  minimizeButtonIconType: undefined,
-};
+const WELCOME_MESSAGE = `Hi, I'm your assistant! You can ask me anything related to your documents`;
 
 const layout = {
   corners: CornersType.SQUARE,
@@ -30,6 +26,8 @@ function App() {
   const [showApiKeyDialog, setShowApiKeyDialog] = useState(false);
   const [authRequired, setAuthRequired] = useState(null); // null = checking, true/false = determined
   const [isReady, setIsReady] = useState(false);
+  const [conversationHistory, setConversationHistory] = useState([]);
+  const chatInstanceRef = useRef(null);
 
   useEffect(() => {
     // Check if authentication is required by probing the models endpoint
@@ -79,13 +77,35 @@ function App() {
     }
   };
 
-  // Create messaging object with API key
+  const handleResetChat = () => {
+    // Perform a page refresh to start a new session
+    window.location.reload();
+  };
+
+  const header = {
+    title: 'DigitalAssistant',
+    hideMinimizeButton: true,
+    minimizeButtonIconType: undefined,
+  };
+
+  // Create messaging object with API key and conversation history
   const messaging = {
     customSendMessage: (request, options, instance) =>
-      customSendMessage(request, options, instance, apiKey, handleAuthError),
+      customSendMessage(
+        request,
+        options,
+        instance,
+        apiKey,
+        handleAuthError,
+        conversationHistory,
+        setConversationHistory,
+      ),
   };
 
   function onAfterRender(instance) {
+    // Store the chat instance reference
+    chatInstanceRef.current = instance;
+
     instance.on({ type: BusEventType.FEEDBACK, handler: feedbackHandler });
 
     instance.messaging.addMessage({
@@ -93,7 +113,7 @@ function App() {
         generic: [
           {
             response_type: 'text',
-            text: `Hi, I'm your assistant! You can ask me anything related to your documents`,
+            text: WELCOME_MESSAGE,
           },
         ],
       },
@@ -131,7 +151,10 @@ function App() {
           <Grid fullWidth className="chat-page-grid">
             <Column sm={4} md={8} lg={12}>
               <Theme theme="g90">
-                <HeaderNav />
+                <HeaderNav
+                  onNewChat={handleResetChat}
+                  showNewChatButton={isReady && apiKey}
+                />
               </Theme>
             </Column>
             <Column sm={4} md={8} lg={12}>
