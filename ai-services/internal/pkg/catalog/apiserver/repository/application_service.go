@@ -106,8 +106,8 @@ func (s *ApplicationService) buildApplication(app models.Application) (types.App
 		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
 	}
 
-	// Add services array (services already loaded from DB via JOIN)
-	if len(app.Services) > 0 {
+	// Add services array only for architectures (not for individual services)
+	if app.DeploymentType == models.DeploymentTypeArchitectures && len(app.Services) > 0 {
 		appData.Services = s.buildServiceStatuses(app.Services)
 	}
 
