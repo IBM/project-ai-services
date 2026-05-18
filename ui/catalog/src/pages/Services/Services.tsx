@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { AccordionItem, Checkbox } from "@carbon/react";
+import { AccordionItem, Checkbox, CheckboxGroup } from "@carbon/react";
 import CatalogBrowseLayout from "@/layouts/CatalogBrowseLayout";
 
 const Services = () => {
@@ -114,33 +114,37 @@ const Services = () => {
         <>
             {providerOptions.length > 0 && (
                 <AccordionItem title="Provider" open>
-                    {providerOptions.map((option) => (
-                        <Checkbox
-                            key={option.value}
-                            labelText={`${option.label} (${option.count})`}
-                            id={`provider-${option.value}`}
-                            checked={selectedProviders.includes(option.value)}
-                            onChange={(_, { checked }) =>
-                                handleProviderChange(checked, option.value)
-                            }
-                        />
-                    ))}
+                    <CheckboxGroup legendText="">
+                        {providerOptions.map((option) => (
+                            <Checkbox
+                                key={option.value}
+                                labelText={`${option.label} (${option.count})`}
+                                id={`provider-${option.value}`}
+                                checked={selectedProviders.includes(option.value)}
+                                onChange={(_, { checked }) =>
+                                    handleProviderChange(checked, option.value)
+                                }
+                            />
+                        ))}
+                    </CheckboxGroup>
                 </AccordionItem>
             )}
 
             {architectureOptions.length > 0 && (
                 <AccordionItem title="Architectures" open>
-                    {architectureOptions.map((option) => (
-                        <Checkbox
-                            key={option.value}
-                            labelText={`${option.label} (${option.count})`}
-                            id={`architecture-${option.value}`}
-                            checked={selectedArchitectures.includes(option.value)}
-                            onChange={(_, { checked }) =>
-                                handleArchitectureChange(checked, option.value)
-                            }
-                        />
-                    ))}
+                    <CheckboxGroup legendText="">
+                        {architectureOptions.map((option) => (
+                            <Checkbox
+                                key={option.value}
+                                labelText={`${option.label} (${option.count})`}
+                                id={`architecture-${option.value}`}
+                                checked={selectedArchitectures.includes(option.value)}
+                                onChange={(_, { checked }) =>
+                                    handleArchitectureChange(checked, option.value)
+                                }
+                            />
+                        ))}
+                    </CheckboxGroup>
                 </AccordionItem>
             )}
         </>
