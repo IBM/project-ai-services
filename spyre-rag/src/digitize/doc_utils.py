@@ -777,10 +777,8 @@ def detect_document_language(data: list) -> str:
             return 'en'
         
         for block_text in sampled_blocks:
-            # For longer blocks, truncate 
-            max_size = min(500, len(block_text)-1)
             # Truncate to 500 characters
-            chunk = block_text[:max_size]
+            chunk = block_text[:500]
             
             # Detect language for this chunk
             if chunk.strip():
@@ -820,7 +818,7 @@ def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50,
     Returns:
         List of text chunks
     """
-    logger.info(f"Using language for chunking: {language}")
+    logger.debug(f"Using language for chunking: {language}")
     
     sentences = SentenceSplitter(language=language).split(text)
     chunks = []
