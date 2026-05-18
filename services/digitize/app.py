@@ -16,7 +16,7 @@ from digitize.settings import settings
 
 set_log_level(settings.common.app.log_level)
 
-from common.misc_utils import validate_pdf_file, set_request_id, configure_uvicorn_logging
+from common.misc_utils import validate_document_file, set_request_id, configure_uvicorn_logging
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 import digitize.digitize_utils as dg_util
 import digitize.models as models
@@ -81,8 +81,8 @@ tags_metadata = [
 
 app = FastAPI(
     title="Digitize Documents Service",
-    description="Document digitization and ingestion API for processing PDFs into searchable content. "
-                "Supports both digitization (converting PDFs to text/markdown/JSON) and ingestion "
+    description="Document digitization and ingestion API for processing PDF and DOCX files into searchable content. "
+                "Supports both digitization (converting documents to text/markdown/JSON) and ingestion "
                 "(processing and indexing documents into a vector database for semantic search).",
     version="1.0.0",
     lifespan=lifespan,
@@ -173,7 +173,7 @@ async def validate_pdf_files(
     file_contents_raw: List[bytes | BaseException]
 ) -> tuple[List[str], List[bytes]]:
     """
-    Validate uploaded PDF files using shared validation logic.
+    Validate uploaded document files (PDF or DOCX) using shared validation logic.
 
     Raises APIError on any validation failure.
 
@@ -190,7 +190,7 @@ async def validate_pdf_files(
 
         # Use shared validation function
         try:
-            await asyncio.to_thread(validate_pdf_file, filename, content)
+            await asyncio.to_thread(validate_document_file, filename, content)
         except ValueError as e:
             APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, str(e))
 
@@ -208,16 +208,16 @@ async def validate_pdf_files(
     tags=["jobs"],
     summary="Create async jobs to upload and process documents",
     description=(
-        "Upload PDF documents for processing. Supports two operation types:\n\n"
+        "Upload documents (PDF or DOCX) for processing. Supports two operation types:\n\n"
         "- **ingestion**: Process and index documents into vector database for semantic search\n"
-        "- **digitization**: Convert PDF to text/markdown/JSON format (single file only)\n\n"
+        "- **digitization**: Convert document to text/markdown/JSON format (single file only)\n\n"
         "The operation runs asynchronously in the background. Use the returned `job_id` to track progress."
     ),
     response_description="Job ID for tracking the processing status"
 )
 async def digitize_document(
     background_tasks: BackgroundTasks,
-    files: List[UploadFile] = File(..., description="PDF files to process (multiple for ingestion, single for digitization)"),
+    files: List[UploadFile] = File(..., description="Document files (PDF or DOCX) to process (multiple for ingestion, single for digitization)"),
     operation: models.OperationType = Query(
         models.OperationType.INGESTION,
         description="Operation type: 'ingestion' (index into vector DB) or 'digitization' (convert to text/md/json)"

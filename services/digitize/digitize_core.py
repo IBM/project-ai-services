@@ -2,7 +2,7 @@ from common.misc_utils import *
 from pathlib import Path
 from digitize.status import StatusManager,get_utc_timestamp
 from digitize.models import JobStatus, DocStatus, OutputFormat
-from digitize.pdf_utils import get_pdf_page_count
+from digitize.pdf_utils import get_pdf_page_count, get_document_page_count
 from digitize.doc_utils import convert_document_format
 from concurrent.futures import ProcessPoolExecutor
 
@@ -10,10 +10,10 @@ logger = get_logger("digitize")
 
 def digitize(directory_path: Path, job_id: str, doc_id_dict: dict, output_format: OutputFormat):
     """
-    Digitize a single PDF file in the staging directory.
+    Digitize a single document file (PDF or DOCX) in the staging directory.
 
     Args:
-        directory_path: Path to staging directory containing exactly one PDF (pre-validated and staged by app.py)
+        directory_path: Path to staging directory containing exactly one document (pre-validated and staged by app.py)
         job_id: Job identifier for StatusManager
         doc_id_dict: Mapping from filename to document ID
         output_format: "json", "md", or "txt"
@@ -33,9 +33,9 @@ def digitize(directory_path: Path, job_id: str, doc_id_dict: dict, output_format
     # Prepare output/cache path
     out_path = setup_digitized_doc_dir()
 
-    # Get the single PDF file from staging directory
-    pdfs = list(directory_path.glob("*.pdf"))
-    file_path = pdfs[0]
+    # Get the single document file from staging directory (PDF or DOCX)
+    documents = list(directory_path.glob("*.pdf")) + list(directory_path.glob("*.docx"))
+    file_path = documents[0]
     filename = file_path.name
     doc_id = doc_id_dict[filename]
 
@@ -59,8 +59,8 @@ def digitize(directory_path: Path, job_id: str, doc_id_dict: dict, output_format
 
             output_file, conversion_time = future.result()
 
-        # Collect metadata
-        page_count = get_pdf_page_count(str(file_path))
+        # Collect metadata (page count may be 0 for DOCX)
+        page_count = get_document_page_count(str(file_path))
 
         # Mark COMPLETED
         if status_mgr:

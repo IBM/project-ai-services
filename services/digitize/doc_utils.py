@@ -82,6 +82,17 @@ def process_text(converted_doc, pdf_path, out_path):
         if label == "section_header":
             prov_list = text_obj.prov
 
+            # Handle empty prov list (e.g., for DOCX files)
+            if not prov_list:
+                # For DOCX or files without provenance, use None for page number
+                structured_output.append({
+                    "label": label,
+                    "text": text_obj.text,
+                    "page": None,
+                    "font_size": None
+                })
+                continue
+
             for prov in prov_list:
                 page_no = prov.page_no
 
@@ -106,27 +117,38 @@ def process_text(converted_doc, pdf_path, out_path):
                             "font_size": None,  # Font size isn't necessary if TOC matches
                         })
                 else:
-                    assert pdf_pages is not None
-                    matches = find_text_font_size(pdf_pages, text_obj.text, page_no - 1)
-                    if len(matches):
-                        font_size = 0
-                        count = 0
-                        for match in matches:
-                            font_size += match["font_size"] if match["match_score"] == 100 else 0
-                            count += 1 if match["match_score"] == 100 else 0
-                        font_size = font_size / count if count else None
+                    # Only try font size extraction if we have pdf_pages (PDF files only)
+                    if pdf_pages:
+                        matches = find_text_font_size(pdf_pages, text_obj.text, page_no - 1)
+                        if len(matches):
+                            font_size = 0
+                            count = 0
+                            for match in matches:
+                                font_size += match["font_size"] if match["match_score"] == 100 else 0
+                                count += 1 if match["match_score"] == 100 else 0
+                            font_size = font_size / count if count else None
 
+                            structured_output.append({
+                                "label": label,
+                                "text": text_obj.text,
+                                "page": page_no,
+                                "font_size": round(font_size, 2) if font_size else None
+                            })
+                    else:
+                        # No pdf_pages available (DOCX), just add without font size
                         structured_output.append({
                             "label": label,
                             "text": text_obj.text,
                             "page": page_no,
-                            "font_size": round(font_size, 2) if font_size else None
+                            "font_size": None
                         })
         else:
+            # For non-header elements, safely get page number
+            page_no = text_obj.prov[0].page_no if text_obj.prov else None
             structured_output.append({
                 "label": label,
                 "text": text_obj.text,
-                "page": text_obj.prov[0].page_no,
+                "page": page_no,
                 "font_size": None
             })
 
