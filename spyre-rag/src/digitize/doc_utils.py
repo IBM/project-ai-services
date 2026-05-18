@@ -747,31 +747,40 @@ def detect_document_language(data: list) -> str:
         'IT': 'it',
         'FR': 'fr'
     }
-    
-    # Extract text blocks that have content
-    text_blocks = [block.get("text", "") for block in data if isinstance(block.get("text"), str) and block.get("text", "").strip()]
-    
-    if not text_blocks:
-        logger.warning("No text blocks found for language detection, falling back to 'en'")
-        return 'en'
 
     try:
         # Sample 3 random blocks from the data
         detected_languages = []
-        num_samples = min(3, len(text_blocks))
-        
-        # Randomly select blocks
-        sampled_blocks = random.sample(text_blocks, num_samples)
+        # Generate random indices and collect valid text blocks without looping through all data
+        sampled_blocks = []
+        attempted_indices = set()
+        max_attempts = min(len(data), 50)  # Limit attempts to avoid infinite loop
+
+        # Keep trying random indices until we get 3 valid blocks or exhaust attempts
+        while len(sampled_blocks) < 3 and len(attempted_indices) < max_attempts:
+            # Generate a random index
+            idx = random.randint(0, len(data) - 1)
+
+            # Skip if already tried this index
+            if idx in attempted_indices:
+                continue
+
+            attempted_indices.add(idx)
+
+            # Check if this block has valid text
+            block = data[idx]
+            if isinstance(block.get("text"), str) and block.get("text", "").strip():
+                sampled_blocks.append(block.get("text", ""))
+
+        if not sampled_blocks:
+            logger.warning("No text blocks found for language detection, falling back to 'en'")
+            return 'en'
         
         for block_text in sampled_blocks:
-            # For longer blocks, take a random chunk
-            if len(block_text) > 500:
-                chunk_size = random.randint(200, 500)
-                max_start = max(0, len(block_text) - chunk_size)
-                start_pos = random.randint(0, max_start) if max_start > 0 else 0
-                chunk = block_text[start_pos:start_pos + chunk_size]
-            else:
-                chunk = block_text
+            # For longer blocks, truncate 
+            max_size = min(500, len(block_text)-1)
+            # Truncate to 500 characters
+            chunk = block_text[:max_size]
             
             # Detect language for this chunk
             if chunk.strip():

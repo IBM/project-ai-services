@@ -91,16 +91,16 @@ class TestDetectDocumentLanguage:
         ]
         
         with patch("digitize.doc_utils.detect_language") as mock_detect:
-            with patch("digitize.doc_utils.random.sample") as mock_sample:
+            with patch("digitize.doc_utils.random.randint") as mock_randint:
                 mock_detect.return_value = "EN"
-                mock_sample.return_value = [data[0]["text"], data[1]["text"], data[2]["text"]]
+                # Return indices 0, 1, 2 for the first 3 calls
+                mock_randint.side_effect = [0, 1, 2]
                 
                 result = detect_document_language(data)
         
         assert result == "en"
-        # Should sample 3 blocks
-        mock_sample.assert_called_once()
-        assert mock_sample.call_args[0][1] == 3
+        # Should call randint to sample blocks
+        assert mock_randint.call_count >= 3
 
     def test_detect_language_with_mixed_languages_uses_most_common(self):
         """Test that mixed languages use the most common detected language."""
@@ -191,9 +191,9 @@ class TestDetectDocumentLanguage:
         
         with patch("digitize.doc_utils.detect_language") as mock_detect:
             with patch("digitize.doc_utils.logger") as mock_logger:
-                with patch("digitize.doc_utils.random.sample") as mock_sample:
-                    # Make random.sample raise an exception
-                    mock_sample.side_effect = Exception("Sampling failed")
+                with patch("digitize.doc_utils.random.randint") as mock_randint:
+                    # Make random.randint raise an exception
+                    mock_randint.side_effect = Exception("Sampling failed")
                     result = detect_document_language(data)
         
         assert result == "en"
@@ -212,7 +212,8 @@ class TestDetectDocumentLanguage:
         with patch("digitize.doc_utils.detect_language") as mock_detect:
             with patch("digitize.doc_utils.random.randint") as mock_randint:
                 mock_detect.return_value = "EN"
-                mock_randint.return_value = 250  # Chunk size and position
+                # Return valid indices (0, 1, 2) for sampling from data
+                mock_randint.side_effect = [0, 1, 2]
                 
                 result = detect_document_language(data)
         
@@ -229,16 +230,16 @@ class TestDetectDocumentLanguage:
         ]
         
         with patch("digitize.doc_utils.detect_language") as mock_detect:
-            with patch("digitize.doc_utils.random.sample") as mock_sample:
+            with patch("digitize.doc_utils.random.randint") as mock_randint:
                 mock_detect.return_value = "EN"
-                mock_sample.return_value = [data[0]["text"], data[1]["text"]]
+                # Return indices 0, 1 for the 2 available blocks
+                mock_randint.side_effect = [0, 1]
                 
                 result = detect_document_language(data)
         
         assert result == "en"
-        # Should sample min(3, 2) = 2 blocks
-        mock_sample.assert_called_once()
-        assert mock_sample.call_args[0][1] == 2
+        # Should sample the 2 available blocks
+        assert mock_randint.call_count >= 2
 
     def test_detect_language_with_whitespace_only_blocks_skips_them(self):
         """Test that blocks with only whitespace are skipped."""
