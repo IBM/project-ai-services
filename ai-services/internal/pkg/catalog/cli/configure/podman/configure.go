@@ -105,7 +105,7 @@ func checkCatalogStatus(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 		return false, nil, err
 	}
 
-	existingResources, err := helpers.CheckExistingResourcesForApplication(rt, catalogAppName, catalogSecrets)
+	existingResources, err := helpers.CheckExistingResourcesForApplication(rt, constants.CatalogAppName, catalogSecrets)
 	if err != nil {
 		return false, nil, err
 	}
