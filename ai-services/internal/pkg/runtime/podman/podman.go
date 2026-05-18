@@ -392,6 +392,15 @@ func (pc *PodmanClient) DeletePVCs(appLabel string) error {
 	return fmt.Errorf("unsupported method")
 }
 
+func (pc *PodmanClient) DeleteSecret(name string) error {
+	err := secrets.Remove(pc.Context, name)
+	if err != nil {
+		return fmt.Errorf("failed to remove secret: %w", err)
+	}
+
+	return nil
+}
+
 func (pc *PodmanClient) ListSecrets(filters map[string][]string) ([]string, error) {
 	var listOpts secrets.ListOptions
 	if len(filters) >= 1 {

@@ -13,6 +13,7 @@ import (
 	"text/template"
 
 	"github.com/project-ai-services/ai-services/assets"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -24,7 +25,6 @@ import (
 )
 
 const (
-	catalogAppName     = "ai-services"
 	catalogAppTemplate = "catalog"
 	dirPerm            = 0o755
 	filePerm           = 0o644
@@ -91,7 +91,7 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 	logger.Infoln("-------")
 
 	// Print next steps similar to application create
-	if err := helpers.PrintNextSteps(tp, rt, catalogAppName, catalogAppTemplate); err != nil {
+	if err := helpers.PrintNextSteps(tp, rt, constants.CatalogAppName, catalogAppTemplate); err != nil {
 		// do not want to fail the overall configure if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)
 	}
@@ -105,7 +105,7 @@ func checkCatalogStatus(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 		return false, nil, err
 	}
 
-	existingResources, err := helpers.CheckExistingResourcesForApplication(rt, catalogAppName, catalogSecrets)
+	existingResources, err := helpers.CheckExistingResourcesForApplication(rt, constants.CatalogAppName, catalogSecrets)
 	if err != nil {
 		return false, nil, err
 	}
@@ -193,7 +193,7 @@ func executeLayer(rt *podman.PodmanClient, tp templates.Template, tmpls map[stri
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
-			if err := executePodTemplate(rt, tp, tmpls, t, catalogAppTemplate, catalogAppName, values, version, nil, baseDir, argParams, existingResources); err != nil {
+			if err := executePodTemplate(rt, tp, tmpls, t, catalogAppTemplate, constants.CatalogAppName, values, version, nil, baseDir, argParams, existingResources); err != nil {
 				errCh <- err
 			}
 		}(podTemplateName)
@@ -293,7 +293,7 @@ func collectSecretNames(tp templates.Template, tmpls map[string]*template.Templa
 	secretNames := make([]string, 0)
 
 	for podTemplateName := range tmpls {
-		podSpec, err := tp.LoadPodTemplateWithValues(catalogAppTemplate, podTemplateName, catalogAppName, nil, argParams)
+		podSpec, err := tp.LoadPodTemplateWithValues(catalogAppTemplate, podTemplateName, constants.CatalogAppName, nil, argParams)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load pod template %s: %w", podTemplateName, err)
 		}

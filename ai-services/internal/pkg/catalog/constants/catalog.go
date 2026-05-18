@@ -16,8 +16,16 @@ const (
 	CatalogTypeServices = "services"
 	// CatalogTypeComponents represents the components catalog type.
 	CatalogTypeComponents = "components"
+)
+
+// Catalog name constants.
+const (
 	// CatalogAppName represents the catalog name.
 	CatalogAppName = "ai-services"
+	// CatalogSecretLabel represents the catalog secret name associated with Catalog Pod.
+	CatalogSecretLabel = "ai-services.io/secret"
+	// CatalogSecretSkipLabel represents if catalog secret associated with pod should be skipped while deletion.
+	CatalogSecretSkipLabel = "ai-services.io/secret-skip-cleanup"
 )
 
 // Pagination constants.
