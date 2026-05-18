@@ -417,18 +417,9 @@ async def delete_job(job_id: str):
         if job_status in (models.JobStatus.ACCEPTED, models.JobStatus.IN_PROGRESS):
             APIError.raise_error(ErrorCode.RESOURCE_LOCKED, f"Job '{job_id}' is still active and cannot be deleted")
 
-        # Delete the job from database
+        # Delete the job from database (CASCADE will delete associated documents)
         db_repo.delete_job(job_id)
         logger.info(f"Deleted job '{job_id}' from database")
-        
-        # Also delete the file for migration compatibility (optional, non-critical)
-        try:
-            job_status_file = settings.digitize.jobs_dir / f"{job_id}_status.json"
-            if job_status_file.exists():
-                job_status_file.unlink(missing_ok=True)
-                logger.debug(f"Deleted job file for migration compatibility")
-        except Exception as e:
-            logger.warning(f"Failed to delete job file (non-critical): {e}")
         
         return
     except HTTPException as e:

@@ -14,11 +14,7 @@ from digitize.models import (
     DocumentContentResponse
 )
 from digitize.settings import settings
-from digitize.status import (
-    get_utc_timestamp,
-    create_document_metadata,
-    create_job_state
-)
+from digitize.status import get_utc_timestamp
 from digitize.job import JobState
 from digitize.document import DocumentMetadata
 from digitize.models import JobStatus
