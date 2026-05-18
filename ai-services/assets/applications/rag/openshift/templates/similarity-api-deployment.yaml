@@ -49,7 +49,7 @@ spec:
             - name: RERANKER_ENDPOINT
               value: http://reranker-predictor:8000
             - name: RERANKER_MODEL
-              value: {{ .Values.reranker.model | quote }}
+              value: {{ .Values.reranker.model.name | quote }}
             - name: OPENSEARCH_HOST
               value: "opensearch"
             - name: OPENSEARCH_PORT
@@ -70,6 +70,8 @@ spec:
                   key: password
             - name: LOG_LEVEL
               value: "{{ .Values.similarity.log_level }}"
+            - name: NUM_CHUNKS_POST_SEARCH
+              value: "{{ .Values.chatbot.numChunksPostSearch }}"
           ports:
             - containerPort: 7000
               protocol: TCP
