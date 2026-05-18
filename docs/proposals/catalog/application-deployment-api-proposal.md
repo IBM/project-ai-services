@@ -519,14 +519,17 @@ Authorization: Bearer <access_token>
       "message": "All services are operational",
       "services": [
         {
+          "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
           "type": "Questions and Answers",
           "status": "Running"
         },
         {
+          "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
           "type": "Digitize",
           "status": "Running"
         },
         {
+          "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
           "type": "Summarize",
           "status": "Running"
         }
@@ -580,6 +583,7 @@ Authorization: Bearer <access_token>
 **Service Object (services[]):**
 | Field | Type | Description |
 |-------|------|-------------|
+| id | string | Service ID (UUID) |
 | type | string | Service type: "Questions and Answers", "Digitize", "Summarize" |
 | status | string | Service status: "Downloading", "Deploying", "Running", "Deleting", "Error" |
 
@@ -609,7 +613,7 @@ Authorization: Bearer <access_token>
 4. Query applications table with pagination and filters:
    - Apply WHERE clauses for deployment_type and type if provided
    - Use template field to fetch corresponding type and deployment_type from metadata
-5. For Digital Assistant applications (type="Digital Assistant"), fetch and include services array with type and status
+5. For Digital Assistant applications (type="Digital Assistant"), fetch and include services array with id, type (display name from catalog), and status from the services table
 6. Construct paginated response with application data and metadata
 
 **Example Requests:**

@@ -21,6 +21,7 @@ type Application struct {
 
 // ServiceStatus represents the status of a service within an application.
 type ServiceStatus struct {
+	ID     string `json:"id"`
 	Type   string `json:"type"`
 	Status string `json:"status"`
 }
