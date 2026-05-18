@@ -1,8 +1,7 @@
 """
 Database utility functions for job and document management.
 
-Provides functions that use database as the primary source of truth.
-File system operations are kept only for backward compatibility during migration.
+Provides functions that use database as the single source of truth.
 """
 
 from datetime import datetime
@@ -12,11 +11,7 @@ from typing import Optional, List, Dict
 from common.misc_utils import get_logger
 from digitize.types import OutputFormat, JobStatus, DocStatus
 from digitize.settings import settings
-from digitize.status import (
-    get_utc_timestamp,
-    create_document_metadata,
-    create_job_state
-)
+from digitize.status import get_utc_timestamp
 from digitize.db.repository import db_repo
 from digitize.db.database import engine
 
@@ -33,7 +28,7 @@ def create_job_with_db(
     job_name: Optional[str] = None
 ) -> None:
     """
-    Create job in database (primary) and optionally in file system (migration compatibility).
+    Create job in database.
     
     Args:
         job_id: Unique identifier for the job
@@ -41,10 +36,9 @@ def create_job_with_db(
         submitted_at: ISO timestamp when job was submitted
         doc_id_dict: Mapping of document names to their IDs
         documents_info: List of document filenames
-        jobs_dir: Directory where job status files are stored
+        jobs_dir: Directory where job status files are stored (unused, kept for compatibility)
         job_name: Optional human-readable name for the job
     """
-    # Create database entry (primary storage)
     if engine is None:
         raise RuntimeError("Database not available. Cannot create job without database connection.")
     
@@ -68,21 +62,6 @@ def create_job_with_db(
         )
         logger.info(f"Created job {job_id} in database")
         
-        # Also create file system entry for migration compatibility (optional)
-        try:
-            create_job_state(
-                job_id=job_id,
-                operation=operation,
-                submitted_at=submitted_at,
-                doc_id_dict=doc_id_dict,
-                documents_info=documents_info,
-                jobs_dir=jobs_dir,
-                job_name=job_name
-            )
-            logger.debug(f"Created job {job_id} file for migration compatibility")
-        except Exception as e:
-            logger.warning(f"Failed to create job file (non-critical): {e}")
-            
     except Exception as e:
         logger.error(f"Failed to create job {job_id} in database: {e}", exc_info=True)
         raise
@@ -98,7 +77,7 @@ def create_document_with_db(
     docs_dir: Path = settings.digitize.docs_dir
 ) -> None:
     """
-    Create document metadata in database (primary) and optionally in file system (migration compatibility).
+    Create document metadata in database.
     
     Args:
         doc_name: Name of the document file
@@ -107,9 +86,8 @@ def create_document_with_db(
         output_format: Output format for the document
         operation: Type of operation (ingestion/digitization)
         submitted_at: ISO timestamp when document was submitted
-        docs_dir: Directory where metadata files are stored
+        docs_dir: Directory where metadata files are stored (unused, kept for compatibility)
     """
-    # Create database entry (primary storage)
     if engine is None:
         raise RuntimeError("Database not available. Cannot create document without database connection.")
     
@@ -139,21 +117,6 @@ def create_document_with_db(
         )
         logger.info(f"Created document {doc_id} in database")
         
-        # Also create file system entry for migration compatibility (optional)
-        try:
-            create_document_metadata(
-                doc_name=doc_name,
-                doc_id=doc_id,
-                job_id=job_id,
-                output_format=output_format,
-                operation=operation,
-                submitted_at=submitted_at,
-                docs_dir=docs_dir
-            )
-            logger.debug(f"Created document {doc_id} file for migration compatibility")
-        except Exception as e:
-            logger.warning(f"Failed to create document file (non-critical): {e}")
-            
     except Exception as e:
         logger.error(f"Failed to create document {doc_id} in database: {e}", exc_info=True)
         raise

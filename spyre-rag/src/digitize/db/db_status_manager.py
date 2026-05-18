@@ -1,7 +1,7 @@
 """
-Database-first status manager with optional file system compatibility.
+Database-only status manager.
 
-Uses database as primary source of truth with optional file system writes for migration compatibility.
+Uses PostgreSQL database as the single source of truth for job and document status.
 """
 
 from datetime import datetime, timezone
@@ -20,10 +20,9 @@ logger = get_logger("db_status_manager")
 
 class DatabaseStatusManager(StatusManager):
     """
-    Database-first StatusManager that persists primarily to database.
+    Database-only StatusManager that persists to PostgreSQL database.
     
-    - Primary storage: PostgreSQL database (required)
-    - Optional: File system writes for migration compatibility
+    - Storage: PostgreSQL database only (required)
     - Raises error if database unavailable
     """
     
@@ -51,25 +50,18 @@ class DatabaseStatusManager(StatusManager):
         error: str = ""
     ) -> None:
         """
-        Update document metadata in database (primary) and optionally in file system.
+        Update document metadata in database.
         
         Args:
             doc_id: Document identifier
             details: Dictionary of fields to update
             error: Optional error message
         """
-        # Update database first (primary storage)
         try:
             self._update_document_in_db(doc_id, details, error)
         except Exception as e:
             logger.error(f"Failed to update document {doc_id} in database: {e}", exc_info=True)
             raise
-        
-        # Also update file system for migration compatibility (optional, non-critical)
-        try:
-            super().update_doc_metadata(doc_id, details, error)
-        except Exception as e:
-            logger.warning(f"Failed to update document {doc_id} file (non-critical): {e}")
     
     def update_job_progress(
         self,
@@ -79,7 +71,7 @@ class DatabaseStatusManager(StatusManager):
         error: str = ""
     ) -> None:
         """
-        Update job progress in database (primary) and optionally in file system.
+        Update job progress in database.
         
         Args:
             doc_id: Document identifier (empty string for job-level updates)
@@ -87,18 +79,11 @@ class DatabaseStatusManager(StatusManager):
             job_status: New job status
             error: Optional error message
         """
-        # Update database first (primary storage)
         try:
             self._update_job_in_db(doc_id, doc_status, job_status, error)
         except Exception as e:
             logger.error(f"Failed to update job {self.job_id} in database: {e}", exc_info=True)
             raise
-        
-        # Also update file system for migration compatibility (optional, non-critical)
-        try:
-            super().update_job_progress(doc_id, doc_status, job_status, error)
-        except Exception as e:
-            logger.warning(f"Failed to update job {self.job_id} file (non-critical): {e}")
     
     def _update_document_in_db(
         self,
