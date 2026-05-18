@@ -500,6 +500,8 @@ Authorization: Bearer <access_token>
 |-----------|------|----------|---------|-------------|
 | page | integer | No | 1 | Page number (1-indexed) |
 | page_size | integer | No | 20 | Number of items per page (max: 100) |
+| deployment_type | string | No | - | Filter by deployment type: "architectures" or "services" |
+| catalog_id | string | No | - | Filter by catalog ID (e.g., "rag", "chat", "digitize", "summarize") |
 
 **Request Body:** None
 
@@ -511,17 +513,31 @@ Authorization: Bearer <access_token>
     {
       "id": "123e4567-e89b-12d3-a456-426614174000",
       "name": "RAG Production",
-      "deployment_type": "architecture",
+      "deployment_type": "architectures",
       "type": "Digital Assistant",
       "status": "Running",
       "message": "All services are operational",
+      "services": [
+        {
+          "type": "Questions and Answers",
+          "status": "Running"
+        },
+        {
+          "type": "Digitize",
+          "status": "Running"
+        },
+        {
+          "type": "Summarize",
+          "status": "Running"
+        }
+      ],
       "created_at": "2026-04-15T10:30:00Z",
       "updated_at": "2026-04-15T10:35:00Z"
     },
     {
       "id": "223e4567-e89b-12d3-a456-426614174001",
       "name": "Summarization Dev",
-      "deployment_type": "service",
+      "deployment_type": "services",
       "type": "Summary",
       "status": "Running",
       "message": "Service deployed successfully",
@@ -557,8 +573,15 @@ Authorization: Bearer <access_token>
 | type | string | Application type: "Digital Assistant" for architectures, "Summary" for summarization services |
 | status | string | Current status: "Downloading", "Deploying", "Running", "Deleting", "Error" |
 | message | string | Status message or error details |
+| services | array | Array of service objects (only present for Digital Assistant type) |
 | created_at | string | ISO 8601 timestamp of creation |
 | updated_at | string | ISO 8601 timestamp of last update |
+
+**Service Object (services[]):**
+| Field | Type | Description |
+|-------|------|-------------|
+| type | string | Service type: "Questions and Answers", "Digitize", "Summarize" |
+| status | string | Service status: "Downloading", "Deploying", "Running", "Deleting", "Error" |
 
 **Pagination Object:**
 | Field | Type | Description |
@@ -580,9 +603,14 @@ Authorization: Bearer <access_token>
 
 1. Validate JWT token from Authorization header via `AuthMiddleware`
 2. Validate pagination parameters (page >= 1, page_size between 1-100)
-3. Query all rows from the applications table with pagination support
-4. For each application, use the template field to fetch the corresponding type (Digital Assistant) and deployment_type (architecture or service) from the architecure or service metadata file for the corresponding template id (This will be unique and belongs to either architecture or service).
-5. Construct paginated response with application data and metadata
+3. Validate filter parameters:
+   - deployment_type: must be "architectures" or "services" if provided
+   - type: must match valid application types if provided
+4. Query applications table with pagination and filters:
+   - Apply WHERE clauses for deployment_type and type if provided
+   - Use template field to fetch corresponding type and deployment_type from metadata
+5. For Digital Assistant applications (type="Digital Assistant"), fetch and include services array with type and status
+6. Construct paginated response with application data and metadata
 
 **Example Requests:**
 
@@ -592,6 +620,18 @@ GET /api/v1/applications
 
 # Get second page with 50 items per page
 GET /api/v1/applications?page=2&page_size=50
+
+# Filter by deployment type (architectures only)
+GET /api/v1/applications?deployment_type=architectures
+
+# Filter by application type (Digital Assistant only)
+GET /api/v1/applications?type=Digital%20Assistant
+
+# Combine filters
+GET /api/v1/applications?deployment_type=architectures&type=Digital%20Assistant&page=1&page_size=10
+
+# Filter services only
+GET /api/v1/applications?deployment_type=services
 ```
 
 ---

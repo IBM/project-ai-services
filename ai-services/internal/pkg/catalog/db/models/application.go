@@ -29,7 +29,7 @@ const (
 type Application struct {
 	ID             uuid.UUID         `json:"id"`
 	Name           string            `json:"name"`
-	Template       string            `json:"template"`
+	CatalogID      string            `json:"catalog_id"`
 	DeploymentType DeploymentType    `json:"deployment_type"`
 	Status         ApplicationStatus `json:"status"`
 	Message        string            `json:"message,omitempty"`

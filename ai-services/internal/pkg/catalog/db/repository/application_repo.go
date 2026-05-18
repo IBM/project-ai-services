@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -12,10 +13,20 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 )
 
+// ApplicationFilters defines optional filters for querying applications.
+type ApplicationFilters struct {
+	DeploymentType string // Optional: filter by deployment_type ("architectures" or "services")
+	CatalogID      string // Optional: filter by catalog_id (e.g., "rag", "chat", "digitize")
+	Limit          int    // Optional: number of records to return (for pagination)
+	Offset         int    // Optional: number of records to skip (for pagination)
+}
+
 // ApplicationRepository defines the interface for application data operations.
 type ApplicationRepository interface {
-	// GetAll retrieves all applications from the database.
-	GetAll(ctx context.Context) ([]models.Application, error)
+	// GetAll retrieves all applications from the database with optional filters and pagination.
+	GetAll(ctx context.Context, filters *ApplicationFilters) ([]models.Application, error)
+	// GetCount returns the total count of applications matching the filters.
+	GetCount(ctx context.Context, filters *ApplicationFilters) (int, error)
 	// GetByID retrieves an application by ID with its associated services.
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Application, error)
 	// GetByName retrieves an application by name with its associated services.
@@ -50,52 +61,130 @@ func NewApplicationRepository(pool *pgxpool.Pool) ApplicationRepository {
 	return &applicationRepo{pool: pool}
 }
 
-// GetAll retrieves all applications from the database.
-func (r *applicationRepo) GetAll(ctx context.Context) ([]models.Application, error) {
+// GetAll retrieves all applications from the database with optional filters.
+// Includes associated services via INNER JOIN.
+func (r *applicationRepo) GetAll(ctx context.Context, filters *ApplicationFilters) ([]models.Application, error) {
 	query := `
-		SELECT id, name, template, deployment_type, status, message, created_by, created_at, updated_at
-		FROM applications
-		ORDER BY created_at DESC
+		SELECT
+			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at,
+			s.id, s.app_id, s.type, s.status, s.endpoints, s.version, s.created_at, s.updated_at
+		FROM applications a
+		INNER JOIN services s ON a.id = s.app_id
 	`
 
-	rows, err := r.pool.Query(ctx, query)
+	args := []interface{}{}
+	whereClauses := []string{}
+
+	// Build WHERE clause dynamically based on provided filters
+	if filters != nil {
+		if filters.DeploymentType != "" {
+			whereClauses = append(whereClauses, fmt.Sprintf("a.deployment_type = $%d", len(args)+1))
+			args = append(args, filters.DeploymentType)
+		}
+	}
+
+	// Add WHERE clause if any filters are present
+	if len(whereClauses) > 0 {
+		query += " WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	query += " ORDER BY a.created_at DESC, s.created_at"
+
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query applications: %w", err)
 	}
 	defer rows.Close()
 
-	var applications []models.Application
+	// Use a map to group services by application ID
+	appMap := make(map[string]*models.Application)
+	var appOrder []string // Track order of applications
+
 	for rows.Next() {
-		var app models.Application
-		var message sql.NullString
+		var (
+			app     models.Application
+			message sql.NullString
+			svc     scannedServiceFields
+		)
 
 		err := rows.Scan(
-			&app.ID,
-			&app.Name,
-			&app.Template,
-			&app.DeploymentType,
-			&app.Status,
-			&message,
-			&app.CreatedBy,
-			&app.CreatedAt,
-			&app.UpdatedAt,
+			&app.ID, &app.Name, &app.CatalogID, &app.DeploymentType, &app.Status,
+			&message, &app.CreatedBy, &app.CreatedAt, &app.UpdatedAt,
+			&svc.id, &svc.appID, &svc.typ, &svc.status,
+			&svc.endpoint, &svc.version, &svc.created, &svc.updated,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan application: %w", err)
+			return nil, fmt.Errorf("failed to scan application with services: %w", err)
 		}
 
 		if message.Valid {
 			app.Message = message.String
 		}
 
-		applications = append(applications, app)
+		appID := app.ID.String()
+
+		// If this is a new application, add it to the map
+		if _, exists := appMap[appID]; !exists {
+			appMap[appID] = &app
+			appOrder = append(appOrder, appID)
+		}
+
+		// Add service to the application
+		service, err := svc.toService()
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert service: %w", err)
+		}
+		if service != nil {
+			appMap[appID].Services = append(appMap[appID].Services, *service)
+		}
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating applications: %w", err)
 	}
 
+	// Convert map to slice in original order
+	applications := make([]models.Application, 0, len(appOrder))
+	for _, appID := range appOrder {
+		applications = append(applications, *appMap[appID])
+	}
+
 	return applications, nil
+}
+
+// GetCount returns the total count of applications matching the filters.
+// This is used for pagination metadata.
+func (r *applicationRepo) GetCount(ctx context.Context, filters *ApplicationFilters) (int, error) {
+	query := `SELECT COUNT(DISTINCT a.id) FROM applications a`
+	args := []interface{}{}
+	argIndex := 1
+	whereAdded := false
+
+	// Add deployment_type filter if provided
+	if filters != nil && filters.DeploymentType != "" {
+		query += fmt.Sprintf(" WHERE a.deployment_type = $%d", argIndex)
+		args = append(args, filters.DeploymentType)
+		argIndex++
+		whereAdded = true
+	}
+
+	// Add catalog_id filter if provided
+	if filters != nil && filters.CatalogID != "" {
+		if whereAdded {
+			query += fmt.Sprintf(" AND a.catalog_id = $%d", argIndex)
+		} else {
+			query += fmt.Sprintf(" WHERE a.catalog_id = $%d", argIndex)
+		}
+		args = append(args, filters.CatalogID)
+	}
+
+	var count int
+	err := r.pool.QueryRow(ctx, query, args...).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get application count: %w", err)
+	}
+
+	return count, nil
 }
 
 // toService converts scanned fields to a Service model.
@@ -137,7 +226,7 @@ func scanApplicationWithService(rows pgx.Rows, app *models.Application) (*models
 	)
 
 	err := rows.Scan(
-		&app.ID, &app.Name, &app.Template, &app.DeploymentType, &app.Status,
+		&app.ID, &app.Name, &app.CatalogID, &app.DeploymentType, &app.Status,
 		&message, &app.CreatedBy, &app.CreatedAt, &app.UpdatedAt,
 		&svc.id, &svc.appID, &svc.typ, &svc.status,
 		&svc.endpoint, &svc.version, &svc.created, &svc.updated,
@@ -243,7 +332,7 @@ func (r *applicationRepo) Insert(ctx context.Context, app *models.Application) e
 		query,
 		app.ID,
 		app.Name,
-		app.Template,
+		app.CatalogID,
 		app.DeploymentType,
 		app.Status,
 		sql.NullString{String: app.Message, Valid: app.Message != ""},

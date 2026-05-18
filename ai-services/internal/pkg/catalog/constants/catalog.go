@@ -20,4 +20,20 @@ const (
 	CatalogAppName = "ai-services"
 )
 
+// Pagination constants.
+const (
+	// DefaultPageSize is the default number of items per page.
+	DefaultPageSize = 20
+	// MaxPageSize is the maximum number of items per page.
+	MaxPageSize = 100
+	// MinPage is the minimum page number.
+	MinPage = 1
+)
+
+// Time format constants.
+const (
+	// RFC3339WithTimezone is the time format for API responses (ISO 8601 with timezone).
+	RFC3339WithTimezone = "2006-01-02T15:04:05Z07:00"
+)
+
 // Made with Bob

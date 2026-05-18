@@ -10,7 +10,7 @@ CREATE TYPE deployment_type AS ENUM (
 CREATE TABLE applications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100),
-    template VARCHAR(100),
+    catalog_id VARCHAR(100),
     deployment_type deployment_type,
     status status,
     message TEXT,

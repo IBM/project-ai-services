@@ -1,5 +1,37 @@
 basePath: /api/v1
 definitions:
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationSummary'
+        type: array
+      pagination:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationSummary:
+    properties:
+      created_at:
+        type: string
+      deployment_type:
+        type: string
+      id:
+        type: string
+      message:
+        type: string
+      name:
+        type: string
+      services:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus'
+        type: array
+      status:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture:
     properties:
       certified_by:
@@ -116,6 +148,21 @@ definitions:
       type:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata:
+    properties:
+      has_next:
+        type: boolean
+      has_prev:
+        type: boolean
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service:
     properties:
       architectures:
@@ -145,6 +192,13 @@ definitions:
       optional:
         type: boolean
       version:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus:
+    properties:
+      status:
+        type: string
+      type:
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceSummary:
@@ -199,6 +253,52 @@ info:
   version: "1.0"
 paths:
   /applications:
+    get:
+      description: Retrieves a paginated list of all applications for the authenticated
+        user with optional filters
+      parameters:
+      - default: 1
+        description: Page number (1-indexed)
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 'Number of items per page (max: 100)'
+        in: query
+        name: page_size
+        type: integer
+      - description: 'Filter by deployment type: ''architectures'' or ''services'''
+        in: query
+        name: deployment_type
+        type: string
+      - description: Filter by catalog ID (e.g., 'rag', 'chat', 'digitize', 'summarize')
+        in: query
+        name: catalog_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationListResponse'
+        "400":
+          description: Invalid query parameters
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List applications
+      tags:
+      - Applications
     post:
       consumes:
       - application/json
