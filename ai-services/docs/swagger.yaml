@@ -1,15 +1,6 @@
 basePath: /api/v1
 definitions:
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationSummary'
-        type: array
-      pagination:
-        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
-    type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationSummary:
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application:
     properties:
       created_at:
         type: string
@@ -31,6 +22,15 @@ definitions:
         type: string
       updated_at:
         type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application'
+        type: array
+      pagination:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture:
     properties:

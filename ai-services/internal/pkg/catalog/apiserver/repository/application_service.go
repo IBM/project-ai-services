@@ -55,44 +55,15 @@ func (s *ApplicationService) ListApplications(ctx context.Context, req ListAppli
 		return nil, fmt.Errorf("failed to retrieve applications: %w", err)
 	}
 
-	// Build application summaries with type information
-	summaries := []types.ApplicationSummary{}
+	// Build application list with type information
+	apps := make([]types.Application, 0, len(applications))
 	for _, app := range applications {
-		// Get type (display name) from catalog metadata
-		typeName, err := s.getApplicationType(app.CatalogID, app.DeploymentType)
+		appData, err := s.buildApplication(app)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get application type for catalog_id '%s': %w", app.CatalogID, err)
+			return nil, err
 		}
 
-		summary := types.ApplicationSummary{
-			ID:             app.ID.String(),
-			Name:           app.Name,
-			DeploymentType: string(app.DeploymentType),
-			Type:           typeName,
-			Status:         string(app.Status),
-			Message:        app.Message,
-			CreatedAt:      app.CreatedAt.Format(constants.RFC3339WithTimezone),
-			UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
-		}
-
-		// Add services array (services already loaded from DB via JOIN)
-		if len(app.Services) > 0 {
-			summary.Services = make([]types.ServiceStatus, 0, len(app.Services))
-			for _, svc := range app.Services {
-				// Get service display name from catalog metadata
-				serviceDisplayName := svc.Type // Default to service type
-				if service, err := s.provider.LoadService(svc.Type); err == nil && service.Name != "" {
-					serviceDisplayName = service.Name
-				}
-
-				summary.Services = append(summary.Services, types.ServiceStatus{
-					Type:   serviceDisplayName,
-					Status: string(svc.Status),
-				})
-			}
-		}
-
-		summaries = append(summaries, summary)
+		apps = append(apps, appData)
 	}
 
 	// All pagination is done at DB level, so summaries are already paginated
@@ -102,7 +73,7 @@ func (s *ApplicationService) ListApplications(ctx context.Context, req ListAppli
 	}
 
 	response := &types.ApplicationListResponse{
-		Data: summaries,
+		Data: apps,
 		Pagination: types.PaginationMetadata{
 			Page:       req.Page,
 			PageSize:   req.PageSize,
@@ -116,6 +87,53 @@ func (s *ApplicationService) ListApplications(ctx context.Context, req ListAppli
 	return response, nil
 }
 
+// buildApplication creates an Application from a models.Application.
+func (s *ApplicationService) buildApplication(app models.Application) (types.Application, error) {
+	// Get type (display name) from catalog metadata
+	typeName, err := s.getApplicationType(app.CatalogID, app.DeploymentType)
+	if err != nil {
+		return types.Application{}, fmt.Errorf("failed to get application type for catalog_id '%s': %w", app.CatalogID, err)
+	}
+
+	appData := types.Application{
+		ID:             app.ID.String(),
+		Name:           app.Name,
+		DeploymentType: string(app.DeploymentType),
+		Type:           typeName,
+		Status:         string(app.Status),
+		Message:        app.Message,
+		CreatedAt:      app.CreatedAt.Format(constants.RFC3339WithTimezone),
+		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
+	}
+
+	// Add services array (services already loaded from DB via JOIN)
+	if len(app.Services) > 0 {
+		appData.Services = s.buildServiceStatuses(app.Services)
+	}
+
+	return appData, nil
+}
+
+// buildServiceStatuses creates ServiceStatus array from models.Service slice.
+func (s *ApplicationService) buildServiceStatuses(services []models.Service) []types.ServiceStatus {
+	statuses := make([]types.ServiceStatus, 0, len(services))
+
+	for _, svc := range services {
+		// Get service display name from catalog metadata
+		serviceDisplayName := svc.Type // Default to service type
+		if service, err := s.provider.LoadService(svc.Type); err == nil && service.Name != "" {
+			serviceDisplayName = service.Name
+		}
+
+		statuses = append(statuses, types.ServiceStatus{
+			Type:   serviceDisplayName,
+			Status: string(svc.Status),
+		})
+	}
+
+	return statuses
+}
+
 // getApplicationType retrieves the application type from catalog metadata.
 func (s *ApplicationService) getApplicationType(catalogID string, deploymentType models.DeploymentType) (string, error) {
 	if deploymentType == models.DeploymentTypeArchitectures {
@@ -123,6 +141,7 @@ func (s *ApplicationService) getApplicationType(catalogID string, deploymentType
 		if err != nil {
 			return "", fmt.Errorf("failed to load architecture metadata: %w", err)
 		}
+
 		return arch.Name, nil
 	}
 
@@ -131,6 +150,7 @@ func (s *ApplicationService) getApplicationType(catalogID string, deploymentType
 	if err != nil {
 		return "", fmt.Errorf("failed to load service metadata: %w", err)
 	}
+
 	return service.Name, nil
 }
 

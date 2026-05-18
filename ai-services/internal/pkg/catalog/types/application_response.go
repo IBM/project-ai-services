@@ -2,12 +2,12 @@ package types
 
 // ApplicationListResponse represents the response for listing applications.
 type ApplicationListResponse struct {
-	Data       []ApplicationSummary `json:"data"`
-	Pagination PaginationMetadata   `json:"pagination"`
+	Data       []Application      `json:"data"`
+	Pagination PaginationMetadata `json:"pagination"`
 }
 
-// ApplicationSummary represents a summary of an application in the list.
-type ApplicationSummary struct {
+// Application represents an application in the list response.
+type Application struct {
 	ID             string          `json:"id"`
 	Name           string          `json:"name"`
 	DeploymentType string          `json:"deployment_type"`

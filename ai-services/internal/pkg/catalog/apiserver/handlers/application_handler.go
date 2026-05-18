@@ -11,7 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
-// Ensure types package is imported for Swagger documentation
+// Ensure types package is imported for Swagger documentation.
 var _ types.ApplicationListResponse
 
 // ApplicationHandler handles application-related HTTP requests.
@@ -33,7 +33,7 @@ func NewApplicationHandler(appService *repository.ApplicationService) *Applicati
 //	@Tags			Applications
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			page			query		int		false	"Page number (1-indexed)"	default(1)
+//	@Param			page			query		int		false	"Page number (1-indexed)"				default(1)
 //	@Param			page_size		query		int		false	"Number of items per page (max: 100)"	default(20)
 //	@Param			deployment_type	query		string	false	"Filter by deployment type: 'architectures' or 'services'"
 //	@Param			catalog_id		query		string	false	"Filter by catalog ID (e.g., 'rag', 'chat', 'digitize', 'summarize')"
@@ -51,6 +51,7 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 	page, pageSize, err := repository.ValidatePaginationParams(page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
 		return
 	}
 
@@ -63,6 +64,7 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error: fmt.Sprintf("deployment_type must be '%s' or '%s'", models.DeploymentTypeArchitectures, models.DeploymentTypeServices),
 		})
+
 		return
 	}
 
@@ -80,6 +82,7 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to retrieve applications: %v", err),
 		})
+
 		return
 	}
 

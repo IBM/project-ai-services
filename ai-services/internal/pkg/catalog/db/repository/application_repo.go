@@ -64,6 +64,19 @@ func NewApplicationRepository(pool *pgxpool.Pool) ApplicationRepository {
 // GetAll retrieves all applications from the database with optional filters.
 // Includes associated services via INNER JOIN.
 func (r *applicationRepo) GetAll(ctx context.Context, filters *ApplicationFilters) ([]models.Application, error) {
+	query, args := r.buildGetAllQuery(filters)
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query applications: %w", err)
+	}
+	defer rows.Close()
+
+	return r.scanApplicationsWithServices(rows)
+}
+
+// buildGetAllQuery constructs the SQL query and arguments for GetAll.
+func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string, []interface{}) {
 	query := `
 		SELECT
 			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at,
@@ -81,6 +94,11 @@ func (r *applicationRepo) GetAll(ctx context.Context, filters *ApplicationFilter
 			whereClauses = append(whereClauses, fmt.Sprintf("a.deployment_type = $%d", len(args)+1))
 			args = append(args, filters.DeploymentType)
 		}
+
+		if filters.CatalogID != "" {
+			whereClauses = append(whereClauses, fmt.Sprintf("a.catalog_id = $%d", len(args)+1))
+			args = append(args, filters.CatalogID)
+		}
 	}
 
 	// Add WHERE clause if any filters are present
@@ -88,17 +106,27 @@ func (r *applicationRepo) GetAll(ctx context.Context, filters *ApplicationFilter
 		query += " WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
-	query += " ORDER BY a.created_at DESC, s.created_at"
+	query += " ORDER BY a.created_at DESC, s.created_at ASC"
 
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query applications: %w", err)
+	// Add pagination if provided
+	if filters != nil {
+		if filters.Limit > 0 {
+			query += fmt.Sprintf(" LIMIT $%d", len(args)+1)
+			args = append(args, filters.Limit)
+		}
+		if filters.Offset > 0 {
+			query += fmt.Sprintf(" OFFSET $%d", len(args)+1)
+			args = append(args, filters.Offset)
+		}
 	}
-	defer rows.Close()
 
-	// Use a map to group services by application ID
+	return query, args
+}
+
+// scanApplicationsWithServices scans rows into Application structs with their services.
+func (r *applicationRepo) scanApplicationsWithServices(rows pgx.Rows) ([]models.Application, error) {
 	appMap := make(map[string]*models.Application)
-	var appOrder []string // Track order of applications
+	var appOrder []string
 
 	for rows.Next() {
 		var (
