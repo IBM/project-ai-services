@@ -1,6 +1,6 @@
 package proxy
 
-// ProxyManager defines the interface for managing reverse proxy routes
+// ProxyManager defines the interface for managing reverse proxy routes.
 type ProxyManager interface {
 	// RegisterRoute registers a new route with the proxy
 	RegisterRoute(route Route) error
@@ -9,7 +9,7 @@ type ProxyManager interface {
 	HealthCheck() error
 }
 
-// Route represents a reverse proxy route configuration
+// Route represents a reverse proxy route configuration.
 type Route struct {
 	// ID is the unique identifier for the route
 	ID string

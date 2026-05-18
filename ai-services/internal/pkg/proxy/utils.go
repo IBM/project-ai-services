@@ -4,10 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
-
 
 // GetCaddyAdminPort retrieves the host port mapped to Caddy's admin API (container port 2019).
 func GetCaddyAdminPort(rt runtime.Runtime, appName string) (string, error) {

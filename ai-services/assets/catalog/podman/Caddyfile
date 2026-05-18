@@ -7,6 +7,12 @@
 }
 
 :443 {
+	# 1. This initializes the routes array natively so it's never empty
+	handle /internal/health {
+        # @id internal-health
+        respond "OK" 200
+    }
+
 	tls internal
 }
 

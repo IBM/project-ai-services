@@ -92,12 +92,10 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 	logger.Infoln("-------")
 
 	// Register routes with Caddy using the reusable function
-	logger.Infoln("-------")
 	if err := proxy.RegisterRoutesForApp(rt, tp, catalogAppName, catalogAppTemplate, "my_app_server"); err != nil {
 		// Warnings already logged by RegisterRoutesForApp
-		logger.Infof("Route registration completed with errors: %v\n", err)
+		return fmt.Errorf("route registration failed: : %w", err)
 	}
-	logger.Infoln("-------")
 
 	// Print next steps similar to application create
 	if err := helpers.PrintNextSteps(tp, rt, constants.CatalogAppName, catalogAppTemplate); err != nil {
