@@ -51,12 +51,6 @@ class SummarizationLevelsConfig(BaseSettings):
 class SummarizationConfig(BaseSettings):
     """Summarization settings."""
 
-    max_concurrent_requests: int = Field(
-        default=32,
-        ge=1,
-        description="Maximum number of concurrent requests",
-    )
-
     summarization_coefficient: float = Field(
         default=0.3,
         gt=0.0,

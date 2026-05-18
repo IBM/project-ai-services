@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import FastAPI, Request, HTTPException, Header, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 import json
 from contextlib import asynccontextmanager
 from asyncio import BoundedSemaphore
@@ -53,7 +53,7 @@ reranker_model_dict = {}
 auth_required_cache = {"checked": False, "required": False}
 auth_cache_lock = asyncio.Lock()
 
-concurrency_limiter = BoundedSemaphore(settings.chatbot.max_concurrent_requests)
+concurrency_limiter = BoundedSemaphore(settings.common.llm.max_batch_size)
 
 def initialize_models():
     global emb_model_dict, llm_model_dict, reranker_model_dict
@@ -87,7 +87,7 @@ async def lifespan(app):
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     initialize_models()
     setup_language_detector([Language.ENGLISH, Language.GERMAN])
-    create_llm_session(pool_maxsize=settings.common.llm.llm_max_batch_size)
+    create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
     yield
     stderr_monitor.stop()
 
@@ -317,7 +317,7 @@ async def locked_stream(stream_g, perf_stat_dict):
         503: http_error_responses[503]
     }
 )
-async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> ChatCompletionResponse | StreamingResponse:
+async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> ChatCompletionResponse | StreamingResponse | Response:
     # Extract API key from credentials
     api_key = credentials.credentials if credentials else None
     
@@ -347,7 +347,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
     try:
         emb_model = emb_model_dict['emb_model']
         emb_endpoint = emb_model_dict['emb_endpoint']
-        emb_max_tokens = emb_model_dict['max_tokens']
+        emb_max_model_len = emb_model_dict['max_model_len']
         llm_model = llm_model_dict['llm_model']
         llm_endpoint = llm_model_dict['llm_endpoint']
         reranker_model = reranker_model_dict['reranker_model']
@@ -372,7 +372,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         max_tokens = req.max_tokens
         # giving priority to max_tokens passed in the request, otherwise according to detected language of query
         if not max_tokens:
-            max_tokens = max_tokens_map.get(lang, settings.common.llm.llm_max_tokens)
+            max_tokens = max_tokens_map.get(lang, settings.llm.max_tokens)
 
         rephrased_query = current_query
         
@@ -399,7 +399,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         docs, perf_stat_dict = await asyncio.to_thread(
             search_only,
             rephrased_query,
-            emb_model, emb_endpoint, emb_max_tokens,
+            emb_model, emb_endpoint, emb_max_model_len,
             reranker_model,
             reranker_endpoint,
             settings.chatbot.num_chunks_post_search,
@@ -448,7 +448,11 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     rephrased_query,
                 )
                 # For streaming, release is handled in locked_stream's finally block
-                return StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
+                response = StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
+                # Add rephrased query as a custom header if available
+                if rephrased_query and rephrased_query != current_query:
+                    response.headers["X-Rephrased-Query"] = rephrased_query
+                return response
 
             vllm_non_stream = await asyncio.to_thread(
                 query_vllm_non_stream,
@@ -481,7 +485,16 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                         if isinstance(message_dict, dict):
                             message_content = message_dict.get("content", "")
                             choices.append(ChatChoice(message=ChatMessage(content=message_content)))
-                return ChatCompletionResponse(choices=choices)
+                
+                response_data = ChatCompletionResponse(choices=choices)
+                # Add rephrased query as a custom header if available
+                if rephrased_query and rephrased_query != current_query:
+                    return Response(
+                        content=response_data.model_dump_json(),
+                        media_type="application/json",
+                        headers={"X-Rephrased-Query": rephrased_query}
+                    )
+                return response_data
 
             APIError.raise_error(ErrorCode.LLM_ERROR, "Unexpected response format from LLM")
         finally:

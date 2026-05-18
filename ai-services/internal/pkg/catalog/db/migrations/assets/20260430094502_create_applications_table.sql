@@ -1,10 +1,17 @@
 -- +goose Up
 -- +goose StatementBegin
+-- Create deployment_type enum
+CREATE TYPE deployment_type AS ENUM (
+    'architectures',
+    'services'
+);
+
 -- Create applications table
 CREATE TABLE applications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100),
     template VARCHAR(100),
+    deployment_type deployment_type,
     status status,
     message TEXT,
     created_by VARCHAR(100),
@@ -35,5 +42,8 @@ DROP FUNCTION IF EXISTS update_updated_at_column();
 
 -- Drop table
 DROP TABLE IF EXISTS applications;
+
+-- Drop deployment_type enum
+DROP TYPE IF EXISTS deployment_type;
 -- +goose StatementEnd
 

@@ -27,6 +27,7 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 
 	authHandler := handlers.NewAuthHandler(authSvc)
 	catalogHandler := handlers.NewCatalogHandler()
+	deployOptionsHandler := handlers.NewDeployOptionsHandler()
 
 	v1 := router.Group("/api/v1")
 	{
@@ -42,8 +43,11 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	{
 		catalog.GET("/architectures", catalogHandler.ListArchitectures)
 		catalog.GET("/architectures/:id", catalogHandler.GetArchitectureDetails)
+		catalog.GET("/architectures/:id/deploy-options", deployOptionsHandler.GetArchitectureDeployOptions)
 		catalog.GET("/services", catalogHandler.ListServices)
 		catalog.GET("/services/:id", catalogHandler.GetServiceDetails)
+		catalog.GET("/services/:id/deploy-options", deployOptionsHandler.GetServiceDeployOptions)
+		catalog.GET("/components/:component_type/providers/:provider_id/params", deployOptionsHandler.GetComponentProviderParams)
 	}
 
 	applications := v1.Group("applications")

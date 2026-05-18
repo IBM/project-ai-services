@@ -6,3 +6,4 @@ description: "Distributed search and analytics engine for vector storage"
 
 # Component type this provider belongs to
 component_type: vector_store
+component_name: "Vector Store"

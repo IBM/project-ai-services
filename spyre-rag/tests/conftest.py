@@ -80,7 +80,7 @@ def mock_model_dicts():
         'emb_model_dict': {
             'emb_model': 'test-embedding-model',
             'emb_endpoint': 'http://localhost:8001',
-            'max_tokens': 512
+            'max_model_len': 512
         },
         'llm_model_dict': {
             'llm_model': 'test-llm-model',
