@@ -25,8 +25,8 @@ spec:
       - /models/{{ .Values.instruct.model.name }}
       - --served-model-name
       - {{ .Values.instruct.model.name }}
-      - --max-num-batched-tokens={{ .Values.instruct.maxNumBatchedTokens }}
-      - --max-model-len={{ .Values.instruct.maxModelLen }}
+      - --max-num-batched-tokens={{ .Values.instruct.model.maxNumBatchedTokens }}
+      - --max-model-len={{ .Values.instruct.model.maxModelLen }}
       - --port=8000
       livenessProbe:
         httpGet:
