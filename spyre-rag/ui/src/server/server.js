@@ -50,6 +50,7 @@ app.post('/v1/similarity-search', async (req, res) => {
       {
         query: query,
         mode: 'hybrid',
+        top_k: 3,
         rerank: true,
       },
       {
