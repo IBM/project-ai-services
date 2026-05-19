@@ -24,24 +24,24 @@ jobs:
       
       - name: Install digitize test dependencies
         run: |
-          pip install -r tests/requirements-test.txt \
+          pip install -r digitize/tests/requirements-test.txt \
           --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
           --prefer-binary
-        working-directory: services/digitize
+        working-directory: services
       
       - name: Run digitize service tests
         run: |
-          pytest tests/ -v
-        working-directory: services/digitize
+          pytest digitize/tests/ -v
+        working-directory: services
       
       - name: Install chatbot test dependencies
         run: |
-          pip install -r tests/requirements-test.txt \
+          pip install -r chatbot/tests/requirements-test.txt \
           --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
           --prefer-binary
-        working-directory: services/chatbot
+        working-directory: services
       
       - name: Run chatbot service tests
         run: |
-          pytest tests/ -v
-        working-directory: services/chatbot
+          pytest chatbot/tests/ -v
+        working-directory: services
