@@ -31,7 +31,7 @@ const LoginPage = () => {
         password,
       });
 
-      navigate("/ai-deployments");
+      navigate("/digital-assistants");
     } catch {
       setError(true);
     } finally {

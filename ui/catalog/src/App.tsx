@@ -5,7 +5,7 @@ import AuthLayout from "./layouts/AuthLayout";
 
 import Login from "./pages/Login";
 import Logout from "./pages/Logout";
-import ApplicationsListPage from "./pages/AiDeployments";
+import DigitalAssistantsPage from "./pages/DigitalAssistants";
 import Architectures from "./pages/Architectures";
 import Services from "./pages/Services";
 import UseCaseReferences from "./pages/UseCaseReferences";
@@ -24,8 +24,8 @@ function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<MainLayout />}>
             <Route
-              path={ROUTES.AI_DEPLOYMENTS}
-              element={<ApplicationsListPage />}
+              path={ROUTES.DIGITAL_ASSISTANTS}
+              element={<DigitalAssistantsPage />}
             />
             <Route path={ROUTES.ARCHITECTURES} element={<Architectures />} />
             <Route path={ROUTES.SERVICES} element={<Services />} />
