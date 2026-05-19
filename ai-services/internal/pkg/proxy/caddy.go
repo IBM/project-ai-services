@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
@@ -138,10 +137,9 @@ func (c *caddyManager) createRoute(routeConfig map[string]interface{}) error {
 //
 // Parameters:
 //   - rt: Runtime interface for interacting with pods
-//   - tp: Template provider for loading routes configuration
 //   - appName: Name of the application (e.g., "ai-services" for catalog)
-//   - appTemplate: Template name (e.g., "catalog", "rag", "chat")
 //   - serverName: Caddy server name (e.g., "my_app_server")
+//   - routesAnnotation: Routes annotation value in format "port:subdomain, port:subdomain, ..."
 //
 // Returns:
 //   - error: nil if routes were registered successfully, error otherwise
@@ -150,16 +148,16 @@ func (c *caddyManager) createRoute(routeConfig map[string]interface{}) error {
 //  1. Discovers Caddy admin port from pod port mappings
 //  2. Creates a proxy manager with the admin URL
 //  3. Performs health check on Caddy
-//  4. Builds routes from routes_file.yaml configuration
+//  4. Builds routes from the provided annotation string
 //  5. Registers each route with Caddy
 //
 // If any step fails, appropriate warnings are logged and the function returns early.
 func RegisterRoutesForApp(
 	rt runtime.Runtime,
-	tp templates.Template,
 	appName string,
-	appTemplate string,
 	serverName string,
+	routesAnnotation string,
+	podName string,
 ) error {
 	// Step 1: Get Caddy admin port from pod port mappings
 	adminPort, err := GetCaddyAdminPort(rt, appName)
@@ -188,8 +186,8 @@ func RegisterRoutesForApp(
 		return fmt.Errorf("failed to get host IP: %w", err)
 	}
 
-	// Step 5: Build routes from routes_file.yaml configuration
-	routes, err := BuildRoutesFromConfig(tp, appTemplate, hostIP)
+	// Step 5: Build routes from the annotation string
+	routes, err := BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName)
 	if err != nil {
 		return fmt.Errorf("failed to build routes: %w", err)
 	}

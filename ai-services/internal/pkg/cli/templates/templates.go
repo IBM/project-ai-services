@@ -47,20 +47,6 @@ type HostVar struct {
 	Type  string `yaml:"type,omitempty"`
 }
 
-type Routes struct {
-	Routes []PodRoutes `yaml:"routes"`
-}
-
-type PodRoutes struct {
-	Pod      string         `yaml:"pod"`
-	Services []ServiceRoute `yaml:"services"`
-}
-
-type ServiceRoute struct {
-	ContainerPort string `yaml:"containerPort"`
-	Subdomain     string `yaml:"subdomain"`
-}
-
 type Template interface {
 	// ListApplications lists all available application templates
 	ListApplications(hidden bool) ([]string, error)
@@ -81,9 +67,7 @@ type Template interface {
 	LoadMdFiles(app string) (map[string]*template.Template, error)
 	// LoadVarsFile loads the var template file
 	LoadVarsFile(app string, params map[string]string) (*Vars, error)
-	// LoadRoutesFile loads the routes configuration file
-	LoadRoutesFile(app string) (*Routes, error)
-	// LoadVarsFile loads the Chart
+	// LoadChart loads the Chart
 	LoadChart(app string) (chart.Charter, error)
 	// LoadYamls loads the yaml in assests dir
 	LoadYamls(folder string) ([][]byte, error)

@@ -17,6 +17,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
@@ -91,10 +92,9 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 	s.Stop("Catalog service deployed successfully")
 	logger.Infoln("-------")
 
-	// Register routes with Caddy using the reusable function
-	if err := proxy.RegisterRoutesForApp(rt, tp, catalogAppName, catalogAppTemplate, "my_app_server"); err != nil {
-		// Warnings already logged by RegisterRoutesForApp
-		return fmt.Errorf("route registration failed: : %w", err)
+	// Register routes with Caddy
+	if err := registerCatalogRoutes(rt, tp, catalogAppTemplate, argParams); err != nil {
+		return fmt.Errorf("route registration failed: %w", err)
 	}
 
 	// Print next steps similar to application create
@@ -311,6 +311,59 @@ func collectSecretNames(tp templates.Template, tmpls map[string]*template.Templa
 	}
 
 	return secretNames, nil
+}
+
+// extractRoutesFromTemplate extracts the ai-services.io/routes annotation from the catalog template.
+func extractRoutesFromTemplate(tp templates.Template, appTemplateName string, argParams map[string]string) (string, error) {
+	// Load the catalog pod template to extract routes annotation
+	podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, "catalog.yaml.tmpl", catalogAppName, nil, argParams)
+	if err != nil {
+		return "", fmt.Errorf("failed to load catalog template: %w", err)
+	}
+
+	// Extract routes annotation
+	if podSpec.Annotations != nil {
+		if routes, ok := podSpec.Annotations[constants.PodRoutesAnnotationKey]; ok {
+			return routes, nil
+		}
+	}
+
+	return "", nil
+}
+
+// extractPodNameFromTemplate extracts the pod name from the catalog template.
+func extractPodNameFromTemplate(tp templates.Template, appTemplateName string, argParams map[string]string) (string, error) {
+	// Load the catalog pod template to extract pod name
+	podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, "catalog.yaml.tmpl", catalogAppName, nil, argParams)
+	if err != nil {
+		return "", fmt.Errorf("failed to load catalog template: %w", err)
+	}
+
+	return podSpec.Name, nil
+}
+
+// registerCatalogRoutes extracts routes from template and registers them with Caddy.
+func registerCatalogRoutes(rt *podman.PodmanClient, tp templates.Template, appTemplateName string, argParams map[string]string) error {
+	// Extract routes annotation from catalog template
+	routesAnnotation, err := extractRoutesFromTemplate(tp, appTemplateName, argParams)
+	if err != nil {
+		return fmt.Errorf("failed to extract routes from template: %w", err)
+	}
+
+	// Get pod name from template
+	podName, err := extractPodNameFromTemplate(tp, appTemplateName, argParams)
+	if err != nil {
+		return fmt.Errorf("failed to extract pod name from template: %w", err)
+	}
+
+	// Register routes with Caddy if both values are available
+	if routesAnnotation != "" && podName != "" {
+		if err := proxy.RegisterRoutesForApp(rt, catalogAppName, "my_app_server", routesAnnotation, podName); err != nil {
+			return fmt.Errorf("failed to register routes: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // Made with Bob

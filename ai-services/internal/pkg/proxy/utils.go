@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
 
@@ -29,40 +28,45 @@ func GetCaddyAdminPort(rt runtime.Runtime, appName string) (string, error) {
 	return "", fmt.Errorf("admin port mapping not found in pod ports")
 }
 
-// BuildRoutesFromConfig builds routes by reading routes_file.yaml configuration.
-// This approach uses static configuration to define routing without needing pod inspection.
-func BuildRoutesFromConfig(tp templates.Template, appName, hostIP string) ([]Route, error) {
-	// Load routes configuration
-	routesConfig, err := tp.LoadRoutesFile(appName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load routes config: %w", err)
+// BuildRoutesFromAnnotation parses a routes annotation string and builds Route objects.
+// The annotation format is: "port:subdomain, port:subdomain, ...".
+// Example: "8081:catalog-ui, 8080:catalog-api".
+func BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName string) ([]Route, error) {
+	if routesAnnotation == "" {
+		return nil, nil
 	}
 
-	// Pre-calculate total number of routes for efficient allocation
-	totalRoutes := 0
-	for _, podConfig := range routesConfig.Routes {
-		totalRoutes += len(podConfig.Services)
-	}
-	routes := make([]Route, 0, totalRoutes)
+	routes := []Route{}
+	const expectedParts = 2
 
-	// Process each pod in the configuration
-	for _, podConfig := range routesConfig.Routes {
-		podName := podConfig.Pod
-
-		// Process each service in the pod
-		for _, svc := range podConfig.Services {
-			// Extract container port number (remove /tcp suffix)
-			containerPort := strings.Split(svc.ContainerPort, "/")[0]
-
-			// Build route
-			route := Route{
-				ID:       fmt.Sprintf("%s--%s", podName, svc.Subdomain),
-				Domain:   fmt.Sprintf("%s.%s.nip.io", svc.Subdomain, hostIP),
-				Upstream: fmt.Sprintf("%s:%s", podName, containerPort),
-				Terminal: true,
-			}
-			routes = append(routes, route)
+	// Parse routes annotation (format: "port:subdomain, port:subdomain, ...")
+	for _, r := range strings.Split(routesAnnotation, ",") {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
 		}
+
+		// Split by colon
+		parts := strings.Split(r, ":")
+		if len(parts) != expectedParts {
+			continue
+		}
+
+		port := strings.TrimSpace(parts[0])
+		subdomain := strings.TrimSpace(parts[1])
+
+		if port == "" || subdomain == "" {
+			continue
+		}
+
+		// Build route - use pod name as upstream since containers are in the same pod
+		route := Route{
+			ID:       fmt.Sprintf("%s--%s", podName, subdomain),
+			Domain:   fmt.Sprintf("%s.%s.nip.io", subdomain, hostIP),
+			Upstream: fmt.Sprintf("%s:%s", podName, port),
+			Terminal: true,
+		}
+		routes = append(routes, route)
 	}
 
 	return routes, nil
