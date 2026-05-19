@@ -5,6 +5,9 @@
   :global(.c4p--side-panel__body) {
     padding: spacing.$spacing-07 spacing.$spacing-06;
   }
+  :global(.c4p--side-panel__action-toolbar) {
+    height: 0;
+  }
 }
 
 .content {

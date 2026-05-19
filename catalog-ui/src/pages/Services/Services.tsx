@@ -90,7 +90,7 @@ const mockServices: ServiceDetailData[] = [
       version: "1.0.0",
       inferenceBackend: "RedHat AI Inference (default)",
       embeddingModel: "BAI/bge-reranker-v2-m3 (on-prem)",
-      llm: "BAAI/bge-reranker-v2-m3 (on-prem)",
+      rerankerModel: "BAAI/bge-reranker-v2-m3 (on-prem)",
       vectorStore: "OpenSearch (default)",
       defaultInferenceBackend: "OpenSearch (default)",
     },
@@ -109,8 +109,8 @@ const mockServices: ServiceDetailData[] = [
     ],
     contentSupport: {
       languages: ["English", "French", "German", "Italian"],
-      formats: ["Text", "Tables", "Images"],
-      content: ["Improved ranking through reranking AI model"],
+      content: ["Text", "Tables", "Images"],
+      reranking: ["Improved ranking through reranking AI model"],
     },
     resourceConsumption: {
       small: ["Compute: 00 CPU cores", "Memory: 00 GB", "Storage: 00 GB"],
@@ -173,7 +173,7 @@ const mockServices: ServiceDetailData[] = [
     ],
     contentSupport: {
       languages: ["English", "French", "German", "Italian"],
-      formats: ["Text", "Tables"],
+      content: ["Text", "Tables"],
     },
     resourceConsumption: {
       small: ["Compute: 4 CPU cores", "Memory: 16 GB", "Storage: 50 GB"],
@@ -241,24 +241,12 @@ const mockServices: ServiceDetailData[] = [
     },
     sla: {
       small: {
-        assumptions: [
-          "Document size: Up to 5K tokens",
-          "Summary length: Up to 500 words",
-        ],
         guarantees: ["Processing time: <3 seconds", "Compression ratio: 5:1"],
       },
       medium: {
-        assumptions: [
-          "Document size: Up to 20K tokens",
-          "Summary length: Up to 1000 words",
-        ],
         guarantees: ["Processing time: <5 seconds", "Compression ratio: 10:1"],
       },
       large: {
-        assumptions: [
-          "Document size: Up to 100K tokens",
-          "Summary length: Up to 2000 words",
-        ],
         guarantees: ["Processing time: <10 seconds", "Compression ratio: 20:1"],
       },
     },
@@ -334,7 +322,6 @@ const Services = () => {
         open={isPanelOpen}
         onClose={handleClosePanel}
         service={selectedService}
-        onDeploy={handleDeploy}
       />
     </div>
   );

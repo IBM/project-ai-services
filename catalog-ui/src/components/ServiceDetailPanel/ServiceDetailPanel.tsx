@@ -14,6 +14,7 @@ export interface ServiceDetailData {
     inferenceBackend?: string;
     embeddingModel?: string;
     vectorStore?: string;
+    rerankerModel?: string;
     llm?: string;
     defaultInferenceBackend?: string;
   };
@@ -24,6 +25,7 @@ export interface ServiceDetailData {
     languages?: string[];
     formats?: string[];
     content?: string[];
+    reranking?: string[];
   };
   resourceConsumption?: {
     small?: string[];
@@ -55,14 +57,12 @@ export interface ServiceDetailPanelProps {
   open: boolean;
   onClose: () => void;
   service: ServiceDetailData | null;
-  onDeploy?: (id: string) => void;
 }
 
 const ServiceDetailPanel = ({
   open,
   onClose,
   service,
-  onDeploy,
 }: ServiceDetailPanelProps) => {
   if (!service) return null;
 
@@ -170,6 +170,14 @@ const ServiceDetailPanel = ({
                     <div className={styles.fieldValue}>{service.demos.llm}</div>
                   </div>
                 )}
+                {service.demos.rerankerModel && (
+                  <div className={styles.demoItem}>
+                    <div className={styles.fieldLabel}>Reranker Model</div>
+                    <div className={styles.fieldValue}>
+                      {service.demos.rerankerModel}
+                    </div>
+                  </div>
+                )}
                 {service.demos.defaultInferenceBackend && (
                   <div className={styles.demoItem}>
                     <div className={styles.fieldLabel}>
@@ -262,7 +270,7 @@ const ServiceDetailPanel = ({
                 )}
                 {service.contentSupport.formats && (
                   <div className={styles.column}>
-                    <div className={styles.columnLabel}>Supported formats</div>
+                    <div className={styles.columnLabel}>Document formats</div>
                     <ul className={styles.dashList}>
                       {service.contentSupport.formats.map((format, index) => (
                         <li key={index}>{format}</li>
@@ -276,6 +284,16 @@ const ServiceDetailPanel = ({
                     <ul className={styles.dashList}>
                       {service.contentSupport.content.map((content, index) => (
                         <li key={index}>{content}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {service.contentSupport.reranking && (
+                  <div className={styles.column}>
+                    <div className={styles.columnLabel}>Reranking</div>
+                    <ul className={styles.dashList}>
+                      {service.contentSupport.reranking.map((rerank, index) => (
+                        <li key={index}>{rerank}</li>
                       ))}
                     </ul>
                   </div>
@@ -343,76 +361,90 @@ const ServiceDetailPanel = ({
                 {service.sla.small && (
                   <div className={styles.column}>
                     <div className={styles.columnLabel}>Small:</div>
-                    {service.sla.small.assumptions && (
-                      <>
-                        <div className={styles.subLabel}>Assumptions</div>
-                        <ul className={styles.dashList}>
-                          {service.sla.small.assumptions.map((item, index) => (
-                            <li key={index}>{item}</li>
-                          ))}
-                        </ul>
-                      </>
-                    )}
-                    {service.sla.small.guarantees && (
-                      <>
-                        <div className={styles.subLabel}>Guarantees</div>
-                        <ul className={styles.dashList}>
-                          {service.sla.small.guarantees.map((item, index) => (
-                            <li key={index}>{item}</li>
-                          ))}
-                        </ul>
-                      </>
-                    )}
+                    {service.sla.small.assumptions &&
+                      service.sla.small.assumptions.length > 0 && (
+                        <>
+                          <div className={styles.subLabel}>Assumptions</div>
+                          <ul className={styles.dashList}>
+                            {service.sla.small.assumptions.map(
+                              (item, index) => (
+                                <li key={index}>{item}</li>
+                              ),
+                            )}
+                          </ul>
+                        </>
+                      )}
+                    {service.sla.small.guarantees &&
+                      service.sla.small.guarantees.length > 0 && (
+                        <>
+                          <div className={styles.subLabel}>Guarantees</div>
+                          <ul className={styles.dashList}>
+                            {service.sla.small.guarantees.map((item, index) => (
+                              <li key={index}>{item}</li>
+                            ))}
+                          </ul>
+                        </>
+                      )}
                   </div>
                 )}
                 {service.sla.medium && (
                   <div className={styles.column}>
                     <div className={styles.columnLabel}>Medium:</div>
-                    {service.sla.medium.assumptions && (
-                      <>
-                        <div className={styles.subLabel}>Assumptions</div>
-                        <ul className={styles.dashList}>
-                          {service.sla.medium.assumptions.map((item, index) => (
-                            <li key={index}>{item}</li>
-                          ))}
-                        </ul>
-                      </>
-                    )}
-                    {service.sla.medium.guarantees && (
-                      <>
-                        <div className={styles.subLabel}>Guarantees</div>
-                        <ul className={styles.dashList}>
-                          {service.sla.medium.guarantees.map((item, index) => (
-                            <li key={index}>{item}</li>
-                          ))}
-                        </ul>
-                      </>
-                    )}
+                    {service.sla.medium.assumptions &&
+                      service.sla.medium.assumptions.length > 0 && (
+                        <>
+                          <div className={styles.subLabel}>Assumptions</div>
+                          <ul className={styles.dashList}>
+                            {service.sla.medium.assumptions.map(
+                              (item, index) => (
+                                <li key={index}>{item}</li>
+                              ),
+                            )}
+                          </ul>
+                        </>
+                      )}
+                    {service.sla.medium.guarantees &&
+                      service.sla.medium.guarantees.length > 0 && (
+                        <>
+                          <div className={styles.subLabel}>Guarantees</div>
+                          <ul className={styles.dashList}>
+                            {service.sla.medium.guarantees.map(
+                              (item, index) => (
+                                <li key={index}>{item}</li>
+                              ),
+                            )}
+                          </ul>
+                        </>
+                      )}
                   </div>
                 )}
                 {service.sla.large && (
                   <div className={styles.column}>
                     <div className={styles.columnLabel}>Large:</div>
-                    {service.sla.large.assumptions && (
-                      <>
-                        <div className={styles.subLabel}>Assumptions</div>
-                        <ul className={styles.dashList}>
-                          {service.sla.large.assumptions.map((item, index) => (
-                            <li key={index}>{item}</li>
-                          ))}
-                        </ul>
-                      </>
-                    )}
-                    {service.sla.large.guarantees && (
-                      <>
-                        <div className={styles.subLabel}>Guarantees</div>
-                        <ul className={styles.dashList}>
-                          {service.sla.large.guarantees.map((item, index) => (
-                            <li key={index}>{item}</li>
-                          ))}
-                        </ul>
-                      </>
-                    )}
+                    {service.sla.large.assumptions &&
+                      service.sla.large.assumptions.length > 0 && (
+                        <>
+                          <div className={styles.subLabel}>Assumptions</div>
+                          <ul className={styles.dashList}>
+                            {service.sla.large.assumptions.map(
+                              (item, index) => (
+                                <li key={index}>{item}</li>
+                              ),
+                            )}
+                          </ul>
+                        </>
+                      )}
+                    {service.sla.large.guarantees &&
+                      service.sla.large.guarantees.length > 0 && (
+                        <>
+                          <div className={styles.subLabel}>Guarantees</div>
+                          <ul className={styles.dashList}>
+                            {service.sla.large.guarantees.map((item, index) => (
+                              <li key={index}>{item}</li>
+                            ))}
+                          </ul>
+                        </>
+                      )}
                   </div>
                 )}
               </div>
@@ -422,7 +454,6 @@ const ServiceDetailPanel = ({
           </>
         )}
 
-        {/* Assets */}
         {service.assets && (
           <section className={styles.section}>
             <h2 className={styles.sectionTitle}>Assets</h2>
