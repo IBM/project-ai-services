@@ -1337,7 +1337,7 @@ import_digitize_podman() {
     TOTAL_SIZE=$(du -sh "$TEMP_DIR/backup/cache" 2>/dev/null | awk '{print $1}')
     echo "  Total files in backup: $TOTAL_FILES ($TOTAL_SIZE)"
     
-    if [ "$TOL_FILES" -eq "0" ]; then
+    if [ "$TOTAL_FILES" -eq "0" ]; then
         print_error "No files found in backup!"
         rm -rf "$TEMP_DIR"
         exit 1
@@ -1401,7 +1401,7 @@ main() {
     # Validate OpenSearch password
     validate_opensearch_password
 
-  case "$1" in
+    case "$1" in
         export)
             case "$2" in
                 opensearch)
@@ -1461,5 +1461,3 @@ main() {
 main "$@"
 
 # Made with Bob
-
-
