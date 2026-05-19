@@ -14,7 +14,7 @@ import (
 )
 
 // CreateRouter sets up the Gin router with the necessary routes and authentication middleware for the API server.
-func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist) *gin.Engine {
+func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService *repository.ApplicationService) *gin.Engine {
 	router := gin.Default()
 
 	// Health check endpoint
@@ -27,6 +27,8 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 
 	authHandler := handlers.NewAuthHandler(authSvc)
 	catalogHandler := handlers.NewCatalogHandler()
+	deployOptionsHandler := handlers.NewDeployOptionsHandler()
+	applicationHandler := handlers.NewApplicationHandler(appService)
 
 	v1 := router.Group("/api/v1")
 	{
@@ -42,23 +44,29 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	{
 		catalog.GET("/architectures", catalogHandler.ListArchitectures)
 		catalog.GET("/architectures/:id", catalogHandler.GetArchitectureDetails)
+		catalog.GET("/architectures/:id/deploy-options", deployOptionsHandler.GetArchitectureDeployOptions)
 		catalog.GET("/services", catalogHandler.ListServices)
 		catalog.GET("/services/:id", catalogHandler.GetServiceDetails)
+		catalog.GET("/services/:id/deploy-options", deployOptionsHandler.GetServiceDeployOptions)
+		catalog.GET("/components/:component_type/providers/:provider_id/params", deployOptionsHandler.GetComponentProviderParams)
 	}
 
 	applications := v1.Group("applications")
 	applications.Use(middleware.AuthMiddleware(tokenMgr, blacklist))
+	{
+		// Implemented endpoints
+		applications.GET("/", applicationHandler.ListApplications)
 
-	// Draft endpoints and more discussion needed to finalize the API design. For now, these are placeholders.
-	// TODO: Define the API design for application management, including request/response formats and error handling.
-	applications.GET("/templates", getTemplates)
-	applications.POST("/", createApplication)
-	applications.GET("/:name", getApplication)
-	applications.DELETE("/:name", deleteApplication)
-	applications.GET("/:name/ps", getApplicationStatus)
-	applications.POST("/:name/start", startApplication)
-	applications.POST("/:name/stop", stopApplication)
-	applications.GET("/:name/logs", getApplicationLogs)
+		// Draft endpoints - placeholders for future implementation
+		applications.GET("/templates", getTemplates)
+		applications.POST("/", createApplication)
+		applications.GET("/:name", getApplication)
+		applications.DELETE("/:name", deleteApplication)
+		applications.GET("/:name/ps", getApplicationStatus)
+		applications.POST("/:name/start", startApplication)
+		applications.POST("/:name/stop", stopApplication)
+		applications.GET("/:name/logs", getApplicationLogs)
+	}
 
 	return router
 }

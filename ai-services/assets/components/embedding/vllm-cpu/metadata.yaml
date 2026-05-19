@@ -6,3 +6,4 @@ description: "Deploy embedding models on vLLM inference engine (CPU-only)"
 
 # Component type this provider belongs to
 component_type: embedding
+component_name: "Embedding Model"
