@@ -21,6 +21,10 @@ digitize:
   log_level: "INFO"
   # @description Database name for the DIGITIZE service. Default is "digitize_metadata".
   database: "digitize_metadata"
+  # @description Enable JSON to PostgreSQL migration on startup. Set to "true" to migrate existing JSON metadata files to PostgreSQL database.
+  enableMigration: "true"
+  # @description Cleanup JSON files after successful migration. Set to "true" to delete JSON files after they are migrated to PostgreSQL.
+  migrationCleanup: "false"
 
 digitizeUi:
   # @description Host port for the DIGITIZE UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
