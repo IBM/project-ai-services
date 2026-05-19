@@ -42,17 +42,31 @@ const mockServices: ServiceDetailData[] = [
     },
     resourceConsumption: {
       small: ["Compute: 00 CPU cores", "Memory: 00 GB", "Storage: 00 GB"],
-      medium: ["Compute: 00 CPU cores + Slave cards", "Memory: 00 GB", "Storage: 00 GB"],
-      large: ["Compute: 00 CPU cores + 15 Slave cards", "Memory: 00 GB", "Storage: 00 GB"],
+      medium: [
+        "Compute: 00 CPU cores + Slave cards",
+        "Memory: 00 GB",
+        "Storage: 00 GB",
+      ],
+      large: [
+        "Compute: 00 CPU cores + 15 Slave cards",
+        "Memory: 00 GB",
+        "Storage: 00 GB",
+      ],
     },
     sla: {
       small: {
         assumptions: ["Document size: TBD", "Features"],
-        guarantees: ["Embedding throughput: >8 mil. docs./hour", "End-to-end throughput: TBD"],
+        guarantees: [
+          "Embedding throughput: >8 mil. docs./hour",
+          "End-to-end throughput: TBD",
+        ],
       },
       medium: {
         assumptions: ["Document size: TBD", "Features"],
-        guarantees: ["Embedding throughput: >8 mil. docs./hour", "End-to-end throughput: TBD"],
+        guarantees: [
+          "Embedding throughput: >8 mil. docs./hour",
+          "End-to-end throughput: TBD",
+        ],
       },
       large: {
         assumptions: ["Document size: TBD", "Features"],
@@ -78,7 +92,7 @@ const mockServices: ServiceDetailData[] = [
       embeddingModel: "BAI/bge-reranker-v2-m3 (on-prem)",
       llm: "BAAI/bge-reranker-v2-m3 (on-prem)",
       vectorStore: "OpenSearch (default)",
-      defaultInferenceBackend : "OpenSearch (default)",
+      defaultInferenceBackend: "OpenSearch (default)",
     },
     inputs: [
       "Item to find similar items for (e.g., text or document)",
@@ -100,8 +114,16 @@ const mockServices: ServiceDetailData[] = [
     },
     resourceConsumption: {
       small: ["Compute: 00 CPU cores", "Memory: 00 GB", "Storage: 00 GB"],
-      medium: ["Compute: 00 CPU cores + 0 Slave cards", "Memory: 00 GB", "Storage: 00 GB"],
-      large: ["Compute: 00 CPU cores + 0 Slave cards", "Memory: 00 GB", "Storage: 00 GB"],
+      medium: [
+        "Compute: 00 CPU cores + 0 Slave cards",
+        "Memory: 00 GB",
+        "Storage: 00 GB",
+      ],
+      large: [
+        "Compute: 00 CPU cores + 0 Slave cards",
+        "Memory: 00 GB",
+        "Storage: 00 GB",
+      ],
     },
     sla: {
       small: {
@@ -133,7 +155,8 @@ const mockServices: ServiceDetailData[] = [
     demos: {
       version: "1.0.0",
       defaultInferenceBackend: "OpenSearch(default)",
-      llm: "ibm-granite/granite-3.3-8b-instruct (on-prem)",   },
+      llm: "ibm-granite/granite-3.3-8b-instruct (on-prem)",
+    },
     inputs: [
       "Question in natural language",
       "Document context (optional)",
@@ -159,15 +182,24 @@ const mockServices: ServiceDetailData[] = [
     },
     sla: {
       small: {
-        assumptions: ["Query complexity: Simple questions", "Context size: Up to 2K tokens"],
+        assumptions: [
+          "Query complexity: Simple questions",
+          "Context size: Up to 2K tokens",
+        ],
         guarantees: ["Response time: <2 seconds", "Accuracy: >85%"],
       },
       medium: {
-        assumptions: ["Query complexity: Moderate questions", "Context size: Up to 8K tokens"],
+        assumptions: [
+          "Query complexity: Moderate questions",
+          "Context size: Up to 8K tokens",
+        ],
         guarantees: ["Response time: <3 seconds", "Accuracy: >90%"],
       },
       large: {
-        assumptions: ["Query complexity: Complex multi-step questions", "Context size: Up to 32K tokens"],
+        assumptions: [
+          "Query complexity: Complex multi-step questions",
+          "Context size: Up to 32K tokens",
+        ],
         guarantees: ["Response time: <5 seconds", "Accuracy: >92%"],
       },
     },
@@ -209,15 +241,24 @@ const mockServices: ServiceDetailData[] = [
     },
     sla: {
       small: {
-        assumptions: ["Document size: Up to 5K tokens", "Summary length: Up to 500 words"],
+        assumptions: [
+          "Document size: Up to 5K tokens",
+          "Summary length: Up to 500 words",
+        ],
         guarantees: ["Processing time: <3 seconds", "Compression ratio: 5:1"],
       },
       medium: {
-        assumptions: ["Document size: Up to 20K tokens", "Summary length: Up to 1000 words"],
+        assumptions: [
+          "Document size: Up to 20K tokens",
+          "Summary length: Up to 1000 words",
+        ],
         guarantees: ["Processing time: <5 seconds", "Compression ratio: 10:1"],
       },
       large: {
-        assumptions: ["Document size: Up to 100K tokens", "Summary length: Up to 2000 words"],
+        assumptions: [
+          "Document size: Up to 100K tokens",
+          "Summary length: Up to 2000 words",
+        ],
         guarantees: ["Processing time: <10 seconds", "Compression ratio: 20:1"],
       },
     },
@@ -230,7 +271,8 @@ const mockServices: ServiceDetailData[] = [
 ];
 
 const Services = () => {
-  const [selectedService, setSelectedService] = useState<ServiceDetailData | null>(null);
+  const [selectedService, setSelectedService] =
+    useState<ServiceDetailData | null>(null);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
 
   const handleCardClick = (id: string) => {

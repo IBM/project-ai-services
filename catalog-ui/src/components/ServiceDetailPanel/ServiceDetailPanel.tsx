@@ -66,7 +66,6 @@ const ServiceDetailPanel = ({
 }: ServiceDetailPanelProps) => {
   if (!service) return null;
 
-
   return (
     <SidePanel
       open={open}
@@ -76,7 +75,6 @@ const ServiceDetailPanel = ({
       placement="right"
       size="lg"
       className={styles.sidePanel}
-     
       actionToolbarButtons={
         service.assets?.sourceCodeUrl
           ? [
@@ -84,7 +82,9 @@ const ServiceDetailPanel = ({
                 key="view-source"
                 kind="ghost"
                 renderIcon={Launch}
-                onClick={() => window.open(service.assets?.sourceCodeUrl, "_blank")}
+                onClick={() =>
+                  window.open(service.assets?.sourceCodeUrl, "_blank")
+                }
               >
                 View source code
               </Button>,
@@ -123,13 +123,17 @@ const ServiceDetailPanel = ({
                 {service.demos.version && (
                   <div className={styles.demoItem}>
                     <div className={styles.fieldLabel}>Version</div>
-                    <div className={styles.fieldValue}>{service.demos.version}</div>
+                    <div className={styles.fieldValue}>
+                      {service.demos.version}
+                    </div>
                   </div>
                 )}
                 {service.demos.inferenceBackend && (
                   <div className={styles.demoItem}>
                     <div className={styles.fieldLabel}>Inference backend</div>
-                    <div className={styles.fieldValue}>{service.demos.inferenceBackend}</div>
+                    <div className={styles.fieldValue}>
+                      {service.demos.inferenceBackend}
+                    </div>
                   </div>
                 )}
               </div>
@@ -137,14 +141,22 @@ const ServiceDetailPanel = ({
               <div className={styles.demoGrid}>
                 {service.demos.embeddingModel && (
                   <div className={styles.demoItem}>
-                    <div className={styles.fieldLabel}>Default embedding model</div>
-                    <div className={styles.fieldValue}>{service.demos.embeddingModel}</div>
+                    <div className={styles.fieldLabel}>
+                      Default embedding model
+                    </div>
+                    <div className={styles.fieldValue}>
+                      {service.demos.embeddingModel}
+                    </div>
                   </div>
                 )}
                 {service.demos.vectorStore && (
                   <div className={styles.demoItem}>
-                    <div className={styles.fieldLabel}>Default vector store</div>
-                    <div className={styles.fieldValue}>{service.demos.vectorStore}</div>
+                    <div className={styles.fieldLabel}>
+                      Default vector store
+                    </div>
+                    <div className={styles.fieldValue}>
+                      {service.demos.vectorStore}
+                    </div>
                   </div>
                 )}
               </div>
@@ -152,14 +164,20 @@ const ServiceDetailPanel = ({
               <div className={styles.demoGrid}>
                 {service.demos.llm && (
                   <div className={styles.demoItem}>
-                    <div className={styles.fieldLabel}>Default Large Language Model (LLM)</div>
+                    <div className={styles.fieldLabel}>
+                      Default Large Language Model (LLM)
+                    </div>
                     <div className={styles.fieldValue}>{service.demos.llm}</div>
                   </div>
                 )}
                 {service.demos.defaultInferenceBackend && (
                   <div className={styles.demoItem}>
-                    <div className={styles.fieldLabel}>Default inference backend</div>
-                    <div className={styles.fieldValue}>{service.demos.defaultInferenceBackend}</div>
+                    <div className={styles.fieldLabel}>
+                      Default inference backend
+                    </div>
+                    <div className={styles.fieldValue}>
+                      {service.demos.defaultInferenceBackend}
+                    </div>
                   </div>
                 )}
               </div>
@@ -207,7 +225,9 @@ const ServiceDetailPanel = ({
         {service.dependencies && service.dependencies.length > 0 && (
           <>
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Dependencies and integration</h2>
+              <h2 className={styles.sectionTitle}>
+                Dependencies and integration
+              </h2>
 
               <div className={styles.columnLabel}>External dependencies</div>
               <ul className={styles.bulletList}>
@@ -225,7 +245,9 @@ const ServiceDetailPanel = ({
         {service.contentSupport && (
           <>
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Content and format support</h2>
+              <h2 className={styles.sectionTitle}>
+                Content and format support
+              </h2>
 
               <div className={styles.threeColumns}>
                 {service.contentSupport.languages && (
@@ -269,7 +291,9 @@ const ServiceDetailPanel = ({
         {service.resourceConsumption && (
           <>
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Expected resource consumption</h2>
+              <h2 className={styles.sectionTitle}>
+                Expected resource consumption
+              </h2>
 
               <div className={styles.threeColumns}>
                 {service.resourceConsumption.small && (
@@ -407,7 +431,9 @@ const ServiceDetailPanel = ({
               {service.assets.architectures && (
                 <div className={styles.assetField}>
                   <div className={styles.fieldLabel}>Architectures</div>
-                  <div className={styles.assetTag}>{service.assets.architectures}</div>
+                  <div className={styles.assetTag}>
+                    {service.assets.architectures}
+                  </div>
                 </div>
               )}
 
@@ -415,7 +441,12 @@ const ServiceDetailPanel = ({
                 <div className={styles.assetField}>
                   <div className={styles.fieldLabel}>API</div>
                   <div className={styles.fieldLabel}>documentation</div>
-                  <a href={service.assets.apiUrl} className={styles.infoLink} target="_blank" rel="noopener noreferrer">
+                  <a
+                    href={service.assets.apiUrl}
+                    className={styles.infoLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     {service.assets.apiUrl}
                   </a>
                 </div>
@@ -429,7 +460,9 @@ const ServiceDetailPanel = ({
                   kind="tertiary"
                   size="md"
                   className={styles.sourceButton}
-                  onClick={() => window.open(service.assets?.sourceCodeUrl, '_blank')}
+                  onClick={() =>
+                    window.open(service.assets?.sourceCodeUrl, "_blank")
+                  }
                 >
                   View source code
                 </Button>
@@ -443,4 +476,3 @@ const ServiceDetailPanel = ({
 };
 
 export default ServiceDetailPanel;
-

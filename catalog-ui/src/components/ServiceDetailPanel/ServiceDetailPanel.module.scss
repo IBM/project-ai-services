@@ -30,14 +30,14 @@
 .tag {
   display: inline-flex;
   align-items: center;
-  border:  1px solid var(--cds-text-primary);
+  border: 1px solid var(--cds-text-primary);
   border-radius: 16px;
   font-size: 0.75rem;
   font-weight: 400;
   line-height: 1.33;
   color: var(--cds-text-primary);
   background-color: transparent;
-  padding:0 spacing.$spacing-02;
+  padding: 0 spacing.$spacing-02;
 }
 
 .certifiedTag {
@@ -77,7 +77,7 @@
   grid-template-columns: 1fr 1fr;
   gap: spacing.$spacing-05 spacing.$spacing-06;
   margin-bottom: spacing.$spacing-05;
-  
+
   &:last-child {
     margin-bottom: 0;
   }
@@ -103,9 +103,8 @@
   color: var(--cds-text-primary);
 }
 
-.fieldmodel{
+.fieldmodel {
   font-size: 0.7rem;
-
 }
 
 .twoColumns {
@@ -147,7 +146,7 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  
+
   li {
     @include type.type-style("body-compact-01");
     color: var(--cds-text-primary);
@@ -155,11 +154,11 @@
     line-height: 1.43;
     padding-left: spacing.$spacing-04;
     position: relative;
-    
+
     &:last-child {
       margin-bottom: 0;
     }
-    
+
     &::before {
       content: "–";
       position: absolute;
@@ -173,7 +172,7 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  
+
   li {
     @include type.type-style("body-compact-01");
     color: var(--cds-text-primary);
@@ -182,11 +181,11 @@
     margin-bottom: spacing.$spacing-02;
     position: relative;
     padding-left: spacing.$spacing-04;
-    
+
     &:last-child {
       margin-bottom: 0;
     }
-    
+
     &::before {
       content: "–";
       position: absolute;
