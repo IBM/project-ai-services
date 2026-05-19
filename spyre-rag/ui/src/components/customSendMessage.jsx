@@ -191,9 +191,6 @@ async function customSendMessage(
     try {
       const context_response = await axios.post('/v1/similarity-search', {
         query: rephrasedQuery,
-        mode: 'hybrid',
-        top_k: 3,
-        rerank: true,
         headers: {
           'Content-Type': 'application/json',
         },
