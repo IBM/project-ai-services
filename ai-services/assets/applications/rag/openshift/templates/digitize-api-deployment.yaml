@@ -41,6 +41,39 @@ spec:
                 secretKeyRef:
                   name: "postgres-credentials"
                   key: password
+          volumeMounts:
+            - mountPath: /var/cache
+              name: cache
+        {{- if eq .Values.digitize.enableMigration "true" }}
+        - name: digitize-db-migrate
+          image: "{{ .Values.digitize.image }}"
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              if [ "{{ .Values.digitize.migrationCleanup }}" = "true" ]; then
+                /var/venv/bin/python -m digitize.db.migrate_json_to_postgres --cleanup
+              else
+                /var/venv/bin/python -m digitize.db.migrate_json_to_postgres
+              fi
+          env:
+            - name: POSTGRES_HOST
+              value: "postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: "{{ .Values.digitize.database }}"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "postgres-credentials"
+                  key: password
+          volumeMounts:
+            - mountPath: /var/cache
+              name: cache
+        {{- end }}
       containers:
         - name: digitize-api
           image: "{{ .Values.digitize.image }}"
