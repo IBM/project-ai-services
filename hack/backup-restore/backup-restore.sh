@@ -1368,11 +1368,7 @@ import_digitize_podman() {
     
     rm -rf "$TEMP_DIR"
     
-<<<<<<< Updated upstream
     echo "  ✓ Restored to /var/cache: $RESTORED_FILES files ($RESTORED_SIZE)"
-=======
-    echo "  ✓ Restored to /var/cache: $RESTORED_FILES files ($RESTORED_ZE)"
->>>>>>> Stashed changes
     
     # Simple check: verify container can access the directory
     if podman exec $DIGITIZE_CONTAINER test -d /var/cache 2>/dev/null; then
@@ -1387,11 +1383,7 @@ import_digitize_podman() {
 
     echo ""
     print_success "Digitize data import completed!"
-<<<<<<< Updated upstream
     echo "📁 Restored $RESTORED_FILES files to container /var/cache"
-=======
-    echo "📁 Restored $RESTORED_FILES files to containvar/cache"
->>>>>>> Stashed changes
     echo "🔄 Refresh your browser to see restored documents"
     echo ""
     print_info "Note: Documents require BOTH digitize files AND OpenSearch metadata"
