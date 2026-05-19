@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@carbon/react";
 import { PageHeader } from "@carbon/ibm-products";
 import ServiceCard from "@/components/ServiceCard";
+import ServiceDetailPanel from "@/components/ServiceDetailPanel";
 import styles from "./Services.module.scss";
 
 const mockServices = [
@@ -35,6 +37,28 @@ const mockServices = [
 ];
 
 const Services = () => {
+  const [selectedService, setSelectedService] = useState<typeof mockServices[0] | null>(null);
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
+
+  const handleCardClick = (id: string) => {
+    const service = mockServices.find((s) => s.id === id);
+    if (service) {
+      setSelectedService(service);
+      setIsPanelOpen(true);
+    }
+  };
+
+  const handleDeploy = (id: string) => {
+    console.log("Deploy service:", id);
+    // Add your deploy logic here
+  };
+
+  const handleClosePanel = () => {
+    setIsPanelOpen(false);
+    // Optional: Clear selected service after animation completes
+    setTimeout(() => setSelectedService(null), 300);
+  };
+
   return (
     <div className={styles.servicesContainer}>
       <PageHeader
@@ -64,16 +88,25 @@ const Services = () => {
                   title={service.title}
                   description={service.description}
                   isCertified={service.isCertified}
-                  onDeploy={(id) => console.log("Deploy:", id)}
-                  onLearnMore={(id) => console.log("Learn more:", id)}
+                  onDeploy={handleDeploy}
+                  onLearnMore={handleCardClick}
                 />
               ))}
             </div>
           </TabPanel>
         </TabPanels>
       </Tabs>
+
+      <ServiceDetailPanel
+        open={isPanelOpen}
+        onClose={handleClosePanel}
+        service={selectedService}
+        onDeploy={handleDeploy}
+      />
     </div>
   );
 };
 
 export default Services;
+
+// Made with Bob

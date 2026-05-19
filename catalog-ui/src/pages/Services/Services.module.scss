@@ -57,3 +57,7 @@
   row-gap: spacing.$spacing-04;
   margin: spacing.$spacing-05 0 0 spacing.$spacing-06;
 }
+
+:global(.c4p--page-header) {
+  z-index: 5999 !important;
+}
