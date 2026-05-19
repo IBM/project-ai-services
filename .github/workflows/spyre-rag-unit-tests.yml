@@ -27,22 +27,22 @@ jobs:
           pip install -r requirements-test.txt \
           --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
           --prefer-binary
-        working-directory: services/digitize
+        working-directory: services/digitize/tests
       
       - name: Run digitize service tests
         run: |
           pytest tests/ -v
-        working-directory: services/digitize
+        working-directory: services/digitize/tests
       
       - name: Install chatbot test dependencies
         run: |
           pip install -r requirements-test.txt \
           --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
           --prefer-binary
-        working-directory: services/chatbot
+        working-directory: services/chatbot/tests
       
       - name: Run chatbot service tests
         run: |
           pytest tests/ -v
-        working-directory: services/chatbot
+        working-directory: services/chatbot/tests
 
