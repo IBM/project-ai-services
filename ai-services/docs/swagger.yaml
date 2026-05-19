@@ -1,5 +1,68 @@
 basePath: /api/v1
 definitions:
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component:
+    properties:
+      component_type:
+        type: string
+      instance_id:
+        type: string
+      params:
+        additionalProperties: true
+        type: object
+      provider_id:
+        type: string
+      type:
+        type: string
+    required:
+    - component_type
+    - provider_id
+    - type
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest:
+    properties:
+      architecture:
+        type: string
+      name:
+        maxLength: 100
+        minLength: 3
+        type: string
+      services:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service'
+        type: array
+    required:
+    - architecture
+    - name
+    - services
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationResponse:
+    properties:
+      id:
+        type: string
+      message:
+        type: string
+      status:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component'
+        type: array
+      enabled:
+        type: boolean
+      service_id:
+        type: string
+      type:
+        type: string
+      version:
+        type: string
+    required:
+    - components
+    - service_id
+    - type
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application:
     properties:
       created_at:
@@ -304,15 +367,42 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a new application instance from a template
+      description: Creates a new application (architecture or service) with optional
+        custom parameters
+      parameters:
+      - description: Application creation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest'
       produces:
       - application/json
       responses:
-        "200":
-          description: Application created
+        "202":
+          description: Application creation initiated
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationResponse'
+        "400":
+          description: Invalid request body or validation errors
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "409":
+          description: Application name already exists
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "422":
+          description: Parameter validation failed or invalid template
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Create new application
