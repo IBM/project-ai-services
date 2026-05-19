@@ -75,28 +75,10 @@ const ServiceDetailPanel = ({
       placement="right"
       size="lg"
       className={styles.sidePanel}
-      actionToolbarButtons={
-        service.assets?.sourceCodeUrl
-          ? [
-              <Button
-                key="view-source"
-                kind="ghost"
-                renderIcon={Launch}
-                onClick={() =>
-                  window.open(service.assets?.sourceCodeUrl, "_blank")
-                }
-              >
-                View source code
-              </Button>,
-            ]
-          : undefined
-      }
     >
       <div className={styles.content}>
-        {/* Description */}
         <p className={styles.description}>{service.description}</p>
 
-        {/* Tags */}
         <div className={styles.tagContainer}>
           {service.tags?.map((tag, index) => (
             <div key={index} className={styles.tag}>
@@ -113,7 +95,6 @@ const ServiceDetailPanel = ({
 
         <div className={styles.divider} />
 
-        {/* Demos and prototypes */}
         {service.demos && (
           <>
             <section className={styles.section}>
@@ -195,7 +176,6 @@ const ServiceDetailPanel = ({
           </>
         )}
 
-        {/* Inputs and outputs */}
         {(service.inputs || service.outputs) && (
           <>
             <section className={styles.section}>
@@ -229,7 +209,6 @@ const ServiceDetailPanel = ({
           </>
         )}
 
-        {/* Dependencies and integration */}
         {service.dependencies && service.dependencies.length > 0 && (
           <>
             <section className={styles.section}>
@@ -249,7 +228,6 @@ const ServiceDetailPanel = ({
           </>
         )}
 
-        {/* Content and format support */}
         {service.contentSupport && (
           <>
             <section className={styles.section}>
@@ -305,7 +283,6 @@ const ServiceDetailPanel = ({
           </>
         )}
 
-        {/* Expected resource consumption */}
         {service.resourceConsumption && (
           <>
             <section className={styles.section}>
@@ -351,7 +328,6 @@ const ServiceDetailPanel = ({
           </>
         )}
 
-        {/* Service level agreements */}
         {service.sla && (
           <>
             <section className={styles.section}>
