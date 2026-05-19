@@ -67,7 +67,7 @@ type Template interface {
 	LoadMdFiles(app string) (map[string]*template.Template, error)
 	// LoadVarsFile loads the var template file
 	LoadVarsFile(app string, params map[string]string) (*Vars, error)
-	// LoadVarsFile loads the Chart
+	// LoadChart loads the Chart
 	LoadChart(app string) (chart.Charter, error)
 	// LoadYamls loads the yaml in assests dir
 	LoadYamls(folder string) ([][]byte, error)
