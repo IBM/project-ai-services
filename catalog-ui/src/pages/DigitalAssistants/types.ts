@@ -1,13 +1,13 @@
 import type { DataTableHeader } from "@carbon/react";
 
-export interface AiDeploymentRow {
+export interface DigitalAssistantRow {
   id: string;
   name: string;
   status: "Deploying..." | "Deleting..." | "Error" | "Stopped" | "Running";
   uptime: string;
-  type: string;
   messages: string;
   actions: string;
+  children?: DigitalAssistantRow[];
 }
 
 export type ExportStatus = "idle" | "exporting" | "success" | "error";
@@ -18,7 +18,7 @@ export interface AppState {
   pageSize: number;
   isDeleteDialogOpen: boolean;
   isConfirmed: boolean;
-  rowsData: AiDeploymentRow[];
+  rowsData: DigitalAssistantRow[];
   selectedRowId: string | null;
   toastOpen: boolean;
   deleteErrorMessage: string;
@@ -30,12 +30,6 @@ export interface AppState {
   exportErrorMessage: string;
   hasError: boolean;
   visibleColumns: Record<string, boolean>;
-  filters: {
-    types: string[];
-  };
-  pendingFilters: {
-    types: string[];
-  };
 }
 
 export const ACTION_TYPES = {
@@ -58,9 +52,6 @@ export const ACTION_TYPES = {
   SET_SELECTED_ROW_ID: "SET_SELECTED_ROW_ID",
   TOGGLE_COLUMN_VISIBILITY: "TOGGLE_COLUMN_VISIBILITY",
   RESET_COLUMN_VISIBILITY: "RESET_COLUMN_VISIBILITY",
-  TOGGLE_PENDING_TYPE_FILTER: "TOGGLE_PENDING_TYPE_FILTER",
-  APPLY_FILTERS: "APPLY_FILTERS",
-  RESET_FILTERS: "RESET_FILTERS",
 } as const;
 
 export type AppAction =
@@ -85,20 +76,13 @@ export type AppAction =
   | { type: typeof ACTION_TYPES.CLEAR_EXPORT_ERROR }
   | { type: typeof ACTION_TYPES.SET_SELECTED_ROW_ID; payload: string | null }
   | { type: typeof ACTION_TYPES.TOGGLE_COLUMN_VISIBILITY; payload: string }
-  | { type: typeof ACTION_TYPES.RESET_COLUMN_VISIBILITY }
-  | {
-      type: typeof ACTION_TYPES.TOGGLE_PENDING_TYPE_FILTER;
-      payload: { value: string };
-    }
-  | { type: typeof ACTION_TYPES.APPLY_FILTERS }
-  | { type: typeof ACTION_TYPES.RESET_FILTERS };
+  | { type: typeof ACTION_TYPES.RESET_COLUMN_VISIBILITY };
 
 // Table headers
 export const HEADERS: DataTableHeader[] = [
-  { header: "Deployment name", key: "name" },
+  { header: "Assistant name", key: "name" },
   { header: "Status", key: "status" },
   { header: "Uptime", key: "uptime" },
-  { header: "Type", key: "type" },
   { header: "Messages", key: "messages" },
   { header: "", key: "actions" },
 ];
@@ -113,94 +97,95 @@ export const STATUS_SORT_ORDER: Record<string, number> = {
 };
 
 // Mock data
-export const MOCK_ROWS: AiDeploymentRow[] = [
+export const MOCK_ROWS: DigitalAssistantRow[] = [
   {
     id: "1",
     name: "Incident troubleshooting",
-    status: "Deploying...",
+    status: "Error",
     uptime: "Mar 4, 2026",
-    type: "Digital assistant",
-    messages: "Error message goes here...",
+    messages: "Error message goes ...",
     actions: "actions",
+    children: [],
   },
   {
     id: "2",
     name: "Process FAQs",
-    status: "Deleting...",
+    status: "Running",
     uptime: "2 days",
-    type: "Deep process",
-    messages: "Deploying [service]...",
+    messages: "",
     actions: "actions",
+    children: [],
   },
   {
     id: "3",
-    name: "Permission requests",
-    status: "Error",
+    name: "Permissions ops",
+    status: "Running",
     uptime: "Mar 4, 2026",
-    type: "Digital assistant",
     messages: "",
     actions: "actions",
+    children: [
+      {
+        id: "3-1",
+        name: "Digitize documents (service)",
+        status: "Running",
+        uptime: "",
+        messages: "",
+        actions: "actions",
+      },
+      {
+        id: "3-2",
+        name: "Find similar item (service)",
+        status: "Running",
+        uptime: "",
+        messages: "",
+        actions: "actions",
+      },
+      {
+        id: "3-3",
+        name: "Question and answer (se...)",
+        status: "Running",
+        uptime: "",
+        messages: "",
+        actions: "actions",
+      },
+      {
+        id: "3-4",
+        name: "Summarize (service)",
+        status: "Running",
+        uptime: "",
+        messages: "",
+        actions: "actions",
+      },
+    ],
   },
   {
     id: "4",
-    name: "Contract analysis agent",
+    name: "Deals tracker",
     status: "Running",
-    uptime: "Mar 4, 2026",
-    type: "Summary",
+    uptime: "2 days",
     messages: "",
     actions: "actions",
+    children: [],
   },
   {
     id: "5",
-    name: "Case routing",
+    name: "Contract analysis agent",
     status: "Running",
-    uptime: "12 hours",
-    type: "Translation",
-    messages: "Ingest data",
+    uptime: "2 days",
+    messages: "",
     actions: "actions",
+    children: [],
   },
   {
     id: "6",
-    name: "Deals tracker",
-    status: "Stopped",
-    uptime: "12 hours",
-    type: "Digital assistant",
-    messages: "",
-    actions: "actions",
-  },
-  {
-    id: "7",
-    name: "Privacy, redaction, audit",
+    name: "Case routing",
     status: "Running",
-    uptime: "Jan 2, 2026",
-    type: "Question and an...",
+    uptime: "2 days",
     messages: "",
     actions: "actions",
-  },
-  {
-    id: "8",
-    name: "IT support triage",
-    status: "Running",
-    uptime: "25 minutes",
-    type: "Digital assistant",
-    messages: "",
-    actions: "actions",
-  },
-  {
-    id: "9",
-    name: "Sales deck generator",
-    status: "Running",
-    uptime: "Nov 9, 2025",
-    type: "Digital assistant",
-    messages: "",
-    actions: "actions",
+    children: [],
   },
 ];
-
-// Helper function to get unique types from data
-export const getUniqueTypes = (rows: AiDeploymentRow[]): string[] => {
-  return Array.from(new Set(rows.map((row) => row.type))).sort();
-};
 
 // Initial state
 export const INITIAL_STATE: AppState = {
@@ -226,14 +211,7 @@ export const INITIAL_STATE: AppState = {
     name: true,
     status: true,
     uptime: true,
-    type: true,
     messages: true,
-  },
-  filters: {
-    types: [],
-  },
-  pendingFilters: {
-    types: [],
   },
 };
 
@@ -332,38 +310,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           name: true,
           status: true,
           uptime: true,
-          type: true,
           messages: true,
-        },
-      };
-    case ACTION_TYPES.TOGGLE_PENDING_TYPE_FILTER: {
-      const { value } = action.payload;
-      const currentFilters = state.pendingFilters.types;
-      const newFilters = currentFilters.includes(value)
-        ? currentFilters.filter((v) => v !== value)
-        : [...currentFilters, value];
-      return {
-        ...state,
-        pendingFilters: {
-          types: newFilters,
-        },
-      };
-    }
-    case ACTION_TYPES.APPLY_FILTERS:
-      return {
-        ...state,
-        filters: {
-          types: state.pendingFilters.types,
-        },
-      };
-    case ACTION_TYPES.RESET_FILTERS:
-      return {
-        ...state,
-        filters: {
-          types: [],
-        },
-        pendingFilters: {
-          types: [],
         },
       };
     default:

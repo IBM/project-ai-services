@@ -15,7 +15,7 @@ import {
 import type { Dispatch } from "react";
 import type { AppAction } from "./types";
 import { ACTION_TYPES } from "./types";
-import styles from "./AiDeployments.module.scss";
+import styles from "./DigitalAssistants.module.scss";
 
 // Status configuration
 const STATUS_CONFIG = {

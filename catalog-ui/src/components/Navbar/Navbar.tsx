@@ -39,8 +39,8 @@ const Navbar = (props: NavbarProps) => {
         ref={navRef}
       >
         <SideNavItems>
-          <SideNavMenuItem as={NavLink} to="/ai-deployments">
-            AI deployments
+          <SideNavMenuItem as={NavLink} to="/digital-assistants">
+            Digital assistants
           </SideNavMenuItem>
 
           <SideNavMenuItem as={NavLink} to="/architectures">
