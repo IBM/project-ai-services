@@ -12,19 +12,19 @@ lang_de = "DE"
 def get_prompt_for_language(lang: str) -> str:
     """
     Get the appropriate prompt template based on language code.
-    This is extensible to more languages easily.
+    Used for non-English languages only (English uses conversational mode).
 
     Args:
-        lang: Language code (EN, DE, etc.)
+        lang: Language code (DE, etc.)
 
     Returns:
         The appropriate prompt template for the language
     """
     prompt_map = {
         lang_de: settings.chatbot.query_vllm_stream_de_prompt,
-        lang_en: settings.chatbot.query_vllm_stream_prompt
     }
-    return prompt_map.get(lang, settings.chatbot.query_vllm_stream_prompt)
+    # Default to legacy English Prompt if language not found in map
+    return prompt_map.get(lang, settings.chatbot.legacy_query_vllm_stream_en_prompt)
 
 max_tokens_map = {
                 lang_en: settings.llm.max_tokens,
