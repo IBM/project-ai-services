@@ -138,7 +138,7 @@ func (c *caddyManager) createRoute(routeConfig map[string]interface{}) error {
 // Parameters:
 //   - rt: Runtime interface for interacting with pods
 //   - appName: Name of the application (e.g., "ai-services" for catalog)
-//   - serverName: Caddy server name (e.g., "my_app_server")
+//   - serverName: Caddy server name (e.g., "ai_services")
 //   - routesAnnotation: Routes annotation value in format "port:subdomain, port:subdomain, ..."
 //
 // Returns:
@@ -157,10 +157,11 @@ func RegisterRoutesForApp(
 	appName string,
 	serverName string,
 	routesAnnotation string,
-	podName string,
+	caddyPodName string,
+	servicePodName string,
 ) error {
-	// Step 1: Get Caddy admin port from pod port mappings
-	adminPort, err := GetCaddyAdminPort(rt, appName)
+	// Step 1: Get Caddy admin port from Caddy pod port mappings
+	adminPort, err := GetCaddyAdminPort(rt, caddyPodName)
 	if err != nil {
 		return fmt.Errorf(
 			"failed to get Caddy admin port, routes not registered: %w",
@@ -186,8 +187,8 @@ func RegisterRoutesForApp(
 		return fmt.Errorf("failed to get host IP: %w", err)
 	}
 
-	// Step 5: Build routes from the annotation string
-	routes, err := BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName)
+	// Step 5: Build routes from the annotation string using service pod name for upstreams
+	routes, err := BuildRoutesFromAnnotation(routesAnnotation, hostIP, servicePodName)
 	if err != nil {
 		return fmt.Errorf("failed to build routes: %w", err)
 	}

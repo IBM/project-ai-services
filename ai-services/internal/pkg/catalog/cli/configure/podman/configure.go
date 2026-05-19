@@ -13,7 +13,7 @@ import (
 	"text/template"
 
 	"github.com/project-ai-services/ai-services/assets"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -98,7 +98,7 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 	}
 
 	// Print next steps similar to application create
-	if err := helpers.PrintNextSteps(tp, rt, constants.CatalogAppName, catalogAppTemplate); err != nil {
+	if err := helpers.PrintNextSteps(tp, rt, catalogconstants.CatalogAppName, catalogAppTemplate); err != nil {
 		// do not want to fail the overall configure if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)
 	}
@@ -112,7 +112,7 @@ func checkCatalogStatus(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 		return false, nil, err
 	}
 
-	existingResources, err := helpers.CheckExistingResourcesForApplication(rt, constants.CatalogAppName, catalogSecrets)
+	existingResources, err := helpers.CheckExistingResourcesForApplication(rt, catalogconstants.CatalogAppName, catalogSecrets)
 	if err != nil {
 		return false, nil, err
 	}
@@ -200,7 +200,7 @@ func executeLayer(rt *podman.PodmanClient, tp templates.Template, tmpls map[stri
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
-			if err := executePodTemplate(rt, tp, tmpls, t, catalogAppTemplate, constants.CatalogAppName, values, version, nil, baseDir, argParams, existingResources); err != nil {
+			if err := executePodTemplate(rt, tp, tmpls, t, catalogAppTemplate, catalogconstants.CatalogAppName, values, version, nil, baseDir, argParams, existingResources); err != nil {
 				errCh <- err
 			}
 		}(podTemplateName)
@@ -274,10 +274,27 @@ func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 
 // generateCaddyfile copies the static Caddyfile to the caddy directory.
 func generateCaddyfile(baseDir string, values map[string]any) error {
-	// Read the static Caddyfile
-	caddyfileContent, err := assets.CatalogFS.ReadFile("catalog/podman/Caddyfile")
+	// Read the Caddyfile template
+	caddyfileContent, err := assets.CatalogFS.ReadFile("catalog/podman/Caddyfile.tmpl")
 	if err != nil {
-		return fmt.Errorf("failed to read Caddyfile: %w", err)
+		return fmt.Errorf("failed to read Caddyfile template: %w", err)
+	}
+
+	// Parse the Caddyfile as a template
+	tmpl, err := template.New("Caddyfile.tmpl").Parse(string(caddyfileContent))
+	if err != nil {
+		return fmt.Errorf("failed to parse Caddyfile template: %w", err)
+	}
+
+	// Prepare template data with the server name constant
+	templateData := map[string]interface{}{
+		"CaddyServerName": constants.CaddyServerName,
+	}
+
+	// Execute the template
+	var rendered bytes.Buffer
+	if err := tmpl.Execute(&rendered, templateData); err != nil {
+		return fmt.Errorf("failed to execute Caddyfile template: %w", err)
 	}
 
 	// Ensure directory exists and write Caddyfile
@@ -287,11 +304,11 @@ func generateCaddyfile(baseDir string, values map[string]any) error {
 	}
 
 	caddyfilePath := filepath.Join(caddyDir, "Caddyfile")
-	if err := os.WriteFile(caddyfilePath, caddyfileContent, filePerm); err != nil {
+	if err := os.WriteFile(caddyfilePath, rendered.Bytes(), filePerm); err != nil {
 		return fmt.Errorf("failed to write Caddyfile: %w", err)
 	}
 
-	logger.Infof("Copied Caddyfile to: %s\n", caddyfilePath)
+	logger.Infof("Generated Caddyfile to: %s\n", caddyfilePath)
 
 	return nil
 }
@@ -300,7 +317,7 @@ func collectSecretNames(tp templates.Template, tmpls map[string]*template.Templa
 	secretNames := make([]string, 0)
 
 	for podTemplateName := range tmpls {
-		podSpec, err := tp.LoadPodTemplateWithValues(catalogAppTemplate, podTemplateName, constants.CatalogAppName, nil, argParams)
+		podSpec, err := tp.LoadPodTemplateWithValues(catalogAppTemplate, podTemplateName, catalogconstants.CatalogAppName, nil, argParams)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load pod template %s: %w", podTemplateName, err)
 		}
@@ -313,55 +330,108 @@ func collectSecretNames(tp templates.Template, tmpls map[string]*template.Templa
 	return secretNames, nil
 }
 
-// extractRoutesFromTemplate extracts the ai-services.io/routes annotation from the catalog template.
-func extractRoutesFromTemplate(tp templates.Template, appTemplateName string, argParams map[string]string) (string, error) {
-	// Load the catalog pod template to extract routes annotation
-	podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, "catalog.yaml.tmpl", catalogAppName, nil, argParams)
+// TemplateRouteInfo holds route information extracted from a template.
+type TemplateRouteInfo struct {
+	PodName          string
+	RoutesAnnotation string
+}
+
+// extractAllRoutesFromTemplates extracts routes annotations from all templates that have them.
+// Returns a slice of TemplateRouteInfo containing pod name and routes for each template.
+func extractAllRoutesFromTemplates(tp templates.Template, appTemplateName string, argParams map[string]string) ([]TemplateRouteInfo, error) {
+	// Load all templates
+	tmpls, err := tp.LoadAllTemplates(appTemplateName)
 	if err != nil {
-		return "", fmt.Errorf("failed to load catalog template: %w", err)
+		return nil, fmt.Errorf("failed to load templates: %w", err)
 	}
 
-	// Extract routes annotation
-	if podSpec.Annotations != nil {
-		if routes, ok := podSpec.Annotations[constants.PodRoutesAnnotationKey]; ok {
-			return routes, nil
+	var routeInfos []TemplateRouteInfo
+
+	// Loop through all templates to find those with routes annotation
+	for templateName := range tmpls {
+		podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, templateName, catalogconstants.CatalogAppName, nil, argParams)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load template %s: %w", templateName, err)
+		}
+
+		// Check if this template has the routes annotation
+		if podSpec.Annotations != nil {
+			if routes, ok := podSpec.Annotations[constants.PodRoutesAnnotationKey]; ok {
+				routeInfos = append(routeInfos, TemplateRouteInfo{
+					PodName:          podSpec.Name,
+					RoutesAnnotation: routes,
+				})
+			}
 		}
 	}
 
-	return "", nil
+	return routeInfos, nil
 }
 
-// extractPodNameFromTemplate extracts the pod name from the catalog template.
-func extractPodNameFromTemplate(tp templates.Template, appTemplateName string, argParams map[string]string) (string, error) {
-	// Load the catalog pod template to extract pod name
-	podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, "catalog.yaml.tmpl", catalogAppName, nil, argParams)
+// findCaddyPodNameFromTemplates finds the Caddy pod name by looking for the pod with component=proxy label in templates.
+func findCaddyPodNameFromTemplates(tp templates.Template, appTemplateName string, argParams map[string]string) (string, error) {
+	// Load all templates
+	tmpls, err := tp.LoadAllTemplates(appTemplateName)
 	if err != nil {
-		return "", fmt.Errorf("failed to load catalog template: %w", err)
+		return "", fmt.Errorf("failed to load templates: %w", err)
 	}
 
-	return podSpec.Name, nil
+	// Loop through all templates to find the Caddy pod
+	for templateName := range tmpls {
+		podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, templateName, catalogconstants.CatalogAppName, nil, argParams)
+		if err != nil {
+			return "", fmt.Errorf("failed to load template %s: %w", templateName, err)
+		}
+
+		// Check if this is the Caddy pod (component=proxy label)
+		if podSpec.Labels != nil {
+			if component, ok := podSpec.Labels["ai-services.io/component"]; ok && component == "proxy" {
+				return podSpec.Name, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no Caddy pod found with component=proxy label in templates")
 }
 
-// registerCatalogRoutes extracts routes from template and registers them with Caddy.
+// registerCatalogRoutes extracts routes from all templates and registers them with Caddy.
 func registerCatalogRoutes(rt *podman.PodmanClient, tp templates.Template, appTemplateName string, argParams map[string]string) error {
-	// Extract routes annotation from catalog template
-	routesAnnotation, err := extractRoutesFromTemplate(tp, appTemplateName, argParams)
+	// Extract routes from all templates
+	routeInfos, err := extractAllRoutesFromTemplates(tp, appTemplateName, argParams)
 	if err != nil {
-		return fmt.Errorf("failed to extract routes from template: %w", err)
+		return fmt.Errorf("failed to extract routes from templates: %w", err)
 	}
 
-	// Get pod name from template
-	podName, err := extractPodNameFromTemplate(tp, appTemplateName, argParams)
-	if err != nil {
-		return fmt.Errorf("failed to extract pod name from template: %w", err)
+	if len(routeInfos) == 0 {
+		logger.Infof("No templates found with routes annotation, skipping route registration\n")
+
+		return nil
 	}
 
-	// Register routes with Caddy if both values are available
-	if routesAnnotation != "" && podName != "" {
-		if err := proxy.RegisterRoutesForApp(rt, catalogAppName, "my_app_server", routesAnnotation, podName); err != nil {
-			return fmt.Errorf("failed to register routes: %w", err)
+	// Find Caddy pod from templates
+	caddyPodName, err := findCaddyPodNameFromTemplates(tp, appTemplateName, argParams)
+	if err != nil {
+		return fmt.Errorf("failed to find Caddy pod: %w", err)
+	}
+
+	logger.Infof("Found Caddy pod: %s\n", caddyPodName)
+
+	// Register routes for each template that has them
+	var registrationErrors []error
+	for _, info := range routeInfos {
+		logger.Infof("Registering routes for pod: %s\n", info.PodName)
+		// Pass caddyPodName for admin port and info.PodName for upstream addresses
+		if err := proxy.RegisterRoutesForApp(rt, catalogconstants.CatalogAppName, constants.CaddyServerName, info.RoutesAnnotation, caddyPodName, info.PodName); err != nil {
+			registrationErrors = append(registrationErrors, fmt.Errorf("pod %s: %w", info.PodName, err))
 		}
 	}
+
+	// Return error if any routes failed to register
+	if len(registrationErrors) > 0 {
+		return fmt.Errorf("failed to register routes for %d pod(s): %w", len(registrationErrors), errors.Join(registrationErrors...))
+	}
+
+	logger.Infof("Successfully registered routes for %d pod(s)\n", len(routeInfos))
 
 	return nil
 }

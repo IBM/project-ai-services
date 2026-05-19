@@ -8,9 +8,8 @@ import (
 )
 
 // GetCaddyAdminPort retrieves the host port mapped to Caddy's admin API (container port 2019).
-func GetCaddyAdminPort(rt runtime.Runtime, appName string) (string, error) {
-	caddyPodName := fmt.Sprintf("%s--caddy", appName)
-	pod, err := rt.InspectPod(caddyPodName)
+func GetCaddyAdminPort(rt runtime.Runtime, podName string) (string, error) {
+	pod, err := rt.InspectPod(podName)
 	if err != nil {
 		return "", fmt.Errorf("failed to inspect Caddy pod: %w", err)
 	}
@@ -28,6 +27,30 @@ func GetCaddyAdminPort(rt runtime.Runtime, appName string) (string, error) {
 	return "", fmt.Errorf("admin port mapping not found in pod ports")
 }
 
+// DomainConfig holds configuration for domain generation.
+type DomainConfig struct {
+	HostIP       string // Used for nip.io-based domains with self-signed certificates
+	CustomDomain string // For custom domain support (future)
+	CertPath     string // For extracting domain from certificates (future)
+}
+
+// BuildRouteDomain generates a domain name for a route.
+// Currently uses nip.io for self-signed certificates.
+// Future: Support custom domains and certificate-based domain extraction.
+func BuildRouteDomain(subdomain string, config DomainConfig) string {
+	// Future: Check for custom domain or certificate-based domain
+	// if config.CustomDomain != "" {
+	//     return fmt.Sprintf("%s.%s", subdomain, config.CustomDomain)
+	// }
+	// if config.CertPath != "" {
+	//     domain := extractDomainFromCert(config.CertPath)
+	//     return fmt.Sprintf("%s.%s", subdomain, domain)
+	// }
+
+	// Current: nip.io for self-signed certificates
+	return fmt.Sprintf("%s.%s.nip.io", subdomain, config.HostIP)
+}
+
 // BuildRoutesFromAnnotation parses a routes annotation string and builds Route objects.
 // The annotation format is: "port:subdomain, port:subdomain, ...".
 // Example: "8081:catalog-ui, 8080:catalog-api".
@@ -38,6 +61,12 @@ func BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName string) ([]Rout
 
 	routes := []Route{}
 	const expectedParts = 2
+
+	// Prepare domain configuration
+	domainConfig := DomainConfig{
+		HostIP: hostIP,
+		// Future: Add CustomDomain and CertPath from flags/config
+	}
 
 	// Parse routes annotation (format: "port:subdomain, port:subdomain, ...")
 	for _, r := range strings.Split(routesAnnotation, ",") {
@@ -62,7 +91,7 @@ func BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName string) ([]Rout
 		// Build route - use pod name as upstream since containers are in the same pod
 		route := Route{
 			ID:       fmt.Sprintf("%s--%s", podName, subdomain),
-			Domain:   fmt.Sprintf("%s.%s.nip.io", subdomain, hostIP),
+			Domain:   BuildRouteDomain(subdomain, domainConfig),
 			Upstream: fmt.Sprintf("%s:%s", podName, port),
 			Terminal: true,
 		}

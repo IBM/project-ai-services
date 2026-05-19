@@ -2,7 +2,7 @@
 	admin 0.0.0.0:2019
 
 	servers :443 {
-		name my_app_server
+		name {{ .CaddyServerName }}
 	}
 }
 
