@@ -46,14 +46,14 @@ type applicationRepo struct {
 
 // scannedServiceFields holds the raw scanned fields from a service row.
 type scannedServiceFields struct {
-	id       uuid.NullUUID
-	appID    uuid.NullUUID
-	typ      sql.NullString
-	status   sql.NullString
-	endpoint []byte
-	version  sql.NullString
-	created  sql.NullTime
-	updated  sql.NullTime
+	id        uuid.UUID
+	appID     uuid.UUID
+	catalogID string
+	status    string
+	endpoint  []byte
+	version   string
+	created   sql.NullTime
+	updated   sql.NullTime
 }
 
 // NewApplicationRepository creates a new ApplicationRepository instance.
@@ -62,7 +62,7 @@ func NewApplicationRepository(pool *pgxpool.Pool) ApplicationRepository {
 }
 
 // GetAll retrieves all applications from the database with optional filters.
-// Includes associated services via INNER JOIN.
+// Includes associated services for the paginated application set.
 func (r *applicationRepo) GetAll(ctx context.Context, filters *ApplicationFilters) ([]models.Application, error) {
 	query, args := r.buildGetAllQuery(filters)
 
@@ -77,14 +77,6 @@ func (r *applicationRepo) GetAll(ctx context.Context, filters *ApplicationFilter
 
 // buildGetAllQuery constructs the SQL query and arguments for GetAll.
 func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string, []interface{}) {
-	query := `
-		SELECT
-			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at,
-			s.id, s.app_id, s.catalog_id, s.status, s.endpoints, s.version, s.created_at, s.updated_at
-		FROM applications a
-		INNER JOIN services s ON a.id = s.app_id
-	`
-
 	args := []interface{}{}
 	whereClauses := []string{}
 
@@ -101,12 +93,19 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 		}
 	}
 
+	query := `
+		WITH paged_applications AS (
+			SELECT
+				a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at
+			FROM applications a
+	`
+
 	// Add WHERE clause if any filters are present
 	if len(whereClauses) > 0 {
 		query += " WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
-	query += " ORDER BY a.created_at DESC, s.created_at ASC"
+	query += " ORDER BY a.created_at DESC"
 
 	// Add pagination if provided
 	if filters != nil {
@@ -120,13 +119,23 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 		}
 	}
 
+	query += `
+		)
+		SELECT
+			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at,
+			s.id, s.app_id, s.catalog_id, s.status, s.endpoints, s.version, s.created_at, s.updated_at
+		FROM paged_applications a
+		INNER JOIN services s ON a.id = s.app_id
+		ORDER BY a.created_at DESC, s.created_at ASC
+	`
+
 	return query, args
 }
 
 // scanApplicationsWithServices scans rows into Application structs with their services.
 func (r *applicationRepo) scanApplicationsWithServices(rows pgx.Rows) ([]models.Application, error) {
-	appMap := make(map[string]*models.Application)
-	var appOrder []string
+	appMap := make(map[uuid.UUID]*models.Application)
+	var appOrder []uuid.UUID
 
 	for rows.Next() {
 		var (
@@ -138,18 +147,18 @@ func (r *applicationRepo) scanApplicationsWithServices(rows pgx.Rows) ([]models.
 		err := rows.Scan(
 			&app.ID, &app.Name, &app.CatalogID, &app.DeploymentType, &app.Status,
 			&message, &app.CreatedBy, &app.CreatedAt, &app.UpdatedAt,
-			&svc.id, &svc.appID, &svc.typ, &svc.status,
+			&svc.id, &svc.appID, &svc.catalogID, &svc.status,
 			&svc.endpoint, &svc.version, &svc.created, &svc.updated,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan application with services: %w", err)
 		}
 
+		appID := app.ID
+
 		if message.Valid {
 			app.Message = message.String
 		}
-
-		appID := app.ID.String()
 
 		// If this is a new application, add it to the map
 		if _, exists := appMap[appID]; !exists {
@@ -162,9 +171,7 @@ func (r *applicationRepo) scanApplicationsWithServices(rows pgx.Rows) ([]models.
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert service: %w", err)
 		}
-		if service != nil {
-			appMap[appID].Services = append(appMap[appID].Services, *service)
-		}
+		appMap[appID].Services = append(appMap[appID].Services, *service)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -216,23 +223,15 @@ func (r *applicationRepo) GetCount(ctx context.Context, filters *ApplicationFilt
 }
 
 // toService converts scanned fields to a Service model.
-// Returns nil if the service ID is not valid (LEFT JOIN found no matching service).
 func (s *scannedServiceFields) toService() (*models.Service, error) {
-	if !s.id.Valid {
-		return nil, nil
-	}
-
 	service := &models.Service{
-		ID:        s.id.UUID,
-		AppID:     s.appID.UUID,
-		CatalogID: s.typ.String,
-		Status:    models.ApplicationStatus(s.status.String),
+		ID:        s.id,
+		AppID:     s.appID,
+		CatalogID: s.catalogID,
+		Status:    models.ApplicationStatus(s.status),
+		Version:   s.version,
 		CreatedAt: s.created.Time,
 		UpdatedAt: s.updated.Time,
-	}
-
-	if s.version.Valid {
-		service.Version = s.version.String
 	}
 
 	if len(s.endpoint) > 0 {
@@ -256,7 +255,7 @@ func scanApplicationWithService(rows pgx.Rows, app *models.Application) (*models
 	err := rows.Scan(
 		&app.ID, &app.Name, &app.CatalogID, &app.DeploymentType, &app.Status,
 		&message, &app.CreatedBy, &app.CreatedAt, &app.UpdatedAt,
-		&svc.id, &svc.appID, &svc.typ, &svc.status,
+		&svc.id, &svc.appID, &svc.catalogID, &svc.status,
 		&svc.endpoint, &svc.version, &svc.created, &svc.updated,
 	)
 	if err != nil {
@@ -284,9 +283,7 @@ func collectApplication(rows pgx.Rows) (*models.Application, error) {
 			return nil, err
 		}
 
-		if service != nil {
-			app.Services = append(app.Services, *service)
-		}
+		app.Services = append(app.Services, *service)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -304,10 +301,10 @@ func collectApplication(rows pgx.Rows) (*models.Application, error) {
 func (r *applicationRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Application, error) {
 	query := `
 		SELECT
-			a.id, a.name, a.template, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at,
+			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at,
 			s.id, s.app_id, s.type, s.status, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM applications a
-		LEFT JOIN services s ON a.id = s.app_id
+		INNER JOIN services s ON a.id = s.app_id
 		WHERE a.id = $1
 		ORDER BY s.created_at
 	`
@@ -325,7 +322,7 @@ func (r *applicationRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Ap
 func (r *applicationRepo) GetByName(ctx context.Context, name string) (*models.Application, error) {
 	query := `
 		SELECT
-			a.id, a.name, a.template, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at,
+			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at,
 			s.id, s.app_id, s.type, s.status, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM applications a
 		LEFT JOIN services s ON a.id = s.app_id
@@ -345,7 +342,7 @@ func (r *applicationRepo) GetByName(ctx context.Context, name string) (*models.A
 // Insert creates a new application in the database.
 func (r *applicationRepo) Insert(ctx context.Context, app *models.Application) error {
 	query := `
-		INSERT INTO applications (id, name, template, deployment_type, status, message, created_by)
+		INSERT INTO applications (id, name, catalog_id, deployment_type, status, message, created_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING created_at, updated_at
 	`
