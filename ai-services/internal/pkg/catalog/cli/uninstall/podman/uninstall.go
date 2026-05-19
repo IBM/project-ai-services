@@ -85,6 +85,7 @@ func confirmDeletion(pods []types.Pod) (bool, error) {
 // performCleanup executes all cleanup operations.
 func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool) error {
 	logger.Infoln("Proceeding with deletion...")
+	baseDir := utils.GetBaseDir()
 
 	secretsToDelete, secretsToSkip := fetchSecretsToDelete(pods)
 
@@ -94,30 +95,64 @@ func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool)
 	}
 
 	// Delete catalog secrets
-	for _, secret := range secretsToDelete {
-		if err := rt.DeleteSecret(secret); err != nil {
-			return err
-		}
+	if err := deleteSecrets(rt, secretsToDelete); err != nil {
+		return err
+	}
+
+	// Delete caddy data
+	caddyDataPath := getDataPath(baseDir, "common/caddy")
+	if err := dataDeletion(caddyDataPath); err != nil {
+		return err
 	}
 
 	// Delete database data and secrets
-	if !skipCleanup {
-		// Delete catalog secrets
-		for _, secret := range secretsToSkip {
-			if err := rt.DeleteSecret(secret); err != nil {
-				return err
-			}
-		}
-		if err := dbDataDeletion(); err != nil {
-			return err
-		}
-	} else {
-		logger.Infoln("Skipping database data cleanup (--skip-cleanup flag set)")
+	if err := cleanupDatabaseResources(rt, baseDir, secretsToSkip, skipCleanup); err != nil {
+		return err
 	}
 
 	logger.Infoln("Catalog service removed successfully")
 
 	return nil
+}
+
+// deleteSecrets removes the specified secrets.
+func deleteSecrets(rt *podman.PodmanClient, secrets []string) error {
+	for _, secret := range secrets {
+		if err := rt.DeleteSecret(secret); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// getDataPath constructs the data path based on the base directory and subdirectory.
+func getDataPath(baseDir, subDir string) string {
+	// this is because we prepend "ai-services" to custom directory and not to default directory
+	if baseDir == constants.DefaultBaseDir {
+		return filepath.Join(baseDir, subDir)
+	}
+
+	return filepath.Join(baseDir, "ai-services", subDir)
+}
+
+// cleanupDatabaseResources handles database data and secret cleanup.
+func cleanupDatabaseResources(rt *podman.PodmanClient, baseDir string, secretsToSkip []string, skipCleanup bool) error {
+	if skipCleanup {
+		logger.Infoln("Skipping database data cleanup (--skip-cleanup flag set)")
+
+		return nil
+	}
+
+	// Delete catalog secrets
+	if err := deleteSecrets(rt, secretsToSkip); err != nil {
+		return err
+	}
+
+	// Delete database data
+	dbDataPath := getDataPath(baseDir, "db")
+
+	return dataDeletion(dbDataPath)
 }
 
 // podsDeletion removes all catalog pods.
@@ -164,35 +199,23 @@ func fetchSecretsToDelete(pods []types.Pod) ([]string, []string) {
 	return secretsToDelete, secretsToSkip
 }
 
-// dbDataDeletion removes the database data directory.
-func dbDataDeletion() error {
-	// Get the currently used base directory
-	baseDir := utils.GetBaseDir()
-	var dbDataPath string
-	// this is because we prepend "ai-services" to custom directory and not to default directory
-	if baseDir == constants.DefaultBaseDir {
-		dbDataPath = filepath.Join(baseDir, "db")
-	} else {
-		dbDataPath = filepath.Join(baseDir, "ai-services/db")
-	}
-
-	// Check if database data directory exists
-	if _, err := os.Stat(dbDataPath); os.IsNotExist(err) {
-		logger.Infof("Database data directory does not exist: %s\n", dbDataPath)
+// dataDeletion removes the specified data directory.
+func dataDeletion(dataPath string) error {
+	// Check if data directory exists
+	if _, err := os.Stat(dataPath); os.IsNotExist(err) {
+		logger.Infof("data directory does not exist: %s\n", dataPath)
 
 		return nil
 	}
 
-	logger.Infof("\nDatabase data found at: %s\n", dbDataPath, logger.VerbosityLevelDebug)
+	logger.Infof("Deleting data at: %s\n", dataPath)
 
-	logger.Infof("Deleting database data at: %s\n", dbDataPath)
-
-	// Remove the database data directory
-	if err := os.RemoveAll(dbDataPath); err != nil {
+	// Remove the data directory
+	if err := os.RemoveAll(dataPath); err != nil {
 		return fmt.Errorf("failed to remove database data directory: %w", err)
 	}
 
-	logger.Infof("Successfully removed database data at: %s\n", dbDataPath)
+	logger.Infof("Successfully removed data at: %s\n", dataPath)
 
 	return nil
 }
