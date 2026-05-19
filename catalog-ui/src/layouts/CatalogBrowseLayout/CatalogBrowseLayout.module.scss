@@ -1,6 +1,11 @@
 @use "@carbon/react/scss/spacing";
 @use "@carbon/react/scss/type";
 
+// Ensure PageHeader stays below SidePanel overlay (overlay is z-index: 6000)
+:global(.c4p--page-header) {
+  z-index: 5999 !important;
+}
+
 .pageContent {
   padding: 0 spacing.$spacing-05 spacing.$spacing-07;
   margin-top: spacing.$spacing-07;

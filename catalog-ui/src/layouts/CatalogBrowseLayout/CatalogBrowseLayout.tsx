@@ -14,6 +14,7 @@ export interface CatalogBrowseLayoutProps {
   filterAccordions: ReactNode;
   results: ReactNode;
   emptyMessage: string;
+  showLearnMore?: boolean;
 }
 
 const CatalogBrowseLayout = ({
@@ -26,6 +27,7 @@ const CatalogBrowseLayout = ({
   filterAccordions,
   results,
   emptyMessage,
+  showLearnMore = true,
 }: CatalogBrowseLayoutProps) => {
   const hasResults = Boolean(results);
 
@@ -34,20 +36,24 @@ const CatalogBrowseLayout = ({
       <PageHeader
         title={{ text: title }}
         subtitle={subtitle}
-        pageActions={[
-          {
-            key: "learn-more",
-            kind: "tertiary",
-            label: "Learn more",
-            renderIcon: ArrowRight,
-            onClick: () => {
-              window.open(
-                "https://www.ibm.com/docs/en/aiservices?topic=services-introduction",
-                "_blank",
-              );
-            },
-          },
-        ]}
+        pageActions={
+          showLearnMore
+            ? [
+                {
+                  key: "learn-more",
+                  kind: "tertiary",
+                  label: "Learn more",
+                  renderIcon: ArrowRight,
+                  onClick: () => {
+                    window.open(
+                      "https://www.ibm.com/docs/en/aiservices?topic=services-introduction",
+                      "_blank",
+                    );
+                  },
+                },
+              ]
+            : []
+        }
         pageActionsOverflowLabel="More actions"
         fullWidthGrid="xl"
       />

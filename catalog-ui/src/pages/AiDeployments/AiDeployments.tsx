@@ -211,7 +211,7 @@ const AiDeploymentsPage = () => {
         />
       )}
       <PageHeader
-        title={{ text: "AI Deployments" }}
+        title={{ text: "AI deployments" }}
         pageActions={[
           {
             key: "learn-more",

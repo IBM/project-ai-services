@@ -3,48 +3,19 @@ import { AccordionItem, Checkbox } from "@carbon/react";
 import CatalogBrowseLayout from "@/layouts/CatalogBrowseLayout";
 import ArchitectureCard from "@/components/ArchitectureCard";
 
-// Mock data for demonstration
+// Mock data
 const mockArchitectures = [
   {
     id: "1",
     title: "Digital assistant",
     description:
-      "Enable digital assistants using Retrieval-Augmented Generation (RAG) to query a message, including custom documents and data.",
+      "Enable digital assistants using Retrieval-Augmented Generation (RAG), including AI services that query a managed knowledge base to answer questions from custom documents and data.",
     tags: ["Digitize documents", "Find similar items", "Question and answer"],
-    isCertified: true,
-  },
-  {
-    id: "2",
-    title: "Summarization",
-    description:
-      "Consolidates (a longer) input text into a brief statement or account of the main points.",
-    tags: ["Digitize documents", "Extract and tag info"],
-    isCertified: true,
-  },
-  {
-    id: "3",
-    title: "Sample Architecture",
-    description: "Description of the architecture goes here.",
-    tags: ["Question and answer", "Find similar items"],
-    isCertified: false,
-  },
-  {
-    id: "4",
-    title: "Document Processing",
-    description: "Advanced document processing with AI capabilities.",
-    tags: ["Extract and tag info", "Digitize documents"],
-    isCertified: true,
-  },
-  {
-    id: "5",
-    title: "Third-party Certified Solution",
-    description: "A certified solution from a third-party provider.",
-    tags: ["Question and answer", "Digitize documents"],
     isCertified: true,
   },
 ];
 
-const CatalogDemo = () => {
+const Architectures = () => {
   const [searchValue, setSearchValue] = useState("");
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
@@ -70,36 +41,38 @@ const CatalogDemo = () => {
   const totalSelectedFilters =
     selectedProviders.length + selectedServices.length;
 
-  // Calculate dynamic counts
-  const ibmCertifiedCount = mockArchitectures.filter(
-    (arch) => arch.isCertified,
-  ).length;
-  const nonCertifiedCount = mockArchitectures.filter(
-    (arch) => !arch.isCertified,
-  ).length;
+  // Calculate dynamic counts based on mock data
+  const providerCounts = useMemo(() => {
+    return {
+      ibmCertified: mockArchitectures.filter((arch) => arch.isCertified).length,
+      nonCertified: mockArchitectures.filter((arch) => !arch.isCertified)
+        .length,
+    };
+  }, []);
 
   const serviceCounts = useMemo(() => {
-    const counts: Record<string, number> = {
-      digitize: 0,
-      extract: 0,
-      similar: 0,
-      qa: 0,
-    };
+    const counts: Record<string, number> = {};
 
     mockArchitectures.forEach((arch) => {
       arch.tags.forEach((tag) => {
-        const lowerTag = tag.toLowerCase();
-        if (lowerTag.includes("digitize")) counts.digitize++;
-        if (lowerTag.includes("extract")) counts.extract++;
-        if (lowerTag.includes("similar")) counts.similar++;
-        if (lowerTag.includes("question")) counts.qa++;
+        const key = tag.toLowerCase().replace(/\s+/g, "-");
+        counts[key] = (counts[key] || 0) + 1;
       });
     });
 
     return counts;
   }, []);
 
-  // Filter architectures based on selected filters only (not search)
+  // Get unique service tags dynamically
+  const uniqueServices = useMemo(() => {
+    const services = new Set<string>();
+    mockArchitectures.forEach((arch) => {
+      arch.tags.forEach((tag) => services.add(tag));
+    });
+    return Array.from(services).sort();
+  }, []);
+
+  // Filter architectures based on selected filters and search
   const filteredArchitectures = useMemo(() => {
     return mockArchitectures.filter((arch) => {
       const matchesProvider =
@@ -109,64 +82,50 @@ const CatalogDemo = () => {
 
       const matchesService =
         selectedServices.length === 0 ||
+        arch.tags.some((tag) => {
+          const normalizedTag = tag.toLowerCase().replace(/\s+/g, "-");
+          return selectedServices.includes(normalizedTag);
+        });
+
+      // Search in card content (title, description, tags)
+      const matchesSearch =
+        !searchValue ||
+        arch.title.toLowerCase().includes(searchValue.toLowerCase()) ||
+        arch.description.toLowerCase().includes(searchValue.toLowerCase()) ||
         arch.tags.some((tag) =>
-          selectedServices.some((service) =>
-            tag.toLowerCase().includes(service.toLowerCase()),
-          ),
+          tag.toLowerCase().includes(searchValue.toLowerCase()),
         );
 
-      return matchesProvider && matchesService;
+      return matchesProvider && matchesService && matchesSearch;
     });
-  }, [selectedProviders, selectedServices]);
+  }, [selectedProviders, selectedServices, searchValue]);
 
-  // Filter options based on search
+  // Filter options
   const providerOptions = useMemo(() => {
-    const options = [
+    return [
       {
         label: "IBM certified",
         value: "ibm-certified",
-        count: ibmCertifiedCount,
+        count: providerCounts.ibmCertified,
       },
       {
         label: "Non-certified",
         value: "non-certified",
-        count: nonCertifiedCount,
+        count: providerCounts.nonCertified,
       },
     ];
-
-    if (!searchValue) return options;
-
-    return options.filter((opt) =>
-      opt.label.toLowerCase().includes(searchValue.toLowerCase()),
-    );
-  }, [searchValue, ibmCertifiedCount, nonCertifiedCount]);
+  }, [providerCounts]);
 
   const serviceOptions = useMemo(() => {
-    const options = [
-      {
-        label: "Digitize documents",
-        value: "digitize",
-        count: serviceCounts.digitize,
-      },
-      {
-        label: "Extract and tag info",
-        value: "extract",
-        count: serviceCounts.extract,
-      },
-      {
-        label: "Find similar items",
-        value: "similar",
-        count: serviceCounts.similar,
-      },
-      { label: "Question and answer", value: "qa", count: serviceCounts.qa },
-    ];
-
-    if (!searchValue) return options;
-
-    return options.filter((opt) =>
-      opt.label.toLowerCase().includes(searchValue.toLowerCase()),
-    );
-  }, [searchValue, serviceCounts]);
+    return uniqueServices.map((service) => {
+      const key = service.toLowerCase().replace(/\s+/g, "-");
+      return {
+        label: service,
+        value: key,
+        count: serviceCounts[key] || 0,
+      };
+    });
+  }, [uniqueServices, serviceCounts]);
 
   const filterAccordions = (
     <>
@@ -224,8 +183,8 @@ const CatalogDemo = () => {
 
   return (
     <CatalogBrowseLayout
-      title="Catalog Demo"
-      subtitle="Production-ready AI solutions - Demo page showing CatalogBrowseLayout in action"
+      title="Architectures"
+      subtitle="Production-ready AI solutions that combine multiple services into complete, integrated systems for complex use cases."
       searchValue={searchValue}
       onSearchChange={setSearchValue}
       totalSelectedFilters={totalSelectedFilters}
@@ -237,4 +196,4 @@ const CatalogDemo = () => {
   );
 };
 
-export default CatalogDemo;
+export default Architectures;
