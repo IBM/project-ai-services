@@ -1,0 +1,14 @@
+FROM services-common:latest
+
+WORKDIR /opt/services/summarize
+
+ENV PYTHONPATH=/opt/services
+
+COPY requirements.txt .
+RUN source /var/venv/bin/activate && pip install -r requirements.txt && pip cache purge
+
+COPY . .
+
+CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", \
+     "--host", "0.0.0.0", "--port", "6000", \
+     "--loop", "uvloop", "--http", "httptools"]

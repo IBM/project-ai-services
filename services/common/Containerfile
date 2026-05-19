@@ -1,0 +1,8 @@
+FROM python-base:latest
+
+WORKDIR /opt/services
+
+# Copy common library to /opt/services/common/
+# Services extending this image set PYTHONPATH=/opt/services
+# so that "from common.X import" resolves correctly
+COPY . common/
