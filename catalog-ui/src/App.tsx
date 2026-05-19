@@ -7,6 +7,7 @@ import Login from "./pages/Login";
 import Logout from "./pages/Logout";
 import ApplicationsListPage from "./pages/AiDeployments";
 import CatalogDemo from "./pages/CatalogDemo";
+import Services from "./pages/Services";
 import { ProtectedRoute } from "@/components";
 
 function App() {
@@ -23,6 +24,7 @@ function App() {
               element={<ApplicationsListPage />}
             />
             <Route path={ROUTES.CATALOG_DEMO} element={<CatalogDemo />} />
+            <Route path={ROUTES.SERVICES} element={<Services />} />
           </Route>
         </Route>
 

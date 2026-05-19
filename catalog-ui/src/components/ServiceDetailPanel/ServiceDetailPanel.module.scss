@@ -1,0 +1,230 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/type";
+
+.sidePanel {
+  :global(.c4p--side-panel__body) {
+    padding: spacing.$spacing-07 spacing.$spacing-06;
+  }
+  :global(.c4p--side-panel__action-toolbar) {
+    height: 0;
+  }
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+}
+
+.description {
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.43;
+  color: var(--cds-text-primary);
+  margin: 0 0 spacing.$spacing-06 0;
+}
+
+.tagContainer {
+  display: flex;
+  align-items: center;
+  gap: spacing.$spacing-04;
+  margin-bottom: spacing.$spacing-01;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--cds-text-primary);
+  border-radius: 16px;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.33;
+  color: var(--cds-text-primary);
+  background-color: transparent;
+  padding: 0 spacing.$spacing-02;
+}
+
+.certifiedTag {
+  display: inline-flex;
+  align-items: center;
+  gap: spacing.$spacing-02;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.33;
+  color: var(--cds-text-primary);
+}
+
+.checkIcon {
+  color: var(--cds-support-success);
+  flex-shrink: 0;
+}
+
+.divider {
+  border: 1px solid var(--cds-border-subtle-01);
+  margin: spacing.$spacing-06 0;
+}
+
+.section {
+  margin-bottom: spacing.$spacing-02;
+}
+
+.sectionTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.375;
+  color: var(--cds-text-primary);
+  margin: 0 0 spacing.$spacing-05 0;
+}
+
+.demoGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: spacing.$spacing-05 spacing.$spacing-06;
+  margin-bottom: spacing.$spacing-05;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.demoItem {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-02;
+}
+
+.fieldLabel {
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.33;
+  color: var(--cds-text-secondary);
+}
+
+.fieldValue {
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.29;
+  color: var(--cds-text-primary);
+}
+
+.fieldmodel {
+  font-size: 0.7rem;
+}
+
+.twoColumns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: spacing.$spacing-06;
+}
+
+.threeColumns {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: spacing.$spacing-05;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+}
+
+.columnLabel {
+  @include type.type-style("label-01");
+  color: var(--cds-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.33;
+  margin-bottom: spacing.$spacing-03;
+}
+
+.subLabel {
+  @include type.type-style("label-01");
+  color: var(--cds-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.33;
+  margin-top: spacing.$spacing-04;
+  margin-bottom: spacing.$spacing-02;
+}
+.bulletList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    @include type.type-style("body-compact-01");
+    color: var(--cds-text-primary);
+    font-size: 0.875rem;
+    line-height: 1.43;
+    padding-left: spacing.$spacing-04;
+    position: relative;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+
+    &::before {
+      content: "–";
+      position: absolute;
+      left: 0;
+      color: var(--cds-text-primary);
+    }
+  }
+}
+
+.dashList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    @include type.type-style("body-compact-01");
+    color: var(--cds-text-primary);
+    font-size: 0.875rem;
+    line-height: 1.29;
+    margin-bottom: spacing.$spacing-02;
+    position: relative;
+    padding-left: spacing.$spacing-04;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+
+    &::before {
+      content: "–";
+      position: absolute;
+      left: 0;
+      color: var(--cds-text-primary);
+    }
+  }
+}
+.assetsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: spacing.$spacing-06;
+  margin-bottom: spacing.$spacing-05;
+}
+
+.assetField {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-02;
+}
+
+.assetTag {
+  display: inline-flex;
+  align-items: center;
+  padding: spacing.$spacing-02 spacing.$spacing-03;
+  background-color: var(--cds-border-subtle-01);
+
+  border-radius: 15px;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.33;
+  color: var(--cds-text-primary);
+  width: fit-content;
+}
+
+.sourceButton {
+  align-self: flex-start;
+  margin-top: spacing.$spacing-02;
+}
