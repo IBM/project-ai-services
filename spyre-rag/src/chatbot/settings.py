@@ -10,6 +10,9 @@ from common.settings import Settings as CommonSettings
 
 logger = get_logger("settings")
 
+# Flag to enable/disable LLM-based validation
+LLM_VALIDATION_ENABLED = True
+
 
 class QueryRephrasingConfig(BaseSettings):
     """Query rephrasing configuration for conversational RAG."""
@@ -161,19 +164,7 @@ class RAGConfig(BaseSettings):
             "Provide clear, accurate, and contextually relevant responses. "
             "Reference previous exchanges when appropriate to maintain conversation flow."
         ),
-        description="Initial system prompt for conversational behavior",
-    )
-
-    conversational_rag_query_system_message: str = Field(
-        default=(
-            "Retrieved Context:\n{context}\n\n"
-            "Rephrased Query: {rephrased_query}\n\n"
-            "Instructions: Answer the user's question based on the retrieved context above. "
-            "Consider the conversation history to provide contextually relevant responses. "
-            "Be conversational and reference previous exchanges when relevant. "
-            "If the context doesn't contain enough information, acknowledge this clearly."
-        ),
-        description="RAG system prompt template with context and rephrased query",
+        description="Initial system prompt for conversational behavior (can be overridden via CONVERSATIONAL_RAG_INITIAL_SYSTEM_MESSAGE env var)",
     )
 
     history_token_budget: int = Field(
@@ -255,7 +246,78 @@ class RAGConfig(BaseSettings):
             logger.warning(f"Setting prompt_template_token_count to default '250' as it is missing in the settings")
             return 250
         return v
-
+    
+    @field_validator('conversational_rag_initial_system_message')
+    @classmethod
+    def validate_conversational_rag_initial_system_message(cls, v):
+        """Validate conversational_rag_initial_system_message with warning fallback and LLM validation."""
+        default_prompt = (
+            "You are a helpful, conversational AI assistant. "
+            "Engage naturally with users across multiple turns of conversation. "
+            "Provide clear, accurate, and contextually relevant responses. "
+            "Reference previous exchanges when appropriate to maintain conversation flow."
+        )
+        
+        if not v or not isinstance(v, str):
+            logger.warning(
+                "Invalid conversational_rag_initial_system_message provided. "
+                "Falling back to default system prompt."
+            )
+            return default_prompt
+        
+        # Basic validation: check if prompt is not empty and has reasonable length
+        v_stripped = v.strip()
+        if len(v_stripped) == 0:
+            logger.warning(
+                "Empty conversational_rag_initial_system_message provided. "
+                "Falling back to default system prompt."
+            )
+            return default_prompt
+        
+        if len(v_stripped) < 10:
+            logger.warning(
+                f"conversational_rag_initial_system_message too short ({len(v_stripped)} chars). "
+                "Falling back to default system prompt."
+            )
+            return default_prompt
+        
+        if len(v_stripped) > 5000:
+            logger.warning(
+                f"conversational_rag_initial_system_message too long ({len(v_stripped)} chars). "
+                "Truncating to 5000 characters."
+            )
+            v_stripped = v_stripped[:5000]
+        
+        # LLM-based validation (if enabled)
+        if LLM_VALIDATION_ENABLED:
+            try:
+                from chatbot.prompt_validator import validate_prompt_with_llm
+                
+                validation_result = validate_prompt_with_llm(
+                    v_stripped,
+                    prompt_type="initial_system",
+                    enable_semantic_check=True,
+                    enable_injection_check=True
+                )
+                
+                if not validation_result.is_valid():
+                    logger.warning(
+                        f"LLM validation failed for conversational_rag_initial_system_message: "
+                        f"{validation_result.reason} (confidence: {validation_result.confidence:.2f}). "
+                        f"Falling back to default system prompt."
+                    )
+                    return default_prompt
+                
+                logger.info(
+                    f"LLM validation passed for conversational_rag_initial_system_message: "
+                    f"{validation_result.reason}"
+                )
+            except Exception as e:
+                logger.warning(f"Error during LLM validation: {e}. Proceeding with basic validation only.")
+        
+        logger.info("Using custom conversational_rag_initial_system_message from environment")
+        return v_stripped
+    
 
 class Settings(BaseSettings):
     common: CommonSettings = Field(default_factory=CommonSettings)

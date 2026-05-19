@@ -88,6 +88,7 @@ async def lifespan(app):
     initialize_models()
     setup_language_detector([Language.ENGLISH, Language.GERMAN])
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
+    
     yield
     stderr_monitor.stop()
 
