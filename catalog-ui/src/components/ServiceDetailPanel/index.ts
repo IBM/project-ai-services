@@ -1,4 +1,2 @@
 export { default } from "./ServiceDetailPanel";
-export type { ServiceDetailPanelProps } from "./ServiceDetailPanel";
-
-// Made with Bob
+export type { ServiceDetailPanelProps, ServiceDetailData } from "./ServiceDetailPanel";
