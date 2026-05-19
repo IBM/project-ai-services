@@ -21,7 +21,8 @@ import digitize.types as types
 from digitize.digitize import digitize
 from digitize.cleanup import reset_db
 from digitize.ingest import ingest
-from digitize.status import StatusManager
+from digitize.db.db_status_manager import get_status_manager
+from digitize.db.database import check_db_connection, close_db_connections
 
 # Semaphores for concurrency limiting
 digitization_semaphore = asyncio.BoundedSemaphore(settings.digitize.digitization_concurrency_limit)
@@ -39,9 +40,32 @@ async def lifespan(app: FastAPI):
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     logger.info("Application starting up...")
 
+    # Check database connection and initialize schema (required for operation)
+    try:
+        if check_db_connection():
+            logger.info("✅ Database connection established")
+            
+            # Initialize database schema (create tables if they don't exist)
+            try:
+                from digitize.db.models import Base
+                from digitize.db.database import engine
+                Base.metadata.create_all(bind=engine)
+                logger.info("✅ Database schema initialized")
+            except Exception as schema_error:
+                logger.error(f"❌ Failed to initialize database schema: {schema_error}")
+                raise RuntimeError(f"Database schema initialization failed: {schema_error}")
+        else:
+            logger.error("❌ Database connection failed - service requires database to operate")
+            raise RuntimeError("Database connection required but not available. Please check database configuration.")
+    except RuntimeError:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Database check failed: {e}")
+        raise RuntimeError(f"Database connection required but failed: {e}")
+
     # Scan for orphan jobs and mark them as failed
     try:
-        orphan_count = dg_util.scan_and_recover_orphan_jobs(settings.digitize.jobs_dir)
+        orphan_count = dg_util.scan_and_recover_orphan_jobs()
         if orphan_count > 0:
             logger.info(f"Found {orphan_count} orphan job(s) from previous app server run")
     except Exception as e:
@@ -51,6 +75,14 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Application shutting down...")
+    
+    # Close database connections
+    try:
+        close_db_connections()
+        logger.info("Database connections closed")
+    except Exception as e:
+        logger.error(f"Error closing database connections: {e}", exc_info=True)
+    
     stderr_monitor.stop()
 
 
@@ -120,7 +152,7 @@ async def health_check():
     return {"status": "ok"}
 
 async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: types.OutputFormat):
-    status_mgr = StatusManager(job_id)
+    status_mgr = get_status_manager(job_id)
     job_staging_path = settings.digitize.staging_dir / f"{job_id}"
 
     try:
@@ -140,7 +172,7 @@ async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: type
         logger.debug(f"Semaphore slot released from digitization job {job_id}")
 
 async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict):
-    status_mgr = StatusManager(job_id)
+    status_mgr = get_status_manager(job_id)
     job_staging_path = settings.digitize.staging_dir / f"{job_id}"
 
     try:
@@ -291,34 +323,21 @@ async def get_all_jobs(
 ):
     """Retrieve information about all submitted jobs with pagination and filtering."""
     try:
-        # Read all job status files
-        all_jobs = dg_util.read_all_job_files()
-
-        # Apply filters in single pass
-        filtered_jobs = [
-            j for j in all_jobs
-            if (status is None or j.status == status) and
-               (operation is None or j.operation == operation.value)
-        ]
-
-        # sorting by submitted_at
-        filtered_jobs = sorted(
-            filtered_jobs,
-            key=lambda j: j.submitted_at,
-            reverse=True
+        # Use database function
+        from digitize.db.db_utils import get_all_jobs_from_db
+        
+        # Get jobs from database
+        jobs_data, total = get_all_jobs_from_db(
+            status=status,
+            operation=operation.value if operation else None,
+            limit=limit if not latest else 1,
+            offset=offset if not latest else 0
         )
 
-        # Handle latest flag before pagination
-        if latest and filtered_jobs:
-            filtered_jobs = [filtered_jobs[0]]
-
-        total = len(filtered_jobs)
-
-        # Apply pagination
-        paginated_jobs = filtered_jobs[offset : offset + limit]
-
-        # Convert to response format
-        jobs_data = [job.to_dict() for job in paginated_jobs]
+        # Handle latest flag (already handled in query if latest=True)
+        if latest and jobs_data:
+            jobs_data = [jobs_data[0]]
+            total = 1
 
         return types.JobsListResponse(
             pagination=types.PaginationInfo(total=total, limit=limit, offset=offset),
@@ -343,21 +362,16 @@ async def get_all_jobs(
 async def get_job_by_id(job_id: str):
     """Retrieve detailed status of a specific job by its ID."""
     try:
-        job_status_file = settings.digitize.jobs_dir / f"{job_id}_status.json"
-
-        if not job_status_file.exists():
+        # Use database function
+        from digitize.db.db_utils import get_job_from_db
+        
+        job_data = get_job_from_db(job_id)
+        
+        if job_data is None:
             APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"No job found with id '{job_id}'")
-
-        if not job_status_file.is_file():
-            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Job status path for '{job_id}' is not a valid file")
-
-        job_state = dg_util.read_job_file(job_status_file)
-        if job_state is None:
-            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to read job status for '{job_id}'")
             return  # This line should never be reached, but helps type checker
 
-        # Convert JobState object to JSON-compatible dictionary
-        return job_state.to_dict()
+        return job_data
     except HTTPException as e:
         logger.error(f"HTTP error retrieving job {job_id}: "
         f"status={e.status_code}, detail={e.detail}")
@@ -378,26 +392,26 @@ async def get_job_by_id(job_id: str):
     response_description="No content on successful deletion"
 )
 async def delete_job(job_id: str):
-    """Deletes a job status file. Does not touch associated document metadata."""
+    """Deletes a job record from database. Does not touch associated document metadata."""
     try:
-        job_status_file = settings.digitize.jobs_dir / f"{job_id}_status.json"
-
-        if not job_status_file.exists():
+        # Use database function to get job
+        from digitize.db.db_utils import get_job_from_db
+        from digitize.db.repository import db_repo
+        
+        job_data = get_job_from_db(job_id)
+        
+        if job_data is None:
             APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"No job found with id '{job_id}'")
 
         # Reject deletion if the job is still active
-        job_state = dg_util.read_job_file(job_status_file)
-        if job_state is None:
-            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to read job status for '{job_id}'")
-            return  # This line should never be reached, but helps type checker
-
-        # Compare with JobStatus enum
-        if job_state.status in (types.JobStatus.ACCEPTED, types.JobStatus.IN_PROGRESS):
+        job_status = job_data.get("status", "")
+        if job_status in (types.JobStatus.ACCEPTED.value, types.JobStatus.IN_PROGRESS.value):
             APIError.raise_error(ErrorCode.RESOURCE_LOCKED, f"Job '{job_id}' is still active and cannot be deleted")
 
-        # Delete the job status file (missing_ok=True handles race conditions)
-        job_status_file.unlink(missing_ok=True)
-        logger.info(f"Deleted job status file for job '{job_id}'")
+        # Delete the job from database (CASCADE will delete associated documents)
+        db_repo.delete_job(job_id)
+        logger.info(f"Deleted job '{job_id}' from database")
+        
         return
     except HTTPException as e:
         logger.error(f"HTTP error deleting job {job_id}: "
@@ -448,22 +462,26 @@ async def list_documents(
                 f"Invalid status '{status}'. Must be one of: {', '.join(sorted(valid_statuses))}"
             )
 
-        all_documents = dg_util.get_all_documents(status_filter=status, name_filter=name)
+        # Use database function
+        from digitize.db.db_utils import get_all_documents_from_db
+        
+        documents_data, total = get_all_documents_from_db(
+            status=status,
+            name=name,
+            limit=limit,
+            offset=offset
+        )
 
-        # Calculate pagination
-        total = len(all_documents)
-        start_idx = offset
-        end_idx = offset + limit
+        logger.debug(f"Returning {len(documents_data)} documents out of {total} total (offset={offset}, limit={limit})")
 
-        # Apply pagination
-        paginated_documents = all_documents[start_idx:end_idx]
-
-        logger.debug(f"Returning {len(paginated_documents)} documents out of {total} total (offset={offset}, limit={limit})")
+        # Convert to DocumentListItem if needed
+        from digitize.types import DocumentListItem
+        doc_items = [DocumentListItem(**doc) for doc in documents_data]
 
         # Return properly typed response
         return types.DocumentsListResponse(
             pagination=types.PaginationInfo(total=total, limit=limit, offset=offset),
-            data=paginated_documents
+            data=doc_items
         )
 
     except HTTPException as e:
@@ -498,13 +516,23 @@ async def get_document_metadata(doc_id: str, details: bool = Query(False, descri
     - Document metadata with optional detailed information
     """
     try:
-        response = dg_util.get_document_by_id(doc_id, include_details=details)
+        # Use database function
+        from digitize.db.db_utils import get_document_from_db
+        
+        doc_data = get_document_from_db(doc_id)
+        
+        if doc_data is None:
+            APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"Document with ID '{doc_id}' not found")
+            return  # This line should never be reached, but helps type checker
+        
+        # Remove metadata if details not requested
+        if not details:
+            doc_data.pop('metadata', None)
+        
+        # Convert to DocumentDetailResponse
+        from digitize.types import DocumentDetailResponse
+        response = DocumentDetailResponse(**doc_data)
         return response
-    except FileNotFoundError as e:
-        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(e))
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse metadata file for document {doc_id}: {e}")
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to read document metadata")
     except HTTPException as e:
         logger.error(f"Failed to get document by id {doc_id}, HTTP error: {e}")
         # Re-raise HTTPException as-is
@@ -633,7 +661,21 @@ async def delete_document(doc_id: str):
                 logger.error(f"VDB cleaned but file deletion failed for {doc_id}")
                 APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Search data removed but files remain: {e}")
 
-        # 5. Idempotent Success
+        # 5. Step C: Database Cleanup
+        # Delete the document record from the database
+        try:
+            from digitize.db.repository import db_repo
+            success = db_repo.delete_document(doc_id)
+            if success:
+                logger.info(f"Database record for {doc_id} deleted successfully.")
+            else:
+                logger.warning(f"Database record for {doc_id} not found (may have been deleted already).")
+        except Exception as e:
+            logger.error(f"Failed to delete database record for {doc_id}: {e}")
+            # If VDB and files are cleaned but DB fails, report error so user can retry
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Search data and files removed but database cleanup failed: {e}")
+
+        # 6. Idempotent Success
         # If we reach here, either everything is deleted, or metadata was already deleted and VDB is now clean.
         return None
 

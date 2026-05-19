@@ -14,11 +14,7 @@ from digitize.types import (
     DocumentContentResponse
 )
 from digitize.settings import settings
-from digitize.status import (
-    get_utc_timestamp,
-    create_document_metadata,
-    create_job_state
-)
+from digitize.status import get_utc_timestamp
 from digitize.job import JobState
 from digitize.document import DocumentMetadata
 from digitize.types import JobStatus
@@ -38,41 +34,34 @@ def generate_uuid():
     return str(generated_uuid)
 
 
-def get_all_document_ids(docs_dir: Path = settings.digitize.docs_dir) -> list[str]:
+def get_all_document_ids() -> list[str]:
     """
-    Read all document IDs from metadata files in the docs directory.
-
-    Args:
-        docs_dir: Directory containing document metadata files
+    Read all document IDs from the database.
 
     Returns:
-        List of document IDs found in metadata files
+        List of document IDs found in database
     """
-    doc_ids = []
+    from digitize.db.database import engine
+    from digitize.db.repository import db_repo
+    
+    if engine is None:
+        raise RuntimeError("Database not available. Cannot retrieve document IDs without database connection.")
+    
     try:
-        logger.debug(f"Reading document IDs from {docs_dir}")
-        if docs_dir.exists():
-            for metadata_file in docs_dir.glob("*_metadata.json"):
-                try:
-                    with open(metadata_file, 'r') as f:
-                        metadata = json.load(f)
-                        doc_id = metadata.get('id')
-                        if doc_id:
-                            doc_ids.append(doc_id)
-                except Exception as e:
-                    logger.warning(f"Failed to read metadata from {metadata_file.name}: {e}")
-            logger.info(f"Found {len(doc_ids)} document IDs in {docs_dir}")
-        else:
-            logger.warning(f"Directory {docs_dir} does not exist")
+        logger.debug("Reading document IDs from database")
+        documents, _ = db_repo.get_all_documents(limit=10000, offset=0)
+        doc_ids = [doc.doc_id for doc in documents]
+        logger.info(f"Found {len(doc_ids)} document IDs in database")
+        return doc_ids
     except Exception as e:
-        logger.error(f"Failed to read document IDs from {docs_dir}: {e}")
-
-    return doc_ids
+        logger.error(f"Failed to read document IDs from database: {e}", exc_info=True)
+        raise
 
 
 def initialize_job_state(job_id: str, operation: str, output_format:OutputFormat, documents_info: list[str], job_name: Optional[str] = None) -> dict[str, str]:
     """
     Creates the job status file and individual document metadata files.
+    Also persists to database if available.
 
     Args:
         job_id: Unique identifier for the job
@@ -84,19 +73,16 @@ def initialize_job_state(job_id: str, operation: str, output_format:OutputFormat
     Returns:
         dict[str, str]: Mapping of filename -> document_id
     """
-    submitted_at = get_utc_timestamp()
+    # Use database-aware initialization
+    from digitize.db.db_utils import initialize_job_state_with_db
     
-    # Generate document IDs upfront using dictionary comprehension
-    doc_id_dict = {doc: generate_uuid() for doc in documents_info}
-
-    # Create and persist document metadata files
-    for doc in documents_info:
-        doc_id = doc_id_dict[doc]
-        logger.debug(f"Generated document id {doc_id} for the file: {doc}")
-        create_document_metadata(doc, doc_id, job_id, output_format, operation, submitted_at, settings.digitize.docs_dir)
-
-    # Create and persist the job state file
-    create_job_state(job_id, operation, submitted_at, doc_id_dict, documents_info, settings.digitize.jobs_dir, job_name)
+    return initialize_job_state_with_db(
+        job_id=job_id,
+        operation=operation,
+        output_format=output_format,
+        documents_info=documents_info,
+        job_name=job_name
+    )
 
     return doc_id_dict
 
@@ -138,207 +124,138 @@ async def stage_upload_files(job_id: str, files: List[str], staging_dir: str, fi
             logger.error(f"Unexpected error while staging {filename} for job {job_id}: {e}")
             raise
 
-def read_job_file(file_path: Path) -> Optional[JobState]:
+def read_job_from_db(job_id: str) -> Optional[JobState]:
     """
-    Read and parse a single job status JSON file into a JobState object.
-    
-    Uses Pydantic for automatic validation and deserialization with built-in
-    error handling and type coercion.
+    Read and parse a single job from the database into a JobState object.
 
     Args:
-        file_path: Path to the job status JSON file.
+        job_id: Unique identifier for the job.
 
     Returns:
         JobState object if successful, None otherwise.
     """
-    # Validate file exists and is readable
-    if not file_path.exists():
-        logger.error(f"Job file does not exist: {file_path}")
-        return None
-    
-    if not file_path.is_file():
-        logger.error(f"Path is not a file: {file_path}")
-        return None
+    from digitize.db.db_utils import get_job_from_db
     
     try:
-        # Read and parse JSON
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        
-        # Pydantic handles all validation, type conversion, and required field checks
-        return JobState(**data)
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON in job file {file_path.name}: {e}")
-        return None
-    except (IOError, OSError, PermissionError) as e:
-        logger.error(f"Failed to read job file {file_path.name}: {e}")
+        job_data = get_job_from_db(job_id)
+        if job_data:
+            return JobState(**job_data)
         return None
     except Exception as e:
-        logger.error(
-            f"Failed to parse job file {file_path.name}: {e}",
-            exc_info=True
-        )
+        logger.error(f"Failed to read job {job_id} from database: {e}", exc_info=True)
         return None
 
-def read_all_job_files() -> List[JobState]:
+def read_all_jobs_from_db() -> List[JobState]:
     """
-    Read all job status JSON files from the jobs directory.
-
-    Args:
-        jobs_dir: Path to the directory containing job status files.
+    Read all jobs from the database.
 
     Returns:
-        List of JobState objects. Files that fail to parse are skipped.
+        List of JobState objects.
     """
-
-    if not settings.digitize.jobs_dir.exists() or not settings.digitize.jobs_dir.is_dir():
+    from digitize.db.db_utils import get_all_jobs_from_db
+    
+    try:
+        jobs_data, _ = get_all_jobs_from_db(limit=10000, offset=0)
+        return [JobState(**job) for job in jobs_data]
+    except Exception as e:
+        logger.error(f"Failed to read jobs from database: {e}", exc_info=True)
         return []
 
-    jobs = []
-    for file_path in settings.digitize.jobs_dir.glob("*_status.json"):
-        if not file_path.is_file():
-            continue
-        job_state = read_job_file(file_path)
-        if job_state is not None:
-            jobs.append(job_state)
 
-    return jobs
-
-
-def _read_document_metadata(doc_id: str, docs_dir: Path = settings.digitize.docs_dir) -> DocumentMetadata:
+def _read_document_metadata_from_db(doc_id: str) -> DocumentMetadata:
     """
-    Internal helper to read and parse document metadata file into a Pydantic model.
+    Internal helper to read and parse document metadata from database into a Pydantic model.
 
     Args:
         doc_id: Unique identifier of the document
-        docs_dir: Directory containing document metadata files
 
     Returns:
         DocumentMetadata model with validated data
 
     Raises:
-        FileNotFoundError: If document metadata file doesn't exist
-        json.JSONDecodeError: If metadata file is corrupted
-        ValidationError: If metadata doesn't match expected schema
+        FileNotFoundError: If document doesn't exist in database
+        RuntimeError: If database is not available
     """
-
-    # Construct the metadata file path
-    meta_file = docs_dir / f"{doc_id}_metadata.json"
-
-    # Check if the document exists
-    if not meta_file.exists():
-        logger.error(f"Document metadata file not found: {meta_file}")
-        raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
-
-    # Read and parse the metadata file using Pydantic
+    from digitize.db.db_utils import get_document_from_db
+    
     try:
-        with open(meta_file, "r", encoding="utf-8") as f:
-            doc_data = json.load(f)
-
+        doc_data = get_document_from_db(doc_id)
+        if doc_data is None:
+            raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
+        
         # Parse and validate using Pydantic model
         return DocumentMetadata(**doc_data)
-
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse metadata file for document {doc_id}: {e}")
+    except FileNotFoundError:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to read document {doc_id} from database: {e}", exc_info=True)
         raise
 
 
 def get_all_documents(
     status_filter: Optional[str] = None,
-    name_filter: Optional[str] = None,
-    docs_dir: Path = settings.digitize.docs_dir
+    name_filter: Optional[str] = None
 ) -> List[DocumentListItem]:
     """
-    Read all document metadata files, apply filters, and sort by submitted time.
+    Read all document metadata from database, apply filters, and sort by submitted time.
     Returns minimal document information (id, name, type, status) as Pydantic models.
 
     Args:
         status_filter: Optional status to filter by (case-insensitive)
         name_filter: Optional name to filter by (case-insensitive partial match)
-        docs_dir: Directory containing document metadata files
 
     Returns:
         List of DocumentListItem models sorted by submitted_at (most recent first)
     """
+    from digitize.db.db_utils import get_all_documents_from_db
+    
     logger.debug(f"Fetching documents with filters: status={status_filter}, name={name_filter}")
 
-    if not docs_dir.exists():
-        logger.error(f"Documents directory {docs_dir} does not exist")
+    try:
+        documents_data, _ = get_all_documents_from_db(
+            status=status_filter,
+            name=name_filter,
+            limit=10000,
+            offset=0
+        )
+        
+        result = [DocumentListItem(**doc) for doc in documents_data]
+        logger.debug(f"Returning {len(result)} documents after filtering")
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get documents from database: {e}", exc_info=True)
         return []
 
-    all_documents = []
-    metadata_files = list(docs_dir.glob("*_metadata.json"))
 
-    logger.debug(f"Found {len(metadata_files)} metadata files")
-
-    for meta_file in metadata_files:
-        # Extract document ID from filename (format: {doc_id}_metadata.json)
-        doc_id = meta_file.stem.replace("_metadata", "")
-
-        try:
-            doc_metadata = _read_document_metadata(doc_id, docs_dir)
-
-            # Apply status filter
-            if status_filter:
-                doc_status = doc_metadata.status.value if hasattr(doc_metadata.status, 'value') else str(doc_metadata.status)
-                if doc_status.lower() != status_filter.lower():
-                    continue
-
-            # Apply name filter (case-insensitive partial match)
-            if name_filter:
-                if name_filter.lower() not in doc_metadata.name.lower():
-                    continue
-
-            doc_item = DocumentListItem(**doc_metadata.model_dump())
-
-            # Store submitted_at for sorting
-            all_documents.append((doc_metadata.submitted_at or "", doc_item))
-
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            logger.error(f"Failed to read metadata file {meta_file}: {e}")
-            continue
-        except Exception as e:
-            logger.error(f"Error reading metadata file {meta_file}: {e}")
-            continue
-
-    # Sort by submitted_at (most recent first) and extract DocumentListItem
-    all_documents.sort(key=lambda x: x[0], reverse=True)
-    result = [doc_item for _, doc_item in all_documents]
-
-    logger.debug(f"Returning {len(result)} documents after filtering")
-    return result
-
-
-def get_document_by_id(doc_id: str, include_details: bool = False, docs_dir: Path = settings.digitize.docs_dir) -> DocumentDetailResponse:
+def get_document_by_id(doc_id: str, include_details: bool = False) -> DocumentDetailResponse:
     """
-    Read a specific document's metadata by ID and return formatted response as Pydantic model.
+    Read a specific document's metadata by ID from database and return formatted response as Pydantic model.
 
     Args:
         doc_id: Unique identifier of the document
         include_details: If True, includes metadata fields
-        docs_dir: Directory containing document metadata files
 
     Returns:
         DocumentDetailResponse model with document information
 
     Raises:
-        FileNotFoundError: If document metadata file doesn't exist
-        json.JSONDecodeError: If metadata file is corrupted
-        ValidationError: If metadata doesn't match expected schema
+        FileNotFoundError: If document doesn't exist in database
+        RuntimeError: If database is not available
     """
+    from digitize.db.db_utils import get_document_from_db
+    
     logger.debug(f"Fetching document {doc_id} with include_details={include_details}")
 
-    doc_metadata = _read_document_metadata(doc_id, docs_dir)
-
-    doc_dict = doc_metadata.model_dump()
+    doc_data = get_document_from_db(doc_id)
+    if doc_data is None:
+        raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
 
     # Conditionally exclude metadata if not requested
     if not include_details:
-        doc_dict.pop('metadata', None)
+        doc_data.pop('metadata', None)
 
     # Let Pydantic validate and convert the data
-    response = DocumentDetailResponse(**doc_dict)
+    response = DocumentDetailResponse(**doc_data)
 
     logger.debug(f"Successfully retrieved document for {doc_id}")
     return response
@@ -367,7 +284,7 @@ def get_document_content(doc_id: str, docs_dir: Path = settings.digitize.docs_di
 
 
     # Read document metadata using the common helper (returns DocumentMetadata)
-    doc_metadata = _read_document_metadata(doc_id, docs_dir)
+    doc_metadata = _read_document_metadata_from_db(doc_id)
 
     # Get the output format from metadata
     output_format = doc_metadata.output_format.value if hasattr(doc_metadata.output_format, 'value') else str(doc_metadata.output_format)
@@ -406,21 +323,21 @@ def get_document_content(doc_id: str, docs_dir: Path = settings.digitize.docs_di
         output_format=output_format
     )
 
-def is_document_in_active_job(doc_id: str, job_id: Optional[str], jobs_dir: Path = settings.digitize.jobs_dir) -> bool:
+def is_document_in_active_job(doc_id: str, job_id: Optional[str]) -> bool:
     """
     Check if a document is part of any active job (in_progress status).
     
-    This function efficiently checks by directly accessing the job file
-    at /var/cache/jobs/{job_id}_status.json instead of iterating through all jobs.
+    This function checks the database for job status.
     
     Args:
         doc_id: Unique identifier of the document
         job_id: Job ID from document metadata (can be None if document has no associated job)
-        jobs_dir: Directory containing job status files
         
     Returns:
         True if document is in an active job, False otherwise
     """
+    from digitize.db.db_utils import get_job_from_db
+    
     logger.debug(f"Checking if document {doc_id} is part of an active job")
     
     # If document has no job_id, it's not part of any job
@@ -430,20 +347,12 @@ def is_document_in_active_job(doc_id: str, job_id: Optional[str], jobs_dir: Path
     
     logger.debug(f"Document {doc_id} is associated with job {job_id}")
     
-    # Check if the job file exists
-    if not jobs_dir.exists():
-        logger.debug(f"Jobs directory {jobs_dir} does not exist")
-        return False
-    
-    job_file = jobs_dir / f"{job_id}_status.json"
-    if not job_file.exists():
-        logger.debug(f"Job file {job_file} does not exist")
-        return False
-    
-    # Read the job status and check if it's in progress
+    # Read the job status from database and check if it's in progress
     try:
-        with open(job_file, "r") as f:
-            job_data = json.load(f)
+        job_data = get_job_from_db(job_id)
+        if job_data is None:
+            logger.debug(f"Job {job_id} not found in database")
+            return False
         
         job_status = job_data.get("status", "").lower()
         if job_status == JobStatus.IN_PROGRESS.value:
@@ -453,8 +362,8 @@ def is_document_in_active_job(doc_id: str, job_id: Optional[str], jobs_dir: Path
             logger.debug(f"Job {job_id} exists but is not in progress (status: {job_status})")
             return False
             
-    except (json.JSONDecodeError, Exception) as e:
-        logger.error(f"Error reading job file {job_file}: {e}")
+    except Exception as e:
+        logger.error(f"Error reading job {job_id} from database: {e}", exc_info=True)
         return False
 
 
@@ -524,56 +433,50 @@ def delete_document_files(doc_id: str, output_format: str, docs_dir: Path = sett
     logger.info(f"✅ Deleted {len(files_deleted)} files for document {doc_id}")
 
 
-def has_active_jobs(operation: Optional[str] = None, jobs_dir: Path = settings.digitize.jobs_dir) -> tuple[bool, list[str]]:
+def has_active_jobs(operation: Optional[str] = None) -> tuple[bool, list[str]]:
     """
-    Check if there are any active jobs (accepted or in_progress status).
+    Check if there are any active jobs (accepted or in_progress status) in the database.
     Optionally filter by operation type.
 
     Args:
         operation: Optional operation type to filter by (e.g., 'ingestion', 'digitization')
-        jobs_dir: Directory containing job status files
 
     Returns:
         Tuple of (has_active, active_job_ids) where has_active is True if any active jobs exist
     """
+    from digitize.db.db_utils import get_all_jobs_from_db
+    
     filter_msg = f" for operation '{operation}'" if operation else ""
     logger.debug(f"Checking for active jobs{filter_msg}")
 
-    if not jobs_dir.exists():
-        logger.debug(f"Jobs directory {jobs_dir} does not exist")
+    try:
+        # Get jobs with ACCEPTED or IN_PROGRESS status
+        active_job_ids = []
+        
+        for status in [JobStatus.ACCEPTED, JobStatus.IN_PROGRESS]:
+            jobs_data, _ = get_all_jobs_from_db(
+                status=status,
+                operation=operation,
+                limit=10000,
+                offset=0
+            )
+            
+            for job_data in jobs_data:
+                job_id = job_data.get("job_id")
+                if job_id:
+                    active_job_ids.append(job_id)
+                    logger.debug(f"Found active job: {job_id} with status {status.value}")
+
+        has_active = len(active_job_ids) > 0
+        if has_active:
+            logger.info(f"Found {len(active_job_ids)} active job(s){filter_msg}: {active_job_ids}")
+        else:
+            logger.debug(f"No active jobs found{filter_msg}")
+
+        return has_active, active_job_ids
+    except Exception as e:
+        logger.error(f"Error checking for active jobs: {e}", exc_info=True)
         return False, []
-
-    active_job_ids = []
-    job_files = list(jobs_dir.glob("*_status.json"))
-
-    for job_file in job_files:
-        try:
-            with open(job_file, "r") as f:
-                job_data = json.load(f)
-
-            # Filter by operation if specified
-            if operation:
-                job_operation = job_data.get("operation", "").lower()
-                if job_operation != operation.lower():
-                    continue
-
-            job_status = job_data.get("status", "").lower()
-            if job_status in [JobStatus.ACCEPTED.value, JobStatus.IN_PROGRESS.value]:
-                job_id = job_data.get("job_id", job_file.stem.replace("_status", ""))
-                active_job_ids.append(job_id)
-                logger.debug(f"Found active job: {job_id} with status {job_status}")
-
-        except (json.JSONDecodeError, Exception) as e:
-            logger.error(f"Error reading job file {job_file}: {e}")
-            continue
-
-    has_active = len(active_job_ids) > 0
-    if has_active:
-        logger.info(f"Found {len(active_job_ids)} active job(s){filter_msg}: {active_job_ids}")
-    else:
-        logger.debug(f"No active jobs found{filter_msg}")
-
-    return has_active, active_job_ids
 
 def cleanup_digitized_files() -> dict:
     """
@@ -681,7 +584,7 @@ def bulk_delete_all_documents(docs_dir: Path = settings.digitize.docs_dir) -> di
     return deletion_stats
 
 
-def scan_and_recover_orphan_jobs(jobs_dir: Path = settings.digitize.jobs_dir) -> int:
+def scan_and_recover_orphan_jobs() -> int:
     """
     Boot-up scan to identify and mark orphan jobs as failed.
 
@@ -690,44 +593,44 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = settings.digitize.jobs_dir) ->
     while processing it.
 
     This method:
-    1. Updates document metadata files first using update_doc_metadata
+    1. Queries database for active jobs
     2. Updates documents in in-progress states to failed
-    3. Updates job status using update_job_progress
-
-    Args:
-        jobs_dir: Directory containing job status JSON files
+    3. Updates job status using database status manager
 
     Returns:
         Number of orphan jobs recovered
     """
-    from digitize.status import StatusManager
+    from digitize.db.db_status_manager import get_status_manager
     from digitize.types import JobStatus, DocStatus
     from digitize.doc_utils import clean_intermediate_files
+    from digitize.db.db_utils import get_all_jobs_from_db
     import digitize.settings as config
 
-    if not jobs_dir.exists():
-        logger.warning(f"Jobs directory does not exist: {jobs_dir}")
-        return 0
-
     orphan_count = 0
-    orphan_statuses = {JobStatus.ACCEPTED.value, JobStatus.IN_PROGRESS.value}
+    orphan_statuses = [JobStatus.ACCEPTED, JobStatus.IN_PROGRESS]
 
     try:
-        # Scan all job statuses(*_status.json) files in the jobs directory
-        for job_file in jobs_dir.glob("*_status.json"):
-            try:
-                with open(job_file, "r") as f:
-                    job_data = json.load(f)
-
-                current_status = job_data.get("status")
-
-                # Check if this is an orphan job
-                if current_status in orphan_statuses:
-                    job_id = job_data.get("job_id", job_file.stem.replace("_status", ""))
+        # Scan all jobs with active statuses from database
+        for status in orphan_statuses:
+            jobs_data, _ = get_all_jobs_from_db(
+                status=status,
+                limit=10000,
+                offset=0
+            )
+            
+            for job_data in jobs_data:
+                job_id = job_data.get("job_id")
+                if not job_id:
+                    logger.warning("Skipping job with missing job_id")
+                    continue
+                    
+                try:
+                    current_status = job_data.get("status")
+                    
                     logger.warning(f"Found orphan job: {job_id} with status '{current_status}'")
 
-                    # Create StatusManager instance for this job
-                    status_mgr = StatusManager(job_id)
+                    # Get database-aware status manager
+                    status_mgr = get_status_manager(job_id)
 
                     # Build error message with cleanup instructions
                     error_message = "System restarted during processing"
@@ -757,7 +660,7 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = settings.digitize.jobs_dir) ->
                                 if doc_id:
                                     doc_ids.append(doc_id)
                                     
-                                    # Update individual document metadata file using update_doc_metadata
+                                    # Update individual document metadata using database-aware manager
                                     status_mgr.update_doc_metadata(
                                         doc_id,
                                         {"status": DocStatus.FAILED},
@@ -793,13 +696,11 @@ def scan_and_recover_orphan_jobs(jobs_dir: Path = settings.digitize.jobs_dir) ->
                     # Clean up staging directory for this orphan job
                     cleanup_staging_directory(job_id, config.settings.digitize.staging_dir)
 
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse job file {job_file}: {e}")
-            except Exception as e:
-                logger.error(f"Error processing job file {job_file}: {e}")
+                except Exception as e:
+                    logger.error(f"Error processing orphan job {job_id}: {e}", exc_info=True)
 
     except Exception as e:
-        logger.error(f"Error scanning jobs directory: {e}")
+        logger.error(f"Error scanning for orphan jobs: {e}", exc_info=True)
 
     if orphan_count > 0:
         logger.debug(f"🔄 Recovered {orphan_count} orphan job(s) on startup")
