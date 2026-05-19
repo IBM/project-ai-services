@@ -1,12 +1,18 @@
-import { Tag, IconButton, Tooltip } from "@carbon/react";
+import { Tag, Tooltip, ClickableTile } from "@carbon/react";
 import {
   ArrowRight,
   AgricultureAnalytics,
   PiggyBank,
   IbmPlanningAnalytics,
   Umbrella,
-  Help,
   Badge,
+  IbmZOpenEditor,
+  Stethoscope,
+  SettingsServices,
+  UserService,
+  UserMultiple,
+  Hotel,
+  Industry,
 } from "@carbon/icons-react";
 import styles from "./SolutionCard.module.scss";
 
@@ -24,15 +30,16 @@ const categoryIcons: Record<
   React.ComponentType<{ size?: string | number }>
 > = {
   Agriculture: AgricultureAnalytics,
-  "Banking and Finance": PiggyBank,
-  "Dev operations": Help,
+  "Banking & Finance": PiggyBank,
+  "Dev operations": IbmZOpenEditor,
   "Enterprise resource planning": IbmPlanningAnalytics,
-  Healthcare: Help,
+  Healthcare: Stethoscope,
   Insurance: Umbrella,
-  "IT operations": Help,
-  "Professional services": Help,
-  "Public sector": Help,
-  "Real estates": Help,
+  "IT operations": SettingsServices,
+  "Professional services": UserService,
+  "Public sector": UserMultiple,
+  "Real estate": Hotel,
+  Manufacturing: Industry,
 };
 
 const SolutionCard = ({
@@ -47,7 +54,7 @@ const SolutionCard = ({
   const primaryTag = tags[0] || "Digital assistant";
 
   return (
-    <div className={styles.card}>
+    <ClickableTile className={styles.card} onClick={() => onViewDetails?.(id)}>
       <div className={styles.cardHeader}>
         <div className={styles.iconContainer}>
           <IconComponent size={32} />
@@ -66,19 +73,12 @@ const SolutionCard = ({
       </div>
 
       <div className={styles.footer}>
-        <Tag type="gray" size="sm">
+        <Tag type="gray" size="md">
           {primaryTag}
         </Tag>
-        <IconButton
-          kind="ghost"
-          size="sm"
-          label="View details"
-          onClick={() => onViewDetails?.(id)}
-        >
-          <ArrowRight size={20} />
-        </IconButton>
+        <ArrowRight size={20} />
       </div>
-    </div>
+    </ClickableTile>
   );
 };
 

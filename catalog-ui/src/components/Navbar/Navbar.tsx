@@ -39,8 +39,8 @@ const Navbar = (props: NavbarProps) => {
         ref={navRef}
       >
         <SideNavItems>
-          <SideNavMenuItem as={NavLink} to="/ai-deployments">
-            AI Deployments
+          <SideNavMenuItem as={NavLink} to="/digital-assistants">
+            Digital assistants
           </SideNavMenuItem>
 
           <SideNavMenuItem as={NavLink} to="/architectures">
@@ -53,8 +53,8 @@ const Navbar = (props: NavbarProps) => {
 
           <SideNavDivider />
 
-          <SideNavMenuItem as={NavLink} to="/solutions-and-use-cases">
-            Solutions and use cases
+          <SideNavMenuItem as={NavLink} to="/use-case-references">
+            Use case references
           </SideNavMenuItem>
         </SideNavItems>
       </SideNav>
