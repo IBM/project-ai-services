@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver"
 	apirepository "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
@@ -88,14 +89,23 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 	blacklist := apirepository.NewDBTokenBlacklist(tokenBlacklistRepo)
 	defer blacklist.Stop()
 
+	// Initialize application repository and service
+	applicationRepo := repository.NewApplicationRepository(pool)
+	catalogProvider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		return fmt.Errorf("failed to initialize catalog provider: %w", err)
+	}
+	applicationService := apirepository.NewApplicationService(applicationRepo, catalogProvider)
+
 	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
 	authSvc := auth.NewAuthService(userRepo, tokenMgr, blacklist)
 
 	return apiserver.NewAPIserver(apiserver.APIServerOptions{
-		Port:         port,
-		AuthService:  authSvc,
-		TokenManager: tokenMgr,
-		Blacklist:    blacklist,
+		Port:               port,
+		AuthService:        authSvc,
+		TokenManager:       tokenMgr,
+		Blacklist:          blacklist,
+		ApplicationService: applicationService,
 	}).Start()
 }
 
