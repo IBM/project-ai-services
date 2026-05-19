@@ -27,6 +27,36 @@ spec:
           value: "postgres"
         - name: POSTGRES_PASSWORD
           value: "{{ .Values.postgres.password }}"
+      volumeMounts:
+        - mountPath: /var/cache:z
+          name: cache
+    {{- if eq .Values.digitize.enableMigration "true" }}
+    - name: digitize-db-migrate
+      image: "{{ .Values.digitize.image }}"
+      command:
+        - "/bin/sh"
+        - "-c"
+        - |
+          if [ "{{ .Values.digitize.migrationCleanup }}" = "true" ]; then
+            /var/venv/bin/python -m digitize.db.migrate_json_to_postgres --cleanup
+          else
+            /var/venv/bin/python -m digitize.db.migrate_json_to_postgres
+          fi
+      env:
+        - name: POSTGRES_HOST
+          value: "{{ .AppName }}--postgres"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.digitize.database }}"
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          value: "{{ .Values.postgres.password }}"
+      volumeMounts:
+        - mountPath: /var/cache:z
+          name: cache
+    {{- end }}
   containers:
     - name: ui
       image: "{{ .Values.digitizeUi.image }}"
