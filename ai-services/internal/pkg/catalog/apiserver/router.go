@@ -58,7 +58,6 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 		applications.POST("/", applicationHandler.CreateApplication)
 
 		// Draft endpoints - placeholders for future implementation
-		applications.POST("/", createApplication)
 		applications.GET("/:id", getApplication)
 		applications.PUT("/:id", updateApplication)
 		applications.DELETE("/:id", deleteApplication)
