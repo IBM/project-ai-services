@@ -37,6 +37,8 @@ type ApplicationRepository interface {
 	UpdateDeploymentName(ctx context.Context, id uuid.UUID, name string) error
 	// Delete removes an application from the database.
 	Delete(ctx context.Context, id uuid.UUID) error
+	// update status for a deletion
+	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ApplicationStatus, message string) error
 }
 
 // applicationRepo implements ApplicationRepository using pgx.
