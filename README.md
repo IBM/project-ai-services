@@ -105,7 +105,7 @@ project-ai-services/
 
 The repository follows a microservices architecture with:
 
-- **Layered Container Images**: `python-base` → `common-service` → individual services
+- **Layered Container Images**: `python-base` → `services-common` → individual services
 - **Independent Services**: Each service has its own Containerfile, Makefile, and versioning
 - **Shared Common Layer**: Common utilities and dependencies in `services/common/`
 - **Clean Boundaries**: No cross-service dependencies, all shared code in common layer

@@ -1,1 +1,1 @@
-# similarity-specific dependencies beyond common-service
+# similarity-specific dependencies beyond services-common

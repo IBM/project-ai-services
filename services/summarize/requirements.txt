@@ -1,1 +1,1 @@
-# summarize-specific dependencies beyond common-service
+# summarize-specific dependencies beyond services-common
