@@ -86,6 +86,7 @@ summarize:
   image: icr.io/ai-services-cicd/summarize-service:v0.0.4
   # @hidden
   log_level: "INFO"
+  database: "summarize_metadata"
 
 similarity:
   # @description Host port for the Similarity Search API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
