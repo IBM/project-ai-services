@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
@@ -129,6 +130,21 @@ func (h *ApplicationHandler) CreateApplication(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusAccepted, response)
+}
+
+func (s *ApplicationHandler) handleDeleteError(c *gin.Context, err error) {
+	msg := err.Error()
+
+	switch {
+	case strings.Contains(msg, "not found"):
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: msg})
+	case strings.Contains(msg, "forbidden"):
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: msg})
+	case strings.Contains(msg, "conflict"):
+		c.JSON(http.StatusConflict, ErrorResponse{Error: msg})
+	default:
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
+	}
 }
 
 // Made with Bob
