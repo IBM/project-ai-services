@@ -39,6 +39,18 @@ fi
 CACHE_DIR="${CACHE_DIR:-/var/cache}"
 OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD:-}"
 
+# Detect container runtime
+detect_runtime() {
+    if command -v oc &> /dev/null && oc whoami &> /dev/null 2>&1; then
+        echo "openshift"
+    elif command -v podman &> /dev/null; then
+        echo "podman"
+    else
+        print_error "Neither OpenShift (oc) nor Podman found"
+        exit 1
+    fi
+}
+
 # Validate and set OpenSearch password
 validate_opensearch_password() {
     if [ -z "$OPENSEARCH_PASSWORD" ]; then
@@ -122,8 +134,8 @@ SECURITY NOTES:
 EOF
 }
 
-# Export OpenSearch using sidecar container approach
-export_opensearch() {
+# Export OpenSearch using sidecar container approach (Podman)
+export_opensearch_podman() {
     local APP_NAME="$1"
     local OUTPUT_FILE="$2"
     
@@ -311,8 +323,8 @@ EOFPYTHON
     ls -lh "$OUTPUT_FILE"
 }
 
-# Export Digitize
-export_digitize() {
+# Export Digitize (Podman)
+export_digitize_podman() {
     local APP_NAME="$1"
     local OUTPUT_FILE="$2"
     
@@ -383,8 +395,8 @@ export_digitize() {
 }
 
 
-# Import OpenSearch using sidecar container approach
-import_opensearch() {
+# Import OpenSearch using sidecar container approach (Podman)
+import_opensearch_podman() {
     local APP_NAME="$1"
     local BACKUP_FILE="$2"
     
@@ -573,8 +585,8 @@ EOFPYTHON
     print_success "OpenSearch import completed!"
 }
 
-# Import Digitize
-import_digitize() {
+# Import Digitize (Podman)
+import_digitize_podman() {
     local APP_NAME="$1"
     local BACKUP_FILE="$2"
     
@@ -683,6 +695,574 @@ import_digitize() {
     echo "  ./backup-restore.sh import opensearch $APP_NAME opensearch_backup.tar.gz"
 }
 
+
+# Export OpenSearch (OpenShift)
+export_opensearch_openshift() {
+    local APP_NAME="$1"
+    local OUTPUT_FILE="${2:-opensearch_backup_$(date +%Y%m%d_%H%M%S).tar.gz}"
+    
+    if [ -z "$APP_NAME" ]; then
+        print_error "App name is required"
+        echo "Usage: ./backup-restore.sh export opensearch <app-name> [output-file]"
+        exit 1
+    fi
+
+    echo "============================================================"
+    echo "OpenSearch Data Export (OpenShift)"
+    echo "============================================================"
+    echo "App name: $APP_NAME"
+    echo "Output file: $OUTPUT_FILE"
+    echo ""
+
+    print_info "Finding OpenSearch pod for app: $APP_NAME..."
+    OPENSEARCH_POD=$(oc get pods -l "ai-services.io/application=${APP_NAME},ai-services.io/component=vectordb" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    
+    if [ -z "$OPENSEARCH_POD" ]; then
+        print_error "OpenSearch pod not found for app: $APP_NAME"
+        exit 1
+    fi
+
+    echo "  ✓ Found pod: $OPENSEARCH_POD"
+    NAMESPACE=$(oc get pod $OPENSEARCH_POD -o jsonpath='{.metadata.namespace}')
+    echo "  ✓ Namespace: $NAMESPACE"
+    
+    TEMP_DIR=$(mktemp -d)
+    trap "rm -rf $TEMP_DIR" EXIT
+    
+    # Get OpenSearch service name
+    OPENSEARCH_SERVICE=$(oc get svc -n $NAMESPACE -l "ai-services.io/application=${APP_NAME},ai-services.io/component=vectordb" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    
+    if [ -z "$OPENSEARCH_SERVICE" ]; then
+        OPENSEARCH_SERVICE="opensearch"
+    fi
+    
+    echo "  ✓ OpenSearch service: $OPENSEARCH_SERVICE"
+    
+    print_info "Creating sidecar pod for backup..."
+    SIDECAR_POD="opensearch-backup-sidecar-$(date +%s)"
+    
+    cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $SIDECAR_POD
+  namespace: $NAMESPACE
+spec:
+  containers:
+  - name: backup
+    image: registry.access.redhat.com/ubi9/python-312:9.7
+    command: ["sleep", "3600"]
+    env:
+    - name: OPENSEARCH_PASSWORD
+      value: "$OPENSEARCH_PASSWORD"
+    - name: OPENSEARCH_HOST
+      value: "$OPENSEARCH_SERVICE"
+  restartPolicy: Never
+EOF
+
+    print_info "Waiting for sidecar pod..."
+    oc wait --for=condition=Ready pod/$SIDECAR_POD -n $NAMESPACE --timeout=60s
+    echo "  ✓ Sidecar pod ready"
+    
+    print_info "Installing opensearch-py..."
+    oc exec $SIDECAR_POD -n $NAMESPACE -- pip install opensearch-py==2.3.1
+    
+    print_info "Running backup..."
+    cat << 'EOFPYTHON' | oc exec -i $SIDECAR_POD -n $NAMESPACE -- python3
+import json, os
+from pathlib import Path
+from opensearchpy import OpenSearch
+
+class OpenSearchBackup:
+    def __init__(self):
+        host = os.environ.get("OPENSEARCH_HOST", "opensearch")
+        self.client = OpenSearch(
+            hosts=[{"host": host, "port": 9200}],
+            http_auth=("admin", os.environ.get("OPENSEARCH_PASSWORD", "AiServices@12345")),
+            use_ssl=True, verify_certs=False, ssl_show_warn=False
+        )
+        self.backup_dir = Path("/tmp/opensearch_backup")
+        self.backup_dir.mkdir(exist_ok=True)
+    
+    def export_data(self):
+        indices = [idx for idx in self.client.indices.get_alias().keys() if idx.startswith("rag_")]
+        print(f"Found {len(indices)} indices to backup")
+        for index_name in indices:
+            print(f"  Backing up index: {index_name}")
+            settings = self.client.indices.get_settings(index=index_name)
+            mapping = self.client.indices.get_mapping(index=index_name)
+            with open(self.backup_dir / f"{index_name}_settings.json", "w") as f:
+                json.dump(settings, f)
+            with open(self.backup_dir / f"{index_name}_mapping.json", "w") as f:
+                json.dump(mapping, f)
+            documents = []
+            response = self.client.search(index=index_name, body={"query": {"match_all": {}}, "size": 1000}, params={"scroll": "5m"})
+            scroll_id = response["_scroll_id"]
+            hits = response["hits"]["hits"]
+            documents.extend(hits)
+            while len(hits) > 0:
+                response = self.client.scroll(scroll_id=scroll_id, params={"scroll": "5m"})
+                scroll_id = response["_scroll_id"]
+                hits = response["hits"]["hits"]
+                documents.extend(hits)
+            with open(self.backup_dir / f"{index_name}_data.json", "w") as f:
+                json.dump(documents, f)
+            print(f"    ✓ {len(documents)} documents backed up")
+    
+    def run(self):
+        print("Connecting to OpenSearch...")
+        self.export_data()
+        print("Backup completed!")
+
+if __name__ == "__main__":
+    backup = OpenSearchBackup()
+    backup.run()
+EOFPYTHON
+
+    print_info "Copying backup files..."
+    oc exec $SIDECAR_POD -n $NAMESPACE -- tar czf /tmp/backup.tar.gz -C /tmp opensearch_backup
+    oc cp $NAMESPACE/$SIDECAR_POD:/tmp/backup.tar.gz "$OUTPUT_FILE"
+    
+    print_info "Cleaning up sidecar pod..."
+    oc delete pod $SIDECAR_POD -n $NAMESPACE --wait=false
+    
+    echo ""
+    print_success "OpenSearch export completed!"
+    echo "Backup file: $OUTPUT_FILE"
+    ls -lh "$OUTPUT_FILE"
+}
+
+# Export Digitize (OpenShift)
+export_digitize_openshift() {
+    local APP_NAME="$1"
+    local OUTPUT_FILE="${2:-digitize_backup_$(date +%Y%m%d_%H%M%S).tar.gz}"
+    
+    if [ -z "$APP_NAME" ]; then
+        print_error "App name is required"
+        echo "Usage: ./backup-restore.sh export digitize <app-name> [output-file]"
+        exit 1
+    fi
+
+    echo "============================================================"
+    echo "Digitize Data Export (OpenShift)"
+    echo "============================================================"
+    echo "App name: $APP_NAME"
+    echo "Output file: $OUTPUT_FILE"
+    echo ""
+
+    print_info "Finding digitize pod for app: $APP_NAME..."
+    
+    # First, check if APP_NAME is a namespace or we need to find the namespace
+    if oc get namespace $APP_NAME &>/dev/null; then
+        NAMESPACE=$APP_NAME
+        echo "  ✓ Using namespace: $NAMESPACE"
+    else
+        print_error "Namespace $APP_NAME not found"
+        exit 1
+    fi
+    
+    # Try multiple strategies to find digitize pod
+    echo "  Searching for digitize pod..."
+    
+    # Strategy 1: By label
+    DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -l "ai-services.io/component=digitize" -o name 2>/dev/null | head -n 1 | sed 's|pod/||')
+    
+    if [ -z "$DIGITIZE_POD" ]; then
+        echo "  Label search failed, trying name pattern..."
+        # Strategy 2: By name pattern with backend
+        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -i digitize | grep -i backend | head -n 1 | sed 's|pod/||')
+    fi
+    
+    if [ -z "$DIGITIZE_POD" ]; then
+        echo "  Backend pattern failed, trying any digitize pod..."
+        # Strategy 3: Any pod with digitize in name
+        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -i digitize | head -n 1 | sed 's|pod/||')
+    fi
+    
+    if [ -z "$DIGITIZE_POD" ]; then
+        print_error "Digitize pod not found in namespace: $NAMESPACE"
+        print_error "Available pods:"
+        oc get pods -n $NAMESPACE
+        exit 1
+    fi
+
+    echo "  ✓ Found pod: $DIGITIZE_POD"
+    
+    # Use helper pod with PVC since pod doesn't have tar/rsync
+    print_info "Getting PVC for digitize pod..."
+    PVC_NAME=$(oc get pod $DIGITIZE_POD -n $NAMESPACE -o jsonpath='{.spec.volumes[?(@.persistentVolumeClaim)].persistentVolumeClaim.claimName}' | head -n 1)
+    
+    if [ -z "$PVC_NAME" ]; then
+        print_error "No PVC found for digitize pod"
+        exit 1
+    fi
+    
+    echo "  ✓ Found PVC: $PVC_NAME"
+    
+    HELPER_POD="digitize-backup-helper-$(date +%s)"
+    print_info "Creating helper pod..."
+    
+    cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $HELPER_POD
+  namespace: $NAMESPACE
+spec:
+  securityContext:
+    runAsUser: 0
+  containers:
+  - name: helper
+    image: registry.access.redhat.com/ubi9/ubi-minimal:9.4
+    command: ["sleep", "3600"]
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: $PVC_NAME
+  restartPolicy: Never
+EOF
+
+    print_info "Waiting for helper pod..."
+    oc wait --for=condition=Ready pod/$HELPER_POD -n $NAMESPACE --timeout=60s
+    echo "  ✓ Helper pod ready"
+    
+    print_info "Installing tar in helper pod..."
+    oc exec $HELPER_POD -n $NAMESPACE -- microdnf install -y tar gzip >/dev/null 2>&1
+    
+    print_info "Creating backup in helper pod..."
+    oc exec $HELPER_POD -n $NAMESPACE -- tar czf /tmp/backup.tar.gz -C /data . 2>/dev/null
+    
+    print_info "Copying backup from helper pod..."
+    oc cp $NAMESPACE/$HELPER_POD:/tmp/backup.tar.gz "$OUTPUT_FILE" 2>/dev/null
+    
+    # Count files from the created backup
+    TOTAL_FILES=$(tar -tzf "$OUTPUT_FILE" 2>/dev/null | grep -v '/$' | wc -l)
+    echo "  ✓ Backed up $TOTAL_FILES files from PVC"
+    
+    print_info "Cleaning up helper pod..."
+    oc delete pod $HELPER_POD -n $NAMESPACE --wait=false
+    
+    echo ""
+    print_success "Digitize data export completed!"
+    echo "Backup file: $OUTPUT_FILE"
+    ls -lh "$OUTPUT_FILE"
+}
+
+# Import OpenSearch (OpenShift)
+import_opensearch_openshift() {
+    local APP_NAME="$1"
+    local BACKUP_FILE="$2"
+    
+    if [ -z "$APP_NAME" ] || [ -z "$BACKUP_FILE" ]; then
+        print_error "App name and backup file required"
+        echo "Usage: ./backup-restore.sh import opensearch <app-name> <backup-file>"
+        exit 1
+    fi
+
+    if [ ! -f "$BACKUP_FILE" ]; then
+        print_error "Backup file not found: $BACKUP_FILE"
+        exit 1
+    fi
+
+    echo "============================================================"
+    echo "OpenSearch Data Import (OpenShift)"
+    echo "============================================================"
+    echo "App name: $APP_NAME"
+    echo "Backup file: $BACKUP_FILE"
+    echo ""
+
+    print_info "Finding OpenSearch pod for app: $APP_NAME..."
+    OPENSEARCH_POD=$(oc get pods -l "ai-services.io/application=${APP_NAME},ai-services.io/component=vectordb" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    
+    if [ -z "$OPENSEARCH_POD" ]; then
+        print_error "OpenSearch pod not found for app: $APP_NAME"
+        exit 1
+    fi
+
+    echo "  ✓ Found pod: $OPENSEARCH_POD"
+    NAMESPACE=$(oc get pod $OPENSEARCH_POD -o jsonpath='{.metadata.namespace}')
+    echo "  ✓ Namespace: $NAMESPACE"
+    
+    # Get OpenSearch service name
+    OPENSEARCH_SERVICE=$(oc get svc -n $NAMESPACE -l "ai-services.io/application=${APP_NAME},ai-services.io/component=vectordb" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    
+    if [ -z "$OPENSEARCH_SERVICE" ]; then
+        OPENSEARCH_SERVICE="opensearch"
+    fi
+    
+    echo "  ✓ OpenSearch service: $OPENSEARCH_SERVICE"
+    
+    print_info "Creating sidecar pod for restore..."
+    SIDECAR_POD="opensearch-restore-sidecar-$(date +%s)"
+    
+    cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $SIDECAR_POD
+  namespace: $NAMESPACE
+spec:
+  containers:
+  - name: restore
+    image: registry.access.redhat.com/ubi9/python-312:9.7
+    command: ["sleep", "3600"]
+    env:
+    - name: OPENSEARCH_PASSWORD
+      value: "$OPENSEARCH_PASSWORD"
+    - name: OPENSEARCH_HOST
+      value: "$OPENSEARCH_SERVICE"
+  restartPolicy: Never
+EOF
+
+    print_info "Waiting for sidecar pod..."
+    oc wait --for=condition=Ready pod/$SIDECAR_POD -n $NAMESPACE --timeout=60s
+    echo "  ✓ Sidecar pod ready"
+    
+    print_info "Installing opensearch-py..."
+    oc exec $SIDECAR_POD -n $NAMESPACE -- pip install opensearch-py==2.3.1
+    
+    print_info "Copying backup to sidecar pod..."
+    oc cp "$BACKUP_FILE" $NAMESPACE/$SIDECAR_POD:/tmp/backup.tar.gz
+    
+    print_info "Running restore..."
+    cat << 'EOFPYTHON' | oc exec -i $SIDECAR_POD -n $NAMESPACE -- python3 - /tmp/backup.tar.gz
+import json, os, sys, tarfile, tempfile
+from pathlib import Path
+from opensearchpy import OpenSearch, helpers
+
+class OpenSearchRestore:
+    def __init__(self, backup_file):
+        self.backup_file = backup_file
+        host = os.environ.get("OPENSEARCH_HOST", "opensearch")
+        self.client = OpenSearch(
+            hosts=[{"host": host, "port": 9200}],
+            http_auth=("admin", os.environ.get("OPENSEARCH_PASSWORD", "AiServices@12345")),
+            use_ssl=True, verify_certs=False, ssl_show_warn=False
+        )
+    
+    def restore_index(self, index_name, backup_dir):
+        print(f"  Restoring index: {index_name}")
+        with open(backup_dir / f"{index_name}_settings.json") as f:
+            settings = json.load(f)
+        with open(backup_dir / f"{index_name}_mapping.json") as f:
+            mapping = json.load(f)
+        
+        if self.client.indices.exists(index=index_name):
+            print(f"    Deleting existing index...")
+            self.client.indices.delete(index=index_name)
+        
+        idx_settings = settings[index_name]["settings"]["index"]
+        for key in ["creation_date", "uuid", "version", "provided_name"]:
+            idx_settings.pop(key, None)
+        
+        self.client.indices.create(
+            index=index_name,
+            body={"settings": {"index": idx_settings}, "mappings": mapping[index_name]["mappings"]}
+        )
+        
+        with open(backup_dir / f"{index_name}_data.json") as f:
+            documents = json.load(f)
+        
+        if documents:
+            actions = [{"_index": index_name, "_id": doc["_id"], "_source": doc["_source"]} for doc in documents]
+            success, _ = helpers.bulk(self.client, actions, stats_only=False, raise_on_error=False, refresh=True)
+            print(f"    ✓ {success} documents restored")
+    
+    def run(self):
+        print("Connecting to OpenSearch...")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            print("Extracting backup...")
+            with tarfile.open(self.backup_file, "r:gz") as tar:
+                tar.extractall(temp_path)
+            
+            backup_dir = temp_path / "opensearch_backup"
+            if backup_dir.exists():
+                indices = [f.stem.replace("_data", "") for f in backup_dir.glob("*_data.json")]
+                print(f"Found {len(indices)} indices to restore")
+                for idx in indices:
+                    self.restore_index(idx, backup_dir)
+        print("✓ Restore completed successfully")
+
+if __name__ == "__main__":
+    restore = OpenSearchRestore(sys.argv[1])
+    restore.run()
+EOFPYTHON
+
+    print_info "Cleaning up sidecar pod..."
+    oc delete pod $SIDECAR_POD -n $NAMESPACE --wait=false
+    
+    echo ""
+    print_success "OpenSearch import completed!"
+}
+
+# Import Digitize (OpenShift)
+import_digitize_openshift() {
+    local APP_NAME="$1"
+    local BACKUP_FILE="$2"
+    
+    if [ -z "$APP_NAME" ] || [ -z "$BACKUP_FILE" ]; then
+        print_error "App name and backup file required"
+        echo "Usage: ./backup-restore.sh import digitize <app-name> <backup-file>"
+        exit 1
+    fi
+
+    if [ ! -f "$BACKUP_FILE" ]; then
+        print_error "Backup file not found: $BACKUP_FILE"
+        exit 1
+    fi
+
+    echo "============================================================"
+    echo "Digitize Data Import (OpenShift)"
+    echo "============================================================"
+    echo "App name: $APP_NAME"
+    echo "Backup file: $BACKUP_FILE"
+    echo ""
+
+    print_info "Finding digitize pod for app: $APP_NAME..."
+    
+    # First, check if APP_NAME is a namespace or we need to find the namespace
+    if oc get namespace $APP_NAME &>/dev/null; then
+        NAMESPACE=$APP_NAME
+        echo "  ✓ Using namespace: $NAMESPACE"
+    else
+        print_error "Namespace $APP_NAME not found"
+        exit 1
+    fi
+    
+    # Try multiple strategies to find digitize pod
+    echo "  Searching for digitize pod..."
+    
+    # Strategy 1: By label
+    DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -l "ai-services.io/component=digitize" -o name 2>/dev/null | head -n 1 | sed 's|pod/||')
+    
+    if [ -z "$DIGITIZE_POD" ]; then
+        echo "  Label search failed, trying name pattern..."
+        # Strategy 2: By name pattern with backend
+        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -i digitize | grep -i backend | head -n 1 | sed 's|pod/||')
+    fi
+    
+    if [ -z "$DIGITIZE_POD" ]; then
+        echo "  Backend pattern failed, trying any digitize pod..."
+        # Strategy 3: Any pod with digitize in name
+        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -i digitize | head -n 1 | sed 's|pod/||')
+    fi
+    
+    if [ -z "$DIGITIZE_POD" ]; then
+        print_error "Digitize pod not found in namespace: $NAMESPACE"
+        print_error "Available pods:"
+        oc get pods -n $NAMESPACE
+        exit 1
+    fi
+
+    echo "  ✓ Found pod: $DIGITIZE_POD"
+    
+    # Use helper pod with PVC since pod doesn't have tar/rsync
+    print_info "Getting PVC for digitize pod..."
+    PVC_NAME=$(oc get pod $DIGITIZE_POD -n $NAMESPACE -o jsonpath='{.spec.volumes[?(@.persistentVolumeClaim)].persistentVolumeClaim.claimName}' | head -n 1)
+    
+    if [ -z "$PVC_NAME" ]; then
+        print_error "No PVC found for digitize pod"
+        exit 1
+    fi
+    
+    echo "  ✓ Found PVC: $PVC_NAME"
+    
+    HELPER_POD="digitize-restore-helper-$(date +%s)"
+    print_info "Creating helper pod..."
+    
+    cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $HELPER_POD
+  namespace: $NAMESPACE
+spec:
+  securityContext:
+    runAsUser: 0
+  containers:
+  - name: helper
+    image: registry.access.redhat.com/ubi9/ubi-minimal:9.4
+    command: ["sleep", "3600"]
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: $PVC_NAME
+  restartPolicy: Never
+EOF
+
+    print_info "Waiting for helper pod..."
+    oc wait --for=condition=Ready pod/$HELPER_POD -n $NAMESPACE --timeout=60s
+    echo "  ✓ Helper pod ready"
+    
+    print_info "Installing tar in helper pod..."
+    oc exec $HELPER_POD -n $NAMESPACE -- microdnf install -y tar gzip >/dev/null 2>&1
+    
+    print_info "Copying backup to helper pod..."
+    oc cp "$BACKUP_FILE" $NAMESPACE/$HELPER_POD:/tmp/restore.tar.gz 2>/dev/null
+    
+    print_info "Extracting backup in helper pod..."
+    oc exec $HELPER_POD -n $NAMESPACE -- tar xzf /tmp/restore.tar.gz -C /data 2>/dev/null
+    
+    # Count files from the backup archive
+    RESTORED_FILES=$(tar -tzf "$BACKUP_FILE" 2>/dev/null | grep -v '/$' | wc -l)
+    echo "  ✓ Restored $RESTORED_FILES files to PVC"
+    
+    print_info "Cleaning up helper pod..."
+    oc delete pod $HELPER_POD -n $NAMESPACE --wait=false
+    
+    # Restart digitize pod to refresh UI
+    print_info "Restarting digitize pod to refresh UI..."
+    oc delete pod $DIGITIZE_POD -n $NAMESPACE --wait=false
+    echo "  ✓ Digitize pod restart initiated"
+    
+    echo ""
+    print_success "Digitize data import completed!"
+    print_info "Wait for pods to restart, then refresh your browser to see documents"
+}
+
+# Wrapper functions that detect runtime
+export_opensearch() {
+    local RUNTIME=$(detect_runtime)
+    if [ "$RUNTIME" = "openshift" ]; then
+        export_opensearch_openshift "$@"
+    else
+        export_opensearch_podman "$@"
+    fi
+}
+
+export_digitize() {
+    local RUNTIME=$(detect_runtime)
+    if [ "$RUNTIME" = "openshift" ]; then
+        export_digitize_openshift "$@"
+    else
+        export_digitize_podman "$@"
+    fi
+}
+
+import_opensearch() {
+    local RUNTIME=$(detect_runtime)
+    if [ "$RUNTIME" = "openshift" ]; then
+        import_opensearch_openshift "$@"
+    else
+        import_opensearch_podman "$@"
+    fi
+}
+
+import_digitize() {
+    local RUNTIME=$(detect_runtime)
+    if [ "$RUNTIME" = "openshift" ]; then
+        import_digitize_openshift "$@"
+    else
+        import_digitize_podman "$@"
+    fi
+}
 
 # Main command dispatcher
 main() {
