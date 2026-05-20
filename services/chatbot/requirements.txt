@@ -1,1 +1,1 @@
-# chatbot-specific dependencies beyond services-common
+# chatbot-specific dependencies beyond common-service

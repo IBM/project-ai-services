@@ -232,7 +232,7 @@ RUN pip install -r requirements.txt
 # Copy common library code
 COPY . .
 
-# This image is tagged as: services-common:latest
+# This image is tagged as: icr.io/ai-services-cicd/services-common:latest
 ```
 
 **Contains:**
@@ -243,7 +243,7 @@ COPY . .
 ### Per-Service Images
 ```dockerfile
 # services/chatbot/Containerfile
-FROM services-common:latest
+FROM icr.io/ai-services-cicd/services-common:latest
 
 WORKDIR /opt/services/chatbot
 
@@ -258,7 +258,7 @@ CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "-
 ```
 
 **Each service (chatbot, digitize, summarize):**
-- Extends `services-common:latest`
+- Extends `icr.io/ai-services-cicd/services-common:latest`
 - Adds only service-specific dependencies
 - Copies only its own code
 - Defines its own entrypoint
@@ -269,7 +269,7 @@ CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "-
 cd images/python-base && podman build -t python-base:latest -f Containerfile .
 
 # 2. Build common library layer
-cd services/common && podman build -t services-common:latest -f Containerfile .
+cd services/common && podman build -t icr.io/ai-services-cicd/services-common:latest -f Containerfile .
 
 # 3. Build individual services (can be parallel)
 cd services/chatbot && podman build -t chatbot-service:latest -f Containerfile .

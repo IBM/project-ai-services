@@ -1,5 +1,5 @@
 REGISTRY?=icr.io/ai-services-private
-IMAGE=services-common
+IMAGE=common-service
 TAG?=v0.0.1
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 

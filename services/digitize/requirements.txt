@@ -1,1 +1,1 @@
-# digitize-specific dependencies beyond services-common
+# digitize-specific dependencies beyond common-service
