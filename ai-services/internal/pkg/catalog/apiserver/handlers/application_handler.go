@@ -123,25 +123,30 @@ func (h *ApplicationHandler) UpdateApplication(c *gin.Context) {
 	var req UpdateApplicationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: fmt.Sprintf("Invalid request body: %v", err)})
+
 		return
 	}
 	// Get authenticated user ID
 	userID := c.GetString(middleware.CtxUserIDKey)
 	if userID == "" {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "User not authenticated"})
+
 		return
 	}
 	updatedApp, err := h.appService.UpdateApplication(c.Request.Context(), appID, userID, req.Name)
 	if err != nil {
 		if err == repository.ErrApplicationNotFound {
 			c.JSON(http.StatusNotFound, ErrorResponse{Error: "Application not found"})
+
 			return
 		}
 		if err == repository.ErrUnauthorized {
 			c.JSON(http.StatusForbidden, ErrorResponse{Error: "User doesn't own this application"})
+
 			return
 		}
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to update application: %v", err)})
+
 		return
 	}
 	c.JSON(http.StatusOK, updatedApp)
