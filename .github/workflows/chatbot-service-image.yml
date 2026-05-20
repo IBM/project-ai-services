@@ -1,15 +1,15 @@
-name: Similarity Service
+name: Chatbot Service
 
 on:
   push:
     paths:
-      - 'services/similarity/**'
+      - 'services/chatbot/**'
     branches:
       - main
   pull_request:
     paths:
-      - 'services/similarity/**'
-      - '.github/workflows/similarity-service-image.yml'
+      - 'services/chatbot/**'
+      - '.github/workflows/chatbot-service-image.yml'
     branches:
       - main
 
@@ -18,14 +18,14 @@ jobs:
     name: Build and Publish Image
     uses: ./.github/workflows/build-and-publish-image.yml
     with:
-      working-directory: 'services/similarity'
+      working-directory: 'services/chatbot'
     secrets: inherit
 
   scan:
     uses: ./.github/workflows/scanner.yml
     with:
-      path: 'services/similarity'
-      image: 'similarity-service'
+      path: 'services/chatbot'
+      image: 'chatbot-service'
     secrets:
       ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
       ICR_APIKEY: ${{ secrets.ICR_APIKEY }}
