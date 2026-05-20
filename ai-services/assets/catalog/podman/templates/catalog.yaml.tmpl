@@ -8,7 +8,8 @@ metadata:
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/secret: "catalog-secret"
   annotations:
-    ai-services.io/ports: "{{ .Values.ui.port }}:8081, {{ .Values.backend.port }}:8080"
+    ai-services.io/routes: "8081:catalog-ui, 8080:catalog-api"
+    # ai-services.io/ports: "{{ .Values.ui.port }}:8081, {{ .Values.backend.port }}:8080"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
   initContainers:
     - name: db-migration
@@ -17,14 +18,14 @@ spec:
       args:
         - |
           set -e  # Exit immediately if any command fails
-          
+
           max_retries=5
           retry_delay=5
-          
+
           echo "Running database migrations with retry logic..."
           for attempt in $(seq 1 $max_retries); do
             echo "Migration attempt $attempt of $max_retries..."
-            
+
             if /usr/bin/ai-services catalog migrate init \
               --db-host={{ .AppName }}--db \
               --db-port=5432 \
@@ -35,7 +36,7 @@ spec:
               echo "Migrations completed successfully"
               exit 0
             fi
-            
+
             if [ $attempt -lt $max_retries ]; then
               echo "Migration failed, retrying in ${retry_delay} seconds..."
               sleep $retry_delay
