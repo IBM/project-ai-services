@@ -1,30 +1,32 @@
 ui:
   # @hidden
-  image: icr.io/ai-services-cicd/rag-ui:v0.0.34
+  image: icr.io/ai-services-cicd/rag-ui:v0.0.35
 
 backend:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.101
+  image: icr.io/ai-services-cicd/rag:v0.0.107
   # @hidden
   log_level: "INFO"
 
 summarize:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.101
+  image: icr.io/ai-services-cicd/rag:v0.0.107
   # @hidden
   log_level: "INFO"
 
 similarity:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.101
+  image: icr.io/ai-services-cicd/rag:v0.0.107
   # @hidden
   log_level: "INFO"
 
 digitize:
   # @hidden
-  image: icr.io/ai-services-cicd/rag:v0.0.101
+  image: icr.io/ai-services-cicd/rag:v0.0.107
   # @hidden
   log_level: "INFO"
+  # @description Database name for the DIGITIZE service. Default is "digitize_metadata".
+  database: "digitize_metadata"
 
 digitizeUi:
   # @hidden
@@ -35,14 +37,29 @@ instruct:
   apiKey: ""
   # @hidden
   storageUri: hf://ibm-granite/granite-3.3-8b-instruct
+  model:
+    # @hidden
+    name: ibm-granite/granite-3.3-8b-instruct
+    # @hidden
+    maxModelLen: 32768
+    # @hidden
+    maxBatchSize: 32
 
 embedding:
   # @hidden
   storageUri: hf://ibm-granite/granite-embedding-278m-multilingual
+  model:
+    # @hidden
+    name: ibm-granite/granite-embedding-278m-multilingual
+    # @hidden
+    maxModelLen: 512
 
 reranker:
   # @hidden
   storageUri: hf://BAAI/bge-reranker-v2-m3
+  model:
+    # @hidden
+    name: BAAI/bge-reranker-v2-m3
 
 ingest:
   # @hidden
@@ -63,3 +80,11 @@ opensearch:
     username: "admin"
     # @description Password for OpenSearch authentication. Must be at least 15 characters and contain at least one uppercase letter, one lowercase letter, one digit, and one special character. Avoid common words, predictable patterns, or dictionary terms. Use this to override the default admin password.
     password: "AiServices@12345"
+
+postgres:
+  # @hidden
+  image: icr.io/ai-services-cicd/postgres:18
+  # @description Sets the storage limit for the PostgreSQL service (Default: 5Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
+  storage: 5Gi
+  # @description Password for PostgreSQL default 'postgres' user authentication. Must be at least 8 characters. Use this to override the default password.
+  password: "Aiservicesdb@1234"

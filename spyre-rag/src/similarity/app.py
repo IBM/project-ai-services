@@ -128,7 +128,7 @@ async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchRes
     try:
         emb_model = emb_model_dict["emb_model"]
         emb_endpoint = emb_model_dict["emb_endpoint"]
-        emb_max_tokens = emb_model_dict["max_tokens"]
+        emb_max_model_len = emb_model_dict["max_model_len"]
 
         # reuses the same token-length guard as /reference and /v1/chat/completions.
         # keeps the query-too-long behaviour consistent across all retrieval endpoints rather than each one inventing its own limit.
@@ -150,7 +150,7 @@ async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchRes
             req.query,
             emb_model,
             emb_endpoint,
-            emb_max_tokens,
+            emb_max_model_len,
             vectorstore,
             top_k,
             req.rerank,

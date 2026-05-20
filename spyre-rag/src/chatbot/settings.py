@@ -22,11 +22,18 @@ class QueryRephrasingConfig(BaseSettings):
         description="Timeout for rephrasing LLM call in seconds"
     )
     
-    max_tokens: int = Field(
+    max_response_tokens: int = Field(
         default=100,
         gt=0,
-        le=512,
-        description="Maximum tokens for rephrased query"
+        le=615,
+        description="Maximum tokens for rephrased query response (used as minimum baseline)"
+    )
+    
+    max_response_tokens_multiplier: float = Field(
+        default=1.2,
+        gt=1.0,
+        le=2.0,
+        description="Multiplier for dynamic max_response_tokens calculation based on input query length"
     )
     
     temperature: float = Field(
@@ -34,6 +41,12 @@ class QueryRephrasingConfig(BaseSettings):
         ge=0.0,
         le=1.0,
         description="Temperature for rephrasing (0=deterministic)"
+    )
+    
+    history_token_budget: int = Field(
+        default=1000,
+        gt=0,
+        description="Maximum tokens allocated for conversation history during query rephrasing"
     )
     
     rephrase_prompt_template: str = Field(
@@ -55,11 +68,61 @@ class QueryRephrasingConfig(BaseSettings):
     )
 
 
+class LLMConfig(BaseSettings):
+    """Chatbot-specific LLM generation settings."""
+
+    max_tokens: int = Field(
+        default=512,
+        gt=0,
+        description="Maximum tokens for LLM generation (English)",
+    )
+
+    max_tokens_de: int = Field(
+        default=700,
+        gt=0,
+        description="Maximum tokens for LLM generation (German)",
+    )
+
+    temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        lt=1.0,
+        description="Temperature for LLM generation",
+    )
+
+    @field_validator('max_tokens')
+    @classmethod
+    def validate_max_tokens(cls, v):
+        """Validate max_tokens with warning fallback."""
+        if not (isinstance(v, int) and v > 0):
+            logger.warning("Setting max_tokens to default '512' as it is missing or malformed in the settings")
+            return 512
+        return v
+
+    @field_validator('max_tokens_de')
+    @classmethod
+    def validate_max_tokens_de(cls, v):
+        """Validate max_tokens_de with warning fallback."""
+        if not (isinstance(v, int) and v > 0):
+            logger.warning("Setting max_tokens_de to default '700' as it is missing or malformed in the settings")
+            return 700
+        return v
+
+    @field_validator('temperature')
+    @classmethod
+    def validate_temperature(cls, v):
+        """Validate temperature with warning fallback."""
+        if not (isinstance(v, float) and 0 <= v < 1):
+            logger.warning("Setting temperature to default '0.0' as it is missing or malformed in the settings")
+            return 0.0
+        return v
+
+
 class RAGConfig(BaseSettings):
     """RAG retrieval and ranking settings."""
 
     conversational_mode: bool = Field(
-        default=True,
+        default=False,
         description="Enable conversational RAG mode with query rephrasing and context management"
     )
 
@@ -68,12 +131,6 @@ class RAGConfig(BaseSettings):
         gt=0.0,
         lt=1.0,
         description="Minimum similarity score threshold for retrieval",
-    )
-
-    max_concurrent_requests: int = Field(
-        default=32,
-        gt=0,
-        description="Maximum concurrent requests for RAG operations",
     )
 
     num_chunks_post_search: int = Field(
@@ -102,7 +159,47 @@ class RAGConfig(BaseSettings):
         description="Estimated token count for query prompt template",
     )
 
-    # Query streaming prompts
+    initial_system_message: str = Field(
+        default=(
+            "You are a helpful, conversational AI assistant. "
+            "Engage naturally with users across multiple turns of conversation. "
+            "Provide clear, accurate, and contextually relevant responses. "
+            "Reference previous exchanges when appropriate to maintain conversation flow."
+        ),
+        description="Initial system prompt for conversational behavior",
+    )
+
+    rag_system_message: str = Field(
+        default=(
+            "Retrieved Context:\n{context}\n\n"
+            "Rephrased Query: {rephrased_query}\n\n"
+            "Instructions: Answer the user's question based on the retrieved context above. "
+            "Consider the conversation history to provide contextually relevant responses. "
+            "Be conversational and reference previous exchanges when relevant. "
+            "If the context doesn't contain enough information, acknowledge this clearly."
+        ),
+        description="RAG system prompt template with context and rephrased query",
+    )
+
+    history_token_budget: int = Field(
+        default=2000,
+        gt=0,
+        description="Maximum tokens allocated for conversation history",
+    )
+
+    initial_system_token_overhead: int = Field(
+        default=100,
+        gt=0,
+        description="Estimated tokens for initial system message",
+    )
+
+    rag_system_token_overhead: int = Field(
+        default=200,
+        gt=0,
+        description="Estimated tokens for RAG system message (excluding context)",
+    )
+
+    # Legacy prompt fields retained for compatibility with language prompt helpers.
     query_vllm_stream_prompt: str = Field(
         default=(
             "You are given:\n1. **A short context text** containing factual information.\n"
@@ -112,7 +209,7 @@ class RAGConfig(BaseSettings):
             "If the context does not provide enough information, answer using your general knowledge.\n\n"
             "Context:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
         ),
-        description="English prompt template for query streaming",
+        description="Legacy English prompt template for query streaming",
     )
 
     query_vllm_stream_de_prompt: str = Field(
@@ -134,15 +231,6 @@ class RAGConfig(BaseSettings):
         if not (isinstance(v, float) and 0 < v < 1):
             logger.warning(f"Setting score threshold to default '0.4' as it is missing or malformed in the settings")
             return 0.4
-        return v
-
-    @field_validator('max_concurrent_requests')
-    @classmethod
-    def validate_max_concurrent_requests(cls, v):
-        """Validate max concurrent requests with warning fallback."""
-        if not (isinstance(v, int) and v > 0):
-            logger.warning(f"Setting max_concurrent_requests to default '32' as it is missing or malformed in the settings")
-            return 32
         return v
 
     @field_validator('num_chunks_post_search')
@@ -176,6 +264,7 @@ class RAGConfig(BaseSettings):
 class Settings(BaseSettings):
     common: CommonSettings = Field(default_factory=CommonSettings)
     chatbot: RAGConfig = Field(default_factory=RAGConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
     query_rephrasing: QueryRephrasingConfig = Field(default_factory=QueryRephrasingConfig)
 
 # Global settings instance

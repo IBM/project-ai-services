@@ -6,6 +6,8 @@ metadata:
     ai-services.io/application: "{{ .AppName }}"
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
+    ai-services.io/secret: "catalog-db-secret"
+    ai-services.io/secret-skip-cleanup: "true"
 spec:
   containers:
   - name: postgresql
@@ -19,7 +21,7 @@ spec:
     - name: POSTGRES_PASSWORD
       valueFrom:
         secretKeyRef:
-          name: catalog-secret
+          name: catalog-db-secret
           key: db-password
     - name: POSTGRES_DB
       value: "{{ .Values.db.database }}"

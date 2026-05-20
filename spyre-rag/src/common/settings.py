@@ -11,16 +11,26 @@ logger = get_logger("settings")
 
 
 class LLMConfig(BaseSettings):
-    """LLM model and generation settings."""
+    """LLM model configuration."""
+    
+    model_config = SettingsConfigDict(env_prefix='LLM_')
 
-    # Context lengths
-    granite_3_3_8b_instruct_context_length: int = Field(
-        default=32768,
-        ge=1,
-        description="Context length for Granite 3.3 8B Instruct model",
+    endpoint: str = Field(
+        default="",
+        description="LLM endpoint URL",
     )
 
-    # Token to word ratios
+    model: str = Field(
+        default="",
+        description="LLM model name",
+    )
+
+    max_model_len: int = Field(
+        default=32768,
+        ge=1,
+        description="Fallback maximum context length for the configured LLM model",
+    )
+
     token_to_word_ratio_en: float = Field(
         default=0.75,
         gt=0.0,
@@ -28,75 +38,54 @@ class LLMConfig(BaseSettings):
         description="Token to word ratio for English text",
     )
 
-    # Generation parameters
-    llm_max_tokens: int = Field(
-        default=512,
-        gt=0,
-        description="Maximum tokens for LLM generation (English)",
-    )
-
-    llm_max_tokens_de: int = Field(
-        default=700,
-        gt=0,
-        description="Maximum tokens for LLM generation (German)",
-    )
-
-    temperature: float = Field(
-        default=0.0,
-        ge=0.0,
-        lt=1.0,
-        description="Temperature for LLM generation",
-    )
-
-    max_input_length: int = Field(
-        default=6000,
-        ge=3000,
-        le=32000,
-        description="Maximum input length in characters",
-    )
-
-    # LLM connection pool / max batch size
-    llm_max_batch_size: int = Field(
+    max_batch_size: int = Field(
         default=32,
         ge=1,
         description="Maximum batch size for LLM service (used for connection pool size)",
     )
 
-    @field_validator('llm_max_tokens')
-    @classmethod
-    def validate_llm_max_tokens(cls, v):
-        """Validate llm_max_tokens with warning fallback."""
-        if not (isinstance(v, int) and v > 0):
-            logger.warning(f"Setting llm_max_tokens to default '512' as it is missing or malformed in the settings")
-            return 512
-        return v
+    api_key: str = Field(
+        default="",
+        description="API key for vLLM authentication (optional, read from LLM_API_KEY env var)",
+    )
 
-    @field_validator('llm_max_tokens_de')
-    @classmethod
-    def validate_llm_max_tokens_de(cls, v):
-        """Validate llm_max_tokens_de with warning fallback."""
-        if not (isinstance(v, int) and v > 0):
-            logger.warning(f"Setting llm_max_tokens_de to default '700' as it is missing or malformed in the settings")
-            return 700
-        return v
 
-    @field_validator('temperature')
-    @classmethod
-    def validate_temperature(cls, v):
-        """Validate temperature with warning fallback."""
-        if not (isinstance(v, float) and 0 <= v < 1):
-            logger.warning(f"Setting temperature to default '0.0' as it is missing or malformed in the settings")
-            return 0.0
-        return v
+class EmbeddingConfig(BaseSettings):
+    """Embedding model configuration."""
+    
+    model_config = SettingsConfigDict(env_prefix='EMB_')
 
-    @field_validator('max_input_length')
-    @classmethod
-    def validate_max_input_length(cls, v):
-        """Validate max_input_length with warning fallback."""
-        if not (isinstance(v, int) and 3000 <= v <= 32000):
-            logger.warning(f"Setting max_input_length to default '6000' as it is missing or malformed in the settings")
-            return 6000
-        return v
+    endpoint: str = Field(
+        default="",
+        description="Embedding model endpoint URL",
+    )
+
+    model: str = Field(
+        default="",
+        description="Embedding model name",
+    )
+
+    max_model_len: int = Field(
+        default=512,
+        ge=1,
+        description="Fallback maximum context length for the configured embedding model",
+    )
+
+
+class RerankerConfig(BaseSettings):
+    """Reranker model configuration."""
+    
+    model_config = SettingsConfigDict(env_prefix='RERANKER_')
+
+    endpoint: str = Field(
+        default="",
+        description="Reranker endpoint URL",
+    )
+
+    model: str = Field(
+        default="",
+        description="Reranker model name",
+    )
 
 
 class LanguageConfig(BaseSettings):
@@ -141,55 +130,6 @@ class AppConfig(BaseSettings):
         if isinstance(v, str):
             return v.upper()
         return v
-
-
-class ModelEndpointsConfig(BaseSettings):
-    """Model endpoint configuration."""
-
-    # Embedding model
-    emb_endpoint: str = Field(
-        default="",
-        description="Embedding model endpoint URL",
-    )
-
-    emb_model: str = Field(
-        default="",
-        description="Embedding model name",
-    )
-
-    emb_max_tokens: int = Field(
-        default=512,
-        ge=1,
-        description="Maximum tokens for embedding model",
-    )
-
-    # LLM model
-    llm_endpoint: str = Field(
-        default="",
-        description="LLM endpoint URL",
-    )
-
-    llm_model: str = Field(
-        default="",
-        description="LLM model name",
-    )
-
-    # vLLM API Key for authentication (used by digitize and summarize services)
-    vllm_api_key: str = Field(
-        default="",
-        description="API key for vLLM authentication (optional, read from VLLM_API_KEY env var)",
-    )
-
-    # Reranker model
-    reranker_endpoint: str = Field(
-        default="",
-        description="Reranker endpoint URL",
-    )
-
-    reranker_model: str = Field(
-        default="",
-        description="Reranker model name",
-    )
 
 
 class VectorStoreConfig(BaseSettings):
@@ -247,8 +187,9 @@ class Settings(BaseSettings):
 
     app: AppConfig = Field(default_factory=AppConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+    reranker: RerankerConfig = Field(default_factory=RerankerConfig)
     language: LanguageConfig = Field(default_factory=LanguageConfig)
-    model_endpoints: ModelEndpointsConfig = Field(default_factory=ModelEndpointsConfig)
     vector_store: VectorStoreConfig = Field(default_factory=VectorStoreConfig)
 
 

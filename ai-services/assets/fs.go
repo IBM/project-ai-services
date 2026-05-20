@@ -8,5 +8,5 @@ var ApplicationFS embed.FS
 //go:embed bootstrap
 var BootstrapFS embed.FS
 
-//go:embed catalog architectures services
+//go:embed catalog architectures services components
 var CatalogFS embed.FS

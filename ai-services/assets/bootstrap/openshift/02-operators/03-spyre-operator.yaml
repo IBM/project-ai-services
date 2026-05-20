@@ -24,8 +24,8 @@ metadata:
   name: spyre-operator
   namespace: spyre-operator
 spec:
-  channel: stable-v1.1
+  channel: stable-v1.2
   name: spyre-operator
   source: certified-operators
   sourceNamespace: openshift-marketplace
-  startingCSV: spyre-operator.v1.1.1
+  startingCSV: spyre-operator.v1.2.1

@@ -25,13 +25,82 @@ const docTemplate = `{
     "basePath": "{{.BasePath}}",
     "paths": {
         "/applications": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves a paginated list of all applications for the authenticated user with optional filters",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Applications"
+                ],
+                "summary": "List applications",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number (1-indexed)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Number of items per page (max: 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by deployment type: 'architectures' or 'services'",
+                        "name": "deployment_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by catalog ID (e.g., 'rag', 'chat', 'digitize', 'summarize')",
+                        "name": "catalog_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid query parameters",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
             "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
                 ],
-                "description": "Create a new application instance from a template",
+                "description": "Creates a new application (architecture or service) with optional custom parameters",
                 "consumes": [
                     "application/json"
                 ],
@@ -42,44 +111,58 @@ const docTemplate = `{
                     "Applications"
                 ],
                 "summary": "Create new application",
-                "responses": {
-                    "200": {
-                        "description": "Application created",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/applications/templates": {
-            "get": {
-                "security": [
+                "parameters": [
                     {
-                        "BearerAuth": []
+                        "description": "Application creation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest"
+                        }
                     }
                 ],
-                "description": "Get a list of available application templates",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Applications"
-                ],
-                "summary": "List application templates",
                 "responses": {
-                    "200": {
-                        "description": "List of templates",
+                    "202": {
+                        "description": "Application creation initiated",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or validation errors",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Application name already exists",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Parameter validation failed or invalid template",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     }
                 }
             }
         },
-        "/applications/{name}": {
+        "/applications/{id}": {
             "get": {
                 "security": [
                     {
@@ -97,8 +180,8 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Application name",
-                        "name": "name",
+                        "description": "Application ID",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     }
@@ -106,6 +189,49 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "Application details",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Application not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Update an existing application's configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Applications"
+                ],
+                "summary": "Update application",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Application ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Application updated",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -134,8 +260,8 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Application name",
-                        "name": "name",
+                        "description": "Application ID",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     }
@@ -143,180 +269,6 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "Application deleted",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "404": {
-                        "description": "Application not found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/applications/{name}/logs": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Get logs from a specific application",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Applications"
-                ],
-                "summary": "Get application logs",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Application name",
-                        "name": "name",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Application logs",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "404": {
-                        "description": "Application not found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/applications/{name}/ps": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Get the running status and health of an application",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Applications"
-                ],
-                "summary": "Get application status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Application name",
-                        "name": "name",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Application status",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "404": {
-                        "description": "Application not found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/applications/{name}/start": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Start a stopped application",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Applications"
-                ],
-                "summary": "Start application",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Application name",
-                        "name": "name",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Application started",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "404": {
-                        "description": "Application not found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/applications/{name}/stop": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Stop a running application",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Applications"
-                ],
-                "summary": "Stop application",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Application name",
-                        "name": "name",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Application stopped",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -401,6 +353,58 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Architecture not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/architectures/{id}/deploy-options": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves available providers and dependency rules for all services and their components within an architecture",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "Get architecture deploy options",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Architecture ID (e.g., 'rag')",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsArchitecture"
                         }
                     },
                     "401": {
@@ -605,6 +609,72 @@ const docTemplate = `{
                 }
             }
         },
+        "/components/{component_type}/providers/{provider_id}/params": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves the configuration schema (JSON Schema) for a specific provider within a component type. Returns a JSON Schema object with properties that may include x-data-id for fields that should be populated from metadata specifications.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "Get component provider parameters",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Component type (e.g., 'vector_db', 'llm', 'embedding', 'reranker')",
+                        "name": "component_type",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Provider identifier (e.g., 'opensearch', 'vllm', 'watsonx')",
+                        "name": "provider_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "JSON Schema object with $schema, type, and properties. Properties may include x-data-id field indicating data should be populated from metadata specifications (e.g., supported_models)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request - Invalid component_type or provider_id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Component type or provider not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/services": {
             "get": {
                 "security": [
@@ -696,9 +766,199 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/services/{id}/deploy-options": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves available providers and dependency rules for a specific service",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "Get service deploy options",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Service ID (e.g., 'digitize', 'chat')",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Service not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component": {
+            "type": "object",
+            "required": [
+                "component_type",
+                "provider_id",
+                "type"
+            ],
+            "properties": {
+                "component_type": {
+                    "type": "string"
+                },
+                "instance_id": {
+                    "type": "string"
+                },
+                "params": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "provider_id": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest": {
+            "type": "object",
+            "required": [
+                "catalogid",
+                "name",
+                "services"
+            ],
+            "properties": {
+                "catalogid": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 3
+                },
+                "services": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service"
+                    }
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service": {
+            "type": "object",
+            "required": [
+                "components",
+                "service_id",
+                "type"
+            ],
+            "properties": {
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component"
+                    }
+                },
+                "service_id": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "deployment_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "services": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application"
+                    }
+                },
+                "pagination": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture": {
             "type": "object",
             "properties": {
@@ -707,6 +967,12 @@ const docTemplate = `{
                 },
                 "description": {
                     "type": "string"
+                },
+                "global_components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentReference"
+                    }
                 },
                 "id": {
                     "type": "string"
@@ -775,14 +1041,122 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentReference": {
+            "type": "object",
+            "properties": {
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference": {
             "type": "object",
             "properties": {
                 "id": {
                     "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsArchitecture": {
+            "type": "object",
+            "properties": {
+                "global_components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent"
+                    }
                 },
-                "version": {
+                "id": {
                     "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "services": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService"
+                    }
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsProvider"
+                    }
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsProvider": {
+            "type": "object",
+            "properties": {
+                "default": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "schema": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService": {
+            "type": "object",
+            "properties": {
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata": {
+            "type": "object",
+            "properties": {
+                "has_next": {
+                    "type": "boolean"
+                },
+                "has_prev": {
+                    "type": "boolean"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
                 }
             }
         },
@@ -803,9 +1177,6 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference"
                     }
-                },
-                "dependency_only": {
-                    "type": "boolean"
                 },
                 "description": {
                     "type": "string"
@@ -832,6 +1203,20 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "type": {
                     "type": "string"
                 }
             }

@@ -11,7 +11,6 @@ certified_by: "IBM"
 architectures:
   - rag
 
-# Dependencies on other services (version is optional, uses latest if not specified)
+# Dependencies on other components
 dependencies:
-  - id: instruct
-    version: ">=1.0.0"
+  - id: llm

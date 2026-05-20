@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import FastAPI, Request, HTTPException, Header, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 import json
 from contextlib import asynccontextmanager
 from asyncio import BoundedSemaphore
@@ -17,6 +17,8 @@ from lingua import Language
 
 from common.misc_utils import set_log_level
 from chatbot.settings import settings
+from chatbot.conversation_utils import get_conversation_context, truncate_history_by_tokens
+from chatbot.query_rephrasing import rephrase_query_with_context
 
 set_log_level(settings.common.app.log_level)
 
@@ -24,7 +26,7 @@ from common.diagnostic_logger import setup_comprehensive_crash_handler
 import common.db_utils as db
 from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
 from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
-from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models
+from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models, tokenize_with_llm
 from common.perf_utils import perf_registry
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from chatbot.backend_utils import search_only, validate_query_length
@@ -51,7 +53,7 @@ reranker_model_dict = {}
 auth_required_cache = {"checked": False, "required": False}
 auth_cache_lock = asyncio.Lock()
 
-concurrency_limiter = BoundedSemaphore(settings.chatbot.max_concurrent_requests)
+concurrency_limiter = BoundedSemaphore(settings.common.llm.max_batch_size)
 
 def initialize_models():
     global emb_model_dict, llm_model_dict, reranker_model_dict
@@ -85,7 +87,7 @@ async def lifespan(app):
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     initialize_models()
     setup_language_detector([Language.ENGLISH, Language.GERMAN])
-    create_llm_session(pool_maxsize=settings.common.llm.llm_max_batch_size)
+    create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
     yield
     stderr_monitor.stop()
 
@@ -148,6 +150,24 @@ def limit_concurrency(f):
         finally:
             concurrency_limiter.release()
     return wrapper
+
+def get_stop_words_with_special_tokens(request_stop_words):
+    """
+    Add common special tokens to stop words to prevent them from appearing in responses.
+    
+    Args:
+        request_stop_words: Stop words from the request (can be None, list, or string)
+    
+    Returns:
+        List of stop words including special tokens
+    """
+    stop_words = list(request_stop_words) if request_stop_words else []
+    # Add common special tokens that should stop generation
+    special_tokens = ["[/assistant]", "</s>", "<|endoftext|>", "<|im_end|>"]
+    for token in special_tokens:
+        if token not in stop_words:
+            stop_words.append(token)
+    return stop_words
 
 async def is_auth_required() -> bool:
     """
@@ -297,7 +317,7 @@ async def locked_stream(stream_g, perf_stat_dict):
         503: http_error_responses[503]
     }
 )
-async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> ChatCompletionResponse | StreamingResponse:
+async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> ChatCompletionResponse | StreamingResponse | Response:
     # Extract API key from credentials
     api_key = credentials.credentials if credentials else None
     
@@ -314,10 +334,10 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
     if not req.messages:
         APIError.raise_error(ErrorCode.EMPTY_INPUT, "messages can't be empty")
 
-    query = req.messages[0].content
+    current_query, previous_messages = get_conversation_context(req.messages)
 
     # Validate query is not empty
-    if not query or not query.strip():
+    if not current_query or not current_query.strip():
         APIError.raise_error(ErrorCode.EMPTY_INPUT, "Query cannot be empty")
 
     # Ensure vectorstore is initialized on first request
@@ -327,7 +347,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
     try:
         emb_model = emb_model_dict['emb_model']
         emb_endpoint = emb_model_dict['emb_endpoint']
-        emb_max_tokens = emb_model_dict['max_tokens']
+        emb_max_model_len = emb_model_dict['max_model_len']
         llm_model = llm_model_dict['llm_model']
         llm_endpoint = llm_model_dict['llm_endpoint']
         reranker_model = reranker_model_dict['reranker_model']
@@ -336,7 +356,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
 
         # Validate query length
         is_valid, error_msg = await asyncio.to_thread(
-            validate_query_length, query, emb_endpoint
+            validate_query_length, current_query, emb_endpoint
         )
         if not is_valid:
             # Return streaming error response for consistency
@@ -347,24 +367,46 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                 return StreamingResponse(stream_query_length_error(), media_type="text/event-stream")
             APIError.raise_error(ErrorCode.INVALID_PARAMETER, error_msg)
 
-        lang = detect_language(query)
+        lang = detect_language(current_query)
 
         max_tokens = req.max_tokens
         # giving priority to max_tokens passed in the request, otherwise according to detected language of query
         if not max_tokens:
-            max_tokens = max_tokens_map.get(lang, settings.common.llm.llm_max_tokens)
+            max_tokens = max_tokens_map.get(lang, settings.llm.max_tokens)
+
+        rephrased_query = current_query
+        
+        # Only process conversation history and rephrase query in conversational mode
+        # Conversational mode only works for English language
+        if settings.chatbot.conversational_mode and previous_messages and lang == "EN":
+            # Truncate history for query rephrasing with 1000 token budget
+            truncated_history_for_rephrasing = await asyncio.to_thread(
+                truncate_history_by_tokens,
+                previous_messages,
+                settings.query_rephrasing.history_token_budget,
+                lambda text: tokenize_with_llm(text, llm_endpoint)
+            )
+            
+            if truncated_history_for_rephrasing:
+                rephrased_query = await rephrase_query_with_context(
+                    current_query=current_query,
+                    previous_messages=truncated_history_for_rephrasing,
+                    llm_endpoint=llm_endpoint,
+                    llm_model=llm_model,
+                    api_key=api_key,
+                )
 
         docs, perf_stat_dict = await asyncio.to_thread(
             search_only,
-            query,
-            emb_model, emb_endpoint, emb_max_tokens,
+            rephrased_query,
+            emb_model, emb_endpoint, emb_max_model_len,
             reranker_model,
             reranker_endpoint,
             settings.chatbot.num_chunks_post_search,
             settings.chatbot.num_chunks_post_reranker,
             vectorstore=vectorstore
         )
-
+        
         if not docs:
             message = "No documents found in the knowledge base for this query."
             if lang == lang_de:
@@ -387,15 +429,45 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         await concurrency_limiter.acquire()
 
         try:
+            stop_words = get_stop_words_with_special_tokens(req.stop)
+            
             if req.stream:
                 vllm_stream = await asyncio.to_thread(
-                    query_vllm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang, api_key
+                    query_vllm_stream,
+                    current_query,
+                    docs,
+                    llm_endpoint,
+                    llm_model,
+                    stop_words,
+                    max_tokens,
+                    req.temperature,
+                    perf_stat_dict,
+                    lang,
+                    api_key,
+                    previous_messages,
+                    rephrased_query,
                 )
                 # For streaming, release is handled in locked_stream's finally block
-                return StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
+                response = StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
+                # Add rephrased query as a custom header if available
+                if rephrased_query and rephrased_query != current_query:
+                    response.headers["X-Rephrased-Query"] = rephrased_query
+                return response
 
             vllm_non_stream = await asyncio.to_thread(
-                query_vllm_non_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang, api_key
+                query_vllm_non_stream,
+                current_query,
+                docs,
+                llm_endpoint,
+                llm_model,
+                stop_words,
+                max_tokens,
+                req.temperature,
+                perf_stat_dict,
+                lang,
+                api_key,
+                previous_messages,
+                rephrased_query,
             )
             # Store metrics in registry for non-stream
             perf_registry.add_metric(perf_stat_dict)
@@ -413,7 +485,16 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                         if isinstance(message_dict, dict):
                             message_content = message_dict.get("content", "")
                             choices.append(ChatChoice(message=ChatMessage(content=message_content)))
-                return ChatCompletionResponse(choices=choices)
+                
+                response_data = ChatCompletionResponse(choices=choices)
+                # Add rephrased query as a custom header if available
+                if rephrased_query and rephrased_query != current_query:
+                    return Response(
+                        content=response_data.model_dump_json(),
+                        media_type="application/json",
+                        headers={"X-Rephrased-Query": rephrased_query}
+                    )
+                return response_data
 
             APIError.raise_error(ErrorCode.LLM_ERROR, "Unexpected response format from LLM")
         finally:

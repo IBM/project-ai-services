@@ -41,18 +41,20 @@ import (
 // APIServerOptions defines the configuration options for the API server such as the port to listen
 // on and the authentication provider.
 type APIServerOptions struct {
-	Port         int
-	AuthService  auth.Service
-	TokenManager *auth.TokenManager
-	Blacklist    repository.TokenBlacklist
+	Port               int
+	AuthService        auth.Service
+	TokenManager       *auth.TokenManager
+	Blacklist          repository.TokenBlacklist
+	ApplicationService *repository.ApplicationService
 }
 
 // APIserver represents the API server instance, holding the configuration and authentication provider.
 type APIserver struct {
-	port         int
-	authService  auth.Service
-	tokenManager *auth.TokenManager
-	blacklist    repository.TokenBlacklist
+	port               int
+	authService        auth.Service
+	tokenManager       *auth.TokenManager
+	blacklist          repository.TokenBlacklist
+	applicationService *repository.ApplicationService
 }
 
 // NewAPIserver creates a new instance of the API server with the provided options, setting default values where necessary.
@@ -63,17 +65,18 @@ func NewAPIserver(options APIServerOptions) *APIserver {
 	}
 
 	return &APIserver{
-		port:         options.Port,
-		authService:  options.AuthService,
-		tokenManager: options.TokenManager,
-		blacklist:    options.Blacklist,
+		port:               options.Port,
+		authService:        options.AuthService,
+		tokenManager:       options.TokenManager,
+		blacklist:          options.Blacklist,
+		applicationService: options.ApplicationService,
 	}
 }
 
 // Start initializes the API server and begins listening for incoming requests on the configured port.
 // It sets up the router with authentication middleware and routes.
 func (a *APIserver) Start() error {
-	r := CreateRouter(a.authService, a.tokenManager, a.blacklist)
+	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService)
 
 	return r.Run(fmt.Sprintf(":%d", a.port))
 }

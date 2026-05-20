@@ -79,7 +79,7 @@ def perform_similarity_search(
     query: str,
     emb_model: str,
     emb_endpoint: str,
-    emb_max_tokens: int,
+    emb_max_model_len: int,
     vectorstore,
     top_k: int,
     rerank: bool,
@@ -99,7 +99,7 @@ def perform_similarity_search(
         query,
         emb_model,
         emb_endpoint,
-        emb_max_tokens,
+        emb_max_model_len,
         vectorstore,
         top_k,
         mode=mode,
@@ -113,6 +113,8 @@ def perform_similarity_search(
     score_type = score_type_map.get(mode, "cosine")
 
     if rerank:
+        if reranker_model is None or reranker_endpoint is None:
+            raise ValueError("reranker_model and reranker_endpoint are required when rerank=True")
         reranked = rerank_documents(query, docs, reranker_model, reranker_endpoint)
         docs = [d for d, _ in reranked]
         scores = [s for _, s in reranked]

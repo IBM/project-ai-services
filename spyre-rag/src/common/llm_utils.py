@@ -7,10 +7,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 from common.lang_utils import get_prompt_for_language
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, resolve_model_max_len
 from common.settings import settings
 from common.retry_utils import retry_on_transient_error
 from chatbot.settings import settings as chatbot_settings
+from chatbot.conversation_utils import truncate_history_by_tokens
 from summarize.settings import settings as summarize_settings
 from digitize.settings import settings as digitize_settings
 import common.misc_utils as misc_utils
@@ -44,7 +45,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint):
     }
 
     try:
-        response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=get_vllm_headers(settings.model_endpoints.vllm_api_key))
+        response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=get_vllm_headers(settings.llm.api_key))
         response.raise_for_status()
         data = response.json() or {}
         choices = data.get("choices", [])
@@ -162,28 +163,136 @@ def query_vllm_models(llm_endpoint, api_key: str | None = None):
     resp_json = response.json()
     return resp_json
 
-def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature,
-                stream, lang, api_key: str | None = None):
+
+def query_vllm_payload(
+    question,
+    documents,
+    llm_endpoint,
+    llm_model,
+    stop_words,
+    max_new_tokens,
+    temperature,
+    stream,
+    lang,
+    api_key: str | None = None,
+    previous_messages: list | None = None,
+    rephrased_query: str | None = None,
+):
     context = "\n\n".join([doc.get("page_content") for doc in documents])
 
-    logger.debug(f'Original Context: {context}')
+    logger.debug(f"Original Context: {context}")
 
-    # dynamic chunk truncation: truncates the context, if doesn't fit in the sequence length
-    question_token_count = len(tokenize_with_llm(question, llm_endpoint))
-    reamining_tokens = settings.llm.max_input_length - (
-        chatbot_settings.chatbot.prompt_template_token_count + question_token_count
-    )
-    context = detokenize_with_llm(tokenize_with_llm(context, llm_endpoint)[:reamining_tokens], llm_endpoint)
-    logger.debug(f"Truncated Context: {context}")
+    # Use conversational mode if enabled AND language is English, otherwise use legacy prompts
+    if chatbot_settings.chatbot.conversational_mode and lang == "EN":
+        # Conversational RAG mode with message history
+        question_token_count = len(tokenize_with_llm(question, llm_endpoint))
+        context_tokens = tokenize_with_llm(context, llm_endpoint)
+        context_token_count = len(context_tokens)
 
-    # Get the appropriate prompt template based on language and format it
-    prompt_template = get_prompt_for_language(lang)
-    prompt = prompt_template.format(context=context, question=question)
+        llm_max_model_len = resolve_model_max_len(
+            llm_endpoint,
+            llm_model,
+            settings.llm.max_model_len,
+            api_key,
+        )
 
-    logger.debug(f"PROMPT: {prompt}")
+        # Calculate budget for context first (prioritize context over history)
+        budget_for_context = llm_max_model_len - (
+            chatbot_settings.chatbot.initial_system_token_overhead +
+            chatbot_settings.chatbot.rag_system_token_overhead +
+            question_token_count +
+            max_new_tokens  # Reserve space for model's response
+        )
+        budget_for_context = max(0, budget_for_context)
+
+        # Check if context fits within budget
+        if context_token_count <= budget_for_context:
+            # Context fits completely, use remaining budget for history
+            remaining_budget_for_history = budget_for_context - context_token_count
+            # Cap history budget at configured limit or remaining budget, whichever is smaller
+            history_budget = min(chatbot_settings.chatbot.history_token_budget, remaining_budget_for_history)
+            logger.debug(f"Context fits completely ({context_token_count} tokens). History budget: {history_budget} tokens")
+        else:
+            # Context exceeds budget, truncate context and no history
+            context = detokenize_with_llm(context_tokens[:budget_for_context], llm_endpoint)
+            history_budget = 0
+            previous_messages = None
+            logger.debug(f"Context truncated from {context_token_count} to {budget_for_context} tokens. No history included.")
+
+        logger.debug(f"Truncated Context: {context}")
+
+        message_array = [
+            {
+                "role": "system",
+                "content": chatbot_settings.chatbot.initial_system_message,
+            }
+        ]
+
+        if previous_messages and history_budget > 0:
+            # Truncate previous messages to fit within history budget using shared utility
+            truncated_messages = truncate_history_by_tokens(
+                previous_messages,
+                history_budget,
+                lambda text: tokenize_with_llm(text, llm_endpoint)
+            )
+            
+            if truncated_messages:
+                message_array.extend(truncated_messages)
+
+        final_system_content = chatbot_settings.chatbot.rag_system_message.format(
+            context=context,
+            rephrased_query=rephrased_query or question,
+        )
+        message_array.append({
+            "role": "system",
+            "content": final_system_content,
+        })
+        message_array.append({
+            "role": "user",
+            "content": question,
+        })
+
+        logger.debug(f"Message array length: {len(message_array)}")
+        logger.debug(f"History messages: {len(previous_messages) if previous_messages else 0}")
+    else:
+        # Legacy mode: use simple prompt template without conversation history
+        # Dynamic chunk truncation: truncates the context if it doesn't fit in the sequence length
+        question_token_count = len(tokenize_with_llm(question, llm_endpoint))
+        llm_max_model_len = resolve_model_max_len(
+            llm_endpoint,
+            llm_model,
+            settings.llm.max_model_len,
+            api_key,
+        )
+        remaining_tokens = llm_max_model_len - (
+            chatbot_settings.chatbot.prompt_template_token_count +
+            question_token_count +
+            max_new_tokens  # Reserve space for model's response
+        )
+        remaining_tokens = max(0, remaining_tokens)
+        
+        context = detokenize_with_llm(
+            tokenize_with_llm(context, llm_endpoint)[:remaining_tokens],
+            llm_endpoint
+        )
+        logger.debug(f"Truncated Context: {context}")
+
+        # Get the appropriate prompt template based on language and format it
+        prompt_template = get_prompt_for_language(lang)
+        prompt = prompt_template.format(context=context, question=question)
+        
+        message_array = [
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ]
+
+        logger.debug(f"Using legacy prompt mode (conversational_mode=False)")
+
     headers = get_vllm_headers(api_key)
     payload = {
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": message_array,
         "model": llm_model,
         "max_tokens": max_new_tokens,
         "frequency_penalty": 1.1,
@@ -192,17 +301,41 @@ def query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words,
         "stream": stream
     }
     if stream:
-        # stream_options is only required for streaming to include the final usage chunk.
-        # For non-streaming requests, the 'usage' field is included by default.
         payload["stream_options"] = {"include_usage": True}
     return headers, payload
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang, api_key: str | None = None):
+def query_vllm_non_stream(
+    question,
+    documents,
+    llm_endpoint,
+    llm_model,
+    stop_words,
+    max_new_tokens,
+    temperature,
+    perf_stat_dict,
+    lang,
+    api_key: str | None = None,
+    previous_messages: list | None = None,
+    rephrased_query: str | None = None,
+):
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, False, lang, api_key)
+    headers, payload = query_vllm_payload(
+        question,
+        documents,
+        llm_endpoint,
+        llm_model,
+        stop_words,
+        max_new_tokens,
+        temperature,
+        False,
+        lang,
+        api_key,
+        previous_messages,
+        rephrased_query,
+    )
 
     # Use requests for synchronous HTTP requests
     start_time = time.time()
@@ -217,12 +350,37 @@ def query_vllm_non_stream(question, documents, llm_endpoint, llm_model, stop_wor
 
     return response_json
 
-def query_vllm_stream(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens, temperature, perf_stat_dict, lang, api_key: str | None = None):
+def query_vllm_stream(
+    question,
+    documents,
+    llm_endpoint,
+    llm_model,
+    stop_words,
+    max_new_tokens,
+    temperature,
+    perf_stat_dict,
+    lang,
+    api_key: str | None = None,
+    previous_messages: list | None = None,
+    rephrased_query: str | None = None,
+):
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers, payload = query_vllm_payload(question, documents, llm_endpoint, llm_model, stop_words, max_new_tokens,
-                                          temperature, True, lang, api_key)
+    headers, payload = query_vllm_payload(
+        question,
+        documents,
+        llm_endpoint,
+        llm_model,
+        stop_words,
+        max_new_tokens,
+        temperature,
+        True,
+        lang,
+        api_key,
+        previous_messages,
+        rephrased_query,
+    )
     try:
         # Use requests for synchronous HTTP requests
         logger.debug("STREAMING RESPONSE")
@@ -287,7 +445,7 @@ def query_vllm_summarize(
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers = get_vllm_headers(settings.model_endpoints.vllm_api_key)
+    headers = get_vllm_headers(settings.llm.api_key)
     stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,
@@ -328,7 +486,7 @@ def query_vllm_summarize_stream(
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    headers = get_vllm_headers(settings.model_endpoints.vllm_api_key)
+    headers = get_vllm_headers(settings.llm.api_key)
     stop_words = [w for w in summarize_settings.summarize.summarization_stop_words.split(",") if w]
     payload = {
         "messages": messages,

@@ -8,6 +8,8 @@ async function customSendMessage(
   instance,
   apiKey,
   onAuthError,
+  conversationHistory,
+  setConversationHistory,
 ) {
   const userInput = request.input.text;
 
@@ -94,8 +96,18 @@ async function customSendMessage(
     },
   });
 
+  // Update conversation history with user input first
+  const updatedHistory = [
+    ...conversationHistory,
+    { role: 'user', content: userInput },
+  ];
+
+  // Apply sliding window: keep only last 10 messages for API payload
+  const SLIDING_WINDOW_SIZE = 10;
+  const recentMessages = updatedHistory.slice(-SLIDING_WINDOW_SIZE);
+
   const payload = {
-    messages: [{ role: 'user', content: userInput }],
+    messages: recentMessages,
     model: 'ibm-granite/granite-3.3-8b-instruct',
     temperature: 0.0,
     stream: true,
@@ -111,16 +123,14 @@ async function customSendMessage(
   try {
     instance.updateIsMessageLoadingCounter('increase');
 
-    const stream = await client.chat.completions.create(payload);
+    // Make the streaming request using OpenAI client with withResponse to access headers
+    const { data: stream, response } = await client.chat.completions
+      .create(payload)
+      .withResponse();
 
-    const referencePromise = axios.post('/v1/similarity-search', {
-      query: userInput,
-      mode: 'hybrid',
-      rerank: true,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    // Extract rephrased query from response headers
+    const rephrasedQuery =
+      response.headers.get('x-rephrased-query') || userInput;
 
     instance.updateIsMessageLoadingCounter('decrease');
 
@@ -129,12 +139,6 @@ async function customSendMessage(
     for await (const chunk of stream) {
       if (isCanceled) break;
 
-      // Check for error in the chunk
-      if (chunk.error) {
-        throw new Error(chunk.error);
-      }
-
-      // to extract the content from the parsed JSON chunk
       const textChunk = chunk.choices[0]?.delta?.content || '';
 
       if (textChunk) {
@@ -182,10 +186,18 @@ async function customSendMessage(
       },
     });
 
-    // await for the reference promise to finish
+    // Now fetch reference docs using the rephrased query (or original if not rephrased)
     let docs = [];
     try {
-      const context_response = await referencePromise;
+      const context_response = await axios.post('/v1/similarity-search', {
+        query: rephrasedQuery,
+        mode: 'hybrid',
+        top_k: 3,
+        rerank: true,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
       // get docs out of context_response
       docs = context_response.data?.results || [];
     } catch (refError) {
@@ -208,7 +220,17 @@ async function customSendMessage(
       },
     ];
 
-    if (docs?.length > 0) {
+    // Only add reference docs button if docs were actually found
+    // AND the response doesn't indicate no documents were found
+    const noDocsMessages = [
+      'No documents found in the knowledge base for this query.',
+      'Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden.',
+    ];
+    const hasNoDocsMessage = noDocsMessages.some((msg) =>
+      fullText.includes(msg),
+    );
+
+    if (docs && docs.length > 0 && !hasNoDocsMessage) {
       responseBlocks.push({
         response_type: 'user_defined',
         user_defined: {
@@ -232,6 +254,12 @@ async function customSendMessage(
         },
       },
     });
+
+    // Update conversation history with assistant response
+    setConversationHistory([
+      ...updatedHistory,
+      { role: 'assistant', content: fullText },
+    ]);
   } catch (err) {
     instance.updateIsMessageLoadingCounter('decrease');
 

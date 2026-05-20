@@ -12,6 +12,8 @@ const (
 	DSCKind              = "DataScienceCluster"
 	DSCIKind             = "DSCInitialization"
 	SMTLevel             = 2
+	ErrSecretNotFound    = "no secret with name or id"
+	CaddyServerName      = "ai_services" // Caddy server name used for route registration
 )
 
 const (

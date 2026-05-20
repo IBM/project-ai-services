@@ -43,9 +43,20 @@ spec:
             - name: LLM_ENDPOINT
               value: http://instruct-predictor:8000
             - name: LLM_MODEL
-              value: ibm-granite/granite-3.3-8b-instruct
+              value: {{ .Values.instruct.model.name | quote }}
+            - name: LLM_MAX_MODEL_LEN
+              value: {{ .Values.instruct.model.maxModelLen | quote }}
+            - name: LLM_MAX_BATCH_SIZE
+              value: {{ .Values.instruct.model.maxBatchSize | quote }}
             - name: LOG_LEVEL
               value: "{{ .Values.summarize.log_level }}"
+            {{- if .Values.instruct.apiKey }}
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: "vllm-instruct-api-key"
+                  key: apiKey
+            {{- end }}
           ports:
             - containerPort: 6000
               protocol: TCP

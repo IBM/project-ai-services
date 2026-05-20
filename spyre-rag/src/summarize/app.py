@@ -40,14 +40,14 @@ logger = get_logger("app")
 
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
 
-concurrency_limiter = asyncio.BoundedSemaphore(settings.summarize.max_concurrent_requests)
+concurrency_limiter = asyncio.BoundedSemaphore(settings.common.llm.max_batch_size)
 
 @asynccontextmanager
 async def lifespan(app):
     filtered_paths = ['/health']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     initialize_models()
-    create_llm_session(pool_maxsize=settings.common.llm.llm_max_batch_size)
+    create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
     yield
     stderr_monitor.stop()
 

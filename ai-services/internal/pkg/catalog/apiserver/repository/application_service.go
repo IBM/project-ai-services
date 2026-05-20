@@ -1,0 +1,188 @@
+package repository
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+)
+
+// ApplicationService provides business logic for application operations.
+type ApplicationService struct {
+	appRepo  dbrepo.ApplicationRepository
+	provider *catalog.CatalogProvider
+}
+
+// NewApplicationService creates a new application service.
+func NewApplicationService(appRepo dbrepo.ApplicationRepository, provider *catalog.CatalogProvider) *ApplicationService {
+	return &ApplicationService{
+		appRepo:  appRepo,
+		provider: provider,
+	}
+}
+
+// ListApplicationsRequest contains parameters for listing applications.
+type ListApplicationsRequest struct {
+	Page           int
+	PageSize       int
+	DeploymentType string
+	CatalogID      string
+}
+
+// ListApplications retrieves a paginated list of applications with filters.
+func (s *ApplicationService) ListApplications(ctx context.Context, req ListApplicationsRequest) (*types.ApplicationListResponse, error) {
+	// Build filters for repository query (all filters are at DB level now)
+	filters := &dbrepo.ApplicationFilters{
+		DeploymentType: req.DeploymentType,
+		CatalogID:      req.CatalogID,
+		Limit:          req.PageSize,
+		Offset:         (req.Page - 1) * req.PageSize,
+	}
+
+	// Get total count for pagination metadata
+	totalCount, err := s.appRepo.GetCount(ctx, filters)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application count: %w", err)
+	}
+
+	// Get applications from database with filters
+	applications, err := s.appRepo.GetAll(ctx, filters)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve applications: %w", err)
+	}
+
+	// Build application list with type information
+	apps := make([]types.Application, 0, len(applications))
+	for _, app := range applications {
+		appData, err := s.buildApplication(app)
+		if err != nil {
+			return nil, err
+		}
+
+		apps = append(apps, appData)
+	}
+
+	// All pagination is done at DB level, so summaries are already paginated
+	totalPages := (totalCount + req.PageSize - 1) / req.PageSize
+	if totalPages == 0 {
+		totalPages = 1
+	}
+
+	response := &types.ApplicationListResponse{
+		Data: apps,
+		Pagination: types.PaginationMetadata{
+			Page:       req.Page,
+			PageSize:   req.PageSize,
+			TotalItems: totalCount,
+			TotalPages: totalPages,
+			HasNext:    req.Page < totalPages,
+			HasPrev:    req.Page > 1,
+		},
+	}
+
+	return response, nil
+}
+
+// buildApplication creates an Application from a models.Application.
+func (s *ApplicationService) buildApplication(app models.Application) (types.Application, error) {
+	// Get type (display name) from catalog metadata
+	typeName, err := s.getApplicationType(app.CatalogID, app.DeploymentType)
+	if err != nil {
+		return types.Application{}, fmt.Errorf("failed to get application type for catalog_id '%s': %w", app.CatalogID, err)
+	}
+
+	appData := types.Application{
+		ID:             app.ID.String(),
+		Name:           app.Name,
+		DeploymentType: string(app.DeploymentType),
+		Type:           typeName,
+		Status:         string(app.Status),
+		Message:        app.Message,
+		CreatedAt:      app.CreatedAt.Format(constants.RFC3339WithTimezone),
+		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
+	}
+
+	// Add services array only for architectures (not for individual services)
+	if app.DeploymentType == models.DeploymentTypeArchitectures && len(app.Services) > 0 {
+		appData.Services = s.buildServiceStatuses(app.Services)
+	}
+
+	return appData, nil
+}
+
+// buildServiceStatuses creates ServiceStatus array from models.Service slice.
+func (s *ApplicationService) buildServiceStatuses(services []models.Service) []types.ServiceStatus {
+	statuses := make([]types.ServiceStatus, 0, len(services))
+
+	for _, svc := range services {
+		// Get service display name from catalog metadata
+		serviceDisplayName := svc.CatalogID // Default to catalog_id
+		if service, err := s.provider.LoadService(svc.CatalogID); err == nil && service.Name != "" {
+			serviceDisplayName = service.Name
+		}
+
+		statuses = append(statuses, types.ServiceStatus{
+			ID:     svc.ID.String(),
+			Type:   serviceDisplayName,
+			Status: string(svc.Status),
+		})
+	}
+
+	return statuses
+}
+
+// getApplicationType retrieves the application type from catalog metadata.
+func (s *ApplicationService) getApplicationType(catalogID string, deploymentType models.DeploymentType) (string, error) {
+	if deploymentType == models.DeploymentTypeArchitectures {
+		arch, err := s.provider.LoadArchitecture(catalogID)
+		if err != nil {
+			return "", fmt.Errorf("failed to load architecture metadata: %w", err)
+		}
+
+		return arch.Name, nil
+	}
+
+	// For services
+	service, err := s.provider.LoadService(catalogID)
+	if err != nil {
+		return "", fmt.Errorf("failed to load service metadata: %w", err)
+	}
+
+	return service.Name, nil
+}
+
+// ValidatePaginationParams validates and returns pagination parameters with defaults.
+func ValidatePaginationParams(page, pageSize int) (int, int, error) {
+	// Apply defaults
+	if page == 0 {
+		page = constants.MinPage
+	}
+	if pageSize == 0 {
+		pageSize = constants.DefaultPageSize
+	}
+
+	// Validate page
+	if page < constants.MinPage {
+		return 0, 0, fmt.Errorf("invalid page parameter: must be a positive integer")
+	}
+
+	// Validate page_size
+	if pageSize < constants.MinPage || pageSize > constants.MaxPageSize {
+		return 0, 0, fmt.Errorf("invalid page_size parameter: must be between 1 and %d", constants.MaxPageSize)
+	}
+
+	return page, pageSize, nil
+}
+
+// CreateApplication creates a new application with the given configuration.
+func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest) (*apimodels.CreateApplicationResponse, error) {
+	// to be implemented
+	return nil, nil
+}
+
+// Made with Bob

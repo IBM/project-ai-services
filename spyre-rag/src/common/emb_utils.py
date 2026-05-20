@@ -9,10 +9,10 @@ logger = get_logger("Embedding")
 _embedder_instance = None
 
 class Embedding:
-    def __init__(self, emb_model, emb_endpoint, max_tokens):
+    def __init__(self, emb_model, emb_endpoint, max_model_len):
         self.emb_model = emb_model
         self.emb_endpoint = emb_endpoint
-        self.max_tokens = int(max_tokens)
+        self.max_model_len = int(max_model_len)
 
     def embed_documents(self, texts):
         return self._post_embedding(texts)
@@ -28,7 +28,7 @@ class Embedding:
         payload = {
             "input": texts,
             "model": self.emb_model,
-            "truncate_prompt_tokens": self.max_tokens-1,
+            "truncate_prompt_tokens": self.max_model_len - 1,
         }
         headers = {
             "accept": "application/json",
@@ -44,11 +44,11 @@ class Embedding:
         embeddings = [data['embedding'] for data in r['data']]
         return [np.array(embed, dtype=np.float32) for embed in embeddings]
 
-def get_embedder(emb_model, emb_endpoint, max_tokens) -> Embedding:
+def get_embedder(emb_model, emb_endpoint, max_model_len) -> Embedding:
     """
     Returns an instance of the Embedding class.
     """
     global _embedder_instance
     if _embedder_instance is None:
-        _embedder_instance = Embedding(emb_model, emb_endpoint, max_tokens)
+        _embedder_instance = Embedding(emb_model, emb_endpoint, max_model_len)
     return _embedder_instance
