@@ -98,21 +98,21 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 
 // UpdateApplication godoc
 //
-//	@Summary        Update application
-//	@Description    Updates the display name of an existing application
-//	@Tags           Applications
-//	@Accept         json
-//	@Produce        json
-//	@Security       BearerAuth
-//	@Param          id      path        string                      true    "Application ID (UUID)"
-//	@Param          body    body        UpdateApplicationRequest    true    "Update request"
-//	@Success        200     {object}    types.Application
-//	@Failure        400     {object}    ErrorResponse   "Invalid request body or name validation failed"
-//	@Failure        401     {object}    ErrorResponse   "Unauthorized"
-//	@Failure        403     {object}    ErrorResponse   "User doesn't own this application"
-//	@Failure        404     {object}    ErrorResponse   "Application not found"
-//	@Failure        500     {object}    ErrorResponse   "Internal Server Error"
-//	@Router         /applications/{id} [put]
+//	@Summary		Update application
+//	@Description	Updates the display name of an existing application
+//	@Tags			Applications
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path		string						true	"Application ID (UUID)"
+//	@Param			body	body		UpdateApplicationRequest	true	"Update request"
+//	@Success		200		{object}	types.Application
+//	@Failure		400		{object}	ErrorResponse	"Invalid request body or name validation failed"
+//	@Failure		401		{object}	ErrorResponse	"Unauthorized"
+//	@Failure		403		{object}	ErrorResponse	"User doesn't own this application"
+//	@Failure		404		{object}	ErrorResponse	"Application not found"
+//	@Failure		500		{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/applications/{id} [put]
 func (h *ApplicationHandler) UpdateApplication(c *gin.Context) {
 	appID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
