@@ -11,6 +11,8 @@ backend:
   image: icr.io/ai-services-cicd/rag:v0.0.107
   # @hidden
   log_level: "INFO"
+  # @description Custom initial system prompt for conversational RAG. Leave empty to use default. Must be at least 10 characters.
+  conversationalRagInitialSystemMessage: ""
 
 digitize:
   # @description Host port for the DIGITIZE API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.

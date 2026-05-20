@@ -87,6 +87,10 @@ spec:
           value: "1"
         - name: LOG_LEVEL
           value: "{{ .Values.backend.log_level}}"
+        {{- if .Values.backend.conversationalRagInitialSystemMessage }}
+        - name: CONVERSATIONAL_RAG_INITIAL_SYSTEM_MESSAGE
+          value: "{{ .Values.backend.conversationalRagInitialSystemMessage }}"
+        {{- end }}
       ports:
         - containerPort: 5000
           protocol: TCP

@@ -88,6 +88,7 @@ async def lifespan(app):
     initialize_models()
     setup_language_detector([Language.ENGLISH, Language.GERMAN])
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
+    
     yield
     stderr_monitor.stop()
 
@@ -376,9 +377,8 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
 
         rephrased_query = current_query
         
-        # Only process conversation history and rephrase query in conversational mode
-        # Conversational mode only works for English language
-        if settings.chatbot.conversational_mode and previous_messages and lang == "EN":
+        # Process conversation history and rephrase query for English language
+        if previous_messages and lang == "EN":
             # Truncate history for query rephrasing with 1000 token budget
             truncated_history_for_rephrasing = await asyncio.to_thread(
                 truncate_history_by_tokens,
