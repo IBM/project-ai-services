@@ -29,7 +29,7 @@
    - [9.3 Service-Level Resources](#93-service-level-resources)
    - [9.4 Provider-Level Resources](#94-provider-level-resources)
    - [9.5 Metadata Source](#95-metadata-source)
-   - [9.6 Use Cases](#96-use-cases)
+   - [9.6 Use Cases](#96-use-case)
 
 ## 1. Executive Summary
 
