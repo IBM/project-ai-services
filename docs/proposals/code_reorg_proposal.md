@@ -209,7 +209,7 @@ RUN pip install -r requirements.txt
 COPY download_docling_models.py .
 RUN python download_docling_models.py
 
-# This image is tagged as: python-base:latest
+# This image is tagged as: icr.io/ai-services-cicd/python-base:latest
 ```
 
 **Contains:**
@@ -221,7 +221,7 @@ RUN python download_docling_models.py
 ### Common Library Layer (`services/common/`)
 ```dockerfile
 # services/common/Containerfile
-FROM python-base:latest
+FROM icr.io/ai-services-cicd/python-base:latest
 
 WORKDIR /opt/services/common
 
@@ -266,7 +266,7 @@ CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "-
 ### Build Order
 ```bash
 # 1. Build base image with system deps and common Python packages
-cd images/python-base && podman build -t python-base:latest -f Containerfile .
+cd images/python-base && podman build -t icr.io/ai-services-cicd/python-base:latest -f Containerfile .
 
 # 2. Build common library layer
 cd services/common && podman build -t icr.io/ai-services-cicd/services-common:latest -f Containerfile .

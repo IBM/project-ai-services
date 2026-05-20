@@ -1,4 +1,4 @@
-FROM python-base:latest
+FROM icr.io/ai-services-cicd/python-base:latest
 
 WORKDIR /opt/services
 
