@@ -2,13 +2,21 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+)
+
+var (
+	ErrApplicationNotFound = errors.New("application not found")
+	ErrUnauthorized        = errors.New("user not authorized")
 )
 
 // ApplicationService provides business logic for application operations.
@@ -176,6 +184,37 @@ func ValidatePaginationParams(page, pageSize int) (int, int, error) {
 	}
 
 	return page, pageSize, nil
+}
+
+func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID, userID, newName string) (*types.Application, error) {
+	app, err := s.appRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrApplicationNotFound
+		}
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app.CreatedBy != userID {
+		return nil, ErrUnauthorized
+	}
+	err = s.appRepo.UpdateDeploymentName(ctx, id, newName)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrApplicationNotFound
+		}
+		return nil, fmt.Errorf("failed to update application name: %w", err)
+	}
+	updatedApp, err := s.appRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch updated application %w", err)
+	}
+
+	appData, err := s.buildApplication(*updatedApp)
+	if err != nil {
+		return nil, err
+	}
+
+	return &appData, nil
 }
 
 // Made with Bob
