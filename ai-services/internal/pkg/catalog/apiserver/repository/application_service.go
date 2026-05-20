@@ -193,6 +193,7 @@ func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrApplicationNotFound
 		}
+
 		return nil, fmt.Errorf("failed to get application: %w", err)
 	}
 	if app.CreatedBy != userID {
@@ -203,6 +204,7 @@ func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrApplicationNotFound
 		}
+
 		return nil, fmt.Errorf("failed to update application name: %w", err)
 	}
 	updatedApp, err := s.appRepo.GetByID(ctx, id)

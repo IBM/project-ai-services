@@ -116,7 +116,8 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 func (h *ApplicationHandler) UpdateApplication(c *gin.Context) {
 	appID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: fmt.Sprintf("Invalid application ID format")})
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid application ID format"})
+
 		return
 	}
 	var req UpdateApplicationRequest
