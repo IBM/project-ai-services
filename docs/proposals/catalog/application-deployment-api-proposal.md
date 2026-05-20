@@ -860,7 +860,7 @@ Content-Type: application/json
 ```json
 {
   "name": "Production RAG System",
-  "architecture": "rag",
+  "catalogid": "rag",
   "services": [
     {
       "type": "service",
@@ -894,7 +894,6 @@ Content-Type: application/json
     {
       "type": "service",
       "service_id": "chat",
-      "enabled": true,
       "version": "1.0.0",
       "components": [
         {
@@ -931,7 +930,7 @@ Content-Type: application/json
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | name | string | Yes | Application name (3-100 chars) |
-| architecture | string | Yes | Architecture ID (e.g., rag) |
+| catalogid | string | Yes | Catalog ID (e.g., rag) |
 | services | array | Yes | Array of service objects to deploy with their component selections |
 
 **Service Object (in services array):**
@@ -939,7 +938,6 @@ Content-Type: application/json
 |-------|------|----------|-------------|
 | type | string | Yes | Must be "service" |
 | service_id | string | Yes | Service identifier (e.g., "digitize", "chat", "summarize") |
-| enabled | boolean | Yes | Whether the service is enabled |
 | version | string | No | Service version to deploy. If not specified, uses the latest compatible version |
 | components | array | Yes | Array of component selections for this service |
 
