@@ -13,7 +13,10 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Navigate to={ROUTES.LOGIN} replace />} />
+        <Route
+          path="/"
+          element={<Navigate to={ROUTES.AI_DEPLOYMENTS} replace />}
+        />
 
         {/* Protected routes */}
         <Route element={<ProtectedRoute />}>
