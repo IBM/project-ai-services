@@ -318,13 +318,13 @@ paths:
       summary: Create new application
       tags:
       - Applications
-  /applications/{name}:
+  /applications/{id}:
     delete:
       description: Delete a specific application and all its resources
       parameters:
-      - description: Application name
+      - description: Application ID
         in: path
-        name: name
+        name: id
         required: true
         type: string
       responses:
@@ -346,9 +346,9 @@ paths:
     get:
       description: Get detailed information about a specific application
       parameters:
-      - description: Application name
+      - description: Application ID
         in: path
-        name: name
+        name: id
         required: true
         type: string
       produces:
@@ -369,76 +369,21 @@ paths:
       summary: Get application details
       tags:
       - Applications
-  /applications/{name}/logs:
-    get:
-      description: Get logs from a specific application
-      parameters:
-      - description: Application name
-        in: path
-        name: name
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Application logs
-          schema:
-            additionalProperties: true
-            type: object
-        "404":
-          description: Application not found
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Get application logs
-      tags:
-      - Applications
-  /applications/{name}/ps:
-    get:
-      description: Get the running status and health of an application
-      parameters:
-      - description: Application name
-        in: path
-        name: name
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Application status
-          schema:
-            additionalProperties: true
-            type: object
-        "404":
-          description: Application not found
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Get application status
-      tags:
-      - Applications
-  /applications/{name}/start:
-    post:
+    put:
       consumes:
       - application/json
-      description: Start a stopped application
+      description: Update an existing application's configuration
       parameters:
-      - description: Application name
+      - description: Application ID
         in: path
-        name: name
+        name: id
         required: true
         type: string
       produces:
       - application/json
       responses:
         "200":
-          description: Application started
+          description: Application updated
           schema:
             additionalProperties: true
             type: object
@@ -449,52 +394,7 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: Start application
-      tags:
-      - Applications
-  /applications/{name}/stop:
-    post:
-      consumes:
-      - application/json
-      description: Stop a running application
-      parameters:
-      - description: Application name
-        in: path
-        name: name
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Application stopped
-          schema:
-            additionalProperties: true
-            type: object
-        "404":
-          description: Application not found
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Stop application
-      tags:
-      - Applications
-  /applications/templates:
-    get:
-      description: Get a list of available application templates
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: List of templates
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - BearerAuth: []
-      summary: List application templates
+      summary: Update application
       tags:
       - Applications
   /architectures:
@@ -589,7 +489,7 @@ paths:
       - BearerAuth: []
       summary: Get architecture deploy options
       tags:
-      - Deploy Options
+      - Catalog
   /auth/login:
     post:
       consumes:
@@ -757,7 +657,7 @@ paths:
       - BearerAuth: []
       summary: Get component provider parameters
       tags:
-      - Deploy Options
+      - Catalog
   /services:
     get:
       description: Retrieves a list of all deployable service templates. Dependency-only
@@ -851,7 +751,7 @@ paths:
       - BearerAuth: []
       summary: Get service deploy options
       tags:
-      - Deploy Options
+      - Catalog
 securityDefinitions:
   BearerAuth:
     description: Type "Bearer" followed by a space and JWT token.
