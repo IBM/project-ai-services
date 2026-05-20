@@ -60,7 +60,7 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 		// Draft endpoints - placeholders for future implementation
 		applications.GET("/:id", getApplication)
 		applications.PUT("/:id", updateApplication)
-		applications.DELETE("/:id", deleteApplication)
+		applications.DELETE("/:id", applicationHandler.DeleteApplication)
 	}
 
 	return router

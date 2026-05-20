@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -126,6 +128,48 @@ func (h *ApplicationHandler) CreateApplication(c *gin.Context) {
 			Error: fmt.Sprintf("Failed to create application: %v", err),
 		})
 
+		return
+	}
+
+	c.JSON(http.StatusAccepted, response)
+}
+
+// DeleteApplication godoc
+//
+//	@Summary		Delete application
+//	@Description	Initiates async deletion of an application and all its associated resources
+//	@Tags			Applications
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id				path		string	true	"Application UUID"
+//	@Param			skip-cleanup	query		bool	false	"Skip infrastructure cleanup"
+//	@Success		202				{object}	repository.DeleteApplicationResponse
+//	@Failure		400				{object}	ErrorResponse	"Invalid application ID"
+//	@Failure		401				{object}	ErrorResponse	"Unauthorized"
+//	@Failure		403				{object}	ErrorResponse	"Forbidden"
+//	@Failure		404				{object}	ErrorResponse	"Application not found"
+//	@Failure		409				{object}	ErrorResponse	"Application already being deleted"
+//	@Failure		500				{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/applications/{id} [delete]
+func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
+	appID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid application ID format, expected UUID"})
+		return
+	}
+
+	skipCleanup := c.Query("skip-cleanup") == "true"
+
+	userIDVal, exists := c.Get(middleware.CtxUserIDKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "authentication required"})
+		return
+	}
+	userID := userIDVal.(string)
+
+	response, err := h.appService.DeleteApplication(c.Request.Context(), appID, userID, skipCleanup)
+	if err != nil {
+		h.handleDeleteError(c, err)
 		return
 	}
 

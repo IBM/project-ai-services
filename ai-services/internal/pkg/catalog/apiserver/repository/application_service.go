@@ -22,7 +22,7 @@ type ApplicationService struct {
 // response type for response
 type DeleteApplicationResponse struct {
 	ID      string `json:"id"`
-	Status  string `json:"staus"`
+	Status  string `json:"status"`
 	Message string `json:"message"`
 }
 
@@ -193,8 +193,8 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 	return nil, nil
 }
 
-// DeleteAPplication method
-func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string) (*DeleteApplicationResponse, error) {
+// DeleteApplication initiates async deletion of an application.
+func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string, skipCleanup bool) (*DeleteApplicationResponse, error) {
 	app, err := s.appRepo.GetByID(ctx, id)
 
 	if err != nil {
@@ -209,11 +209,11 @@ func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID
 		return nil, fmt.Errorf("conflict: application is already being deleted")
 	}
 
-	go s.performDeletion(context.Background(), id, app.Services)
-
 	if err := s.appRepo.UpdateStatus(ctx, id, models.ApplicationStatusDeleting, "Deletion initiated"); err != nil {
 		return nil, err
 	}
+
+	go s.performDeletion(context.Background(), id, app.Services)
 
 	return &DeleteApplicationResponse{
 		ID:      id.String(),
