@@ -408,4 +408,19 @@ func (r *applicationRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+func (r *applicationRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status models.ApplicationStatus, message string) error {
+	query := `UPDATE applications SET status=$2, message=$3, updated_at=NOW() WHERE id=$1`
+
+	result, err := r.pool.Exec(ctx, query, status, id, message)
+	if err != nil {
+		return fmt.Errorf("failed to update application status: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+
+	return nil
+}
+
 // Made with Bob
