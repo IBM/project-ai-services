@@ -106,34 +106,37 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 {
   "cpu": {
     "total_cores": 16,
-    "free_cores": 12.08
+    "available_cores": 12.08
   },
   "memory": {
     "total_bytes": 68719476736,
-    "free_bytes": 34359738368
+    "available_bytes": 34359738368
   },
-  "spyre_cards": {
-    "total_cards": 4,
-    "free_cards": 2
+  "accelerators": {
+    "ibm.com/spyre_pf": {
+      "total": 4,
+      "available": 2
+    }
   }
 }
 ```
 
 **Response Fields:**
 
-| Field                     | Type    | Description                                                                  |
-| ------------------------- | ------- | ---------------------------------------------------------------------------- |
-| `cpu.total_cores`         | integer | Total number of CPU cores available on the system                            |
-| `cpu.free_cores`          | float   | Number of free CPU cores, calculated as `(total_cores × idle_percent) / 100` |
-| `memory.total_bytes`      | integer | Total system memory in bytes                                                 |
-| `memory.free_bytes`       | integer | Available free memory in bytes                                               |
-| `spyre_cards.total_cards` | integer | Total number of Spyre cards detected                                         |
-| `spyre_cards.free_cards`  | integer | Number of Spyre cards not currently in use                                   |
+| Field                                     | Type    | Description                                                                       |
+| ----------------------------------------- | ------- | --------------------------------------------------------------------------------- |
+| `cpu.total_cores`                         | integer | Total number of CPU cores on the system                                           |
+| `cpu.available_cores`                     | float   | Number of available CPU cores, calculated as `(total_cores × idle_percent) / 100` |
+| `memory.total_bytes`                      | integer | Total system memory in bytes                                                      |
+| `memory.available_bytes`                  | integer | Available memory in bytes that can be allocated                                   |
+| `accelerators.ibm.com/spyre_pf.total`     | integer | Total number of Spyre cards detected                                              |
+| `accelerators.ibm.com/spyre_pf.available` | integer | Number of Spyre cards available for allocation                                    |
 
 **Notes:**
 
-- `free_cores` is a floating-point value representing the effective number of idle cores
+- `available_cores` is a floating-point value representing the effective number of idle cores that can be allocated
 - Memory values are in bytes; clients should convert to GB/MB as needed
+- "available" indicates resources that can be allocated to new workloads
 
 **Error Response (401 Unauthorized):**
 
@@ -166,15 +169,17 @@ curl -X GET http://localhost:8080/api/v1/resources \
 {
   "cpu": {
     "total_cores": 32,
-    "free_cores": 24.16
+    "available_cores": 24.16
   },
   "memory": {
     "total_bytes": 137438953472,
-    "free_bytes": 82463372288
+    "available_bytes": 82463372288
   },
-  "spyre_cards": {
-    "total_cards": 8,
-    "free_cards": 5
+  "accelerators": {
+    "ibm.com/spyre_pf": {
+      "total": 8,
+      "available": 5
+    }
   }
 }
 ```
@@ -206,22 +211,22 @@ The Resource API leverages the Podman Go bindings to retrieve system information
 
 ### 6.2 Resource Calculation
 
-**CPU Free Cores Calculation:**
+**CPU Available Cores Calculation:**
 
-The free cores metric represents the effective number of CPU cores available for new workloads:
+The available cores metric represents the effective number of CPU cores available for new workloads:
 
 ```go
 // Get idle percentage from Podman system info
 idlePercent := info.Host.CPUUtilization.IdlePercent
 
-// Calculate free cores
-freeCores := (float64(totalCores) * idlePercent) / 100.0
+// Calculate available cores
+availableCores := (float64(totalCores) * idlePercent) / 100.0
 ```
 
 **Example:**
 
 - System with 16 cores at 75.5% idle
-- Free cores = (16 × 75.5) / 100 = 12.08 cores
+- Available cores = (16 × 75.5) / 100 = 12.08 cores
 
 This metric provides a more intuitive understanding of available CPU capacity compared to raw percentage values.
 
@@ -231,7 +236,7 @@ Memory metrics are directly obtained from Podman system info:
 
 ```go
 totalBytes := info.Host.MemTotal
-freeBytes := info.Host.MemFree
+availableBytes := info.Host.MemFree
 ```
 
 ### 6.3 Spyre Card Detection
@@ -242,18 +247,18 @@ Spyre card availability is determined through helper functions:
 
 1. `helpers.ListSpyreCards()` - Enumerates all Spyre cards on the system
 2. `helpers.FindFreeSpyreCards()` - Identifies cards not currently allocated
-3. Calculate free count: `freeCards = totalCards - usedCards`
+3. Calculate available count: `availableCards = totalCards - usedCards`
 
 **Error Handling:**
 
-- If Spyre card detection fails, the `spyre_cards` field returns with 0 values
+- If Spyre card detection fails, the `accelerators` field returns with 0 values
 - Errors are logged but don't fail the entire request
 - Allows graceful degradation on systems without Spyre cards
 
 **Spyre Card States:**
 
 - **Total Cards**: All Spyre cards detected via device enumeration
-- **Free Cards**: Cards not currently bound to running containers/pods
+- **Available Cards**: Cards not currently bound to running containers/pods that can be allocated
 - **Used Cards**: Cards allocated to active AI workloads (not returned in API)
 
 ## 7. Response Schema
@@ -264,34 +269,34 @@ Spyre card availability is determined through helper functions:
 
 ```go
 type ResourcesResponse struct {
-    CPU        *CPUInfo       `json:"cpu,omitempty"`
-    Memory     *MemoryInfo    `json:"memory,omitempty"`
-    SpyreCards *SpyreCardInfo `json:"spyre_cards,omitempty"`
+    CPU          *CPUInfo                    `json:"cpu,omitempty"`
+    Memory       *MemoryInfo                 `json:"memory,omitempty"`
+    Accelerators map[string]*AcceleratorInfo `json:"accelerators,omitempty"`
 }
 
 type CPUInfo struct {
-    TotalCores int     `json:"total_cores"`
-    FreeCores  float64 `json:"free_cores"`
+    TotalCores     int     `json:"total_cores"`
+    AvailableCores float64 `json:"available_cores"`
 }
 
 type MemoryInfo struct {
-    TotalBytes int64 `json:"total_bytes"`
-    FreeBytes  int64 `json:"free_bytes"`
+    TotalBytes     int64 `json:"total_bytes"`
+    AvailableBytes int64 `json:"available_bytes"`
 }
 
-type SpyreCardInfo struct {
-    TotalCards int `json:"total_cards"`
-    FreeCards  int `json:"free_cards"`
+type AcceleratorInfo struct {
+    Total     int `json:"total"`
+    Available int `json:"available"`
 }
 ```
 
 **Field Constraints:**
 
 - All numeric fields are non-negative
-- `free_cores` ≤ `total_cores`
-- `free_bytes` ≤ `total_bytes`
-- `free_cards` ≤ `total_cards`
-- `spyre_cards` is always included with 0 values if no cards are detected
+- `available_cores` ≤ `total_cores`
+- `available_bytes` ≤ `total_bytes`
+- `accelerators.ibm.com/spyre_pf.available` ≤ `accelerators.ibm.com/spyre_pf.total`
+- `accelerators` is always included with 0 values if no cards are detected
 
 ### 7.2 Error Response
 
@@ -345,26 +350,33 @@ If Spyre card detection fails, the API returns successfully with CPU and memory 
 {
   "cpu": {
     "total_cores": 16,
-    "free_cores": 12.08
+    "available_cores": 12.08
   },
   "memory": {
     "total_bytes": 68719476736,
-    "free_bytes": 34359738368
+    "available_bytes": 34359738368
   },
-  "spyre_cards": {
-    "total_cards": 0,
-    "free_cards": 0
+  "accelerators": {
+    "ibm.com/spyre_pf": {
+      "total": 0,
+      "available": 0
+    }
   }
 }
 ```
 
 This ensures the API remains functional and provides consistent response structure even when Spyre cards are unavailable or detection fails.
 
-## 9. Resource Requirements in Deploy Options API
+## 9. Resource Requirements in Deploy Options and Application APIs
 
 ### 9.1 Overview
 
-The Deploy Options API has to be enhanced to include resource requirement specifications for services and component providers. This feature enables clients to understand the computational resources needed to deploy specific services and their components, facilitating resource-aware deployment decisions and capacity planning.
+The Deploy Options API and Get Application by ID API (`/api/v1/applications/{id}`) have to be enhanced to include resource requirement specifications for services and component providers. This feature enables clients to understand the computational resources needed to deploy specific services and their components, facilitating resource-aware deployment decisions and capacity planning.
+
+**Applicable APIs:**
+
+- Deploy Options API: `/api/v1/services/{service_id}/deploy-options`
+- Get Application by ID API: `/api/v1/applications/{id}`
 
 **Key Benefits:**
 
@@ -382,7 +394,9 @@ Resource requirements are specified using a standardized format with four key me
   "resources": {
     "cpu": 1,
     "memory": 4096,
-    "cards": 1,
+    "accelerators": {
+      "ibm.com/spyre_pf": 1
+    },
     "storage": 1024
   }
 }
@@ -390,12 +404,12 @@ Resource requirements are specified using a standardized format with four key me
 
 **Resource Fields:**
 
-| Field     | Type    | Unit  | Description                                 |
-| --------- | ------- | ----- | ------------------------------------------- |
-| `cpu`     | integer | cores | Number of CPU cores required                |
-| `memory`  | integer | MB    | Memory requirement in megabytes             |
-| `cards`   | integer | count | Number of Spyre accelerator cards required  |
-| `storage` | integer | MB    | Persistent storage requirement in megabytes |
+| Field                           | Type    | Unit  | Description                                 |
+| ------------------------------- | ------- | ----- | ------------------------------------------- |
+| `cpu`                           | integer | cores | Number of CPU cores required                |
+| `memory`                        | integer | MB    | Memory requirement in megabytes             |
+| `accelerators.ibm.com/spyre_pf` | integer | count | Number of Spyre accelerator cards required  |
+| `storage`                       | integer | MB    | Persistent storage requirement in megabytes |
 
 **Notes:**
 
@@ -423,7 +437,9 @@ Service-level resources represent the base computational requirements for the se
   "resources": {
     "cpu": 1,
     "memory": 4096,
-    "cards": 1,
+    "accelerators": {
+      "ibm.com/spyre_pf": 1
+    },
     "storage": 1024
   }
 }
@@ -436,12 +452,12 @@ Total service deployment resources = Service base resources + Sum of selected co
 **Example Calculation:**
 
 ```
-Service (chat):           1 CPU, 4096 MB memory, 1 card, 1024 MB storage
-+ Vector Store (opensearch): 1 CPU, 4096 MB memory, 1 card, 1024 MB storage
-+ Embedding (vllm):          2 CPU, 8192 MB memory, 1 card, 2048 MB storage
-+ LLM (vllm):                4 CPU, 16384 MB memory, 2 cards, 4096 MB storage
+Service (chat):           1 CPU, 4096 MB memory, 1 spyre_pf, 1024 MB storage
++ Vector Store (opensearch): 1 CPU, 4096 MB memory, 1 spyre_pf, 1024 MB storage
++ Embedding (vllm):          2 CPU, 8192 MB memory, 1 spyre_pf, 2048 MB storage
++ LLM (vllm):                4 CPU, 16384 MB memory, 2 spyre_pf, 4096 MB storage
 ─────────────────────────────────────────────────────────────────────────
-Total:                       8 CPU, 32768 MB memory, 5 cards, 8192 MB storage
+Total:                       8 CPU, 32768 MB memory, 5 spyre_pf, 8192 MB storage
 ```
 
 ### 9.4 Provider-Level Resources
@@ -463,7 +479,9 @@ Component providers can specify their own resource requirements, allowing client
       "resources": {
         "cpu": 1,
         "memory": 4096,
-        "cards": 1,
+        "accelerators": {
+          "ibm.com/spyre_pf": 1
+        },
         "storage": 1024
       }
     },
@@ -474,7 +492,9 @@ Component providers can specify their own resource requirements, allowing client
       "resources": {
         "cpu": 1,
         "memory": 4096,
-        "cards": 1,
+        "accelerators": {
+          "ibm.com/spyre_pf": 1
+        },
         "storage": 1024
       }
     }
@@ -527,7 +547,8 @@ dependencies:
 resources:
   cpu: 1
   memory: 4096
-  cards: 1
+  accelerators:
+    ibm.com/spyre_pf: 1
   storage: 1024
 ```
 
@@ -543,7 +564,8 @@ component_name: Vector Store
 resources:
   cpu: 1
   memory: 4096
-  cards: 1
+  accelerators:
+    ibm.com/spyre_pf: 1
   storage: 1024
 ```
 
@@ -559,7 +581,9 @@ resources:
 3. Resources are included in deploy options API responses
 4. Missing `resources` field results in omission from API response
 
-### 9.6 Use Case
+### 9.6 Use Cases
+
+#### Use Case 1: Pre-Deployment Resource Validation
 
 Before deploying a service, validate that the system has sufficient resources:
 
@@ -576,4 +600,54 @@ curl -H "Authorization: Bearer $TOKEN" \
 # Deploy only if: available >= required
 ```
 
-This integration enables intelligent deployment decisions based on real-time resource availability and service requirements.
+#### Use Case 2: Deployed Application Resource Monitoring
+
+Check resource requirements for an already deployed application:
+
+```bash
+# Get system resources
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/api/v1/resources
+
+# Get deployed application details with resource requirements
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/api/v1/applications/my-chat-app
+
+# Response includes resource specifications for the deployed application
+# Useful for capacity planning, scaling decisions, and resource optimization
+```
+
+**Example Application Response with Resources:**
+
+```json
+{
+  "id": "my-chat-app",
+  "name": "My Chat Application",
+  "service_id": "chat",
+  "status": "running",
+  "resources": {
+    "cpu": 8,
+    "memory": 32768,
+    "accelerators": {
+      "ibm.com/spyre_pf": 5
+    },
+    "storage": 8192
+  },
+  "components": [
+    {
+      "type": "vector_store",
+      "provider": "opensearch",
+      "resources": {
+        "cpu": 1,
+        "memory": 4096,
+        "accelerators": {
+          "ibm.com/spyre_pf": 1
+        },
+        "storage": 1024
+      }
+    }
+  ]
+}
+```
+
+This integration enables intelligent deployment decisions based on real-time resource availability and service requirements, as well as ongoing monitoring and optimization of deployed applications.
