@@ -21,7 +21,10 @@ jobs:
       - name: Build Image
         working-directory: ${{ inputs.working-directory }}
         run: |
-          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
+          make build \
+            REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} \
+            REGISTRY_USER=${{ secrets.ICR_USERNAME }} \
+            REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
       
       - name: Publish image
         working-directory: ${{ inputs.working-directory }}
