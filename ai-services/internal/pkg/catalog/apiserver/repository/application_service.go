@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
@@ -215,6 +216,12 @@ func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID
 	}
 
 	return &appData, nil
+}
+
+// CreateApplication creates a new application with the given configuration.
+func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest) (*apimodels.CreateApplicationResponse, error) {
+	// to be implemented
+	return nil, nil
 }
 
 // Made with Bob

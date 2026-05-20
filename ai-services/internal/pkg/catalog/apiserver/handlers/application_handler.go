@@ -8,8 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
@@ -66,9 +67,9 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 	catalogID := c.Query("catalog_id")
 
 	// Validate deployment_type if provided
-	if deploymentType != "" && deploymentType != string(models.DeploymentTypeArchitectures) && deploymentType != string(models.DeploymentTypeServices) {
+	if deploymentType != "" && deploymentType != string(dbmodels.DeploymentTypeArchitectures) && deploymentType != string(dbmodels.DeploymentTypeServices) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: fmt.Sprintf("deployment_type must be '%s' or '%s'", models.DeploymentTypeArchitectures, models.DeploymentTypeServices),
+			Error: fmt.Sprintf("deployment_type must be '%s' or '%s'", dbmodels.DeploymentTypeArchitectures, dbmodels.DeploymentTypeServices),
 		})
 
 		return
@@ -143,6 +144,47 @@ func (h *ApplicationHandler) UpdateApplication(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, updatedApp)
+}
+
+// CreateApplication godoc
+//
+//	@Summary		Create new application
+//	@Description	Creates a new application (architecture or service) with optional custom parameters
+//	@Tags			Applications
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			request	body		models.CreateApplicationRequest		true	"Application creation request"
+//	@Success		202		{object}	models.CreateApplicationResponse	"Application creation initiated"
+//	@Failure		400		{object}	ErrorResponse						"Invalid request body or validation errors"
+//	@Failure		401		{object}	ErrorResponse						"Unauthorized"
+//	@Failure		409		{object}	ErrorResponse						"Application name already exists"
+//	@Failure		422		{object}	ErrorResponse						"Parameter validation failed or invalid template"
+//	@Failure		500		{object}	ErrorResponse						"Internal Server Error"
+//	@Router			/applications [post]
+func (h *ApplicationHandler) CreateApplication(c *gin.Context) {
+	var req models.CreateApplicationRequest
+
+	// Parse and validate request body
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid request body: %v", err),
+		})
+
+		return
+	}
+
+	// Call service layer to create application
+	response, err := h.appService.CreateApplication(c.Request.Context(), req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: fmt.Sprintf("Failed to create application: %v", err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusAccepted, response)
 }
 
 // Made with Bob
