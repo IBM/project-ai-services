@@ -118,7 +118,7 @@ class Document(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Additional metadata (stored as JSONB)
-    metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default={})
+    doc_metadata: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default={}, key="doc_metadata")
 
     # Auto-updated timestamp
     updated_at: Mapped[datetime] = mapped_column(
