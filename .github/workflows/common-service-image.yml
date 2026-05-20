@@ -6,12 +6,6 @@ on:
       - 'services/common/**'
     branches:
       - main
-  pull_request:
-    paths:
-      - 'services/common/**'
-      - '.github/workflows/common-service-image.yml'
-    branches:
-      - main
 
 jobs:
   build-publish-image:

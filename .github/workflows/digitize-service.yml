@@ -6,12 +6,6 @@ on:
       - 'services/digitize/**'
     branches:
       - main
-  pull_request:
-    paths:
-      - 'services/digitize/**'
-      - '.github/workflows/digitize-service.yml'
-    branches:
-      - main
 
 jobs:
   build-publish-image:

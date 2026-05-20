@@ -6,12 +6,6 @@ on:
       - 'services/similarity/**'
     branches:
       - main
-  pull_request:
-    paths:
-      - 'services/similarity/**'
-      - '.github/workflows/similarity-service-image.yml'
-    branches:
-      - main
 
 jobs:
   build-publish-image:

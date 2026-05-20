@@ -6,12 +6,6 @@ on:
       - 'services/summarize/**'
     branches:
       - main
-  pull_request:
-    paths:
-      - 'services/summarize/**'
-      - '.github/workflows/summarize-service-image.yml'
-    branches:
-      - main
 
 jobs:
   build-publish-image:

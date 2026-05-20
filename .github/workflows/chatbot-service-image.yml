@@ -6,12 +6,6 @@ on:
       - 'services/chatbot/**'
     branches:
       - main
-  pull_request:
-    paths:
-      - 'services/chatbot/**'
-      - '.github/workflows/chatbot-service-image.yml'
-    branches:
-      - main
 
 jobs:
   build-publish-image:
