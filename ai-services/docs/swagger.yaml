@@ -1,5 +1,66 @@
 basePath: /api/v1
 definitions:
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component:
+    properties:
+      component_type:
+        type: string
+      instance_id:
+        type: string
+      params:
+        additionalProperties: true
+        type: object
+      provider_id:
+        type: string
+      type:
+        type: string
+    required:
+    - component_type
+    - provider_id
+    - type
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest:
+    properties:
+      catalogid:
+        type: string
+      name:
+        maxLength: 100
+        minLength: 3
+        type: string
+      services:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service'
+        type: array
+    required:
+    - catalogid
+    - name
+    - services
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationResponse:
+    properties:
+      id:
+        type: string
+      message:
+        type: string
+      status:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component'
+        type: array
+      service_id:
+        type: string
+      type:
+        type: string
+      version:
+        type: string
+    required:
+    - components
+    - service_id
+    - type
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application:
     properties:
       created_at:
@@ -304,27 +365,54 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a new application instance from a template
+      description: Creates a new application (architecture or service) with optional
+        custom parameters
+      parameters:
+      - description: Application creation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest'
       produces:
       - application/json
       responses:
-        "200":
-          description: Application created
+        "202":
+          description: Application creation initiated
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationResponse'
+        "400":
+          description: Invalid request body or validation errors
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "409":
+          description: Application name already exists
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "422":
+          description: Parameter validation failed or invalid template
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Create new application
       tags:
       - Applications
-  /applications/{name}:
+  /applications/{id}:
     delete:
       description: Delete a specific application and all its resources
       parameters:
-      - description: Application name
+      - description: Application ID
         in: path
-        name: name
+        name: id
         required: true
         type: string
       responses:
@@ -346,9 +434,9 @@ paths:
     get:
       description: Get detailed information about a specific application
       parameters:
-      - description: Application name
+      - description: Application ID
         in: path
-        name: name
+        name: id
         required: true
         type: string
       produces:
@@ -369,76 +457,21 @@ paths:
       summary: Get application details
       tags:
       - Applications
-  /applications/{name}/logs:
-    get:
-      description: Get logs from a specific application
-      parameters:
-      - description: Application name
-        in: path
-        name: name
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Application logs
-          schema:
-            additionalProperties: true
-            type: object
-        "404":
-          description: Application not found
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Get application logs
-      tags:
-      - Applications
-  /applications/{name}/ps:
-    get:
-      description: Get the running status and health of an application
-      parameters:
-      - description: Application name
-        in: path
-        name: name
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Application status
-          schema:
-            additionalProperties: true
-            type: object
-        "404":
-          description: Application not found
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Get application status
-      tags:
-      - Applications
-  /applications/{name}/start:
-    post:
+    put:
       consumes:
       - application/json
-      description: Start a stopped application
+      description: Update an existing application's configuration
       parameters:
-      - description: Application name
+      - description: Application ID
         in: path
-        name: name
+        name: id
         required: true
         type: string
       produces:
       - application/json
       responses:
         "200":
-          description: Application started
+          description: Application updated
           schema:
             additionalProperties: true
             type: object
@@ -449,52 +482,7 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: Start application
-      tags:
-      - Applications
-  /applications/{name}/stop:
-    post:
-      consumes:
-      - application/json
-      description: Stop a running application
-      parameters:
-      - description: Application name
-        in: path
-        name: name
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Application stopped
-          schema:
-            additionalProperties: true
-            type: object
-        "404":
-          description: Application not found
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Stop application
-      tags:
-      - Applications
-  /applications/templates:
-    get:
-      description: Get a list of available application templates
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: List of templates
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - BearerAuth: []
-      summary: List application templates
+      summary: Update application
       tags:
       - Applications
   /architectures:
@@ -589,7 +577,7 @@ paths:
       - BearerAuth: []
       summary: Get architecture deploy options
       tags:
-      - Deploy Options
+      - Catalog
   /auth/login:
     post:
       consumes:
@@ -757,7 +745,7 @@ paths:
       - BearerAuth: []
       summary: Get component provider parameters
       tags:
-      - Deploy Options
+      - Catalog
   /services:
     get:
       description: Retrieves a list of all deployable service templates. Dependency-only
@@ -851,7 +839,7 @@ paths:
       - BearerAuth: []
       summary: Get service deploy options
       tags:
-      - Deploy Options
+      - Catalog
 securityDefinitions:
   BearerAuth:
     description: Type "Bearer" followed by a space and JWT token.
