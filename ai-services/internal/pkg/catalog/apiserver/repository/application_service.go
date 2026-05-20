@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -16,6 +17,13 @@ import (
 type ApplicationService struct {
 	appRepo  dbrepo.ApplicationRepository
 	provider *catalog.CatalogProvider
+}
+
+// response type for response
+type DeleteApplicationResponse struct {
+	ID      string `json:"id"`
+	Status  string `json:"staus"`
+	Message string `json:"message"`
 }
 
 // NewApplicationService creates a new application service.
@@ -185,4 +193,38 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 	return nil, nil
 }
 
-// Made with Bob
+// DeleteAPplication method
+func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string) (*DeleteApplicationResponse, error) {
+	app, err := s.appRepo.GetByID(ctx, id)
+
+	if err != nil {
+		return nil, fmt.Errorf("not found: %w", err)
+	}
+
+	if app.CreatedBy != user {
+		return nil, fmt.Errorf("forbidden: user does not own this application")
+	}
+
+	if app.Status == models.ApplicationStatusDeleting {
+		return nil, fmt.Errorf("conflict: application is already being deleted")
+	}
+
+	go s.performDeletion(context.Background(), id, app.Services)
+
+	if err := s.appRepo.UpdateStatus(ctx, id, models.ApplicationStatusDeleting, "Deletion initiated"); err != nil {
+		return nil, err
+	}
+
+	return &DeleteApplicationResponse{
+		ID:      id.String(),
+		Status:  string(models.ApplicationStatusDeleting),
+		Message: "Deletion initiated successfully",
+	}, nil
+}
+
+// performDeletion helper method for DeleteApplication
+func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUID, services []models.Service) {
+	if err := s.appRepo.Delete(ctx, appID); err != nil {
+		s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, fmt.Sprintf("failed to delete app: %s", err))
+	}
+}
