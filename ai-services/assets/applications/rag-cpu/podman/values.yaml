@@ -57,7 +57,9 @@ instruct:
     # @hidden
     name: ibm-granite/granite-3.3-8b-instruct
     # @hidden
-    maxModelLen: 32768
+    maxNumBatchedTokens: 26208
+    # @hidden
+    maxModelLen: 26208
     # @hidden
     maxBatchSize: 32
 
