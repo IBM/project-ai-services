@@ -4,10 +4,11 @@ WORKDIR /opt/services/chatbot
 
 ENV PYTHONPATH=/opt/services
 
-COPY requirements.txt .
+COPY chatbot/requirements.txt .
 RUN source /var/venv/bin/activate && pip install -r requirements.txt && pip cache purge
 
-COPY . .
+COPY chatbot/ /opt/services/chatbot/
+COPY similarity/ /opt/services/similarity/
 
 CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", \
      "--host", "0.0.0.0", "--port", "5000", \

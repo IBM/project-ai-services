@@ -6,7 +6,7 @@ CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGIST
 CONTAINER_BUILDER?=podman
 
 build:
-	$(CONTAINER_BUILDER) build $(CREDS_ARG) -t $(REGISTRY)/$(IMAGE):$(TAG) .
+	$(CONTAINER_BUILDER) build $(CREDS_ARG) -f Containerfile -t $(REGISTRY)/$(IMAGE):$(TAG) ..
 .PHONY: build
 
 push:

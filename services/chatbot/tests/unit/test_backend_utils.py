@@ -7,6 +7,107 @@ from unittest.mock import Mock, patch
 
 
 @pytest.mark.unit
+class TestSearchOnly:
+    """Tests for search_only function delegating to perform_similarity_search"""
+
+    def _patch_settings(self, monkeypatch, threshold=0.5):
+        mock_settings = Mock()
+        mock_settings.chatbot.score_threshold = threshold
+        monkeypatch.setattr("chatbot.backend_utils.settings", mock_settings)
+
+    def test_delegates_to_perform_similarity_search_with_hybrid_rerank(self, monkeypatch):
+        """search_only must call perform_similarity_search with mode='hybrid', rerank=True, return_timings=True."""
+        from chatbot import backend_utils
+
+        self._patch_settings(monkeypatch, threshold=0.0)
+
+        mock_perform = Mock(return_value=([], [], "relevance", {"retrieve_time": 0.1, "rerank_time": 0.2}))
+        monkeypatch.setattr("chatbot.backend_utils.perform_similarity_search", mock_perform)
+
+        backend_utils.search_only(
+            question="q",
+            emb_model="m",
+            emb_endpoint="http://emb",
+            max_tokens=512,
+            reranker_model="r",
+            reranker_endpoint="http://rerank",
+            top_k=10,
+            top_r=5,
+            vectorstore=Mock(),
+        )
+
+        kwargs = mock_perform.call_args.kwargs
+        assert kwargs["mode"] == "hybrid"
+        assert kwargs["rerank"] is True
+        assert kwargs["return_timings"] is True
+        assert kwargs["top_k"] == 10
+        assert kwargs["emb_max_model_len"] == 512
+
+    def test_returns_perf_stat_dict_from_shared_function(self, monkeypatch):
+        """search_only must propagate the perf_stat_dict from perform_similarity_search."""
+        from chatbot import backend_utils
+
+        self._patch_settings(monkeypatch, threshold=0.0)
+
+        perf = {"retrieve_time": 0.15, "rerank_time": 0.12}
+        doc = {"page_content": "x", "filename": "f", "type": "text", "source": "f", "chunk_id": "1"}
+        mock_perform = Mock(return_value=([doc], [0.9], "relevance", perf))
+        monkeypatch.setattr("chatbot.backend_utils.perform_similarity_search", mock_perform)
+
+        _, perf_stat_dict = backend_utils.search_only(
+            question="q", emb_model="m", emb_endpoint="http://emb", max_tokens=512,
+            reranker_model="r", reranker_endpoint="http://rerank",
+            top_k=10, top_r=5, vectorstore=Mock(),
+        )
+
+        assert perf_stat_dict == perf
+
+    def test_applies_top_r_cutoff(self, monkeypatch):
+        """search_only must truncate to top_r documents after retrieval."""
+        from chatbot import backend_utils
+
+        self._patch_settings(monkeypatch, threshold=0.0)
+
+        docs = [{"page_content": str(i), "filename": "f", "type": "text",
+                 "source": "f", "chunk_id": str(i)} for i in range(10)]
+        scores = [0.9 - 0.05 * i for i in range(10)]
+        mock_perform = Mock(return_value=(docs, scores, "relevance", {}))
+        monkeypatch.setattr("chatbot.backend_utils.perform_similarity_search", mock_perform)
+
+        filtered_docs, _ = backend_utils.search_only(
+            question="q", emb_model="m", emb_endpoint="http://emb", max_tokens=512,
+            reranker_model="r", reranker_endpoint="http://rerank",
+            top_k=10, top_r=3, vectorstore=Mock(),
+        )
+
+        assert len(filtered_docs) == 3
+        assert filtered_docs == docs[:3]
+
+    def test_filters_by_score_threshold(self, monkeypatch):
+        """search_only must drop documents whose score is below settings.chatbot.score_threshold."""
+        from chatbot import backend_utils
+
+        self._patch_settings(monkeypatch, threshold=0.5)
+
+        docs = [
+            {"page_content": "keep", "filename": "f", "type": "text", "source": "f", "chunk_id": "1"},
+            {"page_content": "drop", "filename": "f", "type": "text", "source": "f", "chunk_id": "2"},
+        ]
+        scores = [0.8, 0.3]
+        mock_perform = Mock(return_value=(docs, scores, "relevance", {}))
+        monkeypatch.setattr("chatbot.backend_utils.perform_similarity_search", mock_perform)
+
+        filtered_docs, _ = backend_utils.search_only(
+            question="q", emb_model="m", emb_endpoint="http://emb", max_tokens=512,
+            reranker_model="r", reranker_endpoint="http://rerank",
+            top_k=10, top_r=10, vectorstore=Mock(),
+        )
+
+        assert len(filtered_docs) == 1
+        assert filtered_docs[0]["page_content"] == "keep"
+
+
+@pytest.mark.unit
 class TestValidateQueryLength:
     """Tests for validate_query_length function"""
     

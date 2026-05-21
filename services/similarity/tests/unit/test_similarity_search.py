@@ -217,6 +217,94 @@ class TestRequestValidation:
         assert top_k_passed == settings.similarity.num_chunks_post_search
 
 
+class TestReturnTimings:
+    """Tests for the return_timings option on perform_similarity_search"""
+
+    def test_default_returns_three_tuple(self):
+        """Without return_timings, the function returns (docs, scores, score_type)."""
+        from similarity.similarity_utils import perform_similarity_search
+
+        with patch("similarity.similarity_utils.retrieve_documents") as mock_retrieve, \
+             patch("similarity.similarity_utils.rerank_documents") as mock_rerank:
+            mock_retrieve.return_value = (
+                [{"page_content": "x", "filename": "f", "type": "text",
+                  "source": "f", "chunk_id": "1"}],
+                [0.5],
+            )
+
+            result = perform_similarity_search(
+                query="q",
+                emb_model="m",
+                emb_endpoint="http://emb",
+                emb_max_model_len=512,
+                vectorstore=Mock(),
+                top_k=5,
+                rerank=False,
+                mode="dense",
+            )
+
+            assert len(result) == 3
+            assert mock_rerank.call_count == 0
+
+    def test_return_timings_includes_retrieve_time(self):
+        """With return_timings=True, perf dict includes retrieve_time."""
+        from similarity.similarity_utils import perform_similarity_search
+
+        with patch("similarity.similarity_utils.retrieve_documents") as mock_retrieve:
+            mock_retrieve.return_value = (
+                [{"page_content": "x", "filename": "f", "type": "text",
+                  "source": "f", "chunk_id": "1"}],
+                [0.5],
+            )
+
+            docs, scores, score_type, perf = perform_similarity_search(
+                query="q",
+                emb_model="m",
+                emb_endpoint="http://emb",
+                emb_max_model_len=512,
+                vectorstore=Mock(),
+                top_k=5,
+                rerank=False,
+                mode="dense",
+                return_timings=True,
+            )
+
+            assert "retrieve_time" in perf
+            assert perf["retrieve_time"] >= 0
+            assert "rerank_time" not in perf
+            assert score_type == "cosine"
+
+    def test_return_timings_includes_rerank_time_when_reranked(self):
+        """With rerank=True and return_timings=True, perf dict includes both timings."""
+        from similarity.similarity_utils import perform_similarity_search
+
+        with patch("similarity.similarity_utils.retrieve_documents") as mock_retrieve, \
+             patch("similarity.similarity_utils.rerank_documents") as mock_rerank:
+            doc = {"page_content": "x", "filename": "f", "type": "text",
+                   "source": "f", "chunk_id": "1"}
+            mock_retrieve.return_value = ([doc], [0.5])
+            mock_rerank.return_value = [(doc, 0.95)]
+
+            docs, scores, score_type, perf = perform_similarity_search(
+                query="q",
+                emb_model="m",
+                emb_endpoint="http://emb",
+                emb_max_model_len=512,
+                vectorstore=Mock(),
+                top_k=5,
+                rerank=True,
+                mode="hybrid",
+                reranker_model="r",
+                reranker_endpoint="http://rerank",
+                return_timings=True,
+            )
+
+            assert "retrieve_time" in perf
+            assert "rerank_time" in perf
+            assert score_type == "relevance"
+            assert scores == [0.95]
+
+
 class TestConfig:
     """Tests for startup-time config validation"""
 
