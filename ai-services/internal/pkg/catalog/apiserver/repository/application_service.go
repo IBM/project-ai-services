@@ -15,8 +15,11 @@ import (
 
 // ApplicationService provides business logic for application operations.
 type ApplicationService struct {
-	appRepo  dbrepo.ApplicationRepository
-	provider *catalog.CatalogProvider
+	appRepo       dbrepo.ApplicationRepository
+	serviceRepo   dbrepo.ServiceRepository
+	depRepo       dbrepo.ServiceDependencyRepository
+	componentRepo dbrepo.ComponentRepository
+	provider      *catalog.CatalogProvider
 }
 
 // response type for response
@@ -27,10 +30,19 @@ type DeleteApplicationResponse struct {
 }
 
 // NewApplicationService creates a new application service.
-func NewApplicationService(appRepo dbrepo.ApplicationRepository, provider *catalog.CatalogProvider) *ApplicationService {
+func NewApplicationService(
+	appRepo dbrepo.ApplicationRepository,
+	serviceRepo dbrepo.ServiceRepository,
+	depRepo dbrepo.ServiceDependencyRepository,
+	componentRepo dbrepo.ComponentRepository,
+	provider *catalog.CatalogProvider,
+) *ApplicationService {
 	return &ApplicationService{
-		appRepo:  appRepo,
-		provider: provider,
+		appRepo:       appRepo,
+		serviceRepo:   serviceRepo,
+		depRepo:       depRepo,
+		componentRepo: componentRepo,
+		provider:      provider,
 	}
 }
 
@@ -213,18 +225,87 @@ func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID
 		return nil, err
 	}
 
-	go s.performDeletion(context.Background(), id, app.Services)
+	for _, svc := range app.Services {
+		if err := s.serviceRepo.UpdateStatus(ctx, svc.ID, models.ApplicationStatusDeleting); err != nil {
+			return nil, fmt.Errorf("failed to set service %s to deleting: %w", svc.ID, err)
+		}
+	}
+
+	go s.performDeletion(context.Background(), id, app.Services, skipCleanup)
 
 	return &DeleteApplicationResponse{
 		ID:      id.String(),
-		Status:  string(models.ApplicationStatusDeleting),
+		Status:  "deleting",
 		Message: "Deletion initiated successfully",
 	}, nil
 }
 
-// performDeletion helper method for DeleteApplication
-func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUID, services []models.Service) {
-	if err := s.appRepo.Delete(ctx, appID); err != nil {
-		s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, fmt.Sprintf("failed to delete app: %s", err))
+// performDeletion carries out the async cascade deletion for an application
+// collect component IDs referenced by this app's services
+// identify which components become orphaned
+// delete the application CASCADE removes services + service_dependencies
+// delete orphaned components
+// TODO: teardown pods/containers once Create flow is ready skipCleanup flag
+func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, skipCleanup bool) {
+	// Step 1: collect component IDs and service IDs being deleted
+	serviceIDs := make(map[uuid.UUID]bool, len(services))
+	componentCandidates := make(map[uuid.UUID]bool)
+
+	for _, svc := range services {
+		serviceIDs[svc.ID] = true
+
+		deps, err := s.depRepo.GetDependenciesByServiceID(ctx, svc.ID)
+		if err != nil {
+			s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError,
+				fmt.Sprintf("failed to get dependencies for service %s: %s", svc.ID, err))
+			return
+		}
+
+		for _, dep := range deps {
+			if dep.DependencyType == models.DependencyTypeComponent {
+				componentCandidates[dep.DependencyID] = true
+			}
+		}
 	}
+
+	var orphanedComponents []uuid.UUID
+
+	for componentID := range componentCandidates {
+		consumers, err := s.depRepo.GetServicesByDependency(ctx, componentID, models.DependencyTypeComponent)
+		if err != nil {
+			s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError,
+				fmt.Sprintf("failed to check consumers of component %s: %s", componentID, err))
+			return
+		}
+
+		onlyUsedByThisApp := true
+		for _, consumerID := range consumers {
+			if !serviceIDs[consumerID] {
+				onlyUsedByThisApp = false
+				break
+			}
+		}
+
+		if onlyUsedByThisApp {
+			orphanedComponents = append(orphanedComponents, componentID)
+		}
+	}
+
+	if err := s.appRepo.Delete(ctx, appID); err != nil {
+		s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError,
+			fmt.Sprintf("failed to delete application: %s", err))
+		return
+	}
+
+	for _, componentID := range orphanedComponents {
+		if err := s.componentRepo.Delete(ctx, componentID); err != nil {
+			fmt.Printf("warning: failed to delete orphaned component %s: %s\n", componentID, err)
+		}
+	}
+
+	// TODO: teardown pods/containers, skipCleanup flag
+	// Deferred until Create Application flow is ready
+	// if !skipCleanup {
+	// 	 s.teardownPods(ctx, appID, services)
+	// }
 }
