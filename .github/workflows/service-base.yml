@@ -1,8 +1,14 @@
-name: Spyre RAG
+name: Service Base
 on:
   push:
     paths:
-      - 'spyre-rag/src/**'
+      - 'images/service-base/**'
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'images/service-base/**'
+      - .github/workflows/service-base.yml
     branches:
       - main
 
@@ -13,19 +19,19 @@ env:
 jobs:
   build-publish-image:
     name: Build and Publish Image
-    runs-on: ubuntu-24.04-ppc64le
+    runs-on: ubuntu-24.04-ppc64le-p10
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-      
-      - name: Build spyre-rag image
-        working-directory: spyre-rag/src
-        run: |
-          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
 
-      - name: Publish spyre-rag image
-        working-directory: spyre-rag/src
+      - name: Build service-base image
+        working-directory: images/service-base
+        run: |
+          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
+
+      - name: Publish service-base image
+        working-directory: images/service-base
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
@@ -33,8 +39,5 @@ jobs:
   scan:
     uses: ./.github/workflows/scanner.yml
     with:
-      path: 'spyre-rag/src'
-      image: 'rag'
-    secrets:
-      ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
-      ICR_APIKEY: ${{ secrets.ICR_APIKEY }}
+      path: 'images/service-base'
+      image: 'service-base'
