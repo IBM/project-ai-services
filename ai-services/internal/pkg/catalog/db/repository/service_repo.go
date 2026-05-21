@@ -22,6 +22,8 @@ type ServiceRepository interface {
 	GetByAppID(ctx context.Context, appID uuid.UUID) ([]models.Service, error)
 	// Update updates a service in the database.
 	Update(ctx context.Context, service *models.Service) error
+	// UpdateStatus updates the status of a service by ID.
+	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ApplicationStatus) error
 }
 
 // serviceRepo implements ServiceRepository using pgx.
@@ -185,6 +187,22 @@ func (r *serviceRepo) Update(ctx context.Context, service *models.Service) error
 		}
 
 		return fmt.Errorf("failed to update service: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateStatus updates the status of a service by ID.
+func (r *serviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status models.ApplicationStatus) error {
+	query := `UPDATE services SET status=$2, updated_at=NOW() WHERE id=$1`
+
+	result, err := r.pool.Exec(ctx, query, id, status)
+	if err != nil {
+		return fmt.Errorf("failed to update service status: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return pgx.ErrNoRows
 	}
 
 	return nil
