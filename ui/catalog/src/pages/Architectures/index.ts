@@ -1,3 +1,3 @@
-export { default } from './Architectures';
+export { default } from "./Architectures";
 
 // Made with Bob

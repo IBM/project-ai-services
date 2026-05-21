@@ -5,6 +5,12 @@ import CatalogBrowseLayout from "@/layouts/CatalogBrowseLayout";
 const Services = () => {
   const [searchValue, setSearchValue] = useState("");
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
+<<<<<<< HEAD
+=======
+  const [selectedArchitectures, setSelectedArchitectures] = useState<string[]>(
+    [],
+  );
+>>>>>>> 9cded35 (main merge)
 
   const handleProviderChange = (checked: boolean, value: string) => {
     setSelectedProviders((prev) =>
