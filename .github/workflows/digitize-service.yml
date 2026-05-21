@@ -1,0 +1,27 @@
+name: Digitize Service
+
+on:
+  push:
+    paths:
+      - 'services/digitize/**'
+    branches:
+      - main
+
+jobs:
+  build-publish-image:
+    name: Build and Publish Image
+    uses: ./.github/workflows/build-and-publish-image.yml
+    with:
+      working-directory: 'services/digitize'
+    secrets: inherit
+
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      path: 'services/digitize'
+      image: 'digitize'
+    secrets:
+      ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
+      ICR_APIKEY: ${{ secrets.ICR_APIKEY }}
+
+# Made with Bob

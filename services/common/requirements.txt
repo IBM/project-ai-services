@@ -1,0 +1,2 @@
+# common-specific dependencies beyond python-base
+# All heavy deps (fastapi, opensearch-py, docling, etc.) live in images/python-base/requirements.txt
