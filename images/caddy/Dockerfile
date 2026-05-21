@@ -1,4 +1,4 @@
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
 RUN microdnf install -y ca-certificates libcap wget tar gzip && microdnf clean all
 
