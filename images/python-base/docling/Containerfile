@@ -1,4 +1,4 @@
-FROM registry.access.redhat.com/ubi9/ubi:9.7 AS build
+FROM registry.access.redhat.com/ubi9/ubi:9.8 AS build
 
 ARG package_version=2.60.1
 
