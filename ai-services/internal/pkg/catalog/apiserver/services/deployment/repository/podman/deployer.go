@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"regexp"
 	"strconv"
 	"strings"
@@ -266,30 +267,13 @@ func (d *PodmanDeployer) downloadModelsForDeployment(plan *DeploymentPlan) error
 	return nil
 }
 
-// deployComponents deploys all components (shared and service-specific) concurrently.
+// deployComponents deploys all components concurrently.
+// All components are treated as shared and deployed together.
 func (d *PodmanDeployer) deployComponents(ctx context.Context, plan *DeploymentPlan, pool *SpyreCardPool) error {
-	// Separate shared components from service-specific ones
-	sharedComponents := make(map[string]*ComponentPlan)
-	serviceSpecificComponents := make(map[string]*ComponentPlan)
-
-	for hash, comp := range plan.Components {
-		if len(comp.UsedByServices) > 1 {
-			sharedComponents[hash] = comp
-		} else {
-			serviceSpecificComponents[hash] = comp
-		}
-	}
-
-	// Deploy shared components first (concurrently)
-	logger.Infof("Deploying %d shared components concurrently...\n", len(sharedComponents))
-	if err := d.deployComponentsConcurrently(ctx, sharedComponents, pool, plan); err != nil {
-		return fmt.Errorf("failed to deploy shared components: %w", err)
-	}
-
-	// Deploy service-specific components (concurrently)
-	logger.Infof("Deploying %d service-specific components concurrently...\n", len(serviceSpecificComponents))
-	if err := d.deployComponentsConcurrently(ctx, serviceSpecificComponents, pool, plan); err != nil {
-		return fmt.Errorf("failed to deploy service-specific components: %w", err)
+	// Deploy all components concurrently
+	logger.Infof("Deploying %d components concurrently...\n", len(plan.Components))
+	if err := d.deployComponentsConcurrently(ctx, plan.Components, pool, plan); err != nil {
+		return fmt.Errorf("failed to deploy components: %w", err)
 	}
 
 	logger.Infof("All components deployed successfully\n")
@@ -366,6 +350,9 @@ func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp 
 	}
 
 	// After successful deployment, merge component endpoints into all services that use this component
+	logger.Infof("Component %s endpoints after deployment: %v\n", comp.ComponentType, comp.Endpoints)
+	logger.Infof("Component %s used by services: %v\n", comp.ComponentType, comp.UsedByServices)
+
 	if len(comp.Endpoints) > 0 {
 		// Use mutex to protect concurrent writes to service Values maps
 		mu.Lock()
@@ -373,16 +360,40 @@ func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp 
 
 		for _, serviceID := range comp.UsedByServices {
 			if svc, ok := plan.Services[serviceID]; ok {
+				logger.Infof("Service %s Values before merge: %v\n", serviceID, svc.Values)
 				if svc.Values == nil {
 					svc.Values = make(map[string]interface{})
 				}
 				// Merge component endpoints under the component type key
 				if endpointData, ok := comp.Endpoints[comp.ComponentType]; ok {
-					svc.Values[comp.ComponentType] = endpointData
-					logger.Infof("Merged component %s endpoints into service %s values: %v\n", comp.ComponentType, serviceID, endpointData)
+					// Check if the component type key already exists in service Values
+					if existingData, exists := svc.Values[comp.ComponentType]; exists {
+						// If key is present and is a map, update host and port values
+						if existingMap, isMap := existingData.(map[string]any); isMap {
+							if endpointMap, isEndpointMap := endpointData.(map[string]any); isEndpointMap {
+								// Update host and port in the existing map (preserving model, image, apiKey, etc.)
+								maps.Copy(existingMap, endpointMap)
+								logger.Infof("Updated component %s host/port in service %s\n", comp.ComponentType, serviceID)
+							}
+						} else {
+							// If not a map, replace it
+							svc.Values[comp.ComponentType] = endpointData
+						}
+					} else {
+						// If key doesn't exist, create it
+						svc.Values[comp.ComponentType] = endpointData
+						logger.Infof("Created component %s in service %s: %v\n", comp.ComponentType, serviceID, endpointData)
+					}
+				} else {
+					logger.Errorf("Component %s endpoint data not found in comp.Endpoints map\n", comp.ComponentType)
 				}
+				logger.Infof("Service %s Values after merge: %v\n", serviceID, svc.Values)
+			} else {
+				logger.Errorf("Service %s not found in plan.Services\n", serviceID)
 			}
 		}
+	} else {
+		logger.Infof("Component %s has no endpoints to merge\n", comp.ComponentType)
 	}
 
 	logger.Infof("Component %s deployed successfully\n", comp.ComponentType)
@@ -574,6 +585,7 @@ func (d *PodmanDeployer) deployServicePods(
 ) error {
 	// Use the values already loaded in the service plan
 	values := svc.Values
+	logger.Infof("Service %s Values before template rendering: %v\n", svc.CatalogID, values)
 
 	// If PodTemplateExecutions is defined, use it for ordered deployment
 	if len(metadata.PodTemplateExecutions) > 0 {
