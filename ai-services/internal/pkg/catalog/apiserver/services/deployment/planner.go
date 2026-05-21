@@ -206,7 +206,7 @@ func (p *DeploymentPlanner) processComponentFromParsed(
 func (p *DeploymentPlanner) calculateComponentHash(
 	componentType string,
 	providerID string,
-	params map[string]interface{},
+	params map[string]any,
 ) string {
 	// Create a deterministic string representation
 	hashInput := fmt.Sprintf("%s:%s:", componentType, providerID)

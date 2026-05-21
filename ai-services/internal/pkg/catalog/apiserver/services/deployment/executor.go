@@ -61,6 +61,22 @@ func (e *DeploymentExecutor) Execute(
 	return plan, nil
 }
 
+// ExecuteWithPlan executes deployment using an existing plan.
+// This is used when the plan has already been created and database records inserted.
+func (e *DeploymentExecutor) ExecuteWithPlan(
+	ctx context.Context,
+	plan *DeploymentPlan,
+	req apimodels.CreateApplicationRequest,
+	runtimeType types.RuntimeType,
+) error {
+	// Execute deployment based on runtime type using the provided plan
+	if err := e.executeDeployment(ctx, plan, req, runtimeType); err != nil {
+		return fmt.Errorf("failed to execute deployment: %w", err)
+	}
+
+	return nil
+}
+
 // executeDeployment executes the deployment plan using the appropriate runtime deployer.
 func (e *DeploymentExecutor) executeDeployment(
 	ctx context.Context,

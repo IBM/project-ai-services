@@ -114,10 +114,10 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	logger.Infof("Starting deployment execution for application '%s'\n", plan.ApplicationName)
 
 	// Step 0: Pull container images for all components and services
-	if err := d.pullImagesForDeployment(plan); err != nil {
-		d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Image pull failed: %v", err))
-		return fmt.Errorf("failed to pull container images: %w", err)
-	}
+	// if err := d.pullImagesForDeployment(plan); err != nil {
+	// 	d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Image pull failed: %v", err))
+	// 	return fmt.Errorf("failed to pull container images: %w", err)
+	// }
 
 	// Step 1: Download models specified in parameters
 	if err := d.downloadModelsForDeployment(plan); err != nil {
@@ -131,6 +131,8 @@ func (d *PodmanDeployer) ExecuteDeployment(
 		d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Spyre card allocation failed: %v", err))
 		return fmt.Errorf("failed to allocate Spyre cards: %w", err)
 	}
+
+	fmt.Println("Print ApplicationID: ", plan.ApplicationID)
 
 	// Update application status to Deploying before starting component deployment
 	if err := d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusDeploying, "Starting component and service deployment"); err != nil {
@@ -264,7 +266,7 @@ func (d *PodmanDeployer) downloadModelsForDeployment(plan *DeploymentPlan) error
 	return nil
 }
 
-// deployComponents deploys all components (shared and service-specific).
+// deployComponents deploys all components (shared and service-specific) concurrently.
 func (d *PodmanDeployer) deployComponents(ctx context.Context, plan *DeploymentPlan, pool *SpyreCardPool) error {
 	// Separate shared components from service-specific ones
 	sharedComponents := make(map[string]*ComponentPlan)
@@ -278,26 +280,62 @@ func (d *PodmanDeployer) deployComponents(ctx context.Context, plan *DeploymentP
 		}
 	}
 
-	logger.Infof("Deploying %d shared components...\n", len(sharedComponents))
-	for hash, comp := range sharedComponents {
-		if err := d.deployComponent(ctx, hash, comp, pool); err != nil {
-			return fmt.Errorf("failed to deploy shared component %s: %w", hash, err)
-		}
+	// Deploy shared components first (concurrently)
+	logger.Infof("Deploying %d shared components concurrently...\n", len(sharedComponents))
+	if err := d.deployComponentsConcurrently(ctx, sharedComponents, pool, plan); err != nil {
+		return fmt.Errorf("failed to deploy shared components: %w", err)
 	}
 
-	logger.Infof("Deploying %d service-specific components...\n", len(serviceSpecificComponents))
-	for hash, comp := range serviceSpecificComponents {
-		if err := d.deployComponent(ctx, hash, comp, pool); err != nil {
-			return fmt.Errorf("failed to deploy service-specific component %s: %w", hash, err)
-		}
+	// Deploy service-specific components (concurrently)
+	logger.Infof("Deploying %d service-specific components concurrently...\n", len(serviceSpecificComponents))
+	if err := d.deployComponentsConcurrently(ctx, serviceSpecificComponents, pool, plan); err != nil {
+		return fmt.Errorf("failed to deploy service-specific components: %w", err)
 	}
 
 	logger.Infof("All components deployed successfully\n")
 	return nil
 }
 
+// deployComponentsConcurrently deploys multiple components concurrently using goroutines.
+func (d *PodmanDeployer) deployComponentsConcurrently(ctx context.Context, components map[string]*ComponentPlan, pool *SpyreCardPool, plan *DeploymentPlan) error {
+	if len(components) == 0 {
+		return nil
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex // Mutex to protect concurrent writes to service Values maps
+	errChan := make(chan error, len(components))
+
+	for hash, comp := range components {
+		wg.Add(1)
+		go func(h string, c *ComponentPlan) {
+			defer wg.Done()
+			if err := d.deployComponent(ctx, h, c, pool, plan, &mu); err != nil {
+				errChan <- fmt.Errorf("failed to deploy component %s: %w", h, err)
+			}
+		}(hash, comp)
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+	close(errChan)
+
+	// Check for any errors
+	var errs []error
+	for err := range errChan {
+		errs = append(errs, err)
+	}
+
+	if len(errs) > 0 {
+		// Return the first error (could be enhanced to return all errors)
+		return errs[0]
+	}
+
+	return nil
+}
+
 // deployComponent deploys a single component and updates its endpoint in the database.
-func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp *ComponentPlan, pool *SpyreCardPool) error {
+func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp *ComponentPlan, pool *SpyreCardPool, plan *DeploymentPlan, mu *sync.Mutex) error {
 	logger.Infof("Deploying component %s (%s/%s)...\n", comp.ComponentType, comp.ProviderID, hash)
 
 	// Load component from catalog
@@ -327,11 +365,31 @@ func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp 
 		return fmt.Errorf("failed to deploy component pods: %w", err)
 	}
 
+	// After successful deployment, merge component endpoints into all services that use this component
+	if len(comp.Endpoints) > 0 {
+		// Use mutex to protect concurrent writes to service Values maps
+		mu.Lock()
+		defer mu.Unlock()
+
+		for _, serviceID := range comp.UsedByServices {
+			if svc, ok := plan.Services[serviceID]; ok {
+				if svc.Values == nil {
+					svc.Values = make(map[string]interface{})
+				}
+				// Merge component endpoints under the component type key
+				if endpointData, ok := comp.Endpoints[comp.ComponentType]; ok {
+					svc.Values[comp.ComponentType] = endpointData
+					logger.Infof("Merged component %s endpoints into service %s values: %v\n", comp.ComponentType, serviceID, endpointData)
+				}
+			}
+		}
+	}
+
 	logger.Infof("Component %s deployed successfully\n", comp.ComponentType)
 	return nil
 }
 
-// deployComponentPods deploys all pods for a component.
+// deployComponentPods deploys all pods for a component and extracts endpoint information.
 func (d *PodmanDeployer) deployComponentPods(
 	comp *ComponentPlan,
 	metadata *templates.AppMetadata,
@@ -343,11 +401,14 @@ func (d *PodmanDeployer) deployComponentPods(
 	// If Values is not set, fall back to ArgParams for backward compatibility
 	values := comp.Values
 	if values == nil {
-		values = make(map[string]interface{})
+		values = make(map[string]any)
 		for k, v := range comp.ArgParams {
 			values[k] = v
 		}
 	}
+
+	// Initialize component endpoints map to store extracted endpoint info
+	componentEndpoints := make(map[string]any)
 
 	// If PodTemplateExecutions is defined, use it for ordered deployment
 	if len(metadata.PodTemplateExecutions) > 0 {
@@ -355,13 +416,16 @@ func (d *PodmanDeployer) deployComponentPods(
 		for _, layer := range metadata.PodTemplateExecutions {
 			for _, podTemplateName := range layer {
 				// Prepare initialParams for the template
-				initialParams := map[string]interface{}{
+				initialParams := map[string]any{
 					"AppSlug":    generateAppSlug(comp.DatabaseID.String()),
 					"TemplateID": comp.DatabaseID,
+					"BaseDir":    utils.GetBaseDir(),
+					"Values":     values,
 					"env":        map[string]map[string]string{},
 				}
 
-				if err := d.deployComponentTemplate(podTemplateName, tmpls, pool, initialParams, nil, ""); err != nil {
+				// Pass componentEndpoints to collect endpoint info, use component type as ID
+				if err := d.deployComponentTemplate(podTemplateName, tmpls, pool, initialParams, componentEndpoints, comp.ComponentType); err != nil {
 					return fmt.Errorf("failed to deploy pod template %s: %w", podTemplateName, err)
 				}
 			}
@@ -374,13 +438,22 @@ func (d *PodmanDeployer) deployComponentPods(
 			initialParams := map[string]interface{}{
 				"AppSlug":    generateAppSlug(comp.DatabaseID.String()),
 				"TemplateID": comp.DatabaseID,
+				"BaseDir":    utils.GetBaseDir(),
+				"Values":     values,
 				"env":        map[string]map[string]string{},
 			}
 
-			if err := d.deployComponentTemplate(templateName, tmpls, pool, initialParams, nil, ""); err != nil {
+			// Pass componentEndpoints to collect endpoint info, use component type as ID
+			if err := d.deployComponentTemplate(templateName, tmpls, pool, initialParams, componentEndpoints, comp.ComponentType); err != nil {
 				return fmt.Errorf("failed to deploy pod template %s: %w", templateName, err)
 			}
 		}
+	}
+
+	// Store extracted endpoints in the component plan for use by services
+	if len(componentEndpoints) > 0 {
+		comp.Endpoints = componentEndpoints
+		logger.Infof("Component %s endpoints extracted: %v\n", comp.ComponentType, componentEndpoints)
 	}
 
 	return nil
@@ -511,6 +584,7 @@ func (d *PodmanDeployer) deployServicePods(
 				initialParams := map[string]any{
 					"AppSlug":    generateAppSlug(applicationID.String()),
 					"TemplateID": svc.DatabaseID,
+					"BaseDir":    utils.GetBaseDir(),
 					"Values":     values,
 					"env":        map[string]map[string]string{},
 				}
@@ -800,11 +874,6 @@ func (d *PodmanDeployer) calculateAndAllocateSpyreCards(
 
 	// Calculate total required Spyre cards from all components
 	for _, comp := range plan.Components {
-		// Component endpoints are already populated during deployment
-		if comp.Endpoints == nil {
-			continue
-		}
-
 		required, err := d.getRequiredSpyreCardsForComponent(comp)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get Spyre card requirements for component %s: %w", comp.ComponentType, err)

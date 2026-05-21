@@ -325,8 +325,8 @@ func (s *ApplicationService) executeDeploymentAsync(plan *deployment.DeploymentP
 	// Determine runtime type (currently only Podman is supported)
 	runtimeType := runtimeTypes.RuntimeTypePodman
 
-	// Execute deployment
-	_, err := s.deploymentExecutor.Execute(ctx, req, runtimeType)
+	// Execute deployment using the existing plan (don't recreate it)
+	err := s.deploymentExecutor.ExecuteWithPlan(ctx, plan, req, runtimeType)
 	if err != nil {
 		log.Printf("Deployment failed for application %s: %v", plan.ApplicationName, err)
 
