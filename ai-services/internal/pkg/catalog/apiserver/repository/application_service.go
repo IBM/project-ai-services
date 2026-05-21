@@ -235,7 +235,7 @@ func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID
 
 	return &DeleteApplicationResponse{
 		ID:      id.String(),
-		Status:  "deleting",
+		Status:  string(models.ApplicationStatusDeleting),
 		Message: "Deletion initiated successfully",
 	}, nil
 }
