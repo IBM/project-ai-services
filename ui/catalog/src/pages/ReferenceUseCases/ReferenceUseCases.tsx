@@ -402,8 +402,3 @@ const ReferenceUseCases = () => {
 };
 
 export default ReferenceUseCases;
-<<<<<<<< HEAD:ui/catalog/src/pages/ReferenceUseCases/ReferenceUseCases.tsx
-
-// Made with Bob
-========
->>>>>>>> 1daa335d (Rename solutions and use cases to reference use cases):catalog-ui/src/pages/ReferenceUseCases/ReferenceUseCases.tsx

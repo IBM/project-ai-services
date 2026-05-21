@@ -157,5 +157,3 @@ const Services = () => {
 };
 
 export default Services;
-
-// Made with Bob
