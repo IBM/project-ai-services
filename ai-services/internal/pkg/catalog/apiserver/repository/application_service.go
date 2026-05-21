@@ -4,15 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
 var (
@@ -23,18 +26,30 @@ var (
 // ApplicationService provides business logic for application operations.
 type ApplicationService struct {
 	appRepo               dbrepo.ApplicationRepository
-	serviceDependencyRepo dbrepo.ServiceDependencyRepository
+	serviceRepo           dbrepo.ServiceRepository
 	componentRepo         dbrepo.ComponentRepository
+	serviceDependencyRepo dbrepo.ServiceDependencyRepository
 	provider              *catalog.CatalogProvider
+	deploymentPlanner     *deployment.DeploymentPlanner
+	deploymentExecutor    *deployment.DeploymentExecutor
 }
 
 // NewApplicationService creates a new application service.
-func NewApplicationService(appRepo dbrepo.ApplicationRepository, serviceDependencyRepo dbrepo.ServiceDependencyRepository, componentRepo dbrepo.ComponentRepository, provider *catalog.CatalogProvider) *ApplicationService {
+func NewApplicationService(
+	appRepo dbrepo.ApplicationRepository,
+	serviceRepo dbrepo.ServiceRepository,
+	componentRepo dbrepo.ComponentRepository,
+	serviceDependencyRepo dbrepo.ServiceDependencyRepository,
+	provider *catalog.CatalogProvider,
+) *ApplicationService {
 	return &ApplicationService{
 		appRepo:               appRepo,
-		serviceDependencyRepo: serviceDependencyRepo,
+		serviceRepo:           serviceRepo,
 		componentRepo:         componentRepo,
+		serviceDependencyRepo: serviceDependencyRepo,
 		provider:              provider,
+		deploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo),
+		deploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo),
 	}
 }
 
@@ -225,9 +240,218 @@ func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID
 }
 
 // CreateApplication creates a new application with the given configuration.
+// It performs synchronous validation and planning, then spawns an async goroutine
+// for deployment execution, returning 202 Accepted immediately.
 func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest) (*apimodels.CreateApplicationResponse, error) {
-	// to be implemented
-	return nil, nil
+	// Phase 1: Validate request and check for duplicate application name
+	existingApp, err := s.appRepo.GetByName(ctx, req.Name)
+	if err == nil && existingApp != nil {
+		return nil, fmt.Errorf("application with name '%s' already exists", req.Name)
+	}
+
+	fmt.Println("Existing APP: ", existingApp)
+
+	// Phase 2: Create deployment plan (synchronous - fail fast if invalid)
+	// Use podman as default runtime type for planning
+	plan, err := s.deploymentPlanner.PlanDeployment(ctx, req, runtimeTypes.RuntimeTypePodman.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create deployment plan: %w", err)
+	}
+
+	fmt.Printf("Deployment Plan:\n")
+	fmt.Printf("  ApplicationID: %s\n", plan.ApplicationID)
+	fmt.Printf("  ApplicationName: %s\n", plan.ApplicationName)
+	fmt.Printf("  CatalogID: %s\n", plan.CatalogID)
+	fmt.Printf("  IsArchitecture: %v\n", plan.IsArchitecture)
+	fmt.Printf("  Components (%d):\n", len(plan.Components))
+	for hash, comp := range plan.Components {
+		fmt.Printf("    [%s] Type: %s, Provider: %s, UsedBy: %v\n",
+			hash[:8], comp.ComponentType, comp.ProviderID, comp.UsedByServices)
+		fmt.Printf("      ArgParams: %v\n", comp.ArgParams)
+	}
+	fmt.Printf("  Services (%d):\n", len(plan.Services))
+	for svcID, svc := range plan.Services {
+		fmt.Printf("    [%s] CatalogID: %s, Version: %s, DatabaseID: %s\n", svcID, svc.CatalogID, svc.Version, svc.DatabaseID)
+		fmt.Printf("      ComponentRefs (%d): %v\n", len(svc.ComponentRefs), svc.ComponentRefs)
+		for _, ref := range svc.ComponentRefs {
+			if comp, ok := plan.Components[ref]; ok {
+				fmt.Printf("        -> %s: %s/%s\n", ref[:8], comp.ComponentType, comp.ProviderID)
+				fmt.Printf("           Component Values: %v\n", comp.Values)
+			}
+		}
+		fmt.Printf("      ArgParams: %v\n", svc.ArgParams)
+		fmt.Printf("      Values: %v\n", svc.Values)
+	}
+
+	// Phase 3: Insert database records for application, services, components, and dependencies
+	if err := s.insertDeploymentRecords(ctx, plan); err != nil {
+		return nil, fmt.Errorf("failed to insert deployment records: %w", err)
+	}
+
+	// Phase 4: Spawn goroutine for async deployment execution with panic recovery
+	go s.executeDeploymentAsync(plan, req)
+
+	// Phase 5: Return 202 Accepted immediately with application ID
+	response := &apimodels.CreateApplicationResponse{
+		ID:      plan.ApplicationID.String(),
+		Status:  string(models.ApplicationStatusDeploying),
+		Message: "Application deployment initiated",
+	}
+
+	return response, nil
+}
+
+// executeDeploymentAsync executes the deployment in a background goroutine.
+// It updates the application status in the database based on deployment outcome.
+// Includes panic recovery to prevent crashes.
+func (s *ApplicationService) executeDeploymentAsync(plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest) {
+	// Defer panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Panic recovered in deployment goroutine for application %s: %v", plan.ApplicationName, r)
+
+			// Attempt to update application status to Error
+			ctx := context.Background()
+			errMsg := fmt.Sprintf("Deployment panic: %v", r)
+			if updateErr := s.updateApplicationStatus(ctx, plan.ApplicationID.String(), models.ApplicationStatusError, errMsg); updateErr != nil {
+				log.Printf("Failed to update application status after panic: %v", updateErr)
+			}
+		}
+	}()
+
+	// Create a new context for the async operation (not tied to the HTTP request context)
+	ctx := context.Background()
+
+	// Determine runtime type (currently only Podman is supported)
+	runtimeType := runtimeTypes.RuntimeTypePodman
+
+	// Execute deployment
+	_, err := s.deploymentExecutor.Execute(ctx, req, runtimeType)
+	if err != nil {
+		log.Printf("Deployment failed for application %s: %v", plan.ApplicationName, err)
+
+		// Update application status to Error
+		if updateErr := s.updateApplicationStatus(ctx, plan.ApplicationID.String(), models.ApplicationStatusError, err.Error()); updateErr != nil {
+			log.Printf("Failed to update application status to Error: %v", updateErr)
+		}
+		return
+	}
+
+	log.Printf("Deployment completed successfully for application %s", plan.ApplicationName)
+}
+
+// insertDeploymentRecords inserts all database records for the deployment plan.
+// This includes: application, services, components (new ones), and service dependencies.
+func (s *ApplicationService) insertDeploymentRecords(
+	ctx context.Context,
+	plan *deployment.DeploymentPlan,
+) error {
+	// 1. Insert application record
+	app := &models.Application{
+		ID:             plan.ApplicationID,
+		Name:           plan.ApplicationName,
+		CatalogID:      plan.CatalogID,
+		DeploymentType: s.getDeploymentType(plan.IsArchitecture),
+		Status:         models.ApplicationStatusDownloading,
+		Message:        "Deployment in progress",
+		CreatedBy:      "admin", // TODO: Get from auth context
+	}
+
+	if err := s.appRepo.Insert(ctx, app); err != nil {
+		return fmt.Errorf("failed to insert application: %w", err)
+	}
+
+	// 2. Insert component records (all components are new)
+	componentIDMap := make(map[string]uuid.UUID) // hash -> UUID
+	for hash, comp := range plan.Components {
+		// Generate new UUID for component
+		instanceUUID := uuid.New()
+
+		// Insert component into database
+		component := &models.Component{
+			ID:       instanceUUID,
+			Type:     comp.ComponentType,
+			Provider: comp.ProviderID,
+			Metadata: comp.Params,
+			// Endpoints will be populated during deployment
+		}
+
+		if err := s.componentRepo.Insert(ctx, component); err != nil {
+			return fmt.Errorf("failed to insert component %s: %w", hash, err)
+		}
+		componentIDMap[hash] = instanceUUID
+
+		// Store the generated component ID back in the plan for endpoint updates
+		comp.DatabaseID = instanceUUID
+	}
+
+	// 3. Insert service records and their dependencies
+	for serviceID, svc := range plan.Services {
+		// Insert service record
+		service := &models.Service{
+			ID:        uuid.Nil, // Will be generated by Insert
+			AppID:     plan.ApplicationID,
+			CatalogID: svc.CatalogID,
+			Status:    models.ApplicationStatusDownloading,
+			Version:   svc.Version,
+			// Endpoints will be populated during deployment
+		}
+
+		if err := s.serviceRepo.Insert(ctx, service); err != nil {
+			return fmt.Errorf("failed to insert service %s: %w", serviceID, err)
+		}
+
+		// Store the generated service ID back in the plan for status updates
+		svc.DatabaseID = service.ID
+
+		// 4. Insert service dependencies (links to components)
+		for _, compHash := range svc.ComponentRefs {
+			componentID, exists := componentIDMap[compHash]
+			if !exists {
+				return fmt.Errorf("component hash %s not found in component map", compHash)
+			}
+
+			dependency := &models.ServiceDependency{
+				ServiceID:      service.ID,
+				DependencyID:   componentID,
+				DependencyType: models.DependencyTypeComponent,
+			}
+
+			if err := s.serviceDependencyRepo.AddDependency(ctx, dependency); err != nil {
+				return fmt.Errorf("failed to add service dependency: %w", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// getDeploymentType determines the deployment type based on whether it's an architecture.
+func (s *ApplicationService) getDeploymentType(isArchitecture bool) models.DeploymentType {
+	if isArchitecture {
+		return models.DeploymentTypeArchitectures
+	}
+
+	return models.DeploymentTypeServices
+}
+
+// updateApplicationStatus updates the status and message of an application.
+func (s *ApplicationService) updateApplicationStatus(ctx context.Context, appID string, status models.ApplicationStatus, message string) error {
+	// Parse the application ID
+	appUUID, err := uuid.Parse(appID)
+	if err != nil {
+		log.Printf("Failed to parse application ID %s: %v", appID, err)
+		return fmt.Errorf("invalid application ID: %w", err)
+	}
+
+	// Update the application status in the database
+	if err := s.appRepo.UpdateStatus(ctx, appUUID, status, message); err != nil {
+		log.Printf("Failed to update application %s status in database: %v", appID, err)
+		return fmt.Errorf("failed to update application status: %w", err)
+	}
+
+	log.Printf("Application %s status updated: %s - %s", appID, status, message)
+	return nil
 }
 
 // GetApplicationByID retrieves application details by ID including all services and components.

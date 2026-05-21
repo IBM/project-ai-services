@@ -1,0 +1,106 @@
+package deployment
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+)
+
+// DeploymentExecutor orchestrates the complete deployment process.
+// It uses the DeploymentPlanner to create a plan and then executes it
+// using the appropriate runtime-specific deployer.
+type DeploymentExecutor struct {
+	planner         *DeploymentPlanner
+	catalogProvider *catalog.CatalogProvider
+	appRepo         repository.ApplicationRepository
+	serviceRepo     repository.ServiceRepository
+	componentRepo   repository.ComponentRepository
+}
+
+// NewDeploymentExecutor creates a new DeploymentExecutor instance.
+func NewDeploymentExecutor(
+	catalogProvider *catalog.CatalogProvider,
+	appRepo repository.ApplicationRepository,
+	serviceRepo repository.ServiceRepository,
+	componentRepo repository.ComponentRepository,
+) *DeploymentExecutor {
+	return &DeploymentExecutor{
+		planner:         NewDeploymentPlanner(catalogProvider, componentRepo),
+		catalogProvider: catalogProvider,
+		appRepo:         appRepo,
+		serviceRepo:     serviceRepo,
+		componentRepo:   componentRepo,
+	}
+}
+
+// Execute performs the complete deployment workflow:
+// 1. Plans the deployment (Phase 1-3)
+// 2. Executes the deployment (Phase 4)
+func (e *DeploymentExecutor) Execute(
+	ctx context.Context,
+	req apimodels.CreateApplicationRequest,
+	runtimeType types.RuntimeType,
+) (*DeploymentPlan, error) {
+	// Phase 1-3: Create deployment plan with runtime type for dynamic path generation
+	plan, err := e.planner.PlanDeployment(ctx, req, runtimeType.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create deployment plan: %w", err)
+	}
+
+	// Phase 4: Execute deployment based on runtime type
+	if err := e.executeDeployment(ctx, plan, req, runtimeType); err != nil {
+		return nil, fmt.Errorf("failed to execute deployment: %w", err)
+	}
+
+	return plan, nil
+}
+
+// executeDeployment executes the deployment plan using the appropriate runtime deployer.
+func (e *DeploymentExecutor) executeDeployment(
+	ctx context.Context,
+	plan *DeploymentPlan,
+	req apimodels.CreateApplicationRequest,
+	runtimeType types.RuntimeType,
+) error {
+	switch runtimeType {
+	case types.RuntimeTypePodman:
+		return e.executePodmanDeployment(ctx, plan, req)
+	case types.RuntimeTypeOpenShift:
+		return fmt.Errorf("OpenShift deployment not yet implemented")
+	default:
+		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
+	}
+}
+
+// executePodmanDeployment executes deployment for Podman runtime.
+func (e *DeploymentExecutor) executePodmanDeployment(
+	ctx context.Context,
+	plan *DeploymentPlan,
+	req apimodels.CreateApplicationRequest,
+) error {
+	// Initialize Podman runtime client
+	rt, err := podmanRuntime.NewPodmanClient()
+	if err != nil {
+		return fmt.Errorf("failed to initialize Podman runtime: %w", err)
+	}
+
+	// Create podman deployer directly
+	deployer := podman.NewPodmanDeployer(
+		rt,
+		e.catalogProvider,
+		e.appRepo,
+		e.serviceRepo,
+		e.componentRepo,
+	)
+
+	// Execute deployment
+	return deployer.ExecuteDeployment(ctx, plan, req)
+}
+
+// Made with Bob
