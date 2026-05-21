@@ -15,7 +15,7 @@ spec:
       image: "{{ .Values.digitize.image }}"
       command:
         - "/var/venv/bin/python"
-        - "/opt/rag/digitize/db/scripts/init_db.py"
+        - "db/scripts/init_db.py"
       env:
         - name: POSTGRES_HOST
           value: "{{ .AppName }}--postgres"
