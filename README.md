@@ -83,8 +83,40 @@ project-ai-services/
 ├── README.md          # Project documentation
 ├── ai-services/       # CLI tool for project-ai-services
 │   ├── assets/        # Application template files
-├── images/            # Helper/Utility image assets
-├── spyre-rag/         # Spyre RAG implementation
+├── images/            # Container base images
+│   └── python-base/   # Python base image for services
+├── services/          # Microservices (backend)
+│   ├── common/        # Shared library layer
+│   ├── chatbot/       # RAG chatbot service
+│   ├── digitize/      # Document ingestion service
+│   ├── summarize/     # Summarization service
+│   └── similarity/    # Similarity search service
+├── ui/                # Frontend applications
+│   ├── chatbot/       # Chatbot UI
+│   ├── digitize/      # Digitize UI
+│   └── catalog/       # Catalog UI
 ├── test/              # Test assets
-│   ├── golden/        # Golden dataset
+│   └── golden/        # Golden dataset
+└── docs/              # Documentation
+    └── proposals/     # Architecture proposals
 ```
+
+### Service Architecture
+
+The repository follows a microservices architecture with:
+
+- **Layered Container Images**: `python-base` → `services-common` → individual services
+- **Independent Services**: Each service has its own Containerfile, Makefile, and versioning
+- **Shared Common Layer**: Common utilities and dependencies in `services/common/`
+- **Clean Boundaries**: No cross-service dependencies, all shared code in common layer
+
+**Service Images:**
+- `chatbot-service` - RAG chatbot backend
+- `digitize-service` - Document ingestion and processing
+- `summarize-service` - Text summarization
+- `similarity-service` - Semantic similarity search
+
+**UI Images:**
+- `chatbot-ui` - Chatbot web interface
+- `digitize-ui` - Document upload interface
+- `catalog-ui` - Service catalog interface

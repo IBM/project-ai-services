@@ -18,7 +18,7 @@ RUN set -eux; \
 	go build -trimpath -ldflags='-s -w -buildid=' -o /out/gosu ./; \
 	/out/gosu --version
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 

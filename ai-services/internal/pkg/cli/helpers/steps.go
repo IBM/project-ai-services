@@ -31,6 +31,29 @@ func PrintNextSteps(tp templates.Template, runtime runtime.Runtime, app, appTemp
 	return nil
 }
 
+// PrintNextStepsWithProxy prints next steps with proxy route information.
+func PrintNextStepsWithProxy(tp templates.Template, runtime runtime.Runtime, app, appTemplate string, routeDomains map[string]string, httpsPort string) error {
+	params := map[string]string{"AppName": app}
+
+	// Add route domains to params
+	for key, value := range routeDomains {
+		params[key] = value
+	}
+
+	// Add HTTPS port to params if provided
+	if httpsPort != "" {
+		params["HTTPS_PORT"] = httpsPort
+	}
+
+	if err := renderStepsMarkdown(tp, runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
+		logger.Infof("Unable to load steps: %v\n", err)
+
+		return nil
+	}
+
+	return nil
+}
+
 func PrintInfo(tp templates.Template, runtime runtime.Runtime, app, appTemplate string) error {
 	params := map[string]string{"AppName": app}
 	if err := renderStepsMarkdown(tp, runtime, appTemplate, params, infoMDFile, infoTitle); err != nil {

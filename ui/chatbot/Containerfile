@@ -1,0 +1,21 @@
+FROM registry.access.redhat.com/ubi9/nodejs-22 AS build
+
+# Switch to the non-root user
+USER 1001
+WORKDIR /app
+COPY --chown=1001:0 package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+FROM registry.access.redhat.com/ubi9/nginx-126:9.8
+
+COPY nginx.conf.tmpl /etc
+
+COPY --from=build /app/build /usr/share/nginx/html
+
+EXPOSE 3000
+
+# Render nginx.conf.tmpl with backend server details and start the nginx server
+CMD /bin/bash -c "envsubst '\$BACKEND_HOST \$BACKEND_PORT \$SIMILARITY_SEARCH_HOST \$SIMILARITY_SEARCH_PORT' < /etc/nginx.conf.tmpl > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"

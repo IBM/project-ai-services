@@ -132,38 +132,31 @@ func (c *caddyManager) createRoute(routeConfig map[string]interface{}) error {
 	return nil
 }
 
-// RegisterRoutesForApp registers routes for an application with Caddy proxy.
-// This is a reusable function that can be called from catalog, application, or service deployments.
+// RegisterRoutesForAppAndReturn registers routes for an application with Caddy proxy and returns the built routes.
 //
 // Parameters:
 //   - rt: Runtime interface for interacting with pods
 //   - appName: Name of the application (e.g., "ai-services" for catalog)
 //   - serverName: Caddy server name (e.g., "ai_services")
-//   - routesAnnotation: Routes annotation value in format "port:subdomain, port:subdomain, ..."
+//   - routesAnnotation: Routes annotation value in format "port:subdomain,port:subdomain,..."
+//   - caddyPodName: Name of the Caddy pod
+//   - servicePodName: Name of the service pod for upstream configuration
 //
 // Returns:
+//   - []Route: List of successfully built and registered routes
 //   - error: nil if routes were registered successfully, error otherwise
-//
-// The function performs the following steps:
-//  1. Discovers Caddy admin port from pod port mappings
-//  2. Creates a proxy manager with the admin URL
-//  3. Performs health check on Caddy
-//  4. Builds routes from the provided annotation string
-//  5. Registers each route with Caddy
-//
-// If any step fails, appropriate warnings are logged and the function returns early.
-func RegisterRoutesForApp(
+func RegisterRoutesForAppAndReturn(
 	rt runtime.Runtime,
 	appName string,
 	serverName string,
 	routesAnnotation string,
 	caddyPodName string,
 	servicePodName string,
-) error {
+) ([]Route, error) {
 	// Step 1: Get Caddy admin port from Caddy pod port mappings
 	adminPort, err := GetCaddyAdminPort(rt, caddyPodName)
 	if err != nil {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"failed to get Caddy admin port, routes not registered: %w",
 			err,
 		)
@@ -175,7 +168,7 @@ func RegisterRoutesForApp(
 
 	// Step 3: Perform health check on Caddy
 	if err := proxyManager.HealthCheck(); err != nil {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"caddy health check failed, routes not registered: %w",
 			err,
 		)
@@ -184,13 +177,13 @@ func RegisterRoutesForApp(
 	// Step 4: Get host IP for route domain generation
 	hostIP, err := utils.GetHostIP()
 	if err != nil {
-		return fmt.Errorf("failed to get host IP: %w", err)
+		return nil, fmt.Errorf("failed to get host IP: %w", err)
 	}
 
 	// Step 5: Build routes from the annotation string using service pod name for upstreams
 	routes, err := BuildRoutesFromAnnotation(routesAnnotation, hostIP, servicePodName)
 	if err != nil {
-		return fmt.Errorf("failed to build routes: %w", err)
+		return nil, fmt.Errorf("failed to build routes: %w", err)
 	}
 
 	// Step 6: Register each route with Caddy
@@ -203,10 +196,10 @@ func RegisterRoutesForApp(
 
 	// Return error if any routes failed to register
 	if len(registrationErrors) > 0 {
-		return fmt.Errorf("failed to register %d route(s): %w", len(registrationErrors), errors.Join(registrationErrors...))
+		return nil, fmt.Errorf("failed to register %d route(s): %w", len(registrationErrors), errors.Join(registrationErrors...))
 	}
 
-	return nil
+	return routes, nil
 }
 
 // Made with Bob

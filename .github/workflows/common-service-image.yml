@@ -1,0 +1,27 @@
+name: Common Service
+
+on:
+  push:
+    paths:
+      - 'services/common/**'
+    branches:
+      - main
+
+jobs:
+  build-publish-image:
+    name: Build and Publish Image
+    uses: ./.github/workflows/build-and-publish-image.yml
+    with:
+      working-directory: 'services/common'
+    secrets: inherit
+
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      path: 'services/common'
+      image: 'service-common'
+    secrets:
+      ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
+      ICR_APIKEY: ${{ secrets.ICR_APIKEY }}
+
+# Made with Bob

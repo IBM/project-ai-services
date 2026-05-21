@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"text/template"
 
@@ -92,13 +93,19 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 	s.Stop("Catalog service deployed successfully")
 	logger.Infoln("-------")
 
-	// Register routes with Caddy
-	if err := registerCatalogRoutes(rt, tp, catalogAppTemplate, argParams); err != nil {
+	return handlePostDeployment(rt, tp, argParams)
+}
+
+// handlePostDeployment handles route registration and next steps display after catalog deployment.
+func handlePostDeployment(rt *podman.PodmanClient, tp templates.Template, argParams map[string]string) error {
+	// Register routes with Caddy and get the registered route domains
+	routeDomains, httpsPort, err := registerCatalogRoutes(rt, tp, catalogAppTemplate, argParams)
+	if err != nil {
 		return fmt.Errorf("route registration failed: %w", err)
 	}
 
-	// Print next steps similar to application create
-	if err := helpers.PrintNextSteps(tp, rt, catalogconstants.CatalogAppName, catalogAppTemplate); err != nil {
+	// Print next steps with proxy route information
+	if err := helpers.PrintNextStepsWithProxy(tp, rt, catalogconstants.CatalogAppName, catalogAppTemplate, routeDomains, httpsPort); err != nil {
 		// do not want to fail the overall configure if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)
 	}
@@ -394,46 +401,89 @@ func findCaddyPodNameFromTemplates(tp templates.Template, appTemplateName string
 	return "", fmt.Errorf("no Caddy pod found with component=proxy label in templates")
 }
 
-// registerCatalogRoutes extracts routes from all templates and registers them with Caddy.
-func registerCatalogRoutes(rt *podman.PodmanClient, tp templates.Template, appTemplateName string, argParams map[string]string) error {
+// registerCatalogRoutes registers routes with Caddy and returns route domains and HTTPS port.
+func registerCatalogRoutes(rt *podman.PodmanClient, tp templates.Template, appTemplateName string, argParams map[string]string) (map[string]string, string, error) {
 	// Extract routes from all templates
 	routeInfos, err := extractAllRoutesFromTemplates(tp, appTemplateName, argParams)
 	if err != nil {
-		return fmt.Errorf("failed to extract routes from templates: %w", err)
+		return nil, "", fmt.Errorf("failed to extract routes from templates: %w", err)
 	}
 
 	if len(routeInfos) == 0 {
 		logger.Infof("No templates found with routes annotation, skipping route registration\n")
 
-		return nil
+		return nil, "", nil
 	}
 
 	// Find Caddy pod from templates
 	caddyPodName, err := findCaddyPodNameFromTemplates(tp, appTemplateName, argParams)
 	if err != nil {
-		return fmt.Errorf("failed to find Caddy pod: %w", err)
+		return nil, "", fmt.Errorf("failed to find Caddy pod: %w", err)
 	}
 
 	logger.Infof("Found Caddy pod: %s\n", caddyPodName)
+
+	// Build route domains map
+	routeDomains := make(map[string]string)
 
 	// Register routes for each template that has them
 	var registrationErrors []error
 	for _, info := range routeInfos {
 		logger.Infof("Registering routes for pod: %s\n", info.PodName)
-		// Pass caddyPodName for admin port and info.PodName for upstream addresses
-		if err := proxy.RegisterRoutesForApp(rt, catalogconstants.CatalogAppName, constants.CaddyServerName, info.RoutesAnnotation, caddyPodName, info.PodName); err != nil {
+
+		// Register routes and get the built routes back
+		routes, err := proxy.RegisterRoutesForAppAndReturn(rt, catalogconstants.CatalogAppName, constants.CaddyServerName, info.RoutesAnnotation, caddyPodName, info.PodName)
+		if err != nil {
 			registrationErrors = append(registrationErrors, fmt.Errorf("pod %s: %w", info.PodName, err))
+
+			continue
+		}
+
+		for _, route := range routes {
+			parts := strings.Split(route.Domain, ".")
+			if len(parts) > 0 {
+				subdomain := parts[0]
+				sanitizedSubdomain := strings.ReplaceAll(subdomain, "-", "_")
+				varName := strings.ToUpper(fmt.Sprintf("%s_DOMAIN", sanitizedSubdomain))
+				routeDomains[varName] = route.Domain
+			}
 		}
 	}
 
 	// Return error if any routes failed to register
 	if len(registrationErrors) > 0 {
-		return fmt.Errorf("failed to register routes for %d pod(s): %w", len(registrationErrors), errors.Join(registrationErrors...))
+		return nil, "", fmt.Errorf("failed to register routes for %d pod(s): %w", len(registrationErrors), errors.Join(registrationErrors...))
+	}
+
+	// Get Caddy HTTPS port
+	httpsPort, err := getCaddyHTTPSPort(rt, caddyPodName)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get Caddy HTTPS port: %w", err)
 	}
 
 	logger.Infof("Successfully registered routes for %d pod(s)\n", len(routeInfos))
 
-	return nil
+	return routeDomains, httpsPort, nil
+}
+
+// getCaddyHTTPSPort retrieves the host port mapped to Caddy's HTTPS port (container port 443).
+func getCaddyHTTPSPort(rt *podman.PodmanClient, caddyPodName string) (string, error) {
+	pod, err := rt.InspectPod(caddyPodName)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect Caddy pod: %w", err)
+	}
+
+	// Get port mappings from the Ports field
+	// Ports is a map[string][]string where key is "containerPort/protocol" and value is list of host ports
+	// Example: {"443/tcp": ["39341"], "2019/tcp": ["37249"]}
+	for containerPort, hostPorts := range pod.Ports {
+		// Check if this is the HTTPS port (443)
+		if strings.HasPrefix(containerPort, "443/") && len(hostPorts) > 0 {
+			return hostPorts[0], nil
+		}
+	}
+
+	return "", fmt.Errorf("HTTPS port mapping not found in pod ports")
 }
 
 // Made with Bob
