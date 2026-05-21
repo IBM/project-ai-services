@@ -93,12 +93,18 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 	s.Stop("Catalog service deployed successfully")
 	logger.Infoln("-------")
 
+	return handlePostDeployment(rt, tp, argParams)
+}
+
+// handlePostDeployment handles route registration and next steps display after catalog deployment.
+func handlePostDeployment(rt *podman.PodmanClient, tp templates.Template, argParams map[string]string) error {
 	// Register routes with Caddy and get the registered route domains
 	routeDomains, httpsPort, err := registerCatalogRoutes(rt, tp, catalogAppTemplate, argParams)
 	if err != nil {
 		return fmt.Errorf("route registration failed: %w", err)
 	}
 
+	// Print next steps with proxy route information
 	if err := helpers.PrintNextStepsWithProxy(tp, rt, catalogconstants.CatalogAppName, catalogAppTemplate, routeDomains, httpsPort); err != nil {
 		// do not want to fail the overall configure if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)

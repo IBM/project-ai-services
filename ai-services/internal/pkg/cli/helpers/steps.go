@@ -42,7 +42,7 @@ func PrintNextStepsWithProxy(tp templates.Template, runtime runtime.Runtime, app
 
 	// Add HTTPS port to params if provided
 	if httpsPort != "" {
-		params["CADDY_HTTPS_PORT"] = httpsPort
+		params["HTTPS_PORT"] = httpsPort
 	}
 
 	if err := renderStepsMarkdown(tp, runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
