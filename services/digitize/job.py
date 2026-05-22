@@ -1,14 +1,17 @@
-from pathlib import Path
+"""
+Pydantic models for job state representation.
+
+These models are used for data validation and API responses,
+converting database ORM models to structured dictionaries.
+"""
+
 from typing import List, Optional
-
 from pydantic import BaseModel, Field, field_validator
-
 from digitize.models import JobStatus
-from digitize.settings import settings
 
 
 class JobDocumentSummary(BaseModel):
-    """Compact per-document entry stored inside a job status file."""
+    """Compact per-document entry for job status responses."""
     id: str
     name: str
     status: str
@@ -32,8 +35,9 @@ class JobStats(BaseModel):
 
 class JobState(BaseModel):
     """
-    Represents the overall state of a job. Job tracks overall progress and statistics.
-    Persisted as <job_id>_status.json under JOBS_DIR.
+    Represents the overall state of a job for API responses.
+
+    This model is used to validate and serialize job data from the database.
     """
     job_id: str
     job_name: Optional[str] = None
@@ -94,24 +98,11 @@ class JobState(BaseModel):
     def to_dict(self) -> dict:
         """
         Serialize the job state to a JSON-compatible dictionary.
-        
+
         Returns:
             Dictionary representation of the job state
         """
         return self.model_dump()
 
-    def save(self, jobs_dir: Path = settings.digitize.jobs_dir) -> Path:
-        """
-        Persist the job state as <job_id>_status.json.
 
-        Args:
-            jobs_dir: Directory where the status file will be written.
-
-        Returns:
-            Path to the written status file.
-        """
-        jobs_dir.mkdir(parents=True, exist_ok=True)
-        status_path = jobs_dir / f"{self.job_id}_status.json"
-        with open(status_path, "w", encoding="utf-8") as f:
-            f.write(self.model_dump_json(indent=4))
-        return status_path
+# Made with Bob

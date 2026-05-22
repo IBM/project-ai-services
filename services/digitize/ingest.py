@@ -6,14 +6,14 @@ import common.db_utils as db
 from common.emb_utils import get_embedder
 from common.misc_utils import *
 from digitize.doc_utils import process_documents
-from digitize.status import StatusManager, get_utc_timestamp, get_job_document_stats
+from digitize.status import get_utc_timestamp, get_job_document_stats
 from digitize.models import JobStatus, DocStatus
 from digitize.settings import settings
-from digitize.db.db_status_manager import get_status_manager
+from digitize.db.db_status_manager import get_status_manager, DatabaseStatusManager
 
 logger = get_logger("ingest")
 
-def create_indexing_handler(emb_model_dict: dict, status_mgr: Optional[StatusManager], doc_id_dict: Optional[dict]):
+def create_indexing_handler(emb_model_dict: dict, status_mgr: Optional[DatabaseStatusManager], doc_id_dict: Optional[dict]):
     """
     Create an indexing handler that can be called immediately after chunking of a document.
 

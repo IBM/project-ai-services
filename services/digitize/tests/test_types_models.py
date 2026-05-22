@@ -3,7 +3,6 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from digitize.document import DocumentMetadata, TimingInfo
 from digitize.job import JobDocumentSummary, JobState, JobStats
 from digitize.models import (
     DocStatus,
@@ -161,59 +160,6 @@ class TestResponseModels:
 
 @pytest.mark.unit
 class TestDocumentAndJobModels:
-    def test_document_metadata_defaults_and_conversion(self):
-        model = DocumentMetadata(
-            id="doc-1",
-            name="sample.pdf",
-            type="digitization",
-            status="completed",
-            output_format="md",
-        )
-
-        assert model.status == "completed"
-        assert model.output_format == "md"
-        assert model.metadata == {}
-
-    def test_document_metadata_invalid_values_default(self):
-        model = DocumentMetadata(
-            id="doc-1",
-            name="sample.pdf",
-            type="digitization",
-            status="bad",
-            output_format="bad",
-        )
-
-        assert model.status == "accepted"
-        assert model.output_format == "json"
-
-    def test_document_metadata_to_dict_and_job_summary(self):
-        model = DocumentMetadata(
-            id="doc-1",
-            name="sample.pdf",
-            type="digitization",
-            status=DocStatus.COMPLETED,
-            output_format=OutputFormat.JSON,
-        )
-
-        dumped = model.to_dict()
-
-        assert dumped["id"] == "doc-1"
-        assert model.job_summary() == {
-            "id": "doc-1",
-            "name": "sample.pdf",
-            "status": "completed",
-        }
-
-    def test_timing_info_model(self):
-        timing = TimingInfo(digitizing=1.2, processing=2.5)
-
-        assert timing.model_dump() == {
-            "digitizing": 1.2,
-            "processing": 2.5,
-            "chunking": None,
-            "indexing": None,
-        }
-
     def test_job_document_summary_model(self):
         summary = JobDocumentSummary(id="doc-1", name="sample.pdf", status="accepted")
 

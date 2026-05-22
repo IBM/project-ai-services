@@ -9,15 +9,15 @@ from typing import Dict, Any, Mapping, Optional
 from pathlib import Path
 
 from common.misc_utils import get_logger
-from digitize.status import StatusManager, get_utc_timestamp
+from digitize.status import get_utc_timestamp
 from digitize.models import JobStatus, DocStatus
-from digitize.db.repository import db_repo
+from digitize.db.db_manager import db_manager
 from digitize.db.database import engine
 
 logger = get_logger("db_status_manager")
 
 
-class DatabaseStatusManager(StatusManager):
+class DatabaseStatusManager:
     """
     Database-only StatusManager that persists to PostgreSQL database.
     
@@ -35,7 +35,7 @@ class DatabaseStatusManager(StatusManager):
         Raises:
             RuntimeError: If database is not available
         """
-        super().__init__(job_id)
+        self.job_id = job_id
         
         if engine is None:
             raise RuntimeError(f"Database not available for job {job_id}. Cannot proceed without database.")
@@ -57,7 +57,7 @@ class DatabaseStatusManager(StatusManager):
             error: Optional error message
         """
         try:
-            self._update_document_in_db(doc_id, details, error)
+            self._update_document(doc_id, details, error)
         except Exception as e:
             logger.error(f"Failed to update document {doc_id} in database: {e}", exc_info=True)
             raise
@@ -79,12 +79,12 @@ class DatabaseStatusManager(StatusManager):
             error: Optional error message
         """
         try:
-            self._update_job_in_db(doc_id, doc_status, job_status, error)
+            self._update_job(doc_id, doc_status, job_status, error)
         except Exception as e:
             logger.error(f"Failed to update job {self.job_id} in database: {e}", exc_info=True)
             raise
     
-    def _update_document_in_db(
+    def _update_document(
         self,
         doc_id: str,
         details: Mapping[str, Any],
@@ -99,7 +99,7 @@ class DatabaseStatusManager(StatusManager):
             error: Optional error message
         """
         # Separate metadata fields from top-level fields
-        metadata_fields, top_level_fields = self._categorize_fields(details)
+        metadata_fields, top_level_fields = _categorize_fields(details)
         
         # Prepare update parameters
         update_params: Dict[str, Any] = {}
@@ -130,7 +130,7 @@ class DatabaseStatusManager(StatusManager):
         # Handle metadata updates
         if metadata_fields:
             # Get existing document to merge metadata
-            existing_doc = db_repo.get_document_by_id(doc_id)
+            existing_doc = db_manager.get_document_by_id(doc_id)
             if existing_doc:
                 merged_metadata = existing_doc.doc_metadata.copy()
                 
@@ -148,13 +148,13 @@ class DatabaseStatusManager(StatusManager):
         
         # Perform database update
         if update_params:
-            success = db_repo.update_document(doc_id, **update_params)
+            success = db_manager.update_document(doc_id, **update_params)
             if success:
                 logger.debug(f"Updated document {doc_id} in database")
             else:
                 logger.warning(f"Document {doc_id} not found in database for update")
     
-    def _update_job_in_db(
+    def _update_job(
         self,
         doc_id: str,
         doc_status: DocStatus,
@@ -172,16 +172,16 @@ class DatabaseStatusManager(StatusManager):
         """
         # Update document status if doc_id provided
         if doc_id:
-            db_repo.update_document(doc_id, status=doc_status)
-        
+            db_manager.update_document(doc_id, status=doc_status)
+
         # Get current job to recalculate stats
-        job = db_repo.get_job_by_id(self.job_id)
+        job = db_manager.get_job_by_id(self.job_id)
         if not job:
             logger.warning(f"Job {self.job_id} not found in database")
             return
         
         # Get all documents for this job to recalculate stats
-        documents = db_repo.get_documents_by_job_id(self.job_id)
+        documents = db_manager.get_documents_by_job_id(self.job_id)
         
         # Recalculate statistics
         stats = {
@@ -218,14 +218,14 @@ class DatabaseStatusManager(StatusManager):
             update_params["error"] = error
         
         # Perform database update
-        success = db_repo.update_job(self.job_id, **update_params)
+        success = db_manager.update_job(self.job_id, **update_params)
         if success:
             logger.debug(f"Updated job {self.job_id} in database")
         else:
             logger.warning(f"Job {self.job_id} not found in database for update")
 
 
-def get_status_manager(job_id: str) -> StatusManager:
+def get_status_manager(job_id: str) -> DatabaseStatusManager:
     """
     Factory function to get database-first status manager.
     
@@ -241,5 +241,36 @@ def get_status_manager(job_id: str) -> StatusManager:
         RuntimeError: If database is not available
     """
     return DatabaseStatusManager(job_id)
+
+
+def _categorize_fields(details: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    Separate fields into metadata wrapper and top-level categories.
+
+    Args:
+        details: Dictionary of fields to categorize
+
+    Returns:
+        Tuple of (metadata_fields, top_level_fields)
+    """
+    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs"}
+
+    metadata_fields = {
+        k: v if k == "timing_in_secs" and isinstance(v, dict) else _extract_value(v)
+        for k, v in details.items() if k in METADATA_KEYS
+    }
+
+    top_level_fields = {
+        k: _extract_value(v)
+        for k, v in details.items() if k not in METADATA_KEYS
+    }
+
+    return metadata_fields, top_level_fields
+
+
+def _extract_value(v: Any) -> Any:
+    """Extract .value from enums, return raw value otherwise."""
+    return v.value if hasattr(v, "value") else v
+
 
 # Made with Bob

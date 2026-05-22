@@ -18,8 +18,8 @@ from digitize.models import JobStatus, DocStatus
 logger = get_logger("db_repository")
 
 
-class DatabaseRepository:
-    """Repository for database operations with error handling and logging."""
+class DatabaseManager:
+    """Manager for database operations with error handling and logging."""
 
     @staticmethod
     def create_job(
@@ -533,6 +533,6 @@ class DatabaseRepository:
 
 
 # Singleton instance for easy access
-db_repo = DatabaseRepository()
+db_manager = DatabaseManager()
 
 # Made with Bob

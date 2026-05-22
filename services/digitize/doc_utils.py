@@ -25,10 +25,7 @@ from common.llm_utils import summarize_and_classify_tables, tokenize_with_llm
 from common.misc_utils import get_logger, text_suffix, table_suffix, text_chunk_suffix, table_chunk_suffix
 from common.lang_utils import detect_language, setup_language_detector
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
-from digitize.status import (
-    StatusManager,
-    get_utc_timestamp
-)
+from digitize.status import get_utc_timestamp
 from digitize.models import DocStatus, JobStatus, OutputFormat
 from digitize.settings import settings
 from digitize.db.db_status_manager import get_status_manager

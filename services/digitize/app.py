@@ -333,10 +333,10 @@ async def get_all_jobs(
     """Retrieve information about all submitted jobs with pagination and filtering."""
     try:
         # Use database function
-        from digitize.db.db_utils import get_all_jobs_from_db
-        
+        from digitize.digitize_utils import get_all_jobs
+
         # Get jobs from database
-        jobs_data, total = get_all_jobs_from_db(
+        jobs_data, total = get_all_jobs(
             status=status,
             operation=operation.value if operation else None,
             limit=limit if not latest else 1,
@@ -372,9 +372,9 @@ async def get_job_by_id(job_id: str):
     """Retrieve detailed status of a specific job by its ID."""
     try:
         # Use database function
-        from digitize.db.db_utils import get_job_from_db
-        
-        job_data = get_job_from_db(job_id)
+        from digitize.digitize_utils import get_job
+
+        job_data = get_job(job_id)
         
         if job_data is None:
             APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"No job found with id '{job_id}'")
@@ -404,10 +404,10 @@ async def delete_job(job_id: str):
     """Deletes a job record from database. Does not touch associated document metadata."""
     try:
         # Use database function to get job
-        from digitize.db.db_utils import get_job_from_db
-        from digitize.db.repository import db_repo
-        
-        job_data = get_job_from_db(job_id)
+        from digitize.digitize_utils import get_job
+        from digitize.db.db_manager import db_manager
+
+        job_data = get_job(job_id)
         
         if job_data is None:
             APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"No job found with id '{job_id}'")
@@ -418,7 +418,7 @@ async def delete_job(job_id: str):
             APIError.raise_error(ErrorCode.RESOURCE_LOCKED, f"Job '{job_id}' is still active and cannot be deleted")
 
         # Delete the job from database (CASCADE will delete associated documents)
-        db_repo.delete_job(job_id)
+        db_manager.delete_job(job_id)
         logger.info(f"Deleted job '{job_id}' from database")
         
         return
@@ -472,9 +472,9 @@ async def list_documents(
             )
 
         # Use database function
-        from digitize.db.db_utils import get_all_documents_from_db
-        
-        documents_data, total = get_all_documents_from_db(
+        from digitize.digitize_utils import get_all_documents_paginated
+
+        documents_data, total = get_all_documents_paginated(
             status=status,
             name=name,
             limit=limit,
@@ -526,9 +526,9 @@ async def get_document_metadata(doc_id: str, details: bool = Query(False, descri
     """
     try:
         # Use database function
-        from digitize.db.db_utils import get_document_from_db
-        
-        doc_data = get_document_from_db(doc_id)
+        from digitize.digitize_utils import get_document
+
+        doc_data = get_document(doc_id)
         
         if doc_data is None:
             APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"Document with ID '{doc_id}' not found")
@@ -673,8 +673,8 @@ async def delete_document(doc_id: str):
         # 5. Step C: Database Cleanup
         # Delete the document record from the database
         try:
-            from digitize.db.repository import db_repo
-            success = db_repo.delete_document(doc_id)
+            from digitize.db.db_manager import db_manager
+            success = db_manager.delete_document(doc_id)
             if success:
                 logger.info(f"Database record for {doc_id} deleted successfully.")
             else:
