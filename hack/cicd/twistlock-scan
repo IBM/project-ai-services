@@ -92,12 +92,18 @@ def generateImageList() {
     echo 'Generating image list for scanning...'
 
     def imageMap = [
-        [name: 'rag', path: 'spyre-rag/src/'],
-        [name: 'rag-ui', path: 'spyre-rag/ui/'],
+        [name: 'chatbot-service', path: 'services/chatbot/'],
+        [name: 'digitize-service', path: 'services/digitize/'],
+        [name: 'summarize-service', path: 'services/summarize/'],
+        [name: 'similarity-service', path: 'services/similarity/'],
+        [name: 'chatbot-ui', path: 'ui/chatbot/'],
         [name: 'tools', path: 'images/tools/'],
+        [name: 'caddy', path: 'images/caddy/'],
+        [name: 'litellm', path: 'images/litellm/'],
+        [name: 'postgres', path: 'images/postgres/'],
         [name: 'ai-services', path: 'ai-services/'],
-        [name: 'catalog-ui', path: 'catalog-ui/'],
-        [name: 'digitize-ui', path: 'digitize-ui/']
+        [name: 'catalog-ui', path: 'ui/catalog/'],
+        [name: 'digitize-ui', path: 'ui/digitize/']
     ]
 
     def images = []

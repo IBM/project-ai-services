@@ -52,26 +52,66 @@ pipeline {
             }
         }
 
-        stage('Build RAG Backend') {
+        stage('Build chatbot service') {
             steps {
                 script {
-                    env.ICR_RAG_IMAGE = buildAndPublishImage('spyre-rag/src/', 'rag')
+                    env.ICR_SERVICES_CHATBOT_IMAGE = buildAndPublishImage('services/chatbot/', 'chatbot-service')
                 }
             }
         }
 
-        stage('Build RAG UI') {
+        stage('Build digitize service') {
             steps {
                 script {
-                    env.ICR_RAG_UI_IMAGE = buildAndPublishImage('spyre-rag/ui/', 'rag-ui')
+                    env.ICR_SERVICES_DIGITIZE_IMAGE = buildAndPublishImage('services/digitize/', 'digitize-service')
                 }
             }
         }
 
-        stage('Build RAG Base') {
+        stage('Build summarize service') {
             steps {
                 script {
-                    env.ICR_RAG_BASE_IMAGE = buildAndPublishImage('images/rag-base/', 'rag-base')
+                    env.ICR_SERVICES_SUMMARIZE_IMAGE = buildAndPublishImage('services/summarize/', 'summarize-service')
+                }
+            }
+        }
+
+        stage('Build similarity service') {
+            steps {
+                script {
+                    env.ICR_SERVICES_SIMILARITY_IMAGE = buildAndPublishImage('services/similarity/', 'similarity-service')
+                }
+            }
+        }
+
+        stage('Build PYTHON Base') {
+            steps {
+                script {
+                    env.ICR_PYTHON_BASE_IMAGE = buildAndPublishImage('images/python-base/', 'python-base')
+                }
+            }
+        }
+
+        stage('Build Caddy') {
+            steps {
+                script {
+                    env.ICR_CADDY_IMAGE = buildAndPublishImage('images/caddy/', 'caddy')
+                }
+            }
+        }
+
+        stage('Build litellm') {
+            steps {
+                script {
+                    env.ICR_LITELLM_IMAGE = buildAndPublishImage('images/litellm/', 'litellm')
+                }
+            }
+        }
+
+        stage('Build postgres') {
+            steps {
+                script {
+                    env.ICR_postgress_IMAGE = buildAndPublishImage('images/postgres/', 'postgres')
                 }
             }
         }
@@ -121,18 +161,25 @@ pipeline {
             }
         }
 
-        stage('Build Catalog UI') {
+        stage('Build UI Catalog') {
             steps {
                 script {
-                    env.ICR_CATALOG_UI_IMAGE = buildAndPublishImage('catalog-ui', 'catalog-ui')
+                    env.ICR_UI_CATALOG_IMAGE = buildAndPublishImage('ui/catalog', 'catalog-ui')
                 }
             }
         }
 
-        stage('Build Digitize UI') {
+        stage('Build UI Digitize') {
             steps {
                 script {
-                    env.ICR_DIGITIZE_UI_IMAGE = buildAndPublishImage('digitize-ui', 'digitize-ui')
+                    env.ICR_UI_DIGITIZE_IMAGE = buildAndPublishImage('ui/digitize', 'ui-digitize-ui')
+                }
+            }
+        }
+        stage('Build UI Chatbot') {
+            steps {
+                script {
+                    env.ICR_UI_CHATBOT_IMAGE = buildAndPublishImage('ui/chatbot', 'ui-chatbot-ui')
                 }
             }
         }
@@ -393,13 +440,16 @@ def generateImageList() {
     echo "Generating image list for signing..."
 
     def images = [
-        env.ICR_RAG_IMAGE,
-        env.ICR_RAG_UI_IMAGE,
-        env.ICR_RAG_BASE_IMAGE,
+        env.ICR_SERVICES_CHATBOT_IMAGE,
+        env.ICR_SERVICES_DIGITIZE_IMAGE,
+        env.ICR_SERVICES_SUMMARIZE_IMAGE,
+        env.ICR_SERVICES_SIMILARITY_IMAGE,
+        env.ICR_UI_CATALOG_IMAGE,
+        env.ICR_UI_DIGITIZE_IMAGE,
+        env.ICR_UI_CHATBOT_IMAGE,
+        env.ICR_PYTHON_BASE_IMAGE,
         env.ICR_TOOL_IMAGE,
-        env.ICR_AI_SERVICES_IMAGE,
-        env.ICR_CATALOG_UI_IMAGE,
-        env.ICR_DIGITIZE_UI_IMAGE
+        env.ICR_AI_SERVICES_IMAGE     
     ]
 
     def imageList = images.join('\n')
