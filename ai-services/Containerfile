@@ -31,7 +31,7 @@ RUN CGO_ENABLED=0 go build \
     " \
     ./cmd/ai-services
 
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.8
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
 COPY --from=builder /go/src/github.com/project-ai-services/ai-services/bin/ai-services /usr/bin/ai-services
 
