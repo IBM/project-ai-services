@@ -33,6 +33,16 @@ RUN CGO_ENABLED=0 go build \
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
+# Install pciutils for lspci command (required for Spyre card detection)
+RUN microdnf install -y pciutils && \
+    microdnf clean all
+
+# Create group with GID 1000 to match the VFIO device group ownership on the host
+# The /dev/vfio/* devices are owned by group 1000 (as shown by ls -la /dev/vfio/)
+# This allows the non-root user to access VFIO devices for Spyre card detection
+RUN groupadd -f -g 1000 vfio && \
+    useradd -u 1001 -g 0 -G vfio -m -s /bin/bash aiservices
+
 COPY --from=builder /go/src/github.com/project-ai-services/ai-services/bin/ai-services /usr/bin/ai-services
 
 USER 1001

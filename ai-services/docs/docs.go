@@ -675,6 +675,43 @@ const docTemplate = `{
                 }
             }
         },
+        "/resources": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves system resource information including CPU, memory, and Spyre card availability (Podman environments only)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "Get system resources",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ResourcesResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/services": {
             "get": {
                 "security": [
@@ -1244,11 +1281,61 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_pkg_catalog_apiserver_handlers.AcceleratorInfo": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_pkg_catalog_apiserver_handlers.CPUInfo": {
+            "type": "object",
+            "properties": {
+                "available_cores": {
+                    "type": "number"
+                },
+                "total_cores": {
+                    "type": "integer"
+                }
+            }
+        },
         "internal_pkg_catalog_apiserver_handlers.ErrorResponse": {
             "type": "object",
             "properties": {
                 "error": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_pkg_catalog_apiserver_handlers.MemoryInfo": {
+            "type": "object",
+            "properties": {
+                "available_bytes": {
+                    "type": "integer"
+                },
+                "total_bytes": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_pkg_catalog_apiserver_handlers.ResourcesResponse": {
+            "type": "object",
+            "properties": {
+                "accelerators": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.AcceleratorInfo"
+                    }
+                },
+                "cpu": {
+                    "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.CPUInfo"
+                },
+                "memory": {
+                    "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.MemoryInfo"
                 }
             }
         },
