@@ -16,7 +16,7 @@ class TestValidateQueryLength:
         
         # Mock tokenize to return 50 tokens
         mock_tokenize = Mock(return_value=[0] * 50)
-        monkeypatch.setattr("chatbot.backend_utils.tokenize_with_llm", mock_tokenize)
+        monkeypatch.setattr("common.validation_utils.tokenize_with_llm", mock_tokenize)
         
         # Mock settings
         mock_settings = Mock()
@@ -37,7 +37,7 @@ class TestValidateQueryLength:
         
         # Mock tokenize to return 150 tokens
         mock_tokenize = Mock(return_value=[0] * 150)
-        monkeypatch.setattr("chatbot.backend_utils.tokenize_with_llm", mock_tokenize)
+        monkeypatch.setattr("common.validation_utils.tokenize_with_llm", mock_tokenize)
         
         # Mock settings
         mock_settings = Mock()
@@ -61,7 +61,7 @@ class TestValidateQueryLength:
         
         # Mock tokenize to return 0 tokens
         mock_tokenize = Mock(return_value=[])
-        monkeypatch.setattr("chatbot.backend_utils.tokenize_with_llm", mock_tokenize)
+        monkeypatch.setattr("common.validation_utils.tokenize_with_llm", mock_tokenize)
         
         # Mock settings
         mock_settings = Mock()
@@ -82,7 +82,7 @@ class TestValidateQueryLength:
         
         # Mock tokenize to return exactly max tokens
         mock_tokenize = Mock(return_value=[0] * 100)
-        monkeypatch.setattr("chatbot.backend_utils.tokenize_with_llm", mock_tokenize)
+        monkeypatch.setattr("common.validation_utils.tokenize_with_llm", mock_tokenize)
         
         # Mock settings
         mock_settings = Mock()
@@ -103,7 +103,7 @@ class TestValidateQueryLength:
         
         # Mock tokenize to raise exception
         mock_tokenize = Mock(side_effect=Exception("Tokenization error"))
-        monkeypatch.setattr("chatbot.backend_utils.tokenize_with_llm", mock_tokenize)
+        monkeypatch.setattr("common.validation_utils.tokenize_with_llm", mock_tokenize)
         
         # Mock settings
         mock_settings = Mock()
@@ -124,7 +124,7 @@ class TestValidateQueryLength:
         from chatbot.backend_utils import validate_query_length
         
         mock_tokenize = Mock(return_value=[0] * 50)
-        monkeypatch.setattr("chatbot.backend_utils.tokenize_with_llm", mock_tokenize)
+        monkeypatch.setattr("common.validation_utils.tokenize_with_llm", mock_tokenize)
         
         # Mock settings
         mock_settings = Mock()

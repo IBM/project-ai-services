@@ -7,9 +7,11 @@ import uvicorn
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, status, Request
 from fastapi.openapi.docs import get_swagger_ui_html
+from lingua import Language
 
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 from common.misc_utils import set_log_level, get_logger
+from common.lang_utils import setup_language_detector
 from digitize.settings import settings
 
 set_log_level(settings.common.app.log_level)
@@ -38,6 +40,13 @@ async def lifespan(app: FastAPI):
     filtered_paths = ['/health', '/v1/jobs']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     logger.info("Application starting up...")
+
+    # Initialize language detector for document processing
+    try:
+        setup_language_detector([Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH])
+        logger.info("Language detector initialized for EN, DE, IT, FR")
+    except Exception as e:
+        logger.error(f"Error initializing language detector: {e}", exc_info=True)
 
     # Scan for orphan jobs and mark them as failed
     try:

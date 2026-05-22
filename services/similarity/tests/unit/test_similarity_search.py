@@ -22,8 +22,8 @@ def mock_dependencies():
     with patch('similarity.app.vectorstore') as mock_vs, \
          patch('similarity.app.emb_model_dict') as mock_emb, \
          patch('similarity.app.reranker_model_dict') as mock_reranker, \
-         patch('common.retrieval_utils.retrieve_documents') as mock_retrieve, \
-         patch('common.reranker_utils.rerank_documents') as mock_rerank:
+         patch('similarity.similarity_utils.retrieve_documents') as mock_retrieve, \
+         patch('similarity.similarity_utils.rerank_documents') as mock_rerank:
         
         # Setup mock returns
         mock_emb.return_value = {

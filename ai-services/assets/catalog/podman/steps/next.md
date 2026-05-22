@@ -1,3 +1,3 @@
-- Access the Catalog UI at http://{{ .HOST_IP }}:{{ .UI_PORT }}
+- Access the Catalog UI at https://{{ .CATALOG_UI_DOMAIN }}:{{ .HTTPS_PORT }}
 
-- Access the Catalog Backend at http://{{ .HOST_IP }}:{{ .BACKEND_PORT }}
+- Access the Catalog Backend at https://{{ .CATALOG_API_DOMAIN }}:{{ .HTTPS_PORT }}
