@@ -1,6 +1,6 @@
 REGISTRY?=icr.io/ai-services-private
 IMAGE=digitize-service
-TAG?=v0.0.2
+TAG?=v0.0.3
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
 CONTAINER_BUILDER?=podman

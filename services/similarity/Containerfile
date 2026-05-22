@@ -1,4 +1,4 @@
-FROM icr.io/ai-services-cicd/services-common:v0.0.1
+FROM icr.io/ai-services-cicd/services-common:v0.0.2
 
 WORKDIR /opt/services/similarity
 
