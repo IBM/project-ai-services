@@ -1,2 +1,0 @@
-# common-specific dependencies beyond service-base
-# All heavy deps (fastapi, opensearch-py, docling, etc.) live in images/service-base/requirements.txt
