@@ -94,3 +94,17 @@ similarity:
   image: icr.io/ai-services-cicd/similarity-service:v0.0.1
   # @hidden
   log_level: "INFO"
+
+litellm:
+  # @description Enable LiteLLM proxy for remote LLM service. When true, uses LiteLLM with WatsonX; when false, uses local vLLM server. Default: false
+  enable: false
+  # @hidden
+  image: icr.io/ai-services-cicd/litellm:v1.84.0-1
+  # @description WatsonX API Key for LiteLLM integration. Required when litellm.enable is true.
+  watsonxApiKey: ""
+  # @description WatsonX Project ID for LiteLLM integration. Required when litellm.enable is true.
+  watsonxProjectId: ""
+  # @description WatsonX Base URL for LiteLLM integration. Required when litellm.enable is true.
+  watsonxUrl: ""
+  # @description Chat/Instruct model name for WatsonX. Default: ibm/granite-4-h-small
+  instructModel: "ibm/granite-4-h-small"

@@ -21,7 +21,7 @@ RUN dnf -y update && \
 
 WORKDIR /build
 
-COPY pre-requirements.txt patches/pyproject-toml.patch ./
+COPY pre-requirements.txt patches ./
 
 # 2. Install Pre-requistes
 RUN python3.12 -m pip install -r pre-requirements.txt \
@@ -38,6 +38,8 @@ RUN wget https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.tar.gz
 RUN tar -xzf v${VERSION}.tar.gz && \
     cd litellm-${VERSION} && \
     patch -p1 pyproject.toml < ../pyproject-toml.patch && \
+    patch -p1 < ../watsonx-passthrough.patch && \
+    cp -R ../passthrough litellm/llms/watsonx/ && \
     uv lock && \
 # 5. Export dependencies to a requirements.txt file \
     uv export --no-hashes --no-dev \
@@ -79,6 +81,8 @@ RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels,ro \
 USER 1001
 
 WORKDIR /app
+
+COPY config ./
 
 EXPOSE 4000
 
