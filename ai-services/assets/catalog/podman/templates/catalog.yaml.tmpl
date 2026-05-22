@@ -112,6 +112,14 @@ spec:
       ports:
         - containerPort: 8080
           protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8080
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
       volumeMounts:
         - name: podman-socket
           mountPath: {{ .Values.backend.podman.uri }}
