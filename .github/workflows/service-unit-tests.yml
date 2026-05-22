@@ -1,0 +1,41 @@
+name: Services Unit Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'services/**'
+      - '.github/workflows/service-unit-tests.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04-ppc64le
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: IBM/setup-python-pz@291287e36d7c893a50c857d8bc014d67edd58ada
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: |
+          pip install -r services/requirements-test.txt \
+            --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
+            --prefer-binary
+      
+      - name: Run all service tests
+        run: |
+          # Set PYTHONPATH to include services directory for common module imports
+          export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+          pytest digitize/tests/ chatbot/tests/ summarize/tests/ similarity/tests/ \
+            --cov=. \
+            --cov-report=html:htmlcov \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-branch \
+            -v
+        working-directory: services
