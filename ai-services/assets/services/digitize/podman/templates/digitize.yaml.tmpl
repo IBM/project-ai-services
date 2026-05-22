@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "digitize--{{ .AppSlug }}"
+  name: "digitize--{{ .InstanceSlug }}"
   labels:
   ai-services.io/template: "{{ .TemplateID }}"
   annotations:
@@ -18,7 +18,7 @@ spec:
           memory: "512Mi"
       env:
         - name: BACKEND_HOST
-          value: "digitize--{{ .AppSlug }}"
+          value: "digitize--{{ .InstanceSlug }}"
         - name: BACKEND_PORT
           value: "4000"
       ports:
@@ -97,5 +97,5 @@ spec:
   volumes:
     - name: cache
       hostPath:
-        path: "{{ .BaseDir }}/services/{{ .AppSlug }}/cache"
+        path: "{{ .BaseDir }}/applications/{{ .InstanceSlug }}/cache"
         type: DirectoryOrCreate

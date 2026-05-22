@@ -258,7 +258,7 @@ func (d *PodmanDeployer) downloadModelsForDeployment(plan *DeploymentPlan) error
 	for modelName := range modelSet {
 		logger.Infof("Downloading model: %s\n", modelName)
 
-		if err := helpers.DownloadModel(modelName, modelsPath); err != nil {
+		if err := helpers.DownloadModelContainer(modelName, modelsPath); err != nil {
 			return fmt.Errorf("failed to download model %s: %w", modelName, err)
 		}
 	}
@@ -428,11 +428,11 @@ func (d *PodmanDeployer) deployComponentPods(
 			for _, podTemplateName := range layer {
 				// Prepare initialParams for the template
 				initialParams := map[string]any{
-					"AppSlug":    generateAppSlug(comp.DatabaseID.String()),
-					"TemplateID": comp.DatabaseID,
-					"BaseDir":    utils.GetBaseDir(),
-					"Values":     values,
-					"env":        map[string]map[string]string{},
+					"InstanceSlug": generateInstanceSlug(comp.DatabaseID.String()),
+					"TemplateID":   comp.DatabaseID,
+					"BaseDir":      utils.GetBaseDir(),
+					"Values":       values,
+					"env":          map[string]map[string]string{},
 				}
 
 				// Pass componentEndpoints to collect endpoint info, use component type as ID
@@ -447,11 +447,11 @@ func (d *PodmanDeployer) deployComponentPods(
 		for templateName := range tmpls {
 			// Prepare initialParams for the template
 			initialParams := map[string]interface{}{
-				"AppSlug":    generateAppSlug(comp.DatabaseID.String()),
-				"TemplateID": comp.DatabaseID,
-				"BaseDir":    utils.GetBaseDir(),
-				"Values":     values,
-				"env":        map[string]map[string]string{},
+				"InstanceSlug": generateInstanceSlug(comp.DatabaseID.String()),
+				"TemplateID":   comp.DatabaseID,
+				"BaseDir":      utils.GetBaseDir(),
+				"Values":       values,
+				"env":          map[string]map[string]string{},
 			}
 
 			// Pass componentEndpoints to collect endpoint info, use component type as ID
@@ -594,11 +594,11 @@ func (d *PodmanDeployer) deployServicePods(
 			for _, podTemplateName := range layer {
 				// Prepare initialParams for the template
 				initialParams := map[string]any{
-					"AppSlug":    generateAppSlug(applicationID.String()),
-					"TemplateID": svc.DatabaseID,
-					"BaseDir":    utils.GetBaseDir(),
-					"Values":     values,
-					"env":        map[string]map[string]string{},
+					"InstanceSlug": generateInstanceSlug(applicationID.String()),
+					"TemplateID":   svc.DatabaseID,
+					"BaseDir":      utils.GetBaseDir(),
+					"Values":       values,
+					"env":          map[string]map[string]string{},
 				}
 
 				_, err := d.deployPodTemplate(podTemplateName, tmpls, initialParams)
@@ -613,10 +613,11 @@ func (d *PodmanDeployer) deployServicePods(
 		for templateName := range tmpls {
 			// Prepare initialParams for the template
 			initialParams := map[string]interface{}{
-				"AppSlug":    generateAppSlug(applicationID.String()),
-				"TemplateID": svc.DatabaseID,
-				"Values":     values,
-				"env":        map[string]map[string]string{},
+				"InstanceSlug": generateInstanceSlug(applicationID.String()),
+				"TemplateID":   svc.DatabaseID,
+				"BaseDir":      utils.GetBaseDir(),
+				"Values":       values,
+				"env":          map[string]map[string]string{},
 			}
 
 			_, err := d.deployPodTemplate(templateName, tmpls, initialParams)
@@ -938,10 +939,10 @@ func (d *PodmanDeployer) getRequiredSpyreCardsForComponent(comp *ComponentPlan) 
 	for templateName, tmpl := range tmpls {
 		// Prepare minimal params for rendering
 		params := map[string]any{
-			"AppSlug":    generateAppSlug(comp.DatabaseID.String()),
-			"TemplateID": comp.DatabaseID,
-			"Values":     comp.Params,
-			"env":        map[string]map[string]string{},
+			"InstanceSlug": generateInstanceSlug(comp.DatabaseID.String()),
+			"TemplateID":   comp.DatabaseID,
+			"Values":       comp.Params,
+			"env":          map[string]map[string]string{},
 		}
 
 		// Render template
@@ -1051,9 +1052,9 @@ func (d *PodmanDeployer) getEnvParamsForComponent(podSpec *podmodels.PodSpec, po
 	return env, nil
 }
 
-// generateAppSlug creates a short slug from an ID using SHA256 hash.
+// generateInstanceSlug creates a short slug from an ID using SHA256 hash.
 // Returns the first 8 characters of the hex-encoded hash.
-func generateAppSlug(id string) string {
+func generateInstanceSlug(id string) string {
 	hash := sha256.Sum256([]byte(id))
 	hexHash := hex.EncodeToString(hash[:])
 	return hexHash[:8]

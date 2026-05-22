@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "chat-bot--{{ .AppSlug }}"
+  name: "chat-bot--{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
   annotations:
@@ -17,7 +17,7 @@ spec:
           memory: "512Mi"
       env:
         - name: BACKEND_HOST
-          value: "chat-bot--{{ .AppSlug }}"
+          value: "chat-bot--{{ .InstanceSlug }}"
         - name: BACKEND_PORT
           value: "5000" 
       ports:

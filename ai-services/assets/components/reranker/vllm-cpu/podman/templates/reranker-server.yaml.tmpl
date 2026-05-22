@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "reranker--{{ .AppSlug }}"
+  name: "reranker--{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
   annotations:
