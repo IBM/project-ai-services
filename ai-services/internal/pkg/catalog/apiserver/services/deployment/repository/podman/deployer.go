@@ -100,10 +100,9 @@ func NewPodmanDeployer(
 // 1. Pull container images for all components and services
 // 2. Download models specified in component/service parameters
 // 3. Calculate and allocate Spyre cards if needed
-// 4. Deploy shared components first (used by multiple services)
-// 5. Deploy service-specific components
-// 6. Deploy services with component references
-// 7. Update database with endpoints and final status
+// 4. Deploy components
+// 5. Deploy services
+// 6. Update database with endpoints and final status
 //
 // Note: Application, service, and component records are already created by ApplicationService
 // before this method is called. This method only updates endpoints and status.
@@ -133,8 +132,6 @@ func (d *PodmanDeployer) ExecuteDeployment(
 		return fmt.Errorf("failed to allocate Spyre cards: %w", err)
 	}
 
-	fmt.Println("Print ApplicationID: ", plan.ApplicationID)
-
 	// Update application status to Deploying before starting component deployment
 	if err := d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusDeploying, "Starting component and service deployment"); err != nil {
 		logger.Errorf("Failed to update application status to Deploying: %v\n", err)
@@ -162,6 +159,71 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	}
 
 	logger.Infof("Deployment completed successfully for application '%s'\n", plan.ApplicationName)
+	return nil
+}
+
+// ExecuteServiceDeployment executes the deployment plan for a standalone service.
+// This is a simplified version of ExecuteDeployment that focuses on deploying a single service
+// with its components. It follows the same deployment phases but is optimized for service-only deployments.
+//
+// Deployment phases:
+// 1. Download models specified in component/service parameters
+// 2. Calculate and allocate Spyre cards if needed
+// 3. Deploy components
+// 4. Deploy the service
+// 5. Update database with endpoints and final status
+//
+// Note: Service and component records are already created by ApplicationService
+// before this method is called. This method only updates endpoints and status.
+func (d *PodmanDeployer) ExecuteServiceDeployment(
+	ctx context.Context,
+	plan *DeploymentPlan,
+	req apimodels.CreateApplicationRequest,
+) error {
+	logger.Infof("Starting service deployment execution for '%s'\n", plan.ApplicationName)
+
+	// Step 1: Download models specified in parameters
+	if err := d.downloadModelsForDeployment(plan); err != nil {
+		d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Model download failed: %v", err))
+		return fmt.Errorf("failed to download models: %w", err)
+	}
+
+	// Step 2: Calculate and allocate Spyre cards if needed
+	pool, err := d.calculateAndAllocateSpyreCards(plan)
+	if err != nil {
+		d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Spyre card allocation failed: %v", err))
+		return fmt.Errorf("failed to allocate Spyre cards: %w", err)
+	}
+
+	// Update application status to Deploying
+	if err := d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusDeploying, "Starting service deployment"); err != nil {
+		logger.Errorf("Failed to update application status to Deploying: %v\n", err)
+	}
+
+	// Step 3: Deploy components if any
+	if len(plan.Components) > 0 {
+		logger.Infof("Deploying %d components for service...\n", len(plan.Components))
+		if err := d.deployComponents(ctx, plan, pool); err != nil {
+			d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Component deployment failed: %v", err))
+			return fmt.Errorf("failed to deploy components: %w", err)
+		}
+	}
+
+	// Step 4: Deploy the service
+	if len(plan.Services) > 0 {
+		logger.Infof("Deploying service...\n")
+		if err := d.deployServices(ctx, plan); err != nil {
+			d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Service deployment failed: %v", err))
+			return fmt.Errorf("failed to deploy service: %w", err)
+		}
+	}
+
+	// Step 5: Update application status to Running
+	if err := d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusRunning, "Service deployment completed successfully"); err != nil {
+		logger.Errorf("Failed to update application status: %v\n", err)
+	}
+
+	logger.Infof("Service deployment completed successfully for '%s'\n", plan.ApplicationName)
 	return nil
 }
 
@@ -350,9 +412,6 @@ func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp 
 	}
 
 	// After successful deployment, merge component endpoints into all services that use this component
-	logger.Infof("Component %s endpoints after deployment: %v\n", comp.ComponentType, comp.Endpoints)
-	logger.Infof("Component %s used by services: %v\n", comp.ComponentType, comp.UsedByServices)
-
 	if len(comp.Endpoints) > 0 {
 		// Use mutex to protect concurrent writes to service Values maps
 		mu.Lock()
@@ -382,14 +441,10 @@ func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp 
 					} else {
 						// If key doesn't exist, create it
 						svc.Values[comp.ComponentType] = endpointData
-						logger.Infof("Created component %s in service %s: %v\n", comp.ComponentType, serviceID, endpointData)
 					}
 				} else {
 					logger.Errorf("Component %s endpoint data not found in comp.Endpoints map\n", comp.ComponentType)
 				}
-				logger.Infof("Service %s Values after merge: %v\n", serviceID, svc.Values)
-			} else {
-				logger.Errorf("Service %s not found in plan.Services\n", serviceID)
 			}
 		}
 	} else {

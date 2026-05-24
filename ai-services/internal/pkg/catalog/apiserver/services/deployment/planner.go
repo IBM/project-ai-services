@@ -93,6 +93,52 @@ func (p *DeploymentPlanner) PlanDeployment(
 	return plan, nil
 }
 
+// PlanServiceDeployment creates a deployment plan for a standalone service.
+// This is used when deploying individual services outside of an architecture.
+func (p *DeploymentPlanner) PlanServiceDeployment(
+	ctx context.Context,
+	serviceReq apimodels.Service,
+	applicationName string,
+	runtimeType string,
+) (*DeploymentPlan, error) {
+	// Validate service exists in catalog
+	_, err := p.catalogProvider.LoadService(serviceReq.CatalogID)
+	if err != nil {
+		return nil, fmt.Errorf("service '%s' not found in catalog: %w", serviceReq.CatalogID, err)
+	}
+
+	// Create a minimal CreateApplicationRequest for parsing
+	req := apimodels.CreateApplicationRequest{
+		Name:      applicationName,
+		CatalogID: serviceReq.CatalogID,
+		Services:  []apimodels.Service{serviceReq},
+	}
+
+	// Parse the request as a standalone service (not architecture)
+	parsedReq, err := p.requestParser.ParseRequest(ctx, req, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse service request: %w", err)
+	}
+
+	// Create deployment plan
+	plan := &DeploymentPlan{
+		ApplicationID:   uuid.New(),
+		ApplicationName: applicationName,
+		CatalogID:       serviceReq.CatalogID,
+		IsArchitecture:  false,
+		Components:      make(map[string]*ComponentPlan),
+		Services:        make(map[string]*ServicePlan),
+	}
+
+	// Process the single service
+	parsedSvc := parsedReq.Services[serviceReq.CatalogID]
+	if err := p.processServiceFromParsed(ctx, parsedSvc, plan, runtimeType); err != nil {
+		return nil, fmt.Errorf("failed to process service '%s': %w", serviceReq.CatalogID, err)
+	}
+
+	return plan, nil
+}
+
 // processServiceFromParsed processes a single service from parsed request.
 func (p *DeploymentPlanner) processServiceFromParsed(
 	ctx context.Context,
@@ -100,9 +146,15 @@ func (p *DeploymentPlanner) processServiceFromParsed(
 	plan *DeploymentPlan,
 	runtimeType string,
 ) error {
+	// Get service path from catalog provider
+	servicePath, err := p.catalogProvider.GetCatalogItemPath(parsedSvc.CatalogID)
+	if err != nil {
+		return fmt.Errorf("failed to get service catalog path: %w", err)
+	}
+
 	servicePlan := &ServicePlan{
 		CatalogID:     parsedSvc.CatalogID,
-		CatalogPath:   fmt.Sprintf("services/%s/%s", parsedSvc.CatalogID, runtimeType),
+		CatalogPath:   fmt.Sprintf("%s/%s", servicePath, runtimeType),
 		Version:       parsedSvc.Version,
 		ComponentRefs: make([]string, 0),
 		ArgParams:     make(map[string]string),
@@ -184,12 +236,19 @@ func (p *DeploymentPlanner) processComponentFromParsed(
 		return componentHash, nil
 	}
 
+	// Get component path from catalog provider
+	componentKey := fmt.Sprintf("%s/%s", parsedComp.ComponentType, parsedComp.ProviderID)
+	componentPath, err := p.catalogProvider.GetCatalogItemPath(componentKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to get component catalog path: %w", err)
+	}
+
 	// Create new component plan
 	compPlan := &ComponentPlan{
 		Hash:           componentHash,
 		ComponentType:  parsedComp.ComponentType,
 		ProviderID:     parsedComp.ProviderID,
-		CatalogPath:    fmt.Sprintf("components/%s/%s/%s", parsedComp.ComponentType, parsedComp.ProviderID, runtimeType),
+		CatalogPath:    fmt.Sprintf("%s/%s", componentPath, runtimeType),
 		Params:         parsedComp.Params,
 		ArgParams:      utils.FlattenMapWithValues(parsedComp.Params, ""),
 		UsedByServices: []string{catalogID},

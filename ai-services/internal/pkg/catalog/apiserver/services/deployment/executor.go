@@ -39,28 +39,6 @@ func NewDeploymentExecutor(
 	}
 }
 
-// Execute performs the complete deployment workflow:
-// 1. Plans the deployment (Phase 1-3)
-// 2. Executes the deployment (Phase 4)
-func (e *DeploymentExecutor) Execute(
-	ctx context.Context,
-	req apimodels.CreateApplicationRequest,
-	runtimeType types.RuntimeType,
-) (*DeploymentPlan, error) {
-	// Phase 1-3: Create deployment plan with runtime type for dynamic path generation
-	plan, err := e.planner.PlanDeployment(ctx, req, runtimeType.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to create deployment plan: %w", err)
-	}
-
-	// Phase 4: Execute deployment based on runtime type
-	if err := e.executeDeployment(ctx, plan, req, runtimeType); err != nil {
-		return nil, fmt.Errorf("failed to execute deployment: %w", err)
-	}
-
-	return plan, nil
-}
-
 // ExecuteWithPlan executes deployment using an existing plan.
 // This is used when the plan has already been created and database records inserted.
 func (e *DeploymentExecutor) ExecuteWithPlan(
@@ -86,6 +64,10 @@ func (e *DeploymentExecutor) executeDeployment(
 ) error {
 	switch runtimeType {
 	case types.RuntimeTypePodman:
+		// Check if this is a service-only deployment (not architecture)
+		if !plan.IsArchitecture && len(plan.Services) == 1 {
+			return e.executePodmanServiceDeployment(ctx, plan, req)
+		}
 		return e.executePodmanDeployment(ctx, plan, req)
 	case types.RuntimeTypeOpenShift:
 		return fmt.Errorf("OpenShift deployment not yet implemented")
@@ -117,6 +99,31 @@ func (e *DeploymentExecutor) executePodmanDeployment(
 
 	// Execute deployment
 	return deployer.ExecuteDeployment(ctx, plan, req)
+}
+
+// executePodmanServiceDeployment executes deployment for a standalone service in Podman runtime.
+func (e *DeploymentExecutor) executePodmanServiceDeployment(
+	ctx context.Context,
+	plan *DeploymentPlan,
+	req apimodels.CreateApplicationRequest,
+) error {
+	// Initialize Podman runtime client
+	rt, err := podmanRuntime.NewPodmanClient()
+	if err != nil {
+		return fmt.Errorf("failed to initialize Podman runtime: %w", err)
+	}
+
+	// Create podman deployer
+	deployer := podman.NewPodmanDeployer(
+		rt,
+		e.catalogProvider,
+		e.appRepo,
+		e.serviceRepo,
+		e.componentRepo,
+	)
+
+	// Execute service deployment
+	return deployer.ExecuteServiceDeployment(ctx, plan, req)
 }
 
 // Made with Bob

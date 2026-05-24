@@ -249,38 +249,11 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 		return nil, fmt.Errorf("application with name '%s' already exists", req.Name)
 	}
 
-	fmt.Println("Existing APP: ", existingApp)
-
 	// Phase 2: Create deployment plan (synchronous - fail fast if invalid)
 	// Use podman as default runtime type for planning
 	plan, err := s.deploymentPlanner.PlanDeployment(ctx, req, runtimeTypes.RuntimeTypePodman.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create deployment plan: %w", err)
-	}
-
-	fmt.Printf("Deployment Plan:\n")
-	fmt.Printf("  ApplicationID: %s\n", plan.ApplicationID)
-	fmt.Printf("  ApplicationName: %s\n", plan.ApplicationName)
-	fmt.Printf("  CatalogID: %s\n", plan.CatalogID)
-	fmt.Printf("  IsArchitecture: %v\n", plan.IsArchitecture)
-	fmt.Printf("  Components (%d):\n", len(plan.Components))
-	for hash, comp := range plan.Components {
-		fmt.Printf("    [%s] Type: %s, Provider: %s, UsedBy: %v\n",
-			hash[:8], comp.ComponentType, comp.ProviderID, comp.UsedByServices)
-		fmt.Printf("      ArgParams: %v\n", comp.ArgParams)
-	}
-	fmt.Printf("  Services (%d):\n", len(plan.Services))
-	for svcID, svc := range plan.Services {
-		fmt.Printf("    [%s] CatalogID: %s, Version: %s, DatabaseID: %s\n", svcID, svc.CatalogID, svc.Version, svc.DatabaseID)
-		fmt.Printf("      ComponentRefs (%d): %v\n", len(svc.ComponentRefs), svc.ComponentRefs)
-		for _, ref := range svc.ComponentRefs {
-			if comp, ok := plan.Components[ref]; ok {
-				fmt.Printf("        -> %s: %s/%s\n", ref[:8], comp.ComponentType, comp.ProviderID)
-				fmt.Printf("           Component Values: %v\n", comp.Values)
-			}
-		}
-		fmt.Printf("      ArgParams: %v\n", svc.ArgParams)
-		fmt.Printf("      Values: %v\n", svc.Values)
 	}
 
 	// Phase 3: Insert database records for application, services, components, and dependencies
