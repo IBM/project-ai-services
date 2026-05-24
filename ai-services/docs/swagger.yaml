@@ -284,6 +284,15 @@ definitions:
       error:
         type: string
     type: object
+  internal_pkg_catalog_apiserver_handlers.UpdateApplicationRequest:
+    properties:
+      name:
+        maxLength: 100
+        minLength: 3
+        type: string
+    required:
+    - name
+    type: object
   internal_pkg_catalog_apiserver_handlers.loginReq:
     properties:
       password:
@@ -460,26 +469,46 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update an existing application's configuration
+      description: Updates the display name of an existing application
       parameters:
-      - description: Application ID
+      - description: Application ID (UUID)
         in: path
         name: id
         required: true
         type: string
+      - description: Update request
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.UpdateApplicationRequest'
       produces:
       - application/json
       responses:
         "200":
-          description: Application updated
+          description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application'
+        "400":
+          description: Invalid request body or name validation failed
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "403":
+          description: User doesn't own this application
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "404":
           description: Application not found
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Update application

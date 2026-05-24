@@ -61,10 +61,10 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 		// Implemented endpoints
 		applications.GET("/", applicationHandler.ListApplications)
 		applications.POST("/", applicationHandler.CreateApplication)
+		applications.PUT("/:id", applicationHandler.UpdateApplication)
 
 		// Draft endpoints - placeholders for future implementation
 		applications.GET("/:id", getApplication)
-		applications.PUT("/:id", updateApplication)
 		applications.DELETE("/:id", deleteApplication)
 	}
 
@@ -83,22 +83,6 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 //	@Failure		404	{object}	map[string]interface{}	"Application not found"
 //	@Router			/applications/{id} [get]
 func getApplication(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "This is a placeholder endpoint for " + c.FullPath()})
-}
-
-// UpdateApplication godoc
-//
-//	@Summary		Update application
-//	@Description	Update an existing application's configuration
-//	@Tags			Applications
-//	@Accept			json
-//	@Produce		json
-//	@Security		BearerAuth
-//	@Param			id	path		string					true	"Application ID"
-//	@Success		200	{object}	map[string]interface{}	"Application updated"
-//	@Failure		404	{object}	map[string]interface{}	"Application not found"
-//	@Router			/applications/{id} [put]
-func updateApplication(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "This is a placeholder endpoint for " + c.FullPath()})
 }
 

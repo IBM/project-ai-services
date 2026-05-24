@@ -6,6 +6,8 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -18,6 +20,10 @@ var _ types.ApplicationListResponse
 // ApplicationHandler handles application-related HTTP requests.
 type ApplicationHandler struct {
 	appService *repository.ApplicationService
+}
+
+type UpdateApplicationRequest struct {
+	Name string `json:"name" binding:"required,min=3,max=100"`
 }
 
 // NewApplicationHandler creates a new application handler.
@@ -88,6 +94,62 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// UpdateApplication godoc
+//
+//	@Summary		Update application
+//	@Description	Updates the display name of an existing application
+//	@Tags			Applications
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path		string						true	"Application ID (UUID)"
+//	@Param			body	body		UpdateApplicationRequest	true	"Update request"
+//	@Success		200		{object}	types.Application
+//	@Failure		400		{object}	ErrorResponse	"Invalid request body or name validation failed"
+//	@Failure		401		{object}	ErrorResponse	"Unauthorized"
+//	@Failure		403		{object}	ErrorResponse	"User doesn't own this application"
+//	@Failure		404		{object}	ErrorResponse	"Application not found"
+//	@Failure		500		{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/applications/{id} [put]
+func (h *ApplicationHandler) UpdateApplication(c *gin.Context) {
+	appID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid application ID format"})
+
+		return
+	}
+	var req UpdateApplicationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: fmt.Sprintf("Invalid request body: %v", err)})
+
+		return
+	}
+	// Get authenticated user ID
+	userID := c.GetString(middleware.CtxUserIDKey)
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "User not authenticated"})
+
+		return
+	}
+	updatedApp, err := h.appService.UpdateApplication(c.Request.Context(), appID, userID, req.Name)
+	if err != nil {
+		if err == repository.ErrApplicationNotFound {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "Application not found"})
+
+			return
+		}
+		if err == repository.ErrUnauthorized {
+			c.JSON(http.StatusForbidden, ErrorResponse{Error: "User doesn't own this application"})
+
+			return
+		}
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to update application: %v", err)})
+
+		return
+	}
+	c.JSON(http.StatusOK, updatedApp)
 }
 
 // CreateApplication godoc
