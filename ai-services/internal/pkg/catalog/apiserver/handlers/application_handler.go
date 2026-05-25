@@ -1,14 +1,12 @@
 package handlers
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 
@@ -221,11 +219,13 @@ func (h *ApplicationHandler) GetApplicationByID(c *gin.Context) {
 	// Call service layer
 	response, err := h.appService.GetApplicationByID(c.Request.Context(), appID)
 	if err != nil {
-		statusCode := http.StatusInternalServerError
-		if errors.Is(err, pgx.ErrNoRows) {
-			statusCode = http.StatusNotFound
+		if err == repository.ErrApplicationNotFound {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "Application not found"})
+
+			return
 		}
-		c.JSON(statusCode, ErrorResponse{
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get application: %v", err),
 		})
 

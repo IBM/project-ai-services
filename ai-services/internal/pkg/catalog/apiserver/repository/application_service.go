@@ -235,7 +235,10 @@ func (s *ApplicationService) GetApplicationByID(ctx context.Context, id uuid.UUI
 	// Fetch application from database
 	app, err := s.appRepo.GetByID(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get application id '%s': %w", id, err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrApplicationNotFound
+		}
+		return nil, fmt.Errorf("failed to get application: %w", err)
 	}
 	// Build complete response with services and components
 	return s.buildGetApplicationResponse(ctx, app)
