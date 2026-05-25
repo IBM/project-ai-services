@@ -133,7 +133,7 @@ func (r *serviceRepo) GetByAppID(ctx context.Context, appID uuid.UUID) ([]models
 		}
 
 		if len(endpointsJSON) > 0 {
-			var endpoints map[string]any
+			var endpoints []map[string]any
 			if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal service endpoints: %w", err)
 			}

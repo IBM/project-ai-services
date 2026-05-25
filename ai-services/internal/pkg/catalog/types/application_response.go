@@ -8,15 +8,31 @@ type ApplicationListResponse struct {
 
 // Application represents an application in the list response.
 type Application struct {
-	ID             string          `json:"id"`
-	Name           string          `json:"name"`
-	DeploymentType string          `json:"deployment_type"`
-	Type           string          `json:"type"`
-	Status         string          `json:"status"`
-	Message        string          `json:"message,omitempty"`
-	Services       []ServiceStatus `json:"services,omitempty"`
-	CreatedAt      string          `json:"created_at"`
-	UpdatedAt      string          `json:"updated_at"`
+	ID             string      `json:"id"`
+	Name           string      `json:"name"`
+	DeploymentType string      `json:"deployment_type"`
+	Type           string      `json:"type"`
+	Status         string      `json:"status"`
+	Message        string      `json:"message,omitempty"`
+	Services       interface{} `json:"services,omitempty"`
+	CreatedAt      string      `json:"created_at"`
+	UpdatedAt      string      `json:"updated_at"`
+}
+
+type ApplicationService struct {
+	ID        string                 `json:"id"`
+	Type      string                 `json:"type"`
+	Endpoints []map[string]any       `json:"endpoints,omitempty"`
+	Version   string                 `json:"version,omitempty"`
+	Component []ServiceComponentResp `json:"components,omitempty"`
+	CreatedAt string                 `json:"created_at"`
+	UpdatedAt string                 `json:"updated_at"`
+}
+
+type ServiceComponentResp struct {
+	Type     string         `json:"type"`
+	Provider string         `json:"provider"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // ServiceStatus represents the status of a service within an application.

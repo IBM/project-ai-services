@@ -169,14 +169,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get detailed information about a specific application",
+                "description": "Retrieves a single application by its unique identifier for the authenticated user",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Applications"
                 ],
-                "summary": "Get application details",
+                "summary": "Get application by ID",
                 "parameters": [
                     {
                         "type": "string",
@@ -188,17 +188,27 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Application details",
+                        "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Application not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     }
                 }
@@ -959,12 +969,7 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
-                "services": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus"
-                    }
-                },
+                "services": {},
                 "status": {
                     "type": "string"
                 },
@@ -1234,20 +1239,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "type": {
                     "type": "string"
                 }
             }

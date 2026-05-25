@@ -73,10 +73,7 @@ definitions:
         type: string
       name:
         type: string
-      services:
-        items:
-          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus'
-        type: array
+      services: {}
       status:
         type: string
       type:
@@ -253,15 +250,6 @@ definitions:
       optional:
         type: boolean
       version:
-        type: string
-    type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus:
-    properties:
-      id:
-        type: string
-      status:
-        type: string
-      type:
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceSummary:
@@ -441,7 +429,8 @@ paths:
       tags:
       - Applications
     get:
-      description: Get detailed information about a specific application
+      description: Retrieves a single application by its unique identifier for the
+        authenticated user
       parameters:
       - description: Application ID
         in: path
@@ -452,18 +441,24 @@ paths:
       - application/json
       responses:
         "200":
-          description: Application details
+          description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "404":
           description: Application not found
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
       security:
       - BearerAuth: []
-      summary: Get application details
+      summary: Get application by ID
       tags:
       - Applications
     put:
