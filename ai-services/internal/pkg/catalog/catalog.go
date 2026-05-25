@@ -664,6 +664,7 @@ func (p *CatalogProvider) LoadComponentTemplates(componentType, providerID strin
 		}
 
 		templates[templateName] = tmpl
+
 		return nil
 	})
 
@@ -756,6 +757,7 @@ func (p *CatalogProvider) LoadServiceTemplates(serviceID string) (map[string]*te
 		}
 
 		templates[templateName] = tmpl
+
 		return nil
 	})
 

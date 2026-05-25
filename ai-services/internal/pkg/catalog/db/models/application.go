@@ -18,11 +18,12 @@ const (
 type ApplicationStatus string
 
 const (
-	ApplicationStatusDownloading ApplicationStatus = "Downloading"
-	ApplicationStatusDeploying   ApplicationStatus = "Deploying"
-	ApplicationStatusRunning     ApplicationStatus = "Running"
-	ApplicationStatusDeleting    ApplicationStatus = "Deleting"
-	ApplicationStatusError       ApplicationStatus = "Error"
+	ApplicationStatusInitializing ApplicationStatus = "Initializing"
+	ApplicationStatusDownloading  ApplicationStatus = "Downloading"
+	ApplicationStatusDeploying    ApplicationStatus = "Deploying"
+	ApplicationStatusRunning      ApplicationStatus = "Running"
+	ApplicationStatusDeleting     ApplicationStatus = "Deleting"
+	ApplicationStatusError        ApplicationStatus = "Error"
 )
 
 // Application represents an application in the catalog.

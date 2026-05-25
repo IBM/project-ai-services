@@ -20,7 +20,7 @@ import (
 // 1. Parsing and validating the request
 // 2. Collecting parameters for each service and component
 // 3. Deduplicating components (same type + provider + params = single deployment)
-// 4. Creating deployment plan with shared components
+// 4. Creating deployment plan with shared components.
 type DeploymentPlanner struct {
 	catalogProvider *catalog.CatalogProvider
 	componentRepo   repository.ComponentRepository
@@ -41,7 +41,7 @@ func NewDeploymentPlanner(
 	}
 }
 
-// Type aliases for deployment plan types
+// Type aliases for deployment plan types.
 type (
 	DeploymentPlan = types.DeploymentPlan
 	ComponentPlan  = types.ComponentPlan
@@ -233,6 +233,7 @@ func (p *DeploymentPlanner) processComponentFromParsed(
 	if existingComp, exists := plan.Components[componentHash]; exists {
 		// Component already planned, just add this service to its users
 		existingComp.UsedByServices = append(existingComp.UsedByServices, catalogID)
+
 		return componentHash, nil
 	}
 
@@ -276,6 +277,7 @@ func (p *DeploymentPlanner) calculateComponentHash(
 
 	// Calculate SHA256 hash
 	hash := sha256.Sum256([]byte(hashInput))
+
 	return fmt.Sprintf("%x", hash[:16]) // Use first 16 bytes (32 hex chars)
 }
 

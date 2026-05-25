@@ -15,7 +15,7 @@ import (
 // It collects parameters from:
 // 1. Component-level params from the request
 // 2. Flattens component params with component_type prefix (e.g., llm.model)
-// 3. Loads service values which merges component values under component_type keys
+// 3. Loads service values which merges component values under component_type keys.
 type ParamBuilder struct {
 	catalogProvider *catalog.CatalogProvider
 }

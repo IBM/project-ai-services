@@ -4,6 +4,7 @@
 
 -- Status enum for applications and services
 CREATE TYPE status AS ENUM (
+    'Initializing',
     'Downloading',
     'Deploying',
     'Running',

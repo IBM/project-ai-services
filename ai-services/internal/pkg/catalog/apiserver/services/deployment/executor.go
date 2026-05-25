@@ -65,9 +65,10 @@ func (e *DeploymentExecutor) executeDeployment(
 	switch runtimeType {
 	case types.RuntimeTypePodman:
 		// Check if this is a service-only deployment (not architecture)
-		if !plan.IsArchitecture && len(plan.Services) == 1 {
+		if !plan.IsArchitecture {
 			return e.executePodmanServiceDeployment(ctx, plan, req)
 		}
+
 		return e.executePodmanDeployment(ctx, plan, req)
 	case types.RuntimeTypeOpenShift:
 		return fmt.Errorf("OpenShift deployment not yet implemented")

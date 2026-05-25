@@ -115,5 +115,6 @@ func DownloadModelContainer(model, targetDir string) error {
 	}
 
 	logger.Infoln("Model downloaded successfully")
+
 	return nil
 }

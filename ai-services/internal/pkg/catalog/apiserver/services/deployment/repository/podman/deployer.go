@@ -19,11 +19,11 @@ import (
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -32,7 +32,7 @@ import (
 	k8syaml "sigs.k8s.io/yaml"
 )
 
-// ComponentInfo holds the information derived from a deployed component
+// ComponentInfo holds the information derived from a deployed component.
 type ComponentInfo struct {
 	Endpoint string
 	Domain   string
@@ -40,13 +40,13 @@ type ComponentInfo struct {
 	Model    string
 }
 
-// SpyreCardPool manages allocation of PCI addresses to components
+// SpyreCardPool manages allocation of PCI addresses to components.
 type SpyreCardPool struct {
 	addresses []string
 	mutex     sync.Mutex
 }
 
-// Allocate takes n addresses from the pool and returns them
+// Allocate takes n addresses from the pool and returns them.
 func (p *SpyreCardPool) Allocate(n int) ([]string, error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
@@ -62,7 +62,7 @@ func (p *SpyreCardPool) Allocate(n int) ([]string, error) {
 	return allocated, nil
 }
 
-// Type aliases for deployment plan types
+// Type aliases for deployment plan types.
 type (
 	DeploymentPlan = deploymenttypes.DeploymentPlan
 	ComponentPlan  = deploymenttypes.ComponentPlan
@@ -113,53 +113,61 @@ func (d *PodmanDeployer) ExecuteDeployment(
 ) error {
 	logger.Infof("Starting deployment execution for application '%s'\n", plan.ApplicationName)
 
-	// Step 0: Pull container images for all components and services
-	// if err := d.pullImagesForDeployment(plan); err != nil {
-	// 	d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Image pull failed: %v", err))
-	// 	return fmt.Errorf("failed to pull container images: %w", err)
-	// }
+	// TODO: Add Image pull logic
 
 	// Step 1: Download models specified in parameters
 	if err := d.downloadModelsForDeployment(plan); err != nil {
-		d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Model download failed: %v", err))
+		d.handleDeploymentError(ctx, plan.ApplicationID, "Model download failed", err)
+
 		return fmt.Errorf("failed to download models: %w", err)
 	}
 
 	// Step 2: Calculate and allocate Spyre cards if needed
 	pool, err := d.calculateAndAllocateSpyreCards(plan)
 	if err != nil {
-		d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Spyre card allocation failed: %v", err))
+		d.handleDeploymentError(ctx, plan.ApplicationID, "Spyre card allocation failed", err)
+
 		return fmt.Errorf("failed to allocate Spyre cards: %w", err)
 	}
 
 	// Update application status to Deploying before starting component deployment
-	if err := d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusDeploying, "Starting component and service deployment"); err != nil {
-		logger.Errorf("Failed to update application status to Deploying: %v\n", err)
-		// Don't fail the deployment if status update fails
-	}
+	d.updateStatusIgnoreError(ctx, plan.ApplicationID, models.ApplicationStatusDeploying, "Starting component and service deployment")
 
 	// Step 3: Deploy components and update their endpoints
-	if err := d.deployComponents(ctx, plan, pool); err != nil {
-		// Update application status to Error
-		d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Component deployment failed: %v", err))
+	if err := d.deployComponents(plan, pool); err != nil {
+		d.handleDeploymentError(ctx, plan.ApplicationID, "Component deployment failed", err)
+
 		return fmt.Errorf("failed to deploy components: %w", err)
 	}
 
 	// Step 5: Deploy services with component references
 	if err := d.deployServices(ctx, plan); err != nil {
-		// Update application status to Error
-		d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Service deployment failed: %v", err))
+		d.handleDeploymentError(ctx, plan.ApplicationID, "Service deployment failed", err)
+
 		return fmt.Errorf("failed to deploy services: %w", err)
 	}
 
 	// Step 6: Update application status to Running
-	if err := d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusRunning, "Deployment completed successfully"); err != nil {
-		logger.Errorf("Failed to update application status: %v\n", err)
-		// Don't fail the deployment if status update fails
-	}
+	d.updateStatusIgnoreError(ctx, plan.ApplicationID, models.ApplicationStatusRunning, "Deployment completed successfully")
 
 	logger.Infof("Deployment completed successfully for application '%s'\n", plan.ApplicationName)
+
 	return nil
+}
+
+// handleDeploymentError updates application status on error and logs any update failures.
+func (d *PodmanDeployer) handleDeploymentError(ctx context.Context, appID uuid.UUID, message string, err error) {
+	fullMessage := fmt.Sprintf("%s: %v", message, err)
+	if updateErr := d.updateApplicationStatus(ctx, appID, models.ApplicationStatusError, fullMessage); updateErr != nil {
+		logger.Errorf("Failed to update application status: %v\n", updateErr)
+	}
+}
+
+// updateStatusIgnoreError updates application status and logs any failures without returning error.
+func (d *PodmanDeployer) updateStatusIgnoreError(ctx context.Context, appID uuid.UUID, status models.ApplicationStatus, message string) {
+	if err := d.updateApplicationStatus(ctx, appID, status, message); err != nil {
+		logger.Errorf("Failed to update application status: %v\n", err)
+	}
 }
 
 // ExecuteServiceDeployment executes the deployment plan for a standalone service.
@@ -184,46 +192,48 @@ func (d *PodmanDeployer) ExecuteServiceDeployment(
 
 	// Step 1: Download models specified in parameters
 	if err := d.downloadModelsForDeployment(plan); err != nil {
-		d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Model download failed: %v", err))
+		d.handleDeploymentError(ctx, plan.ApplicationID, "Model download failed", err)
+
 		return fmt.Errorf("failed to download models: %w", err)
 	}
 
 	// Step 2: Calculate and allocate Spyre cards if needed
 	pool, err := d.calculateAndAllocateSpyreCards(plan)
 	if err != nil {
-		d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Spyre card allocation failed: %v", err))
+		d.handleDeploymentError(ctx, plan.ApplicationID, "Spyre card allocation failed", err)
+
 		return fmt.Errorf("failed to allocate Spyre cards: %w", err)
 	}
 
 	// Update application status to Deploying
-	if err := d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusDeploying, "Starting service deployment"); err != nil {
-		logger.Errorf("Failed to update application status to Deploying: %v\n", err)
-	}
+	d.updateStatusIgnoreError(ctx, plan.ApplicationID, models.ApplicationStatusDeploying, "Starting service deployment")
 
 	// Step 3: Deploy components if any
 	if len(plan.Components) > 0 {
 		logger.Infof("Deploying %d components for service...\n", len(plan.Components))
-		if err := d.deployComponents(ctx, plan, pool); err != nil {
-			d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Component deployment failed: %v", err))
+		if err := d.deployComponents(plan, pool); err != nil {
+			d.handleDeploymentError(ctx, plan.ApplicationID, "Component deployment failed", err)
+
 			return fmt.Errorf("failed to deploy components: %w", err)
 		}
+		logger.Infof("All components deployed successfully for service\n")
 	}
 
 	// Step 4: Deploy the service
 	if len(plan.Services) > 0 {
 		logger.Infof("Deploying service...\n")
 		if err := d.deployServices(ctx, plan); err != nil {
-			d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusError, fmt.Sprintf("Service deployment failed: %v", err))
+			d.handleDeploymentError(ctx, plan.ApplicationID, "Service deployment failed", err)
+
 			return fmt.Errorf("failed to deploy service: %w", err)
 		}
 	}
 
 	// Step 5: Update application status to Running
-	if err := d.updateApplicationStatus(ctx, plan.ApplicationID, models.ApplicationStatusRunning, "Service deployment completed successfully"); err != nil {
-		logger.Errorf("Failed to update application status: %v\n", err)
-	}
+	d.updateStatusIgnoreError(ctx, plan.ApplicationID, models.ApplicationStatusRunning, "Service deployment completed successfully")
 
 	logger.Infof("Service deployment completed successfully for '%s'\n", plan.ApplicationName)
+
 	return nil
 }
 
@@ -231,49 +241,11 @@ func (d *PodmanDeployer) ExecuteServiceDeployment(
 func (d *PodmanDeployer) updateApplicationStatus(ctx context.Context, appID uuid.UUID, status models.ApplicationStatus, message string) error {
 	if err := d.appRepo.UpdateStatus(ctx, appID, status, message); err != nil {
 		logger.Errorf("Failed to update application status in database: %v", err)
+
 		return fmt.Errorf("failed to update application status: %w", err)
 	}
 	logger.Infof("Application %s status updated: %s - %s", appID, status, message)
-	return nil
-}
 
-// pullImagesForDeployment pulls all container images required for components and services.
-// Uses image.PullIfNotPresent policy to avoid unnecessary downloads.
-func (d *PodmanDeployer) pullImagesForDeployment(plan *DeploymentPlan) error {
-	logger.Infof("Pulling container images for application '%s'\n", plan.ApplicationName)
-
-	// Collect all unique template paths for components and services
-	templatePaths := make(map[string]bool)
-
-	// Add component template paths
-	for _, comp := range plan.Components {
-		// Use dynamic catalog path from component plan
-		templatePaths[comp.CatalogPath] = true
-	}
-
-	// Add service template paths
-	for _, svc := range plan.Services {
-		// Use dynamic catalog path from service plan
-		templatePaths[svc.CatalogPath] = true
-	}
-
-	// Pull images for each unique template path
-	for templatePath := range templatePaths {
-		logger.Infof("Pulling images for template: %s\n", templatePath)
-
-		img := &image.Images{
-			Runtime:     d.runtime,
-			App:         plan.ApplicationName,
-			AppTemplate: templatePath,
-		}
-
-		// Use PullIfNotPresent policy to avoid unnecessary downloads
-		if err := img.Run(image.PullIfNotPresent); err != nil {
-			return fmt.Errorf("failed to pull images for template %s: %w", templatePath, err)
-		}
-	}
-
-	logger.Infof("Successfully pulled all container images for application '%s'\n", plan.ApplicationName)
 	return nil
 }
 
@@ -282,41 +254,57 @@ func (d *PodmanDeployer) pullImagesForDeployment(plan *DeploymentPlan) error {
 func (d *PodmanDeployer) downloadModelsForDeployment(plan *DeploymentPlan) error {
 	logger.Infof("Downloading models for application '%s'\n", plan.ApplicationName)
 
-	// Collect all unique model names from components and services
+	modelSet := d.collectModelsFromPlan(plan)
+
+	if len(modelSet) == 0 {
+		logger.Infof("No models to download for application '%s'\n", plan.ApplicationName)
+
+		return nil
+	}
+
+	if err := d.downloadModels(modelSet); err != nil {
+		return err
+	}
+
+	logger.Infof("Successfully downloaded all models for application '%s'\n", plan.ApplicationName)
+
+	return nil
+}
+
+// collectModelsFromPlan collects all unique model names from the deployment plan.
+func (d *PodmanDeployer) collectModelsFromPlan(plan *DeploymentPlan) map[string]bool {
 	modelSet := make(map[string]bool)
 
 	// Extract models from component params
 	for _, comp := range plan.Components {
-		for key, value := range comp.Params {
-			// Look for params with "model" in the key name
-			if strings.Contains(strings.ToLower(key), "model") {
-				if modelName, ok := value.(string); ok && modelName != "" {
-					modelSet[modelName] = true
-				}
-			}
-		}
+		d.extractModelsFromParams(comp.Params, modelSet)
 	}
 
-	// Extract models from service params (if services have model params)
+	// Extract models from service params
 	for _, svc := range plan.Services {
 		if svc.Values != nil {
-			// Check if Values contains model information
-			if modelVal, ok := svc.Values["model"]; ok {
-				if modelName, ok := modelVal.(string); ok && modelName != "" {
-					modelSet[modelName] = true
-				}
-			}
+			d.extractModelsFromParams(svc.Values, modelSet)
 		}
 	}
 
-	// If no models found, skip download
-	if len(modelSet) == 0 {
-		logger.Infof("No models to download for application '%s'\n", plan.ApplicationName)
-		return nil
-	}
+	return modelSet
+}
 
-	// Download each unique model
+// extractModelsFromParams extracts model names from parameter maps.
+func (d *PodmanDeployer) extractModelsFromParams(params map[string]any, modelSet map[string]bool) {
+	for key, value := range params {
+		if strings.Contains(strings.ToLower(key), "model") {
+			if modelName, ok := value.(string); ok && modelName != "" {
+				modelSet[modelName] = true
+			}
+		}
+	}
+}
+
+// downloadModels downloads all models in the provided set.
+func (d *PodmanDeployer) downloadModels(modelSet map[string]bool) error {
 	modelsPath := utils.GetModelsPath()
+
 	for modelName := range modelSet {
 		logger.Infof("Downloading model: %s\n", modelName)
 
@@ -325,25 +313,25 @@ func (d *PodmanDeployer) downloadModelsForDeployment(plan *DeploymentPlan) error
 		}
 	}
 
-	logger.Infof("Successfully downloaded all models for application '%s'\n", plan.ApplicationName)
 	return nil
 }
 
 // deployComponents deploys all components concurrently.
 // All components are treated as shared and deployed together.
-func (d *PodmanDeployer) deployComponents(ctx context.Context, plan *DeploymentPlan, pool *SpyreCardPool) error {
+func (d *PodmanDeployer) deployComponents(plan *DeploymentPlan, pool *SpyreCardPool) error {
 	// Deploy all components concurrently
 	logger.Infof("Deploying %d components concurrently...\n", len(plan.Components))
-	if err := d.deployComponentsConcurrently(ctx, plan.Components, pool, plan); err != nil {
+	if err := d.deployComponentsConcurrently(plan.Components, pool, plan); err != nil {
 		return fmt.Errorf("failed to deploy components: %w", err)
 	}
 
 	logger.Infof("All components deployed successfully\n")
+
 	return nil
 }
 
 // deployComponentsConcurrently deploys multiple components concurrently using goroutines.
-func (d *PodmanDeployer) deployComponentsConcurrently(ctx context.Context, components map[string]*ComponentPlan, pool *SpyreCardPool, plan *DeploymentPlan) error {
+func (d *PodmanDeployer) deployComponentsConcurrently(components map[string]*ComponentPlan, pool *SpyreCardPool, plan *DeploymentPlan) error {
 	if len(components) == 0 {
 		return nil
 	}
@@ -356,7 +344,7 @@ func (d *PodmanDeployer) deployComponentsConcurrently(ctx context.Context, compo
 		wg.Add(1)
 		go func(h string, c *ComponentPlan) {
 			defer wg.Done()
-			if err := d.deployComponent(ctx, h, c, pool, plan, &mu); err != nil {
+			if err := d.deployComponent(h, c, pool, plan, &mu); err != nil {
 				errChan <- fmt.Errorf("failed to deploy component %s: %w", h, err)
 			}
 		}(hash, comp)
@@ -367,7 +355,7 @@ func (d *PodmanDeployer) deployComponentsConcurrently(ctx context.Context, compo
 	close(errChan)
 
 	// Check for any errors
-	var errs []error
+	errs := make([]error, 0, len(plan.Components))
 	for err := range errChan {
 		errs = append(errs, err)
 	}
@@ -381,78 +369,112 @@ func (d *PodmanDeployer) deployComponentsConcurrently(ctx context.Context, compo
 }
 
 // deployComponent deploys a single component and updates its endpoint in the database.
-func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp *ComponentPlan, pool *SpyreCardPool, plan *DeploymentPlan, mu *sync.Mutex) error {
+func (d *PodmanDeployer) deployComponent(hash string, comp *ComponentPlan, pool *SpyreCardPool, plan *DeploymentPlan, mu *sync.Mutex) error {
 	logger.Infof("Deploying component %s (%s/%s)...\n", comp.ComponentType, comp.ProviderID, hash)
 
-	// Load component from catalog
-	component, err := d.catalogProvider.LoadComponent(comp.ComponentType, comp.ProviderID)
+	component, metadata, tmpls, err := d.loadComponentResources(comp)
 	if err != nil {
-		return fmt.Errorf("failed to load component from catalog: %w", err)
+		return err
 	}
+
 	logger.Infof("Component %s loaded: %s\n", component.ID, component.Name)
 
-	// Load runtime-specific metadata (contains PodTemplateExecutions)
-	metadata, err := d.catalogProvider.LoadComponentRuntimeMetadata(comp.ComponentType, comp.ProviderID)
-	if err != nil {
-		return fmt.Errorf("failed to load component runtime metadata: %w", err)
-	}
-
-	// Load component templates
-	tmpls, err := d.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
-	if err != nil {
-		return fmt.Errorf("failed to load component templates: %w", err)
-	}
-
-	// Use dynamic catalog path from component plan
-	componentPath := comp.CatalogPath
-
-	// Deploy component pods
-	if err := d.deployComponentPods(comp, metadata, tmpls, componentPath, pool); err != nil {
+	if err := d.deployComponentPods(comp, metadata, tmpls, comp.CatalogPath, pool); err != nil {
 		return fmt.Errorf("failed to deploy component pods: %w", err)
 	}
 
-	// After successful deployment, merge component endpoints into all services that use this component
-	if len(comp.Endpoints) > 0 {
-		// Use mutex to protect concurrent writes to service Values maps
-		mu.Lock()
-		defer mu.Unlock()
-
-		for _, serviceID := range comp.UsedByServices {
-			if svc, ok := plan.Services[serviceID]; ok {
-				logger.Infof("Service %s Values before merge: %v\n", serviceID, svc.Values)
-				if svc.Values == nil {
-					svc.Values = make(map[string]interface{})
-				}
-				// Merge component endpoints under the component type key
-				if endpointData, ok := comp.Endpoints[comp.ComponentType]; ok {
-					// Check if the component type key already exists in service Values
-					if existingData, exists := svc.Values[comp.ComponentType]; exists {
-						// If key is present and is a map, update host and port values
-						if existingMap, isMap := existingData.(map[string]any); isMap {
-							if endpointMap, isEndpointMap := endpointData.(map[string]any); isEndpointMap {
-								// Update host and port in the existing map (preserving model, image, apiKey, etc.)
-								maps.Copy(existingMap, endpointMap)
-								logger.Infof("Updated component %s host/port in service %s\n", comp.ComponentType, serviceID)
-							}
-						} else {
-							// If not a map, replace it
-							svc.Values[comp.ComponentType] = endpointData
-						}
-					} else {
-						// If key doesn't exist, create it
-						svc.Values[comp.ComponentType] = endpointData
-					}
-				} else {
-					logger.Errorf("Component %s endpoint data not found in comp.Endpoints map\n", comp.ComponentType)
-				}
-			}
-		}
-	} else {
-		logger.Infof("Component %s has no endpoints to merge\n", comp.ComponentType)
-	}
+	d.mergeComponentEndpoints(comp, plan, mu)
 
 	logger.Infof("Component %s deployed successfully\n", comp.ComponentType)
+
 	return nil
+}
+
+// loadComponentResources loads all necessary resources for a component.
+func (d *PodmanDeployer) loadComponentResources(comp *ComponentPlan) (*types.Component, *templates.AppMetadata, map[string]*template.Template, error) {
+	component, err := d.catalogProvider.LoadComponent(comp.ComponentType, comp.ProviderID)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to load component from catalog: %w", err)
+	}
+
+	metadata, err := d.catalogProvider.LoadComponentRuntimeMetadata(comp.ComponentType, comp.ProviderID)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to load component runtime metadata: %w", err)
+	}
+
+	tmpls, err := d.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to load component templates: %w", err)
+	}
+
+	return component, metadata, tmpls, nil
+}
+
+// mergeComponentEndpoints merges component endpoints into services that use the component.
+func (d *PodmanDeployer) mergeComponentEndpoints(comp *ComponentPlan, plan *DeploymentPlan, mu *sync.Mutex) {
+	if len(comp.Endpoints) == 0 {
+		logger.Infof("Component %s has no endpoints to merge\n", comp.ComponentType)
+
+		return
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	for _, serviceID := range comp.UsedByServices {
+		d.mergeEndpointIntoService(comp, plan, serviceID)
+	}
+}
+
+// mergeEndpointIntoService merges component endpoint data into a specific service.
+func (d *PodmanDeployer) mergeEndpointIntoService(comp *ComponentPlan, plan *DeploymentPlan, serviceID string) {
+	svc, ok := plan.Services[serviceID]
+	if !ok {
+		return
+	}
+
+	logger.Infof("Service %s Values before merge: %v\n", serviceID, svc.Values)
+
+	if svc.Values == nil {
+		svc.Values = make(map[string]interface{})
+	}
+
+	endpointData, ok := comp.Endpoints[comp.ComponentType]
+	if !ok {
+		logger.Errorf("Component %s endpoint data not found in comp.Endpoints map\n", comp.ComponentType)
+
+		return
+	}
+
+	d.updateServiceValuesWithEndpoint(svc, comp.ComponentType, endpointData, serviceID)
+}
+
+// updateServiceValuesWithEndpoint updates service values with endpoint data.
+func (d *PodmanDeployer) updateServiceValuesWithEndpoint(
+	svc *ServicePlan,
+	componentType string,
+	endpointData any,
+	serviceID string,
+) {
+	existingData, exists := svc.Values[componentType]
+	if !exists {
+		svc.Values[componentType] = endpointData
+
+		return
+	}
+
+	existingMap, isMap := existingData.(map[string]any)
+	if !isMap {
+		svc.Values[componentType] = endpointData
+
+		return
+	}
+
+	endpointMap, isEndpointMap := endpointData.(map[string]any)
+	if isEndpointMap {
+		maps.Copy(existingMap, endpointMap)
+		logger.Infof("Updated component %s host/port in service %s\n", componentType, serviceID)
+	}
 }
 
 // deployComponentPods deploys all pods for a component and extracts endpoint information.
@@ -545,6 +567,7 @@ func (d *PodmanDeployer) deployServices(ctx context.Context, plan *DeploymentPla
 					}
 				}
 				errCh <- fmt.Errorf("failed to deploy service %s: %w", sID, err)
+
 				return
 			}
 
@@ -562,7 +585,7 @@ func (d *PodmanDeployer) deployServices(ctx context.Context, plan *DeploymentPla
 	close(errCh)
 
 	// Collect all errors
-	var errs []error
+	errs := make([]error, 0, len(plan.Services))
 	for err := range errCh {
 		errs = append(errs, err)
 	}
@@ -572,6 +595,7 @@ func (d *PodmanDeployer) deployServices(ctx context.Context, plan *DeploymentPla
 	}
 
 	logger.Infof("All services deployed successfully\n")
+
 	return nil
 }
 
@@ -609,25 +633,8 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 		return fmt.Errorf("failed to deploy service pods: %w", err)
 	}
 
-	// Extract external service endpoints (HostIP + routes)
-	endpoints, err := d.extractServiceEndpoints(ctx, "")
-	if err != nil {
-		logger.Errorf("Failed to extract service endpoints: %v\n", err)
-		// Don't fail deployment if endpoint extraction fails
-		endpoints = map[string]any{}
-	}
-
-	// Update service endpoints in database
-	if svc.DatabaseID != uuid.Nil && len(endpoints) > 0 {
-		if err := d.serviceRepo.UpdateEndpoints(ctx, svc.DatabaseID, endpoints); err != nil {
-			logger.Errorf("Failed to update service endpoints in database: %v\n", err)
-			// Don't fail the deployment if endpoint update fails
-		} else {
-			logger.Infof("Service endpoints updated in database: %v\n", endpoints)
-		}
-	}
-
 	logger.Infof("Service %s deployed successfully\n", serviceID)
+
 	return nil
 }
 
@@ -640,7 +647,6 @@ func (d *PodmanDeployer) deployServicePods(
 ) error {
 	// Use the values already loaded in the service plan
 	values := svc.Values
-	logger.Infof("Service %s Values before template rendering: %v\n", svc.CatalogID, values)
 
 	// If PodTemplateExecutions is defined, use it for ordered deployment
 	if len(metadata.PodTemplateExecutions) > 0 {
@@ -685,57 +691,6 @@ func (d *PodmanDeployer) deployServicePods(
 	return nil
 }
 
-// extractServiceEndpoints extracts external service endpoints for Podman by inspecting the pod.
-// Returns endpoints in format: {type: "external", name: "pod-name", endpoint: "hostIP:hostPort"}
-func (d *PodmanDeployer) extractServiceEndpoints(ctx context.Context, serviceInstanceName string) (map[string]any, error) {
-	// Get host IP
-	hostIP, err := utils.GetHostIP()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get host IP: %w", err)
-	}
-
-	// Check if pod exists
-	exists, err := d.runtime.PodExists(serviceInstanceName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check if pod exists: %w", err)
-	}
-	if !exists {
-		logger.Infof("Pod %s does not exist yet\n", serviceInstanceName)
-		return map[string]any{}, nil
-	}
-
-	// Inspect the pod to get port mappings
-	podInfo, err := d.runtime.InspectPod(serviceInstanceName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to inspect pod %s: %w", serviceInstanceName, err)
-	}
-
-	// Extract the first host port from the Ports map
-	// Ports is map[string][]string where key is "containerPort/protocol" and value is list of host ports
-	// Example: {"8080/tcp": ["37249"]}
-	var hostPort string
-	for _, hostPorts := range podInfo.Ports {
-		if len(hostPorts) > 0 {
-			hostPort = hostPorts[0]
-			break
-		}
-	}
-
-	if hostPort == "" {
-		logger.Infof("No port mappings found for service %s\n", serviceInstanceName)
-		return map[string]any{}, nil
-	}
-
-	// Build external endpoint
-	endpoints := map[string]any{
-		"type":     "external",
-		"name":     serviceInstanceName,
-		"endpoint": fmt.Sprintf("%s:%s", hostIP, hostPort),
-	}
-
-	return endpoints, nil
-}
-
 // deployComponentTemplate deploys a component pod template.
 // This is a generic method to deploy all component templates with Spyre card support.
 // The serviceParams map is updated with the component's endpoint information (host and port).
@@ -749,92 +704,138 @@ func (d *PodmanDeployer) deployComponentTemplate(
 ) error {
 	logger.Infof("Deploying component template '%s'...\n", podTemplateName)
 
-	// Get the pod template
 	podTemplate, ok := tmpls[podTemplateName]
 	if !ok {
 		return fmt.Errorf("pod template '%s' not found", podTemplateName)
 	}
 
-	// Use the provided initialParams for first render
-	var initialRendered bytes.Buffer
-	if err := podTemplate.Execute(&initialRendered, initialParams); err != nil {
-		return fmt.Errorf("failed to render template %s: %w", podTemplateName, err)
-	}
-
-	// Parse rendered YAML to get pod spec
-	var podSpec podmodels.PodSpec
-	if err := k8syaml.Unmarshal(initialRendered.Bytes(), &podSpec); err != nil {
-		return fmt.Errorf("failed to parse rendered pod spec: %w", err)
+	// Render and parse initial template
+	podSpec, err := d.renderAndParsePodTemplate(podTemplate, podTemplateName, initialParams)
+	if err != nil {
+		return err
 	}
 
 	// Check if pod already exists
-	exists, err := d.runtime.PodExists(podSpec.Name)
-	if err != nil {
+	if exists, err := d.runtime.PodExists(podSpec.Name); err != nil {
 		return fmt.Errorf("failed to check pod existence: %w", err)
-	}
-
-	if exists {
+	} else if exists {
 		logger.Infof("Pod '%s' already exists, skipping deployment\n", podSpec.Name)
+
 		return nil
 	}
 
-	// Get env params for this pod (including Spyre card PCI addresses if needed)
-	env, err := d.getEnvParamsForComponent(&podSpec, pool)
+	// Get environment parameters and render final template
+	finalPodSpec, err := d.renderFinalPodTemplate(podTemplate, podTemplateName, initialParams, podSpec, pool)
 	if err != nil {
-		return fmt.Errorf("failed to get env params: %w", err)
-	}
-
-	// Append env to initialParams if not already present
-	if _, exists := initialParams["env"]; !exists {
-		initialParams["env"] = env
-	}
-
-	// Second render: with complete params including env
-	var finalRendered bytes.Buffer
-	if err := podTemplate.Execute(&finalRendered, initialParams); err != nil {
-		return fmt.Errorf("failed to render template %s with env: %w", podTemplateName, err)
-	}
-
-	// Parse final rendered YAML to get complete pod spec
-	var finalPodSpec podmodels.PodSpec
-	if err := k8syaml.Unmarshal(finalRendered.Bytes(), &finalPodSpec); err != nil {
-		return fmt.Errorf("failed to parse final rendered pod spec: %w", err)
+		return err
 	}
 
 	// Deploy the pod
-	reader := bytes.NewReader(finalRendered.Bytes())
-	podAnnotations := specs.FetchPodAnnotations(finalPodSpec)
-	podDeployOptions := clipodman.ConstructPodDeployOptions(podAnnotations)
-
-	if err := clipodman.DeployPodAndReadinessCheck(d.runtime, &finalPodSpec, podTemplateName, reader, podDeployOptions); err != nil {
-		return fmt.Errorf("failed to deploy pod: %w", err)
+	if err := d.deployPodSpec(finalPodSpec, podTemplateName); err != nil {
+		return err
 	}
 
 	logger.Infof("Component template '%s' deployed successfully\n", podTemplateName)
 
-	// Update service params with component endpoint information if provided
-	if serviceParams != nil && componentID != "" {
-		// Extract endpoint information from the deployed pod
-		componentInfo, err := d.extractComponentEndpointInfo(&finalPodSpec)
-		if err != nil {
-			logger.Errorf("Failed to extract component endpoint info: %v\n", err)
-			// Don't fail deployment if endpoint extraction fails
-			return nil
-		}
+	// Update service params with endpoint information
+	d.updateServiceParamsWithEndpoint(serviceParams, componentID, finalPodSpec)
 
-		if componentInfo != nil {
-			// Create a nested map for this component's endpoint info
-			componentEndpoint := map[string]interface{}{
-				"host": componentInfo.Domain,
-				"port": componentInfo.Port,
-			}
-			serviceParams[componentID] = componentEndpoint
-			logger.Infof("Updated service params with component '%s' endpoint: %s:%s\n",
-				componentID, componentInfo.Domain, componentInfo.Port)
-		}
+	return nil
+}
+
+// renderAndParsePodTemplate renders a pod template and parses it into a PodSpec.
+func (d *PodmanDeployer) renderAndParsePodTemplate(
+	podTemplate *template.Template,
+	templateName string,
+	params map[string]any,
+) (*podmodels.PodSpec, error) {
+	var rendered bytes.Buffer
+	if err := podTemplate.Execute(&rendered, params); err != nil {
+		return nil, fmt.Errorf("failed to render template %s: %w", templateName, err)
+	}
+
+	var podSpec podmodels.PodSpec
+	if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
+		return nil, fmt.Errorf("failed to parse rendered pod spec: %w", err)
+	}
+
+	return &podSpec, nil
+}
+
+// renderFinalPodTemplate renders the final pod template with environment parameters.
+func (d *PodmanDeployer) renderFinalPodTemplate(
+	podTemplate *template.Template,
+	templateName string,
+	initialParams map[string]any,
+	podSpec *podmodels.PodSpec,
+	pool *SpyreCardPool,
+) (*podmodels.PodSpec, error) {
+	env, err := d.getEnvParamsForComponent(podSpec, pool)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get env params: %w", err)
+	}
+
+	if _, exists := initialParams["env"]; !exists {
+		initialParams["env"] = env
+	}
+
+	var finalRendered bytes.Buffer
+	if err := podTemplate.Execute(&finalRendered, initialParams); err != nil {
+		return nil, fmt.Errorf("failed to render template %s with env: %w", templateName, err)
+	}
+
+	var finalPodSpec podmodels.PodSpec
+	if err := k8syaml.Unmarshal(finalRendered.Bytes(), &finalPodSpec); err != nil {
+		return nil, fmt.Errorf("failed to parse final rendered pod spec: %w", err)
+	}
+
+	return &finalPodSpec, nil
+}
+
+// deployPodSpec deploys a pod specification.
+func (d *PodmanDeployer) deployPodSpec(podSpec *podmodels.PodSpec, templateName string) error {
+	yamlBytes, err := k8syaml.Marshal(podSpec)
+	if err != nil {
+		return fmt.Errorf("failed to marshal pod spec: %w", err)
+	}
+
+	reader := bytes.NewReader(yamlBytes)
+	podAnnotations := specs.FetchPodAnnotations(*podSpec)
+	podDeployOptions := clipodman.ConstructPodDeployOptions(podAnnotations)
+
+	if err := clipodman.DeployPodAndReadinessCheck(d.runtime, podSpec, templateName, reader, podDeployOptions); err != nil {
+		return fmt.Errorf("failed to deploy pod: %w", err)
 	}
 
 	return nil
+}
+
+// updateServiceParamsWithEndpoint updates service parameters with component endpoint information.
+func (d *PodmanDeployer) updateServiceParamsWithEndpoint(
+	serviceParams map[string]interface{},
+	componentID string,
+	podSpec *podmodels.PodSpec,
+) {
+	if serviceParams == nil || componentID == "" {
+		return
+	}
+
+	componentInfo, err := d.extractComponentEndpointInfo(podSpec)
+	if err != nil {
+		logger.Errorf("Failed to extract component endpoint info: %v\n", err)
+
+		return
+	}
+
+	if componentInfo != nil {
+		componentEndpoint := map[string]interface{}{
+			"host": componentInfo.Domain,
+			"port": componentInfo.Port,
+		}
+		serviceParams[componentID] = componentEndpoint
+		logger.Infof("Updated service params with component '%s' endpoint: %s:%s\n",
+			componentID, componentInfo.Domain, componentInfo.Port)
+	}
 }
 
 // extractComponentEndpointInfo extracts host (pod name) and port from a deployed pod spec.
@@ -877,25 +878,16 @@ func (d *PodmanDeployer) deployPodTemplate(
 ) (map[string]string, error) {
 	logger.Infof("Deploying service template '%s'...\n", podTemplateName)
 
-	// Get the pod template
 	podTemplate, ok := tmpls[podTemplateName]
 	if !ok {
 		return nil, fmt.Errorf("pod template '%s' not found", podTemplateName)
 	}
 
-	// Use the provided initialParams for rendering
-	var rendered bytes.Buffer
-	if err := podTemplate.Execute(&rendered, initialParams); err != nil {
-		return nil, fmt.Errorf("failed to render template %s: %w", podTemplateName, err)
+	podSpec, err := d.renderAndParsePodTemplate(podTemplate, podTemplateName, initialParams)
+	if err != nil {
+		return nil, err
 	}
 
-	// Parse rendered YAML to get pod spec
-	var podSpec podmodels.PodSpec
-	if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
-		return nil, fmt.Errorf("failed to parse rendered pod spec: %w", err)
-	}
-
-	// Check if pod already exists
 	exists, err := d.runtime.PodExists(podSpec.Name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check pod existence: %w", err)
@@ -903,38 +895,53 @@ func (d *PodmanDeployer) deployPodTemplate(
 
 	if exists {
 		logger.Infof("Pod '%s' already exists, skipping deployment\n", podSpec.Name)
-		// Extract endpoints from existing pod
-		// Extract endpoints from existing pod - use pod name as host
-		endpoints := make(map[string]string)
-		endpoints["host"] = podSpec.Name
-		if len(podSpec.Spec.Containers) > 0 && len(podSpec.Spec.Containers[0].Ports) > 0 {
-			endpoints["port"] = fmt.Sprintf("%d", podSpec.Spec.Containers[0].Ports[0].ContainerPort)
-		}
-		return endpoints, nil
+
+		return d.extractPodEndpoints(podSpec), nil
 	}
 
-	// Deploy the pod
-	reader := bytes.NewReader(rendered.Bytes())
-	podAnnotations := specs.FetchPodAnnotations(podSpec)
-	podDeployOptions := clipodman.ConstructPodDeployOptions(podAnnotations)
-
-	if err := clipodman.DeployPodAndReadinessCheck(d.runtime, &podSpec, podTemplateName, reader, podDeployOptions); err != nil {
-		return nil, fmt.Errorf("failed to deploy pod: %w", err)
+	if err := d.deployPodFromSpec(podSpec, podTemplateName); err != nil {
+		return nil, err
 	}
 
 	logger.Infof("Service template '%s' deployed successfully\n", podTemplateName)
 
-	// Extract endpoint information from deployed pod
-	// Extract endpoint information - use pod name as host
+	return d.extractPodEndpoints(podSpec), nil
+}
+
+// deployPodFromSpec deploys a pod from its specification.
+func (d *PodmanDeployer) deployPodFromSpec(
+	podSpec *podmodels.PodSpec,
+	templateName string,
+) error {
+	yamlBytes, err := k8syaml.Marshal(podSpec)
+	if err != nil {
+		return fmt.Errorf("failed to marshal pod spec: %w", err)
+	}
+
+	reader := bytes.NewReader(yamlBytes)
+	podAnnotations := specs.FetchPodAnnotations(*podSpec)
+	podDeployOptions := clipodman.ConstructPodDeployOptions(podAnnotations)
+
+	if err := clipodman.DeployPodAndReadinessCheck(d.runtime, podSpec, templateName, reader, podDeployOptions); err != nil {
+		return fmt.Errorf("failed to deploy pod: %w", err)
+	}
+
+	return nil
+}
+
+// extractPodEndpoints extracts endpoint information from a pod specification.
+func (d *PodmanDeployer) extractPodEndpoints(podSpec *podmodels.PodSpec) map[string]string {
 	endpoints := make(map[string]string)
 	endpoints["host"] = podSpec.Name
+
 	if len(podSpec.Spec.Containers) > 0 && len(podSpec.Spec.Containers[0].Ports) > 0 {
 		endpoints["port"] = fmt.Sprintf("%d", podSpec.Spec.Containers[0].Ports[0].ContainerPort)
 	}
-	return endpoints, nil
+
+	return endpoints
 }
 
-// calculateAndAllocateSpyreCards calculates required Spyre cards and creates allocation pool
+// calculateAndAllocateSpyreCards calculates required Spyre cards and creates allocation pool.
 func (d *PodmanDeployer) calculateAndAllocateSpyreCards(
 	plan *DeploymentPlan,
 ) (*SpyreCardPool, error) {
@@ -954,6 +961,7 @@ func (d *PodmanDeployer) calculateAndAllocateSpyreCards(
 
 	if totalRequired == 0 {
 		logger.Infof("No Spyre cards required for this deployment\n")
+
 		return nil, nil
 	}
 
@@ -981,7 +989,7 @@ func (d *PodmanDeployer) calculateAndAllocateSpyreCards(
 	return pool, nil
 }
 
-// getRequiredSpyreCardsForComponent calculates Spyre cards needed for a component
+// getRequiredSpyreCardsForComponent calculates Spyre cards needed for a component.
 func (d *PodmanDeployer) getRequiredSpyreCardsForComponent(comp *ComponentPlan) (int, error) {
 	// Load component templates using catalog provider
 	tmpls, err := d.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
@@ -1027,7 +1035,7 @@ func (d *PodmanDeployer) getRequiredSpyreCardsForComponent(comp *ComponentPlan) 
 	return totalSpyreCards, nil
 }
 
-// fetchSpyreCardsFromPodAnnotations extracts Spyre card requirements from pod annotations
+// fetchSpyreCardsFromPodAnnotations extracts Spyre card requirements from pod annotations.
 func (d *PodmanDeployer) fetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[string]int, error) {
 	var spyreCards int
 	spyreCardContainerMap := map[string]int{}
@@ -1039,6 +1047,7 @@ func (d *PodmanDeployer) fetchSpyreCardsFromPodAnnotations(annotations map[strin
 		if matches == nil {
 			return "", false
 		}
+
 		return matches[1], true
 	}
 
@@ -1056,7 +1065,7 @@ func (d *PodmanDeployer) fetchSpyreCardsFromPodAnnotations(annotations map[strin
 	return spyreCards, spyreCardContainerMap, nil
 }
 
-// getEnvParamsForComponent returns environment parameters for a component including Spyre card PCI addresses
+// getEnvParamsForComponent returns environment parameters for a component including Spyre card PCI addresses.
 func (d *PodmanDeployer) getEnvParamsForComponent(podSpec *podmodels.PodSpec, pool *SpyreCardPool) (map[string]map[string]string, error) {
 	env := make(map[string]map[string]string)
 
@@ -1112,6 +1121,7 @@ func (d *PodmanDeployer) getEnvParamsForComponent(podSpec *podmodels.PodSpec, po
 func generateInstanceSlug(id string) string {
 	hash := sha256.Sum256([]byte(id))
 	hexHash := hex.EncodeToString(hash[:])
+
 	return hexHash[:8]
 }
 

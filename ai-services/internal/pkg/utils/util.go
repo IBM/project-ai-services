@@ -379,7 +379,7 @@ func FlattenMapToKeys(m map[string]any, prefix string) map[string]string {
 
 // FlattenMapWithValues converts a nested map into a flat map with dotted keys and string values.
 // Unlike FlattenMapToKeys which returns empty strings, this converts actual values to strings.
-// Example: {"ui": {"port": 8080}, "items": [1,2,3]} -> {"ui.port": "8080", "items": "1,2,3"}
+// Example: {"ui": {"port": 8080}, "items": [1,2,3]} -> {"ui.port": "8080", "items": "1,2,3"}.
 func FlattenMapWithValues(m map[string]any, prefix string) map[string]string {
 	result := make(map[string]string)
 	for key, val := range m {
