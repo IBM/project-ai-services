@@ -1,12 +1,12 @@
 REGISTRY?=icr.io/ai-services-private
 IMAGE=summarize-service
-TAG?=v0.0.3
+TAG?=v0.0.4
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
 CONTAINER_BUILDER?=podman
 
 build:
-	$(CONTAINER_BUILDER) build $(CREDS_ARG) -t $(REGISTRY)/$(IMAGE):$(TAG) .
+	cd .. && $(CONTAINER_BUILDER) build $(CREDS_ARG) -f summarize/Containerfile -t $(REGISTRY)/$(IMAGE):$(TAG) .
 .PHONY: build
 
 push:

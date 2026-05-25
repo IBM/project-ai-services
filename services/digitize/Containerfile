@@ -4,8 +4,8 @@ WORKDIR /opt/services/digitize
 
 ENV PYTHONPATH=/opt/services
 
-COPY ../common /opt/services/common
-COPY . .
+COPY common /opt/services/common
+COPY digitize/ .
 
 RUN source /var/venv/bin/activate && pip install -r requirements.txt && pip cache purge
 
