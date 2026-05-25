@@ -279,18 +279,25 @@ definitions:
       name:
         type: string
     type: object
-  internal_pkg_catalog_apiserver_handlers.AcceleratorInfo:
+  github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo:
     properties:
       available:
         type: integer
       total:
         type: integer
     type: object
-  internal_pkg_catalog_apiserver_handlers.CPUInfo:
+  github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo:
     properties:
       available_cores:
         type: number
       total_cores:
+        type: integer
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo:
+    properties:
+      available_bytes:
+        type: integer
+      total_bytes:
         type: integer
     type: object
   internal_pkg_catalog_apiserver_handlers.ErrorResponse:
@@ -298,23 +305,16 @@ definitions:
       error:
         type: string
     type: object
-  internal_pkg_catalog_apiserver_handlers.MemoryInfo:
-    properties:
-      available_bytes:
-        type: integer
-      total_bytes:
-        type: integer
-    type: object
   internal_pkg_catalog_apiserver_handlers.ResourcesResponse:
     properties:
       accelerators:
         additionalProperties:
-          $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.AcceleratorInfo'
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo'
         type: object
       cpu:
-        $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.CPUInfo'
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo'
       memory:
-        $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.MemoryInfo'
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo'
     type: object
   internal_pkg_catalog_apiserver_handlers.UpdateApplicationRequest:
     properties:

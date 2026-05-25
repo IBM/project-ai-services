@@ -1312,7 +1312,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_pkg_catalog_apiserver_handlers.AcceleratorInfo": {
+        "github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo": {
             "type": "object",
             "properties": {
                 "available": {
@@ -1323,13 +1323,24 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_pkg_catalog_apiserver_handlers.CPUInfo": {
+        "github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo": {
             "type": "object",
             "properties": {
                 "available_cores": {
                     "type": "number"
                 },
                 "total_cores": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo": {
+            "type": "object",
+            "properties": {
+                "available_bytes": {
+                    "type": "integer"
+                },
+                "total_bytes": {
                     "type": "integer"
                 }
             }
@@ -1342,31 +1353,20 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_pkg_catalog_apiserver_handlers.MemoryInfo": {
-            "type": "object",
-            "properties": {
-                "available_bytes": {
-                    "type": "integer"
-                },
-                "total_bytes": {
-                    "type": "integer"
-                }
-            }
-        },
         "internal_pkg_catalog_apiserver_handlers.ResourcesResponse": {
             "type": "object",
             "properties": {
                 "accelerators": {
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.AcceleratorInfo"
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo"
                     }
                 },
                 "cpu": {
-                    "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.CPUInfo"
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo"
                 },
                 "memory": {
-                    "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.MemoryInfo"
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo"
                 }
             }
         },
