@@ -1,4 +1,4 @@
-FROM icr.io/ai-services-cicd/services-common:v0.0.2
+FROM icr.io/ai-services-cicd/services-common:v0.0.3
 
 WORKDIR /opt/services/summarize
 
