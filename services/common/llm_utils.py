@@ -212,7 +212,7 @@ def query_vllm_payload(
             logger.debug(f"Context fits completely ({context_token_count} tokens). History budget: {history_budget} tokens")
         else:
             # Context exceeds budget, truncate context and no history
-            context = detokenize_with_llm(context_tokens[:budget_for_context], llm_endpoint)
+            context = truncate_text_to_token_limit(context, budget_for_context, llm_endpoint, tokens=context_tokens)
             history_budget = 0
             previous_messages = None
             logger.debug(f"Context truncated from {context_token_count} to {budget_for_context} tokens. No history included.")
@@ -269,10 +269,7 @@ def query_vllm_payload(
         )
         remaining_tokens = max(0, remaining_tokens)
         
-        context = detokenize_with_llm(
-            tokenize_with_llm(context, llm_endpoint)[:remaining_tokens],
-            llm_endpoint
-        )
+        context = truncate_text_to_token_limit(context, remaining_tokens, llm_endpoint)
         logger.debug(f"Truncated Context: {context}")
 
         # Get the appropriate prompt template based on language and format it
@@ -560,33 +557,57 @@ def tokenize_with_llm(prompt, emb_endpoint, max_retries=3):
 
     return tokens
 
-@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def detokenize_with_llm(tokens, emb_endpoint, max_retries=3):
+def truncate_text_to_token_limit(text, token_limit, llm_endpoint, tokens=None):
     """
-    Detokenize tokens using the LLM embedding endpoint with retry logic.
+    This function uses a character ratio approach to truncate text to fit within
+    the token budget. It estimates the character limit based on the token-to-character
+    ratio and iteratively adjusts if needed.
 
     Args:
-        tokens: List of tokens to detokenize
-        emb_endpoint: Embedding endpoint URL
-        max_retries: Maximum number of retry attempts (default: 3)
+        text: Text to truncate
+        token_limit: Maximum number of tokens allowed
+        llm_endpoint: LLM endpoint URL for tokenization
+        tokens: Optional pre-computed tokens for the text
 
     Returns:
-        Detokenized text string
+        Truncated text string that fits within token_limit
 
     Raises:
         RuntimeError: If SESSION is not initialized
-        requests.exceptions.RequestException: If all retries fail
     """
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
 
-    payload = {
-        "tokens": tokens
-    }
-
-    response = misc_utils.SESSION.post(f"{emb_endpoint}/detokenize", json=payload)
-    response.raise_for_status()
-    result = response.json()
-    prompt = result.get("prompt", "")
-
-    return prompt
+    if not text or token_limit <= 0:
+        return ""
+    
+    # Use pre-computed tokens if provided, otherwise tokenize
+    if tokens is None:
+        tokens = tokenize_with_llm(text, llm_endpoint)
+    
+    # If truncation is not needed, return original text
+    if len(tokens) <= token_limit:
+        return text
+    
+    # Calculate approximate character position based on token-to-character ratio
+    char_ratio = len(text) / len(tokens)
+    approx_char_limit = int(token_limit * char_ratio)
+    
+    # Truncate at character level
+    truncated_text = text[:approx_char_limit]
+    
+    # Verify and adjust if needed
+    while len(tokenize_with_llm(truncated_text, llm_endpoint)) > token_limit:
+        # Reduce by 10% and retry
+        truncated_text = truncated_text[:int(len(truncated_text) * 0.9)]
+    
+    # Try to truncate at a word boundary for better readability
+    # Look back up to 100 characters for a space
+    if len(truncated_text) > 100:
+        last_space = truncated_text.rfind(' ', len(truncated_text) - 100)
+        if last_space > 0:
+            truncated_text = truncated_text[:last_space]
+    
+    logger.debug(f"Truncated text from {len(text)} to {len(truncated_text)} characters to fit {token_limit} tokens")
+    
+    return truncated_text
