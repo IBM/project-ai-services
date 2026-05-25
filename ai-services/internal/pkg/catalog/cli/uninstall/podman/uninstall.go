@@ -100,7 +100,7 @@ func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool)
 	}
 
 	// Delete caddy data
-	caddyDataPath := getDataPath(baseDir, "common/caddy")
+	caddyDataPath := getDataPath(baseDir, "common")
 	if err := dataDeletion(caddyDataPath); err != nil {
 		return err
 	}

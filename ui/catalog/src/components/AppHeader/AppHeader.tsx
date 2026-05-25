@@ -113,7 +113,11 @@ const AppHeader = (props: AppHeaderProps) => {
             />
           )}
 
-          <HeaderName prefix="IBM">
+          <HeaderName
+            prefix="IBM"
+            onClick={() => navigate("/")}
+            className={styles.headerName}
+          >
             Open-Source AI Foundation for Power
           </HeaderName>
 

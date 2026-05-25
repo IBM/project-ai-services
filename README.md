@@ -84,7 +84,7 @@ project-ai-services/
 ├── ai-services/       # CLI tool for project-ai-services
 │   ├── assets/        # Application template files
 ├── images/            # Container base images
-│   └── python-base/   # Python base image for services
+│   └── service-base/   # Service base image for services
 ├── services/          # Microservices (backend)
 │   ├── common/        # Shared library layer
 │   ├── chatbot/       # RAG chatbot service
@@ -105,7 +105,7 @@ project-ai-services/
 
 The repository follows a microservices architecture with:
 
-- **Layered Container Images**: `python-base` → `services-common` → individual services
+- **Layered Container Images**: `service-base` → `services-common` → individual services
 - **Independent Services**: Each service has its own Containerfile, Makefile, and versioning
 - **Shared Common Layer**: Common utilities and dependencies in `services/common/`
 - **Clean Boundaries**: No cross-service dependencies, all shared code in common layer

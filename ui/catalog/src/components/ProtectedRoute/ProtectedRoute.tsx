@@ -3,9 +3,9 @@ import { ROUTES } from "@/constants";
 import { useAuthStore } from "@/store/auth.store";
 
 const ProtectedRoute = () => {
-  const accessToken = useAuthStore((state) => state.accessToken);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated());
 
-  if (!accessToken) {
+  if (!isAuthenticated) {
     return <Navigate to={ROUTES.LOGIN} replace />;
   }
 

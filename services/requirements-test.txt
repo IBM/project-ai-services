@@ -1,0 +1,39 @@
+# Testing Dependencies for spyre-rag services
+# Install with: pip install -r requirements-test.txt
+# This file contains specific versions that are compatible for testing all services
+
+# Core testing framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.0
+
+# FastAPI testing
+httpx>=0.24.0
+fastapi>=0.104.0
+starlette>=0.27.0
+uvicorn==0.38.0
+requests==2.33.0
+python-multipart==0.0.27
+
+# Additional utilities
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+pydantic-settings==2.13.1
+
+# Language detection (required by chatbot)
+lingua-language-detector>=1.4.2
+
+# Common dependencies with specific versions for test compatibility
+tqdm==4.67.3
+opensearch-py==3.0.0
+cohere==5.19.0
+numpy==2.4.1
+psutil==7.2.2
+
+# Document processing (required by digitize)
+pypdfium2==5.6.0
+pdfplumber==0.11.9
+RapidFuzz==3.13.0
+docling==2.77.0
+sentence-splitter==1.4

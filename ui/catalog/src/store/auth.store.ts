@@ -7,11 +7,12 @@ type AuthState = {
   setTokens: (access: string, refresh: string) => void;
   setAccessToken: (token: string) => void;
   clearTokens: () => void;
+  isAuthenticated: () => boolean;
 };
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       accessToken: null,
       refreshToken: null,
 
@@ -31,6 +32,11 @@ export const useAuthStore = create<AuthState>()(
           accessToken: null,
           refreshToken: null,
         }),
+
+      isAuthenticated: () => {
+        const { accessToken, refreshToken } = get();
+        return !!(accessToken && refreshToken);
+      },
     }),
     {
       name: "auth-storage",

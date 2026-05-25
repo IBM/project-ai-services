@@ -1,14 +1,14 @@
-name: Python Base
+name: Service Base
 on:
   push:
     paths:
-      - 'images/python-base/**'
+      - 'images/service-base/**'
     branches:
       - main
   pull_request:
     paths:
-      - 'images/python-base/**'
-      - .github/workflows/spyre-rag-base.yml
+      - 'images/service-base/**'
+      - .github/workflows/service-base.yml
     branches:
       - main
 
@@ -25,13 +25,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Build python-base image
-        working-directory: images/python-base
+      - name: Build service-base image
+        working-directory: images/service-base
         run: |
           make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
 
-      - name: Publish python-base image
-        working-directory: images/python-base
+      - name: Publish service-base image
+        working-directory: images/service-base
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
@@ -39,5 +39,5 @@ jobs:
   scan:
     uses: ./.github/workflows/scanner.yml
     with:
-      path: 'images/python-base'
-      image: 'python-base'
+      path: 'images/service-base'
+      image: 'service-base'
