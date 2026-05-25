@@ -42,13 +42,17 @@ app.post('/v1/chat/completions', async (req, res) => {
 app.post('/v1/similarity-search', async (req, res) => {
   const { query } = req.body;
   const targetURL = process.env.TARGET_URL;
-  
+
   // Read chatbot configuration from environment variables with defaults
   const mode = process.env.CHATBOT_SEARCH_MODE || 'hybrid';
   const topK = parseInt(process.env.CHATBOT_NUM_CHUNKS_POST_RERANKER || '3', 3);
-  const rerank = process.env.CHATBOT_RERANK === 'true' || process.env.CHATBOT_RERANK === true;
-  
-  console.log(`Forwarding request to: ${targetURL}, with message: ${query}, mode: ${mode}, top_k: ${topK}, rerank: ${rerank}`);
+  const rerank =
+    process.env.CHATBOT_RERANK === 'true' ||
+    process.env.CHATBOT_RERANK === true;
+
+  console.log(
+    `Forwarding request to: ${targetURL}, with message: ${query}, mode: ${mode}, top_k: ${topK}, rerank: ${rerank}`,
+  );
 
   try {
     const response = await axios.post(
