@@ -450,7 +450,7 @@ func (pc *PodmanClient) GetSystemInfo() (*models.SystemInfo, error) {
 		}
 
 		// Calculate available cores: available_cores = (total_cores * idle_percent) / 100
-		availableCores := (float64(totalCores) * idlePercent) / 100.0
+		availableCores := (float64(totalCores) * idlePercent) / constants.PercentageDivisor
 
 		sysInfo.CPU = &models.CPUInfo{
 			TotalCores:     totalCores,
