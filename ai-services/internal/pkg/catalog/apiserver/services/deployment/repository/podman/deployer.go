@@ -436,7 +436,7 @@ func (d *PodmanDeployer) mergeEndpointIntoService(comp *ComponentPlan, plan *Dep
 	logger.Infof("Service %s Values before merge: %v\n", serviceID, svc.Values)
 
 	if svc.Values == nil {
-		svc.Values = make(map[string]interface{})
+		svc.Values = make(map[string]any)
 	}
 
 	endpointData, ok := comp.Endpoints[comp.ComponentType]
@@ -523,7 +523,7 @@ func (d *PodmanDeployer) deployComponentPods(
 		logger.Infof("No PodTemplateExecutions defined for %s, deploying all templates\n", componentPath)
 		for templateName := range tmpls {
 			// Prepare initialParams for the template
-			initialParams := map[string]interface{}{
+			initialParams := map[string]any{
 				"InstanceSlug": generateInstanceSlug(comp.DatabaseID.String()),
 				"TemplateID":   comp.DatabaseID,
 				"BaseDir":      utils.GetBaseDir(),
@@ -673,7 +673,7 @@ func (d *PodmanDeployer) deployServicePods(
 		logger.Infof("No PodTemplateExecutions defined for service %s, deploying all templates\n", svc.CatalogID)
 		for templateName := range tmpls {
 			// Prepare initialParams for the template
-			initialParams := map[string]interface{}{
+			initialParams := map[string]any{
 				"InstanceSlug": generateInstanceSlug(applicationID.String()),
 				"TemplateID":   svc.DatabaseID,
 				"BaseDir":      utils.GetBaseDir(),
@@ -699,7 +699,7 @@ func (d *PodmanDeployer) deployComponentTemplate(
 	tmpls map[string]*template.Template,
 	pool *SpyreCardPool,
 	initialParams map[string]any,
-	serviceParams map[string]interface{},
+	serviceParams map[string]any,
 	componentID string,
 ) error {
 	logger.Infof("Deploying component template '%s'...\n", podTemplateName)
@@ -812,7 +812,7 @@ func (d *PodmanDeployer) deployPodSpec(podSpec *podmodels.PodSpec, templateName 
 
 // updateServiceParamsWithEndpoint updates service parameters with component endpoint information.
 func (d *PodmanDeployer) updateServiceParamsWithEndpoint(
-	serviceParams map[string]interface{},
+	serviceParams map[string]any,
 	componentID string,
 	podSpec *podmodels.PodSpec,
 ) {
@@ -828,7 +828,7 @@ func (d *PodmanDeployer) updateServiceParamsWithEndpoint(
 	}
 
 	if componentInfo != nil {
-		componentEndpoint := map[string]interface{}{
+		componentEndpoint := map[string]any{
 			"host": componentInfo.Domain,
 			"port": componentInfo.Port,
 		}
