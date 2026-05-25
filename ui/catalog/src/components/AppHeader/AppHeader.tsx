@@ -118,7 +118,7 @@ const AppHeader = (props: AppHeaderProps) => {
             onClick={() => navigate("/")}
             className={styles.headerName}
           >
-            Open-Source AI Foundation for Power
+            AI Foundation for Power
           </HeaderName>
 
           {!minimal && (
