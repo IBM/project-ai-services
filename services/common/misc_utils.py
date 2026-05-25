@@ -284,17 +284,6 @@ def validate_document_file(filename: str, content) -> None:
     if not filename:
         raise ValueError("File must have a filename.")
 
-    # Check content is bytes (not an exception from failed read)
-    if isinstance(content, Exception):
-        raise ValueError(f"Failed to read file: {filename}")
-
-    if not isinstance(content, bytes):
-        raise ValueError(f"Invalid file content for: {filename}")
-
-    # Check content is not empty
-    if len(content) == 0:
-        raise ValueError(f"File is empty: {filename}")
-
     # Validate extension and format
     allowed_extensions = {'.pdf', '.docx'}
     file_ext = Path(filename).suffix.lower()
@@ -315,10 +304,16 @@ def validate_document_file(filename: str, content) -> None:
         if not content.startswith(docx_signature):
             raise ValueError(f"File has .docx extension but invalid DOCX format: {filename}")
 
-# Keep old function for backward compatibility (deprecated)
-def validate_pdf_file(filename: str, content) -> None:
-    """Deprecated: Use validate_document_file() instead."""
-    validate_document_file(filename, content)
+    # Check content is bytes (not an exception from failed read)
+    if isinstance(content, Exception):
+        raise ValueError(f"Failed to read file: {filename}")
+
+    if not isinstance(content, bytes):
+        raise ValueError(f"Invalid file content for: {filename}")
+
+    # Check content is not empty
+    if len(content) == 0:
+        raise ValueError(f"File is empty: {filename}")
 
 def get_unprocessed_files(original_files, processed_pdfs):
     return set(original_files).difference(set(processed_pdfs))

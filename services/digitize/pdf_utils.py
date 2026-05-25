@@ -334,45 +334,34 @@ def get_doc_converter():
     import os
     from pathlib import Path
     from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import PdfPipelineOptions, PipelineOptions
-    from docling.document_converter import DocumentConverter, PdfFormatOption, WordFormatOption
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.document_converter import DocumentConverter, PdfFormatOption
 
-    # Get artifacts path if set
+    # Accelerator & pipeline options
+    pipeline_options = PdfPipelineOptions()
+    
+    # Only set artifacts_path if DOCLING_MODELS_PATH environment variable is set
     docling_models_path = os.environ.get('DOCLING_MODELS_PATH')
-    artifacts_path = None
     if docling_models_path:
         artifacts_path = Path(docling_models_path)
         if artifacts_path.exists():
+            pipeline_options.artifacts_path = artifacts_path
             logger.debug(f"Using docling models from: {artifacts_path}")
         else:
             logger.warning(f"DOCLING_MODELS_PATH set to {artifacts_path} but directory does not exist")
-            artifacts_path = None
     else:
         logger.debug("DOCLING_MODELS_PATH not set. Docling will use default model loading behavior.")
+    
+    pipeline_options.do_table_structure = True
+    pipeline_options.table_structure_options.do_cell_matching = True
+    pipeline_options.do_ocr = False
 
-    # Configure PDF pipeline options
-    pdf_pipeline_options = PdfPipelineOptions()
-    if artifacts_path:
-        pdf_pipeline_options.artifacts_path = artifacts_path
-    pdf_pipeline_options.do_table_structure = True
-    pdf_pipeline_options.table_structure_options.do_cell_matching = True
-    pdf_pipeline_options.do_ocr = False
-
-    # # Configure Word/DOCX pipeline options (use base PipelineOptions)
-    # word_pipeline_options = PipelineOptions()
-    # if artifacts_path:
-    #     word_pipeline_options.artifacts_path = artifacts_path
-
-    # Configure converter to support both PDF and DOCX
     doc_converter = DocumentConverter(
         allowed_formats=[
             InputFormat.PDF,
             InputFormat.DOCX
         ],
-        format_options={
-            InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_pipeline_options),
-            # InputFormat.DOCX: WordFormatOption(pipeline_options=word_pipeline_options)
-        }
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
     )
 
     return doc_converter
