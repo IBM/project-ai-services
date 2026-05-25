@@ -93,8 +93,12 @@ spec:
           value: "1"
         - name: LOG_LEVEL
           value: "{{ .Values.backend.log_level}}"
-        - name: NUM_CHUNKS_POST_RERANKER
+        - name: CHATBOT_SEARCH_MODE
+          value: "{{ .Values.chatbot.searchMode }}"
+        - name: CHATBOT_NUM_CHUNKS_POST_RERANKER
           value: "{{ .Values.chatbot.numChunksPostReranker }}"
+        - name: CHATBOT_RERANK
+          value: "{{ .Values.chatbot.rerank }}"
       ports:
         - containerPort: 5000
           protocol: TCP
