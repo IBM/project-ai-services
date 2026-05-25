@@ -1,0 +1,106 @@
+@use "@carbon/motion";
+@use "@carbon/react/scss/colors";
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/theme";
+@use "@carbon/react/scss/type";
+
+.appHeader {
+  :global(.cds--header) {
+    background-color: colors.$black-100;
+    border-bottom: none;
+  }
+
+  :global(.cds--header__menu-trigger) {
+    background-color: colors.$black-100;
+    border: none;
+
+    &:hover,
+    &:focus {
+      background-color: colors.$black-100;
+    }
+  }
+
+  :global(.cds--header-panel) {
+    position: fixed;
+    top: 3rem;
+    right: 0;
+    left: auto;
+    bottom: auto;
+    transform: none;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+    z-index: 8000;
+
+    &:global(.cds--header-panel--expanded) {
+      max-height: none;
+      height: auto;
+      overflow: visible;
+    }
+  }
+}
+
+.headerName {
+  cursor: pointer;
+}
+
+.iconWidth {
+  width: spacing.$spacing-10;
+}
+
+.usercircle {
+  width: spacing.$spacing-09;
+  height: spacing.$spacing-09;
+  border-radius: 50%;
+  background-color: theme.$layer-02;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: theme.$text-on-color;
+  transition: background-color motion.$duration-fast-01
+    motion.motion(standard, productive);
+
+  &:hover {
+    background-color: theme.$layer-hover-02;
+  }
+}
+
+.userprofile {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: spacing.$spacing-03;
+  padding: spacing.$spacing-04;
+  @include type.type-style("body-compact-02");
+}
+
+.logout {
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: spacing.$spacing-05;
+  background-color: theme.$layer-01;
+  color: theme.$text-primary;
+  transition: background-color motion.$duration-fast-01
+    motion.motion(standard, productive);
+  @include type.type-style("body-compact-01");
+
+  &:hover {
+    background-color: theme.$layer-hover-01;
+  }
+
+  &:active {
+    background-color: theme.$layer-active-01;
+  }
+
+  &:focus {
+    outline: 2px solid theme.$focus;
+    outline-offset: -2px;
+  }
+}

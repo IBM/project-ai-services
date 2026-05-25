@@ -1,0 +1,36 @@
+name: Build and Publish Image
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+       required: true
+       type: string
+
+env:
+  ICR_REGISTRY: icr.io
+  ICR_NAMESPACE: ai-services-cicd
+
+jobs:
+  build-publish-image:
+    runs-on: ubuntu-24.04-ppc64le
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      
+      - name: Build Image
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          make build \
+            REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} \
+            REGISTRY_USER=${{ secrets.ICR_USERNAME }} \
+            REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+      
+      - name: Publish image
+        working-directory: ${{ inputs.working-directory }}
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          make push \
+            REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} \
+            REGISTRY_USER=${{ secrets.ICR_USERNAME }} \
+            REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }} 

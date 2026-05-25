@@ -1,0 +1,25 @@
+{
+	admin 0.0.0.0:2019
+
+	servers :443 {
+		name {{ .CaddyServerName }}
+	}
+}
+
+:443 {
+	# 1. This initializes the routes array natively so it's never empty
+	handle /internal/health {
+        # @id internal-health
+        respond "OK" 200
+    }
+
+	tls internal
+}
+
+# Internal health check endpoint (Bypasses automatic HTTPS redirection)
+:8080 {
+    respond /health "OK" 200
+}
+
+# This file serves as the base configuration
+# Routes will be dynamically added via Caddy Admin API

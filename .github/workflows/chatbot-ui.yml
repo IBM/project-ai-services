@@ -1,0 +1,90 @@
+name: Chatbot UI
+on:
+  push:
+    paths:
+      - 'ui/chatbot/**'
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'ui/chatbot/**'
+      - .github/workflows/chatbot-ui.yml
+    branches:
+      - main
+
+env:
+  ICR_REGISTRY: icr.io
+  ICR_NAMESPACE: ai-services-cicd
+
+jobs:
+  format:
+    name: format
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: ui/chatbot/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ui/chatbot
+        run: npm ci
+
+      - name: Run Prettier check
+        working-directory: ui/chatbot
+        run: npm run format:check
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: ui/chatbot/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ui/chatbot
+        run: npm ci
+
+      - name: Run linter
+        working-directory: ui/chatbot
+        run: npm run lint
+
+  build-publish-image:
+    name: Build and Publish Image
+    needs: [lint, format]
+    runs-on: ubuntu-24.04-ppc64le
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      
+      - name: Build chatbot-ui image
+        working-directory: ui/chatbot
+        run: |
+          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
+
+      - name: Publish chatbot-ui image
+        working-directory: ui/chatbot
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      path: 'ui/chatbot'
+      image: 'chatbot-ui'

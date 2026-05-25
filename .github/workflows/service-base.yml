@@ -1,0 +1,43 @@
+name: Service Base
+on:
+  push:
+    paths:
+      - 'images/service-base/**'
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'images/service-base/**'
+      - .github/workflows/service-base.yml
+    branches:
+      - main
+
+env:
+  ICR_REGISTRY: icr.io
+  ICR_NAMESPACE: ai-services-cicd
+
+jobs:
+  build-publish-image:
+    name: Build and Publish Image
+    runs-on: ubuntu-24.04-ppc64le-p10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Build service-base image
+        working-directory: images/service-base
+        run: |
+          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}
+
+      - name: Publish service-base image
+        working-directory: images/service-base
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      path: 'images/service-base'
+      image: 'service-base'

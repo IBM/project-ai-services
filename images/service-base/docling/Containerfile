@@ -1,0 +1,124 @@
+FROM registry.access.redhat.com/ubi9/ubi:9.8 AS build
+
+ARG package_version=2.60.1
+
+ENV PACKAGE_NAME="docling"
+ENV PACKAGE_VERSION=$package_version
+ENV PACKAGE_ORG="docling-project"
+ENV PACKAGE_URL="https://github.com/${PACKAGE_ORG}/${PACKAGE_NAME}.git"
+ENV CMAKE_VERSION=3.28.1
+ENV OPENJPEG_VERSION=v2.5.3
+ENV PYPDFIUM2_VERSION=35a88d21450eb395e023ca280c9f4c855ec9684d
+ENV TORCHVISION_VERSION=v0.22.1
+ENV TREE_SITTER_VERSION=v0.23.2
+ENV ABSEIL_VERSION=20230802.2
+ENV LLVM_CONFIG=/usr/lib64/llvm16/bin/llvm-config
+ENV PATH=/usr/local/cmake/bin:${PATH}:/usr/local/bin
+ENV LD_LIBRARY_PATH=/usr/local/lib64
+
+COPY 0001-Exclude-source-that-has-commercial-license_v0.22.1.patch /tmp/torchvision.patch
+COPY docling_v2.60.1.patch /tmp/docling.patch
+
+#Install required repos
+RUN dnf config-manager --add-repo https://mirror.stream.centos.org/9-stream/CRB/ppc64le/os && \
+    dnf config-manager --add-repo https://mirror.stream.centos.org/9-stream/AppStream//ppc64le/os && \
+    dnf config-manager --add-repo https://mirror.stream.centos.org/9-stream/BaseOS/ppc64le/os && \
+    rpm --import https://centos.org/keys/RPM-GPG-KEY-CentOS-Official && \
+    dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    dnf install -y git gcc gcc-c++ make python3.12-devel python3.12-pip openssl-devel openssl-fips-provider-so \
+        zlib-devel libjpeg-devel ninja-build libicu-devel lcms2-devel glib2-devel freetype-devel gfortran \
+        openblas-devel libxml2-devel libxslt-devel ncurses-devel gn libpng-devel libtiff-devel geos-devel \
+        tesseract-devel spatialindex-devel rust cargo llvm16-devel ffmpeg-free ffmpeg-free-devel && \
+    dnf clean all && rm -rf /var/cache/dnf && rm -rf /usr/share/man/* && rm -rf /usr/share/doc/* && \
+    ln -s /usr/bin/pip3.12 /usr/bin/pip && ln -s /usr/bin/pip3.12 /usr/bin/pip3 && \
+    rm -rf /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python && \
+    rm -rf /usr/bin/python3 && ln -s /usr/bin/python3.12 /usr/bin/python3 && \
+    pip install cmake
+
+# Build and Install openjpeg
+WORKDIR /tmp
+RUN git clone "https://github.com/uclouvain/openjpeg.git" && \
+    cd openjpeg/ && \
+    git checkout $OPENJPEG_VERSION && \
+    mkdir build && \
+    cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig && \
+    # Cleanup
+    cd /tmp && rm -rf /tmp/openjpeg
+
+#Build and Install pypdfium2
+WORKDIR /tmp
+RUN git clone "https://github.com/pypdfium2-team/pypdfium2.git" && \
+    cd pypdfium2/ && \
+    git checkout $PYPDFIUM2_VERSION && \
+    python3 ./setupsrc/pypdfium2_setup/build_native.py --compiler gcc && \
+    sed -i 's#7191#6996#g' ./setupsrc/pypdfium2_setup/build_native.py && \
+    python3 ./setupsrc/pypdfium2_setup/build_native.py --compiler gcc  && \
+    PDFIUM_PLATFORM="sourcebuild" pip3 wheel . --verbose && \
+    cp *.whl /tmp && \
+    # Cleanup
+    cd /tmp && rm -rf /tmp/pypdfium2
+
+#Build and Install torchvision
+WORKDIR /tmp
+RUN git clone https://github.com/pytorch/vision.git && \
+    cd vision && \
+    git checkout $TORCHVISION_VERSION && \
+    # Below patch is needed to exclude the models that come under SWAG license (CC-BY-NC-4.0)
+    git apply /tmp/torchvision.patch && \
+    pip install --upgrade pip setuptools wheel && \
+    pip install --prefer-binary --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ torch==2.7.1 libprotobuf==4.25.8 numpy==2.3.1 && \
+    cp -rp /usr/local/lib/python3.12/site-packages/libprotobuf/lib64/*.so* /usr/local/lib64/ && \
+    python setup.py bdist_wheel && \
+    cp dist/*.whl /tmp && \
+    # Cleanup
+    cd /tmp && rm -rf /tmp/vision
+
+#Install libtree-sitter-devel
+WORKDIR /tmp
+RUN git clone https://github.com/tree-sitter/tree-sitter-c && \
+    cd tree-sitter-c && \
+    git checkout $TREE_SITTER_VERSION && \
+    mkdir -p /usr/include/tree_sitter/ && \
+    cp src/tree_sitter/*.h /usr/include/tree_sitter/ && \
+    # Cleanup
+    cd /tmp && rm -rf /tmp/tree-sitter-c
+
+#Install abseil
+WORKDIR /tmp
+RUN git clone https://github.com/abseil/abseil-cpp && \
+    cd abseil-cpp && \
+    git checkout $ABSEIL_VERSION && \
+    mkdir build && \
+    cd build && \
+    cmake -DBUILD_SHARED_LIBS=ON -DABSL_BUILD_TESTING=OFF .. && \
+    make install && \
+    ldconfig && \
+    # Cleanup
+    cd /tmp && rm -rf /tmp/abseil-cpp
+
+#Get source, apply patch and build wheel
+WORKDIR /tmp
+RUN git clone "${PACKAGE_URL}" && \
+    cd "${PACKAGE_NAME}" && \
+    git checkout "v${PACKAGE_VERSION}" && \
+    git apply /tmp/docling.patch && \
+    pip install build && \
+    python -m build --wheel && \
+    cp dist/*.whl /tmp && \
+    # Cleanup
+    cd /tmp && rm -rf /tmp/"${PACKAGE_NAME}"
+
+#Install docling wheel and its dependencies
+RUN python3 -m pip install Pillow==12.1.1 -C tiff=disable
+RUN pip install --prefer-binary --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \
+        wheel==0.45.1 hf-xet==1.1.1 huggingface-hub==0.36.0 \
+        tree_sitter_c==0.23.2 tree-sitter-python==0.23.2 tesserocr==2.9.1 rapidocr==3.4.2 \
+        docling-parse==4.7.1 pylatexenc==2.10 rtree==1.4.1 pyclipper==1.4.0 antlr4-python3-runtime==4.9.3 \
+        fastavro==1.12.1 uvloop==0.22.1 /tmp/*.whl
+
+#Copy wheels to be installed in the main stage
+RUN find /root/.cache/pip/wheels -name '*.whl' -exec cp "{}" /tmp  \;
