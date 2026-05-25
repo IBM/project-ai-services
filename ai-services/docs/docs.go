@@ -713,7 +713,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves system resource information including CPU, memory, and Spyre card availability (Podman environments only)",
+                "description": "Retrieves system resource information including CPU, memory, and accelerator availability",
                 "produces": [
                     "application/json"
                 ],

@@ -19,6 +19,7 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/secrets"
 	"github.com/containers/podman/v5/pkg/bindings/system"
 	"github.com/containers/podman/v5/pkg/specgen"
+	"github.com/project-ai-services/ai-services/internal/pkg/accelerator/spyre"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
@@ -427,8 +428,7 @@ func (pc *PodmanClient) Type() types.RuntimeType {
 	return types.RuntimeTypePodman
 }
 
-// GetSystemInfo retrieves system resource information including CPU and memory.
-// Accelerators are populated by the handler layer to avoid import cycles.
+// GetSystemInfo retrieves system resource information including CPU, memory, and accelerators.
 func (pc *PodmanClient) GetSystemInfo() (*models.SystemInfo, error) {
 	sysInfo := &models.SystemInfo{
 		Accelerators: make(map[string]*models.AcceleratorInfo),
@@ -466,6 +466,48 @@ func (pc *PodmanClient) GetSystemInfo() (*models.SystemInfo, error) {
 		}
 	}
 
-	// Accelerators will be populated by the handler layer
+	// Populate accelerator information (Spyre cards)
+	sysInfo.Accelerators = pc.getAcceleratorInfo()
+
 	return sysInfo, nil
+}
+
+// getAcceleratorInfo retrieves accelerator availability information for Podman.
+func (pc *PodmanClient) getAcceleratorInfo() map[string]*models.AcceleratorInfo {
+	accelerators := make(map[string]*models.AcceleratorInfo)
+
+	// Get total Spyre cards
+	totalCards, err := spyre.ListCards()
+	if err != nil {
+		logger.Errorf("Could not list Spyre cards: %v", err)
+		// Return empty map when error occurs
+		return accelerators
+	}
+
+	totalCount := len(totalCards)
+	if totalCount == 0 {
+		// Return empty map when no Spyre cards found
+		return accelerators
+	}
+
+	// Get available Spyre cards
+	availableCards, err := spyre.FindFreeCards()
+	if err != nil {
+		logger.Errorf("Could not find available Spyre cards: %v", err)
+		accelerators["ibm.com/spyre_pf"] = &models.AcceleratorInfo{
+			Total:     totalCount,
+			Available: 0,
+		}
+
+		return accelerators
+	}
+
+	availableCount := len(availableCards)
+
+	accelerators["ibm.com/spyre_pf"] = &models.AcceleratorInfo{
+		Total:     totalCount,
+		Available: availableCount,
+	}
+
+	return accelerators
 }

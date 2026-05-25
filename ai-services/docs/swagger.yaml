@@ -810,7 +810,7 @@ paths:
   /resources:
     get:
       description: Retrieves system resource information including CPU, memory, and
-        Spyre card availability (Podman environments only)
+        accelerator availability
       produces:
       - application/json
       responses:
