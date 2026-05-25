@@ -21,6 +21,8 @@ var (
 	runtimeType string
 	// Base directory flag for catalog configure command.
 	baseDir string
+	// HTTPS port flag for catalog configure command.
+	httpsPort int
 )
 
 // NewConfigureCmd creates a new configure command for the catalog service.
@@ -75,6 +77,7 @@ Examples:
 				Runtime:       vars.RuntimeFactory.GetRuntimeType(),
 				BaseDir:       aiServicesDir,
 				ArgParams:     argParams,
+				HttpsPort:     httpsPort,
 			})
 		},
 	}
@@ -98,6 +101,11 @@ func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
 	// Check if podman runtime is being used on unsupported platform
 	if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
 		return nil, err
+	}
+
+	// Validate HTTPS port range
+	if httpsPort < 1 || httpsPort > 65535 {
+		return nil, fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
 	}
 
 	// Parse params if provided
@@ -126,6 +134,15 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 		"",
 		"Base directory for AI services data (applications, models, cache).\n"+
 			"Example: --basedir /custom/path\n",
+	)
+
+	// Add HTTPS port flag
+	cmd.Flags().IntVar(
+		&httpsPort,
+		"https-port",
+		443,
+		"HTTPS port for the Caddy server (default: 443).\n"+
+			"Example: --https-port 8443\n",
 	)
 
 	cmd.Flags().StringSliceVar(
