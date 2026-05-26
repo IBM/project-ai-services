@@ -123,11 +123,6 @@ class RAGConfig(BaseSettings):
     
     model_config = SettingsConfigDict(env_prefix="CHATBOT_")
 
-    conversational_mode: bool = Field(
-        default=False,
-        description="Enable conversational RAG mode with query rephrasing and context management"
-    )
-
     search_mode: str = Field(
         default="hybrid",
         description="Search mode for document retrieval (e.g., 'hybrid', 'dense', 'sparse')"
@@ -166,7 +161,7 @@ class RAGConfig(BaseSettings):
         description="Estimated token count for query prompt template",
     )
 
-    initial_system_message: str = Field(
+    conversational_rag_initial_system_message: str = Field(
         default=(
             "You are a helpful, conversational AI assistant. "
             "Engage naturally with users across multiple turns of conversation. "
@@ -176,7 +171,7 @@ class RAGConfig(BaseSettings):
         description="Initial system prompt for conversational behavior",
     )
 
-    rag_system_message: str = Field(
+    conversational_rag_query_system_message: str = Field(
         default=(
             "Retrieved Context:\n{context}\n\n"
             "Rephrased Query: {rephrased_query}\n\n"
@@ -207,7 +202,7 @@ class RAGConfig(BaseSettings):
     )
 
     # Legacy prompt fields retained for compatibility with language prompt helpers.
-    query_vllm_stream_prompt: str = Field(
+    legacy_query_vllm_stream_en_prompt: str = Field(
         default=(
             "You are given:\n1. **A short context text** containing factual information.\n"
             "2. **A user's question** seeking clarification or advice.\n"
@@ -219,6 +214,7 @@ class RAGConfig(BaseSettings):
         description="Legacy English prompt template for query streaming",
     )
 
+    # Chatbot prompt (non-conversational) for German language.
     query_vllm_stream_de_prompt: str = Field(
         default=(
             "Sie erhalten: 1. **Einen kurzen Kontexttext** mit sachlichen Informationen.\n"

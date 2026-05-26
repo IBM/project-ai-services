@@ -352,31 +352,9 @@ class TestRephraseQueryWithContext:
     """Tests for rephrase_query_with_context function"""
     
     @pytest.mark.asyncio
-    async def test_conversational_mode_disabled_returns_original(self, monkeypatch):
-        """Test returns original query when conversational mode disabled"""
-        from chatbot.query_rephrasing import rephrase_query_with_context
-        
-        # Mock conversational mode as disabled
-        mock_is_enabled = Mock(return_value=False)
-        monkeypatch.setattr("chatbot.query_rephrasing.is_conversational_mode_enabled", mock_is_enabled)
-        
-        result = await rephrase_query_with_context(
-            current_query="Is it supported?",
-            previous_messages=[{"role": "user", "content": "What is Spyre?"}],
-            llm_endpoint="http://localhost:8000",
-            llm_model="test-model"
-        )
-        
-        assert result == "Is it supported?"
-    
-    @pytest.mark.asyncio
     async def test_empty_history_returns_original(self, monkeypatch):
         """Test returns original query when no conversation history"""
         from chatbot.query_rephrasing import rephrase_query_with_context
-        
-        # Mock conversational mode as enabled
-        mock_is_enabled = Mock(return_value=True)
-        monkeypatch.setattr("chatbot.query_rephrasing.is_conversational_mode_enabled", mock_is_enabled)
         
         result = await rephrase_query_with_context(
             current_query="What is Spyre?",
@@ -392,10 +370,6 @@ class TestRephraseQueryWithContext:
         """Test successful query rephrasing with context"""
         from chatbot.query_rephrasing import rephrase_query_with_context
         import common.misc_utils as misc_utils
-        
-        # Mock conversational mode as enabled
-        mock_is_enabled = Mock(return_value=True)
-        monkeypatch.setattr("chatbot.query_rephrasing.is_conversational_mode_enabled", mock_is_enabled)
         
         # Mock settings
         mock_settings = Mock()
@@ -440,10 +414,6 @@ class TestRephraseQueryWithContext:
         from chatbot.query_rephrasing import rephrase_query_with_context
         import common.misc_utils as misc_utils
         
-        # Mock conversational mode as enabled
-        mock_is_enabled = Mock(return_value=True)
-        monkeypatch.setattr("chatbot.query_rephrasing.is_conversational_mode_enabled", mock_is_enabled)
-        
         # Mock settings
         mock_settings = Mock()
         mock_settings.query_rephrasing.rephrase_prompt_template = "History: {conversation_history}\nQuery: {current_query}\nRephrased:"
@@ -484,10 +454,6 @@ class TestRephraseQueryWithContext:
         from chatbot.query_rephrasing import rephrase_query_with_context
         import common.misc_utils as misc_utils
         
-        # Mock conversational mode as enabled
-        mock_is_enabled = Mock(return_value=True)
-        monkeypatch.setattr("chatbot.query_rephrasing.is_conversational_mode_enabled", mock_is_enabled)
-        
         # Mock settings
         mock_settings = Mock()
         mock_settings.query_rephrasing.rephrase_prompt_template = "History: {conversation_history}\nQuery: {current_query}\nRephrased:"
@@ -521,10 +487,6 @@ class TestRephraseQueryWithContext:
         """Test rephrasing with API key authentication"""
         from chatbot.query_rephrasing import rephrase_query_with_context
         import common.misc_utils as misc_utils
-        
-        # Mock conversational mode as enabled
-        mock_is_enabled = Mock(return_value=True)
-        monkeypatch.setattr("chatbot.query_rephrasing.is_conversational_mode_enabled", mock_is_enabled)
         
         # Mock settings
         mock_settings = Mock()
