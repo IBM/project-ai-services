@@ -169,14 +169,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves a single application by its unique identifier for the authenticated user",
+                "description": "Get detailed information about a specific application",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Applications"
                 ],
-                "summary": "Get application by ID",
+                "summary": "Get application details",
                 "parameters": [
                     {
                         "type": "string",
@@ -188,27 +188,17 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "Application details",
                         "schema": {
-                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     },
                     "404": {
                         "description": "Application not found",
                         "schema": {
-                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -219,7 +209,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Updates the display name of an existing application",
+                "description": "Update an existing application's configuration",
                 "consumes": [
                     "application/json"
                 ],
@@ -233,30 +223,67 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Application ID (UUID)",
+                        "description": "Application ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Application updated",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Application not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Initiates async deletion of an application and all its associated resources",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Applications"
+                ],
+                "summary": "Delete application",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Application UUID",
                         "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
-                        "description": "Update request",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.UpdateApplicationRequest"
-                        }
+                        "type": "boolean",
+                        "description": "Skip infrastructure cleanup",
+                        "name": "skip-cleanup",
+                        "in": "query"
                     }
                 ],
                 "responses": {
-                    "200": {
-                        "description": "OK",
+                    "202": {
+                        "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application"
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse"
                         }
                     },
                     "400": {
-                        "description": "Invalid request body or name validation failed",
+                        "description": "Invalid application ID",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
@@ -268,13 +295,19 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "User doesn't own this application",
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Application not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Application already being deleted",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
@@ -283,43 +316,6 @@ const docTemplate = `{
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Delete a specific application and all its resources",
-                "tags": [
-                    "Applications"
-                ],
-                "summary": "Delete application",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Application ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Application deleted",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "404": {
-                        "description": "Application not found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
                         }
                     }
                 }
@@ -988,6 +984,20 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application": {
             "type": "object",
             "properties": {
@@ -1414,19 +1424,6 @@ const docTemplate = `{
                 },
                 "memory": {
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo"
-                }
-            }
-        },
-        "internal_pkg_catalog_apiserver_handlers.UpdateApplicationRequest": {
-            "type": "object",
-            "required": [
-                "name"
-            ],
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "maxLength": 100,
-                    "minLength": 3
                 }
             }
         },

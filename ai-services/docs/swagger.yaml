@@ -61,6 +61,15 @@ definitions:
     - service_id
     - type
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse:
+    properties:
+      id:
+        type: string
+      message:
+        type: string
+      status:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application:
     properties:
       created_at:
@@ -341,15 +350,6 @@ definitions:
       memory:
         $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo'
     type: object
-  internal_pkg_catalog_apiserver_handlers.UpdateApplicationRequest:
-    properties:
-      name:
-        maxLength: 100
-        minLength: 3
-        type: string
-    required:
-    - name
-    type: object
   internal_pkg_catalog_apiserver_handlers.loginReq:
     properties:
       password:
@@ -474,87 +474,27 @@ paths:
       - Applications
   /applications/{id}:
     delete:
-      description: Delete a specific application and all its resources
+      description: Initiates async deletion of an application and all its associated
+        resources
       parameters:
-      - description: Application ID
+      - description: Application UUID
         in: path
         name: id
         required: true
         type: string
-      responses:
-        "200":
-          description: Application deleted
-          schema:
-            additionalProperties: true
-            type: object
-        "404":
-          description: Application not found
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Delete application
-      tags:
-      - Applications
-    get:
-      description: Retrieves a single application by its unique identifier for the
-        authenticated user
-      parameters:
-      - description: Application ID
-        in: path
-        name: id
-        required: true
-        type: string
+      - description: Skip infrastructure cleanup
+        in: query
+        name: skip-cleanup
+        type: boolean
       produces:
       - application/json
       responses:
-        "200":
-          description: OK
+        "202":
+          description: Accepted
           schema:
-            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
-        "404":
-          description: Application not found
-          schema:
-            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Get application by ID
-      tags:
-      - Applications
-    put:
-      consumes:
-      - application/json
-      description: Updates the display name of an existing application
-      parameters:
-      - description: Application ID (UUID)
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Update request
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.UpdateApplicationRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application'
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse'
         "400":
-          description: Invalid request body or name validation failed
+          description: Invalid application ID
           schema:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "401":
@@ -562,17 +502,75 @@ paths:
           schema:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "403":
-          description: User doesn't own this application
+          description: Forbidden
           schema:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "404":
           description: Application not found
           schema:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "409":
+          description: Application already being deleted
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete application
+      tags:
+      - Applications
+    get:
+      description: Get detailed information about a specific application
+      parameters:
+      - description: Application ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Application details
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Application not found
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get application details
+      tags:
+      - Applications
+    put:
+      consumes:
+      - application/json
+      description: Update an existing application's configuration
+      parameters:
+      - description: Application ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Application updated
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Application not found
+          schema:
+            additionalProperties: true
+            type: object
       security:
       - BearerAuth: []
       summary: Update application
