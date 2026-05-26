@@ -17,7 +17,7 @@ function App() {
       <Routes>
         <Route
           path="/"
-          element={<Navigate to={ROUTES.AI_DEPLOYMENTS} replace />}
+          element={<Navigate to={ROUTES.DIGITAL_ASSISTANTS} replace />}
         />
 
         {/* Protected routes */}
