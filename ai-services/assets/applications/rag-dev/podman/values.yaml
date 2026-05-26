@@ -2,13 +2,13 @@ ui:
   # @description Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.36
+  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.37
 
 backend:
   # @description Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.
   port: "0"
   # @hidden
-  image: icr.io/ai-services-cicd/chatbot-service:v0.0.2
+  image: icr.io/ai-services-cicd/chatbot-service:v0.0.3
   # @hidden
   log_level: "INFO"
 
@@ -92,3 +92,11 @@ similarity:
   image: icr.io/ai-services-cicd/similarity-service:v0.0.3
   # @hidden
   log_level: "INFO"
+
+chatbot:
+  # @description Search mode for similarity search. Options: "dense" (cosine similarity), "sparse" (BM25), "hybrid" (both). Default is "dense".
+  searchMode: "hybrid"
+  # @description Number of document chunks to keep after reranking. Default is 3.
+  numChunksPostReranker: 3
+  # @description Enable reranking of search results using the reranker model. Default is true.
+  rerank: true

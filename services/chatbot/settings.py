@@ -120,10 +120,17 @@ class LLMConfig(BaseSettings):
 
 class RAGConfig(BaseSettings):
     """RAG retrieval and ranking settings."""
+    
+    model_config = SettingsConfigDict(env_prefix="CHATBOT_")
 
     conversational_mode: bool = Field(
         default=False,
         description="Enable conversational RAG mode with query rephrasing and context management"
+    )
+
+    search_mode: str = Field(
+        default="hybrid",
+        description="Search mode for document retrieval (e.g., 'hybrid', 'dense', 'sparse')"
     )
 
     score_threshold: float = Field(
