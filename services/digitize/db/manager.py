@@ -5,8 +5,9 @@ Provides CRUD operations with proper error handling and transaction management.
 """
 
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, cast
 from sqlalchemy import select, update, delete, func, or_, and_
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from common.misc_utils import get_logger
@@ -196,7 +197,7 @@ class DatabaseManager:
                     return True
                 
                 stmt = update(Job).where(Job.job_id == job_id).values(**updates)
-                result = session.execute(stmt)
+                result = cast(CursorResult, session.execute(stmt))
                 
                 if result.rowcount > 0:
                     logger.debug(f"Updated job in database: {job_id}")
@@ -225,7 +226,7 @@ class DatabaseManager:
         try:
             with get_db_session() as session:
                 stmt = delete(Job).where(Job.job_id == job_id)
-                result = session.execute(stmt)
+                result = cast(CursorResult, session.execute(stmt))
                 
                 if result.rowcount > 0:
                     logger.info(f"Deleted job from database: {job_id}")
@@ -453,7 +454,7 @@ class DatabaseManager:
                     return True
                 
                 stmt = update(Document).where(Document.doc_id == doc_id).values(**updates)
-                result = session.execute(stmt)
+                result = cast(CursorResult, session.execute(stmt))
                 
                 if result.rowcount > 0:
                     logger.debug(f"Updated document in database: {doc_id}")
@@ -482,7 +483,7 @@ class DatabaseManager:
         try:
             with get_db_session() as session:
                 stmt = delete(Document).where(Document.doc_id == doc_id)
-                result = session.execute(stmt)
+                result = cast(CursorResult, session.execute(stmt))
                 
                 if result.rowcount > 0:
                     logger.info(f"Deleted document from database: {doc_id}")
