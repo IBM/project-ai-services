@@ -30,13 +30,61 @@ import {
   Tab,
   TabPanels,
   TabPanel,
+  Layer,
+  Link,
 } from "@carbon/react";
-import { Export, Column as ColumnIcon, Deploy } from "@carbon/icons-react";
+import {
+  Export,
+  Column as ColumnIcon,
+  Deploy,
+  Code,
+  PlayOutline,
+} from "@carbon/icons-react";
 import styles from "./DigitalAssistants.module.scss";
 import type { DigitalAssistantRow } from "./types";
 import { ACTION_TYPES, HEADERS, INITIAL_STATE, appReducer } from "./types";
-import { renderCell, StatusCell } from "./CellRenderers";
+import { CELL_RENDERERS, StatusCell } from "./CellRenderers";
 import { exportToCSV, ensureCSVExtension } from "@/utils/csv";
+import type { Dispatch } from "react";
+import type { AppAction } from "./types";
+
+// Generic cell renderer wrapper
+interface RenderCellProps {
+  header: string;
+  value: unknown;
+  rowId: string;
+  dispatch: Dispatch<AppAction>;
+  selectedRowId?: string | null;
+  cellKey: string;
+  cellProps: Record<string, unknown>;
+}
+
+const renderCell = ({
+  header,
+  value,
+  rowId,
+  dispatch,
+  selectedRowId,
+  cellKey,
+  cellProps,
+}: RenderCellProps) => {
+  const CellRenderer = CELL_RENDERERS[header as keyof typeof CELL_RENDERERS];
+
+  return (
+    <TableCell key={cellKey} {...cellProps}>
+      {CellRenderer ? (
+        <CellRenderer
+          value={value}
+          rowId={rowId}
+          dispatch={dispatch}
+          selectedRowId={selectedRowId}
+        />
+      ) : (
+        String(value || "")
+      )}
+    </TableCell>
+  );
+};
 
 const DigitalAssistantsPage = () => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
@@ -536,18 +584,182 @@ const DigitalAssistantsPage = () => {
             </div>
           </TabPanel>
           <TabPanel>
-            <div className={styles.tableContent}>
-              <Grid fullWidth>
-                <Column lg={16} md={8} sm={4} className={styles.tableColumn}>
-                  <h4>About Digital Assistants</h4>
-                  <p>
-                    Digital assistants are production-ready AI solutions that
-                    combine multiple services into intelligent, integrated
-                    systems for complex use cases using Retrieval-Augmented
-                    Generation (RAG).
-                  </p>
-                </Column>
-              </Grid>
+            <div className={styles.aboutContent}>
+              {/* Services Section */}
+              <Layer withBackground>
+                <section className={styles.aboutSection}>
+                  <div className={styles.sectionHeader}>
+                    <h4 className={styles.aboutSectionTitle}>Services</h4>
+                    <Button
+                      kind="primary"
+                      size="md"
+                      renderIcon={Deploy}
+                      onClick={() => {
+                        console.log("Deploy clicked");
+                      }}
+                    >
+                      Deploy
+                    </Button>
+                  </div>
+                  <ul className={styles.servicesList}>
+                    <li>Digitize documents</li>
+                    <li>Find similar items</li>
+                    <li>Question and answer</li>
+                    <li>Summarize</li>
+                  </ul>
+                </section>
+              </Layer>
+
+              {/* Use Case Domains Section */}
+              <Layer withBackground>
+                <section className={styles.aboutSection}>
+                  <h4 className={styles.aboutSectionTitle}>Use case domains</h4>
+                  <div className={styles.useCaseGrid}>
+                    <div className={styles.useCaseColumn}>
+                      <h5 className={styles.useCaseDomain}>Agriculture</h5>
+                      <ul className={styles.useCaseList}>
+                        <li>Agriculture assistant</li>
+                      </ul>
+                    </div>
+                    <div className={styles.useCaseColumn}>
+                      <h5 className={styles.useCaseDomain}>Banking</h5>
+                      <ul className={styles.useCaseList}>
+                        <li>Analyst assistant</li>
+                        <li>Financial documents assistant</li>
+                        <li>Open account agent</li>
+                      </ul>
+                    </div>
+                    <div className={styles.useCaseColumn}>
+                      <h5 className={styles.useCaseDomain}>
+                        Enterprise resource planning
+                      </h5>
+                      <ul className={styles.useCaseList}>
+                        <li>HR assistant</li>
+                        <li>Invoice matching assistant</li>
+                        <li>Order processing assistant</li>
+                      </ul>
+                    </div>
+                    <div className={styles.useCaseColumn}>
+                      <h5 className={styles.useCaseDomain}>Insurance</h5>
+                      <ul className={styles.useCaseList}>
+                        <li>Claims & policy management agent</li>
+                      </ul>
+                    </div>
+                    <div className={styles.useCaseColumn}>
+                      <h5 className={styles.useCaseDomain}>IT operations</h5>
+                      <ul className={styles.useCaseList}>
+                        <li>Invoice matching assistant</li>
+                      </ul>
+                    </div>
+                    <div className={styles.useCaseColumn}>
+                      <h5 className={styles.useCaseDomain}>Public sector</h5>
+                      <ul className={styles.useCaseList}>
+                        <li>Private documents assistant</li>
+                        <li>Conference slide search</li>
+                      </ul>
+                    </div>
+                    <div className={styles.useCaseColumn}>
+                      <h5 className={styles.useCaseDomain}>Real estate</h5>
+                      <ul className={styles.useCaseList}>
+                        <li>Real estate assistant</li>
+                      </ul>
+                    </div>
+                  </div>
+                </section>
+              </Layer>
+
+              {/* Minimum Resource Allocation Section */}
+              <Layer withBackground>
+                <section className={styles.aboutSection}>
+                  <h4 className={styles.aboutSectionTitle}>
+                    Minimum resource allocation
+                  </h4>
+                  <div className={styles.resourceGrid}>
+                    <div className={styles.resourceItem}>
+                      <span className={styles.resourceLabel}>
+                        Required cores
+                      </span>
+                      <span className={styles.resourceValue}>0.5 - 2.0</span>
+                    </div>
+                    <div className={styles.resourceItem}>
+                      <span className={styles.resourceLabel}>
+                        Required memory
+                      </span>
+                      <span className={styles.resourceValue}>15GB - 25GB</span>
+                    </div>
+                    <div className={styles.resourceItem}>
+                      <span className={styles.resourceLabel}>
+                        Required Spyre cards
+                      </span>
+                      <span className={styles.resourceValue}>4 cards</span>
+                    </div>
+                  </div>
+                </section>
+              </Layer>
+
+              {/* Code and Architecture + Demos Section (Side by Side) */}
+              <div className={styles.sideBySideContainer}>
+                {/* Code and Architecture Section */}
+                <Layer withBackground>
+                  <section className={styles.sideBySideSection}>
+                    <h4 className={styles.aboutSectionTitle}>
+                      Code and architecture
+                    </h4>
+                    <Button
+                      kind="tertiary"
+                      size="sm"
+                      className={styles.codeButton}
+                      renderIcon={Code}
+                      onClick={() =>
+                        window.open("https://github.com/your-repo", "_blank")
+                      }
+                    >
+                      View code
+                    </Button>
+                    <div className={styles.architectureDiagram}>
+                      <img
+                        src="/images/architectureDiagram.png"
+                        alt="RAG Architecture Diagram"
+                        className={styles.diagramImage}
+                      />
+                    </div>
+                  </section>
+                </Layer>
+
+                {/* Demos and Prototypes Section */}
+                <Layer withBackground>
+                  <section className={styles.demosSection}>
+                    <h4 className={styles.aboutSectionTitle}>
+                      Demos and prototypes
+                    </h4>
+                    <div className={styles.demoCard}>
+                      <img
+                        src="/images/videoThumbnail.png"
+                        alt="RAG Demo"
+                        className={styles.demoImage}
+                      />
+                      <div className={styles.demoContent}>
+                        <h5 className={styles.demoTitle}>
+                          Retrieval-Augmented Generation (RAG)
+                        </h5>
+                        <p className={styles.demoDescription}>
+                          Discover the architecture behind this pre-built
+                          digital assistant
+                        </p>
+                        <div className={styles.demoActions}>
+                          <Link
+                            href="https://video-link.com"
+                            target="_blank"
+                            renderIcon={PlayOutline}
+                          >
+                            Watch
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                </Layer>
+              </div>
             </div>
           </TabPanel>
         </TabPanels>

@@ -174,3 +174,167 @@
     fill: var(--cds-text-secondary);
   }
 }
+
+.aboutContent {
+  padding: spacing.$spacing-06;
+}
+
+.aboutSection {
+  padding: spacing.$spacing-05;
+  margin-bottom: spacing.$spacing-05;
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: spacing.$spacing-05;
+}
+
+.aboutSectionTitle {
+  margin: 0;
+  @include type.type-style("heading-compact-01");
+}
+
+.servicesList {
+  list-style: disc;
+  padding-left: spacing.$spacing-06;
+  margin: 0;
+
+  li {
+    margin-bottom: spacing.$spacing-03;
+    @include type.type-style("heading-compact-01");
+    font-weight: 400;
+  }
+}
+
+.useCaseGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: spacing.$spacing-07;
+  margin-top: spacing.$spacing-05;
+}
+
+.useCaseColumn {
+  margin-bottom: 0;
+}
+
+.useCaseDomain {
+  margin-bottom: spacing.$spacing-03;
+  @include type.type-style("label-01");
+  color: var(--cds-text-secondary);
+}
+
+.useCaseList {
+  list-style: disc;
+  padding-left: spacing.$spacing-06;
+  margin: 0;
+
+  li {
+    margin-bottom: spacing.$spacing-02;
+    @include type.type-style("heading-compact-01");
+    font-weight: 400;
+  }
+}
+
+.resourceGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: spacing.$spacing-07;
+  margin-top: spacing.$spacing-05;
+}
+
+.resourceItem {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-02;
+}
+
+.resourceLabel {
+  @include type.type-style("label-01");
+  color: var(--cds-text-secondary);
+}
+
+.resourceValue {
+  @include type.type-style("body-01");
+}
+
+.sideBySideContainer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: spacing.$spacing-05;
+}
+
+.sideBySideSection {
+  display: flex;
+  flex-direction: column;
+  padding: spacing.$spacing-05;
+}
+
+.architectureDiagram {
+  margin-top: spacing.$spacing-05;
+  padding: spacing.$spacing-05;
+  max-width: 700px;
+}
+
+.diagramImage {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.demosSection {
+  padding: spacing.$spacing-05;
+}
+
+.demoCard {
+  display: flex;
+  gap: 0;
+  padding: 0;
+  background-color: var(--cds-layer);
+  position: relative;
+  margin-top: spacing.$spacing-06;
+  overflow: hidden;
+}
+
+.demoImage {
+  width: 133px;
+  height: 100%;
+  object-fit: cover;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.demoContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: spacing.$spacing-05;
+}
+
+.demoTitle {
+  @include type.type-style("heading-03");
+  margin: 0;
+}
+
+.demoDescription {
+  @include type.type-style("body-compact-01");
+  margin: spacing.$spacing-03 0 0 0;
+}
+
+.demoActions {
+  margin-top: auto;
+  text-align: right;
+
+  a {
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: none;
+    }
+  }
+}
+
+.codeButton {
+  margin-top: spacing.$spacing-07;
+}

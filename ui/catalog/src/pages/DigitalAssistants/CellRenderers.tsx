@@ -1,10 +1,4 @@
-import {
-  TableCell,
-  Link,
-  Tag,
-  OverflowMenu,
-  OverflowMenuItem,
-} from "@carbon/react";
+import { Link, Tag, OverflowMenu, OverflowMenuItem } from "@carbon/react";
 import {
   Delete,
   CheckmarkFilled,
@@ -130,41 +124,3 @@ export const CELL_RENDERERS = {
   status: StatusCell,
   messages: MessageCell,
 } as const;
-
-// Generic cell renderer wrapper
-interface RenderCellProps {
-  header: string;
-  value: unknown;
-  rowId: string;
-  dispatch: Dispatch<AppAction>;
-  selectedRowId?: string | null;
-  cellKey: string;
-  cellProps: Record<string, unknown>;
-}
-
-export const renderCell = ({
-  header,
-  value,
-  rowId,
-  dispatch,
-  selectedRowId,
-  cellKey,
-  cellProps,
-}: RenderCellProps) => {
-  const CellRenderer = CELL_RENDERERS[header as keyof typeof CELL_RENDERERS];
-
-  return (
-    <TableCell key={cellKey} {...cellProps}>
-      {CellRenderer ? (
-        <CellRenderer
-          value={value}
-          rowId={rowId}
-          dispatch={dispatch}
-          selectedRowId={selectedRowId}
-        />
-      ) : (
-        String(value || "")
-      )}
-    </TableCell>
-  );
-};
