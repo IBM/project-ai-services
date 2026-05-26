@@ -25,6 +25,8 @@ var (
 	httpsPort int
 )
 
+const defaultHTTPSPort = 443
+
 // NewConfigureCmd creates a new configure command for the catalog service.
 func NewConfigureCmd() *cobra.Command {
 	var (
@@ -140,7 +142,7 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 	cmd.Flags().IntVar(
 		&httpsPort,
 		"https-port",
-		443,
+		defaultHTTPSPort,
 		"HTTPS port for the Caddy server (default: 443).\n"+
 			"Example: --https-port 8443\n",
 	)
