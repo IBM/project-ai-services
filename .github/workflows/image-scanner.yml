@@ -40,8 +40,6 @@ jobs:
            image: digitize-ui
          - path: services/chatbot
            image: chatbot-service
-         - path: services/common
-           image: services-common
          - path: services/digitize
            image: digitize-service
          - path: services/similarity
