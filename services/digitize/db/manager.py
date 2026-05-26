@@ -543,7 +543,7 @@ class DatabaseManager:
         try:
             with get_db_session() as session:
                 stmt = delete(Document)
-                result = session.execute(stmt)
+                result = cast(CursorResult, session.execute(stmt))
                 deleted_count = result.rowcount
                 
                 logger.info(f"Deleted all documents from database: {deleted_count} documents")
@@ -579,7 +579,7 @@ class DatabaseManager:
         try:
             with get_db_session() as session:
                 stmt = delete(Job)
-                result = session.execute(stmt)
+                result = cast(CursorResult, session.execute(stmt))
                 deleted_count = result.rowcount
                 
                 logger.info(f"Deleted all jobs from database: {deleted_count} jobs")
