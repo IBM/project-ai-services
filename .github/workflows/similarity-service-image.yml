@@ -13,6 +13,7 @@ jobs:
     uses: ./.github/workflows/build-and-publish-image.yml
     with:
       service: 'similarity'
+      working-directory: 'services'
     secrets: inherit
 
   scan:

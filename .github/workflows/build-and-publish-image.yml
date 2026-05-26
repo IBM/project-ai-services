@@ -6,6 +6,9 @@ on:
       service:
        required: true
        type: string
+      working-directory:
+       required: true
+       type: string
 
 env:
   ICR_REGISTRY: icr.io
@@ -19,7 +22,7 @@ jobs:
         uses: actions/checkout@v5
       
       - name: Build Image
-        working-directory: services
+        working-directory: ${{ inputs.working-directory }}
         run: |
           make build \
             SERVICE=${{ inputs.service }} \
@@ -28,7 +31,7 @@ jobs:
             REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
       
       - name: Publish image
-        working-directory: services
+        working-directory: ${{ inputs.working-directory }}
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           make push \
