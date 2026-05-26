@@ -71,11 +71,11 @@ def reset_db():
         logger.debug("Deleting all document files...")
         deletion_stats = bulk_delete_all_documents()
 
-        total_deleted = deletion_stats["metadata_files_deleted"] + deletion_stats["content_files_deleted"]
+        # Note: metadata_files_deleted is always 0 since metadata is now in PostgreSQL
+        total_deleted = deletion_stats["content_files_deleted"]
         logger.info(
-            f"✓ Deleted {total_deleted} files "
-            f"({deletion_stats['metadata_files_deleted']} metadata, "
-            f"{deletion_stats['content_files_deleted']} content)"
+            f"✓ Deleted {total_deleted} content files from filesystem "
+            f"(metadata is managed in PostgreSQL database)"
         )
 
         # If there were any file deletion errors, raise an error

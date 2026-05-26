@@ -833,6 +833,7 @@ def bulk_delete_all_documents() -> dict:
     logger.info("Starting bulk deletion of all digitized content files...")
 
     deletion_stats = {
+        "metadata_files_deleted": 0,  # Metadata now in PostgreSQL, no files to delete
         "content_files_deleted": 0,
         "errors": []
     }
