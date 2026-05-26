@@ -143,7 +143,7 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 		&httpsPort,
 		"https-port",
 		defaultHTTPSPort,
-		"HTTPS port for the Caddy server (default: 443).\n"+
+		"Custom HTTPS port to expose the service endpoints externally (podman runtime only).\n"+
 			"Example: --https-port 8443\n",
 	)
 
