@@ -1,6 +1,7 @@
 import common.db_utils as db
 from common.misc_utils import get_logger
-from digitize.digitize_utils import bulk_delete_all_documents, get_all_document_ids
+from digitize.digitize_utils import bulk_delete_all_documents
+from digitize.db_operations import get_all_document_ids
 from digitize.db.manager import db_manager
 
 logger = get_logger("cleanup")

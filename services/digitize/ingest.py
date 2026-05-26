@@ -9,7 +9,7 @@ from digitize.doc_utils import process_documents
 from digitize.digitize_utils import get_utc_timestamp, get_job_document_stats
 from digitize.models import JobStatus, DocStatus
 from digitize.settings import settings
-from digitize.digitize_utils import get_status_manager, DatabaseStatusManager
+from digitize.db_operations import get_status_manager, DatabaseStatusManager
 
 logger = get_logger("ingest")
 

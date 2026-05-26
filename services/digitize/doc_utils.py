@@ -28,7 +28,7 @@ from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages,
 from digitize.digitize_utils import get_utc_timestamp
 from digitize.models import DocStatus, JobStatus, OutputFormat
 from digitize.settings import settings
-from digitize.digitize_utils import get_status_manager
+from digitize.db_operations import get_status_manager
 
 logger = get_logger("doc_utils")
 

@@ -23,7 +23,7 @@ import digitize.models as models
 from digitize.digitize_core import digitize
 from digitize.cleanup import reset_db
 from digitize.ingest import ingest
-from digitize.digitize_utils import get_status_manager
+from digitize.db_operations import get_status_manager
 from digitize.db.connection import check_db_connection, close_db_connections
 
 # Semaphores for concurrency limiting
@@ -333,7 +333,7 @@ async def get_all_jobs(
     """Retrieve information about all submitted jobs with pagination and filtering."""
     try:
         # Use database function
-        from digitize.digitize_utils import get_all_jobs
+        from digitize.db_operations import get_all_jobs
 
         # Get jobs from database
         jobs_data, total = get_all_jobs(
@@ -372,7 +372,7 @@ async def get_job_by_id(job_id: str):
     """Retrieve detailed status of a specific job by its ID."""
     try:
         # Use database function
-        from digitize.digitize_utils import get_job
+        from digitize.db_operations import get_job
 
         job_data = get_job(job_id)
         
@@ -404,7 +404,7 @@ async def delete_job(job_id: str):
     """Deletes a job record from database. Does not touch associated document metadata."""
     try:
         # Use database function to get job
-        from digitize.digitize_utils import get_job
+        from digitize.db_operations import get_job
         from digitize.db.manager import db_manager
 
         job_data = get_job(job_id)
@@ -472,7 +472,7 @@ async def list_documents(
             )
 
         # Use database function
-        from digitize.digitize_utils import get_all_documents_paginated
+        from digitize.db_operations import get_all_documents_paginated
 
         documents_data, total = get_all_documents_paginated(
             status=status,
@@ -526,7 +526,7 @@ async def get_document_metadata(doc_id: str, details: bool = Query(False, descri
     """
     try:
         # Use database function - now returns DocumentDetailResponse directly
-        from digitize.digitize_utils import get_document
+        from digitize.db_operations import get_document
 
         response = get_document(doc_id, include_details=details)
         return response
