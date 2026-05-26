@@ -5,11 +5,9 @@ Uses PostgreSQL database as the single source of truth for job and document stat
 """
 
 from datetime import datetime, timezone
-from typing import Dict, Any, Mapping, Optional
-from pathlib import Path
+from typing import Dict, Any, Mapping
 
 from common.misc_utils import get_logger
-from digitize.status import get_utc_timestamp
 from digitize.models import JobStatus, DocStatus
 from digitize.db.db_manager import db_manager
 from digitize.db.database import engine

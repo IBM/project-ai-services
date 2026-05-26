@@ -1,6 +1,6 @@
 from pathlib import Path
 import time
-from typing import Optional, Callable
+from typing import Optional
 
 import common.db_utils as db
 from common.emb_utils import get_embedder

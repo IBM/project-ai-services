@@ -5,7 +5,6 @@ Provides common utilities used across the digitize service.
 """
 
 from datetime import datetime, timezone
-from typing import Optional
 
 from common.misc_utils import get_logger
 
