@@ -234,6 +234,7 @@ func (p *DeploymentPlanner) calculateAndAllocateSpyreCards(plan *DeploymentPlan)
 
 	if totalRequired == 0 {
 		logger.Infof("No Spyre cards required for this deployment\n")
+
 		return nil
 	}
 
@@ -319,6 +320,7 @@ func fetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[
 		if matches == nil {
 			return "", false
 		}
+
 		return matches[1], true
 	}
 
