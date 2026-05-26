@@ -230,7 +230,7 @@ func (s *scannedServiceFields) toService() (*models.Service, error) {
 		ID:        s.id,
 		AppID:     s.appID,
 		CatalogID: s.catalogID,
-		Status:    models.ApplicationStatus(s.status),
+		Status:    models.ServiceStatus(s.status),
 		Version:   s.version,
 		CreatedAt: s.created.Time,
 		UpdatedAt: s.updated.Time,

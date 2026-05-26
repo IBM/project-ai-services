@@ -3,5 +3,3 @@ memoryLimit: 8Gi
 auth:
   username: "admin"
   password: "AiServices@12345"
-host: ""
-port: ""

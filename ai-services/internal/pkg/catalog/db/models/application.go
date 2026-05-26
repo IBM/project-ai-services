@@ -18,12 +18,20 @@ const (
 type ApplicationStatus string
 
 const (
-	ApplicationStatusInitializing ApplicationStatus = "Initializing"
-	ApplicationStatusDownloading  ApplicationStatus = "Downloading"
-	ApplicationStatusDeploying    ApplicationStatus = "Deploying"
-	ApplicationStatusRunning      ApplicationStatus = "Running"
-	ApplicationStatusDeleting     ApplicationStatus = "Deleting"
-	ApplicationStatusError        ApplicationStatus = "Error"
+	ApplicationStatusDownloading ApplicationStatus = "Downloading"
+	ApplicationStatusDeploying   ApplicationStatus = "Deploying"
+	ApplicationStatusRunning     ApplicationStatus = "Running"
+	ApplicationStatusDeleting    ApplicationStatus = "Deleting"
+	ApplicationStatusError       ApplicationStatus = "Error"
+)
+
+// ServiceStatus represents the status of a service.
+type ServiceStatus string
+
+const (
+	ServiceStatusInitializing ServiceStatus = "Initializing"
+	ServiceStatusRunning      ServiceStatus = "Running"
+	ServiceStatusError        ServiceStatus = "Error"
 )
 
 // Application represents an application in the catalog.

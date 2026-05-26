@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "summarize-api--{{ .InstanceSlug }}"
+  name: "summarize-api-{{ .InstanceSlug }}"
   labels:
   ai-services.io/template: "{{ .TemplateID }}"
   annotations:

@@ -46,32 +46,6 @@ type ServiceParams struct {
 	Values    map[string]any    // Service values with component values nested under component_type
 }
 
-// BuildArchitectureParams builds parameters for all services in an architecture deployment.
-func (b *ParamBuilder) BuildArchitectureParams(
-	ctx context.Context,
-	req apimodels.CreateApplicationRequest,
-) (map[string]*ServiceParams, error) {
-	// Load architecture metadata
-	arch, err := b.catalogProvider.LoadArchitecture(req.CatalogID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load architecture '%s': %w", req.CatalogID, err)
-	}
-
-	serviceParamsMap := make(map[string]*ServiceParams)
-
-	// Build params for each service in the request
-	for _, svcReq := range req.Services {
-		params, err := b.BuildServiceParams(ctx, svcReq, arch)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build params for service '%s': %w", svcReq.CatalogID, err)
-		}
-
-		serviceParamsMap[svcReq.CatalogID] = params
-	}
-
-	return serviceParamsMap, nil
-}
-
 // BuildServiceParams builds parameters for a single service deployment.
 func (b *ParamBuilder) BuildServiceParams(
 	ctx context.Context,

@@ -1,11 +1,13 @@
 package deployment
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"maps"
+	"regexp"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
@@ -13,18 +15,19 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/params"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
+	k8syaml "sigs.k8s.io/yaml"
 )
 
 // DeploymentPlanner plans the deployment of applications by:
-// 1. Parsing and validating the request
-// 2. Collecting parameters for each service and component
-// 3. Deduplicating components (same type + provider + params = single deployment)
-// 4. Creating deployment plan with shared components.
+// 1. Collecting parameters for each service and component
+// 2. Deduplicating components (same type + provider + params = single deployment)
+// 3. Creating deployment plan with shared components.
 type DeploymentPlanner struct {
 	catalogProvider *catalog.CatalogProvider
 	componentRepo   repository.ComponentRepository
-	requestParser   *RequestParser
 	paramBuilder    *params.ParamBuilder
 }
 
@@ -36,7 +39,6 @@ func NewDeploymentPlanner(
 	return &DeploymentPlanner{
 		catalogProvider: provider,
 		componentRepo:   componentRepo,
-		requestParser:   NewRequestParser(componentRepo),
 		paramBuilder:    params.NewParamBuilder(provider),
 	}
 }
@@ -67,130 +69,64 @@ func (p *DeploymentPlanner) PlanDeployment(
 		}
 	}
 
-	// Parse the request
-	parsedReq, err := p.requestParser.ParseRequest(ctx, req, isArchitecture)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse request: %w", err)
-	}
-
 	// Create deployment plan
 	plan := &DeploymentPlan{
 		ApplicationID:   uuid.New(),
-		ApplicationName: parsedReq.ApplicationName,
-		CatalogID:       parsedReq.CatalogID,
-		IsArchitecture:  parsedReq.IsArchitecture,
+		ApplicationName: req.Name,
+		CatalogID:       req.CatalogID,
+		IsArchitecture:  isArchitecture,
 		Components:      make(map[string]*ComponentPlan),
 		Services:        make(map[string]*ServicePlan),
 	}
 
-	// Process each service from parsed request
-	for serviceID, parsedSvc := range parsedReq.Services {
-		if err := p.processServiceFromParsed(ctx, parsedSvc, plan, runtimeType); err != nil {
-			return nil, fmt.Errorf("failed to process service '%s': %w", serviceID, err)
+	// Process each service from request
+	for _, svc := range req.Services {
+		if err := p.processService(ctx, svc, plan, runtimeType); err != nil {
+			return nil, fmt.Errorf("failed to process service '%s': %w", svc.CatalogID, err)
 		}
 	}
 
-	return plan, nil
-}
-
-// PlanServiceDeployment creates a deployment plan for a standalone service.
-// This is used when deploying individual services outside of an architecture.
-func (p *DeploymentPlanner) PlanServiceDeployment(
-	ctx context.Context,
-	serviceReq apimodels.Service,
-	applicationName string,
-	runtimeType string,
-) (*DeploymentPlan, error) {
-	// Validate service exists in catalog
-	_, err := p.catalogProvider.LoadService(serviceReq.CatalogID)
-	if err != nil {
-		return nil, fmt.Errorf("service '%s' not found in catalog: %w", serviceReq.CatalogID, err)
-	}
-
-	// Create a minimal CreateApplicationRequest for parsing
-	req := apimodels.CreateApplicationRequest{
-		Name:      applicationName,
-		CatalogID: serviceReq.CatalogID,
-		Services:  []apimodels.Service{serviceReq},
-	}
-
-	// Parse the request as a standalone service (not architecture)
-	parsedReq, err := p.requestParser.ParseRequest(ctx, req, false)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse service request: %w", err)
-	}
-
-	// Create deployment plan
-	plan := &DeploymentPlan{
-		ApplicationID:   uuid.New(),
-		ApplicationName: applicationName,
-		CatalogID:       serviceReq.CatalogID,
-		IsArchitecture:  false,
-		Components:      make(map[string]*ComponentPlan),
-		Services:        make(map[string]*ServicePlan),
-	}
-
-	// Process the single service
-	parsedSvc := parsedReq.Services[serviceReq.CatalogID]
-	if err := p.processServiceFromParsed(ctx, parsedSvc, plan, runtimeType); err != nil {
-		return nil, fmt.Errorf("failed to process service '%s': %w", serviceReq.CatalogID, err)
+	// Calculate and allocate Spyre cards after all components are planned
+	if err := p.calculateAndAllocateSpyreCards(plan); err != nil {
+		return nil, fmt.Errorf("failed to allocate Spyre cards: %w", err)
 	}
 
 	return plan, nil
 }
 
-// processServiceFromParsed processes a single service from parsed request.
-func (p *DeploymentPlanner) processServiceFromParsed(
+// processService processes a single service from the request.
+func (p *DeploymentPlanner) processService(
 	ctx context.Context,
-	parsedSvc *ParsedService,
+	svc apimodels.Service,
 	plan *DeploymentPlan,
 	runtimeType string,
 ) error {
 	// Get service path from catalog provider
-	servicePath, err := p.catalogProvider.GetCatalogItemPath(parsedSvc.CatalogID)
+	servicePath, err := p.catalogProvider.GetCatalogItemPath(svc.CatalogID)
 	if err != nil {
 		return fmt.Errorf("failed to get service catalog path: %w", err)
 	}
 
 	servicePlan := &ServicePlan{
-		CatalogID:     parsedSvc.CatalogID,
+		CatalogID:     svc.CatalogID,
 		CatalogPath:   fmt.Sprintf("%s/%s", servicePath, runtimeType),
-		Version:       parsedSvc.Version,
+		Version:       svc.Version,
 		ComponentRefs: make([]string, 0),
-		ArgParams:     make(map[string]string),
 	}
 
 	// Process each component in the service
-	for _, parsedComp := range parsedSvc.Components {
-		componentHash, err := p.processComponentFromParsed(parsedComp, parsedSvc.CatalogID, plan, runtimeType)
+	for _, comp := range svc.Components {
+		componentHash, err := p.processComponent(comp, svc.CatalogID, plan, runtimeType)
 		if err != nil {
-			return fmt.Errorf("failed to process component '%s': %w", parsedComp.ComponentType, err)
+			return fmt.Errorf("failed to process component '%s': %w", comp.ComponentType, err)
 		}
 
 		// Add component reference to service
 		servicePlan.ComponentRefs = append(servicePlan.ComponentRefs, componentHash)
-
-		// Merge component argParams into service argParams
-		compPlan := plan.Components[componentHash]
-		maps.Copy(servicePlan.ArgParams, compPlan.ArgParams)
 	}
 
 	// Load values using ParamBuilder
-	// Convert ParsedService to apimodels.Service for ParamBuilder
-	svcReq := apimodels.Service{
-		CatalogID:  parsedSvc.CatalogID,
-		Version:    parsedSvc.Version,
-		Components: make([]apimodels.Component, 0, len(parsedSvc.Components)),
-	}
-	for _, comp := range parsedSvc.Components {
-		svcReq.Components = append(svcReq.Components, apimodels.Component{
-			ComponentType: comp.ComponentType,
-			ProviderID:    comp.ProviderID,
-			Params:        comp.Params,
-		})
-	}
-
-	serviceParams, err := p.paramBuilder.BuildServiceParams(ctx, svcReq, nil)
+	serviceParams, err := p.paramBuilder.BuildServiceParams(ctx, svc, nil)
 	if err != nil {
 		return fmt.Errorf("failed to build service params: %w", err)
 	}
@@ -202,21 +138,21 @@ func (p *DeploymentPlanner) processServiceFromParsed(
 	for _, compHash := range servicePlan.ComponentRefs {
 		compPlan := plan.Components[compHash]
 		// Component values are nested under component_type in serviceParams.Values
-		if compValues, ok := serviceParams.Values[compPlan.ComponentType].(map[string]interface{}); ok {
+		if compValues, ok := serviceParams.Values[compPlan.ComponentType].(map[string]any); ok {
 			compPlan.Values = compValues
 		}
 	}
 
 	// Add service to plan
-	plan.Services[parsedSvc.CatalogID] = servicePlan
+	plan.Services[svc.CatalogID] = servicePlan
 
 	return nil
 }
 
-// processComponentFromParsed processes a single component from parsed request and returns its hash.
+// processComponent processes a single component from the request and returns its hash.
 // If the same component configuration already exists, it reuses it.
-func (p *DeploymentPlanner) processComponentFromParsed(
-	parsedComp *ParsedComponent,
+func (p *DeploymentPlanner) processComponent(
+	comp apimodels.Component,
 	catalogID string,
 	plan *DeploymentPlan,
 	runtimeType string,
@@ -224,9 +160,9 @@ func (p *DeploymentPlanner) processComponentFromParsed(
 	// Calculate component hash based on type + provider + params
 	// This allows deduplication: same config = same deployment
 	componentHash := p.calculateComponentHash(
-		parsedComp.ComponentType,
-		parsedComp.ProviderID,
-		parsedComp.Params,
+		comp.ComponentType,
+		comp.ProviderID,
+		comp.Params,
 	)
 
 	// Check if this component configuration already exists in the plan
@@ -238,7 +174,7 @@ func (p *DeploymentPlanner) processComponentFromParsed(
 	}
 
 	// Get component path from catalog provider
-	componentKey := fmt.Sprintf("%s/%s", parsedComp.ComponentType, parsedComp.ProviderID)
+	componentKey := fmt.Sprintf("%s/%s", comp.ComponentType, comp.ProviderID)
 	componentPath, err := p.catalogProvider.GetCatalogItemPath(componentKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to get component catalog path: %w", err)
@@ -247,11 +183,10 @@ func (p *DeploymentPlanner) processComponentFromParsed(
 	// Create new component plan
 	compPlan := &ComponentPlan{
 		Hash:           componentHash,
-		ComponentType:  parsedComp.ComponentType,
-		ProviderID:     parsedComp.ProviderID,
+		ComponentType:  comp.ComponentType,
+		ProviderID:     comp.ProviderID,
 		CatalogPath:    fmt.Sprintf("%s/%s", componentPath, runtimeType),
-		Params:         parsedComp.Params,
-		ArgParams:      utils.FlattenMapWithValues(parsedComp.Params, ""),
+		Params:         comp.Params,
 		UsedByServices: []string{catalogID},
 	}
 
@@ -279,6 +214,126 @@ func (p *DeploymentPlanner) calculateComponentHash(
 	hash := sha256.Sum256([]byte(hashInput))
 
 	return fmt.Sprintf("%x", hash[:16]) // Use first 16 bytes (32 hex chars)
+}
+
+// calculateAndAllocateSpyreCards calculates required Spyre cards and creates allocation pool.
+func (p *DeploymentPlanner) calculateAndAllocateSpyreCards(plan *DeploymentPlan) error {
+	totalRequired := 0
+
+	// Calculate total required Spyre cards from all components
+	for _, comp := range plan.Components {
+		required, err := p.getRequiredSpyreCardsForComponent(comp)
+		if err != nil {
+			return fmt.Errorf("failed to get Spyre card requirements for component %s: %w", comp.ComponentType, err)
+		}
+		totalRequired += required
+		if required > 0 {
+			logger.Infof("Component %s/%s requires %d Spyre cards\n", comp.ComponentType, comp.ProviderID, required)
+		}
+	}
+
+	if totalRequired == 0 {
+		logger.Infof("No Spyre cards required for this deployment\n")
+		return nil
+	}
+
+	logger.Infof("Total Spyre cards required: %d\n", totalRequired)
+
+	// Find available Spyre cards
+	pciAddresses, err := helpers.FindFreeSpyreCards()
+	if err != nil {
+		return fmt.Errorf("failed to find free Spyre cards: %w", err)
+	}
+
+	availableCount := len(pciAddresses)
+	logger.Infof("Available Spyre cards: %d\n", availableCount)
+
+	// Validate we have enough Spyre cards
+	if availableCount < totalRequired {
+		return fmt.Errorf("insufficient Spyre cards: required %d, available %d", totalRequired, availableCount)
+	}
+
+	// Create pool with available addresses and store in plan
+	plan.SpyreCardPool = &types.SpyreCardPool{
+		Addresses: pciAddresses,
+	}
+
+	return nil
+}
+
+// getRequiredSpyreCardsForComponent calculates Spyre cards needed for a component.
+func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(comp *ComponentPlan) (int, error) {
+	// Load component templates using catalog provider
+	tmpls, err := p.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to load component templates: %w", err)
+	}
+
+	totalSpyreCards := 0
+
+	for templateName, tmpl := range tmpls {
+		// Prepare minimal params for rendering
+		params := map[string]any{
+			"InstanceSlug": "slug", // dummy
+			"TemplateID":   "test", // dummy
+			"Values":       comp.Params,
+			"env":          map[string]map[string]string{},
+		}
+
+		// Render template
+		var rendered bytes.Buffer
+		if err := tmpl.Execute(&rendered, params); err != nil {
+			continue
+		}
+
+		// Parse rendered YAML to get pod spec
+		var podSpec podmodels.PodSpec
+		if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
+			continue
+		}
+
+		// Extract Spyre card requirements from annotations
+		spyreCards, _, err := fetchSpyreCardsFromPodAnnotations(podSpec.Annotations)
+		if err != nil {
+			return 0, err
+		}
+
+		totalSpyreCards += spyreCards
+		if spyreCards > 0 {
+			logger.Infof("Template %s requires %d Spyre cards\n", templateName, spyreCards)
+		}
+	}
+
+	return totalSpyreCards, nil
+}
+
+// fetchSpyreCardsFromPodAnnotations extracts Spyre card requirements from pod annotations.
+func fetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[string]int, error) {
+	var spyreCards int
+	spyreCardContainerMap := map[string]int{}
+
+	spyreCardAnnotationRegex := regexp.MustCompile(`^ai-services\.io\/([A-Za-z0-9][-A-Za-z0-9_.]*)--spyre-cards$`)
+
+	isSpyreCardAnnotation := func(annotation string) (string, bool) {
+		matches := spyreCardAnnotationRegex.FindStringSubmatch(annotation)
+		if matches == nil {
+			return "", false
+		}
+		return matches[1], true
+	}
+
+	for annotationKey, val := range annotations {
+		if containerName, ok := isSpyreCardAnnotation(annotationKey); ok {
+			valInt, err := strconv.Atoi(val)
+			if err != nil {
+				return 0, spyreCardContainerMap, fmt.Errorf("failed to convert to int. Provided val: %s is not of int type", val)
+			}
+			spyreCardContainerMap[containerName] = valInt
+			spyreCards += valInt
+		}
+	}
+
+	return spyreCards, spyreCardContainerMap, nil
 }
 
 // Made with Bob

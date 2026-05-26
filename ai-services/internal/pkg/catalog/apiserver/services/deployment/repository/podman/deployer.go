@@ -40,33 +40,12 @@ type ComponentInfo struct {
 	Model    string
 }
 
-// SpyreCardPool manages allocation of PCI addresses to components.
-type SpyreCardPool struct {
-	addresses []string
-	mutex     sync.Mutex
-}
-
-// Allocate takes n addresses from the pool and returns them.
-func (p *SpyreCardPool) Allocate(n int) ([]string, error) {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-
-	if len(p.addresses) < n {
-		return nil, fmt.Errorf("insufficient Spyre cards in pool: need %d, have %d", n, len(p.addresses))
-	}
-
-	allocated := make([]string, n)
-	copy(allocated, p.addresses[:n])
-	p.addresses = p.addresses[n:]
-
-	return allocated, nil
-}
-
 // Type aliases for deployment plan types.
 type (
 	DeploymentPlan = deploymenttypes.DeploymentPlan
 	ComponentPlan  = deploymenttypes.ComponentPlan
 	ServicePlan    = deploymenttypes.ServicePlan
+	SpyreCardPool  = deploymenttypes.SpyreCardPool
 )
 
 // PodmanDeployer implements deployment execution for Podman runtime.
@@ -95,8 +74,8 @@ func NewPodmanDeployer(
 	}
 }
 
-// ExecuteDeployment executes the deployment plan for an application.
-// This implements Phase 4 of the deployment flow:
+// ExecuteDeployment executes the deployment plan for an application or standalone service.
+// This implements the deployment flow:
 // 1. Pull container images for all components and services
 // 2. Download models specified in component/service parameters
 // 3. Calculate and allocate Spyre cards if needed
@@ -111,7 +90,7 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	plan *DeploymentPlan,
 	req apimodels.CreateApplicationRequest,
 ) error {
-	logger.Infof("Starting deployment execution for application '%s'\n", plan.ApplicationName)
+	logger.Infof("Starting deployment execution for '%s'\n", plan.ApplicationName)
 
 	// TODO: Add Image pull logic
 
@@ -122,35 +101,35 @@ func (d *PodmanDeployer) ExecuteDeployment(
 		return fmt.Errorf("failed to download models: %w", err)
 	}
 
-	// Step 2: Calculate and allocate Spyre cards if needed
-	pool, err := d.calculateAndAllocateSpyreCards(plan)
-	if err != nil {
-		d.handleDeploymentError(ctx, plan.ApplicationID, "Spyre card allocation failed", err)
+	// Step 2: Use pre-allocated Spyre card pool from plan
+	pool := plan.SpyreCardPool
 
-		return fmt.Errorf("failed to allocate Spyre cards: %w", err)
+	// Update application status to Deploying before starting deployment
+	deployMsg := "Deploying application"
+	d.updateStatusIgnoreError(ctx, plan.ApplicationID, models.ApplicationStatusDeploying, deployMsg)
+
+	// Step 3: Deploy components if any
+	if len(plan.Components) > 0 {
+		if err := d.deployComponents(plan, pool); err != nil {
+			d.handleDeploymentError(ctx, plan.ApplicationID, "Component deployment failed", err)
+
+			return fmt.Errorf("failed to deploy components: %w", err)
+		}
 	}
 
-	// Update application status to Deploying before starting component deployment
-	d.updateStatusIgnoreError(ctx, plan.ApplicationID, models.ApplicationStatusDeploying, "Starting component and service deployment")
+	// Step 4: Deploy services if any
+	if len(plan.Services) > 0 {
+		if err := d.deployServices(ctx, plan); err != nil {
+			d.handleDeploymentError(ctx, plan.ApplicationID, "Service deployment failed", err)
 
-	// Step 3: Deploy components and update their endpoints
-	if err := d.deployComponents(plan, pool); err != nil {
-		d.handleDeploymentError(ctx, plan.ApplicationID, "Component deployment failed", err)
-
-		return fmt.Errorf("failed to deploy components: %w", err)
+			return fmt.Errorf("failed to deploy services: %w", err)
+		}
 	}
 
-	// Step 5: Deploy services with component references
-	if err := d.deployServices(ctx, plan); err != nil {
-		d.handleDeploymentError(ctx, plan.ApplicationID, "Service deployment failed", err)
-
-		return fmt.Errorf("failed to deploy services: %w", err)
-	}
-
-	// Step 6: Update application status to Running
+	// Step 5: Update application status to Running
 	d.updateStatusIgnoreError(ctx, plan.ApplicationID, models.ApplicationStatusRunning, "Deployment completed successfully")
 
-	logger.Infof("Deployment completed successfully for application '%s'\n", plan.ApplicationName)
+	logger.Infof("Deployment completed successfully for '%s'\n", plan.ApplicationName)
 
 	return nil
 }
@@ -168,73 +147,6 @@ func (d *PodmanDeployer) updateStatusIgnoreError(ctx context.Context, appID uuid
 	if err := d.updateApplicationStatus(ctx, appID, status, message); err != nil {
 		logger.Errorf("Failed to update application status: %v\n", err)
 	}
-}
-
-// ExecuteServiceDeployment executes the deployment plan for a standalone service.
-// This is a simplified version of ExecuteDeployment that focuses on deploying a single service
-// with its components. It follows the same deployment phases but is optimized for service-only deployments.
-//
-// Deployment phases:
-// 1. Download models specified in component/service parameters
-// 2. Calculate and allocate Spyre cards if needed
-// 3. Deploy components
-// 4. Deploy the service
-// 5. Update database with endpoints and final status
-//
-// Note: Service and component records are already created by ApplicationService
-// before this method is called. This method only updates endpoints and status.
-func (d *PodmanDeployer) ExecuteServiceDeployment(
-	ctx context.Context,
-	plan *DeploymentPlan,
-	req apimodels.CreateApplicationRequest,
-) error {
-	logger.Infof("Starting service deployment execution for '%s'\n", plan.ApplicationName)
-
-	// Step 1: Download models specified in parameters
-	if err := d.downloadModelsForDeployment(plan); err != nil {
-		d.handleDeploymentError(ctx, plan.ApplicationID, "Model download failed", err)
-
-		return fmt.Errorf("failed to download models: %w", err)
-	}
-
-	// Step 2: Calculate and allocate Spyre cards if needed
-	pool, err := d.calculateAndAllocateSpyreCards(plan)
-	if err != nil {
-		d.handleDeploymentError(ctx, plan.ApplicationID, "Spyre card allocation failed", err)
-
-		return fmt.Errorf("failed to allocate Spyre cards: %w", err)
-	}
-
-	// Update application status to Deploying
-	d.updateStatusIgnoreError(ctx, plan.ApplicationID, models.ApplicationStatusDeploying, "Starting service deployment")
-
-	// Step 3: Deploy components if any
-	if len(plan.Components) > 0 {
-		logger.Infof("Deploying %d components for service...\n", len(plan.Components))
-		if err := d.deployComponents(plan, pool); err != nil {
-			d.handleDeploymentError(ctx, plan.ApplicationID, "Component deployment failed", err)
-
-			return fmt.Errorf("failed to deploy components: %w", err)
-		}
-		logger.Infof("All components deployed successfully for service\n")
-	}
-
-	// Step 4: Deploy the service
-	if len(plan.Services) > 0 {
-		logger.Infof("Deploying service...\n")
-		if err := d.deployServices(ctx, plan); err != nil {
-			d.handleDeploymentError(ctx, plan.ApplicationID, "Service deployment failed", err)
-
-			return fmt.Errorf("failed to deploy service: %w", err)
-		}
-	}
-
-	// Step 5: Update application status to Running
-	d.updateStatusIgnoreError(ctx, plan.ApplicationID, models.ApplicationStatusRunning, "Service deployment completed successfully")
-
-	logger.Infof("Service deployment completed successfully for '%s'\n", plan.ApplicationName)
-
-	return nil
 }
 
 // updateApplicationStatus updates the application status and message in the database.
@@ -486,14 +398,7 @@ func (d *PodmanDeployer) deployComponentPods(
 	pool *SpyreCardPool,
 ) error {
 	// Use the loaded Values from the component plan (includes defaults from values.yaml + overrides)
-	// If Values is not set, fall back to ArgParams for backward compatibility
 	values := comp.Values
-	if values == nil {
-		values = make(map[string]any)
-		for k, v := range comp.ArgParams {
-			values[k] = v
-		}
-	}
 
 	// Initialize component endpoints map to store extracted endpoint info
 	componentEndpoints := make(map[string]any)
@@ -941,100 +846,6 @@ func (d *PodmanDeployer) extractPodEndpoints(podSpec *podmodels.PodSpec) map[str
 	return endpoints
 }
 
-// calculateAndAllocateSpyreCards calculates required Spyre cards and creates allocation pool.
-func (d *PodmanDeployer) calculateAndAllocateSpyreCards(
-	plan *DeploymentPlan,
-) (*SpyreCardPool, error) {
-	totalRequired := 0
-
-	// Calculate total required Spyre cards from all components
-	for _, comp := range plan.Components {
-		required, err := d.getRequiredSpyreCardsForComponent(comp)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get Spyre card requirements for component %s: %w", comp.ComponentType, err)
-		}
-		totalRequired += required
-		if required > 0 {
-			logger.Infof("Component %s/%s requires %d Spyre cards\n", comp.ComponentType, comp.ProviderID, required)
-		}
-	}
-
-	if totalRequired == 0 {
-		logger.Infof("No Spyre cards required for this deployment\n")
-
-		return nil, nil
-	}
-
-	logger.Infof("Total Spyre cards required: %d\n", totalRequired)
-
-	// Find available Spyre cards
-	pciAddresses, err := helpers.FindFreeSpyreCards()
-	if err != nil {
-		return nil, fmt.Errorf("failed to find free Spyre cards: %w", err)
-	}
-
-	availableCount := len(pciAddresses)
-	logger.Infof("Available Spyre cards: %d\n", availableCount)
-
-	// Validate we have enough Spyre cards
-	if availableCount < totalRequired {
-		return nil, fmt.Errorf("insufficient Spyre cards: required %d, available %d", totalRequired, availableCount)
-	}
-
-	// Create pool with available addresses
-	pool := &SpyreCardPool{
-		addresses: pciAddresses,
-	}
-
-	return pool, nil
-}
-
-// getRequiredSpyreCardsForComponent calculates Spyre cards needed for a component.
-func (d *PodmanDeployer) getRequiredSpyreCardsForComponent(comp *ComponentPlan) (int, error) {
-	// Load component templates using catalog provider
-	tmpls, err := d.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
-	if err != nil {
-		return 0, fmt.Errorf("failed to load component templates: %w", err)
-	}
-
-	totalSpyreCards := 0
-
-	for templateName, tmpl := range tmpls {
-		// Prepare minimal params for rendering
-		params := map[string]any{
-			"InstanceSlug": generateInstanceSlug(comp.DatabaseID.String()),
-			"TemplateID":   comp.DatabaseID,
-			"Values":       comp.Params,
-			"env":          map[string]map[string]string{},
-		}
-
-		// Render template
-		var rendered bytes.Buffer
-		if err := tmpl.Execute(&rendered, params); err != nil {
-			continue
-		}
-
-		// Parse rendered YAML to get pod spec
-		var podSpec podmodels.PodSpec
-		if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
-			continue
-		}
-
-		// Extract Spyre card requirements from annotations
-		spyreCards, _, err := d.fetchSpyreCardsFromPodAnnotations(podSpec.Annotations)
-		if err != nil {
-			return 0, err
-		}
-
-		totalSpyreCards += spyreCards
-		if spyreCards > 0 {
-			logger.Infof("Template %s requires %d Spyre cards\n", templateName, spyreCards)
-		}
-	}
-
-	return totalSpyreCards, nil
-}
-
 // fetchSpyreCardsFromPodAnnotations extracts Spyre card requirements from pod annotations.
 func (d *PodmanDeployer) fetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[string]int, error) {
 	var spyreCards int
@@ -1117,12 +928,12 @@ func (d *PodmanDeployer) getEnvParamsForComponent(podSpec *podmodels.PodSpec, po
 }
 
 // generateInstanceSlug creates a short slug from an ID using SHA256 hash.
-// Returns the first 8 characters of the hex-encoded hash.
+// Returns the first 10 characters of the hex-encoded hash.
 func generateInstanceSlug(id string) string {
 	hash := sha256.Sum256([]byte(id))
 	hexHash := hex.EncodeToString(hash[:])
 
-	return hexHash[:8]
+	return hexHash[:10]
 }
 
 // Made with Bob

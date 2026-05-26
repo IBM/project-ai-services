@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "chat-bot--{{ .InstanceSlug }}"
+  name: "chat-bot-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
   annotations:

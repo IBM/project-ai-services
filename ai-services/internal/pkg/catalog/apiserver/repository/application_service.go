@@ -267,7 +267,7 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 	// Phase 5: Return 202 Accepted immediately with application ID
 	response := &apimodels.CreateApplicationResponse{
 		ID:      plan.ApplicationID.String(),
-		Status:  string(models.ApplicationStatusInitializing),
+		Status:  string(models.ApplicationStatusDownloading),
 		Message: "Application deployment initiated",
 	}
 
@@ -351,7 +351,7 @@ func (s *ApplicationService) insertApplicationRecord(
 		Name:           plan.ApplicationName,
 		CatalogID:      plan.CatalogID,
 		DeploymentType: s.getDeploymentType(plan.IsArchitecture),
-		Status:         models.ApplicationStatusInitializing,
+		Status:         models.ApplicationStatusDownloading,
 		Message:        "Initializing deployment",
 		CreatedBy:      createdBy,
 	}
@@ -402,7 +402,7 @@ func (s *ApplicationService) insertServiceRecords(
 			ID:        uuid.Nil,
 			AppID:     plan.ApplicationID,
 			CatalogID: svc.CatalogID,
-			Status:    models.ApplicationStatusInitializing,
+			Status:    models.ServiceStatusInitializing,
 			Version:   svc.Version,
 		}
 

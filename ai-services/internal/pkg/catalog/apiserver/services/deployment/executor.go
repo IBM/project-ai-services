@@ -64,11 +64,6 @@ func (e *DeploymentExecutor) executeDeployment(
 ) error {
 	switch runtimeType {
 	case types.RuntimeTypePodman:
-		// Check if this is a service-only deployment (not architecture)
-		if !plan.IsArchitecture {
-			return e.executePodmanServiceDeployment(ctx, plan, req)
-		}
-
 		return e.executePodmanDeployment(ctx, plan, req)
 	case types.RuntimeTypeOpenShift:
 		return fmt.Errorf("OpenShift deployment not yet implemented")
@@ -78,32 +73,8 @@ func (e *DeploymentExecutor) executeDeployment(
 }
 
 // executePodmanDeployment executes deployment for Podman runtime.
+// Handles both architecture and standalone service deployments.
 func (e *DeploymentExecutor) executePodmanDeployment(
-	ctx context.Context,
-	plan *DeploymentPlan,
-	req apimodels.CreateApplicationRequest,
-) error {
-	// Initialize Podman runtime client
-	rt, err := podmanRuntime.NewPodmanClient()
-	if err != nil {
-		return fmt.Errorf("failed to initialize Podman runtime: %w", err)
-	}
-
-	// Create podman deployer directly
-	deployer := podman.NewPodmanDeployer(
-		rt,
-		e.catalogProvider,
-		e.appRepo,
-		e.serviceRepo,
-		e.componentRepo,
-	)
-
-	// Execute deployment
-	return deployer.ExecuteDeployment(ctx, plan, req)
-}
-
-// executePodmanServiceDeployment executes deployment for a standalone service in Podman runtime.
-func (e *DeploymentExecutor) executePodmanServiceDeployment(
 	ctx context.Context,
 	plan *DeploymentPlan,
 	req apimodels.CreateApplicationRequest,
@@ -123,8 +94,8 @@ func (e *DeploymentExecutor) executePodmanServiceDeployment(
 		e.componentRepo,
 	)
 
-	// Execute service deployment
-	return deployer.ExecuteServiceDeployment(ctx, plan, req)
+	// Execute deployment - handles both architectures and standalone services
+	return deployer.ExecuteDeployment(ctx, plan, req)
 }
 
 // Made with Bob
