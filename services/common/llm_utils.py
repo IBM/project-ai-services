@@ -180,8 +180,11 @@ def query_vllm_payload(
     
     context = "\n\n".join([doc.get("page_content") for doc in documents])
 
-    # Use conversational mode if enabled AND language is English, otherwise use legacy prompts
-    if chatbot_settings.chatbot.conversational_mode and lang == "EN":
+    logger.debug(f"Original Context: {context}")
+
+    # Conversational RAG mode with message history (for English language)
+    # For non-English languages, use legacy prompts without conversation history
+    if lang == "EN":
         # Conversational RAG mode with message history
         question_token_count = len(tokenize_with_llm(question, llm_endpoint))
         context_tokens = tokenize_with_llm(context, llm_endpoint)
@@ -222,7 +225,7 @@ def query_vllm_payload(
         message_array = [
             {
                 "role": "system",
-                "content": chatbot_settings.chatbot.initial_system_message,
+                "content": chatbot_settings.chatbot.conversational_rag_initial_system_message,
             }
         ]
 
@@ -237,7 +240,7 @@ def query_vllm_payload(
             if truncated_messages:
                 message_array.extend(truncated_messages)
 
-        final_system_content = chatbot_settings.chatbot.rag_system_message.format(
+        final_system_content = chatbot_settings.chatbot.conversational_rag_query_system_message.format(
             context=context,
             rephrased_query=rephrased_query or question,
         )
@@ -253,7 +256,7 @@ def query_vllm_payload(
         logger.debug(f"Message array length: {len(message_array)}")
         logger.debug(f"History messages: {len(previous_messages) if previous_messages else 0}")
     else:
-        # Legacy mode: use simple prompt template without conversation history
+        # Non-English languages: use simple prompt template without conversation history
         # Dynamic chunk truncation: truncates the context if it doesn't fit in the sequence length
         question_token_count = len(tokenize_with_llm(question, llm_endpoint))
         llm_max_model_len = resolve_model_max_len(
@@ -276,8 +279,8 @@ def query_vllm_payload(
         prompt_template = get_prompt_for_language(
             lang,
             {
-                lang_en: chatbot_settings.chatbot.query_vllm_stream_prompt,
-                lang_de: chatbot_settings.chatbot.query_vllm_stream_de_prompt,
+                lang_en: chatbot_settings.chatbot.legacy_query_vllm_stream_en_prompt,
+                lang_de: chatbot_settings.chatbot.query_vllm_stream_de_prompt
             }
         )
         prompt = prompt_template.format(context=context, question=question)
@@ -289,7 +292,7 @@ def query_vllm_payload(
             }
         ]
 
-        logger.debug(f"Using legacy prompt mode (conversational_mode=False)")
+        logger.debug(f"Using legacy prompt mode for non-English language: {lang}")
 
     headers = get_vllm_headers(api_key)
     payload = {

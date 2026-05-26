@@ -7,7 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -191,6 +193,46 @@ func (h *ApplicationHandler) CreateApplication(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusAccepted, response)
+}
+
+// GetApplicationByID godoc
+//
+//	@Summary		Get application by ID
+//	@Description	Retrieves a single application by its unique identifier for the authenticated user
+//	@Tags			Applications
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string	true	"Application ID"
+//	@Success		200	{object}	types.Application
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized"
+//	@Failure		404	{object}	ErrorResponse	"Application not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/applications/{id} [get]
+func (h *ApplicationHandler) GetApplicationByID(c *gin.Context) {
+	appID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid application ID format"})
+
+		return
+	}
+
+	// Call service layer
+	response, err := h.appService.GetApplicationByID(c.Request.Context(), appID)
+	if err != nil {
+		if err == repository.ErrApplicationNotFound {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "Application not found"})
+
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get application: %v", err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // Made with Bob

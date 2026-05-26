@@ -23,6 +23,7 @@ type ConfigureOptions struct {
 	Runtime       types.RuntimeType
 	BaseDir       string
 	ArgParams     map[string]string
+	HttpsPort     int
 }
 
 // Run executes the configure process for the catalog service.
@@ -44,7 +45,7 @@ func Run(opts ConfigureOptions) error {
 		// Determine Podman URI
 		podmanURI := getPodmanURI()
 
-		return catalogPodman.DeployCatalog(ctx, podmanURI, passwordHashBase64, opts.BaseDir, opts.ArgParams)
+		return catalogPodman.DeployCatalog(ctx, podmanURI, passwordHashBase64, opts.BaseDir, opts.ArgParams, opts.HttpsPort)
 
 	case types.RuntimeTypeOpenShift:
 		return fmt.Errorf("openshift runtime is not yet supported for catalog configure")

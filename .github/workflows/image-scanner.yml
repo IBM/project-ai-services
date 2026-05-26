@@ -28,8 +28,8 @@ jobs:
            image: litellm
          - path: images/postgres
            image: postgres
-         - path: images/python-base
-           image: python-base
+         - path: images/service-base
+           image: service-base
          - path: images/tools
            image: tools
          - path: ui/catalog
