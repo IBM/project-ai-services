@@ -34,7 +34,9 @@ from summarize.summ_utils import (
     validate_summary_length,
     validate_summary_level,
     validate_input_and_get_available_tokens,
-    extract_text_from_pdf
+    extract_text_from_pdf,
+    get_llm_max_model_len,
+    MAX_INPUT_WORDS
 )
 from summarize.job_utils import (
     ensure_directories,
@@ -419,27 +421,319 @@ async def summarize(request: Request):
     except Exception as e:
         logger.error(f"Got exception while generating summary: {e}")
 
-# Background task stub for async job processing
+# Background task for async job processing
 async def process_summarization_job(job_id: str):
     """
     Background task to process a summarization job.
     
-    This is a stub implementation that logs the job processing.
-    Actual summarization logic will be implemented in a future phase.
+    Implements both direct and chunked summarization strategies:
+    - Direct: For documents within context window
+    - Chunked: For large documents exceeding context window
     
     Args:
         job_id: UUID of the job to process
     """
-    logger.info(f"[STUB] Background processing started for job {job_id}")
-    # TODO: Implement actual summarization logic:
-    # 1. Read staged file
-    # 2. Extract text (PDF or TXT)
-    # 3. Determine strategy (direct vs chunked)
-    # 4. Perform summarization
-    # 5. Write result file
-    # 6. Update job status to 'completed'
-    # 7. Clean up staging directory
-    logger.info(f"[STUB] Background processing completed for job {job_id}")
+    from pathlib import Path
+    import json
+    from datetime import datetime, timezone
+    from summarize.db.repository import db_repo
+    from summarize.summ_types import JobStatus, SummarizationType
+    from summarize.chunk_utils import (
+        split_text_into_chunks,
+        estimate_chunk_summary_tokens,
+        build_merge_messages
+    )
+    
+    logger.info(f"Background processing started for job {job_id}")
+    
+    start_time = time.time()
+    staging_dir = settings.summarize.staging_dir / job_id
+    result_path = settings.summarize.results_dir / f"{job_id}_result.json"
+    
+    try:
+        # Step 1: Read staged file
+        if not staging_dir.exists():
+            raise Exception(f"Staging directory not found: {staging_dir}")
+        
+        staged_files = list(staging_dir.glob("*"))
+        if not staged_files:
+            raise Exception(f"No files found in staging directory: {staging_dir}")
+        
+        staged_file = staged_files[0]
+        filename = staged_file.name
+        ext = staged_file.suffix.lower()
+        
+        logger.info(f"Processing file: {filename} (type: {ext})")
+        
+        # Step 2: Extract text
+        if ext == ".pdf":
+            with open(staged_file, 'rb') as f:
+                raw_content = f.read()
+            content_text = await asyncio.to_thread(extract_text_from_pdf, raw_content)
+        elif ext == ".txt":
+            with open(staged_file, 'r', encoding='utf-8') as f:
+                content_text = f.read()
+        else:
+            raise Exception(f"Unsupported file type: {ext}")
+        
+        if not content_text or not content_text.strip():
+            raise Exception("Extracted text is empty")
+        
+        content_text = content_text.strip()
+        
+        # Step 3: Compute metrics
+        input_word_count = word_count(content_text)
+        logger.info(f"Document word count: {input_word_count}")
+        
+        # Get LLM endpoint for tokenization
+        llm_endpoint = llm_model_dict['llm_endpoint']
+        llm_model = llm_model_dict['llm_model']
+        
+        # Tokenize input
+        input_tokens = await asyncio.to_thread(
+            lambda: len(tokenize_with_llm(content_text, llm_endpoint))
+        )
+        logger.info(f"Document token count: {input_tokens}")
+        
+        # Update job with word count and set to in_progress
+        db_repo.update_job(
+            job_id,
+            status=JobStatus.IN_PROGRESS,
+            metadata={"document_word_count": input_word_count}
+        )
+        
+        # Get job details for level
+        job = db_repo.get_job_by_id(job_id)
+        if not job:
+            raise Exception(f"Job {job_id} not found in database")
+        
+        level = job.level
+        
+        # Compute target and max tokens
+        available_output_tokens = (
+            get_llm_max_model_len()
+            - input_tokens
+            - settings.summarize.summarization_prompt_token_count
+        )
+        
+        target_words, min_words, max_words, max_tokens = compute_target_and_max_tokens(
+            input_tokens, available_output_tokens, level, None
+        )
+        
+        # Step 4: Determine strategy
+        total_required_tokens = input_tokens + settings.summarize.summarization_prompt_token_count + max_tokens
+        
+        strategy = "direct"  # Initialize strategy variable
+        num_chunks = 0  # Initialize for type checking
+        
+        if total_required_tokens <= get_llm_max_model_len():
+            # Direct summarization strategy
+            logger.info(f"Using DIRECT strategy (fits in context window)")
+            
+            # Build messages
+            messages = build_messages(content_text, target_words, min_words, max_words, True)
+            
+            # Call LLM with semaphore
+            async with concurrency_limiter:
+                result, in_tokens, out_tokens = await asyncio.to_thread(
+                    query_vllm_summarize,
+                    llm_endpoint=llm_endpoint,
+                    messages=messages,
+                    model=llm_model,
+                    max_tokens=max_tokens,
+                    temperature=settings.summarize.summarization_temperature,
+                )
+            
+            if isinstance(result, dict) and "error" in result:
+                raise Exception(f"LLM error: {result.get('error', 'Unknown error')}")
+            
+            summary = trim_to_last_sentence(result) if isinstance(result, str) else ""
+            
+            # Token usage
+            total_input_tokens = in_tokens
+            total_output_tokens = out_tokens
+            
+        else:
+            # Chunked summarization strategy
+            logger.info(f"Using CHUNKED strategy (exceeds context window)")
+            strategy = "chunked"
+            
+            # Split into chunks
+            chunks = await asyncio.to_thread(
+                split_text_into_chunks,
+                content_text,
+                MAX_INPUT_WORDS,
+                settings.summarize.chunk_overlap_sentences
+            )
+            
+            num_chunks = len(chunks)
+            logger.info(f"Split into {num_chunks} chunks")
+            
+            # Pre-check: Estimate if combined summaries will fit
+            estimated_chunk_summary_tokens = estimate_chunk_summary_tokens(num_chunks, max_tokens)
+            merge_required_tokens = estimated_chunk_summary_tokens + settings.summarize.summarization_prompt_token_count + max_tokens
+            
+            if merge_required_tokens > get_llm_max_model_len():
+                raise Exception(
+                    f"FILE_SIZE_OVER_LIMIT: Document too large. "
+                    f"Estimated {num_chunks} chunk summaries would require {merge_required_tokens} tokens, "
+                    f"exceeding context window of {get_llm_max_model_len()} tokens."
+                )
+            
+            # Update metadata with chunking info
+            db_repo.update_job(
+                job_id,
+                metadata={
+                    "total_chunks": num_chunks,
+                    "completed_chunks": 0,
+                    "phase": "summarizing"
+                }
+            )
+            
+            # Process chunks in parallel with semaphore
+            chunk_semaphore = asyncio.BoundedSemaphore(settings.summarize.chunk_parallelism)
+            metadata_lock = asyncio.Lock()
+            
+            chunk_summaries = []
+            total_input_tokens = 0
+            total_output_tokens = 0
+            
+            async def process_chunk(chunk_text: str, chunk_index: int):
+                nonlocal total_input_tokens, total_output_tokens
+                
+                async with chunk_semaphore:  # Per-job parallelism limit
+                    # Build messages for this chunk
+                    chunk_messages = build_messages(chunk_text, target_words, min_words, max_words, True)
+                    
+                    async with concurrency_limiter:  # Global vLLM limit
+                        chunk_result, chunk_in_tokens, chunk_out_tokens = await asyncio.to_thread(
+                            query_vllm_summarize,
+                            llm_endpoint=llm_endpoint,
+                            messages=chunk_messages,
+                            model=llm_model,
+                            max_tokens=max_tokens,
+                            temperature=settings.summarize.summarization_temperature,
+                        )
+                    
+                    if isinstance(chunk_result, dict) and "error" in chunk_result:
+                        raise Exception(f"LLM error on chunk {chunk_index}: {chunk_result.get('error')}")
+                    
+                    chunk_summary = trim_to_last_sentence(chunk_result) if isinstance(chunk_result, str) else ""
+                    
+                    # Update progress with lock
+                    async with metadata_lock:
+                        total_input_tokens += chunk_in_tokens
+                        total_output_tokens += chunk_out_tokens
+                        
+                        # Update database progress
+                        job_record = db_repo.get_job_by_id(job_id)
+                        if job_record:
+                            current_metadata = job_record.job_metadata or {}
+                            current_metadata["completed_chunks"] = current_metadata.get("completed_chunks", 0) + 1
+                            db_repo.update_job(job_id, metadata=current_metadata)
+                    
+                    logger.info(f"Completed chunk {chunk_index + 1}/{num_chunks}")
+                    return chunk_summary
+            
+            # Process all chunks in parallel
+            tasks = [process_chunk(chunk, i) for i, chunk in enumerate(chunks)]
+            chunk_summaries = await asyncio.gather(*tasks)
+            
+            # Merge step
+            logger.info(f"Merging {len(chunk_summaries)} chunk summaries")
+            db_repo.update_job(
+                job_id,
+                metadata={
+                    "total_chunks": num_chunks,
+                    "completed_chunks": num_chunks,
+                    "phase": "merging"
+                }
+            )
+            
+            # Concatenate chunk summaries
+            merged_text = "\n\n".join(chunk_summaries)
+            
+            # Build merge messages
+            merge_messages = build_merge_messages(merged_text, target_words, min_words, max_words)
+            
+            # Final merge call
+            async with concurrency_limiter:
+                merge_result, merge_in_tokens, merge_out_tokens = await asyncio.to_thread(
+                    query_vllm_summarize,
+                    llm_endpoint=llm_endpoint,
+                    messages=merge_messages,
+                    model=llm_model,
+                    max_tokens=max_tokens,
+                    temperature=settings.summarize.summarization_temperature,
+                )
+            
+            if isinstance(merge_result, dict) and "error" in merge_result:
+                raise Exception(f"LLM error during merge: {merge_result.get('error')}")
+            
+            summary = trim_to_last_sentence(merge_result) if isinstance(merge_result, str) else ""
+            
+            # Add merge tokens to totals
+            total_input_tokens += merge_in_tokens
+            total_output_tokens += merge_out_tokens
+        
+        # Step 5: Write result file
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        
+        result_data = {
+            "data": {
+                "summary": summary,
+                "original_length": input_word_count,
+                "summary_length": word_count(summary),
+            },
+            "meta": {
+                "model": llm_model,
+                "processing_time_ms": elapsed_ms,
+                "input_type": "file",
+                "strategy": strategy,
+            },
+            "usage": {
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "total_tokens": total_input_tokens + total_output_tokens,
+            },
+        }
+        
+        if strategy == "chunked":
+            result_data["meta"]["chunks_processed"] = num_chunks
+        
+        # Write result to disk
+        with open(result_path, 'w', encoding='utf-8') as f:
+            json.dump(result_data, f, indent=2)
+        
+        logger.info(f"Result written to {result_path}")
+        
+        # Step 6: Update job status to completed
+        db_repo.update_job(
+            job_id,
+            status=JobStatus.COMPLETED,
+            completed_at=datetime.now(timezone.utc)
+        )
+        
+        logger.info(f"Job {job_id} completed successfully ({strategy} strategy)")
+        
+    except Exception as e:
+        logger.error(f"Job {job_id} failed: {e}", exc_info=True)
+        
+        # Update job status to failed
+        db_repo.update_job(
+            job_id,
+            status=JobStatus.FAILED,
+            error=str(e),
+            completed_at=datetime.now(timezone.utc)
+        )
+    
+    finally:
+        # Step 7: Clean up staging directory
+        try:
+            cleanup_staging_directory(job_id)
+            logger.debug(f"Cleaned up staging for job {job_id}")
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to cleanup staging for job {job_id}: {cleanup_error}")
 
 
 @app.post(
@@ -477,6 +771,14 @@ async def create_summarization_job(
     Validates the file, stages it, creates a database record, and launches background processing.
     """
     try:
+        # Check semaphore availability before processing
+        if concurrency_limiter.locked():
+            raise SummarizeException(
+                429,
+                "RATE_LIMIT_EXCEEDED",
+                "Server is at capacity processing summarization jobs. Please try again later."
+            )
+        
         # Validate file extension
         filename = file.filename or ""
         is_valid, ext = validate_file_extension(filename)
