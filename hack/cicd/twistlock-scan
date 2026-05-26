@@ -22,6 +22,7 @@ pipeline {
     }
 
     stages {
+        
         stage('Clone AI Services') {
             steps {
                 script {
@@ -101,6 +102,7 @@ def generateImageList() {
         [name: 'caddy', path: 'images/caddy/'],
         [name: 'litellm', path: 'images/litellm/'],
         [name: 'postgres', path: 'images/postgres/'],
+        [name: 'service-base', path: 'images/service-base/'],
         [name: 'ai-services', path: 'ai-services/'],
         [name: 'catalog-ui', path: 'ui/catalog/'],
         [name: 'digitize-ui', path: 'ui/digitize/']
@@ -119,9 +121,17 @@ def generateImageList() {
 
 def getImageWithTag(String imagePath, String imageName) {
     def icrImage = ''
-    dir("${REPO_DIR}/${imagePath}") {
-        def tag = sh(script: 'make image-tag', returnStdout: true).trim()
-        icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
+    if (imagePath.startsWith('services/')) {
+        def serviceName = imagePath.split('/')[1]
+        dir("${REPO_DIR}/services") {
+            def tag = sh(script: "make image-tag SERVICE=${serviceName}", returnStdout: true).trim()
+            icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
+        }
+    } else {
+        dir("${REPO_DIR}/${imagePath}") {
+            def tag = sh(script: 'make image-tag', returnStdout: true).trim()
+            icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
+        }
     }
     return icrImage
 }
