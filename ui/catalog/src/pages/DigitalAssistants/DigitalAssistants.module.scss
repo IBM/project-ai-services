@@ -1,5 +1,7 @@
 @use "@carbon/react/scss/spacing";
 @use "@carbon/react/scss/type";
+@use "@carbon/react/scss/theme";
+@use "@carbon/react/scss/breakpoint" as *;
 
 .tableContent {
   padding: spacing.$spacing-07;
@@ -28,9 +30,9 @@
       padding-right: spacing.$spacing-03;
       padding-left: 0;
       width: spacing.$spacing-09;
-      background-color: var(--cds-layer-accent);
+      background-color: theme.$layer-accent;
       box-shadow: calc(-1 * spacing.$spacing-01) 0 spacing.$spacing-02
-        rgba(0, 0, 0, 0.05);
+        var(--cds-shadow);
     }
 
     :global(td:last-child) {
@@ -40,22 +42,22 @@
       padding-right: spacing.$spacing-03;
       padding-left: 0;
       box-shadow: calc(-1 * spacing.$spacing-01) 0 spacing.$spacing-02
-        rgba(0, 0, 0, 0.05);
+        var(--cds-shadow);
     }
 
     :global(th:first-child) {
       position: sticky;
       left: 0;
       z-index: 1;
-      background-color: var(--cds-layer-accent);
-      box-shadow: spacing.$spacing-01 0 spacing.$spacing-02 rgba(0, 0, 0, 0.05);
+      background-color: theme.$layer-accent;
+      box-shadow: spacing.$spacing-01 0 spacing.$spacing-02 var(--cds-shadow);
     }
 
     :global(td:first-child) {
       position: sticky;
       left: 0;
       z-index: 2;
-      box-shadow: spacing.$spacing-01 0 spacing.$spacing-02 rgba(0, 0, 0, 0.05);
+      box-shadow: spacing.$spacing-01 0 spacing.$spacing-02 var(--cds-shadow);
     }
   }
 }
@@ -84,14 +86,6 @@
   display: flex;
   align-items: center;
   gap: spacing.$spacing-02;
-}
-
-.deployButtonWrapper {
-  :global(.cds--menu-button__trigger) {
-    width: spacing.$spacing-13;
-    min-width: spacing.$spacing-13;
-    max-width: spacing.$spacing-13;
-  }
 }
 
 :global(.cds--overflow-menu-options) {
@@ -143,35 +137,35 @@
 
 .messageIconError {
   flex-shrink: 0;
-  color: var(--cds-support-error);
+  color: theme.$support-error;
 }
 
 .messageIconInfo {
   flex-shrink: 0;
-  color: var(--cds-support-info);
+  color: theme.$support-info;
 }
 
 .statusTagError {
   :global(svg) {
-    fill: var(--cds-support-error);
+    fill: theme.$support-error;
   }
 }
 
 .statusTagSuccess {
   :global(svg) {
-    fill: var(--cds-support-success);
+    fill: theme.$support-success;
   }
 }
 
 .statusTagInfo {
   :global(svg) {
-    fill: var(--cds-support-info);
+    fill: theme.$support-info;
   }
 }
 
 .statusTagSecondary {
   :global(svg) {
-    fill: var(--cds-text-secondary);
+    fill: theme.$text-secondary;
   }
 }
 
@@ -208,40 +202,26 @@
   }
 }
 
-.useCaseGrid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: spacing.$spacing-07;
+.gridWithTopMargin {
   margin-top: spacing.$spacing-05;
-}
-
-.useCaseColumn {
-  margin-bottom: 0;
 }
 
 .useCaseDomain {
   margin-bottom: spacing.$spacing-03;
   @include type.type-style("label-01");
-  color: var(--cds-text-secondary);
+  color: theme.$text-secondary;
 }
 
 .useCaseList {
   list-style: disc;
   padding-left: spacing.$spacing-06;
-  margin: 0;
+  margin-bottom: spacing.$spacing-07;
 
   li {
     margin-bottom: spacing.$spacing-02;
     @include type.type-style("heading-compact-01");
     font-weight: 400;
   }
-}
-
-.resourceGrid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: spacing.$spacing-07;
-  margin-top: spacing.$spacing-05;
 }
 
 .resourceItem {
@@ -252,29 +232,39 @@
 
 .resourceLabel {
   @include type.type-style("label-01");
-  color: var(--cds-text-secondary);
+  color: theme.$text-secondary;
 }
 
 .resourceValue {
   @include type.type-style("body-01");
 }
 
-.sideBySideContainer {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: spacing.$spacing-05;
+.sideBySideGrid {
+  display: flex;
+  gap: 1rem;
+
+  @include breakpoint-down("md") {
+    flex-direction: column;
+  }
+}
+
+.sideBySideColumn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .sideBySideSection {
   display: flex;
   flex-direction: column;
   padding: spacing.$spacing-05;
+  flex: 1;
 }
 
 .architectureDiagram {
   margin-top: spacing.$spacing-05;
   padding: spacing.$spacing-05;
-  max-width: 700px;
 }
 
 .diagramImage {
@@ -285,20 +275,21 @@
 
 .demosSection {
   padding: spacing.$spacing-05;
+  flex: 1;
 }
 
 .demoCard {
   display: flex;
   gap: 0;
   padding: 0;
-  background-color: var(--cds-layer);
+  background-color: theme.$layer;
   position: relative;
   margin-top: spacing.$spacing-06;
   overflow: hidden;
 }
 
 .demoImage {
-  width: 133px;
+  width: spacing.$spacing-13;
   height: 100%;
   object-fit: cover;
   flex-shrink: 0;

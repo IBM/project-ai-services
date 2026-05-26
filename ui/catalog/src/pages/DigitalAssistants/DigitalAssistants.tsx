@@ -1,4 +1,4 @@
-import React, { useReducer, useState } from "react";
+import React, { useReducer } from "react";
 import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
 import {
   DataTable,
@@ -54,7 +54,6 @@ interface RenderCellProps {
   value: unknown;
   rowId: string;
   dispatch: Dispatch<AppAction>;
-  selectedRowId?: string | null;
   cellKey: string;
   cellProps: Record<string, unknown>;
 }
@@ -64,7 +63,6 @@ const renderCell = ({
   value,
   rowId,
   dispatch,
-  selectedRowId,
   cellKey,
   cellProps,
 }: RenderCellProps) => {
@@ -73,12 +71,7 @@ const renderCell = ({
   return (
     <TableCell key={cellKey} {...cellProps}>
       {CellRenderer ? (
-        <CellRenderer
-          value={value}
-          rowId={rowId}
-          dispatch={dispatch}
-          selectedRowId={selectedRowId}
-        />
+        <CellRenderer value={value} rowId={rowId} dispatch={dispatch} />
       ) : (
         String(value || "")
       )}
@@ -88,7 +81,6 @@ const renderCell = ({
 
 const DigitalAssistantsPage = () => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
-  const [selectedTabIndex, setSelectedTabIndex] = useState(0);
 
   const handleDelete = async () => {
     if (!state.selectedRowId) {
@@ -222,10 +214,7 @@ const DigitalAssistantsPage = () => {
           className={styles.customToast}
         />
       )}
-      <Tabs
-        selectedIndex={selectedTabIndex}
-        onChange={(evt) => setSelectedTabIndex(evt.selectedIndex)}
-      >
+      <Tabs>
         <PageHeader
           title={{ text: "Digital assistants" }}
           subtitle="Production-ready AI solutions that combine multiple services into intelligent, integrated systems for complex use cases using Retrieval-Augmented Generation (RAG)."
@@ -418,7 +407,6 @@ const DigitalAssistantsPage = () => {
                                             value: cell.value,
                                             rowId: row.id as string,
                                             dispatch,
-                                            selectedRowId: state.selectedRowId,
                                             cellKey,
                                             cellProps,
                                           });
@@ -614,57 +602,65 @@ const DigitalAssistantsPage = () => {
               <Layer withBackground>
                 <section className={styles.aboutSection}>
                   <h4 className={styles.aboutSectionTitle}>Use case domains</h4>
-                  <div className={styles.useCaseGrid}>
-                    <div className={styles.useCaseColumn}>
+                  <Grid narrow className={styles.gridWithTopMargin}>
+                    <Column sm={4} md={4} lg={4}>
                       <h5 className={styles.useCaseDomain}>Agriculture</h5>
                       <ul className={styles.useCaseList}>
                         <li>Agriculture assistant</li>
                       </ul>
-                    </div>
-                    <div className={styles.useCaseColumn}>
+                    </Column>
+                    <Column sm={4} md={4} lg={4}>
                       <h5 className={styles.useCaseDomain}>Banking</h5>
                       <ul className={styles.useCaseList}>
                         <li>Analyst assistant</li>
                         <li>Financial documents assistant</li>
                         <li>Open account agent</li>
                       </ul>
-                    </div>
-                    <div className={styles.useCaseColumn}>
+                    </Column>
+                    <Column sm={4} md={4} lg={4}>
                       <h5 className={styles.useCaseDomain}>
                         Enterprise resource planning
                       </h5>
                       <ul className={styles.useCaseList}>
-                        <li>HR assistant</li>
+                        <li>BI assistant</li>
                         <li>Invoice matching assistant</li>
                         <li>Order processing assistant</li>
                       </ul>
-                    </div>
-                    <div className={styles.useCaseColumn}>
+                    </Column>
+                    <Column sm={4} md={4} lg={4}>
                       <h5 className={styles.useCaseDomain}>Insurance</h5>
                       <ul className={styles.useCaseList}>
                         <li>Claims & policy management agent</li>
                       </ul>
-                    </div>
-                    <div className={styles.useCaseColumn}>
+                    </Column>
+                    <Column sm={4} md={4} lg={4}>
                       <h5 className={styles.useCaseDomain}>IT operations</h5>
                       <ul className={styles.useCaseList}>
                         <li>Invoice matching assistant</li>
                       </ul>
-                    </div>
-                    <div className={styles.useCaseColumn}>
+                    </Column>
+                    <Column sm={4} md={4} lg={4}>
                       <h5 className={styles.useCaseDomain}>Public sector</h5>
                       <ul className={styles.useCaseList}>
                         <li>Private documents assistant</li>
+                        <li>Product sales assistant</li>
+                      </ul>
+                    </Column>
+                    <Column sm={4} md={4} lg={4}>
+                      <h5 className={styles.useCaseDomain}>
+                        Professional services
+                      </h5>
+                      <ul className={styles.useCaseList}>
                         <li>Conference slide search</li>
                       </ul>
-                    </div>
-                    <div className={styles.useCaseColumn}>
+                    </Column>
+                    <Column sm={4} md={4} lg={4}>
                       <h5 className={styles.useCaseDomain}>Real estate</h5>
                       <ul className={styles.useCaseList}>
                         <li>Real estate assistant</li>
                       </ul>
-                    </div>
-                  </div>
+                    </Column>
+                  </Grid>
                 </section>
               </Layer>
 
@@ -674,33 +670,41 @@ const DigitalAssistantsPage = () => {
                   <h4 className={styles.aboutSectionTitle}>
                     Minimum resource allocation
                   </h4>
-                  <div className={styles.resourceGrid}>
-                    <div className={styles.resourceItem}>
-                      <span className={styles.resourceLabel}>
-                        Required cores
-                      </span>
-                      <span className={styles.resourceValue}>0.5 - 2.0</span>
-                    </div>
-                    <div className={styles.resourceItem}>
-                      <span className={styles.resourceLabel}>
-                        Required memory
-                      </span>
-                      <span className={styles.resourceValue}>15GB - 25GB</span>
-                    </div>
-                    <div className={styles.resourceItem}>
-                      <span className={styles.resourceLabel}>
-                        Required Spyre cards
-                      </span>
-                      <span className={styles.resourceValue}>4 cards</span>
-                    </div>
-                  </div>
+                  <Grid narrow className={styles.gridWithTopMargin}>
+                    <Column sm={4} md={4} lg={5}>
+                      <div className={styles.resourceItem}>
+                        <span className={styles.resourceLabel}>
+                          Required cores
+                        </span>
+                        <span className={styles.resourceValue}>0.5 - 2.0</span>
+                      </div>
+                    </Column>
+                    <Column sm={4} md={4} lg={5}>
+                      <div className={styles.resourceItem}>
+                        <span className={styles.resourceLabel}>
+                          Required memory
+                        </span>
+                        <span className={styles.resourceValue}>
+                          15GB - 25GB
+                        </span>
+                      </div>
+                    </Column>
+                    <Column sm={4} md={4} lg={6}>
+                      <div className={styles.resourceItem}>
+                        <span className={styles.resourceLabel}>
+                          Required Spyre cards
+                        </span>
+                        <span className={styles.resourceValue}>4 cards</span>
+                      </div>
+                    </Column>
+                  </Grid>
                 </section>
               </Layer>
 
               {/* Code and Architecture + Demos Section (Side by Side) */}
-              <div className={styles.sideBySideContainer}>
+              <div className={styles.sideBySideGrid}>
                 {/* Code and Architecture Section */}
-                <Layer withBackground>
+                <Layer withBackground className={styles.sideBySideColumn}>
                   <section className={styles.sideBySideSection}>
                     <h4 className={styles.aboutSectionTitle}>
                       Code and architecture
@@ -727,7 +731,7 @@ const DigitalAssistantsPage = () => {
                 </Layer>
 
                 {/* Demos and Prototypes Section */}
-                <Layer withBackground>
+                <Layer withBackground className={styles.sideBySideColumn}>
                   <section className={styles.demosSection}>
                     <h4 className={styles.aboutSectionTitle}>
                       Demos and prototypes

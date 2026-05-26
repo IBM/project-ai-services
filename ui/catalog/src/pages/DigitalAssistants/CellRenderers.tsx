@@ -51,7 +51,6 @@ interface CellRendererProps {
   value: unknown;
   rowId: string;
   dispatch: Dispatch<AppAction>;
-  selectedRowId?: string | null;
 }
 
 export const ActionCell = ({ rowId, dispatch }: CellRendererProps) => (
