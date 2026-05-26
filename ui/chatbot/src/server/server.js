@@ -1,14 +1,19 @@
 import axios from 'axios';
 import express, { json } from 'express';
+import {
+  getChatbotConfig,
+  getServerPort,
+  getTargetURL,
+} from '../config/chatbotConfig.js';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = getServerPort();
 
 app.use(json());
 
 // Proxy endpoint
 app.post('/v1/chat/completions', async (req, res) => {
-  const targetURL = process.env.TARGET_URL;
+  const targetURL = getTargetURL();
   console.log(`Forwarding request to: ${targetURL}`);
   try {
     const upstreamResponse = await axios({
@@ -41,16 +46,23 @@ app.post('/v1/chat/completions', async (req, res) => {
 
 app.post('/v1/similarity-search', async (req, res) => {
   const { query } = req.body;
-  const targetURL = process.env.TARGET_URL;
-  console.log(`Forwarding request to: ${targetURL}, with message: ${query}`);
+  const targetURL = getTargetURL();
+
+  // Get chatbot configuration using shared utility
+  const { searchMode: mode, topK, rerank } = getChatbotConfig();
+
+  console.log(
+    `Forwarding request to: ${targetURL}, with message: ${query}, mode: ${mode}, top_k: ${topK}, rerank: ${rerank}`,
+  );
 
   try {
     const response = await axios.post(
       `${targetURL}/v1/similarity-search`,
       {
         query: query,
-        mode: 'hybrid',
-        rerank: true,
+        mode: mode,
+        top_k: topK,
+        rerank: rerank,
       },
       {
         headers: { 'Content-Type': 'application/json' },
@@ -67,7 +79,7 @@ app.post('/v1/similarity-search', async (req, res) => {
 });
 
 app.get('/db-status', async (req, res) => {
-  const targetURL = process.env.TARGET_URL;
+  const targetURL = getTargetURL();
   console.log(`Checking DB status at: ${targetURL}`);
 
   try {
@@ -82,6 +94,18 @@ app.get('/db-status', async (req, res) => {
     // If backend is unreachable, returning false instead of crashing
     res.status(200).json({ status: false });
   }
+});
+
+app.get('/config', (req, res) => {
+  // Return chatbot configuration using shared utility
+  const { searchMode, topK, rerank } = getChatbotConfig();
+  const config = {
+    searchMode,
+    numChunksPostReranker: String(topK),
+    rerank: String(rerank),
+  };
+  console.log('Returning config:', config);
+  res.json(config);
 });
 
 app.listen(PORT, () => {

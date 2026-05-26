@@ -237,7 +237,7 @@ func (s *scannedServiceFields) toService() (*models.Service, error) {
 	}
 
 	if len(s.endpoint) > 0 {
-		var endpoints map[string]any
+		var endpoints []map[string]any
 		if err := json.Unmarshal(s.endpoint, &endpoints); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal service endpoints: %w", err)
 		}

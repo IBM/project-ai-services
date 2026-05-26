@@ -2,13 +2,13 @@ ui:
   # @description Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.35
+  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.37
 
 backend:
   # @description Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.
   port: "0"
   # @hidden
-  image: icr.io/ai-services-cicd/chatbot-service:v0.0.107
+  image: icr.io/ai-services-cicd/chatbot-service:v0.0.4
   # @hidden
   log_level: "INFO"
 
@@ -16,7 +16,7 @@ digitize:
   # @description Host port for the DIGITIZE API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/digitize-service:v0.0.2
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.4
   # @hidden
   log_level: "INFO"
   # @description Database name for the DIGITIZE service. Default is "digitize_metadata".
@@ -26,7 +26,7 @@ digitizeUi:
   # @description Host port for the DIGITIZE UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/digitize-ui:v0.0.18
+  image: icr.io/ai-services-cicd/digitize-ui:v0.0.19
 
 ingest:
   # @hidden
@@ -83,7 +83,7 @@ summarize:
   # @description Host port for the Summarize API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/summarize-service:v0.0.1
+  image: icr.io/ai-services-cicd/summarize-service:v0.0.3
   # @hidden
   log_level: "INFO"
 
@@ -91,6 +91,28 @@ similarity:
   # @description Host port for the Similarity Search API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/similarity-service:v0.0.1
+  image: icr.io/ai-services-cicd/similarity-service:v0.0.3
   # @hidden
   log_level: "INFO"
+
+litellm:
+  # @description Enable LiteLLM proxy for remote LLM service. When true, uses LiteLLM with WatsonX; when false, uses local vLLM server. Default: false
+  enable: false
+  # @hidden
+  image: icr.io/ai-services-cicd/litellm:v1.84.0-1
+  # @description WatsonX API Key for LiteLLM integration. Required when litellm.enable is true.
+  watsonxApiKey: ""
+  # @description WatsonX Project ID for LiteLLM integration. Required when litellm.enable is true.
+  watsonxProjectId: ""
+  # @description WatsonX Base URL for LiteLLM integration. Required when litellm.enable is true.
+  watsonxUrl: ""
+  # @description Chat/Instruct model name for WatsonX. Default: ibm/granite-4-h-small
+  instructModel: "ibm/granite-4-h-small"
+  
+chatbot:
+  # @description Search mode for similarity search. Options: "dense" (cosine similarity), "sparse" (BM25), "hybrid" (both). Default is "dense".
+  searchMode: "hybrid"
+  # @description Number of document chunks to keep after reranking. Default is 3.
+  numChunksPostReranker: 3
+  # @description Enable reranking of search results using the reranker model. Default is true.
+  rerank: true

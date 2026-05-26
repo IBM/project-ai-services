@@ -89,14 +89,14 @@ class TestGetStopWordsWithSpecialTokens:
 
 
 @pytest.mark.unit
-class TestConversationalModeIntegration:
-    """Tests for conversational mode integration in chat_completion endpoint"""
+class TestQueryRephrasingIntegration:
+    """Tests for query rephrasing integration in chat_completion endpoint"""
     
     @pytest.mark.asyncio
-    async def test_query_rephrasing_with_conversational_mode_enabled(
+    async def test_query_rephrasing_with_conversation_history(
         self, test_client, monkeypatch
     ):
-        """Test query rephrasing is called when conversational mode enabled"""
+        """Test query rephrasing is called when there is conversation history"""
         
         # Mock all dependencies
         mock_validate = Mock(return_value=(True, None))
@@ -116,9 +116,8 @@ class TestConversationalModeIntegration:
         mock_is_auth = AsyncMock(return_value=False)
         monkeypatch.setattr("chatbot.app.is_auth_required", mock_is_auth)
         
-        # Mock conversational mode enabled
+        # Mock settings
         mock_settings = Mock()
-        mock_settings.chatbot.conversational_mode = True
         mock_settings.chatbot.num_chunks_post_search = 10
         mock_settings.chatbot.num_chunks_post_reranker = 5
         mock_settings.chatbot.score_threshold = 0.5
@@ -190,9 +189,8 @@ class TestConversationalModeIntegration:
         mock_is_auth = AsyncMock(return_value=False)
         monkeypatch.setattr("chatbot.app.is_auth_required", mock_is_auth)
         
-        # Mock conversational mode enabled
+        # Mock settings
         mock_settings = Mock()
-        mock_settings.chatbot.conversational_mode = True
         mock_settings.chatbot.num_chunks_post_search = 10
         mock_settings.chatbot.num_chunks_post_reranker = 5
         mock_settings.chatbot.score_threshold = 0.5
@@ -252,9 +250,8 @@ class TestConversationalModeIntegration:
         mock_is_auth = AsyncMock(return_value=False)
         monkeypatch.setattr("chatbot.app.is_auth_required", mock_is_auth)
         
-        # Mock conversational mode enabled
+        # Mock settings
         mock_settings = Mock()
-        mock_settings.chatbot.conversational_mode = True
         mock_settings.chatbot.num_chunks_post_search = 10
         mock_settings.chatbot.num_chunks_post_reranker = 5
         mock_settings.chatbot.score_threshold = 0.5
@@ -312,9 +309,8 @@ class TestConversationalModeIntegration:
         mock_is_auth = AsyncMock(return_value=False)
         monkeypatch.setattr("chatbot.app.is_auth_required", mock_is_auth)
         
-        # Mock conversational mode enabled
+        # Mock settings
         mock_settings = Mock()
-        mock_settings.chatbot.conversational_mode = True
         mock_settings.chatbot.num_chunks_post_search = 10
         mock_settings.chatbot.num_chunks_post_reranker = 5
         mock_settings.chatbot.score_threshold = 0.5
@@ -364,62 +360,3 @@ class TestConversationalModeIntegration:
         rephrase_call_args = mock_rephrase.call_args
         assert rephrase_call_args[1]["previous_messages"] == truncated_history
     
-    @pytest.mark.asyncio
-    async def test_original_query_used_when_rephrasing_disabled(
-        self, test_client, monkeypatch
-    ):
-        """Test original query is used when conversational mode disabled"""
-        
-        # Mock all dependencies
-        mock_validate = Mock(return_value=(True, None))
-        monkeypatch.setattr("chatbot.app.validate_query_length", mock_validate)
-        
-        # Mock detect_language to return string "EN" (not Language enum)
-        mock_detect = Mock(return_value="EN")
-        monkeypatch.setattr("chatbot.app.detect_language", mock_detect)
-        
-        mock_search = Mock(return_value=([{"page_content": "test"}], {}))
-        monkeypatch.setattr("chatbot.app.search_only", mock_search)
-        
-        mock_vllm = Mock(return_value={"choices": [{"message": {"content": "Response"}}]})
-        monkeypatch.setattr("chatbot.app.query_vllm_non_stream", mock_vllm)
-        
-        # Mock is_auth_required to return False
-        mock_is_auth = AsyncMock(return_value=False)
-        monkeypatch.setattr("chatbot.app.is_auth_required", mock_is_auth)
-        
-        # Mock conversational mode DISABLED
-        mock_settings = Mock()
-        mock_settings.chatbot.conversational_mode = False
-        mock_settings.chatbot.num_chunks_post_search = 10
-        mock_settings.chatbot.num_chunks_post_reranker = 5
-        mock_settings.chatbot.score_threshold = 0.5
-        mock_settings.common.llm.llm_max_tokens = 512
-        monkeypatch.setattr("chatbot.app.settings", mock_settings)
-        
-        # Mock concurrency limiter
-        mock_limiter = Mock()
-        mock_limiter.locked = Mock(return_value=False)
-        mock_limiter.acquire = AsyncMock()
-        mock_limiter.release = Mock()
-        monkeypatch.setattr("chatbot.app.concurrency_limiter", mock_limiter)
-        
-        # Mock vectorstore
-        mock_vectorstore = Mock()
-        monkeypatch.setattr("chatbot.app.vectorstore", mock_vectorstore)
-        
-        original_query = "Is it supported?"
-        request_data = {
-            "messages": [
-                {"content": "What is Spyre?"},
-                {"content": original_query}
-            ],
-            "stream": False
-        }
-        
-        response = test_client.post("/v1/chat/completions", json=request_data)
-        
-        assert response.status_code == 200
-        # Verify search was called with original query (not rephrased)
-        call_args = mock_search.call_args[0]
-        assert call_args[0] == original_query

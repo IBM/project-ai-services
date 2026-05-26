@@ -3,6 +3,7 @@ package runtime
 import (
 	"io"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
@@ -35,6 +36,9 @@ type Runtime interface {
 
 	// PVC operations
 	DeletePVCs(appLabel string) error
+
+	// System information
+	GetSystemInfo() (*models.SystemInfo, error)
 
 	// Runtime type identification
 	Type() types.RuntimeType

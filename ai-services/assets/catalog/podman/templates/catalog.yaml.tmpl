@@ -10,6 +10,8 @@ metadata:
   annotations:
     ai-services.io/routes: "8081:catalog-ui, 8080:catalog-api"
     # ai-services.io/ports: "{{ .Values.ui.port }}:8081, {{ .Values.backend.port }}:8080"  # Uncomment to expose ports directly (bypasses Caddy)
+    io.podman.annotations.userns: "keep-id"
+    run.oci.keep_original_groups: "1"
 spec:
   initContainers:
     - name: db-migration
@@ -112,6 +114,14 @@ spec:
       ports:
         - containerPort: 8080
           protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8080
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
       volumeMounts:
         - name: podman-socket
           mountPath: {{ .Values.backend.podman.uri }}

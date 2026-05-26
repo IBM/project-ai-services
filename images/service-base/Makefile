@@ -1,6 +1,6 @@
 REGISTRY?=icr.io/ai-services-private
-IMAGE=python-base
-TAG?=v0.0.28
+IMAGE=service-base
+TAG?=v0.0.29
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
 CONTAINER_BUILDER?=podman
