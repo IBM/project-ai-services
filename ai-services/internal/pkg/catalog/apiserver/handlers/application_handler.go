@@ -155,6 +155,7 @@ func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
 	appID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid application ID format, expected UUID"})
+
 		return
 	}
 
@@ -163,6 +164,7 @@ func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
 	userIDVal, exists := c.Get(middleware.CtxUserIDKey)
 	if !exists {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "authentication required"})
+
 		return
 	}
 	userID := userIDVal.(string)
@@ -170,6 +172,7 @@ func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
 	response, err := h.appService.DeleteApplication(c.Request.Context(), appID, userID, skipCleanup)
 	if err != nil {
 		h.handleDeleteError(c, err)
+
 		return
 	}
 
