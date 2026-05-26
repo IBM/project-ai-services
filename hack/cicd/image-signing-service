@@ -1,5 +1,5 @@
 pipeline {
-    agent { label 'onprem-ai-services-4-spyre-cards' }
+    agent { label 'onprem-ai-services-stelar-machine' }
     
     parameters {
         string(
@@ -84,10 +84,18 @@ pipeline {
             }
         }
 
-        stage('Build PYTHON Base') {
+        stage('Build common service') {
             steps {
                 script {
-                    env.ICR_PYTHON_BASE_IMAGE = buildAndPublishImage('images/python-base/', 'python-base')
+                    env.ICR_SERVICES_COMMON_IMAGE = buildAndPublishImage('services/common/', 'services-common')
+                }
+            }
+        }
+
+        stage('Build service-base') {
+            steps {
+                script {
+                    env.ICR_SERVICE_BASE_IMAGE = buildAndPublishImage('images/service-base/', 'service-base')
                 }
             }
         }
@@ -444,10 +452,11 @@ def generateImageList() {
         env.ICR_SERVICES_DIGITIZE_IMAGE,
         env.ICR_SERVICES_SUMMARIZE_IMAGE,
         env.ICR_SERVICES_SIMILARITY_IMAGE,
+        env.ICR_SERVICES_COMMON_IMAGE,
         env.ICR_UI_CATALOG_IMAGE,
         env.ICR_UI_DIGITIZE_IMAGE,
         env.ICR_UI_CHATBOT_IMAGE,
-        env.ICR_PYTHON_BASE_IMAGE,
+        env.ICR_SERVICE_BASE_IMAGE,
         env.ICR_CADDY_IMAGE,
         env.ICR_LITELLM_IMAGE,
         env.ICR_POSTGRES_IMAGE,
