@@ -255,6 +255,7 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 		if err != nil {
 			_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError,
 				fmt.Sprintf("failed to get dependencies for service %s: %s", svc.ID, err))
+
 			return
 		}
 
@@ -272,6 +273,7 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 		if err != nil {
 			_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError,
 				fmt.Sprintf("failed to check consumers of component %s: %s", componentID, err))
+
 			return
 		}
 
@@ -279,6 +281,7 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 		for _, consumerID := range consumers {
 			if !serviceIDs[consumerID] {
 				onlyUsedByThisApp = false
+
 				break
 			}
 		}
@@ -291,6 +294,7 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 	if err := s.appRepo.Delete(ctx, appID); err != nil {
 		_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError,
 			fmt.Sprintf("failed to delete application: %s", err))
+
 		return
 	}
 
