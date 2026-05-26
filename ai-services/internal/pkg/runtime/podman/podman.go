@@ -17,9 +17,12 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/kube"
 	"github.com/containers/podman/v5/pkg/bindings/pods"
 	"github.com/containers/podman/v5/pkg/bindings/secrets"
+	"github.com/containers/podman/v5/pkg/bindings/system"
 	"github.com/containers/podman/v5/pkg/specgen"
+	"github.com/project-ai-services/ai-services/internal/pkg/accelerator/spyre"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
@@ -423,4 +426,83 @@ func (pc *PodmanClient) ListSecrets(filters map[string][]string) ([]string, erro
 // Type returns the runtime type for PodmanClient.
 func (pc *PodmanClient) Type() types.RuntimeType {
 	return types.RuntimeTypePodman
+}
+
+// GetSystemInfo retrieves system resource information including CPU, memory, and accelerators.
+func (pc *PodmanClient) GetSystemInfo() (*models.SystemInfo, error) {
+	sysInfo := &models.SystemInfo{}
+
+	// Get Podman system info for CPU and memory
+	info, err := system.Info(pc.Context, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get system info: %w", err)
+	}
+
+	// Extract CPU and memory information
+	if info.Host != nil {
+		totalCores := int(info.Host.CPUs)
+		idlePercent := 0.0
+
+		if info.Host.CPUUtilization != nil {
+			idlePercent = info.Host.CPUUtilization.IdlePercent
+		}
+
+		// Calculate available cores: available_cores = (total_cores * idle_percent) / 100
+		availableCores := (float64(totalCores) * idlePercent) / constants.PercentageDivisor
+
+		sysInfo.CPU = &models.CPUInfo{
+			TotalCores:     totalCores,
+			AvailableCores: availableCores,
+		}
+
+		sysInfo.Memory = &models.MemoryInfo{
+			TotalBytes:     info.Host.MemTotal,
+			AvailableBytes: info.Host.MemFree,
+		}
+	}
+
+	// Populate accelerator information (Spyre cards)
+	sysInfo.Accelerators = getAcceleratorInfo()
+
+	return sysInfo, nil
+}
+
+// getAcceleratorInfo retrieves accelerator availability information for Podman.
+func getAcceleratorInfo() map[string]*models.AcceleratorInfo {
+	accelerators := make(map[string]*models.AcceleratorInfo)
+
+	// Get total Spyre cards
+	totalCards, err := spyre.ListCards()
+	if err != nil {
+		logger.Errorf("Could not list Spyre cards: %v", err)
+		// Return empty map when error occurs
+		return accelerators
+	}
+
+	totalCount := len(totalCards)
+	if totalCount == 0 {
+		// Return empty map when no Spyre cards found
+		return accelerators
+	}
+
+	// Get available Spyre cards
+	availableCards, err := spyre.FindFreeCards()
+	if err != nil {
+		logger.Errorf("Could not find available Spyre cards: %v", err)
+		accelerators["ibm.com/spyre_pf"] = &models.AcceleratorInfo{
+			Total:     totalCount,
+			Available: 0,
+		}
+
+		return accelerators
+	}
+
+	availableCount := len(availableCards)
+
+	accelerators["ibm.com/spyre_pf"] = &models.AcceleratorInfo{
+		Total:     totalCount,
+		Available: availableCount,
+	}
+
+	return accelerators
 }

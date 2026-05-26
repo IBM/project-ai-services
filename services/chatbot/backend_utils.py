@@ -18,7 +18,7 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
 
     start_time = time.time()
     retrieved_documents, retrieved_scores = retrieve_documents(question, emb_model, emb_endpoint, max_tokens,
-                                                               vectorstore, top_k, 'hybrid')
+                                                               vectorstore, top_k, settings.chatbot.search_mode)
     perf_stat_dict["retrieve_time"] = time.time() - start_time
 
     start_time = time.time()

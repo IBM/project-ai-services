@@ -32,6 +32,7 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 
 	authHandler := handlers.NewAuthHandler(authSvc)
 	catalogHandler := handlers.NewCatalogHandler()
+	resourcesHandler := handlers.NewResourcesHandler()
 	applicationHandler := handlers.NewApplicationHandler(appService)
 
 	v1 := router.Group("/api/v1")
@@ -46,6 +47,7 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	catalog := v1.Group("")
 	catalog.Use(middleware.AuthMiddleware(tokenMgr, blacklist))
 	{
+		catalog.GET("/resources", resourcesHandler.GetResources)
 		catalog.GET("/architectures", catalogHandler.ListArchitectures)
 		catalog.GET("/architectures/:id", catalogHandler.GetArchitectureDetails)
 		catalog.GET("/architectures/:id/deploy-options", catalogHandler.GetArchitectureDeployOptions)

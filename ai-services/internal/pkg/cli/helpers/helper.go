@@ -2,12 +2,10 @@ package helpers
 
 import (
 	"fmt"
-	"log"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/accelerator/spyre"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -88,66 +86,16 @@ func FetchContainerStartPeriod(runtime runtime.Runtime, containerNameOrId string
 	return containerStats.HealthcheckStartPeriod, nil
 }
 
+// ListSpyreCards lists all Spyre cards attached to the system.
+// This is a wrapper around spyre.ListCards for backward compatibility.
 func ListSpyreCards() ([]string, error) {
-	spyre_device_ids_list := []string{}
-	cmd := exec.Command("lspci", "-d", "1014:06a7")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return spyre_device_ids_list, fmt.Errorf("failed to get PCI devices attached to lpar: %v, output: %s", err, string(out))
-	}
-
-	pci_devices_str := string(out)
-
-	for _, pci_dev := range strings.Split(pci_devices_str, "\n") {
-		if pci_dev == "" {
-			continue
-		}
-		logger.Infoln("Spyre card detected", logger.VerbosityLevelDebug)
-		dev_id := strings.Split(pci_dev, " ")[0]
-		logger.Infof("PCI id: %s\n", dev_id, logger.VerbosityLevelDebug)
-		spyre_device_ids_list = append(spyre_device_ids_list, dev_id)
-	}
-
-	logger.Infoln("List of discovered Spyre cards: "+strings.Join(spyre_device_ids_list, ", "), logger.VerbosityLevelDebug)
-
-	return spyre_device_ids_list, nil
+	return spyre.ListCards()
 }
 
+// FindFreeSpyreCards finds available (free) Spyre cards.
+// This is a wrapper around spyre.FindFreeCards for backward compatibility.
 func FindFreeSpyreCards() ([]string, error) {
-	free_spyre_dev_id_list := []string{}
-	dev_files, err := os.ReadDir("/dev/vfio")
-	if err != nil {
-		log.Fatalf("failed to check device files under /dev/vfio. Error: %v", err)
-
-		return free_spyre_dev_id_list, err
-	}
-
-	for _, dev_file := range dev_files {
-		if dev_file.Name() == "vfio" {
-			continue
-		}
-		f, err := os.Open("/dev/vfio/" + dev_file.Name())
-		if err != nil {
-			logger.Infof("Device or resource busy, skipping.., err: %v", err, logger.VerbosityLevelDebug)
-
-			continue
-		}
-		if err := f.Close(); err != nil {
-			logger.Infoln("Failed to close the device file handle", logger.VerbosityLevelDebug)
-		}
-
-		// free card available to use
-		dev_pci_path := fmt.Sprintf("/sys/kernel/iommu_groups/%s/devices", dev_file.Name())
-		cmd := exec.Command("ls", dev_pci_path)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return free_spyre_dev_id_list, fmt.Errorf("failed to get pci address for the free spyre device: %v, output: %s", err, string(out))
-		}
-		pci := string(out)
-		free_spyre_dev_id_list = append(free_spyre_dev_id_list, pci)
-	}
-
-	return free_spyre_dev_id_list, nil
+	return spyre.FindFreeCards()
 }
 
 func ParseSkipChecks(skipChecks []string) map[string]bool {

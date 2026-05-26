@@ -1,21 +1,23 @@
 REGISTRY?=icr.io/ai-services-private
 IMAGE=litellm
+# 1. Must run update-patch after updating the Litellm version
+# 2. Manually regenerate the patches/watsonx-passthrough.patch
 LITELLM_VERSION?=1.84.0
 IMAGE_REVISION?=1
-VERSION?=$(LITELLM_VERSION)-$(IMAGE_REVISION)
+TAG?=v$(LITELLM_VERSION)-$(IMAGE_REVISION)
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
 CONTAINER_BUILDER?=podman
 build:
-	$(CONTAINER_BUILDER) build -t $(REGISTRY)/$(IMAGE):v$(VERSION) --build-arg VERSION=$(LITELLM_VERSION) .
+	$(CONTAINER_BUILDER) build -t $(REGISTRY)/$(IMAGE):$(TAG) --build-arg VERSION=$(LITELLM_VERSION) .
 .PHONY: build
 
 push:
-	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):v$(VERSION)
+	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(TAG)
 .PHONY: push
 
 image-tag:
-	@echo v$(VERSION)
+	@echo $(TAG)
 .PHONY: image-tag
 
 update-patch:

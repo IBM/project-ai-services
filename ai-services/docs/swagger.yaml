@@ -279,10 +279,42 @@ definitions:
       name:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo:
+    properties:
+      available:
+        type: integer
+      total:
+        type: integer
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo:
+    properties:
+      available_cores:
+        type: number
+      total_cores:
+        type: integer
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo:
+    properties:
+      available_bytes:
+        type: integer
+      total_bytes:
+        type: integer
+    type: object
   internal_pkg_catalog_apiserver_handlers.ErrorResponse:
     properties:
       error:
         type: string
+    type: object
+  internal_pkg_catalog_apiserver_handlers.ResourcesResponse:
+    properties:
+      accelerators:
+        additionalProperties:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo'
+        type: object
+      cpu:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo'
+      memory:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo'
     type: object
   internal_pkg_catalog_apiserver_handlers.UpdateApplicationRequest:
     properties:
@@ -773,6 +805,30 @@ paths:
       security:
       - BearerAuth: []
       summary: Get component provider parameters
+      tags:
+      - Catalog
+  /resources:
+    get:
+      description: Retrieves system resource information including CPU, memory, and
+        accelerator availability
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ResourcesResponse'
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get system resources
       tags:
       - Catalog
   /services:
