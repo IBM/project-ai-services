@@ -17,7 +17,7 @@ spec:
           memory: "512Mi"
       env:
         - name: BACKEND_HOST
-          value: "chat-bot--{{ .InstanceSlug }}"
+          value: "chat-bot-{{ .InstanceSlug }}"
         - name: BACKEND_PORT
           value: "5000" 
       ports:

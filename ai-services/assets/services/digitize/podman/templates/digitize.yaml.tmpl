@@ -18,7 +18,7 @@ spec:
           memory: "512Mi"
       env:
         - name: BACKEND_HOST
-          value: "digitize--{{ .InstanceSlug }}"
+          value: "digitize-{{ .InstanceSlug }}"
         - name: BACKEND_PORT
           value: "4000"
       ports:
