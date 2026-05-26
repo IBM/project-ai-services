@@ -73,7 +73,10 @@ definitions:
         type: string
       name:
         type: string
-      services: {}
+      services:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService'
+        type: array
       status:
         type: string
       type:
@@ -89,6 +92,30 @@ definitions:
         type: array
       pagination:
         $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp'
+        type: array
+      created_at:
+        type: string
+      endpoints:
+        items:
+          additionalProperties: {}
+          type: object
+        type: array
+      id:
+        type: string
+      status:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+      version:
+        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture:
     properties:
@@ -241,6 +268,16 @@ definitions:
         type: string
       type:
         description: '"service"'
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp:
+    properties:
+      metadata:
+        additionalProperties: {}
+        type: object
+      provider:
+        type: string
+      type:
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceReference:

@@ -969,7 +969,12 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
-                "services": {},
+                "services": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService"
+                    }
+                },
                 "status": {
                     "type": "string"
                 },
@@ -992,6 +997,42 @@ const docTemplate = `{
                 },
                 "pagination": {
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService": {
+            "type": "object",
+            "properties": {
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "endpoints": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -1225,6 +1266,21 @@ const docTemplate = `{
                 },
                 "type": {
                     "description": "\"service\"",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp": {
+            "type": "object",
+            "properties": {
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "type": {
                     "type": "string"
                 }
             }

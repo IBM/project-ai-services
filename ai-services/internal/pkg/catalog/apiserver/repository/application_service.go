@@ -127,9 +127,9 @@ func (s *ApplicationService) buildApplication(app models.Application) (types.App
 	return appData, nil
 }
 
-// buildServiceStatuses creates ServiceStatus array from models.Service slice.
-func (s *ApplicationService) buildServiceStatuses(services []models.Service) []types.ServiceStatus {
-	statuses := make([]types.ServiceStatus, 0, len(services))
+// buildServiceStatuses creates ApplicationService array from models.Service slice.
+func (s *ApplicationService) buildServiceStatuses(services []models.Service) []types.ApplicationService {
+	statuses := make([]types.ApplicationService, 0, len(services))
 
 	for _, svc := range services {
 		// Get service display name from catalog metadata
@@ -138,7 +138,7 @@ func (s *ApplicationService) buildServiceStatuses(services []models.Service) []t
 			serviceDisplayName = service.Name
 		}
 
-		statuses = append(statuses, types.ServiceStatus{
+		statuses = append(statuses, types.ApplicationService{
 			ID:     svc.ID.String(),
 			Type:   serviceDisplayName,
 			Status: string(svc.Status),
