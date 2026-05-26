@@ -3,7 +3,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from digitize.job import JobDocumentSummary, JobState, JobStats
+from digitize.models import JobDocumentSummary, JobState, JobStats
 from digitize.models import (
     DocStatus,
     DocumentContentResponse,

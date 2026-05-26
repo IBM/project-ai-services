@@ -1,10 +1,10 @@
 from common.misc_utils import *
 from pathlib import Path
-from digitize.status import get_utc_timestamp
+from digitize.digitize_utils import get_utc_timestamp
 from digitize.models import JobStatus, DocStatus, OutputFormat
 from digitize.pdf_utils import get_pdf_page_count, get_document_page_count
 from digitize.doc_utils import convert_document_format
-from digitize.db.db_status_manager import get_status_manager
+from digitize.digitize_utils import get_status_manager
 from concurrent.futures import ProcessPoolExecutor
 
 logger = get_logger("digitize")

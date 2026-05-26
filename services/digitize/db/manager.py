@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from common.misc_utils import get_logger
 from digitize.db.models import Job, Document
-from digitize.db.database import get_db_session
+from digitize.db.connection import get_db_session
 from digitize.models import JobStatus, DocStatus
 
 logger = get_logger("db_repository")
@@ -529,6 +529,78 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Unexpected error retrieving active jobs: {e}", exc_info=True)
             return []
+    @staticmethod
+    def delete_all_documents() -> Dict[str, Any]:
+        """
+        Delete all documents from the database.
+        
+        Returns:
+            Dictionary with deletion statistics:
+            - deleted_count: Number of documents deleted
+            - success: Whether operation completed successfully
+        """
+        try:
+            with get_db_session() as session:
+                stmt = delete(Document)
+                result = session.execute(stmt)
+                deleted_count = result.rowcount
+                
+                logger.info(f"Deleted all documents from database: {deleted_count} documents")
+                return {
+                    "deleted_count": deleted_count,
+                    "success": True
+                }
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting all documents: {e}", exc_info=True)
+            return {
+                "deleted_count": 0,
+                "success": False,
+                "error": str(e)
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error deleting all documents: {e}", exc_info=True)
+            return {
+                "deleted_count": 0,
+                "success": False,
+                "error": str(e)
+            }
+    
+    @staticmethod
+    def delete_all_jobs() -> Dict[str, Any]:
+        """
+        Delete all jobs from the database.
+        
+        Returns:
+            Dictionary with deletion statistics:
+            - deleted_count: Number of jobs deleted
+            - success: Whether operation completed successfully
+        """
+        try:
+            with get_db_session() as session:
+                stmt = delete(Job)
+                result = session.execute(stmt)
+                deleted_count = result.rowcount
+                
+                logger.info(f"Deleted all jobs from database: {deleted_count} jobs")
+                return {
+                    "deleted_count": deleted_count,
+                    "success": True
+                }
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting all jobs: {e}", exc_info=True)
+            return {
+                "deleted_count": 0,
+                "success": False,
+                "error": str(e)
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error deleting all jobs: {e}", exc_info=True)
+            return {
+                "deleted_count": 0,
+                "success": False,
+                "error": str(e)
+            }
+
 
 
 # Singleton instance for easy access

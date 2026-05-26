@@ -23,8 +23,8 @@ import digitize.models as models
 from digitize.digitize_core import digitize
 from digitize.cleanup import reset_db
 from digitize.ingest import ingest
-from digitize.db.db_status_manager import get_status_manager
-from digitize.db.database import check_db_connection, close_db_connections
+from digitize.digitize_utils import get_status_manager
+from digitize.db.connection import check_db_connection, close_db_connections
 
 # Semaphores for concurrency limiting
 digitization_semaphore = asyncio.BoundedSemaphore(settings.digitize.digitization_concurrency_limit)
@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
             # Initialize database schema (create tables if they don't exist)
             try:
                 from digitize.db.models import Base
-                from digitize.db.database import engine
+                from digitize.db.connection import engine
                 Base.metadata.create_all(bind=engine)
                 logger.info("✅ Database schema initialized")
             except Exception as schema_error:
@@ -405,7 +405,7 @@ async def delete_job(job_id: str):
     try:
         # Use database function to get job
         from digitize.digitize_utils import get_job
-        from digitize.db.db_manager import db_manager
+        from digitize.db.manager import db_manager
 
         job_data = get_job(job_id)
         
@@ -525,22 +525,10 @@ async def get_document_metadata(doc_id: str, details: bool = Query(False, descri
     - Document metadata with optional detailed information
     """
     try:
-        # Use database function
+        # Use database function - now returns DocumentDetailResponse directly
         from digitize.digitize_utils import get_document
 
-        doc_data = get_document(doc_id)
-        
-        if doc_data is None:
-            APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"Document with ID '{doc_id}' not found")
-            return  # This line should never be reached, but helps type checker
-        
-        # Remove metadata if details not requested
-        if not details:
-            doc_data.pop('metadata', None)
-        
-        # Convert to DocumentDetailResponse
-        from digitize.models import DocumentDetailResponse
-        response = DocumentDetailResponse(**doc_data)
+        response = get_document(doc_id, include_details=details)
         return response
     except HTTPException as e:
         logger.error(f"Failed to get document by id {doc_id}, HTTP error: {e}")
@@ -630,7 +618,7 @@ async def delete_document(doc_id: str):
         # 1. Fetch Metadata (if it exists)
         doc_metadata = None
         try:
-            doc_metadata = dg_util.get_document_by_id(doc_id, include_details=False)
+            doc_metadata = dg_util.get_document(doc_id, include_details=False)
         except FileNotFoundError:
             logger.error(f"Metadata for {doc_id} not found. Proceeding with vectorstore cleanup.")
 
@@ -673,7 +661,7 @@ async def delete_document(doc_id: str):
         # 5. Step C: Database Cleanup
         # Delete the document record from the database
         try:
-            from digitize.db.db_manager import db_manager
+            from digitize.db.manager import db_manager
             success = db_manager.delete_document(doc_id)
             if success:
                 logger.info(f"Database record for {doc_id} deleted successfully.")

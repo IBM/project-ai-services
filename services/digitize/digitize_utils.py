@@ -3,22 +3,77 @@ import json
 from functools import partial
 from pathlib import Path
 import shutil
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Mapping
 import uuid
+from datetime import datetime, timezone
 
 from common.misc_utils import get_logger
 from digitize.models import (
     OutputFormat,
     DocumentListItem,
     DocumentDetailResponse,
-    DocumentContentResponse
+    DocumentContentResponse,
+    JobStatus,
+    JobState,
+    DocStatus
 )
 from digitize.settings import settings
-from digitize.status import get_utc_timestamp
-from digitize.job import JobState
-from digitize.models import JobStatus
+from digitize.db.manager import db_manager
+from digitize.db.connection import engine
 
 logger = get_logger("digitize_utils")
+
+
+def get_utc_timestamp() -> str:
+    """
+    Generate UTC timestamp in ISO format with 'Z' suffix.
+
+    Returns:
+        ISO 8601 formatted timestamp string with 'Z' suffix
+    """
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def get_job_document_stats(job_id: str) -> dict:
+    """
+    Get statistics about documents in a job by reading from the database.
+
+    Args:
+        job_id: Unique identifier for the job
+
+    Returns:
+        Dictionary containing:
+        - failed_docs: List of failed document objects with id, name, status
+        - completed_docs: List of completed document objects with id, name, status
+        - total_docs: Total number of documents
+        - failed_count: Number of failed documents
+        - completed_count: Number of completed documents
+    """
+    from digitize.models import DocStatus
+
+    try:
+        job_data = get_job(job_id)
+
+        if job_data is None:
+            error_msg = f"Job not found in database: {job_id}"
+            logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
+
+        documents = job_data.get("documents", [])
+        failed_docs = [doc for doc in documents if doc.get("status") == DocStatus.FAILED.value]
+        completed_docs = [doc for doc in documents if doc.get("status") == DocStatus.COMPLETED.value]
+
+        return {
+            "failed_docs": failed_docs,
+            "completed_docs": completed_docs,
+            "total_docs": len(documents),
+            "failed_count": len(failed_docs),
+            "completed_count": len(completed_docs)
+        }
+    except Exception as e:
+        logger.error(f"Error reading job {job_id} from database: {e}", exc_info=True)
+        raise
 
 
 def create_job(
@@ -27,7 +82,6 @@ def create_job(
     submitted_at: str,
     doc_id_dict: dict[str, str],
     documents_info: list[str],
-    jobs_dir: Path = settings.digitize.jobs_dir,
     job_name: Optional[str] = None
 ) -> None:
     """
@@ -39,11 +93,10 @@ def create_job(
         submitted_at: ISO timestamp when job was submitted
         doc_id_dict: Mapping of document names to their IDs
         documents_info: List of document filenames
-        jobs_dir: Directory where job status files are stored (unused, kept for compatibility)
         job_name: Optional human-readable name for the job
     """
-    from digitize.db.database import engine
-    from digitize.db.db_manager import db_manager
+    from digitize.db.connection import engine
+    from digitize.db.manager import db_manager
     from datetime import datetime
 
     if engine is None:
@@ -80,8 +133,7 @@ def create_document(
     job_id: str,
     output_format: OutputFormat,
     operation: str,
-    submitted_at: str,
-    docs_dir: Path = settings.digitize.docs_dir
+    submitted_at: str
 ) -> None:
     """
     Create document metadata in database.
@@ -93,10 +145,9 @@ def create_document(
         output_format: Output format for the document
         operation: Type of operation (ingestion/digitization)
         submitted_at: ISO timestamp when document was submitted
-        docs_dir: Directory where metadata files are stored (unused, kept for compatibility)
     """
-    from digitize.db.database import engine
-    from digitize.db.db_manager import db_manager
+    from digitize.db.connection import engine
+    from digitize.db.manager import db_manager
     from digitize.models import DocStatus
     from datetime import datetime
 
@@ -134,60 +185,6 @@ def create_document(
         raise
 
 
-def initialize_job_state_internal(
-    job_id: str,
-    operation: str,
-    output_format: OutputFormat,
-    documents_info: list[str],
-    job_name: Optional[str] = None
-) -> dict[str, str]:
-    """
-    Initialize job state with both database and file system persistence.
-
-    Creates job status file, document metadata files, and database entries.
-    IMPORTANT: Job must be created BEFORE documents due to foreign key constraint.
-
-    Args:
-        job_id: Unique identifier for the job
-        operation: Type of operation (ingestion/digitization)
-        output_format: Output format for documents
-        documents_info: List of filenames to be processed
-        job_name: Optional human-readable name for the job
-  
-    Returns:
-        dict[str, str]: Mapping of filename -> document_id
-    """
-    submitted_at = get_utc_timestamp()
-
-    # Generate document IDs upfront
-    doc_id_dict = {doc: generate_uuid() for doc in documents_info}
-
-    # CRITICAL: Create job FIRST before documents (foreign key constraint)
-    create_job(
-        job_id=job_id,
-        operation=operation,
-        submitted_at=submitted_at,
-        doc_id_dict=doc_id_dict,
-        documents_info=documents_info,
-        jobs_dir=settings.digitize.jobs_dir,
-        job_name=job_name
-    )
-
-    # Now create document metadata in both database and file system
-    for doc in documents_info:
-        doc_id = doc_id_dict[doc]
-        logger.debug(f"Generated document id {doc_id} for file: {doc}")
-        create_document(
-            doc_name=doc,
-            doc_id=doc_id,
-            job_id=job_id,
-            output_format=output_format,
-            operation=operation,
-            submitted_at=submitted_at,
-            docs_dir=settings.digitize.docs_dir
-        )
-
-    return doc_id_dict
 
 
 def get_job(job_id: str) -> Optional[dict]:
@@ -200,8 +197,8 @@ def get_job(job_id: str) -> Optional[dict]:
     Returns:
         Job data dictionary or None if not found
     """
-    from digitize.db.database import engine
-    from digitize.db.db_manager import db_manager
+    from digitize.db.connection import engine
+    from digitize.db.manager import db_manager
 
     # Database is the primary and only source
     if engine is None:
@@ -211,7 +208,7 @@ def get_job(job_id: str) -> Optional[dict]:
         job = db_manager.get_job_by_id(job_id)
         if job:
             # Convert SQLAlchemy model to dictionary
-            from digitize.job import JobState, JobDocumentSummary, JobStats
+            from digitize.models import JobState, JobDocumentSummary, JobStats
 
             # Get documents for this job
             documents = db_manager.get_documents_by_job_id(job_id)
@@ -265,8 +262,8 @@ def get_all_jobs(
     Returns:
         Tuple of (list of job dictionaries, total count)
     """
-    from digitize.db.database import engine
-    from digitize.db.db_manager import db_manager
+    from digitize.db.connection import engine
+    from digitize.db.manager import db_manager
 
     # Database is the primary and only source
     if engine is None:
@@ -281,7 +278,7 @@ def get_all_jobs(
         )
 
         # Convert SQLAlchemy models to dictionaries
-        from digitize.job import JobState, JobDocumentSummary, JobStats
+        from digitize.models import JobState, JobDocumentSummary, JobStats
 
         job_dicts = []
         for job in jobs:
@@ -317,18 +314,25 @@ def get_all_jobs(
         raise
 
 
-def get_document(doc_id: str) -> Optional[dict]:
+def get_document(doc_id: str, include_details: bool = True) -> DocumentDetailResponse:
     """
-    Get document data from database.
+    Get document data from database and return as Pydantic model.
 
     Args:
         doc_id: Unique identifier for the document
+        include_details: If True, includes metadata fields; if False, excludes them
 
     Returns:
-        Document data dictionary or None if not found
+        DocumentDetailResponse model with document information
+
+    Raises:
+        FileNotFoundError: If document doesn't exist in database
+        RuntimeError: If database is not available
     """
-    from digitize.db.database import engine
-    from digitize.db.db_manager import db_manager
+    from digitize.db.connection import engine
+    from digitize.db.manager import db_manager
+
+    logger.debug(f"Fetching document {doc_id} with include_details={include_details}")
 
     # Database is the primary and only source
     if engine is None:
@@ -350,11 +354,20 @@ def get_document(doc_id: str) -> Optional[dict]:
                 "error": doc.error,
                 "metadata": doc.doc_metadata
             }
-            logger.debug(f"Retrieved document {doc_id} from database")
-            return doc_dict
+
+            # Conditionally exclude metadata if not requested
+            if not include_details:
+                doc_dict.pop('metadata', None)
+
+            # Let Pydantic validate and convert the data
+            response = DocumentDetailResponse(**doc_dict)
+            logger.debug(f"Successfully retrieved document {doc_id}")
+            return response
         else:
             logger.debug(f"Document {doc_id} not found in database")
-            return None
+            raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
+    except FileNotFoundError:
+        raise
     except Exception as e:
         logger.error(f"Failed to get document {doc_id} from database: {e}", exc_info=True)
         raise
@@ -378,8 +391,8 @@ def get_all_documents_paginated(
     Returns:
         Tuple of (list of document dictionaries, total count)
     """
-    from digitize.db.database import engine
-    from digitize.db.db_manager import db_manager
+    from digitize.db.connection import engine
+    from digitize.db.manager import db_manager
 
     # Database is the primary and only source
     if engine is None:
@@ -435,8 +448,8 @@ def get_all_document_ids() -> list[str]:
     Returns:
         List of document IDs found in database
     """
-    from digitize.db.database import engine
-    from digitize.db.db_manager import db_manager
+    from digitize.db.connection import engine
+    from digitize.db.manager import db_manager
 
     if engine is None:
         raise RuntimeError("Database not available. Cannot retrieve document IDs without database connection.")
@@ -452,29 +465,52 @@ def get_all_document_ids() -> list[str]:
         raise
 
 
-def initialize_job_state(job_id: str, operation: str, output_format:OutputFormat, documents_info: list[str], job_name: Optional[str] = None) -> dict[str, str]:
+def initialize_job_state(job_id: str, operation: str, output_format: OutputFormat, documents_info: list[str], job_name: Optional[str] = None) -> dict[str, str]:
     """
-    Creates the job status file and individual document metadata files.
-    Also persists to database if available.
+    Initialize job state with both database and file system persistence.
+
+    Creates job status file, document metadata files, and database entries.
+    IMPORTANT: Job must be created BEFORE documents due to foreign key constraint.
 
     Args:
         job_id: Unique identifier for the job
-        operation: Type of operation (e.g., 'ingestion', 'digitization')
-        output_format: Output format for the documents
-        documents_info: List of filenames to be processed under this job
+        operation: Type of operation (ingestion/digitization)
+        output_format: Output format for documents
+        documents_info: List of filenames to be processed
         job_name: Optional human-readable name for the job
 
     Returns:
         dict[str, str]: Mapping of filename -> document_id
     """
-    # Call the database-aware initialization directly
-    return initialize_job_state_internal(
+    submitted_at = get_utc_timestamp()
+
+    # Generate document IDs upfront
+    doc_id_dict = {doc: generate_uuid() for doc in documents_info}
+
+    # CRITICAL: Create job FIRST before documents (foreign key constraint)
+    create_job(
         job_id=job_id,
         operation=operation,
-        output_format=output_format,
+        submitted_at=submitted_at,
+        doc_id_dict=doc_id_dict,
         documents_info=documents_info,
         job_name=job_name
     )
+
+    # Now create document metadata in both database and file system
+    for doc in documents_info:
+        doc_id = doc_id_dict[doc]
+        logger.debug(f"Generated document id {doc_id} for file: {doc}")
+        create_document(
+            doc_name=doc,
+            doc_id=doc_id,
+            job_id=job_id,
+            output_format=output_format,
+            operation=operation,
+            submitted_at=submitted_at
+        )
+
+    return doc_id_dict
 
 
 async def stage_upload_files(job_id: str, files: List[str], staging_dir: str, file_contents: List[bytes]):
@@ -514,65 +550,6 @@ async def stage_upload_files(job_id: str, files: List[str], staging_dir: str, fi
             logger.error(f"Unexpected error while staging {filename} for job {job_id}: {e}")
             raise
 
-def read_job(job_id: str) -> Optional[JobState]:
-    """
-    Read and parse a single job into a JobState object.
-
-    Args:
-        job_id: Unique identifier for the job.
-
-    Returns:
-        JobState object if successful, None otherwise.
-    """
-    try:
-        job_data = get_job(job_id)
-        if job_data:
-            return JobState(**job_data)
-        return None
-    except Exception as e:
-        logger.error(f"Failed to read job {job_id} from database: {e}", exc_info=True)
-        return None
-
-def read_all_jobs() -> List[JobState]:
-    """
-    Read all jobs.
-
-    Returns:
-        List of JobState objects.
-    """
-    try:
-        jobs_data, _ = get_all_jobs(limit=10000, offset=0)
-        return [JobState(**job) for job in jobs_data]
-    except Exception as e:
-        logger.error(f"Failed to read jobs from database: {e}", exc_info=True)
-        return []
-
-
-def _read_document_metadata(doc_id: str) -> dict:
-    """
-    Internal helper to read document metadata.
-
-    Args:
-        doc_id: Unique identifier of the document
-
-    Returns:
-        Document metadata dictionary
-
-    Raises:
-        FileNotFoundError: If document doesn't exist in database
-        RuntimeError: If database is not available
-    """
-    try:
-        doc_data = get_document(doc_id)
-        if doc_data is None:
-            raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
-        
-        return doc_data
-    except FileNotFoundError:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to read document {doc_id} from database: {e}", exc_info=True)
-        raise
 
 
 def get_all_documents(
@@ -608,39 +585,9 @@ def get_all_documents(
         return []
 
 
-def get_document_by_id(doc_id: str, include_details: bool = False) -> DocumentDetailResponse:
-    """
-    Read a specific document's metadata by ID and return formatted response as Pydantic model.
-
-    Args:
-        doc_id: Unique identifier of the document
-        include_details: If True, includes metadata fields
-
-    Returns:
-        DocumentDetailResponse model with document information
-
-    Raises:
-        FileNotFoundError: If document doesn't exist in database
-        RuntimeError: If database is not available
-    """
-    logger.debug(f"Fetching document {doc_id} with include_details={include_details}")
-
-    doc_data = get_document(doc_id)
-    if doc_data is None:
-        raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
-
-    # Conditionally exclude metadata if not requested
-    if not include_details:
-        doc_data.pop('metadata', None)
-
-    # Let Pydantic validate and convert the data
-    response = DocumentDetailResponse(**doc_data)
-
-    logger.debug(f"Successfully retrieved document for {doc_id}")
-    return response
 
 
-def get_document_content(doc_id: str, docs_dir: Path = settings.digitize.docs_dir) -> DocumentContentResponse:
+def get_document_content(doc_id: str) -> DocumentContentResponse:
     """
     Read the digitized content of a document from the local cache.
 
@@ -661,12 +608,11 @@ def get_document_content(doc_id: str, docs_dir: Path = settings.digitize.docs_di
     """
     logger.debug(f"Fetching content for document {doc_id}")
 
+    # Read document metadata from database
+    doc_response = get_document(doc_id, include_details=False)
 
-    # Read document metadata using the common helper (returns dict)
-    doc_metadata = _read_document_metadata(doc_id)
-
-    # Get the output format from metadata
-    output_format = doc_metadata.get("output_format", "json")
+    # Get the output format from the response
+    output_format = doc_response.output_format
 
     # Determine file extension based on output format
     file_extension = output_format  # json, md, or text
@@ -744,70 +690,44 @@ def is_document_in_active_job(doc_id: str, job_id: Optional[str]) -> bool:
         return False
 
 
-def delete_document_files(doc_id: str, output_format: str, docs_dir: Path = settings.digitize.docs_dir) -> None:
+def delete_document_files(doc_id: str, output_format: str) -> None:
     """
-    Delete all files associated with a document from the cache directories.
+    Delete digitized content file associated with a document from the cache directory.
     
-    Deletion order (important for crash recovery):
-    1. FIRST: Delete digitized content file
-    2. LAST: Delete metadata file
-    
-    This ensures that if a crash occurs during deletion, the metadata file
-    remains as a record, allowing for cleanup retry or manual intervention.
+    Note: Document metadata is stored in PostgreSQL and managed separately via the database.
+    This function only handles file system cleanup of digitized content.
     
     Files deleted:
     - /var/cache/digitized/<doc_id>.<extension> (based on output_format)
-    - /var/cache/docs/<doc_id>_metadata.json (LAST)
     
     Args:
         doc_id: Unique identifier of the document
         output_format: Output format of the document (txt, md, or json)
-        docs_dir: Directory containing document metadata files
+        docs_dir: Directory parameter (kept for backward compatibility, not used)
         
     Raises:
-        FileNotFoundError: If document metadata file doesn't exist
         ValueError: If output_format is invalid
     """
     logger.debug(f"Deleting files for document {doc_id} with format {output_format}")
-    
-    # Check if document exists
-    meta_file = docs_dir / f"{doc_id}_metadata.json"
-    if not meta_file.exists():
-        logger.error(f"Document metadata file not found: {meta_file}")
-        raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
     
     # Validate output_format against OutputFormat enum
     valid_formats = [fmt.value for fmt in OutputFormat]
     if output_format not in valid_formats:
         raise ValueError(f"Invalid output_format: '{output_format}'. Must be one of: {', '.join(valid_formats)}")
 
-    files_deleted = []
-    
-    # STEP 1: Delete digitized content file FIRST
+    # Delete digitized content file
     content_file = settings.digitize.digitized_docs_dir / f"{doc_id}.{output_format}"
     if content_file.exists():
         try:
             content_file.unlink()
-            files_deleted.append(str(content_file))
             logger.debug(f"✓ Deleted content file: {content_file}")
+            logger.info(f"✅ Deleted content file for document {doc_id}")
         except Exception as e:
             error_msg = f"Failed to delete content file {content_file}: {e}"
             logger.error(f"✗ {error_msg}")
-            # Preserve metadata file if content deletion fails
             raise Exception(f"Failed to delete content file: {error_msg}") from e
     else:
         logger.warning(f"Content file not found (may have been deleted already): {content_file}")
-    
-    # STEP 2: Delete metadata file LAST (only after content files are successfully deleted)
-    try:
-        meta_file.unlink()
-        files_deleted.append(str(meta_file))
-        logger.debug(f"✓ Deleted metadata file: {meta_file}")
-    except Exception as e:
-        logger.error(f"✗ Failed to delete metadata file {meta_file}: {e}")
-        raise
-    
-    logger.info(f"✅ Deleted {len(files_deleted)} files for document {doc_id}")
 
 
 def has_active_jobs(operation: Optional[str] = None) -> tuple[bool, list[str]]:
@@ -897,60 +817,34 @@ def cleanup_digitized_files() -> dict:
     return cleanup_stats
 
 
-def bulk_delete_all_documents(docs_dir: Path = settings.digitize.docs_dir) -> dict:
+def bulk_delete_all_documents() -> dict:
     """
-    Delete all documents from the system including:
-    1. All digitized content files from /var/cache/digitized
-    2. All document metadata files from /var/cache/docs
+    Delete all digitized content files from the system.
+
+    Note: Document metadata is stored in PostgreSQL and should be managed separately
+    via the database. This function only handles file system cleanup of digitized content.
 
     This function does NOT delete job status files or reset the vector database.
     Those operations should be handled separately by the caller.
 
-    Args:
-        docs_dir: Directory containing document metadata files
-
     Returns:
         Dictionary with deletion statistics
     """
-    logger.info("Starting bulk deletion of all documents...")
+    logger.info("Starting bulk deletion of all digitized content files...")
 
     deletion_stats = {
-        "metadata_files_deleted": 0,
         "content_files_deleted": 0,
         "errors": []
     }
 
-    # Step 1: Delete all digitized content files using the utility function
+    # Delete all digitized content files using the utility function
     cleanup_stats = cleanup_digitized_files()
     deletion_stats["content_files_deleted"] = cleanup_stats["content_files_deleted"]
     deletion_stats["errors"].extend(cleanup_stats["errors"])
 
-    # Step 2: Delete all document metadata files
-    if docs_dir.exists():
-        try:
-            # Count metadata files before deletion
-            metadata_files = list(docs_dir.glob("*_metadata.json"))
-            file_count = len(metadata_files)
-            logger.debug(f"Found {file_count} metadata files in {docs_dir}")
-
-            # Delete the entire directory and recreate it
-            shutil.rmtree(docs_dir)
-            docs_dir.mkdir(parents=True, exist_ok=True)
-
-            deletion_stats["metadata_files_deleted"] = file_count
-            logger.info(f"✓ Deleted {file_count} metadata files from {docs_dir}")
-        except Exception as e:
-            error_msg = f"Failed to clean up documents directory: {e}"
-            logger.error(f"✗ {error_msg}")
-            deletion_stats["errors"].append(error_msg)
-    else:
-        logger.error(f"Documents directory {docs_dir} does not exist")
-
     # Log summary
-    total_deleted = deletion_stats["metadata_files_deleted"] + deletion_stats["content_files_deleted"]
     logger.info(
-        f"✅ Bulk deletion completed: {deletion_stats['metadata_files_deleted']} metadata files, "
-        f"{deletion_stats['content_files_deleted']} content files deleted (total: {total_deleted})"
+        f"✅ Bulk deletion completed: {deletion_stats['content_files_deleted']} content files deleted"
     )
 
     if deletion_stats["errors"]:
@@ -975,7 +869,6 @@ def scan_and_recover_orphan_jobs() -> int:
     Returns:
         Number of orphan jobs recovered
     """
-    from digitize.db.db_status_manager import get_status_manager
     from digitize.models import JobStatus, DocStatus
     from digitize.doc_utils import clean_intermediate_files
     import digitize.settings as config
@@ -1110,3 +1003,264 @@ def cleanup_staging_directory(job_id: str, staging_base_dir: Path) -> bool:
     except Exception as e:
         logger.warning(f"Failed to clean up staging directory {staging_dir}: {e}")
         return False
+
+# ============================================================================
+# Database Status Manager
+# ============================================================================
+
+class DatabaseStatusManager:
+    """
+    Database-only StatusManager that persists to PostgreSQL database.
+
+    - Storage: PostgreSQL database only (required)
+    - Raises error if database unavailable
+    """
+
+    def __init__(self, job_id: str):
+        """
+        Initialize database-first status manager.
+
+        Args:
+            job_id: Unique identifier for the job
+
+        Raises:
+            RuntimeError: If database is not available
+        """
+        self.job_id = job_id
+
+        if engine is None:
+            raise RuntimeError(f"Database not available for job {job_id}. Cannot proceed without database.")
+
+        self.db_enabled = True
+
+    def update_doc_metadata(
+        self,
+        doc_id: str,
+        details: Mapping[str, Any],
+        error: str = ""
+    ) -> None:
+        """
+        Update document metadata in database.
+
+        Args:
+            doc_id: Document identifier
+            details: Dictionary of fields to update
+            error: Optional error message
+        """
+        try:
+            self._update_document(doc_id, details, error)
+        except Exception as e:
+            logger.error(f"Failed to update document {doc_id} in database: {e}", exc_info=True)
+            raise
+
+    def update_job_progress(
+        self,
+        doc_id: str,
+        doc_status: DocStatus,
+        job_status: JobStatus,
+        error: str = ""
+    ) -> None:
+        """
+        Update job progress in database.
+
+        Args:
+            doc_id: Document identifier (empty string for job-level updates)
+            doc_status: New document status
+            job_status: New job status
+            error: Optional error message
+        """
+        try:
+            self._update_job(doc_id, doc_status, job_status, error)
+        except Exception as e:
+            logger.error(f"Failed to update job {self.job_id} in database: {e}", exc_info=True)
+            raise
+
+    def _update_document(
+        self,
+        doc_id: str,
+        details: Mapping[str, Any],
+        error: str
+    ) -> None:
+        """
+        Update document in database.
+
+        Args:
+            doc_id: Document identifier
+            details: Dictionary of fields to update
+            error: Optional error message
+        """
+        # Separate metadata fields from top-level fields
+        metadata_fields, top_level_fields = _categorize_fields(details)
+
+        # Prepare update parameters
+        update_params: Dict[str, Any] = {}
+
+        # Handle status update
+        if "status" in top_level_fields:
+            status_value = top_level_fields["status"]
+            try:
+                update_params["status"] = DocStatus(status_value)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid status value: {status_value}")
+
+        # Handle completed_at
+        if "completed_at" in top_level_fields:
+            completed_at_str = top_level_fields["completed_at"]
+            if completed_at_str:
+                try:
+                    update_params["completed_at"] = datetime.fromisoformat(
+                        completed_at_str.replace("Z", "+00:00")
+                    )
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Invalid completed_at format: {completed_at_str}, {e}")
+
+        # Handle error
+        if error:
+            update_params["error"] = error
+
+        # Handle metadata updates
+        if metadata_fields:
+            # Get existing document to merge metadata
+            existing_doc = db_manager.get_document_by_id(doc_id)
+            if existing_doc:
+                merged_metadata = existing_doc.doc_metadata.copy()
+
+                # Merge timing updates
+                if "timing_in_secs" in metadata_fields:
+                    merged_metadata.setdefault("timing_in_secs", {})
+                    merged_metadata["timing_in_secs"].update(metadata_fields["timing_in_secs"])
+
+                # Update other metadata fields
+                for key, value in metadata_fields.items():
+                    if key != "timing_in_secs" and value is not None:
+                        merged_metadata[key] = value
+
+                update_params["metadata"] = merged_metadata
+
+        # Perform database update
+        if update_params:
+            success = db_manager.update_document(doc_id, **update_params)
+            if success:
+                logger.debug(f"Updated document {doc_id} in database")
+            else:
+                logger.warning(f"Document {doc_id} not found in database for update")
+
+    def _update_job(
+        self,
+        doc_id: str,
+        doc_status: DocStatus,
+        job_status: JobStatus,
+        error: str
+    ) -> None:
+        """
+        Update job and associated document in database.
+
+        Args:
+            doc_id: Document identifier (empty for job-level updates)
+            doc_status: New document status
+            job_status: New job status
+            error: Optional error message
+        """
+        # Update document status if doc_id provided
+        if doc_id:
+            db_manager.update_document(doc_id, status=doc_status)
+
+        # Get current job to recalculate stats
+        job = db_manager.get_job_by_id(self.job_id)
+        if not job:
+            logger.warning(f"Job {self.job_id} not found in database")
+            return
+
+        # Get all documents for this job to recalculate stats
+        documents = db_manager.get_documents_by_job_id(self.job_id)
+
+        # Recalculate statistics
+        stats = {
+            "total_documents": len(documents),
+            "completed": sum(1 for d in documents if d.status == DocStatus.COMPLETED.value),
+            "failed": sum(1 for d in documents if d.status == DocStatus.FAILED.value),
+            "in_progress": sum(
+                1 for d in documents if d.status in [
+                    DocStatus.IN_PROGRESS.value,
+                    DocStatus.DIGITIZED.value,
+                    DocStatus.PROCESSED.value,
+                    DocStatus.CHUNKED.value
+                ]
+            )
+        }
+
+        # Prepare job update parameters
+        update_params: Dict[str, Any] = {
+            "status": job_status,
+            "stats": stats
+        }
+
+        # Set completed_at if job is finished
+        if job_status in [JobStatus.COMPLETED, JobStatus.FAILED]:
+            total_docs = stats["total_documents"]
+            completed_docs = stats["completed"]
+            failed_docs = stats["failed"]
+
+            if total_docs > 0 and (completed_docs + failed_docs) == total_docs:
+                update_params["completed_at"] = datetime.now(timezone.utc)
+
+        # Set error if provided
+        if error and job_status == JobStatus.FAILED:
+            update_params["error"] = error
+
+        # Perform database update
+        success = db_manager.update_job(self.job_id, **update_params)
+        if success:
+            logger.debug(f"Updated job {self.job_id} in database")
+        else:
+            logger.warning(f"Job {self.job_id} not found in database for update")
+
+
+def get_status_manager(job_id: str) -> DatabaseStatusManager:
+    """
+    Factory function to get database-first status manager.
+
+    Returns DatabaseStatusManager which requires database to be available.
+
+    Args:
+        job_id: Unique identifier for the job
+
+    Returns:
+        DatabaseStatusManager instance
+
+    Raises:
+        RuntimeError: If database is not available
+    """
+    return DatabaseStatusManager(job_id)
+
+
+def _categorize_fields(details: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    Separate fields into metadata wrapper and top-level categories.
+
+    Args:
+        details: Dictionary of fields to categorize
+
+    Returns:
+        Tuple of (metadata_fields, top_level_fields)
+    """
+    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs"}
+
+    metadata_fields = {
+        k: v if k == "timing_in_secs" and isinstance(v, dict) else _extract_value(v)
+        for k, v in details.items() if k in METADATA_KEYS
+    }
+
+    top_level_fields = {
+        k: _extract_value(v)
+        for k, v in details.items() if k not in METADATA_KEYS
+    }
+
+    return metadata_fields, top_level_fields
+
+
+def _extract_value(v: Any) -> Any:
+    """Extract .value from enums, return raw value otherwise."""
+    return v.value if hasattr(v, "value") else v
+
+# Made with Bob

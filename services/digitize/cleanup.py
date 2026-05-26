@@ -1,18 +1,20 @@
 import common.db_utils as db
 from common.misc_utils import get_logger
 from digitize.digitize_utils import bulk_delete_all_documents, get_all_document_ids
+from digitize.db.manager import db_manager
 
 logger = get_logger("cleanup")
 
 def reset_db():
     """
-    Reset the vector database and clean up all document files.
+    Reset the vector database, PostgreSQL database, and clean up all document files.
 
     This function performs a complete cleanup:
     1. Reads all document IDs from metadata files in DOCS_DIR
     2. Deletes chunks for those documents from the vector database index
-    3. Deletes all digitized content files from /var/cache/digitized
-    4. Deletes all document metadata files from /var/cache/docs
+    3. Deletes all jobs and documents from PostgreSQL database
+    4. Deletes all digitized content files from /var/cache/digitized
+    5. Deletes all document metadata files from /var/cache/docs
 
     Raises:
         Exception: If vector database reset fails or file deletion fails completely
@@ -35,7 +37,36 @@ def reset_db():
         # Raise error immediately - VDB reset is critical
         raise Exception(error_msg) from e
 
-    # Step 3: Delete all document files LAST
+    # Step 3: Delete all records from PostgreSQL database
+    try:
+        logger.debug("Deleting all documents from PostgreSQL database...")
+        doc_result = db_manager.delete_all_documents()
+
+        if doc_result["success"]:
+            logger.info(f"✓ Deleted {doc_result['deleted_count']} documents from PostgreSQL database")
+        else:
+            error_msg = f"Failed to delete documents from PostgreSQL: {doc_result.get('error', 'Unknown error')}"
+            logger.error(f"✗ {error_msg}")
+            raise Exception(error_msg)
+
+        logger.debug("Deleting all jobs from PostgreSQL database...")
+        job_result = db_manager.delete_all_jobs()
+
+        if job_result["success"]:
+            logger.info(f"✓ Deleted {job_result['deleted_count']} jobs from PostgreSQL database")
+        else:
+            error_msg = f"Failed to delete jobs from PostgreSQL: {job_result.get('error', 'Unknown error')}"
+            logger.error(f"✗ {error_msg}")
+            raise Exception(error_msg)
+
+    except Exception as e:
+        error_msg = f"Failed to delete PostgreSQL records: {str(e)}"
+        logger.error(f"✗ {error_msg}")
+        raise Exception(
+            f"Partial deletion: vector database reset but PostgreSQL deletion failed. {error_msg}"
+        ) from e
+
+    # Step 4: Delete all document files LAST
     try:
         logger.debug("Deleting all document files...")
         deletion_stats = bulk_delete_all_documents()

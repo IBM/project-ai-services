@@ -25,10 +25,10 @@ from common.llm_utils import summarize_and_classify_tables, tokenize_with_llm
 from common.misc_utils import get_logger, text_suffix, table_suffix, text_chunk_suffix, table_chunk_suffix
 from common.lang_utils import detect_language, setup_language_detector
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
-from digitize.status import get_utc_timestamp
+from digitize.digitize_utils import get_utc_timestamp
 from digitize.models import DocStatus, JobStatus, OutputFormat
 from digitize.settings import settings
-from digitize.db.db_status_manager import get_status_manager
+from digitize.digitize_utils import get_status_manager
 
 logger = get_logger("doc_utils")
 
@@ -610,7 +610,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
                     batch_stats[path]["timings"]["chunking"] = round(float(total_time or 0), 2)
 
-                    # Capture chunk counts in real time and update <doc_id>_metadata.json
+                    # Capture chunk counts in real time
                     chunk_count = count_chunks(text_chunk_json, table_chunk_json)
                     batch_stats[path]["chunk_count"] = chunk_count
 
