@@ -430,9 +430,7 @@ func (pc *PodmanClient) Type() types.RuntimeType {
 
 // GetSystemInfo retrieves system resource information including CPU, memory, and accelerators.
 func (pc *PodmanClient) GetSystemInfo() (*models.SystemInfo, error) {
-	sysInfo := &models.SystemInfo{
-		Accelerators: make(map[string]*models.AcceleratorInfo),
-	}
+	sysInfo := &models.SystemInfo{}
 
 	// Get Podman system info for CPU and memory
 	info, err := system.Info(pc.Context, nil)
@@ -440,7 +438,7 @@ func (pc *PodmanClient) GetSystemInfo() (*models.SystemInfo, error) {
 		return nil, fmt.Errorf("failed to get system info: %w", err)
 	}
 
-	// Extract CPU information
+	// Extract CPU and memory information
 	if info.Host != nil {
 		totalCores := int(info.Host.CPUs)
 		idlePercent := 0.0
@@ -456,10 +454,7 @@ func (pc *PodmanClient) GetSystemInfo() (*models.SystemInfo, error) {
 			TotalCores:     totalCores,
 			AvailableCores: availableCores,
 		}
-	}
 
-	// Extract memory information
-	if info.Host != nil {
 		sysInfo.Memory = &models.MemoryInfo{
 			TotalBytes:     info.Host.MemTotal,
 			AvailableBytes: info.Host.MemFree,
@@ -467,13 +462,13 @@ func (pc *PodmanClient) GetSystemInfo() (*models.SystemInfo, error) {
 	}
 
 	// Populate accelerator information (Spyre cards)
-	sysInfo.Accelerators = pc.getAcceleratorInfo()
+	sysInfo.Accelerators = getAcceleratorInfo()
 
 	return sysInfo, nil
 }
 
 // getAcceleratorInfo retrieves accelerator availability information for Podman.
-func (pc *PodmanClient) getAcceleratorInfo() map[string]*models.AcceleratorInfo {
+func getAcceleratorInfo() map[string]*models.AcceleratorInfo {
 	accelerators := make(map[string]*models.AcceleratorInfo)
 
 	// Get total Spyre cards
