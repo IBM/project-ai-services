@@ -5,7 +5,8 @@ These values can be overridden via environment variables.
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, create_llm_session
+import common.misc_utils as misc_utils
 from common.settings import Settings as CommonSettings
 
 logger = get_logger("settings")
@@ -314,6 +315,8 @@ class RAGConfig(BaseSettings):
         if llm_validation_enabled:
             try:
                 from chatbot.prompt_validator import validate_prompt_with_llm
+                if misc_utils.SESSION is None:
+                    create_llm_session(pool_maxsize=1)
                 
                 validation_result = validate_prompt_with_llm(
                     v_stripped,
