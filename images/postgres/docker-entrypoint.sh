@@ -54,6 +54,7 @@ docker_create_db_directories() {
 	fi
 
 	# allow the container to be started with `--user`
+	# For OpenShift: only chown if running as root, otherwise assume correct permissions
 	if [ "$user" = '0' ]; then
 		find "$PGDATA" \! -user postgres -exec chown postgres '{}' +
 		find /var/run/postgresql \! -user postgres -exec chown postgres '{}' +
@@ -338,6 +339,10 @@ _main() {
 		docker_setup_env
 		# setup data directories and permissions (when run as root)
 		docker_create_db_directories
+		
+		# OpenShift compatibility: Don't use gosu, run as current user
+		# If running as root, switch to postgres user using gosu
+		# Otherwise (OpenShift case), continue as current arbitrary user
 		if [ "$(id -u)" = '0' ]; then
 			# then restart script as postgres user
 			exec gosu postgres "$BASH_SOURCE" "$@"
