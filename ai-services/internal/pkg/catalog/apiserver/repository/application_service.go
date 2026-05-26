@@ -22,7 +22,7 @@ type ApplicationService struct {
 	provider      *catalog.CatalogProvider
 }
 
-// response type for response
+// DeleteApplicationResponse is the response body for a delete application request.
 type DeleteApplicationResponse struct {
 	ID      string `json:"id"`
 	Status  string `json:"status"`
@@ -240,14 +240,11 @@ func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID
 	}, nil
 }
 
-// performDeletion carries out the async cascade deletion for an application
-// collect component IDs referenced by this app's services
-// identify which components become orphaned
-// delete the application CASCADE removes services + service_dependencies
-// delete orphaned components
-// TODO: teardown pods/containers once Create flow is ready skipCleanup flag
+// performDeletion carries out the async cascade deletion for an application.
+//
+//nolint:cyclop
 func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, skipCleanup bool) {
-	// Step 1: collect component IDs and service IDs being deleted
+	_ = skipCleanup // reserved for pod teardown once Create flow is ready
 	serviceIDs := make(map[uuid.UUID]bool, len(services))
 	componentCandidates := make(map[uuid.UUID]bool)
 
@@ -256,7 +253,7 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 
 		deps, err := s.depRepo.GetDependenciesByServiceID(ctx, svc.ID)
 		if err != nil {
-			s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError,
+			_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError,
 				fmt.Sprintf("failed to get dependencies for service %s: %s", svc.ID, err))
 			return
 		}
@@ -273,7 +270,7 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 	for componentID := range componentCandidates {
 		consumers, err := s.depRepo.GetServicesByDependency(ctx, componentID, models.DependencyTypeComponent)
 		if err != nil {
-			s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError,
+			_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError,
 				fmt.Sprintf("failed to check consumers of component %s: %s", componentID, err))
 			return
 		}
@@ -292,7 +289,7 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 	}
 
 	if err := s.appRepo.Delete(ctx, appID); err != nil {
-		s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError,
+		_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError,
 			fmt.Sprintf("failed to delete application: %s", err))
 		return
 	}
