@@ -29,6 +29,10 @@ export default defineConfig(() => {
         "/db-status": {
           target: "http://localhost:3001",
           changeOrigin: true,
+        },
+        "/config": {
+          target: "http://localhost:3001",
+          changeOrigin: true,
         }
       },
     },
