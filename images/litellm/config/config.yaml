@@ -1,0 +1,13 @@
+model_list:
+  - model_name: "os.environ/INSTRUCT_MODEL_NAME"
+    litellm_params:
+      model: "os.environ/INSTRUCT_MODEL"
+      api_key: "os.environ/WATSONX_APIKEY"
+      project_id: "os.environ/WATSONX_PROJECT_ID"
+      base_url: "os.environ/WATSONX_URL"
+litellm_settings:
+  callbacks: custom_callbacks.translator_instance
+general_settings:
+  pass_through_endpoints:
+    - path: "/tokenize"
+      target: http://localhost:8000/watsonx/ml/v1/text/tokenization
