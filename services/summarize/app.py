@@ -509,26 +509,48 @@ async def process_summarization_job(job_id: str):
         
         level = job.level
         
-        # Compute target and max tokens
-        available_output_tokens = (
-            get_llm_max_model_len()
-            - input_tokens
-            - settings.summarize.summarization_prompt_token_count
-        )
+        # Step 4: Determine strategy - check if input alone fits in context window
+        max_model_len = get_llm_max_model_len()
+        prompt_tokens = settings.summarize.summarization_prompt_token_count
         
+        # Calculate available space for output
+        available_output_tokens = max_model_len - input_tokens - prompt_tokens
+        
+        # Always compute target/max tokens (needed for both strategies)
         target_words, min_words, max_words, max_tokens = compute_target_and_max_tokens(
-            input_tokens, available_output_tokens, level, None
+            input_tokens, max(available_output_tokens, 1000), level, None  # Use minimum 1000 if negative
         )
-        
-        # Step 4: Determine strategy
-        total_required_tokens = input_tokens + settings.summarize.summarization_prompt_token_count + max_tokens
         
         strategy = "direct"  # Initialize strategy variable
         num_chunks = 0  # Initialize for type checking
         
-        if total_required_tokens <= get_llm_max_model_len():
-            # Direct summarization strategy
-            logger.info(f"Using DIRECT strategy (fits in context window)")
+        # If input + prompt already exceeds context window, must use chunked strategy
+        if available_output_tokens <= 0:
+            logger.info(
+                f"Input too large for direct strategy: input_tokens={input_tokens}, "
+                f"prompt_tokens={prompt_tokens}, max_model_len={max_model_len}, "
+                f"available_output={available_output_tokens} (NEGATIVE - using CHUNKED)"
+            )
+            strategy = "chunked"
+        else:
+            total_required_tokens = input_tokens + prompt_tokens + max_tokens
+            
+            logger.info(
+                f"Strategy decision: input_tokens={input_tokens}, "
+                f"prompt_tokens={prompt_tokens}, "
+                f"max_tokens={max_tokens}, total_required={total_required_tokens}, "
+                f"max_model_len={max_model_len}"
+            )
+            
+            if total_required_tokens <= max_model_len:
+                # Direct summarization strategy
+                logger.info(f"Using DIRECT strategy (fits in context window)")
+                strategy = "direct"
+            else:
+                logger.info(f"Using CHUNKED strategy (exceeds context window)")
+                strategy = "chunked"
+        
+        if strategy == "direct":
             
             # Build messages
             messages = build_messages(content_text, target_words, min_words, max_words, True)
