@@ -28,34 +28,36 @@ func GetCaddyAdminPort(rt runtime.Runtime, podName string) (string, error) {
 	return "", fmt.Errorf("admin port mapping not found in pod ports")
 }
 
-// DomainConfig holds configuration for domain generation.
+// DomainConfig holds configuration for domain generation with priority-based selection.
 type DomainConfig struct {
-	HostIP       string // Used for nip.io-based domains with self-signed certificates
-	CustomDomain string // For custom domain support (future)
-	CertPath     string // For extracting domain from certificates (future)
+	HostIP       string // Used for nip.io-based domains (lowest priority)
+	CustomDomain string // User-provided custom domain (medium priority)
+	CertDomain   string // Domain extracted from SSL certificate (highest priority)
 }
 
-// BuildRouteDomain generates a domain name for a route.
-// Currently uses nip.io for self-signed certificates.
-// Future: Support custom domains and certificate-based domain extraction.
+// BuildRouteDomain generates a domain name for a route using priority-based selection:
+// 1. CertDomain (highest priority) - from wildcard SSL certificate
+// 2. CustomDomain (medium priority) - user-provided via --domain-name flag
+// 3. HostIP with nip.io (lowest priority) - default fallback for self-signed certificates.
 func BuildRouteDomain(subdomain string, config DomainConfig) string {
-	// Future: Check for custom domain or certificate-based domain
-	// if config.CustomDomain != "" {
-	//     return fmt.Sprintf("%s.%s", subdomain, config.CustomDomain)
-	// }
-	// if config.CertPath != "" {
-	//     domain := extractDomainFromCert(config.CertPath)
-	//     return fmt.Sprintf("%s.%s", subdomain, domain)
-	// }
+	// Priority 1: Certificate domain (from wildcard cert)
+	if config.CertDomain != "" {
+		return fmt.Sprintf("%s.%s", subdomain, config.CertDomain)
+	}
 
-	// Current: nip.io for self-signed certificates
+	// Priority 2: Custom domain (user-provided)
+	if config.CustomDomain != "" {
+		return fmt.Sprintf("%s.%s", subdomain, config.CustomDomain)
+	}
+
+	// Priority 3: nip.io with host IP (default fallback)
 	return fmt.Sprintf("%s.%s.nip.io", subdomain, config.HostIP)
 }
 
 // BuildRoutesFromAnnotation parses a routes annotation string and builds Route objects.
 // The annotation format is: "port:subdomain, port:subdomain, ...".
 // Example: "8081:catalog-ui, 8080:catalog-api".
-func BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName string) ([]Route, error) {
+func BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName string, domainConfig *DomainConfig) ([]Route, error) {
 	if routesAnnotation == "" {
 		return nil, nil
 	}
@@ -63,10 +65,18 @@ func BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName string) ([]Rout
 	routes := []Route{}
 	const expectedParts = 2
 
-	// Prepare domain configuration
-	domainConfig := DomainConfig{
-		HostIP: hostIP,
-		// Future: Add CustomDomain and CertPath from flags/config
+	// Use provided domain configuration or create default with HostIP
+	var config DomainConfig
+	if domainConfig != nil {
+		config = *domainConfig
+		// Ensure HostIP is set for fallback
+		if config.HostIP == "" {
+			config.HostIP = hostIP
+		}
+	} else {
+		config = DomainConfig{
+			HostIP: hostIP,
+		}
 	}
 
 	// Parse routes annotation (format: "port:subdomain, port:subdomain, ...")
@@ -92,7 +102,7 @@ func BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName string) ([]Rout
 		// Build route - use pod name as upstream since containers are in the same pod
 		route := Route{
 			ID:       fmt.Sprintf("%s--%s", podName, subdomain),
-			Domain:   BuildRouteDomain(subdomain, domainConfig),
+			Domain:   BuildRouteDomain(subdomain, config),
 			Upstream: fmt.Sprintf("%s:%s", podName, port),
 			Terminal: true,
 		}

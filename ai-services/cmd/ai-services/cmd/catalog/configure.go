@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"syscall"
 
@@ -22,6 +23,10 @@ var (
 	runtimeType string
 	// Base directory flag for catalog configure command.
 	baseDir string
+	// SSL certificate flags for HTTPS configuration.
+	domainName  string
+	sslCertPath string
+	sslKeyPath  string
 	// HTTPS port flag for catalog configure command.
 	httpsPort int
 )
@@ -55,7 +60,36 @@ Examples:
 			return err
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runConfigure(argParams)
+			// Prompt for admin password
+			adminPassword, err := promptForPassword()
+			if err != nil {
+				return fmt.Errorf("failed to read admin password: %w", err)
+			}
+
+			var aiServicesDir string
+
+			// Use default base directory if not specified, otherwise validate
+			if baseDir == "" {
+				aiServicesDir = constants.DefaultBaseDir
+			} else {
+				aiServicesDir, err = utils.ValidateBaseDir(baseDir)
+				if err != nil {
+					return fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
+				}
+			}
+
+			logger.Infof("Using base directory: %s\n", aiServicesDir, logger.VerbosityLevelDebug)
+
+			return configure.Run(configure.ConfigureOptions{
+				AdminPassword: adminPassword,
+				Runtime:       vars.RuntimeFactory.GetRuntimeType(),
+				BaseDir:       aiServicesDir,
+				ArgParams:     argParams,
+				DomainName:    domainName,
+				SSLCertPath:   sslCertPath,
+				SSLKeyPath:    sslKeyPath,
+				HttpsPort:     httpsPort,
+			})
 		},
 	}
 
@@ -118,6 +152,11 @@ func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
 		return nil, err
 	}
 
+	// Validate SSL flags
+	if err := validateSSLFlags(); err != nil {
+		return nil, err
+	}
+
 	// Validate HTTPS port range
 	if httpsPort < 1 || httpsPort > 65535 {
 		return nil, fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
@@ -134,6 +173,59 @@ func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
 	}
 
 	return argParams, nil
+}
+
+// validateSSLFlags validates SSL certificate and key flags.
+func validateSSLFlags() error {
+	if err := checkSSLFlagsPaired(); err != nil {
+		return err
+	}
+
+	// If no SSL cert/key provided, validation passes
+	if sslCertPath == "" && sslKeyPath == "" {
+		return nil
+	}
+
+	warnIfBothCertAndDomainProvided()
+
+	return validateSSLCertificates()
+}
+
+// checkSSLFlagsPaired ensures cert and key flags are used together.
+func checkSSLFlagsPaired() error {
+	if (sslCertPath != "" && sslKeyPath == "") || (sslCertPath == "" && sslKeyPath != "") {
+		return fmt.Errorf("--ssl-cert and --ssl-key must be used together")
+	}
+
+	return nil
+}
+
+// warnIfBothCertAndDomainProvided warns user if both certificate and custom domain are provided.
+func warnIfBothCertAndDomainProvided() {
+	if sslCertPath != "" && sslKeyPath != "" && domainName != "" {
+		fmt.Fprintf(os.Stderr, "Warning: Both SSL certificate and --domain-name provided. "+
+			"The domain from the certificate will be used, and --domain-name will be ignored.\n\n")
+	}
+}
+
+// validateSSLCertificates performs comprehensive validation of SSL certificates.
+func validateSSLCertificates() error {
+	// Validate certificate files exist and are readable
+	if err := utils.ValidateCertificateFiles(sslCertPath, sslKeyPath); err != nil {
+		return fmt.Errorf("certificate validation failed: %w", err)
+	}
+
+	// Validate certificate and key match
+	if err := utils.ValidateCertificateKeyPair(sslCertPath, sslKeyPath); err != nil {
+		return fmt.Errorf("certificate and key validation failed: %w", err)
+	}
+
+	// Validate wildcard certificate
+	if err := utils.ValidateWildcardCertificate(sslCertPath); err != nil {
+		return fmt.Errorf("wildcard certificate validation failed: %w", err)
+	}
+
+	return nil
 }
 
 // configureConfigureFlags configures the flags for the configure command.
@@ -171,6 +263,35 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 			"Available parameters:\n"+
 			"- ui.port: Port for the catalog UI (default: random available port)\n"+
 			"- backend.port: Port for the catalog backend API (default: random available port)\n",
+	)
+
+	// SSL/TLS certificate configuration flags
+	cmd.Flags().StringVar(
+		&domainName,
+		"domain-name",
+		"",
+		"Custom domain name for self-signed certificates (optional).\n"+
+			"If not provided, uses wildcard DNS format: <service>.<ip>.nip.io\n"+
+			"Example: --domain-name example.com generates certs for *.example.com\n",
+	)
+
+	cmd.Flags().StringVar(
+		&sslCertPath,
+		"ssl-cert",
+		"",
+		"Path to user-provided SSL certificate (optional).\n"+
+			"Must be used together with --ssl-key.\n"+
+			"Certificate must contain wildcard SAN entry (e.g., *.example.com).\n"+
+			"Example: --ssl-cert /path/to/cert.pem\n",
+	)
+
+	cmd.Flags().StringVar(
+		&sslKeyPath,
+		"ssl-key",
+		"",
+		"Path to user-provided SSL private key (optional).\n"+
+			"Must be used together with --ssl-cert.\n"+
+			"Example: --ssl-key /path/to/key.pem\n",
 	)
 }
 

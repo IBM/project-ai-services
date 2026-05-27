@@ -25,7 +25,11 @@ type ConfigureOptions struct {
 	Runtime       types.RuntimeType
 	BaseDir       string
 	ArgParams     map[string]string
-	HttpsPort     int
+	// SSL/TLS certificate configuration
+	DomainName  string // Custom domain name for self-signed certificates
+	SSLCertPath string // Path to user-provided SSL certificate
+	SSLKeyPath  string // Path to user-provided SSL private key
+	HttpsPort   int
 }
 
 // Run executes the configure process for the catalog service.
@@ -53,7 +57,7 @@ func Run(opts ConfigureOptions) error {
 			return fmt.Errorf("failed to get auth file path: %w", err)
 		}
 
-		return catalogPodman.DeployCatalog(ctx, podmanURI, authFilePath, passwordHash, opts.BaseDir, opts.ArgParams, opts.HttpsPort)
+		return catalogPodman.DeployCatalog(ctx, podmanURI, authFilePath, passwordHash, opts.BaseDir, opts.ArgParams, opts.DomainName, opts.SSLCertPath, opts.SSLKeyPath, opts.HttpsPort)
 
 	case types.RuntimeTypeOpenShift:
 		return fmt.Errorf("openshift runtime is not yet supported for catalog configure")

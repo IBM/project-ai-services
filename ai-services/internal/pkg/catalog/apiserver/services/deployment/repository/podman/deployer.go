@@ -1201,6 +1201,7 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 			adminURL,
 			hostIP,
 			podName,
+			nil, // domainConfig - nil for default nip.io domains
 		); err != nil {
 			registrationErrors = append(registrationErrors, fmt.Errorf("pod %s: %w", podName, err))
 
