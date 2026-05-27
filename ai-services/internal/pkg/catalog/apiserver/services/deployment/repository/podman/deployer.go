@@ -20,6 +20,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -101,16 +102,13 @@ func (d *PodmanDeployer) ExecuteDeployment(
 		return fmt.Errorf("failed to download models: %w", err)
 	}
 
-	// Step 2: Use pre-allocated Spyre card pool from plan
-	pool := plan.SpyreCardPool
-
 	// Update application status to Deploying before starting deployment
 	deployMsg := "Deploying application"
 	d.updateStatusIgnoreError(ctx, plan.ApplicationID, models.ApplicationStatusDeploying, deployMsg)
 
-	// Step 3: Deploy components if any
+	// Step 2: Deploy components if any
 	if len(plan.Components) > 0 {
-		if err := d.deployComponents(plan, pool); err != nil {
+		if err := d.deployComponents(plan); err != nil {
 			d.handleDeploymentError(ctx, plan.ApplicationID, "Component deployment failed", err)
 
 			return fmt.Errorf("failed to deploy components: %w", err)
@@ -137,28 +135,16 @@ func (d *PodmanDeployer) ExecuteDeployment(
 // handleDeploymentError updates application status on error and logs any update failures.
 func (d *PodmanDeployer) handleDeploymentError(ctx context.Context, appID uuid.UUID, message string, err error) {
 	fullMessage := fmt.Sprintf("%s: %v", message, err)
-	if updateErr := d.updateApplicationStatus(ctx, appID, models.ApplicationStatusError, fullMessage); updateErr != nil {
+	if updateErr := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, appID, models.ApplicationStatusError, fullMessage); updateErr != nil {
 		logger.Errorf("Failed to update application status: %v\n", updateErr)
 	}
 }
 
 // updateStatusIgnoreError updates application status and logs any failures without returning error.
 func (d *PodmanDeployer) updateStatusIgnoreError(ctx context.Context, appID uuid.UUID, status models.ApplicationStatus, message string) {
-	if err := d.updateApplicationStatus(ctx, appID, status, message); err != nil {
+	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, appID, status, message); err != nil {
 		logger.Errorf("Failed to update application status: %v\n", err)
 	}
-}
-
-// updateApplicationStatus updates the application status and message in the database.
-func (d *PodmanDeployer) updateApplicationStatus(ctx context.Context, appID uuid.UUID, status models.ApplicationStatus, message string) error {
-	if err := d.appRepo.UpdateStatus(ctx, appID, status, message); err != nil {
-		logger.Errorf("Failed to update application status in database: %v", err)
-
-		return fmt.Errorf("failed to update application status: %w", err)
-	}
-	logger.Infof("Application %s status updated: %s - %s", appID, status, message)
-
-	return nil
 }
 
 // downloadModelsForDeployment downloads all models specified in component and service parameters.
@@ -192,13 +178,6 @@ func (d *PodmanDeployer) collectModelsFromPlan(plan *DeploymentPlan) map[string]
 		d.extractModelsFromParams(comp.Params, modelSet)
 	}
 
-	// Extract models from service params
-	for _, svc := range plan.Services {
-		if svc.Values != nil {
-			d.extractModelsFromParams(svc.Values, modelSet)
-		}
-	}
-
 	return modelSet
 }
 
@@ -230,10 +209,10 @@ func (d *PodmanDeployer) downloadModels(modelSet map[string]bool) error {
 
 // deployComponents deploys all components concurrently.
 // All components are treated as shared and deployed together.
-func (d *PodmanDeployer) deployComponents(plan *DeploymentPlan, pool *SpyreCardPool) error {
+func (d *PodmanDeployer) deployComponents(plan *DeploymentPlan) error {
 	// Deploy all components concurrently
 	logger.Infof("Deploying %d components concurrently...\n", len(plan.Components))
-	if err := d.deployComponentsConcurrently(plan.Components, pool, plan); err != nil {
+	if err := d.deployComponentsConcurrently(plan.Components, plan); err != nil {
 		return fmt.Errorf("failed to deploy components: %w", err)
 	}
 
@@ -243,7 +222,7 @@ func (d *PodmanDeployer) deployComponents(plan *DeploymentPlan, pool *SpyreCardP
 }
 
 // deployComponentsConcurrently deploys multiple components concurrently using goroutines.
-func (d *PodmanDeployer) deployComponentsConcurrently(components map[string]*ComponentPlan, pool *SpyreCardPool, plan *DeploymentPlan) error {
+func (d *PodmanDeployer) deployComponentsConcurrently(components map[string]*ComponentPlan, plan *DeploymentPlan) error {
 	if len(components) == 0 {
 		return nil
 	}
@@ -256,7 +235,7 @@ func (d *PodmanDeployer) deployComponentsConcurrently(components map[string]*Com
 		wg.Add(1)
 		go func(h string, c *ComponentPlan) {
 			defer wg.Done()
-			if err := d.deployComponent(h, c, pool, plan, &mu); err != nil {
+			if err := d.deployComponent(h, c, plan, &mu); err != nil {
 				errChan <- fmt.Errorf("failed to deploy component %s: %w", h, err)
 			}
 		}(hash, comp)
@@ -281,7 +260,7 @@ func (d *PodmanDeployer) deployComponentsConcurrently(components map[string]*Com
 }
 
 // deployComponent deploys a single component and updates its endpoint in the database.
-func (d *PodmanDeployer) deployComponent(hash string, comp *ComponentPlan, pool *SpyreCardPool, plan *DeploymentPlan, mu *sync.Mutex) error {
+func (d *PodmanDeployer) deployComponent(hash string, comp *ComponentPlan, plan *DeploymentPlan, mu *sync.Mutex) error {
 	logger.Infof("Deploying component %s (%s/%s)...\n", comp.ComponentType, comp.ProviderID, hash)
 
 	component, metadata, tmpls, err := d.loadComponentResources(comp)
@@ -291,7 +270,7 @@ func (d *PodmanDeployer) deployComponent(hash string, comp *ComponentPlan, pool 
 
 	logger.Infof("Component %s loaded: %s\n", component.ID, component.Name)
 
-	if err := d.deployComponentPods(comp, metadata, tmpls, comp.CatalogPath, pool); err != nil {
+	if err := d.deployComponentPods(comp, metadata, tmpls, comp.CatalogPath, plan); err != nil {
 		return fmt.Errorf("failed to deploy component pods: %w", err)
 	}
 
@@ -395,7 +374,7 @@ func (d *PodmanDeployer) deployComponentPods(
 	metadata *templates.AppMetadata,
 	tmpls map[string]*template.Template,
 	componentPath string,
-	pool *SpyreCardPool,
+	plan *DeploymentPlan,
 ) error {
 	// Use the loaded Values from the component plan (includes defaults from values.yaml + overrides)
 	values := comp.Values
@@ -418,7 +397,7 @@ func (d *PodmanDeployer) deployComponentPods(
 				}
 
 				// Pass componentEndpoints to collect endpoint info, use component type as ID
-				if err := d.deployComponentTemplate(podTemplateName, tmpls, pool, initialParams, componentEndpoints, comp.ComponentType); err != nil {
+				if err := d.deployComponentTemplate(podTemplateName, tmpls, plan, initialParams, componentEndpoints, comp.ComponentType); err != nil {
 					return fmt.Errorf("failed to deploy pod template %s: %w", podTemplateName, err)
 				}
 			}
@@ -437,7 +416,7 @@ func (d *PodmanDeployer) deployComponentPods(
 			}
 
 			// Pass componentEndpoints to collect endpoint info, use component type as ID
-			if err := d.deployComponentTemplate(templateName, tmpls, pool, initialParams, componentEndpoints, comp.ComponentType); err != nil {
+			if err := d.deployComponentTemplate(templateName, tmpls, plan, initialParams, componentEndpoints, comp.ComponentType); err != nil {
 				return fmt.Errorf("failed to deploy pod template %s: %w", templateName, err)
 			}
 		}
@@ -602,7 +581,7 @@ func (d *PodmanDeployer) deployServicePods(
 func (d *PodmanDeployer) deployComponentTemplate(
 	podTemplateName string,
 	tmpls map[string]*template.Template,
-	pool *SpyreCardPool,
+	plan *DeploymentPlan,
 	initialParams map[string]any,
 	serviceParams map[string]any,
 	componentID string,
@@ -630,7 +609,7 @@ func (d *PodmanDeployer) deployComponentTemplate(
 	}
 
 	// Get environment parameters and render final template
-	finalPodSpec, err := d.renderFinalPodTemplate(podTemplate, podTemplateName, initialParams, podSpec, pool)
+	finalPodSpec, err := d.renderFinalPodTemplate(podTemplate, podTemplateName, initialParams, podSpec, plan)
 	if err != nil {
 		return err
 	}
@@ -673,9 +652,9 @@ func (d *PodmanDeployer) renderFinalPodTemplate(
 	templateName string,
 	initialParams map[string]any,
 	podSpec *podmodels.PodSpec,
-	pool *SpyreCardPool,
+	plan *DeploymentPlan,
 ) (*podmodels.PodSpec, error) {
-	env, err := d.getEnvParamsForComponent(podSpec, pool)
+	env, err := d.getEnvParamsForComponent(podSpec, plan)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get env params: %w", err)
 	}
@@ -877,7 +856,7 @@ func (d *PodmanDeployer) fetchSpyreCardsFromPodAnnotations(annotations map[strin
 }
 
 // getEnvParamsForComponent returns environment parameters for a component including Spyre card PCI addresses.
-func (d *PodmanDeployer) getEnvParamsForComponent(podSpec *podmodels.PodSpec, pool *SpyreCardPool) (map[string]map[string]string, error) {
+func (d *PodmanDeployer) getEnvParamsForComponent(podSpec *podmodels.PodSpec, plan *DeploymentPlan) (map[string]map[string]string, error) {
 	env := make(map[string]map[string]string)
 
 	// Get container names from pod spec
@@ -885,7 +864,7 @@ func (d *PodmanDeployer) getEnvParamsForComponent(podSpec *podmodels.PodSpec, po
 		env[container.Name] = make(map[string]string)
 	}
 
-	if pool == nil {
+	if plan.SpyreCardPool == nil {
 		return env, nil
 	}
 
@@ -903,7 +882,7 @@ func (d *PodmanDeployer) getEnvParamsForComponent(podSpec *podmodels.PodSpec, po
 	for containerName, spyreCount := range spyreCardContainerMap {
 		if spyreCount != 0 {
 			// Allocate addresses from the pool (thread-safe)
-			allocatedAddresses, err := pool.Allocate(spyreCount)
+			allocatedAddresses, err := plan.SpyreCardPool.Allocate(spyreCount)
 			if err != nil {
 				return env, fmt.Errorf("failed to allocate Spyre cards for container %s: %w", containerName, err)
 			}

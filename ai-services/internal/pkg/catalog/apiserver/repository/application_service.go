@@ -15,6 +15,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
@@ -266,9 +267,7 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 
 	// Phase 5: Return 202 Accepted immediately with application ID
 	response := &apimodels.CreateApplicationResponse{
-		ID:      plan.ApplicationID.String(),
-		Status:  string(models.ApplicationStatusDownloading),
-		Message: "Application deployment initiated",
+		ID: plan.ApplicationID.String(),
 	}
 
 	return response, nil
@@ -286,7 +285,7 @@ func (s *ApplicationService) executeDeploymentAsync(plan *deployment.DeploymentP
 			// Attempt to update application status to Error
 			ctx := context.Background()
 			errMsg := fmt.Sprintf("Deployment panic: %v", r)
-			if updateErr := s.updateApplicationStatus(ctx, plan.ApplicationID.String(), models.ApplicationStatusError, errMsg); updateErr != nil {
+			if updateErr := utils.UpdateApplicationStatus(ctx, s.appRepo, plan.ApplicationID.String(), models.ApplicationStatusError, errMsg); updateErr != nil {
 				log.Printf("Failed to update application status after panic: %v", updateErr)
 			}
 		}
@@ -304,7 +303,7 @@ func (s *ApplicationService) executeDeploymentAsync(plan *deployment.DeploymentP
 		log.Printf("Deployment failed for application %s: %v", plan.ApplicationName, err)
 
 		// Update application status to Error
-		if updateErr := s.updateApplicationStatus(ctx, plan.ApplicationID.String(), models.ApplicationStatusError, err.Error()); updateErr != nil {
+		if updateErr := utils.UpdateApplicationStatus(ctx, s.appRepo, plan.ApplicationID.String(), models.ApplicationStatusError, err.Error()); updateErr != nil {
 			log.Printf("Failed to update application status to Error: %v", updateErr)
 		}
 
@@ -350,7 +349,7 @@ func (s *ApplicationService) insertApplicationRecord(
 		ID:             plan.ApplicationID,
 		Name:           plan.ApplicationName,
 		CatalogID:      plan.CatalogID,
-		DeploymentType: s.getDeploymentType(plan.IsArchitecture),
+		DeploymentType: utils.GetDeploymentType(plan.IsArchitecture),
 		Status:         models.ApplicationStatusDownloading,
 		Message:        "Initializing deployment",
 		CreatedBy:      createdBy,
@@ -443,37 +442,6 @@ func (s *ApplicationService) insertServiceDependencies(
 			return fmt.Errorf("failed to add service dependency: %w", err)
 		}
 	}
-
-	return nil
-}
-
-// getDeploymentType determines the deployment type based on whether it's an architecture.
-func (s *ApplicationService) getDeploymentType(isArchitecture bool) models.DeploymentType {
-	if isArchitecture {
-		return models.DeploymentTypeArchitectures
-	}
-
-	return models.DeploymentTypeServices
-}
-
-// updateApplicationStatus updates the status and message of an application.
-func (s *ApplicationService) updateApplicationStatus(ctx context.Context, appID string, status models.ApplicationStatus, message string) error {
-	// Parse the application ID
-	appUUID, err := uuid.Parse(appID)
-	if err != nil {
-		log.Printf("Failed to parse application ID %s: %v", appID, err)
-
-		return fmt.Errorf("invalid application ID: %w", err)
-	}
-
-	// Update the application status in the database
-	if err := s.appRepo.UpdateStatus(ctx, appUUID, status, message); err != nil {
-		log.Printf("Failed to update application %s status in database: %v", appID, err)
-
-		return fmt.Errorf("failed to update application status: %w", err)
-	}
-
-	log.Printf("Application %s status updated: %s - %s", appID, status, message)
 
 	return nil
 }

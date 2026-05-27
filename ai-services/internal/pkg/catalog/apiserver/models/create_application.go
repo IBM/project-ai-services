@@ -27,9 +27,7 @@ type Component struct {
 
 // CreateApplicationResponse represents the response after creating an application.
 type CreateApplicationResponse struct {
-	ID      string `json:"id"`
-	Status  string `json:"status"`
-	Message string `json:"message"`
+	ID string `json:"id"`
 }
 
 // Made with Bob
