@@ -18,6 +18,7 @@
     "watsonxApiKey": {
       "type": "string",
       "title": "WatsonX API Key",
+      "format": "password",
       "description": "WatsonX API Key for LiteLLM integration"
     },
     "watsonxProjectId": {
