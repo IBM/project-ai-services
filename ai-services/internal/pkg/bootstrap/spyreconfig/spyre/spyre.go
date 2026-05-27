@@ -639,8 +639,6 @@ func checkSELinuxVFIOPolicy() *check.Check {
 }
 
 // checkSELinuxPodmanSocketPolicy validates SELinux policy for Podman socket access.
-// This check always fails (returns false) when SELinux is enabled and Podman socket exists,
-// forcing the policy to be reinstalled on every run to ensure it's up to date.
 func checkSELinuxPodmanSocketPolicy() *check.Check {
 	selinuxCheck := check.NewCheck("SELinux Podman socket policy configuration")
 
@@ -670,7 +668,7 @@ func checkSELinuxPodmanSocketPolicy() *check.Check {
 	}
 
 	// Check if policy is installed (requires root/sudo)
-	exitCode, _, stderr, err := utils.ExecuteCommand("semodule", "-l")
+	exitCode, stdout, stderr, err := utils.ExecuteCommand("semodule", "-l")
 	if err != nil || exitCode != 0 {
 		// If permission denied, assume policy needs to be checked with sudo
 		// This is expected when running without sudo - skip check (pass)
@@ -685,9 +683,9 @@ func checkSELinuxPodmanSocketPolicy() *check.Check {
 		return selinuxCheck
 	}
 
-	// Always return false to force policy reinstallation on every run
-	// This ensures the policy is always up to date with the latest permissions
-	selinuxCheck.SetStatus(false)
+	// Check if policy is installed
+	policyInstalled := strings.Contains(stdout, "podman_socket_policy")
+	selinuxCheck.SetStatus(policyInstalled)
 
 	return selinuxCheck
 }

@@ -496,8 +496,6 @@ func (d *PodmanDeployer) mergeEndpointIntoService(comp *ComponentPlan, plan *Dep
 		return
 	}
 
-	logger.Infof("Service %s Values before merge: %v\n", serviceID, svc.Values)
-
 	if svc.Values == nil {
 		svc.Values = make(map[string]any)
 	}
