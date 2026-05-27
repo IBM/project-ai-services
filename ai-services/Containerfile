@@ -33,6 +33,10 @@ RUN CGO_ENABLED=0 go build \
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
+# Install pciutils for lspci command (required for Spyre card detection)
+RUN microdnf install -y pciutils && \
+    microdnf clean all
+
 COPY --from=builder /go/src/github.com/project-ai-services/ai-services/bin/ai-services /usr/bin/ai-services
 
 USER 1001

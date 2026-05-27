@@ -22,15 +22,19 @@ var (
 
 // ApplicationService provides business logic for application operations.
 type ApplicationService struct {
-	appRepo  dbrepo.ApplicationRepository
-	provider *catalog.CatalogProvider
+	appRepo               dbrepo.ApplicationRepository
+	serviceDependencyRepo dbrepo.ServiceDependencyRepository
+	componentRepo         dbrepo.ComponentRepository
+	provider              *catalog.CatalogProvider
 }
 
 // NewApplicationService creates a new application service.
-func NewApplicationService(appRepo dbrepo.ApplicationRepository, provider *catalog.CatalogProvider) *ApplicationService {
+func NewApplicationService(appRepo dbrepo.ApplicationRepository, serviceDependencyRepo dbrepo.ServiceDependencyRepository, componentRepo dbrepo.ComponentRepository, provider *catalog.CatalogProvider) *ApplicationService {
 	return &ApplicationService{
-		appRepo:  appRepo,
-		provider: provider,
+		appRepo:               appRepo,
+		serviceDependencyRepo: serviceDependencyRepo,
+		componentRepo:         componentRepo,
+		provider:              provider,
 	}
 }
 
@@ -123,9 +127,9 @@ func (s *ApplicationService) buildApplication(app models.Application) (types.App
 	return appData, nil
 }
 
-// buildServiceStatuses creates ServiceStatus array from models.Service slice.
-func (s *ApplicationService) buildServiceStatuses(services []models.Service) []types.ServiceStatus {
-	statuses := make([]types.ServiceStatus, 0, len(services))
+// buildServiceStatuses creates ApplicationService array from models.Service slice.
+func (s *ApplicationService) buildServiceStatuses(services []models.Service) []types.ApplicationService {
+	statuses := make([]types.ApplicationService, 0, len(services))
 
 	for _, svc := range services {
 		// Get service display name from catalog metadata
@@ -134,7 +138,7 @@ func (s *ApplicationService) buildServiceStatuses(services []models.Service) []t
 			serviceDisplayName = service.Name
 		}
 
-		statuses = append(statuses, types.ServiceStatus{
+		statuses = append(statuses, types.ApplicationService{
 			ID:     svc.ID.String(),
 			Type:   serviceDisplayName,
 			Status: string(svc.Status),
@@ -224,6 +228,107 @@ func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID
 func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest) (*apimodels.CreateApplicationResponse, error) {
 	// to be implemented
 	return nil, nil
+}
+
+// GetApplicationByID retrieves application details by ID including all services and components.
+func (s *ApplicationService) GetApplicationByID(ctx context.Context, id uuid.UUID) (*types.Application, error) {
+	// Fetch application from database
+	app, err := s.appRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrApplicationNotFound
+		}
+
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	// Build complete response with services and components
+	return s.buildGetApplicationResponse(ctx, app)
+}
+
+// buildGetApplicationResponse constructs the application response with type info and nested services.
+func (s *ApplicationService) buildGetApplicationResponse(ctx context.Context, app *models.Application) (*types.Application, error) {
+	// Get application type display name from catalog metadata
+	typeName, err := s.getApplicationType(app.CatalogID, app.DeploymentType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application type for catalog_id '%s': %w", app.CatalogID, err)
+	}
+	// Build base application response
+	appresponse := &types.Application{
+		ID:             app.ID.String(),
+		Name:           app.Name,
+		DeploymentType: string(app.DeploymentType),
+		Type:           typeName,
+		Status:         string(app.Status),
+		Message:        app.Message,
+		CreatedAt:      app.CreatedAt.Format(constants.RFC3339WithTimezone),
+		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
+	}
+
+	// Load services with their components if present
+	if len(app.Services) > 0 {
+		appresponse.Services, err = s.loadApplicationServices(ctx, app.Services)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get application services: %w", err)
+		}
+	}
+
+	return appresponse, nil
+}
+
+// loadApplicationServices transforms service models to API response objects with components.
+func (s *ApplicationService) loadApplicationServices(ctx context.Context, services []models.Service) ([]types.ApplicationService, error) {
+	appServices := []types.ApplicationService{}
+	for _, service := range services {
+		// Build application service response
+		appService := types.ApplicationService{
+			ID:        service.ID.String(),
+			Type:      service.CatalogID,
+			Endpoints: service.Endpoints,
+			Version:   service.Version,
+			CreatedAt: service.CreatedAt.Format(constants.RFC3339WithTimezone),
+			UpdatedAt: service.UpdatedAt.Format(constants.RFC3339WithTimezone),
+		}
+
+		// Get all dependencies for this service
+		serviceDependencies, err := s.serviceDependencyRepo.GetDependenciesByServiceID(ctx, service.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get application dependencies: %w", err)
+		}
+
+		// Load component details from dependencies
+		appService.Component, err = s.loadServiceComponents(ctx, serviceDependencies)
+		if err != nil {
+			return nil, err
+		}
+		appServices = append(appServices, appService)
+	}
+
+	return appServices, nil
+}
+
+// loadServiceComponents extracts component details from service dependencies.
+func (s *ApplicationService) loadServiceComponents(ctx context.Context, sd []models.ServiceDependency) ([]types.ServiceComponentResp, error) {
+	components := []types.ServiceComponentResp{}
+	for _, dependency := range sd {
+		// Only process component-type dependencies
+		if dependency.DependencyType == models.DependencyTypeComponent {
+			// Fetch component details from database
+			component, err := s.componentRepo.GetByID(ctx, dependency.DependencyID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get component: %w", err)
+			}
+
+			// Transform to response object
+			temp := types.ServiceComponentResp{
+				Type:     component.Type,
+				Provider: component.Provider,
+				Metadata: component.Metadata,
+			}
+			components = append(components, temp)
+		}
+	}
+
+	return components, nil
 }
 
 // Made with Bob

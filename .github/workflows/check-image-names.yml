@@ -16,6 +16,7 @@ on:
 jobs:
   check:
     name: Verify image names and versions are consistent
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

@@ -12,7 +12,8 @@ type Service struct {
 	AppID     uuid.UUID         `json:"app_id"`
 	CatalogID string            `json:"catalog_id"`
 	Status    ApplicationStatus `json:"status"`
-	Endpoints map[string]any    `json:"endpoints,omitempty"`
+	Endpoints []map[string]any  `json:"endpoints,omitempty"`
+	Component Component         `json:"component,omitempty"`
 	Version   string            `json:"version,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`

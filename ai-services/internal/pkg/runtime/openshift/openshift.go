@@ -16,6 +16,7 @@ import (
 	routeclient "github.com/openshift/client-go/route/clientset/versioned"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -427,4 +428,12 @@ func (kc *OpenshiftClient) ListSecrets(filters map[string][]string) ([]string, e
 	logger.Warningln("Not implemented")
 
 	return nil, nil
+}
+
+// GetSystemInfo returns empty system information for OpenShift runtime.
+// Resource information is managed by Kubernetes/OpenShift and not directly accessible.
+func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
+	return &models.SystemInfo{
+		Accelerators: make(map[string]*models.AcceleratorInfo),
+	}, nil
 }

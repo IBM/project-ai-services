@@ -75,7 +75,7 @@ definitions:
         type: string
       services:
         items:
-          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus'
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService'
         type: array
       status:
         type: string
@@ -92,6 +92,30 @@ definitions:
         type: array
       pagination:
         $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp'
+        type: array
+      created_at:
+        type: string
+      endpoints:
+        items:
+          additionalProperties: {}
+          type: object
+        type: array
+      id:
+        type: string
+      status:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+      version:
+        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture:
     properties:
@@ -246,6 +270,16 @@ definitions:
         description: '"service"'
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp:
+    properties:
+      metadata:
+        additionalProperties: {}
+        type: object
+      provider:
+        type: string
+      type:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceReference:
     properties:
       id:
@@ -253,15 +287,6 @@ definitions:
       optional:
         type: boolean
       version:
-        type: string
-    type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus:
-    properties:
-      id:
-        type: string
-      status:
-        type: string
-      type:
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceSummary:
@@ -279,10 +304,42 @@ definitions:
       name:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo:
+    properties:
+      available:
+        type: integer
+      total:
+        type: integer
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo:
+    properties:
+      available_cores:
+        type: number
+      total_cores:
+        type: integer
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo:
+    properties:
+      available_bytes:
+        type: integer
+      total_bytes:
+        type: integer
+    type: object
   internal_pkg_catalog_apiserver_handlers.ErrorResponse:
     properties:
       error:
         type: string
+    type: object
+  internal_pkg_catalog_apiserver_handlers.ResourcesResponse:
+    properties:
+      accelerators:
+        additionalProperties:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo'
+        type: object
+      cpu:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo'
+      memory:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo'
     type: object
   internal_pkg_catalog_apiserver_handlers.UpdateApplicationRequest:
     properties:
@@ -441,7 +498,8 @@ paths:
       tags:
       - Applications
     get:
-      description: Get detailed information about a specific application
+      description: Retrieves a single application by its unique identifier for the
+        authenticated user
       parameters:
       - description: Application ID
         in: path
@@ -452,18 +510,24 @@ paths:
       - application/json
       responses:
         "200":
-          description: Application details
+          description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "404":
           description: Application not found
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
       security:
       - BearerAuth: []
-      summary: Get application details
+      summary: Get application by ID
       tags:
       - Applications
     put:
@@ -773,6 +837,30 @@ paths:
       security:
       - BearerAuth: []
       summary: Get component provider parameters
+      tags:
+      - Catalog
+  /resources:
+    get:
+      description: Retrieves system resource information including CPU, memory, and
+        accelerator availability
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ResourcesResponse'
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get system resources
       tags:
       - Catalog
   /services:

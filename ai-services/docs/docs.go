@@ -169,14 +169,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get detailed information about a specific application",
+                "description": "Retrieves a single application by its unique identifier for the authenticated user",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Applications"
                 ],
-                "summary": "Get application details",
+                "summary": "Get application by ID",
                 "parameters": [
                     {
                         "type": "string",
@@ -188,17 +188,27 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Application details",
+                        "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Application not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     }
                 }
@@ -706,6 +716,43 @@ const docTemplate = `{
                 }
             }
         },
+        "/resources": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves system resource information including CPU, memory, and accelerator availability",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "Get system resources",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ResourcesResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/services": {
             "get": {
                 "security": [
@@ -962,7 +1009,7 @@ const docTemplate = `{
                 "services": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus"
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService"
                     }
                 },
                 "status": {
@@ -987,6 +1034,42 @@ const docTemplate = `{
                 },
                 "pagination": {
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService": {
+            "type": "object",
+            "properties": {
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "endpoints": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -1224,6 +1307,21 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp": {
+            "type": "object",
+            "properties": {
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceReference": {
             "type": "object",
             "properties": {
@@ -1234,20 +1332,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "type": {
                     "type": "string"
                 }
             }
@@ -1275,11 +1359,61 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo": {
+            "type": "object",
+            "properties": {
+                "available_cores": {
+                    "type": "number"
+                },
+                "total_cores": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo": {
+            "type": "object",
+            "properties": {
+                "available_bytes": {
+                    "type": "integer"
+                },
+                "total_bytes": {
+                    "type": "integer"
+                }
+            }
+        },
         "internal_pkg_catalog_apiserver_handlers.ErrorResponse": {
             "type": "object",
             "properties": {
                 "error": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_pkg_catalog_apiserver_handlers.ResourcesResponse": {
+            "type": "object",
+            "properties": {
+                "accelerators": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo"
+                    }
+                },
+                "cpu": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo"
+                },
+                "memory": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo"
                 }
             }
         },
