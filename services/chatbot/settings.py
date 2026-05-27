@@ -272,7 +272,7 @@ class RAGConfig(BaseSettings):
     @field_validator('conversational_rag_initial_system_message', mode='after')
     @classmethod
     def validate_conversational_rag_initial_system_message(cls, v, info):
-        """Validate conversational_rag_initial_system_message with warning fallback and LLM validation."""
+        """Validate conversational_rag_initial_system_message with language detection, warning fallback and LLM validation."""
         default_prompt = (
             "You are a helpful, conversational AI assistant. "
             "Engage naturally with users across multiple turns of conversation. "
@@ -309,6 +309,21 @@ class RAGConfig(BaseSettings):
                 "Truncating to 5000 characters."
             )
             v_stripped = v_stripped[:5000]
+        
+        # Language detection: Only allow English custom system prompts
+        try:
+            from common.lang_utils import detect_language, lang_en
+            detected_lang = detect_language(v_stripped, min_confidence=0.7)
+            if detected_lang != lang_en:
+                logger.warning(
+                    f"Custom system prompt detected as non-English language ({detected_lang}). "
+                    "Custom system prompts are only supported in English. "
+                    "Falling back to default system prompt."
+                )
+                return default_prompt
+            logger.info("Custom system prompt language validation passed (English detected)")
+        except Exception as e:
+            logger.warning(f"Error during language detection for custom system prompt: {e}. Proceeding with validation.")
         
         # LLM-based validation (if enabled)
         llm_validation_enabled = info.data.get('llm_validate_custom_system_prompt', True)
