@@ -178,6 +178,7 @@ func (d *PodmanDeployer) collectModelsFromPlan(plan *DeploymentPlan) map[string]
 		// do not download models for watsonx
 		if strings.EqualFold(comp.ProviderID, "watsonx") {
 			logger.Infof("Skipping model download for provider: %s\n", comp.ProviderID)
+
 			continue
 		}
 		d.extractModelsFromParams(comp.Params, modelSet)
