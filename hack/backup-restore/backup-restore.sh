@@ -108,9 +108,9 @@ EOF
 # Validate runtime parameter
 validate_runtime() {
     local RUNTIME="$1"
-    if [ "$RUNTIME" != "podman" ] && [ "$RUNTIME" != "openshift" ]; then
-        print_error "Invalid runtime: $RUNTIME"
-        echo "Valid runtimes: podman, openshift"
+    if [[ "$RUNTIME" != "podman" && "$RUNTIME" != "openshift" ]]; then
+        print_error "Error: Invalid runtime value '$RUNTIME'. Must be 'podman' or 'openshift'"
+        echo ""
         exit 1
     fi
 }
@@ -118,9 +118,8 @@ validate_runtime() {
 # Validate app name parameter
 validate_app_name() {
     local APP_NAME="$1"
-    if [ -z "$APP_NAME" ]; then
+    if [ -z "$APP_NAME" ] || [[ "$APP_NAME" == --* ]]; then
         print_error "App name is required"
-        echo "Usage: ./backup-restore.sh --runtime <runtime> <command> <target> <app-name> [options]"
         exit 1
     fi
 }
@@ -128,14 +127,18 @@ validate_app_name() {
 # Validate backup file parameter
 validate_backup_file() {
     local BACKUP_FILE="$1"
-    if [ -z "$BACKUP_FILE" ] || [ ! -f "$BACKUP_FILE" ]; then
+    if [ -z "$BACKUP_FILE" ] || [[ "$BACKUP_FILE" == --* ]]; then
+        print_error "Backup file is required"
+        exit 1
+    fi
+    if [ ! -f "$BACKUP_FILE" ]; then
         print_error "Backup file not found: $BACKUP_FILE"
         exit 1
     fi
 }
 
-# Validate and set OpenSearch password
-validate_opensearch_password() {
+# Check and set OpenSearch password if not set
+check_and_set_opensearch_password() {
     if [ -z "$OPENSEARCH_PASSWORD" ]; then
         # No password set - use default
         OPENSEARCH_PASSWORD="AiServices@12345"
@@ -150,12 +153,15 @@ print_header() {
     echo "============================================================"
 }
 
-# Find pod in OpenShift across all namespaces
+# Find pod in OpenShift using app name as namespace
 # Usage: find_pod_openshift <app-name> <component>
 # Returns: "namespace pod-name" or empty string if not found
 find_pod_openshift() {
     local APP_NAME="$1"
     local COMPONENT="$2"
+    
+    # Use app name as the namespace (convention: namespace = app-name)
+    local NAMESPACE="$APP_NAME"
     
     # For digitize, the actual label is "digitize-api"
     local SEARCH_COMPONENT="$COMPONENT"
@@ -163,13 +169,14 @@ find_pod_openshift() {
         SEARCH_COMPONENT="digitize-api"
     fi
     
-    local POD_INFO=$(oc get pods --all-namespaces -l "ai-services.io/application=${APP_NAME},ai-services.io/component=${SEARCH_COMPONENT}" -o jsonpath='{range .items[0]}{.metadata.namespace}{" "}{.metadata.name}{end}' 2>/dev/null)
+    # Search in the specific namespace instead of all namespaces
+    local POD_NAME=$(oc get pods -n "$NAMESPACE" -l "ai-services.io/application=${APP_NAME},ai-services.io/component=${SEARCH_COMPONENT}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
     
-    if [ -z "$POD_INFO" ]; then
+    if [ -z "$POD_NAME" ]; then
         return 1
     fi
     
-    echo "$POD_INFO"
+    echo "$NAMESPACE $POD_NAME"
     return 0
 }
 
@@ -182,21 +189,15 @@ parse_pod_info() {
     POD_NAME=$(echo "$POD_INFO" | awk '{print $2}')
 }
 
-# Dispatch to runtime-specific function
-# Usage: dispatch_runtime <runtime> <target> <operation> <args...>
-dispatch_runtime() {
+# Start the operation using runtime-specific function
+# Usage: start_operation <runtime> <target> <operation> <args...>
+start_operation() {
     local RUNTIME="$1"
     local TARGET="$2"
     local OPERATION="$3"
     shift 3
     
-    local FUNC_NAME="${OPERATION}_${TARGET}_"
-    if [ "$RUNTIME" = "openshift" ]; then
-        FUNC_NAME="${FUNC_NAME}openshift"
-    else
-        FUNC_NAME="${FUNC_NAME}podman"
-    fi
-    
+    local FUNC_NAME="${OPERATION}_${TARGET}_${RUNTIME}"    
     $FUNC_NAME "$@"
 }
 
@@ -217,10 +218,10 @@ print_operation_details() {
 }
 
 # Find and validate pod (combines find + validate + parse + display)
-# Usage: find_and_validate_pod <app-name> <component>
+# Usage: find_and_validate_pod_openshift <app-name> <component>
 # Sets global variables: NAMESPACE and POD_NAME
 # Returns: 0 if found, 1 if not found (for digitize, allows fallback)
-find_and_validate_pod() {
+find_and_validate_pod_openshift() {
     local APP_NAME="$1"
     local COMPONENT="$2"
     
@@ -236,7 +237,10 @@ find_and_validate_pod() {
         fi
         # For other components, exit with error
         print_error "${COMPONENT} pod not found for app: $APP_NAME"
-        print_error "Make sure the pod has labels: ai-services.io/application=${APP_NAME} and ai-services.io/component=${COMPONENT}"
+        print_error "Expected namespace: $APP_NAME (convention: namespace = app-name)"
+        print_error "Make sure:"
+        print_error "  1. Namespace '$APP_NAME' exists"
+        print_error "  2. Pod has labels: ai-services.io/application=${APP_NAME} and ai-services.io/component=${COMPONENT}"
         exit 1
     fi
     
@@ -421,37 +425,11 @@ install_tar_dependencies() {
     oc exec $POD_NAME -n $NAMESPACE -- microdnf install -y tar gzip >/dev/null 2>&1
 }
 
-# Export OpenSearch using sidecar container approach (Podman)
-export_opensearch_podman() {
-    local APP_NAME="$1"
-    local OUTPUT_FILE="$2"
-    
-    local CONTAINER_NAME=$(podman ps --filter "label=ai-services.io/application=${APP_NAME}" --filter "name=opensearch" --format "{{.Names}}" | head -n 1)
-
-    if [ -z "$CONTAINER_NAME" ]; then
-        print_error "OpenSearch container not found for app: $APP_NAME"
-        print_error "Make sure the container has label 'ai-services.io/application=${APP_NAME}' and name contains 'opensearch'"
-        exit 1
-    fi
-
-    print_header "OpenSearch Export (Sidecar Container Approach)"
-    echo "Container: $CONTAINER_NAME"
-    print_operation_details "export" "$APP_NAME" "$OUTPUT_FILE"
-
-    # Get the pod ID for the OpenSearch container
-    local POD_ID=$(podman inspect $CONTAINER_NAME --format '{{.Pod}}')
-    
-    if [ -z "$POD_ID" ] || [ "$POD_ID" = "<no value>" ]; then
-        print_error "Container is not part of a pod. Sidecar approach requires pod deployment."
-        print_error "Please ensure OpenSearch is deployed as part of a pod."
-        exit 1
-    fi
-    
-    print_info "Pod ID: $POD_ID"
-
-    # Create Python backup script
-    print_info "Creating backup script..."
-    cat > /tmp/backup.py << 'EOFPYTHON'
+# Create OpenSearch backup Python script
+# Usage: create_opensearch_backup_script <output-file>
+create_opensearch_backup_script() {
+    local SCRIPT_FILE="$1"
+    cat > "$SCRIPT_FILE" << 'EOFPYTHON'
 #!/usr/bin/env python3
 import json, os, sys, tarfile, tempfile
 from datetime import datetime
@@ -519,6 +497,116 @@ if __name__ == "__main__":
     exporter = BackupExporter(sys.argv[1], sys.argv[2])
     exporter.run()
 EOFPYTHON
+}
+
+# Create OpenSearch restore Python script
+# Usage: create_opensearch_restore_script <output-file>
+create_opensearch_restore_script() {
+    local SCRIPT_FILE="$1"
+    cat > "$SCRIPT_FILE" << 'EOFPYTHON'
+#!/usr/bin/env python3
+import json, os, sys, tarfile, tempfile
+from pathlib import Path
+from opensearchpy import OpenSearch, helpers
+
+class BackupRestorer:
+    def __init__(self, backup_file):
+        self.backup_file = backup_file
+        password = os.getenv("OPENSEARCH_PASSWORD")
+        if not password:
+            print("ERROR: OPENSEARCH_PASSWORD environment variable not set")
+            sys.exit(1)
+        self.client = OpenSearch(
+            hosts=[{"host": "localhost", "port": 9200}],
+            http_compress=True, use_ssl=True,
+            http_auth=("admin", password),
+            verify_certs=False, ssl_show_warn=False, timeout=30
+        )
+    
+    def restore_index(self, index_name, temp_dir):
+        print(f"  Restoring index: {index_name}")
+        os_dir = temp_dir / "backup" / "opensearch"
+        with open(os_dir / f"{index_name}_mapping.json") as f:
+            mapping = json.load(f)
+        with open(os_dir / f"{index_name}_settings.json") as f:
+            settings = json.load(f)
+        if self.client.indices.exists(index=index_name):
+            print(f"    Deleting existing index...")
+            self.client.indices.delete(index=index_name)
+        idx_settings = settings[index_name]["settings"]["index"]
+        for key in ["creation_date", "uuid", "version", "provided_name"]:
+            idx_settings.pop(key, None)
+        self.client.indices.create(
+            index=index_name,
+            body={"settings": {"index": idx_settings}, "mappings": mapping[index_name]["mappings"]}
+        )
+        with open(os_dir / f"{index_name}_data.json") as f:
+            documents = json.load(f)
+        if documents:
+            actions = [{"_index": index_name, "_id": doc["_id"], "_source": doc["_source"]} for doc in documents]
+            success, errors = helpers.bulk(self.client, actions, stats_only=False, raise_on_error=False, refresh=True)
+            print(f"    ✓ {success} documents restored")
+    
+    def run(self):
+        print("Connecting to OpenSearch...")
+        info = self.client.info()
+        print(f"✓ Connected to OpenSearch {info['version']['number']}")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            print("Extracting backup...")
+            with tarfile.open(self.backup_file, "r:gz") as tar:
+                tar.extractall(temp_path)
+            info_file = temp_path / "backup" / "backup_info.json"
+            if info_file.exists():
+                with open(info_file) as f:
+                    info = json.load(f)
+                    print(f"  Backup date: {info.get('backup_date')}")
+                    print(f"  App name: {info.get('app_name')}")
+            os_dir = temp_path / "backup" / "opensearch"
+            if os_dir.exists():
+                indices = [f.stem.replace("_data", "") for f in os_dir.glob("*_data.json")]
+                print(f"Found {len(indices)} indices to restore")
+                for idx in indices:
+                    self.restore_index(idx, temp_path)
+            print("✓ Restore completed successfully")
+
+if __name__ == "__main__":
+    restorer = BackupRestorer(sys.argv[1])
+    restorer.run()
+EOFPYTHON
+}
+
+# Export OpenSearch using sidecar container approach (Podman)
+export_opensearch_podman() {
+    local APP_NAME="$1"
+    local OUTPUT_FILE="$2"
+    
+    local CONTAINER_NAME=$(podman ps --filter "label=ai-services.io/application=${APP_NAME}" --filter "name=opensearch" --format "{{.Names}}" | head -n 1)
+
+    if [ -z "$CONTAINER_NAME" ]; then
+        print_error "OpenSearch container not found for app: $APP_NAME"
+        print_error "Make sure the container has label 'ai-services.io/application=${APP_NAME}' and name contains 'opensearch'"
+        exit 1
+    fi
+
+    print_header "OpenSearch Export (Sidecar Container Approach)"
+    echo "Container: $CONTAINER_NAME"
+    print_operation_details "export" "$APP_NAME" "$OUTPUT_FILE"
+
+    # Get the pod ID for the OpenSearch container
+    local POD_ID=$(podman inspect $CONTAINER_NAME --format '{{.Pod}}')
+    
+    if [ -z "$POD_ID" ] || [ "$POD_ID" = "<no value>" ]; then
+        print_error "Container is not part of a pod. Sidecar approach requires pod deployment."
+        print_error "Please ensure OpenSearch is deployed as part of a pod."
+        exit 1
+    fi
+    
+    print_info "Pod ID: $POD_ID"
+
+    # Create Python backup script using helper function
+    print_info "Creating backup script..."
+    create_opensearch_backup_script "/tmp/backup.py"
 
     # Use helper function to manage sidecar lifecycle
     manage_podman_sidecar "backup" "$POD_ID" "/tmp/backup.py" "$OUTPUT_FILE"
@@ -538,7 +626,7 @@ export_digitize_podman() {
     echo "Container cache path: /var/cache"
     print_operation_details "export" "$APP_NAME" "$OUTPUT_FILE"
 
-    local DIGITIZE_CONTAINER=$(podman ps --filter "label=ai-services.io/application=${APP_NAME}" --format "{{.Names}}" | grep -E "digitize.*(backend|server)" | head -n 1)
+    local DIGITIZE_CONTAINER=$(podman ps --filter "label=ai-services.io/application=${APP_NAME}" --format "{{.Names}}" | grep -Em1 "digitize.*(backend|server)")
 
     if [ -z "$DIGITIZE_CONTAINER" ]; then
         print_error "Digitize backend container not found for app: $APP_NAME"
@@ -614,79 +702,9 @@ import_opensearch_podman() {
     
     print_info "Pod ID: $POD_ID"
 
-    # Create restore script
+    # Create restore script using helper function
     print_info "Creating restore script..."
-    cat > /tmp/restore.py << 'EOFPYTHON'
-#!/usr/bin/env python3
-import json, os, sys, tarfile, tempfile
-from pathlib import Path
-from opensearchpy import OpenSearch, helpers
-
-class BackupRestorer:
-    def __init__(self, backup_file):
-        self.backup_file = backup_file
-        password = os.getenv("OPENSEARCH_PASSWORD")
-        if not password:
-            print("ERROR: OPENSEARCH_PASSWORD environment variable not set")
-            sys.exit(1)
-        self.client = OpenSearch(
-            hosts=[{"host": "localhost", "port": 9200}],
-            http_compress=True, use_ssl=True,
-            http_auth=("admin", password),
-            verify_certs=False, ssl_show_warn=False, timeout=30
-        )
-    
-    def restore_index(self, index_name, temp_dir):
-        print(f"  Restoring index: {index_name}")
-        os_dir = temp_dir / "backup" / "opensearch"
-        with open(os_dir / f"{index_name}_mapping.json") as f:
-            mapping = json.load(f)
-        with open(os_dir / f"{index_name}_settings.json") as f:
-            settings = json.load(f)
-        if self.client.indices.exists(index=index_name):
-            print(f"    Deleting existing index...")
-            self.client.indices.delete(index=index_name)
-        idx_settings = settings[index_name]["settings"]["index"]
-        for key in ["creation_date", "uuid", "version", "provided_name"]:
-            idx_settings.pop(key, None)
-        self.client.indices.create(
-            index=index_name,
-            body={"settings": {"index": idx_settings}, "mappings": mapping[index_name]["mappings"]}
-        )
-        with open(os_dir / f"{index_name}_data.json") as f:
-            documents = json.load(f)
-        if documents:
-            actions = [{"_index": index_name, "_id": doc["_id"], "_source": doc["_source"]} for doc in documents]
-            success, errors = helpers.bulk(self.client, actions, stats_only=False, raise_on_error=False, refresh=True)
-            print(f"    ✓ {success} documents restored")
-    
-    def run(self):
-        print("Connecting to OpenSearch...")
-        info = self.client.info()
-        print(f"✓ Connected to OpenSearch {info['version']['number']}")
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-            print("Extracting backup...")
-            with tarfile.open(self.backup_file, "r:gz") as tar:
-                tar.extractall(temp_path)
-            info_file = temp_path / "backup" / "backup_info.json"
-            if info_file.exists():
-                with open(info_file) as f:
-                    info = json.load(f)
-                    print(f"  Backup date: {info.get('backup_date')}")
-                    print(f"  App name: {info.get('app_name')}")
-            os_dir = temp_path / "backup" / "opensearch"
-            if os_dir.exists():
-                indices = [f.stem.replace("_data", "") for f in os_dir.glob("*_data.json")]
-                print(f"Found {len(indices)} indices to restore")
-                for idx in indices:
-                    self.restore_index(idx, temp_path)
-            print("✓ Restore completed successfully")
-
-if __name__ == "__main__":
-    restorer = BackupRestorer(sys.argv[1])
-    restorer.run()
-EOFPYTHON
+    create_opensearch_restore_script "/tmp/restore.py"
 
     # Use helper function to manage sidecar lifecycle
     manage_podman_sidecar "restore" "$POD_ID" "/tmp/restore.py" "$BACKUP_FILE"
@@ -718,7 +736,7 @@ import_digitize_podman() {
     # Restore to container - MIRROR the export strategy
     print_info "Restoring to digitize container..."
     
-    local DIGITIZE_CONTAINER=$(podman ps --filter "label=ai-services.io/application=${APP_NAME}" --format "{{.Names}}" | grep -E "digitize.*(backend|server)" | head -n 1)
+    local DIGITIZE_CONTAINER=$(podman ps --filter "label=ai-services.io/application=${APP_NAME}" --format "{{.Names}}" | grep -Em1 "digitize.*(backend|server)")
 
     if [ -z "$DIGITIZE_CONTAINER" ]; then
         print_error "Digitize backend container not found for app: $APP_NAME"
@@ -799,7 +817,7 @@ export_opensearch_openshift() {
     print_operation_details "export" "$APP_NAME" "$OUTPUT_FILE"
 
     # Find and validate OpenSearch pod
-    find_and_validate_pod "$APP_NAME" "vectordb"
+    find_and_validate_pod_openshift "$APP_NAME" "vectordb"
     local OPENSEARCH_POD="$POD_NAME"
     
     # Get OpenSearch service name
@@ -893,37 +911,32 @@ export_digitize_openshift() {
     print_operation_details "export" "$APP_NAME" "$OUTPUT_FILE"
 
     # Find and validate digitize pod
-    find_and_validate_pod "$APP_NAME" "digitize"
+    find_and_validate_pod_openshift "$APP_NAME" "digitize"
     local DIGITIZE_POD="$POD_NAME"
     
     # If pod not found by labels, try fallback strategies
     if [ -z "$DIGITIZE_POD" ]; then
         echo "  Searching for digitize pod with fallback strategies..."
         
-        # First, get the namespace from any pod with the app label
-        NAMESPACE=$(oc get pods --all-namespaces -l "ai-services.io/application=${APP_NAME}" -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null)
+        # Use app name as the namespace (convention: namespace = app-name)
+        NAMESPACE="$APP_NAME"
         
-        if [ -z "$NAMESPACE" ]; then
-            print_error "No pods found for app: $APP_NAME"
-            exit 1
-        fi
+        echo "  ✓ Using namespace: $NAMESPACE"
         
-        echo "  ✓ Found namespace: $NAMESPACE"
-        
-        # Strategy 1: By label in namespace
-        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -l "ai-services.io/component=digitize" -o name 2>/dev/null | head -n 1 | sed 's|pod/||')
+        # Strategy 1: By digitize label in namespace
+        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -l "ai-services.io/component=digitize" -o name 2>/dev/null | sed -n '1s|pod/||p')
     fi
     
     if [ -z "$DIGITIZE_POD" ]; then
         echo "  Label search failed, trying name pattern..."
         # Strategy 2: By name pattern with backend
-        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -i digitize | grep -i backend | head -n 1 | sed 's|pod/||')
+        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -im1 "digitize.*backend" | sed 's|pod/||')
     fi
     
     if [ -z "$DIGITIZE_POD" ]; then
         echo "  Backend pattern failed, trying any digitize pod..."
         # Strategy 3: Any pod with digitize in name
-        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -i digitize | head -n 1 | sed 's|pod/||')
+        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -im1 "digitize" | sed 's|pod/||')
     fi
     
     if [ -z "$DIGITIZE_POD" ]; then
@@ -935,9 +948,9 @@ export_digitize_openshift() {
 
     echo "  ✓ Found pod: $DIGITIZE_POD"
     
-    # Get PVC for digitize pod
-    print_info "Getting PVC for digitize pod..."
-    local PVC_NAME=$(oc get pod $DIGITIZE_POD -n $NAMESPACE -o jsonpath='{.spec.volumes[?(@.persistentVolumeClaim)].persistentVolumeClaim.claimName}' | head -n 1)
+    # Get PVC for digitize pod (batched operation - single oc call)
+    print_info "Getting pod details and PVC..."
+    local PVC_NAME=$(oc get pod $DIGITIZE_POD -n $NAMESPACE -o jsonpath='{.spec.volumes[?(@.persistentVolumeClaim)].persistentVolumeClaim.claimName}' 2>/dev/null | awk '{print $1}')
     
     if [ -z "$PVC_NAME" ]; then
         print_error "No PVC found for digitize pod"
@@ -992,7 +1005,7 @@ import_opensearch_openshift() {
     print_operation_details "import" "$APP_NAME" "$BACKUP_FILE"
 
     # Find and validate OpenSearch pod
-    find_and_validate_pod "$APP_NAME" "vectordb"
+    find_and_validate_pod_openshift "$APP_NAME" "vectordb"
     local OPENSEARCH_POD="$POD_NAME"
     
     # Get OpenSearch service name
@@ -1117,13 +1130,19 @@ import_digitize_openshift() {
     print_operation_details "import" "$APP_NAME" "$BACKUP_FILE"
 
     # Find and validate digitize pod
-    find_and_validate_pod "$APP_NAME" "digitize"
+    find_and_validate_pod_openshift "$APP_NAME" "digitize"
     local DIGITIZE_POD="$POD_NAME"
     
     if [ -z "$DIGITIZE_POD" ]; then
-        echo "  Backend pattern failed, trying any digitize pod..."
-        # Strategy 3: Any pod with digitize in name
-        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -i digitize | head -n 1 | sed 's|pod/||')
+        echo "  Searching for digitize pod with fallback strategies..."
+        
+        # Use app name as the namespace (convention: namespace = app-name)
+        NAMESPACE="$APP_NAME"
+        
+        echo "  ✓ Using namespace: $NAMESPACE"
+        
+        # Strategy: Any pod with digitize in name
+        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -im1 "digitize" | sed 's|pod/||')
     fi
     
     if [ -z "$DIGITIZE_POD" ]; then
@@ -1135,9 +1154,9 @@ import_digitize_openshift() {
 
     echo "  ✓ Found pod: $DIGITIZE_POD"
     
-    # Get PVC for digitize pod
-    print_info "Getting PVC for digitize pod..."
-    local PVC_NAME=$(oc get pod $DIGITIZE_POD -n $NAMESPACE -o jsonpath='{.spec.volumes[?(@.persistentVolumeClaim)].persistentVolumeClaim.claimName}' | head -n 1)
+    # Get PVC for digitize pod (batched operation - single oc call)
+    print_info "Getting pod details and PVC..."
+    local PVC_NAME=$(oc get pod $DIGITIZE_POD -n $NAMESPACE -o jsonpath='{.spec.volumes[?(@.persistentVolumeClaim)].persistentVolumeClaim.claimName}' 2>/dev/null | awk '{print $1}')
     
     if [ -z "$PVC_NAME" ]; then
         print_error "No PVC found for digitize pod"
@@ -1194,75 +1213,83 @@ main() {
         exit 1
     fi
     
-    # Validate OpenSearch password
-    validate_opensearch_password
-
-    # Parse --runtime parameter (must be at the end)
-    local RUNTIME=""
-    local LAST_ARG="${@: -1}"
-    local SECOND_LAST="${@: -2:1}"
-    
-    # Check if --runtime is at the end
-    if [ "$SECOND_LAST" = "--runtime" ]; then
-        RUNTIME="$LAST_ARG"
-        validate_runtime "$RUNTIME"
-        # Remove last two arguments (--runtime and its value)
-        set -- "${@:1:$(($#-2))}"
-    else
-        print_error "Missing --runtime parameter at the end"
-        echo "Usage: ./backup-restore.sh <command> <target> <app-name> [options] --runtime <podman|openshift>"
-        exit 1
-    fi
-    
-    # Now parse the command and validate parameters
+    # Parse the command first to check for sub-command
     local COMMAND="$1"
-    local TARGET="$2"
-    local APP_NAME="$3"
     
+    # Validate sub-commands first before runtime (to ensure help and version work)
     case "$COMMAND" in
-        export)
-            # Validate parameters for export
-            validate_app_name "$APP_NAME"
-            local OUTPUT_FILE="${4:-${TARGET}_backup_$(date +%Y%m%d_%H%M%S).tar.gz}"
-            
-            case "$TARGET" in
-                opensearch|digitize)
-                    dispatch_runtime "$RUNTIME" "$TARGET" "export" "$APP_NAME" "$OUTPUT_FILE"
-                    ;;
-                *)
-                    print_error "Unknown export target: $TARGET"
-                    echo "Valid targets: opensearch, digitize"
-                    exit 1
-                    ;;
-            esac
-            ;;
-        import)
-            # Validate parameters for import
-            validate_app_name "$APP_NAME"
-            local BACKUP_FILE="$4"
-            validate_backup_file "$BACKUP_FILE"
-            
-            case "$TARGET" in
-                opensearch|digitize)
-                    dispatch_runtime "$RUNTIME" "$TARGET" "import" "$APP_NAME" "$BACKUP_FILE"
-                    ;;
-                *)
-                    print_error "Unknown import target: $TARGET"
-                    echo "Valid targets: opensearch, digitize"
-                    exit 1
-                    ;;
-            esac
-            ;;
         help|--help|-h)
             show_usage
+            exit 0
             ;;
         version|--version|-v)
             echo "Backup/Restore Tool v${VERSION}"
+            exit 0
+            ;;
+        export|import)
+            # Check and set OpenSearch password
+            check_and_set_opensearch_password
+
+            # Validate runtime parameter
+            RUNTIME=$(echo "$@" | grep -oP '(?<=--runtime\s)\S+' || true)
+
+            # Validate runtime parameter is provided
+            if [[ -z "$RUNTIME" ]]; then
+                print_error "--runtime parameter is mandatory"
+                echo ""
+                exit 1
+            fi
+
+            # Validate runtime parameter value
+            validate_runtime "$RUNTIME"
+            
+            # Now parse remaining parameters
+            local TARGET="$2"
+            local APP_NAME="$3"
+            
+            # Validate target parameter first
+            if [ -z "$TARGET" ] || [[ "$TARGET" == --* ]]; then
+                print_error "Target is required"
+                echo "Valid targets: opensearch, digitize"
+                exit 1
+            fi
+            
+            # Validate target value
+            case "$TARGET" in
+                opensearch|digitize)
+                    # Valid target, continue
+                    ;;
+                *)
+                    print_error "Unknown target: $TARGET"
+                    echo "Valid targets: opensearch, digitize"
+                    exit 1
+                    ;;
+            esac
+            
+            # Validate app name parameter
+            validate_app_name "$APP_NAME"
+            
+            # Execute command-specific operations
+            case "$COMMAND" in
+                export)
+                    # Check if $4 is provided and is not a flag (doesn't start with --)
+                    if [[ -n "$4" && "$4" != --* ]]; then
+                        local OUTPUT_FILE="$4"
+                    else
+                        local OUTPUT_FILE="${TARGET}_backup_$(date +%Y%m%d_%H%M%S).tar.gz"
+                    fi
+                    start_operation "$RUNTIME" "$TARGET" "export" "$APP_NAME" "$OUTPUT_FILE"
+                    ;;
+                import)
+                    local BACKUP_FILE="$4"
+                    validate_backup_file "$BACKUP_FILE"
+                    start_operation "$RUNTIME" "$TARGET" "import" "$APP_NAME" "$BACKUP_FILE"
+                    ;;
+            esac
             ;;
         *)
-            print_error "Unknown command: $1"
+            print_error "Unknown command: $COMMAND"
             echo ""
-            show_usage
             exit 1
             ;;
     esac
