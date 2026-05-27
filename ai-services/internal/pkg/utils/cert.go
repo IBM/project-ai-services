@@ -345,6 +345,7 @@ func loadCertificatesIntoCaddy(certPath, keyPath, adminURL string) error {
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
+
 		return fmt.Errorf("caddy returned error (status %d): %s", resp.StatusCode, string(body))
 	}
 

@@ -182,6 +182,7 @@ func extractCertDomainIfProvided(sslCertPath, sslKeyPath string, s *spinner.Spin
 	certDomain, err := utils.ExtractDomainFromCertificate(sslCertPath)
 	if err != nil {
 		s.Fail("failed to extract domain from certificate")
+
 		return "", fmt.Errorf("failed to extract domain from certificate: %w", err)
 	}
 
@@ -195,6 +196,7 @@ func loadAndCheckCatalogTemplates(rt *podman.PodmanClient, argParams map[string]
 	tp, appMetadata, tmpls, err := loadCatalogTemplates(s)
 	if err != nil {
 		s.Fail("failed to load catalog templates")
+
 		return nil, nil, nil, nil, fmt.Errorf("failed to load catalog templates: %w", err)
 	}
 
@@ -202,6 +204,7 @@ func loadAndCheckCatalogTemplates(rt *podman.PodmanClient, argParams map[string]
 	isDeployed, existingResources, err := checkCatalogStatus(rt, tp, tmpls, argParams)
 	if err != nil {
 		s.Fail("failed to check existing resources")
+
 		return nil, nil, nil, nil, fmt.Errorf("failed to check existing resources: %w", err)
 	}
 
@@ -234,11 +237,13 @@ func deployCatalogService(rt *podman.PodmanClient, tp templates.Template, tmpls 
 	values, err := prepareCatalogValues(tp, podmanURI, authFilePath, passwordHash, argParams)
 	if err != nil {
 		s.Fail("failed to load values")
+
 		return fmt.Errorf("failed to load values: %w", err)
 	}
 
 	if err := generateCaddyfile(baseDir, values); err != nil {
 		s.Fail("failed to generate Caddyfile")
+
 		return fmt.Errorf("failed to generate Caddyfile: %w", err)
 	}
 
@@ -618,6 +623,7 @@ func registerCatalogRoutes(rt *podman.PodmanClient, tp templates.Template, appTe
 
 	if len(routeInfos) == 0 {
 		logger.Infof("No templates found with routes annotation, skipping route registration\n")
+
 		return nil, "", nil
 	}
 
@@ -688,6 +694,7 @@ func registerRoutesForPods(rt *podman.PodmanClient, routeInfos []TemplateRouteIn
 		)
 		if err != nil {
 			registrationErrors = append(registrationErrors, fmt.Errorf("pod %s: %w", info.PodName, err))
+
 			continue
 		}
 
