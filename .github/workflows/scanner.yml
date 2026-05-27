@@ -45,7 +45,7 @@ env:
   ICR_NAMESPACE: ai-services-cicd
   TRIVY_SBOM_FILE: trivy.json
   PARLAY_SBOM_FILE: parlay.json
-  PARLAY_VERSION: v0.9.0
+  PARLAY_VERSION: v0.11.0
 
 jobs:
   cves:
