@@ -31,6 +31,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	k8syaml "sigs.k8s.io/yaml"
 )
 
@@ -243,6 +244,9 @@ func (d *PodmanDeployer) pullImagesForDeployment(plan *DeploymentPlan) error {
 // collectImagesFromPlan collects all unique container images from the deployment plan.
 func (d *PodmanDeployer) collectImagesFromPlan(plan *DeploymentPlan) map[string]bool {
 	imageSet := make(map[string]bool)
+
+	// Include tool image which is used for all housekeeping tasks
+	imageSet[vars.ToolImage] = true
 
 	// Extract images from component templates
 	for _, comp := range plan.Components {
