@@ -455,3 +455,14 @@ func ValidateBaseDir(baseDir string) (string, error) {
 
 	return baseDir, nil
 }
+
+func CreateDir(path string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		err := os.MkdirAll(path, constants.DirPerm)
+		if err != nil {
+			return fmt.Errorf("failed to create target directory: %w", err)
+		}
+	}
+
+	return nil
+}
