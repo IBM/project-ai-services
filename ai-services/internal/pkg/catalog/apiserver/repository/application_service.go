@@ -591,7 +591,7 @@ func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID
 // performDeletion carries out the async cascade deletion for an application.
 // When force is true, orphaned component records are also deleted.
 //
-//nolint:cyclop
+//nolint:cyclop,gocognit,nestif
 func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, force bool) {
 	serviceIDs := make(map[uuid.UUID]bool, len(services))
 	for _, svc := range services {

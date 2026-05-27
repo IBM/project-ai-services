@@ -254,8 +254,8 @@ func (h *ApplicationHandler) GetApplicationByID(c *gin.Context) {
 //	@Tags			Applications
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id		path		string						true	"Application ID (UUID)"
-//	@Param			force	query		bool						false	"When true, also deletes orphaned component records"
+//	@Param			id		path		string	true	"Application ID (UUID)"
+//	@Param			force	query		bool	false	"When true, also deletes orphaned component records"
 //	@Success		202		{object}	repository.DeleteApplicationResponse
 //	@Failure		400		{object}	ErrorResponse	"Invalid application ID"
 //	@Failure		401		{object}	ErrorResponse	"Unauthorized"
