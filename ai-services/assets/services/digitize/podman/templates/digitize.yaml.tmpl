@@ -65,7 +65,7 @@ spec:
           memory: "50Gi"
       env:
         - name: POSTGRES_HOST
-          value: "postgres-{{ .InstanceSlug }}"
+          value: "digitize-db-{{ .InstanceSlug }}"
         - name: POSTGRES_PORT
           value: "5432"
         - name: POSTGRES_DB

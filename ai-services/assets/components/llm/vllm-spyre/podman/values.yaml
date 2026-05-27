@@ -1,3 +1,6 @@
 image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.4.0
 model: ""
 apiKey: ""
+maxNumBatchedTokens: 26208
+maxModelLen: 26208
+maxBatchSize: 32

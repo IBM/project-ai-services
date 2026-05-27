@@ -3,3 +3,6 @@ model: "ibm/granite-4-h-small"
 watsonxApiKey: ""
 watsonxProjectId: ""
 watsonxUrl: ""
+maxNumBatchedTokens: 26208
+maxModelLen: 26208
+maxBatchSize: 32
