@@ -6,6 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import digitize.app as digitize_app
+import digitize.db_operations as db_ops
+import digitize.db.connection as db_conn
 from digitize.models import JobStatus, OperationType, OutputFormat
 
 
@@ -35,15 +37,25 @@ def digitize_test_client(monkeypatch, tmp_path):
     monkeypatch.setattr(digitize_app.dg_util, "generate_uuid", Mock(return_value="job-123"))
     monkeypatch.setattr(digitize_app.dg_util, "stage_upload_files", AsyncMock())
     monkeypatch.setattr(digitize_app.dg_util, "initialize_job_state", Mock(return_value={"sample.pdf": "doc-1"}))
-    monkeypatch.setattr(digitize_app.dg_util, "get_all_jobs", Mock(return_value=([], 0)))
-    monkeypatch.setattr(digitize_app.dg_util, "get_job", Mock())
-    monkeypatch.setattr(digitize_app.dg_util, "get_all_documents_paginated", Mock(return_value=([], 0)))
-    monkeypatch.setattr(digitize_app.dg_util, "get_document", Mock())
+    monkeypatch.setattr(db_ops, "get_all_jobs", Mock(return_value=([], 0)))
+    monkeypatch.setattr(db_ops, "get_job", Mock())
+    monkeypatch.setattr(db_ops, "get_all_documents_paginated", Mock(return_value=([], 0)))
+    monkeypatch.setattr(db_ops, "get_document", Mock())
     monkeypatch.setattr(digitize_app.dg_util, "get_document_content", Mock())
     monkeypatch.setattr(digitize_app.dg_util, "is_document_in_active_job", Mock(return_value=False))
     monkeypatch.setattr(digitize_app.dg_util, "delete_document_files", Mock())
     monkeypatch.setattr(digitize_app, "reset_db", Mock())
     monkeypatch.setattr(digitize_app, "configure_uvicorn_logging", Mock())
+
+    # Mock database engine to prevent DatabaseStatusManager from failing
+    mock_engine = Mock()
+    monkeypatch.setattr(db_conn, "engine", mock_engine)
+
+    # Mock get_status_manager to return a mock status manager
+    mock_status_manager = Mock()
+    mock_status_manager.update_doc_metadata = Mock()
+    mock_status_manager.update_job_progress = Mock()
+    monkeypatch.setattr(db_ops, "get_status_manager", Mock(return_value=mock_status_manager))
 
     return TestClient(digitize_app.app)
 
