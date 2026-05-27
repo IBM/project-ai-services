@@ -6,12 +6,16 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	texttemplate "text/template"
 
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -496,6 +500,276 @@ func (p *CatalogProvider) ValidateDependencies(serviceIDs []string) error {
 	}
 
 	return nil
+}
+
+// LoadServiceValues loads the values.yaml for a service with optional parameter overrides.
+// Returns a map of values that can be used for template rendering.
+func (p *CatalogProvider) LoadServiceValues(serviceID string, argParams map[string]string) (map[string]any, error) {
+	// Verify service exists and get its path from catalog
+	_, err := p.LoadService(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("service not found: %w", err)
+	}
+
+	// Get service path from catalog (uses cached path from metadata loading)
+	servicePath, err := p.GetCatalogItemPath(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service path: %w", err)
+	}
+
+	// Get runtime
+	runtime := vars.RuntimeFactory.GetRuntimeType()
+	runtimeStr := string(runtime)
+
+	// Read values.yaml from the catalog path
+	valuesPath := filepath.Join(servicePath, runtimeStr, "values.yaml")
+	valuesData, err := assets.CatalogFS.ReadFile(valuesPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read values.yaml at %s: %w", valuesPath, err)
+	}
+
+	// Parse values
+	values := make(map[string]any)
+	if err := yaml.Unmarshal(valuesData, &values); err != nil {
+		return nil, fmt.Errorf("failed to parse values.yaml: %w", err)
+	}
+
+	// Apply argParams overrides if provided
+	for key, val := range argParams {
+		utils.SetNestedValue(values, key, val)
+	}
+
+	return values, nil
+}
+
+// LoadComponentValues loads the values.yaml for a component with optional parameter overrides.
+// Returns a map of values that can be used for template rendering.
+func (p *CatalogProvider) LoadComponentValues(componentType, providerID string, argParams map[string]string) (map[string]any, error) {
+	// Verify component exists and get its path from catalog
+	_, err := p.LoadComponent(componentType, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("component not found: %w", err)
+	}
+
+	// Get component path from catalog (uses cached path from metadata loading)
+	// The catalog stores components with key "<component_type>/<id>"
+	componentKey := fmt.Sprintf("%s/%s", componentType, providerID)
+	componentPath, err := p.GetCatalogItemPath(componentKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get component path: %w", err)
+	}
+
+	// Get runtime
+	runtime := vars.RuntimeFactory.GetRuntimeType()
+	runtimeStr := string(runtime)
+
+	// Read values.yaml from the catalog path
+	valuesPath := filepath.Join(componentPath, runtimeStr, "values.yaml")
+	valuesData, err := assets.CatalogFS.ReadFile(valuesPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read values.yaml at %s: %w", valuesPath, err)
+	}
+
+	// Parse values
+	values := make(map[string]any)
+	if err := yaml.Unmarshal(valuesData, &values); err != nil {
+		return nil, fmt.Errorf("failed to parse values.yaml: %w", err)
+	}
+
+	// Apply argParams overrides if provided
+	for key, val := range argParams {
+		utils.SetNestedValue(values, key, val)
+	}
+
+	return values, nil
+}
+
+// LoadComponentRuntimeMetadata loads runtime-specific metadata for a component.
+// This includes PodTemplateExecutions and other runtime configuration.
+func (p *CatalogProvider) LoadComponentRuntimeMetadata(componentType, providerID string) (*clitemplates.AppMetadata, error) {
+	// Get component path from catalog
+	componentKey := fmt.Sprintf("%s/%s", componentType, providerID)
+	componentPath, err := p.GetCatalogItemPath(componentKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get component path: %w", err)
+	}
+
+	// Get runtime
+	runtime := vars.RuntimeFactory.GetRuntimeType()
+	runtimeStr := string(runtime)
+
+	// Build catalog path with runtime
+	catalogPath := filepath.Join(componentPath, runtimeStr)
+
+	// Load metadata.yaml from runtime directory
+	metadataPath := filepath.Join(catalogPath, "metadata.yaml")
+	metadataData, err := assets.CatalogFS.ReadFile(metadataPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read runtime metadata %s: %w", metadataPath, err)
+	}
+
+	var metadata clitemplates.AppMetadata
+	if err := yaml.Unmarshal(metadataData, &metadata); err != nil {
+		return nil, fmt.Errorf("failed to parse runtime metadata: %w", err)
+	}
+
+	return &metadata, nil
+}
+
+// LoadComponentTemplates loads all pod templates for a component.
+// Returns a map of template name to parsed template.
+func (p *CatalogProvider) LoadComponentTemplates(componentType, providerID string) (map[string]*texttemplate.Template, error) {
+	// Get component path from catalog
+	componentKey := fmt.Sprintf("%s/%s", componentType, providerID)
+	componentPath, err := p.GetCatalogItemPath(componentKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get component path: %w", err)
+	}
+
+	// Get runtime
+	runtime := vars.RuntimeFactory.GetRuntimeType()
+	runtimeStr := string(runtime)
+
+	// Build catalog path with runtime
+	catalogPath := filepath.Join(componentPath, runtimeStr, "templates")
+
+	// Load all template files
+	templates := make(map[string]*texttemplate.Template)
+
+	err = fs.WalkDir(&assets.CatalogFS, catalogPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		// Only process .tmpl and .yaml.tmpl files
+		if !strings.HasSuffix(path, ".tmpl") {
+			return nil
+		}
+
+		// Read template file
+		templateData, err := assets.CatalogFS.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read template %s: %w", path, err)
+		}
+
+		// Parse template
+		templateName := filepath.Base(path)
+		tmpl, err := texttemplate.New(templateName).Parse(string(templateData))
+		if err != nil {
+			return fmt.Errorf("failed to parse template %s: %w", templateName, err)
+		}
+
+		templates[templateName] = tmpl
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to load component templates: %w", err)
+	}
+
+	if len(templates) == 0 {
+		return nil, fmt.Errorf("no templates found in %s", catalogPath)
+	}
+
+	return templates, nil
+}
+
+// LoadServiceRuntimeMetadata loads runtime-specific metadata for a service.
+// This includes PodTemplateExecutions and other runtime configuration.
+func (p *CatalogProvider) LoadServiceRuntimeMetadata(serviceID string) (*clitemplates.AppMetadata, error) {
+	// Get service path from catalog
+	servicePath, err := p.GetCatalogItemPath(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service path: %w", err)
+	}
+
+	// Get runtime
+	runtime := vars.RuntimeFactory.GetRuntimeType()
+	runtimeStr := string(runtime)
+
+	// Build catalog path with runtime
+	catalogPath := filepath.Join(servicePath, runtimeStr)
+
+	// Load metadata.yaml from runtime directory
+	metadataPath := filepath.Join(catalogPath, "metadata.yaml")
+	metadataData, err := assets.CatalogFS.ReadFile(metadataPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read runtime metadata %s: %w", metadataPath, err)
+	}
+
+	var metadata clitemplates.AppMetadata
+	if err := yaml.Unmarshal(metadataData, &metadata); err != nil {
+		return nil, fmt.Errorf("failed to parse runtime metadata: %w", err)
+	}
+
+	return &metadata, nil
+}
+
+// LoadServiceTemplates loads all pod templates for a service.
+// Returns a map of template name to parsed template.
+func (p *CatalogProvider) LoadServiceTemplates(serviceID string) (map[string]*texttemplate.Template, error) {
+	// Get service path from catalog
+	servicePath, err := p.GetCatalogItemPath(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service path: %w", err)
+	}
+
+	// Get runtime
+	runtime := vars.RuntimeFactory.GetRuntimeType()
+	runtimeStr := string(runtime)
+
+	// Build catalog path with runtime
+	catalogPath := filepath.Join(servicePath, runtimeStr, "templates")
+
+	// Load all template files
+	templates := make(map[string]*texttemplate.Template)
+
+	err = fs.WalkDir(&assets.CatalogFS, catalogPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		// Only process .tmpl and .yaml.tmpl files
+		if !strings.HasSuffix(path, ".tmpl") {
+			return nil
+		}
+
+		// Read template file
+		templateData, err := assets.CatalogFS.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read template %s: %w", path, err)
+		}
+
+		// Parse template
+		templateName := filepath.Base(path)
+		tmpl, err := texttemplate.New(templateName).Parse(string(templateData))
+		if err != nil {
+			return fmt.Errorf("failed to parse template %s: %w", templateName, err)
+		}
+
+		templates[templateName] = tmpl
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to load service templates: %w", err)
+	}
+
+	if len(templates) == 0 {
+		return nil, fmt.Errorf("no templates found in %s", catalogPath)
+	}
+
+	return templates, nil
 }
 
 // Made with Bob

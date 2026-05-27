@@ -1,11 +1,9 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "{{ .AppName }}--summarize-api"
+  name: "summarize-api-{{ .InstanceSlug }}"
   labels:
-    ai-services.io/application: "{{ .AppName }}"
-    ai-services.io/template: "{{ .AppTemplateName }}"
-    ai-services.io/version: "{{ .Version }}"
+  ai-services.io/template: "{{ .TemplateID }}"
   annotations:
     ai-services.io/ports: "{{ or .Values.summarize.port }}:6000"
 spec:
@@ -16,7 +14,7 @@ spec:
         - "/var/venv/bin/python"
         - "-m"
         - "uvicorn"
-        - "app:app"
+        - "summarize.app:app"
         - "--host"
         - "0.0.0.0"
         - "--port"
@@ -29,9 +27,9 @@ spec:
         - name: PORT
           value: "6000"
         - name: LLM_ENDPOINT
-          value: "http://{{ .AppName  }}--instruct:8000"
+          value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}"
         - name: LLM_MODEL
-          value: "ibm-granite/granite-3.3-8b-instruct"
+          value: "{{ .Values.llm.model }}"
         - name: LOG_LEVEL
           value: "{{ .Values.summarize.log_level}}"
       resources:

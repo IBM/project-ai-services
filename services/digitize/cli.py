@@ -30,7 +30,7 @@ if command_args.debug:
 set_log_level(log_level)
 
 from digitize.digitize_utils import generate_uuid, initialize_job_state, has_active_jobs
-from common.misc_utils import get_logger, validate_pdf_file
+from common.misc_utils import get_logger, validate_document_file
 from digitize.models import OperationType, OutputFormat
 from digitize.ingest import ingest
 from digitize.cleanup import reset_db
@@ -80,7 +80,7 @@ def main():
                 return
 
             try:
-                validate_pdf_file(file_path.name, content)
+                validate_document_file(file_path.name, content)
                 filenames.append(file_path.name)
             except ValueError as e:
                 logger.error(f"File validation failed: {e}")

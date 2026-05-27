@@ -5,7 +5,7 @@ Provides ORM models, database configuration, and migration utilities.
 """
 
 from digitize.db.models import Base, Job, Document
-from digitize.db.database import (
+from digitize.db.connection import (
     engine,
     SessionLocal,
     ScopedSession,

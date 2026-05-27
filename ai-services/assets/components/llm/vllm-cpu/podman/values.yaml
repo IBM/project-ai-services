@@ -1,4 +1,3 @@
-instruct:
-  image: icr.io/ppc64le-oss/vllm-ppc64le:0.18.0
-  model: ""
-  apiKey: ""
+image: icr.io/ppc64le-oss/vllm-ppc64le:0.18.0
+model: ""
+apiKey: ""

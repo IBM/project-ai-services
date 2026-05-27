@@ -1,5 +1,3 @@
-instruct:
-  # @hidden
-  image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.4.0
-  model: ""
-  apiKey: ""
+image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.4.0
+model: ""
+apiKey: ""

@@ -1,3 +1,2 @@
-embedding:
-  image: icr.io/ppc64le-oss/vllm-ppc64le:0.18.0
-  model: ""
+image: icr.io/ppc64le-oss/vllm-ppc64le:0.18.0
+model: ""

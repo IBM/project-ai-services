@@ -6,6 +6,9 @@ on:
       path:
         required: false
         type: string
+      service:
+        required: false
+        type: string
       # Set skip-image-build to true, to scan the latest image from the registry else set to false for building the image and scanning it
       skip-image-build:
         required: false
@@ -56,14 +59,14 @@ jobs:
         if: ${{ !inputs.skip-image-build }}
         working-directory: ${{ inputs.path }}
         run: |
-          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+          make build SERVICE=${{ inputs.service }} REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
 
       - name: Pull latest image Tag
         if: ${{ inputs.skip-image-build }}
         working-directory: ${{ inputs.path }}
         id: image-tag
         run: |
-          TAG_VALUE=$(make image-tag)
+          TAG_VALUE=$(make image-tag SERVICE=${{ inputs.service }})
           IMAGE_NAME=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}/${{ inputs.image }}:${TAG_VALUE}
           podman pull --creds ${{ secrets.ICR_USERNAME }}:${{ secrets.ICR_APIKEY }} $IMAGE_NAME
 
@@ -94,13 +97,13 @@ jobs:
         if: ${{ !inputs.skip-image-build }}
         working-directory: ${{ inputs.path }}
         run: |
-          make build REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+          make build SERVICE=${{ inputs.service }} REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
       
       - name: Pull latest image tag
         if: ${{ inputs.skip-image-build && inputs.skip-code-license-scan }}
         working-directory: ${{ inputs.path }}
         run: |
-          TAG_VALUE=$(make image-tag)
+          TAG_VALUE=$(make image-tag SERVICE=${{ inputs.service }})
           IMAGE_NAME=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}/${{ inputs.image }}:${TAG_VALUE}
           podman pull --creds ${{ secrets.ICR_USERNAME }}:${{ secrets.ICR_APIKEY }} $IMAGE_NAME
 

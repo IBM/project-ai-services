@@ -1,13 +1,13 @@
-FROM icr.io/ai-services-cicd/services-common:v0.0.3
+FROM icr.io/ai-services-cicd/service-base:v0.0.28
 
 WORKDIR /opt/services/summarize
 
 ENV PYTHONPATH=/opt/services
 
-COPY requirements.txt .
-RUN source /var/venv/bin/activate && pip install -r requirements.txt && pip cache purge
+COPY common /opt/services/common
+COPY summarize/ .
 
-COPY . .
+RUN source /var/venv/bin/activate && pip install -r requirements.txt && pip cache purge
 
 CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", \
      "--host", "0.0.0.0", "--port", "6000", \

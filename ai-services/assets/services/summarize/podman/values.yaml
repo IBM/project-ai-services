@@ -1,7 +1,6 @@
 summarize:
-  # @hidden
+  port: ""
   image: icr.io/ai-services-cicd/rag:v0.0.95
-  # @hidden
   log_level: "INFO"
 
 # Made with Bob

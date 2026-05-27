@@ -182,6 +182,17 @@ func (h *ApplicationHandler) CreateApplication(c *gin.Context) {
 		return
 	}
 
+	// Extract user ID from auth context
+	userID := c.GetString(middleware.CtxUserIDKey)
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Error: "Unauthorized: user ID not found in context",
+		})
+
+		return
+	}
+	req.CreatedBy = userID
+
 	// Call service layer to create application
 	response, err := h.appService.CreateApplication(c.Request.Context(), req)
 	if err != nil {

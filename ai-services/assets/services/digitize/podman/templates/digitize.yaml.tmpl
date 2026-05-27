@@ -1,11 +1,9 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "{{ .AppName }}--digitize"
+  name: "digitize-{{ .InstanceSlug }}"
   labels:
-    ai-services.io/application: "{{ .AppName }}"
-    ai-services.io/template: "{{ .AppTemplateName }}"
-    ai-services.io/version: "{{ .Version }}"
+  ai-services.io/template: "{{ .TemplateID }}"
   annotations:
     ai-services.io/ports: "{{ .Values.digitizeUi.port }}:4001, {{ .Values.digitize.port }}:4000"
     io.podman.annotations.pids-limit/backend-server: "4096"
@@ -20,7 +18,7 @@ spec:
           memory: "512Mi"
       env:
         - name: BACKEND_HOST
-          value: "{{ .AppName }}--digitize"
+          value: "digitize-{{ .InstanceSlug }}"
         - name: BACKEND_PORT
           value: "4000"
       ports:
@@ -40,7 +38,7 @@ spec:
         - "/var/venv/bin/python"
         - "-m"
         - "uvicorn"
-        - "app:app"
+        - "digitize.app:app"
         - "--host"
         - "0.0.0.0"
         - "--port"
@@ -67,27 +65,27 @@ spec:
           memory: "50Gi"
       env:
         - name: EMB_ENDPOINT
-          value: "http://{{ .AppName }}--embedding:8001"
+          value: "http://{{ .Values.embedding.host }}:{{ .Values.embedding.port }}"
         - name: EMB_MODEL
-          value: "ibm-granite/granite-embedding-278m-multilingual"
+          value: "{{ .Values.embedding.model }}"
         - name: EMB_MAX_TOKENS
           value: "512"
         - name: LLM_ENDPOINT
-          value: "http://{{ .AppName }}--instruct:8000"
+          value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}"
         - name: LLM_MODEL
-          value: "ibm-granite/granite-3.3-8b-instruct"
+          value: "{{ .Values.llm.model }}"
         - name: OPENSEARCH_HOST
-          value: "{{ .AppName }}--opensearch"
+          value: "{{ .Values.vector_store.host }}"
         - name: OPENSEARCH_PORT
-          value: "9200"
+          value: "{{ .Values.vector_store.port }}"
         - name: OPENSEARCH_DB_PREFIX
           value: "RAG_DB"
         - name: OPENSEARCH_INDEX_NAME
           value: "RAG_INDEX"
         - name: OPENSEARCH_USERNAME
-          value: "{{ .Values.opensearch.auth.username }}"
+          value: "{{ .Values.vector_store.auth.username }}"
         - name: OPENSEARCH_PASSWORD
-          value: "{{ .Values.opensearch.auth.password }}"
+          value: "{{ .Values.vector_store.auth.password }}"
         - name: OPENSEARCH_NUM_SHARDS
           value: "1"
         - name: LOG_LEVEL
@@ -99,5 +97,5 @@ spec:
   volumes:
     - name: cache
       hostPath:
-        path: "{{ .BaseDir }}/applications/{{ .AppName }}/cache"
+        path: "{{ .BaseDir }}/applications/{{ .InstanceSlug }}/cache"
         type: DirectoryOrCreate

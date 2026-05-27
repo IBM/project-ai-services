@@ -1,11 +1,9 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "{{ .AppName }}--chat-bot"
+  name: "chat-bot-{{ .InstanceSlug }}"
   labels:
-    ai-services.io/application: "{{ .AppName }}"
-    ai-services.io/template: "{{ .AppTemplateName }}"
-    ai-services.io/version: "{{ .Version }}"
+    ai-services.io/template: "{{ .TemplateID }}"
   annotations:
     ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"
 spec:
@@ -19,7 +17,7 @@ spec:
           memory: "512Mi"
       env:
         - name: BACKEND_HOST
-          value: "{{ .AppName  }}--chat-bot"
+          value: "chat-bot-{{ .InstanceSlug }}"
         - name: BACKEND_PORT
           value: "5000" 
       ports:
@@ -39,7 +37,7 @@ spec:
         - "/var/venv/bin/python"
         - "-m"
         - "uvicorn"
-        - "app:app"
+        - "chatbot.app:app"
         - "--host"
         - "0.0.0.0"
         - "--port"
@@ -50,35 +48,35 @@ spec:
         - "httptools"
       env:
         - name: EMB_ENDPOINT
-          value: "http://{{ .AppName  }}--embedding:8001"
+          value: "http://{{ .Values.embedding.host }}:{{ .Values.embedding.port }}"
         - name: EMB_MODEL
-          value: "ibm-granite/granite-embedding-278m-multilingual"
+          value: "{{ .Values.embedding.model }}"
         - name: EMB_MAX_TOKENS
           value: "512"
         - name: LLM_ENDPOINT
-          value: "http://{{ .AppName  }}--instruct:8000"
+          value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}"
         - name: LLM_MODEL
-          value: "ibm-granite/granite-3.3-8b-instruct"
+          value: "{{ .Values.llm.model }}"
         - name: RERANKER_ENDPOINT
-          value: "http://{{ .AppName  }}--reranker:8002"
+          value: "http://{{ .Values.reranker.host }}:{{ .Values.reranker.port }}"
         - name: RERANKER_MODEL
-          value: "BAAI/bge-reranker-v2-m3"
+          value: "{{ .Values.reranker.model }}"
         - name: OPENSEARCH_HOST
-          value: "{{ .AppName  }}--opensearch"
+          value: "{{ .Values.vector_store.host }}"
         - name: OPENSEARCH_PORT
-          value: "9200"
+          value: "{{ .Values.vector_store.port }}"
         - name: OPENSEARCH_DB_PREFIX
           value: "RAG_DB"
         - name: OPENSEARCH_INDEX_NAME
           value: "RAG_INDEX"
         - name: OPENSEARCH_USERNAME
-          value: "{{ .Values.opensearch.auth.username }}"
+          value: "{{ .Values.vector_store.auth.username }}"
         - name: OPENSEARCH_PASSWORD
-          value: "{{ .Values.opensearch.auth.password }}"
+          value: "{{ .Values.vector_store.auth.password }}"
         - name: OPENSEARCH_NUM_SHARDS
           value: "1"
         - name: LOG_LEVEL
-          value: "{{ .Values.backend.log_level}}"
+          value: "{{ .Values.backend.log_level }}"
       ports:
         - containerPort: 5000
           protocol: TCP

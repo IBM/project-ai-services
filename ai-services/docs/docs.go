@@ -915,7 +915,7 @@ const docTemplate = `{
                 },
                 "params": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "provider_id": {
                     "type": "string"
@@ -928,12 +928,12 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest": {
             "type": "object",
             "required": [
-                "catalogid",
+                "catalog_id",
                 "name",
                 "services"
             ],
             "properties": {
-                "catalogid": {
+                "catalog_id": {
                     "type": "string"
                 },
                 "name": {
@@ -954,31 +954,25 @@ const docTemplate = `{
             "properties": {
                 "id": {
                     "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
                 }
             }
         },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service": {
             "type": "object",
             "required": [
+                "catalog_id",
                 "components",
-                "service_id",
                 "type"
             ],
             "properties": {
+                "catalog_id": {
+                    "type": "string"
+                },
                 "components": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component"
                     }
-                },
-                "service_id": {
-                    "type": "string"
                 },
                 "type": {
                     "type": "string"

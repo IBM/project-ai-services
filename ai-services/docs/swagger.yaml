@@ -7,7 +7,7 @@ definitions:
       instance_id:
         type: string
       params:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       provider_id:
         type: string
@@ -20,7 +20,7 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest:
     properties:
-      catalogid:
+      catalog_id:
         type: string
       name:
         maxLength: 100
@@ -31,7 +31,7 @@ definitions:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service'
         type: array
     required:
-    - catalogid
+    - catalog_id
     - name
     - services
     type: object
@@ -39,26 +39,22 @@ definitions:
     properties:
       id:
         type: string
-      message:
-        type: string
-      status:
-        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service:
     properties:
+      catalog_id:
+        type: string
       components:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component'
         type: array
-      service_id:
-        type: string
       type:
         type: string
       version:
         type: string
     required:
+    - catalog_id
     - components
-    - service_id
     - type
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application:
