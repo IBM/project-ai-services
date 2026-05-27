@@ -607,8 +607,8 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 		for _, svc := range services {
 			deps, err := s.serviceDependencyRepo.GetDependenciesByServiceID(ctx, svc.ID)
 			if err != nil {
-				_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError,
-					fmt.Sprintf("failed to get dependencies for service %s: %s", svc.ID, err))
+				logger.Errorf("failed to get dependencies for service %s: %s", svc.ID, err)
+				_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, "failed to get service dependencies")
 
 				return
 			}
