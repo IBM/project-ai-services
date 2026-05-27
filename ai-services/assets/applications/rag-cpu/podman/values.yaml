@@ -108,7 +108,7 @@ litellm:
   watsonxUrl: ""
   # @description Chat/Instruct model name for WatsonX. Default: ibm/granite-4-h-small
   instructModel: "ibm/granite-4-h-small"
-  
+
 chatbot:
   # @description Search mode for similarity search. Options: "dense" (cosine similarity), "sparse" (BM25), "hybrid" (both). Default is "dense".
   searchMode: "hybrid"
