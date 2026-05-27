@@ -1,10 +1,13 @@
 digitize:
   port: ""
-  image: icr.io/ai-services-cicd/rag:v0.0.95
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.7
   log_level: "INFO"
+  database: "digitize_metadata"
 
 digitizeUi:
   port: ""
-  image: icr.io/ai-services-cicd/digitize-ui:v0.0.16
+  image: icr.io/ai-services-cicd/digitize-ui:v0.0.19
 
-# Made with Bob
+postgres:
+  image: icr.io/ai-services-cicd/postgres:18
+  password: "Aiservicesdb@1234"

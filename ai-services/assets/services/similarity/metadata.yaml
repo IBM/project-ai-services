@@ -1,0 +1,20 @@
+# Service identification
+id: similarity
+name: "Similarity Search"
+description: "Finds semantically similar content using embeddings and reranking"
+type: service
+
+# Certification and support
+certified_by: "IBM"
+
+# Service belongs to these architectures
+architectures:
+  - rag
+
+# Dependencies on other components
+dependencies:
+  - id: vector_store
+  - id: embedding
+  - id: reranker
+
+# Made with Bob

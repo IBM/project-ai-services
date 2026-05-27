@@ -19,7 +19,17 @@ spec:
         - name: BACKEND_HOST
           value: "chat-bot-{{ .InstanceSlug }}"
         - name: BACKEND_PORT
-          value: "5000" 
+          value: "5000"
+        - name: SIMILARITY_SEARCH_HOST
+          value: "similarity-api-{{ .InstanceSlug }}"
+        - name: SIMILARITY_SEARCH_PORT
+          value: "7000"
+        - name: CHATBOT_SEARCH_MODE
+          value: "{{ .Values.backend.chatbot.searchMode }}"
+        - name: CHATBOT_NUM_CHUNKS_POST_RERANKER
+          value: "{{ .Values.backend.chatbot.numChunksPostReranker }}"
+        - name: CHATBOT_RERANK
+          value: "{{ .Values.backend.chatbot.rerank }}"
       ports:
         - containerPort: 3000
           protocol: TCP
@@ -37,7 +47,7 @@ spec:
         - "/var/venv/bin/python"
         - "-m"
         - "uvicorn"
-        - "chatbot.app:app"
+        - "app:app"
         - "--host"
         - "0.0.0.0"
         - "--port"
@@ -51,12 +61,16 @@ spec:
           value: "http://{{ .Values.embedding.host }}:{{ .Values.embedding.port }}"
         - name: EMB_MODEL
           value: "{{ .Values.embedding.model }}"
-        - name: EMB_MAX_TOKENS
-          value: "512"
+        - name: EMB_MAX_MODEL_LEN
+          value: "{{ .Values.embedding.maxModelLen }}"
         - name: LLM_ENDPOINT
           value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}"
         - name: LLM_MODEL
           value: "{{ .Values.llm.model }}"
+        - name: LLM_MAX_MODEL_LEN
+          value: "{{ .Values.llm.maxModelLen }}"
+        - name: LLM_MAX_BATCH_SIZE
+          value: "{{ .Values.llm.maxBatchSize }}"
         - name: RERANKER_ENDPOINT
           value: "http://{{ .Values.reranker.host }}:{{ .Values.reranker.port }}"
         - name: RERANKER_MODEL
@@ -77,6 +91,12 @@ spec:
           value: "1"
         - name: LOG_LEVEL
           value: "{{ .Values.backend.log_level }}"
+        - name: CHATBOT_SEARCH_MODE
+          value: "{{ .Values.backend.chatbot.searchMode }}"
+        - name: CHATBOT_NUM_CHUNKS_POST_RERANKER
+          value: "{{ .Values.backend.chatbot.numChunksPostReranker }}"
+        - name: CHATBOT_RERANK
+          value: "{{ .Values.backend.chatbot.rerank }}"
       ports:
         - containerPort: 5000
           protocol: TCP

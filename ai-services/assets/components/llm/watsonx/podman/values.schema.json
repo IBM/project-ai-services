@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "model": {
+      "type": "string",
+      "title": "Large Language Model (LLM)",
+      "description": "Chat/Instruct model name for WatsonX",
+      "oneOf": [
+        {
+          "const": "ibm/granite-4-h-small",
+          "title": "granite-4-h-small",
+          "description": "IBM Granite 4 H Small model on Watsonx for chat and instruct workloads"
+        }
+      ],
+      "default": "ibm/granite-4-h-small"
+    },
+    "watsonxApiKey": {
+      "type": "string",
+      "title": "WatsonX API Key",
+      "description": "WatsonX API Key for LiteLLM integration"
+    },
+    "watsonxProjectId": {
+      "type": "string",
+      "title": "WatsonX Project ID",
+      "description": "WatsonX Project ID for LiteLLM integration"
+    },
+    "watsonxUrl": {
+      "type": "string",
+      "title": "WatsonX Base URL",
+      "description": "WatsonX Base URL for LiteLLM integration"
+    }
+  }
+}
