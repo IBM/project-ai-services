@@ -57,6 +57,15 @@ definitions:
     - components
     - type
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse:
+    properties:
+      id:
+        type: string
+      message:
+        type: string
+      status:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application:
     properties:
       created_at:
@@ -470,24 +479,49 @@ paths:
       - Applications
   /applications/{id}:
     delete:
-      description: Delete a specific application and all its resources
+      description: Initiates async deletion of an application and all its resources.
+        Returns 202 immediately.
       parameters:
-      - description: Application ID
+      - description: Application ID (UUID)
         in: path
         name: id
         required: true
         type: string
+      - description: When true, also deletes orphaned component records
+        in: query
+        name: force
+        type: boolean
+      produces:
+      - application/json
       responses:
-        "200":
-          description: Application deleted
+        "202":
+          description: Accepted
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse'
+        "400":
+          description: Invalid application ID
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "403":
+          description: User doesn't own this application
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "404":
           description: Application not found
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "409":
+          description: Application is already being deleted
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Delete application

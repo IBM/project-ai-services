@@ -60,29 +60,12 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	applications := v1.Group("applications")
 	applications.Use(middleware.AuthMiddleware(tokenMgr, blacklist))
 	{
-		// Implemented endpoints
 		applications.GET("/", applicationHandler.ListApplications)
 		applications.GET("/:id", applicationHandler.GetApplicationByID)
 		applications.POST("/", applicationHandler.CreateApplication)
 		applications.PUT("/:id", applicationHandler.UpdateApplication)
-
-		// Draft endpoints - placeholders for future implementation
-		applications.DELETE("/:id", deleteApplication)
+		applications.DELETE("/:id", applicationHandler.DeleteApplication)
 	}
 
 	return router
-}
-
-// DeleteApplication godoc
-//
-//	@Summary		Delete application
-//	@Description	Delete a specific application and all its resources
-//	@Tags			Applications
-//	@Security		BearerAuth
-//	@Param			id	path		string					true	"Application ID"
-//	@Success		200	{object}	map[string]interface{}	"Application deleted"
-//	@Failure		404	{object}	map[string]interface{}	"Application not found"
-//	@Router			/applications/{id} [delete]
-func deleteApplication(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "This is a placeholder endpoint for " + c.FullPath()})
 }
