@@ -659,9 +659,8 @@ func (d *PodmanDeployer) renderFinalPodTemplate(
 		return nil, fmt.Errorf("failed to get env params: %w", err)
 	}
 
-	if _, exists := initialParams["env"]; !exists {
-		initialParams["env"] = env
-	}
+	// Always set/overwrite the env to ensure Spyre card PCI addresses are included
+	initialParams["env"] = env
 
 	var finalRendered bytes.Buffer
 	if err := podTemplate.Execute(&finalRendered, initialParams); err != nil {
