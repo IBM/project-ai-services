@@ -954,12 +954,6 @@ const docTemplate = `{
             "properties": {
                 "id": {
                     "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
                 }
             }
         },

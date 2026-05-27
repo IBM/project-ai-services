@@ -30,6 +30,7 @@ func UpdateApplicationStatus(ctx context.Context, appRepo dbrepo.ApplicationRepo
 		appUUID, err = uuid.Parse(id)
 		if err != nil {
 			log.Printf("Failed to parse application ID %s: %v", id, err)
+
 			return fmt.Errorf("invalid application ID: %w", err)
 		}
 	case uuid.UUID:

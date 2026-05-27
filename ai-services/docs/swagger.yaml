@@ -39,10 +39,6 @@ definitions:
     properties:
       id:
         type: string
-      message:
-        type: string
-      status:
-        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service:
     properties:
