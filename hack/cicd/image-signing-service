@@ -84,14 +84,6 @@ pipeline {
             }
         }
 
-        stage('Build common service') {
-            steps {
-                script {
-                    env.ICR_SERVICES_COMMON_IMAGE = buildAndPublishImage('services/common/', 'services-common')
-                }
-            }
-        }
-
         stage('Build service-base') {
             steps {
                 script {
@@ -180,14 +172,14 @@ pipeline {
         stage('Build UI Digitize') {
             steps {
                 script {
-                    env.ICR_UI_DIGITIZE_IMAGE = buildAndPublishImage('ui/digitize', 'ui-digitize-ui')
+                    env.ICR_UI_DIGITIZE_IMAGE = buildAndPublishImage('ui/digitize', 'digitize-ui')
                 }
             }
         }
         stage('Build UI Chatbot') {
             steps {
                 script {
-                    env.ICR_UI_CHATBOT_IMAGE = buildAndPublishImage('ui/chatbot', 'ui-chatbot-ui')
+                    env.ICR_UI_CHATBOT_IMAGE = buildAndPublishImage('ui/chatbot', 'chatbot-ui')
                 }
             }
         }
@@ -317,29 +309,49 @@ def checkoutRepository() {
 
 def buildAndPublishImage(String imagePath, String imageName) {
     def icrImage = ''
-    dir("${REPO_DIR}/${imagePath}") {
-        echo "Building and pushing ${imageName} image..."
-
-        def tag = sh(script: "make image-tag", returnStdout: true).trim()
-        icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
-
-        withCredentials([usernamePassword(
-            credentialsId: 'icr-credentials-personal',
-            usernameVariable: 'ICR_USERNAME',
-            passwordVariable: 'ICR_PASSWORD'
-        )]) {
-            sh """
-                make build REGISTRY=${params.ICR_REGISTRY} \
-                    REGISTRY_USER=\$ICR_USERNAME \
-                    REGISTRY_PASSWORD=\$ICR_PASSWORD
-
-                make push REGISTRY=${params.ICR_REGISTRY} \
-                    REGISTRY_USER=\$ICR_USERNAME \
-                    REGISTRY_PASSWORD=\$ICR_PASSWORD
-            """
+    if (imagePath.startsWith('services/')) {
+        def serviceName = imagePath.split('/')[1]
+        dir("${REPO_DIR}/services") {
+            echo "Building and pushing ${imageName} image (service: ${serviceName})..."
+            def tag = sh(script: "make image-tag SERVICE=${serviceName}", returnStdout: true).trim()
+            icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
+            withCredentials([usernamePassword(
+                credentialsId: 'icr-iam-creds',
+                usernameVariable: 'ICR_USERNAME',
+                passwordVariable: 'ICR_PASSWORD'
+            )]) {
+                sh """
+                    make build SERVICE=${serviceName} REGISTRY=${params.ICR_REGISTRY} \\
+                        REGISTRY_USER=\$ICR_USERNAME \\
+                        REGISTRY_PASSWORD=\$ICR_PASSWORD
+                    make push SERVICE=${serviceName} REGISTRY=${params.ICR_REGISTRY} \\
+                        REGISTRY_USER=\$ICR_USERNAME \\
+                        REGISTRY_PASSWORD=\$ICR_PASSWORD
+                """
+            }
+            echo "✓ Successfully built and pushed: ${icrImage}"
         }
-        
-        echo "✓ Successfully built and pushed: ${icrImage}"
+    } else {
+        dir("${REPO_DIR}/${imagePath}") {
+            echo "Building and pushing ${imageName} image..."
+            def tag = sh(script: "make image-tag", returnStdout: true).trim()
+            icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
+            withCredentials([usernamePassword(
+                credentialsId: 'icr-iam-creds',
+                usernameVariable: 'ICR_USERNAME',
+                passwordVariable: 'ICR_PASSWORD'
+            )]) {
+                sh """
+                    make build REGISTRY=${params.ICR_REGISTRY} \\
+                        REGISTRY_USER=\$ICR_USERNAME \\
+                        REGISTRY_PASSWORD=\$ICR_PASSWORD
+                    make push REGISTRY=${params.ICR_REGISTRY} \\
+                        REGISTRY_USER=\$ICR_USERNAME \\
+                        REGISTRY_PASSWORD=\$ICR_PASSWORD
+                """
+            }
+            echo "✓ Successfully built and pushed: ${icrImage}"
+        }
     }
     return icrImage
 }
@@ -357,7 +369,7 @@ def buildToolArmImage(String imagePath, String imageName) {
         icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
 
         withCredentials([usernamePassword(
-            credentialsId: 'icr-credentials-personal',
+            credentialsId: 'icr-iam-creds',
             usernameVariable: 'ICR_USERNAME',
             passwordVariable: 'ICR_PASSWORD'
         )]) {
@@ -401,7 +413,7 @@ def createToolsManifest() {
         echo "Creating multi-arch manifest for tools image..."
 
         withCredentials([usernamePassword(
-            credentialsId: 'icr-credentials-personal',
+            credentialsId: 'icr-iam-creds',
             usernameVariable: 'ICR_USERNAME',
             passwordVariable: 'ICR_PASSWORD'
         )]) {
@@ -452,7 +464,6 @@ def generateImageList() {
         env.ICR_SERVICES_DIGITIZE_IMAGE,
         env.ICR_SERVICES_SUMMARIZE_IMAGE,
         env.ICR_SERVICES_SIMILARITY_IMAGE,
-        env.ICR_SERVICES_COMMON_IMAGE,
         env.ICR_UI_CATALOG_IMAGE,
         env.ICR_UI_DIGITIZE_IMAGE,
         env.ICR_UI_CHATBOT_IMAGE,
