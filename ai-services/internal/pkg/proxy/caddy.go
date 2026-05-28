@@ -5,12 +5,28 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
+
+// isRunningInContainer checks if the code is running inside a container
+// by checking for the presence of /.dockerenv or /run/.containerenv files.
+func isRunningInContainer() bool {
+	// Check for Docker container indicator
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	// Check for Podman container indicator
+	if _, err := os.Stat("/run/.containerenv"); err == nil {
+		return true
+	}
+
+	return false
+}
 
 // caddyManager implements ProxyManager interface for Caddy.
 type caddyManager struct {
@@ -162,8 +178,17 @@ func RegisterRoutesForAppAndReturn(
 		)
 	}
 
-	// Step 2: Create proxy manager with the discovered admin URL
-	adminURL := fmt.Sprintf("http://localhost:%s", adminPort)
+	// Step 2: Determine admin URL based on context
+	// If we're running inside a container (catalog backend), use pod name
+	// If we're running on host (CLI), use localhost
+	var adminURL string
+	if isRunningInContainer() {
+		// Running in catalog backend container - use Caddy pod name with internal port
+		adminURL = fmt.Sprintf("http://%s:2019", caddyPodName)
+	} else {
+		// Running on host (CLI) - use localhost with mapped port
+		adminURL = fmt.Sprintf("http://localhost:%s", adminPort)
+	}
 	proxyManager := NewCaddyManager(adminURL, serverName)
 
 	// Step 3: Perform health check on Caddy
@@ -175,9 +200,15 @@ func RegisterRoutesForAppAndReturn(
 	}
 
 	// Step 4: Get host IP for route domain generation
-	hostIP, err := utils.GetHostIP()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get host IP: %w", err)
+	// Prefer HOST_IP env var (set in catalog backend) over auto-detection
+	hostIP := os.Getenv("HOST_IP")
+	if hostIP == "" {
+		// Fallback to auto-detection (for CLI usage)
+		var err error
+		hostIP, err = utils.GetHostIP()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get host IP: %w", err)
+		}
 	}
 
 	// Step 5: Build routes from the annotation string using service pod name for upstreams

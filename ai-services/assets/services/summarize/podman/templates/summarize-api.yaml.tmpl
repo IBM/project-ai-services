@@ -3,9 +3,10 @@ kind: Pod
 metadata:
   name: "summarize-api-{{ .InstanceSlug }}"
   labels:
-  ai-services.io/template: "{{ .TemplateID }}"
+    ai-services.io/template: "{{ .TemplateID }}"
   annotations:
-    ai-services.io/ports: "{{ or .Values.summarize.port }}:6000"
+    ai-services.io/routes: "6000:summarize-api"
+    # ai-services.io/ports: "{{ or .Values.summarize.port }}:6000"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
   containers:
     - name: summarize-api

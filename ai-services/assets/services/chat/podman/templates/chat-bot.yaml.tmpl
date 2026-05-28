@@ -5,7 +5,8 @@ metadata:
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
   annotations:
-    ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"
+    ai-services.io/routes: "3000:chat-bot-ui,5000:chat-bot-backend"
+    # ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
   containers:
     - name: ui
