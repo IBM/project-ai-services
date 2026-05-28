@@ -25,6 +25,8 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
         ai-services.io/component: vectordb
     spec:
+      securityContext:
+        fsGroup: 1000
       containers:
         - name: opensearch
           image: "{{ .Values.opensearch.image }}"
@@ -67,7 +69,7 @@ spec:
           startupProbe:
             tcpSocket:
               port: 9200
-            initialDelaySeconds: 5
+            initialDelaySeconds: 60
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 30
