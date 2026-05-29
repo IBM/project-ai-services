@@ -294,6 +294,11 @@
   object-fit: cover;
   flex-shrink: 0;
   align-self: stretch;
+
+  // Hide image on screens smaller than 900px (between md and lg breakpoints)
+  @media (max-width: 899px) {
+    display: none;
+  }
 }
 
 .demoContent {
