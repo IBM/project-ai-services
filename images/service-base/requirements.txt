@@ -41,7 +41,7 @@ httptools==0.6.4
 httpx==0.28.1
 httpx-sse==0.4.0
 huggingface_hub==1.14.0
-idna==3.14
+idna==3.15
 Jinja2==3.1.6
 jiter==0.14.0
 jsonlines==4.0.0

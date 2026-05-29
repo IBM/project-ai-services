@@ -2,23 +2,18 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
-    "llm": {
-      "type": "object",
-      "properties": {
-        "model": {
-          "type": "string",
-          "title": "Large Language Model (LLM)",
-          "description": "Large Language Model (LLM)",
-          "oneOf": [
-            {
-              "const": "ibm-granite/granite-3.3-8b-instruct",
-              "title": "granite-3.3-8b-instruct",
-              "description": "**Languages:** English, with multilingual capabilities\n\n**Use Cases:** General-purpose instruction following, Question answering and reasoning, Code generation and explanation, Content creation and summarization\n\n**Strengths:** Balanced performance and efficiency with 8B parameters, Strong instruction following capabilities, Optimized for GPU inference with Spyre acceleration, Suitable for enterprise applications"
-            }
-          ],
-          "default": "ibm-granite/granite-3.3-8b-instruct"
+    "model": {
+      "type": "string",
+      "title": "Large Language Model (LLM)",
+      "description": "Large Language Model (LLM)",
+      "oneOf": [
+        {
+          "const": "ibm-granite/granite-3.3-8b-instruct",
+          "title": "granite-3.3-8b-instruct",
+          "description": "**Languages:** English, with multilingual capabilities\n\n**Use Cases:** General-purpose instruction following, Question answering and reasoning, Code generation and explanation, Content creation and summarization\n\n**Strengths:** Balanced performance and efficiency with 8B parameters, Strong instruction following capabilities, Optimized for GPU inference with Spyre acceleration, Suitable for enterprise applications"
         }
-      }
+      ],
+      "default": "ibm-granite/granite-3.3-8b-instruct"
     }
   }
 }

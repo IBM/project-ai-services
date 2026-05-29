@@ -3,6 +3,9 @@ name: Build and Publish Image
 on:
   workflow_call:
     inputs:
+      service:
+       required: true
+       type: string
       working-directory:
        required: true
        type: string
@@ -22,6 +25,7 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: |
           make build \
+            SERVICE=${{ inputs.service }} \
             REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} \
             REGISTRY_USER=${{ secrets.ICR_USERNAME }} \
             REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
@@ -31,6 +35,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           make push \
+            SERVICE=${{ inputs.service }} \
             REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} \
             REGISTRY_USER=${{ secrets.ICR_USERNAME }} \
-            REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }} 
+            REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}

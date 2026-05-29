@@ -1,17 +1,14 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "{{ .AppName }}--instruct"
+  name: "llm-{{ .InstanceSlug }}"
   labels:
-    ai-services.io/application: "{{ .AppName }}"
-    ai-services.io/template: "{{ .AppTemplateName }}"
-    ai-services.io/version: "{{ .Version }}"
+    ai-services.io/template: "{{ .TemplateID }}"
   annotations:
     io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
     io.podman.annotations.userns: "keep-id"
     run.oci.keep_original_groups: "1"
-    ai-services.io/model: ibm-granite/granite-3.3-8b-instruct
-    ai-services.io/instruct--spyre-cards: "4"
+    ai-services.io/llm--spyre-cards: "4"
 spec:
   volumes:
     - name: dshm
@@ -23,8 +20,8 @@ spec:
         path: "{{ .BaseDir }}/models"
         type: Directory
   containers:
-    - name: instruct
-      image: "{{ .Values.instruct.image }}"
+    - name: llm
+      image: "{{ .Values.image }}"
       command: ["/bin/bash"]
       args:
         - "-c"
@@ -34,7 +31,7 @@ spec:
           -tp ${AIU_WORLD_SIZE} \
           --max-model-len ${MAX_MODEL_LEN} \
           --max-num-seqs ${MAX_BATCH_SIZE} \
-          --served-model-name ibm-granite/granite-3.3-8b-instruct --port 8000
+          --served-model-name {{ .Values.model }} --port 8000
       livenessProbe:
         httpGet:
           path: /health
@@ -45,7 +42,7 @@ spec:
         failureThreshold: 3
       env:
         - name: VLLM_MODEL_PATH
-          value: "/models/ibm-granite/granite-3.3-8b-instruct"
+          value: "/models/{{ .Values.model }}"
         - name: AIU_WORLD_SIZE
           value: "4"
         - name: VLLM_SPYRE_USE_CB
@@ -56,9 +53,9 @@ spec:
           value: "32"
         - name: MASTER_PORT
           value: "12355"
-        {{- /* Check if .env.instruct exists and is a non-empty map */}}
-        {{- with .env.instruct }}
-          {{- /* If it does, '.' (dot) is now scoped to .env.instruct */}}
+        {{- /* Check if .env.llm exists and is a non-empty map */}}
+        {{- with .env.llm }}
+          {{- /* If it does, '.' (dot) is now scoped to .env.llm */}}
           {{- range $k, $v := . }}
         - name: {{ $k }}
           value: "{{ $v }}"

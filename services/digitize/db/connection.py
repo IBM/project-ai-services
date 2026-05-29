@@ -52,8 +52,9 @@ def get_database_url() -> str:
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
     # URL-encode credentials to handle special characters (@, :, /, etc.)
-    encoded_user = quote_plus(user)
-    encoded_password = quote_plus(password)
+    # Type assertion: user and password are guaranteed to be str at this point due to validation above
+    encoded_user = quote_plus(user) if user else ""
+    encoded_password = quote_plus(password) if password else ""
 
     return f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/{database}"
 

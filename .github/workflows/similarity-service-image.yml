@@ -12,13 +12,15 @@ jobs:
     name: Build and Publish Image
     uses: ./.github/workflows/build-and-publish-image.yml
     with:
-      working-directory: 'services/similarity'
+      service: 'similarity'
+      working-directory: 'services'
     secrets: inherit
 
   scan:
     uses: ./.github/workflows/scanner.yml
     with:
-      path: 'services/similarity'
+      path: 'services'
+      service: 'similarity'
       image: 'similarity-service'
     secrets:
       ICR_USERNAME: ${{ secrets.ICR_USERNAME }}

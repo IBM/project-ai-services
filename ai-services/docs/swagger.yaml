@@ -7,7 +7,7 @@ definitions:
       instance_id:
         type: string
       params:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       provider_id:
         type: string
@@ -20,7 +20,7 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest:
     properties:
-      catalogid:
+      catalog_id:
         type: string
       name:
         maxLength: 100
@@ -31,7 +31,7 @@ definitions:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service'
         type: array
     required:
-    - catalogid
+    - catalog_id
     - name
     - services
     type: object
@@ -39,27 +39,32 @@ definitions:
     properties:
       id:
         type: string
-      message:
-        type: string
-      status:
-        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service:
     properties:
+      catalog_id:
+        type: string
       components:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component'
         type: array
-      service_id:
-        type: string
       type:
         type: string
       version:
         type: string
     required:
+    - catalog_id
     - components
-    - service_id
     - type
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse:
+    properties:
+      id:
+        type: string
+      message:
+        type: string
+      status:
+        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application:
     properties:
@@ -75,7 +80,7 @@ definitions:
         type: string
       services:
         items:
-          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus'
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService'
         type: array
       status:
         type: string
@@ -92,6 +97,30 @@ definitions:
         type: array
       pagination:
         $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp'
+        type: array
+      created_at:
+        type: string
+      endpoints:
+        items:
+          additionalProperties: {}
+          type: object
+        type: array
+      id:
+        type: string
+      status:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+      version:
+        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture:
     properties:
@@ -246,6 +275,16 @@ definitions:
         description: '"service"'
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp:
+    properties:
+      metadata:
+        additionalProperties: {}
+        type: object
+      provider:
+        type: string
+      type:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceReference:
     properties:
       id:
@@ -253,15 +292,6 @@ definitions:
       optional:
         type: boolean
       version:
-        type: string
-    type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus:
-    properties:
-      id:
-        type: string
-      status:
-        type: string
-      type:
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceSummary:
@@ -449,31 +479,57 @@ paths:
       - Applications
   /applications/{id}:
     delete:
-      description: Delete a specific application and all its resources
+      description: Initiates async deletion of an application and all its resources.
+        Returns 202 immediately.
       parameters:
-      - description: Application ID
+      - description: Application ID (UUID)
         in: path
         name: id
         required: true
         type: string
+      - description: When true, also deletes orphaned component records
+        in: query
+        name: force
+        type: boolean
+      produces:
+      - application/json
       responses:
-        "200":
-          description: Application deleted
+        "202":
+          description: Accepted
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse'
+        "400":
+          description: Invalid application ID
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "403":
+          description: User doesn't own this application
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "404":
           description: Application not found
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "409":
+          description: Application is already being deleted
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Delete application
       tags:
       - Applications
     get:
-      description: Get detailed information about a specific application
+      description: Retrieves a single application by its unique identifier for the
+        authenticated user
       parameters:
       - description: Application ID
         in: path
@@ -484,18 +540,24 @@ paths:
       - application/json
       responses:
         "200":
-          description: Application details
+          description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "404":
           description: Application not found
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
       security:
       - BearerAuth: []
-      summary: Get application details
+      summary: Get application by ID
       tags:
       - Applications
     put:

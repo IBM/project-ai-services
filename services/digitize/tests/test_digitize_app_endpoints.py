@@ -6,24 +6,22 @@ import pytest
 from fastapi.testclient import TestClient
 
 import digitize.app as digitize_app
+import digitize.db_operations as db_ops
+import digitize.db.connection as db_conn
 from digitize.models import JobStatus, OperationType, OutputFormat
 
 
 @pytest.fixture
 def digitize_test_client(monkeypatch, tmp_path):
-    docs_dir = tmp_path / "docs"
-    jobs_dir = tmp_path / "jobs"
     digitized_dir = tmp_path / "digitized"
     staging_dir = tmp_path / "staging"
 
-    for path in (docs_dir, jobs_dir, digitized_dir, staging_dir):
+    for path in (digitized_dir, staging_dir):
         path.mkdir(parents=True, exist_ok=True)
 
     fake_settings = SimpleNamespace(
         common=SimpleNamespace(app=SimpleNamespace(log_level="INFO")),
         digitize=SimpleNamespace(
-            docs_dir=docs_dir,
-            jobs_dir=jobs_dir,
             digitized_docs_dir=digitized_dir,
             staging_dir=staging_dir,
             digitization_concurrency_limit=2,
@@ -39,15 +37,25 @@ def digitize_test_client(monkeypatch, tmp_path):
     monkeypatch.setattr(digitize_app.dg_util, "generate_uuid", Mock(return_value="job-123"))
     monkeypatch.setattr(digitize_app.dg_util, "stage_upload_files", AsyncMock())
     monkeypatch.setattr(digitize_app.dg_util, "initialize_job_state", Mock(return_value={"sample.pdf": "doc-1"}))
-    monkeypatch.setattr(digitize_app.dg_util, "read_all_job_files", Mock(return_value=[]))
-    monkeypatch.setattr(digitize_app.dg_util, "read_job_file", Mock())
-    monkeypatch.setattr(digitize_app.dg_util, "get_all_documents", Mock(return_value=[]))
-    monkeypatch.setattr(digitize_app.dg_util, "get_document_by_id", Mock())
+    monkeypatch.setattr(db_ops, "get_all_jobs", Mock(return_value=([], 0)))
+    monkeypatch.setattr(db_ops, "get_job", Mock())
+    monkeypatch.setattr(db_ops, "get_all_documents_paginated", Mock(return_value=([], 0)))
+    monkeypatch.setattr(db_ops, "get_document", Mock())
     monkeypatch.setattr(digitize_app.dg_util, "get_document_content", Mock())
     monkeypatch.setattr(digitize_app.dg_util, "is_document_in_active_job", Mock(return_value=False))
     monkeypatch.setattr(digitize_app.dg_util, "delete_document_files", Mock())
     monkeypatch.setattr(digitize_app, "reset_db", Mock())
     monkeypatch.setattr(digitize_app, "configure_uvicorn_logging", Mock())
+
+    # Mock database engine to prevent DatabaseStatusManager from failing
+    mock_engine = Mock()
+    monkeypatch.setattr(db_conn, "engine", mock_engine)
+
+    # Mock get_status_manager to return a mock status manager
+    mock_status_manager = Mock()
+    mock_status_manager.update_doc_metadata = Mock()
+    mock_status_manager.update_job_progress = Mock()
+    monkeypatch.setattr(db_ops, "get_status_manager", Mock(return_value=mock_status_manager))
 
     return TestClient(digitize_app.app)
 
@@ -187,14 +195,10 @@ class TestJobsEndpoints:
         assert body["data"][0]["job_id"] == "job-2"
 
     def test_get_job_by_id(self, digitize_test_client, monkeypatch, tmp_path):
-        job_file = tmp_path / "jobs" / "job-123_status.json"
-        job_file.parent.mkdir(parents=True, exist_ok=True)
-        job_file.write_text("{}")
-        digitize_app.settings.digitize.jobs_dir = job_file.parent
         monkeypatch.setattr(
             digitize_app.dg_util,
-            "read_job_file",
-            Mock(return_value=SimpleNamespace(to_dict=lambda: {"job_id": "job-123"})),
+            "get_job",
+            Mock(return_value={"job_id": "job-123"}),
         )
 
         response = digitize_test_client.get("/v1/jobs/job-123")
@@ -202,39 +206,36 @@ class TestJobsEndpoints:
         assert response.status_code == 200
         assert response.json() == {"job_id": "job-123"}
 
-    def test_get_missing_job_returns_404(self, digitize_test_client, tmp_path):
-        digitize_app.settings.digitize.jobs_dir = tmp_path / "jobs"
-        digitize_app.settings.digitize.jobs_dir.mkdir(parents=True, exist_ok=True)
+    def test_get_missing_job_returns_404(self, digitize_test_client, monkeypatch):
+        monkeypatch.setattr(
+            digitize_app.dg_util,
+            "get_job",
+            Mock(return_value=None),
+        )
 
         response = digitize_test_client.get("/v1/jobs/job-404")
 
         assert response.status_code == 404
 
-    def test_delete_completed_job_succeeds(self, digitize_test_client, monkeypatch, tmp_path):
-        job_file = tmp_path / "jobs" / "job-123_status.json"
-        job_file.parent.mkdir(parents=True, exist_ok=True)
-        job_file.write_text("{}")
-        digitize_app.settings.digitize.jobs_dir = job_file.parent
+    def test_delete_completed_job_succeeds(self, digitize_test_client, monkeypatch):
         monkeypatch.setattr(
             digitize_app.dg_util,
-            "read_job_file",
-            Mock(return_value=SimpleNamespace(status=JobStatus.COMPLETED)),
+            "get_job",
+            Mock(return_value={"job_id": "job-123", "status": JobStatus.COMPLETED.value}),
         )
+        mock_delete = Mock()
+        monkeypatch.setattr("digitize.db.manager.db_manager.delete_job", mock_delete)
 
         response = digitize_test_client.delete("/v1/jobs/job-123")
 
         assert response.status_code == 204
-        assert not job_file.exists()
+        mock_delete.assert_called_once_with("job-123")
 
-    def test_delete_active_job_returns_409(self, digitize_test_client, monkeypatch, tmp_path):
-        job_file = tmp_path / "jobs" / "job-123_status.json"
-        job_file.parent.mkdir(parents=True, exist_ok=True)
-        job_file.write_text("{}")
-        digitize_app.settings.digitize.jobs_dir = job_file.parent
+    def test_delete_active_job_returns_409(self, digitize_test_client, monkeypatch):
         monkeypatch.setattr(
             digitize_app.dg_util,
-            "read_job_file",
-            Mock(return_value=SimpleNamespace(status=JobStatus.IN_PROGRESS)),
+            "get_job",
+            Mock(return_value={"job_id": "job-123", "status": JobStatus.IN_PROGRESS.value}),
         )
 
         response = digitize_test_client.delete("/v1/jobs/job-123")
