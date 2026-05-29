@@ -61,3 +61,60 @@ export const ensureCSVExtension = (filename: string): string => {
 
   return `${sanitized || "export"}.csv`;
 };
+
+/** Validates, flattens data with children, and exports to CSV with proper error handling */
+export const downloadCSVWithChildren = <T extends { children?: T[] }>(
+  data: T[],
+  headers: Array<{ key: string; header: unknown }>,
+  filename: string,
+): { success: boolean; message: string; rowCount?: number } => {
+  try {
+    // Validate filename
+    if (!filename || filename.trim().length === 0) {
+      return {
+        success: false,
+        message: "Provide a valid file name",
+      };
+    }
+
+    // Validate data
+    if (!data || data.length === 0) {
+      return {
+        success: false,
+        message: "No data available to export",
+      };
+    }
+
+    // Flatten data to include child rows
+    const flattenedRows: T[] = [];
+    data.forEach((row) => {
+      flattenedRows.push(row);
+      if (row.children && row.children.length > 0) {
+        flattenedRows.push(...row.children);
+      }
+    });
+
+    // Ensure filename has .csv extension
+    const sanitizedFilename = ensureCSVExtension(filename);
+
+    // Always exclude actions column from export
+    const exportableHeaders = headers.filter((h) => h.key !== "actions");
+
+    // Export to CSV
+    exportToCSV(flattenedRows, exportableHeaders, sanitizedFilename);
+
+    return {
+      success: true,
+      message: `Successfully exported ${flattenedRows.length} rows to ${sanitizedFilename}`,
+      rowCount: flattenedRows.length,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : "An error occurred while exporting the CSV file. Please try again.",
+    };
+  }
+};

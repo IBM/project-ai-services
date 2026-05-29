@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { PageHeader } from "@carbon/ibm-products";
-import { Grid, Column, Search, Accordion, Button, Tag } from "@carbon/react";
+import { Search, Accordion, Button, Tag } from "@carbon/react";
 import { ArrowRight } from "@carbon/icons-react";
 import styles from "./CatalogBrowseLayout.module.scss";
 
@@ -59,48 +59,44 @@ const CatalogBrowseLayout = ({
       />
 
       <div className={styles.pageContent}>
-        <Grid fullWidth>
-          <Column lg={4} md={2} sm={4}>
-            <div className={styles.sidebar}>
-              <Search
-                placeholder="Search"
-                labelText="Search"
-                value={searchValue}
-                onChange={(event) => onSearchChange(event.target.value)}
-                size="lg"
-              />
+        <div className={styles.sidebar}>
+          <Search
+            placeholder="Search"
+            labelText="Search"
+            value={searchValue}
+            onChange={(event) => onSearchChange(event.target.value)}
+            size="lg"
+          />
 
-              <div className={styles.filterHeader}>
-                <span className={styles.filterTitle}>Filters</span>
-                {totalSelectedFilters > 0 && (
-                  <Tag
-                    type="high-contrast"
-                    size="md"
-                    filter
-                    onClose={onClearFilters}
-                  >
-                    {totalSelectedFilters}
-                  </Tag>
-                )}
-              </div>
-
-              <Accordion>{filterAccordions}</Accordion>
-            </div>
-          </Column>
-
-          <Column lg={12} md={6} sm={4}>
-            {hasResults ? (
-              <div className={styles.cardsGrid}>{results}</div>
-            ) : (
-              <div className={styles.emptyState}>
-                <p>{emptyMessage}</p>
-                <Button kind="tertiary" onClick={onClearFilters}>
-                  Clear filters
-                </Button>
-              </div>
+          <div className={styles.filterHeader}>
+            <span className={styles.filterTitle}>Filters</span>
+            {totalSelectedFilters > 0 && (
+              <Tag
+                type="high-contrast"
+                size="md"
+                filter
+                onClose={onClearFilters}
+              >
+                {totalSelectedFilters}
+              </Tag>
             )}
-          </Column>
-        </Grid>
+          </div>
+
+          <Accordion>{filterAccordions}</Accordion>
+        </div>
+
+        <div className={styles.contentArea}>
+          {hasResults ? (
+            <div className={styles.cardsGrid}>{results}</div>
+          ) : (
+            <div className={styles.emptyState}>
+              <p>{emptyMessage}</p>
+              <Button kind="tertiary" onClick={onClearFilters}>
+                Clear filters
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
     </>
   );

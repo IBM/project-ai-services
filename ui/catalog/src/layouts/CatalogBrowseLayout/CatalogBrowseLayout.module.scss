@@ -1,5 +1,6 @@
 @use "@carbon/react/scss/spacing";
 @use "@carbon/react/scss/type";
+@use "@carbon/react/scss/breakpoint";
 
 // Ensure PageHeader stays below SidePanel overlay (overlay is z-index: 6000)
 :global(.c4p--page-header) {
@@ -9,13 +10,42 @@
 .pageContent {
   padding: 0 spacing.$spacing-05 spacing.$spacing-07;
   margin-top: spacing.$spacing-07;
+
+  // Desktop: side-by-side layout
+  @include breakpoint.breakpoint(lg) {
+    display: flex;
+    gap: spacing.$spacing-05;
+  }
+
+  // Mobile/Tablet: vertical stacking
+  @include breakpoint.breakpoint-down(md) {
+    display: block;
+  }
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
   gap: spacing.$spacing-05;
-  padding-bottom: spacing.$spacing-05;
+  padding: 0 spacing.$spacing-05;
+
+  // Desktop: fixed width sidebar
+  @include breakpoint.breakpoint(lg) {
+    width: 256px;
+    min-width: 256px;
+    max-width: 256px;
+    flex-shrink: 0;
+  }
+
+  // Mobile/Tablet: full width, normal flow
+  @include breakpoint.breakpoint-down(md) {
+    width: 100%;
+    margin-bottom: spacing.$spacing-06;
+  }
+
+  :global(.cds--accordion__title) {
+    @include type.type-style("heading-01");
+  }
 }
 
 .filterHeader {
@@ -29,9 +59,15 @@
   @include type.type-style("heading-01");
 }
 
-.sidebar {
-  :global(.cds--accordion__title) {
-    @include type.type-style("heading-01");
+.contentArea {
+  // Desktop: flexible content area
+  @include breakpoint.breakpoint(lg) {
+    flex: 1;
+  }
+
+  // Mobile/Tablet: full width
+  @include breakpoint.breakpoint-down(md) {
+    width: 100%;
   }
 }
 

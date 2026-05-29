@@ -1,4 +1,4 @@
-import React, { useReducer } from "react";
+import React, { useReducer, useEffect } from "react";
 import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
 import {
   DataTable,
@@ -23,7 +23,6 @@ import {
   ActionableNotification,
   Modal,
   TextInput,
-  InlineLoading,
   OverflowMenu,
   Tabs,
   TabList,
@@ -44,7 +43,7 @@ import styles from "./DigitalAssistants.module.scss";
 import type { DigitalAssistantRow } from "./types";
 import { ACTION_TYPES, HEADERS, INITIAL_STATE, appReducer } from "./types";
 import { CELL_RENDERERS, StatusCell } from "./CellRenderers";
-import { exportToCSV, ensureCSVExtension } from "@/utils/csv";
+import { downloadCSVWithChildren } from "@/utils/csv";
 import type { Dispatch } from "react";
 import type { AppAction } from "./types";
 
@@ -81,6 +80,17 @@ const renderCell = ({
 
 const DigitalAssistantsPage = () => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
+
+  // Auto-dismiss success toast after 5 seconds
+  useEffect(() => {
+    if (state.exportToastOpen && state.exportToastKind === "success") {
+      const timer = setTimeout(() => {
+        dispatch({ type: ACTION_TYPES.HIDE_EXPORT_TOAST });
+      }, 5000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [state.exportToastOpen, state.exportToastKind]);
 
   const handleDelete = async () => {
     if (!state.selectedRowId) {
@@ -126,6 +136,7 @@ const DigitalAssistantsPage = () => {
   const downloadCSV = async () => {
     const name = state.csvFileName.trim();
 
+    // Validate filename before closing modal
     if (!name) {
       dispatch({
         type: ACTION_TYPES.SET_EXPORT_ERROR,
@@ -134,8 +145,7 @@ const DigitalAssistantsPage = () => {
       return;
     }
 
-    const filename = ensureCSVExtension(name);
-
+    // Validate data before closing modal
     if (filteredRows.length === 0) {
       dispatch({
         type: ACTION_TYPES.SET_EXPORT_ERROR,
@@ -144,31 +154,20 @@ const DigitalAssistantsPage = () => {
       return;
     }
 
+    // Close modal immediately
+    dispatch({ type: ACTION_TYPES.CLOSE_EXPORT_DIALOG });
+
+    // Use utility function to handle export
+    const result = downloadCSVWithChildren(filteredRows, HEADERS, name);
+
+    // Show toast based on result
     dispatch({
-      type: ACTION_TYPES.SET_EXPORT_STATUS,
-      payload: "exporting",
+      type: ACTION_TYPES.SHOW_EXPORT_TOAST,
+      payload: {
+        message: result.message,
+        kind: result.success ? "success" : "error",
+      },
     });
-
-    try {
-      const exportableHeaders = HEADERS.filter((h) => h.key !== "actions");
-      exportToCSV(filteredRows, exportableHeaders, filename);
-
-      dispatch({
-        type: ACTION_TYPES.SET_EXPORT_STATUS,
-        payload: "success",
-      });
-    } catch {
-      dispatch({
-        type: ACTION_TYPES.SET_EXPORT_STATUS,
-        payload: "error",
-      });
-
-      dispatch({
-        type: ACTION_TYPES.SET_EXPORT_ERROR,
-        payload:
-          "An error occurred while exporting the CSV file. Please try again.",
-      });
-    }
   };
 
   const filteredRows = state.rowsData.filter((row) => {
@@ -214,10 +213,28 @@ const DigitalAssistantsPage = () => {
           className={styles.customToast}
         />
       )}
+      {state.exportToastOpen && (
+        <ActionableNotification
+          aria-label="close notification"
+          kind={state.exportToastKind}
+          closeOnEscape
+          title={
+            state.exportToastKind === "success"
+              ? "Export successful"
+              : "Export failed"
+          }
+          subtitle={state.exportToastMessage}
+          onCloseButtonClick={() => {
+            dispatch({ type: ACTION_TYPES.HIDE_EXPORT_TOAST });
+          }}
+          className={styles.customToast}
+          hideCloseButton={false}
+        />
+      )}
       <Tabs>
         <PageHeader
           title={{ text: "Digital assistants" }}
-          subtitle="Production-ready AI solutions that combine multiple services into intelligent, integrated systems for complex use cases using Retrieval-Augmented Generation (RAG)."
+          subtitle="Production-ready tools that help users complete tasks and access information through conversation or commands. Assistants integrate multiple services for complex use cases and support retrieval-augmented generation (RAG)."
           fullWidthGrid="xl"
           navigation={
             <TabList aria-label="Digital assistants tabs">
@@ -463,7 +480,7 @@ const DigitalAssistantsPage = () => {
                   <Modal
                     open={state.isDeleteDialogOpen}
                     size="sm"
-                    modalLabel={`Delete ${state.rowsData.find((r) => r.id === state.selectedRowId)?.name || "digital assistant"}`}
+                    modalLabel="Delete digital assistant deployment"
                     modalHeading="Confirm delete"
                     primaryButtonText="Delete"
                     secondaryButtonText="Cancel"
@@ -475,15 +492,15 @@ const DigitalAssistantsPage = () => {
                     onRequestSubmit={handleDelete}
                   >
                     <p>
-                      Deleting an AI deployment permanently deletes all
-                      associated components, including connected services,
-                      runtime metadata, and configurations will be permanently
-                      deleted, and it cannot be undone.
+                      Deleting an digital assistant deployment permanently
+                      deletes all associated components, including connected
+                      services, runtime metadata, and configurations will be
+                      permanently deleted, and it cannot be undone.
                     </p>
                     <div>
                       <CheckboxGroup
                         className={styles.deleteConfirmation}
-                        legendText="Confirm digital assistant to be deleted"
+                        legendText="Confirm digital assistant deployment to be deleted"
                       >
                         <Checkbox
                           id="checkbox-label-1"
@@ -512,60 +529,27 @@ const DigitalAssistantsPage = () => {
                     open={state.isExportDialogOpen}
                     size="sm"
                     modalHeading="Export as CSV"
-                    passiveModal={state.exportStatus !== "idle"}
-                    preventCloseOnClickOutside
-                    {...(state.exportStatus === "idle" && {
-                      primaryButtonText: "Export",
-                      secondaryButtonText: "Cancel",
-                      onRequestSubmit: downloadCSV,
-                    })}
+                    primaryButtonText="Export"
+                    secondaryButtonText="Cancel"
+                    onRequestSubmit={downloadCSV}
                     onRequestClose={() =>
                       dispatch({ type: ACTION_TYPES.CLOSE_EXPORT_DIALOG })
                     }
                   >
-                    {state.exportStatus === "idle" && (
-                      <TextInput
-                        id="csv-file-name"
-                        labelText="File name"
-                        value={state.csvFileName}
-                        invalid={!!state.exportErrorMessage}
-                        invalidText={state.exportErrorMessage}
-                        onChange={(e) => {
-                          dispatch({
-                            type: ACTION_TYPES.SET_CSV_FILENAME,
-                            payload: e.target.value,
-                          });
-                          dispatch({ type: ACTION_TYPES.CLEAR_EXPORT_ERROR });
-                        }}
-                      />
-                    )}
-
-                    {state.exportStatus === "exporting" && (
-                      <div className={styles.exportStatus}>
-                        <InlineLoading
-                          status="active"
-                          description="Exporting..."
-                        />
-                      </div>
-                    )}
-
-                    {state.exportStatus === "success" && (
-                      <div className={styles.exportStatus}>
-                        <InlineLoading
-                          status="finished"
-                          description="The file has been exported"
-                        />
-                      </div>
-                    )}
-
-                    {state.exportStatus === "error" && (
-                      <div className={styles.exportStatus}>
-                        <InlineLoading
-                          status="error"
-                          description={state.exportErrorMessage}
-                        />
-                      </div>
-                    )}
+                    <TextInput
+                      id="csv-file-name"
+                      labelText="File name"
+                      value={state.csvFileName}
+                      invalid={!!state.exportErrorMessage}
+                      invalidText={state.exportErrorMessage}
+                      onChange={(e) => {
+                        dispatch({
+                          type: ACTION_TYPES.SET_CSV_FILENAME,
+                          payload: e.target.value,
+                        });
+                        dispatch({ type: ACTION_TYPES.CLEAR_EXPORT_ERROR });
+                      }}
+                    />
                   </Modal>
                 </Column>
               </Grid>

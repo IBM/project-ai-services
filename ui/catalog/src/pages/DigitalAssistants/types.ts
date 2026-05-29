@@ -10,8 +10,6 @@ export interface DigitalAssistantRow {
   children?: DigitalAssistantRow[];
 }
 
-export type ExportStatus = "idle" | "exporting" | "success" | "error";
-
 export interface AppState {
   search: string;
   page: number;
@@ -26,10 +24,12 @@ export interface AppState {
   isDeleting: boolean;
   isExportDialogOpen: boolean;
   csvFileName: string;
-  exportStatus: ExportStatus;
   exportErrorMessage: string;
   hasError: boolean;
   visibleColumns: Record<string, boolean>;
+  exportToastOpen: boolean;
+  exportToastMessage: string;
+  exportToastKind: "success" | "error";
 }
 
 export const ACTION_TYPES = {
@@ -46,12 +46,13 @@ export const ACTION_TYPES = {
   OPEN_EXPORT_DIALOG: "OPEN_EXPORT_DIALOG",
   CLOSE_EXPORT_DIALOG: "CLOSE_EXPORT_DIALOG",
   SET_CSV_FILENAME: "SET_CSV_FILENAME",
-  SET_EXPORT_STATUS: "SET_EXPORT_STATUS",
   SET_EXPORT_ERROR: "SET_EXPORT_ERROR",
   CLEAR_EXPORT_ERROR: "CLEAR_EXPORT_ERROR",
   SET_SELECTED_ROW_ID: "SET_SELECTED_ROW_ID",
   TOGGLE_COLUMN_VISIBILITY: "TOGGLE_COLUMN_VISIBILITY",
   RESET_COLUMN_VISIBILITY: "RESET_COLUMN_VISIBILITY",
+  SHOW_EXPORT_TOAST: "SHOW_EXPORT_TOAST",
+  HIDE_EXPORT_TOAST: "HIDE_EXPORT_TOAST",
 } as const;
 
 export type AppAction =
@@ -71,12 +72,16 @@ export type AppAction =
   | { type: typeof ACTION_TYPES.OPEN_EXPORT_DIALOG }
   | { type: typeof ACTION_TYPES.CLOSE_EXPORT_DIALOG }
   | { type: typeof ACTION_TYPES.SET_CSV_FILENAME; payload: string }
-  | { type: typeof ACTION_TYPES.SET_EXPORT_STATUS; payload: ExportStatus }
   | { type: typeof ACTION_TYPES.SET_EXPORT_ERROR; payload: string }
   | { type: typeof ACTION_TYPES.CLEAR_EXPORT_ERROR }
   | { type: typeof ACTION_TYPES.SET_SELECTED_ROW_ID; payload: string | null }
   | { type: typeof ACTION_TYPES.TOGGLE_COLUMN_VISIBILITY; payload: string }
-  | { type: typeof ACTION_TYPES.RESET_COLUMN_VISIBILITY };
+  | { type: typeof ACTION_TYPES.RESET_COLUMN_VISIBILITY }
+  | {
+      type: typeof ACTION_TYPES.SHOW_EXPORT_TOAST;
+      payload: { message: string; kind: "success" | "error" };
+    }
+  | { type: typeof ACTION_TYPES.HIDE_EXPORT_TOAST };
 
 // Table headers
 export const HEADERS: DataTableHeader[] = [
@@ -205,7 +210,6 @@ export const INITIAL_STATE: AppState = {
   hasError: false,
   isExportDialogOpen: false,
   csvFileName: "",
-  exportStatus: "idle",
   exportErrorMessage: "",
   visibleColumns: {
     name: true,
@@ -213,6 +217,9 @@ export const INITIAL_STATE: AppState = {
     uptime: true,
     messages: true,
   },
+  exportToastOpen: false,
+  exportToastMessage: "",
+  exportToastKind: "success",
 };
 
 // Reducer
@@ -274,7 +281,6 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         isExportDialogOpen: true,
         csvFileName: "",
         exportErrorMessage: "",
-        exportStatus: "idle",
       };
     case ACTION_TYPES.CLOSE_EXPORT_DIALOG:
       return {
@@ -283,8 +289,6 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       };
     case ACTION_TYPES.SET_CSV_FILENAME:
       return { ...state, csvFileName: action.payload };
-    case ACTION_TYPES.SET_EXPORT_STATUS:
-      return { ...state, exportStatus: action.payload };
     case ACTION_TYPES.SET_EXPORT_ERROR:
       return {
         ...state,
@@ -312,6 +316,18 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           uptime: true,
           messages: true,
         },
+      };
+    case ACTION_TYPES.SHOW_EXPORT_TOAST:
+      return {
+        ...state,
+        exportToastOpen: true,
+        exportToastMessage: action.payload.message,
+        exportToastKind: action.payload.kind,
+      };
+    case ACTION_TYPES.HIDE_EXPORT_TOAST:
+      return {
+        ...state,
+        exportToastOpen: false,
       };
     default:
       return state;
