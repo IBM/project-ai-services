@@ -331,7 +331,7 @@ def process_text(converted_doc, pdf_path, out_path):
 
     # Load pdf pages one time when TOC headers not found for retrieving the font size of header texts
     pdf_pages = None
-    if not toc_headers and not is_docx:
+    if not toc_headers:
         pdf_pages = load_pdf_pages(pdf_path)
         page_count = len(pdf_pages)
 
