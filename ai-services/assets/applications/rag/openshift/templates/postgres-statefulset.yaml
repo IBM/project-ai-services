@@ -24,8 +24,6 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
         ai-services.io/component: database
     spec:
-      securityContext:
-        fsGroup: 26
       containers:
         - name: postgres
           image: "{{ .Values.postgres.image }}"
@@ -44,8 +42,6 @@ spec:
           ports:
             - name: postgres-port
               containerPort: 5432
-          securityContext:
-            runAsUser: 26
           volumeMounts:
             - mountPath: /var/lib/pgsql
               name: data
