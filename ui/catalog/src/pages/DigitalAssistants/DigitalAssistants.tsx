@@ -715,7 +715,7 @@ const DigitalAssistantsPage = () => {
                       className={styles.codeButton}
                       renderIcon={Code}
                       onClick={() =>
-                        window.open("https://github.com/your-repo", "_blank")
+                        window.open("https://github.com/IBM/project-ai-services/tree/main/services/chatbot", "_blank")
                       }
                     >
                       View code
@@ -752,7 +752,7 @@ const DigitalAssistantsPage = () => {
                         </p>
                         <div className={styles.demoActions}>
                           <Link
-                            href="https://video-link.com"
+                            href="https://github.com/IBM/project-ai-services/tree/main/spyre-rag"
                             target="_blank"
                             renderIcon={PlayOutline}
                           >
