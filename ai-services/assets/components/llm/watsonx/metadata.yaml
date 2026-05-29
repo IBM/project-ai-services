@@ -1,0 +1,11 @@
+# Component identification
+type: component
+id: watsonx
+name: "Watsonx Instruct"
+description: "Deploy llm models using watsonx"
+
+# Component type this provider belongs to
+component_type: llm
+component_name: "Large Language Model (LLM)"
+
+# Made with Bob

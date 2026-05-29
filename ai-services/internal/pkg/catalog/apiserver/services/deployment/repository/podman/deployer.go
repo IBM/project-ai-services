@@ -25,11 +25,13 @@ import (
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	k8syaml "sigs.k8s.io/yaml"
 )
 
@@ -93,9 +95,14 @@ func (d *PodmanDeployer) ExecuteDeployment(
 ) error {
 	logger.Infof("Starting deployment execution for '%s'\n", plan.ApplicationName)
 
-	// TODO: Add Image pull logic
+	// Step 1.a: Pull container images for all components and services
+	if err := d.pullImagesForDeployment(plan); err != nil {
+		d.handleDeploymentError(ctx, plan.ApplicationID, "Image pull failed", err)
 
-	// Step 1: Download models specified in parameters
+		return fmt.Errorf("failed to pull images: %w", err)
+	}
+
+	// Step 1.b: Download models specified in parameters
 	if err := d.downloadModelsForDeployment(plan); err != nil {
 		d.handleDeploymentError(ctx, plan.ApplicationID, "Model download failed", err)
 
@@ -175,6 +182,12 @@ func (d *PodmanDeployer) collectModelsFromPlan(plan *DeploymentPlan) map[string]
 
 	// Extract models from component params
 	for _, comp := range plan.Components {
+		// do not download models for watsonx
+		if strings.EqualFold(comp.ProviderID, "watsonx") {
+			logger.Infof("Skipping model download for provider: %s\n", comp.ProviderID)
+
+			continue
+		}
 		d.extractModelsFromParams(comp.Params, modelSet)
 	}
 
@@ -202,6 +215,140 @@ func (d *PodmanDeployer) downloadModels(modelSet map[string]bool) error {
 		if err := helpers.DownloadModelContainer(modelName, modelsPath); err != nil {
 			return fmt.Errorf("failed to download model %s: %w", modelName, err)
 		}
+	}
+
+	return nil
+}
+
+// pullImagesForDeployment pulls all container images required for components and services.
+func (d *PodmanDeployer) pullImagesForDeployment(plan *DeploymentPlan) error {
+	logger.Infof("Pulling container images for application '%s'\n", plan.ApplicationName)
+
+	imageSet := d.collectImagesFromPlan(plan)
+
+	if len(imageSet) == 0 {
+		logger.Infof("No images to pull for application '%s'\n", plan.ApplicationName)
+
+		return nil
+	}
+
+	if err := d.pullImages(imageSet); err != nil {
+		return err
+	}
+
+	logger.Infof("Successfully pulled all images for application '%s'\n", plan.ApplicationName)
+
+	return nil
+}
+
+// collectImagesFromPlan collects all unique container images from the deployment plan.
+func (d *PodmanDeployer) collectImagesFromPlan(plan *DeploymentPlan) map[string]bool {
+	imageSet := make(map[string]bool)
+
+	// Include tool image which is used for all housekeeping tasks
+	imageSet[vars.ToolImage] = true
+
+	// Extract images from component templates
+	for _, comp := range plan.Components {
+		d.extractImagesFromComponent(comp, imageSet)
+	}
+
+	// Extract images from service templates
+	for _, svc := range plan.Services {
+		d.extractImagesFromService(svc, imageSet)
+	}
+
+	return imageSet
+}
+
+// extractImagesFromComponent extracts container images from a component's templates.
+func (d *PodmanDeployer) extractImagesFromComponent(comp *ComponentPlan, imageSet map[string]bool) {
+	// Load component templates
+	tmpls, err := d.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
+	if err != nil {
+		logger.Errorf("Failed to load component templates for %s/%s: %v\n", comp.ComponentType, comp.ProviderID, err)
+
+		return
+	}
+
+	// Extract images from each template
+	for templateName, tmpl := range tmpls {
+		d.extractImagesFromTemplate(tmpl, templateName, comp.Values, imageSet)
+	}
+}
+
+// extractImagesFromService extracts container images from a service's templates.
+func (d *PodmanDeployer) extractImagesFromService(svc *ServicePlan, imageSet map[string]bool) {
+	// Load service templates
+	tmpls, err := d.catalogProvider.LoadServiceTemplates(svc.CatalogID)
+	if err != nil {
+		logger.Errorf("Failed to load service templates for %s: %v\n", svc.CatalogID, err)
+
+		return
+	}
+
+	// Extract images from each template
+	for templateName, tmpl := range tmpls {
+		d.extractImagesFromTemplate(tmpl, templateName, svc.Values, imageSet)
+	}
+}
+
+// extractImagesFromTemplate renders a template and extracts container images from it.
+func (d *PodmanDeployer) extractImagesFromTemplate(
+	tmpl *template.Template,
+	templateName string,
+	values map[string]any,
+	imageSet map[string]bool,
+) {
+	// Prepare minimal params for rendering
+	initialParams := map[string]any{
+		"InstanceSlug": "image-extraction",
+		"TemplateID":   uuid.New(),
+		"BaseDir":      utils.GetBaseDir(),
+		"Values":       values,
+		"env":          map[string]map[string]string{},
+	}
+
+	// Render the template
+	var rendered bytes.Buffer
+	if err := tmpl.Execute(&rendered, initialParams); err != nil {
+		logger.Errorf("Failed to render template %s for image extraction: %v\n", templateName, err)
+
+		return
+	}
+
+	// Parse the rendered template
+	var podSpec podmodels.PodSpec
+	if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
+		logger.Errorf("Failed to parse rendered template %s: %v\n", templateName, err)
+
+		return
+	}
+
+	// Extract images from containers
+	for _, container := range podSpec.Spec.Containers {
+		if container.Image != "" {
+			imageSet[container.Image] = true
+		}
+	}
+}
+
+// pullImages pulls only missing images from the provided set using the runtime.
+// Images that are already present locally are skipped.
+func (d *PodmanDeployer) pullImages(imageSet map[string]bool) error {
+	// Convert map to slice
+	images := make([]string, 0, len(imageSet))
+	for img := range imageSet {
+		images = append(images, img)
+	}
+
+	// Use the image package's IfNotPresent method
+	imgHelper := &image.Images{
+		Runtime: d.runtime,
+	}
+
+	if err := imgHelper.IfNotPresent(images); err != nil {
+		return fmt.Errorf("failed to pull images: %w", err)
 	}
 
 	return nil

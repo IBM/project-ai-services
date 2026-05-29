@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -244,6 +245,67 @@ func (h *ApplicationHandler) GetApplicationByID(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// DeleteApplication godoc
+//
+//	@Summary		Delete application
+//	@Description	Initiates async deletion of an application and all its resources. Returns 202 immediately.
+//	@Tags			Applications
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path		string	true	"Application ID (UUID)"
+//	@Param			force	query		bool	false	"When true, also deletes orphaned component records"
+//	@Success		202		{object}	repository.DeleteApplicationResponse
+//	@Failure		400		{object}	ErrorResponse	"Invalid application ID"
+//	@Failure		401		{object}	ErrorResponse	"Unauthorized"
+//	@Failure		403		{object}	ErrorResponse	"User doesn't own this application"
+//	@Failure		404		{object}	ErrorResponse	"Application not found"
+//	@Failure		409		{object}	ErrorResponse	"Application is already being deleted"
+//	@Failure		500		{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/applications/{id} [delete]
+func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
+	appID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid application ID format, expected UUID"})
+
+		return
+	}
+
+	force := c.Query("force") == "true"
+
+	userIDVal, exists := c.Get(middleware.CtxUserIDKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "authentication required"})
+
+		return
+	}
+
+	userID := userIDVal.(string)
+
+	response, err := h.appService.DeleteApplication(c.Request.Context(), appID, userID, force)
+	if err != nil {
+		h.handleDeleteError(c, err)
+
+		return
+	}
+
+	c.JSON(http.StatusAccepted, response)
+}
+
+func (h *ApplicationHandler) handleDeleteError(c *gin.Context, err error) {
+	msg := err.Error()
+
+	switch {
+	case strings.Contains(msg, "not found"):
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: msg})
+	case strings.Contains(msg, "forbidden"):
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: msg})
+	case strings.Contains(msg, "conflict"):
+		c.JSON(http.StatusConflict, ErrorResponse{Error: msg})
+	default:
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
+	}
 }
 
 // Made with Bob

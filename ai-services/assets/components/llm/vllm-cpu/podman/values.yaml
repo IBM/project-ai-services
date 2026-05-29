@@ -1,3 +1,6 @@
 image: icr.io/ppc64le-oss/vllm-ppc64le:0.18.0
 model: ""
 apiKey: ""
+maxNumBatchedTokens: 26208
+maxModelLen: 26208
+maxBatchSize: 32

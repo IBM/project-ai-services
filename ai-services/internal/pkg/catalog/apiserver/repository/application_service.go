@@ -16,6 +16,7 @@ import (
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
@@ -545,6 +546,116 @@ func (s *ApplicationService) loadServiceComponents(ctx context.Context, sd []mod
 	}
 
 	return components, nil
+}
+
+// DeleteApplicationResponse is the response body for a delete application request.
+type DeleteApplicationResponse struct {
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+// DeleteApplication initiates async deletion of an application and returns immediately.
+func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string, force bool) (*DeleteApplicationResponse, error) {
+	app, err := s.appRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("not found: application does not exist")
+		}
+
+		return nil, fmt.Errorf("not found: %w", err)
+	}
+
+	if app.CreatedBy != user {
+		return nil, fmt.Errorf("forbidden: user does not own this application")
+	}
+
+	if app.Status == models.ApplicationStatusDeleting {
+		return nil, fmt.Errorf("conflict: application is already being deleted")
+	}
+
+	if err := s.appRepo.UpdateStatus(ctx, id, models.ApplicationStatusDeleting, "Deletion initiated"); err != nil {
+		return nil, err
+	}
+
+	// Service status update deferred until later
+	go s.performDeletion(context.Background(), id, app.Services, force)
+
+	return &DeleteApplicationResponse{
+		ID:      id.String(),
+		Status:  string(models.ApplicationStatusDeleting),
+		Message: "Deletion initiated successfully",
+	}, nil
+}
+
+// performDeletion carries out the async cascade deletion for an application.
+// When force is true, orphaned component records are also deleted.
+//
+//nolint:cyclop,gocognit,nestif,funlen
+func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, force bool) {
+	serviceIDs := make(map[uuid.UUID]bool, len(services))
+	for _, svc := range services {
+		serviceIDs[svc.ID] = true
+	}
+
+	// Identify orphaned components before deletion while service_dependencies still exist.
+	var orphanedComponents []uuid.UUID
+
+	if force {
+		componentCandidates := make(map[uuid.UUID]bool)
+
+		for _, svc := range services {
+			deps, err := s.serviceDependencyRepo.GetDependenciesByServiceID(ctx, svc.ID)
+			if err != nil {
+				logger.Errorf("failed to get dependencies for service %s: %s", svc.ID, err)
+				_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, "failed to get service dependencies")
+
+				return
+			}
+
+			for _, dep := range deps {
+				if dep.DependencyType == models.DependencyTypeComponent {
+					componentCandidates[dep.DependencyID] = true
+				}
+			}
+		}
+
+		for componentID := range componentCandidates {
+			dependentServices, err := s.serviceDependencyRepo.GetServicesByDependency(ctx, componentID, models.DependencyTypeComponent)
+			if err != nil {
+				logger.Errorf("failed to check component %s orphan status: %s", componentID, err)
+
+				continue
+			}
+
+			isOrphan := true
+
+			for _, svcID := range dependentServices {
+				if !serviceIDs[svcID] {
+					isOrphan = false
+
+					break
+				}
+			}
+
+			if isOrphan {
+				orphanedComponents = append(orphanedComponents, componentID)
+			}
+		}
+	}
+
+	// Delete the application; CASCADE removes services and service_dependencies.
+	if err := s.appRepo.Delete(ctx, appID); err != nil {
+		logger.Errorf("failed to delete application %s: %s", appID, err)
+
+		return
+	}
+
+	for _, componentID := range orphanedComponents {
+		if err := s.componentRepo.Delete(ctx, componentID); err != nil {
+			logger.Errorf("failed to delete orphaned component %s: %s", componentID, err)
+		}
+	}
 }
 
 // Made with Bob
