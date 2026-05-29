@@ -47,6 +47,14 @@ type DependencyReference struct {
 	ID string `yaml:"id" json:"id"`
 }
 
+// Resources represents resource requirements for a service or component.
+type Resources struct {
+	CPU          int            `yaml:"cpu,omitempty" json:"cpu,omitempty"`                   // CPU cores
+	Memory       int            `yaml:"memory,omitempty" json:"memory,omitempty"`             // Memory in MB
+	Accelerators map[string]int `yaml:"accelerators,omitempty" json:"accelerators,omitempty"` // Accelerator cards (e.g., "ibm.com/spyre_pf": 1)
+	Storage      int            `yaml:"storage,omitempty" json:"storage,omitempty"`           // Storage in MB
+}
+
 // Service represents a deployable AI service.
 type Service struct {
 	ID            string                `yaml:"id" json:"id"`
@@ -56,6 +64,7 @@ type Service struct {
 	CertifiedBy   string                `yaml:"certified_by" json:"certified_by"`
 	Architectures []string              `yaml:"architectures" json:"architectures"`
 	Dependencies  []DependencyReference `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
+	Resources     *Resources            `yaml:"resources,omitempty" json:"resources,omitempty"`
 }
 
 // ServiceSummary represents a service for list API responses.
@@ -69,12 +78,13 @@ type ServiceSummary struct {
 
 // Component represents an infrastructure component (vector_store, embedding, llm, etc.).
 type Component struct {
-	ID            string `yaml:"id" json:"id"`
-	Name          string `yaml:"name" json:"name"`
-	Description   string `yaml:"description" json:"description"`
-	Type          string `yaml:"type" json:"type"`                     // "component"
-	ComponentType string `yaml:"component_type" json:"component_type"` // "vector_store", "embedding", "llm", etc.
-	ComponentName string `yaml:"component_name" json:"component_name"` // Display name for component type (e.g., "Vector Store", "LLM Model")
+	ID            string     `yaml:"id" json:"id"`
+	Name          string     `yaml:"name" json:"name"`
+	Description   string     `yaml:"description" json:"description"`
+	Type          string     `yaml:"type" json:"type"`                     // "component"
+	ComponentType string     `yaml:"component_type" json:"component_type"` // "vector_store", "embedding", "llm", etc.
+	ComponentName string     `yaml:"component_name" json:"component_name"` // Display name for component type (e.g., "Vector Store", "LLM Model")
+	Resources     *Resources `yaml:"resources,omitempty" json:"resources,omitempty"`
 }
 
 // ComponentSummary represents a component for list API responses.
@@ -93,11 +103,12 @@ type RuntimeMetadata struct {
 
 // DeployOptionsProvider represents a provider for a component type.
 type DeployOptionsProvider struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Default     bool   `json:"default,omitempty"`
-	Schema      string `json:"schema,omitempty"`
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	Default     bool       `json:"default,omitempty"`
+	Schema      string     `json:"schema,omitempty"`
+	Resources   *Resources `json:"resources,omitempty"`
 }
 
 // DeployOptionsComponent represents a component type with its providers.
@@ -114,6 +125,7 @@ type DeployOptionsService struct {
 	ID         string                   `json:"id"`
 	Name       string                   `json:"name"`
 	Components []DeployOptionsComponent `json:"components"`
+	Resources  *Resources               `json:"resources,omitempty"`
 }
 
 // DeployOptionsArchitecture represents deploy options for an architecture.

@@ -18,3 +18,8 @@ dependencies:
   - id: llm
 
 # Made with Bob
+
+# Resource requirements (UI + Backend)
+resources:
+  cpu: 16 # 50m (UI) + 16 (Backend) = ~16 cores
+  memory: 51712 # 512Mi (UI) + 50Gi (Backend) = 50.5Gi in MB

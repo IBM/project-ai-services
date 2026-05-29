@@ -7,3 +7,8 @@ description: "Deploy reranker models on vLLM inference engine (CPU-only)"
 # Component type this provider belongs to
 component_type: reranker
 component_name: "Reranker Model"
+
+# Resource requirements
+resources:
+  cpu: 8
+  memory: 5120 # 5Gi in MB

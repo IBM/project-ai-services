@@ -7,3 +7,8 @@ description: "Deploy instruct models on vLLM inference engine (CPU-only)"
 # Component type this provider belongs to
 component_type: llm
 component_name: "Large Language Model (LLM)"
+
+# Resource requirements
+resources:
+  cpu: 12
+  memory: 102400 # 100Gi in MB

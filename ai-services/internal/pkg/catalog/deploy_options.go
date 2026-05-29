@@ -23,7 +23,7 @@ func (p *CatalogProvider) GetArchitectureDeployOptions(architectureID string) (*
 	// Build global components from architecture metadata
 	globalComponents := make([]types.DeployOptionsComponent, 0, len(arch.GlobalComponents))
 	for _, compRef := range arch.GlobalComponents {
-		component, err := p.buildDeployOptionsComponent(compRef.Type)
+		component, err := p.buildDeployOptionsComponent(compRef.Type, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build global component '%s': %w", compRef.Type, err)
 		}
@@ -41,7 +41,7 @@ func (p *CatalogProvider) GetArchitectureDeployOptions(architectureID string) (*
 		// Build all components for this service from its dependencies
 		components := make([]types.DeployOptionsComponent, 0, len(service.Dependencies))
 		for _, dep := range service.Dependencies {
-			component, err := p.buildDeployOptionsComponent(dep.ID)
+			component, err := p.buildDeployOptionsComponent(dep.ID, false)
 			if err != nil {
 				return nil, fmt.Errorf("failed to build component '%s' for service '%s': %w", dep.ID, service.ID, err)
 			}
@@ -75,7 +75,7 @@ func (p *CatalogProvider) GetServiceDeployOptions(serviceID string) (*types.Depl
 	// Build components list
 	components := make([]types.DeployOptionsComponent, 0, len(service.Dependencies))
 	for _, dep := range service.Dependencies {
-		component, err := p.buildDeployOptionsComponent(dep.ID)
+		component, err := p.buildDeployOptionsComponent(dep.ID, true)
 		if err != nil {
 			logger.Errorf(fmt.Sprintf("failed to build component '%s': %v", dep.ID, err))
 
@@ -88,11 +88,13 @@ func (p *CatalogProvider) GetServiceDeployOptions(serviceID string) (*types.Depl
 		ID:         service.ID,
 		Name:       service.Name,
 		Components: components,
+		Resources:  service.Resources,
 	}, nil
 }
 
 // buildDeployOptionsComponent builds a DeployOptionsComponent for a given component type.
-func (p *CatalogProvider) buildDeployOptionsComponent(componentType string) (*types.DeployOptionsComponent, error) {
+// includeResources controls whether to include resource information in providers.
+func (p *CatalogProvider) buildDeployOptionsComponent(componentType string, includeResources bool) (*types.DeployOptionsComponent, error) {
 	// List all components of this type
 	allComponents, err := p.ListComponents()
 	if err != nil {
@@ -118,6 +120,11 @@ func (p *CatalogProvider) buildDeployOptionsComponent(componentType string) (*ty
 			ID:          comp.ID,
 			Name:        comp.Name,
 			Description: comp.Description,
+		}
+
+		// Only include resources if requested
+		if includeResources {
+			provider.Resources = comp.Resources
 		}
 
 		// Only add schema if the schema file has non-empty properties
