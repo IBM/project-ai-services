@@ -6,7 +6,6 @@ import AuthLayout from "./layouts/AuthLayout";
 import Login from "./pages/Login";
 import Logout from "./pages/Logout";
 import ApplicationsListPage from "./pages/AiDeployments";
-import Architectures from "./pages/Architectures";
 import Services from "./pages/Services";
 import ReferenceUseCases from "./pages/ReferenceUseCases";
 import { ProtectedRoute } from "@/components";
@@ -27,7 +26,6 @@ function App() {
               path={ROUTES.AI_DEPLOYMENTS}
               element={<ApplicationsListPage />}
             />
-            <Route path={ROUTES.ARCHITECTURES} element={<Architectures />} />
             <Route path={ROUTES.SERVICES} element={<Services />} />
             <Route
               path={ROUTES.REFERENCE_USE_CASES}
