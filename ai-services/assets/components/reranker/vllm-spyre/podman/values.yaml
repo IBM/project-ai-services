@@ -1,3 +1,2 @@
-reranker:
-  image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.4.0
-  model: ""
+image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.4.0
+model: ""

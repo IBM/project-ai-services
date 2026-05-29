@@ -1,17 +1,15 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "{{ .AppName }}--opensearch"
+  name: "opensearch-{{ .InstanceSlug }}"
   labels:
-    ai-services.io/application: "{{ .AppName }}"
-    ai-services.io/template: "{{ .AppTemplateName }}"
-    ai-services.io/version: "{{ .Version }}"
+    ai-services.io/template: "{{ .TemplateID }}"
   annotations:
     io.podman.annotations.pids-limit/opensearch: "4096"
 spec:
   initContainers:
     - name: fix-permissions
-      image: "{{ .Values.opensearch.image }}"
+      image: "{{ .Values.image }}"
       command: ["sh", "-c", "chown -R 1000:1000 /usr/share/opensearch/data"]
       securityContext:
         runAsUser: 0
@@ -20,12 +18,12 @@ spec:
           mountPath: /usr/share/opensearch/data
   containers:
     - name: opensearch
-      image: "{{ .Values.opensearch.image }}"
+      image: "{{ .Values.image }}"
       env:
         - name: "discovery.type"
           value: "single-node"
         - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
-          value: "{{ .Values.opensearch.auth.password }}"
+          value: "{{ .Values.auth.password }}"
         - name: OPENSEARCH_JAVA_OPTS
           value: "-Xms4g -Xmx4g -XX:MaxDirectMemorySize=2g -XX:-UseSuperWord -XX:TieredStopAtLevel=1"
       ports:
@@ -35,9 +33,9 @@ spec:
           containerPort: 9600
       resources:
         requests:
-          memory: "{{ .Values.opensearch.memoryLimit }}"
+          memory: "{{ .Values.memoryLimit }}"
         limits:
-          memory: "{{ .Values.opensearch.memoryLimit }}"
+          memory: "{{ .Values.memoryLimit }}"
       securityContext:
         runAsUser: 1000
         fsGroup: 1000
@@ -50,7 +48,7 @@ spec:
           - curl
           - -fk
           - -u
-          - {{ .Values.opensearch.auth.username }}:{{ .Values.opensearch.auth.password }}
+          - {{ .Values.auth.username }}:{{ .Values.auth.password }}
           - https://localhost:9200/_cluster/health
         initialDelaySeconds: 90
         periodSeconds: 30
@@ -60,5 +58,5 @@ spec:
   volumes:
     - name: opensearch-data
       hostPath:
-        path: "{{ .BaseDir }}/applications/{{ .AppName }}/volumes/opensearch"
+        path: "{{ .BaseDir }}/applications/components/{{ .InstanceSlug }}/volumes/opensearch"
         type: DirectoryOrCreate

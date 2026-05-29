@@ -72,6 +72,10 @@ func DownloadModel(model, targetDir string) error {
 		return fmt.Errorf("failed to remove test file: %w", err)
 	}
 
+	return DownloadModelContainer(model, targetDir)
+}
+
+func DownloadModelContainer(model, targetDir string) error {
 	logger.Infof("Downloading model %s to %s\n", model, targetDir)
 
 	// Get Podman client

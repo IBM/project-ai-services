@@ -39,6 +39,42 @@ def get_pdf_page_count(file_path):
     except Exception as e:
         return 0
 
+def get_document_page_count(file_path: str) -> int:
+    """
+    Get page count for a document file (PDF or DOCX).
+
+    For PDF files, returns actual page count.
+    For DOCX files, returns 0 (DOCX doesn't have fixed pages).
+
+    Args:
+        file_path: Path to the document file
+
+    Returns:
+        Page count (int), or 0 if unable to determine
+    """
+    from pathlib import Path
+
+    try:
+        file_ext = Path(file_path).suffix.lower()
+
+        if file_ext == '.pdf':
+            return get_pdf_page_count(file_path)
+
+        elif file_ext == '.docx':
+            # DOCX files don't have fixed pages like PDFs
+            # Page count depends on rendering (font, margins, etc.)
+            # Return 0 to indicate "not applicable"
+            logger.debug(f"DOCX file {file_path}: page count not applicable, returning 0")
+            return 0
+
+        else:
+            logger.warning(f"Unknown file extension {file_ext} for {file_path}")
+            return 0
+
+    except Exception as e:
+        logger.error(f"Error getting page count for {file_path}: {e}")
+        return 0
+
 def get_matching_header_lvl(toc, title, threshold=80):
     title_l = title.lower()
     for toc_title in toc:
@@ -48,6 +84,18 @@ def get_matching_header_lvl(toc, title, threshold=80):
     return ""
 
 def get_toc(file):
+    """
+    Extract table of contents from a PDF file.
+    Returns empty TOC and 0 page count for non-PDF files (e.g., DOCX).
+    """
+    from pathlib import Path
+    
+    # Check if file is actually a PDF
+    file_ext = Path(file).suffix.lower()
+    if file_ext != '.pdf':
+        logger.debug(f"Skipping TOC extraction for non-PDF file: {file}")
+        return {}, 0
+    
     toc = {}
     page_count = 0
     parser = None
@@ -77,10 +125,27 @@ def get_toc(file):
     return toc, page_count
 
 def load_pdf_pages(pdf_path):
+    """
+    Load PDF pages for text extraction.
+    Returns empty list for non-PDF files (e.g., DOCX).
+    """
+    from pathlib import Path
+    
+    # Check if file is actually a PDF
+    file_ext = Path(pdf_path).suffix.lower()
+    if file_ext != '.pdf':
+        logger.debug(f"Skipping load_pdf_pages for non-PDF file: {pdf_path}")
+        return []
+    
     pdf_pages = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            pdf_pages.append(page.extract_words(extra_attrs=["size", "fontname"]))
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                pdf_pages.append(page.extract_words(extra_attrs=["size", "fontname"]))
+    except Exception as e:
+        logger.warning(f"Failed to load PDF pages from {pdf_path}: {e}")
+        return []
+    
     return pdf_pages
 
 def find_text_font_size(
@@ -151,7 +216,7 @@ def find_text_font_size(
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def convert_chunk(doc_converter: DocumentConverter, path: Path, chunk_num: int, start_page: int, end_page: int, chunk_cache_dir: Path):
     """Convert a single chunk of a PDF document.
-    
+
     Args:
         doc_converter: DocumentConverter instance
         path: Path to the PDF file
@@ -159,17 +224,17 @@ def convert_chunk(doc_converter: DocumentConverter, path: Path, chunk_num: int, 
         start_page: Starting page number (1-based)
         end_page: Ending page number (1-based, inclusive)
         chunk_cache_dir: Directory to save chunk results
-        
+
     Returns:
         Path to the saved chunk JSON file
-        
+
     Raises:
         DoclingConversionError: If conversion or saving fails
     """
     try:
         # Convert this chunk
         conv_res: ConversionResult = doc_converter.convert(source=path, page_range=(start_page, end_page))
-        
+
         # Save chunk result to cache
         chunk_filename = chunk_cache_dir / f"chunk_{chunk_num:04d}.json"
         conv_res.document.save_as_json(str(chunk_filename))
@@ -185,30 +250,30 @@ def convert_chunk(doc_converter: DocumentConverter, path: Path, chunk_num: int, 
 def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDocument:
     """
     Convert a document to DoclingDocument, processing in 100-page chunks.
-    
+
     Args:
         path: Path to the PDF file to convert
         cache_dir: Optional cache directory for storing chunk results.
                    Will be cleaned up after processing.
-        
+
     Returns:
         DoclingDocument containing the concatenated result
     """
-    
+
     # Input validation
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Document not found: {path}")
-    
+
     doc_converter: DocumentConverter = get_doc_converter()
-    
+
     # Get total page count
     total_pages = get_pdf_page_count(path)
-    
+
     # If document has configured chunk size pages or fewer, convert normally
     if total_pages <= settings.digitize.pdf_chunk_size:
         logger.debug(f"Converting {path} document with {total_pages} pages in single pass")
-        
+
         @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
         def _convert_single_doc():
             try:
@@ -217,9 +282,9 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
                 error_msg = f"Failed to convert document {path}: {str(e)}"
                 logger.error(error_msg)
                 raise DoclingConversionError(error_msg) from e
-        
+
         return _convert_single_doc()
-    
+
     # Process in chunks
     # Calculate total chunks using ceiling division for the configured PDF chunk size.
     # This ensures all pages are covered even if the last chunk is smaller.
@@ -228,35 +293,35 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
         f"Converting {path} document with {total_pages} pages in {total_chunks} "
         f"chunks of {settings.digitize.pdf_chunk_size}"
     )
-    
+
     # Determine cache directory for storing chunk results
     if cache_dir is None:
         chunk_cache_dir = Path(tempfile.mkdtemp(prefix="docling_chunks_"))
     else:
         chunk_cache_dir = Path(cache_dir)
-    
+
     chunk_cache_dir.mkdir(parents=True, exist_ok=True)
-    
+
     try:
         # Process document in chunks and save each chunk
         chunk_files = []
-        
+
         for start_page in range(1, total_pages + 1, settings.digitize.pdf_chunk_size):
             end_page = min(start_page + settings.digitize.pdf_chunk_size - 1, total_pages)
             chunk_num = (start_page - 1) // settings.digitize.pdf_chunk_size + 1
-            
+
             logger.debug(f"Processing {path}'s chunk {chunk_num}/{total_chunks} (pages {start_page}-{end_page})")
             chunk_file = convert_chunk(doc_converter, path, chunk_num, start_page, end_page, chunk_cache_dir)
             chunk_files.append(chunk_file)
-        
+
         # Load all chunk documents and concatenate
         docs = [DoclingDocument.load_from_json(filename=f) for f in chunk_files]
         concatenated_doc = DoclingDocument.concatenate(docs=docs)
-        
+
         logger.debug(f"Successfully concatenated {path}'s {len(docs)} chunks into single document")
         
         return concatenated_doc
-    
+
     finally:
         # Always cleanup cache directory
         try:
@@ -293,7 +358,8 @@ def get_doc_converter():
 
     doc_converter = DocumentConverter(
         allowed_formats=[
-            InputFormat.PDF
+            InputFormat.PDF,
+            InputFormat.DOCX
         ],
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
     )
