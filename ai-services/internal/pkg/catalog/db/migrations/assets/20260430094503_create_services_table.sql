@@ -5,7 +5,7 @@ CREATE TABLE services (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     app_id UUID NOT NULL,
     catalog_id VARCHAR(100),
-    status status,
+    status service_status,
     endpoints JSONB,
     version TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),

@@ -35,7 +35,7 @@ const (
 )
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
-func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string, argParams map[string]string) error {
+func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string, argParams map[string]string, httpsPort int) error {
 	s := spinner.New("Deploying catalog service...")
 	s.Start(ctx)
 
@@ -54,6 +54,12 @@ func DeployCatalog(ctx context.Context, podmanURI, passwordHash, baseDir string,
 
 		return fmt.Errorf("failed to load catalog templates: %w", err)
 	}
+
+	// Set httpsPort in argParams before any template loading
+	if argParams == nil {
+		argParams = make(map[string]string)
+	}
+	argParams["caddy.httpsPort"] = fmt.Sprintf("%d", httpsPort)
 
 	// collect all secret names used as part of deployment
 	isDeployed, existingResources, err := checkCatalogStatus(rt, tp, tmpls, argParams)
@@ -152,10 +158,6 @@ func loadCatalogTemplates(s *spinner.Spinner) (templates.Template, *templates.Ap
 
 // prepareCatalogValues prepares the values map with configure-specific configuration.
 func prepareCatalogValues(tp templates.Template, podmanURI, passwordHash string, argParams map[string]string) (map[string]any, error) {
-	if argParams == nil {
-		argParams = make(map[string]string)
-	}
-
 	// Generate database password
 	dbPassword, err := utils.GenerateRandomPassword(utils.DefaultPasswordLength)
 	if err != nil {

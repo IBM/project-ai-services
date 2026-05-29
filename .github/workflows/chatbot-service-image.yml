@@ -12,13 +12,15 @@ jobs:
     name: Build and Publish Image
     uses: ./.github/workflows/build-and-publish-image.yml
     with:
-      working-directory: 'services/chatbot'
+      service: 'chatbot'
+      working-directory: 'services'
     secrets: inherit
 
   scan:
     uses: ./.github/workflows/scanner.yml
     with:
-      path: 'services/chatbot'
+      path: 'services'
+      service: 'chatbot'
       image: 'chatbot-service'
     secrets:
       ICR_USERNAME: ${{ secrets.ICR_USERNAME }}

@@ -35,6 +35,8 @@ type ApplicationRepository interface {
 	Insert(ctx context.Context, app *models.Application) error
 	// UpdateDeploymentName updates the deployment name (name field) of an application.
 	UpdateDeploymentName(ctx context.Context, id uuid.UUID, name string) error
+	// UpdateStatus updates the status and message of an application.
+	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ApplicationStatus, message string) error
 	// Delete removes an application from the database.
 	Delete(ctx context.Context, id uuid.UUID) error
 }
@@ -228,14 +230,14 @@ func (s *scannedServiceFields) toService() (*models.Service, error) {
 		ID:        s.id,
 		AppID:     s.appID,
 		CatalogID: s.catalogID,
-		Status:    models.ApplicationStatus(s.status),
+		Status:    models.ServiceStatus(s.status),
 		Version:   s.version,
 		CreatedAt: s.created.Time,
 		UpdatedAt: s.updated.Time,
 	}
 
 	if len(s.endpoint) > 0 {
-		var endpoints map[string]any
+		var endpoints []map[string]any
 		if err := json.Unmarshal(s.endpoint, &endpoints); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal service endpoints: %w", err)
 		}
@@ -302,7 +304,7 @@ func (r *applicationRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Ap
 	query := `
 		SELECT
 			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at,
-			s.id, s.app_id, s.type, s.status, s.endpoints, s.version, s.created_at, s.updated_at
+			s.id, s.app_id, s.catalog_id, s.status, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM applications a
 		INNER JOIN services s ON a.id = s.app_id
 		WHERE a.id = $1
@@ -382,6 +384,26 @@ func (r *applicationRepo) UpdateDeploymentName(ctx context.Context, id uuid.UUID
 	result, err := r.pool.Exec(ctx, query, name, id)
 	if err != nil {
 		return fmt.Errorf("failed to update application name: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+
+	return nil
+}
+
+// UpdateStatus updates the status and message of an application.
+func (r *applicationRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status models.ApplicationStatus, message string) error {
+	query := `
+		UPDATE applications
+		SET status = $1, message = $2, updated_at = NOW()
+		WHERE id = $3
+	`
+
+	result, err := r.pool.Exec(ctx, query, status, sql.NullString{String: message, Valid: message != ""}, id)
+	if err != nil {
+		return fmt.Errorf("failed to update application status: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {
