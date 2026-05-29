@@ -12,14 +12,16 @@ jobs:
     name: Build and Publish Image
     uses: ./.github/workflows/build-and-publish-image.yml
     with:
-      working-directory: 'services/digitize'
+      service: 'digitize'
+      working-directory: 'services'
     secrets: inherit
 
   scan:
     uses: ./.github/workflows/scanner.yml
     with:
-      path: 'services/digitize'
-      image: 'digitize'
+      path: 'services'
+      service: 'digitize'
+      image: 'digitize-service'
     secrets:
       ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
       ICR_APIKEY: ${{ secrets.ICR_APIKEY }}

@@ -24,6 +24,8 @@ type ComponentRepository interface {
 	GetByType(ctx context.Context, componentType string) ([]models.Component, error)
 	// Update updates a component in the database.
 	Update(ctx context.Context, component *models.Component) error
+	// UpdateEndpoints updates only the endpoints of a component.
+	UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints map[string]any) error
 	// Delete removes a component from the database.
 	Delete(ctx context.Context, id uuid.UUID) error
 }
@@ -309,6 +311,36 @@ func (r *componentRepo) Update(ctx context.Context, component *models.Component)
 		}
 
 		return fmt.Errorf("failed to update component: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateEndpoints updates only the endpoints of a component.
+func (r *componentRepo) UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints map[string]any) error {
+	query := `
+		UPDATE components
+		SET endpoints = $1, updated_at = NOW()
+		WHERE id = $2
+	`
+
+	// Marshal endpoints to JSONB
+	var endpointsJSON []byte
+	var err error
+	if endpoints != nil {
+		endpointsJSON, err = json.Marshal(endpoints)
+		if err != nil {
+			return fmt.Errorf("failed to marshal endpoints: %w", err)
+		}
+	}
+
+	result, err := r.pool.Exec(ctx, query, endpointsJSON, id)
+	if err != nil {
+		return fmt.Errorf("failed to update component endpoints: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return pgx.ErrNoRows
 	}
 
 	return nil

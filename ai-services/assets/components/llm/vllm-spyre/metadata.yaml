@@ -1,8 +1,8 @@
 # Component identification
 type: component
-id: vllm
-name: "vLLM Instruct"
-description: "Deploy instruct models on vLLM inference engine"
+id: vllm-spyre
+name: "vLLM Spyre Instruct"
+description: "Deploy instruct models on vLLM inference engine with Spyre acceleration"
 
 # Component type this provider belongs to
 component_type: llm

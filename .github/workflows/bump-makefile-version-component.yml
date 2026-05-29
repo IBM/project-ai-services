@@ -19,6 +19,7 @@ on:
 jobs:
   check-version-bump:
     name: Verify TAG is bumped in ${{ inputs.component_path }}/Makefile
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
