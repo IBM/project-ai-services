@@ -73,7 +73,13 @@ def classify_license(trivy_data, parlay_data):
             "License by Trivy": trivy_pkg_license,
             "License by Parlay": parlay_pkg_license,
         }
-        
+
+        # Setting license value for scipy as we are getting raw license value from parlay enrichment.
+        # Temporary exception for scipy until issue is fixed in upstream.
+        # parlay ecosystems package pkg:pypi/scipy | jq '.licenses'
+        if pkg_name == "scipy":
+            pkg_license_dic["License by Parlay"] = "BSD-3-Clause"
+
         if is_pkg_license_approved(pkg_name, pkg_licenses, approved_pkgs):
             classified_pkg["allowed"][pkg_name_and_version] = pkg_license_dic
         elif is_licence_exist(deny_license_list, pkg_licenses):
