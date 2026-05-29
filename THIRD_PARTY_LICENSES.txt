@@ -11,3 +11,6 @@ plex-sans
 plex-sans-devanagari
 plex-sans-hebrew
 plex-sans-arabic
+
+The following component is separately licensed under the CNRI-python license
+regex
