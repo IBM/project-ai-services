@@ -22,6 +22,10 @@ type ServiceRepository interface {
 	GetByAppID(ctx context.Context, appID uuid.UUID) ([]models.Service, error)
 	// Update updates a service in the database.
 	Update(ctx context.Context, service *models.Service) error
+	// UpdateStatus updates only the status of a service.
+	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ApplicationStatus) error
+	// UpdateEndpoints updates only the endpoints of a service.
+	UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints map[string]any) error
 }
 
 // serviceRepo implements ServiceRepository using pgx.
@@ -185,6 +189,56 @@ func (r *serviceRepo) Update(ctx context.Context, service *models.Service) error
 		}
 
 		return fmt.Errorf("failed to update service: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateStatus updates only the status of a service.
+func (r *serviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status models.ApplicationStatus) error {
+	query := `
+		UPDATE services
+		SET status = $1, updated_at = NOW()
+		WHERE id = $2
+	`
+
+	result, err := r.pool.Exec(ctx, query, status, id)
+	if err != nil {
+		return fmt.Errorf("failed to update service status: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+
+	return nil
+}
+
+// UpdateEndpoints updates only the endpoints of a service.
+func (r *serviceRepo) UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints map[string]any) error {
+	query := `
+		UPDATE services
+		SET endpoints = $1, updated_at = NOW()
+		WHERE id = $2
+	`
+
+	// Marshal endpoints to JSONB
+	var endpointsJSON []byte
+	var err error
+	if endpoints != nil {
+		endpointsJSON, err = json.Marshal(endpoints)
+		if err != nil {
+			return fmt.Errorf("failed to marshal endpoints: %w", err)
+		}
+	}
+
+	result, err := r.pool.Exec(ctx, query, endpointsJSON, id)
+	if err != nil {
+		return fmt.Errorf("failed to update service endpoints: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return pgx.ErrNoRows
 	}
 
 	return nil

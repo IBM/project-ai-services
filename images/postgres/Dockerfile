@@ -4,29 +4,38 @@
 # This Dockerfile creates a PostgreSQL 18 image based on Red Hat Universal Base Image 9 Minimal
 #
 
-FROM golang:1.25 AS gosu-builder
+FROM registry.access.redhat.com/ubi9/ubi:9.8 AS gosu-builder
+
+ARG GO_VERSION=1.25.10
 
 ENV GOSU_VERSION=1.19 \
 	CGO_ENABLED=0
 
-RUN set -eux; \
-	apt-get update; \
-	apt-get install -y --no-install-recommends git ca-certificates; \
-	rm -rf /var/lib/apt/lists/*; \
-	git clone --branch "$GOSU_VERSION" --depth 1 https://github.com/tianon/gosu.git /src/gosu; \
-	cd /src/gosu; \
-	go build -trimpath -ldflags='-s -w -buildid=' -o /out/gosu ./; \
-	/out/gosu --version
+USER root
+
+RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-ppc64le.tar.gz -o go.tar.gz && \
+    tar -C /usr/local -xzf go.tar.gz && \
+    rm go.tar.gz
+
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+RUN dnf install -y git ca-certificates && \
+    dnf clean all && \
+    git clone --branch "$GOSU_VERSION" --depth 1 https://github.com/tianon/gosu.git /src/gosu && \
+    cd /src/gosu && \
+    go build -trimpath -ldflags='-s -w -buildid=' -o /out/gosu ./ && \
+    /out/gosu --version
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 
-# explicitly set user/group IDs
+# Create postgres group and user with flexible GID/UID for OpenShift compatibility
 RUN set -eux; \
 	groupadd -r postgres --gid=26; \
 	useradd -r -g postgres --uid=26 --home-dir=/var/lib/pgsql --shell=/bin/bash postgres; \
-	install --verbose --directory --owner postgres --group postgres --mode 1777 /var/lib/pgsql
+	# Create directory with group 0 (root) and mode 0775 for OpenShift arbitrary UID support
+	install --verbose --directory --owner=26 --group=0 --mode=0775 /var/lib/pgsql
 
 # Install required packages
 RUN set -ex; \
@@ -94,7 +103,9 @@ RUN set -eux; \
 	sed -ri "s!^#?(listen_addresses)\s*=\s*\S+.*!\1 = '*'!" /usr/pgsql-$PG_MAJOR/share/postgresql.conf.sample; \
 	grep -F "listen_addresses = '*'" /usr/pgsql-$PG_MAJOR/share/postgresql.conf.sample
 
-RUN install --verbose --directory --owner postgres --group postgres --mode 3777 /var/run/postgresql
+RUN install --verbose --directory --owner postgres --group postgres --mode 0775 /var/run/postgresql && \
+    chgrp -R 0 /var/run/postgresql /var/lib/pgsql && \
+    chmod -R g=u /var/run/postgresql /var/lib/pgsql
 
 #
 # NOTE: in 18+, PGDATA has changed to match the pg_ctlcluster standard directory structure, and the VOLUME has moved from /var/lib/postgresql/data to /var/lib/postgresql
@@ -104,6 +115,10 @@ VOLUME /var/lib/pgsql
 
 COPY docker-entrypoint.sh docker-ensure-initdb.sh /usr/local/bin/
 RUN ln -sT docker-ensure-initdb.sh /usr/local/bin/docker-enforce-initdb.sh
+
+# Support arbitrary user IDs (OpenShift requirement)
+USER 26
+
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 # We set the default STOPSIGNAL to SIGINT, which corresponds to what PostgreSQL

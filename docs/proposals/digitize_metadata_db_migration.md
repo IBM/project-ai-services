@@ -672,7 +672,7 @@ spec:
       # Init container to initialize database schema
       initContainers:
         - name: digitize-db-init
-          image: "icr.io/ai-services-private/postgres:18"  # ppc64le compatible UBI based Postgres image
+          image: "icr.io/ai-services-cicd/postgres:18-2"  # ppc64le compatible UBI based Postgres image
           command: ["/bin/sh", "/scripts/init_db.sh"]
           env:
             - name: POSTGRES_HOST

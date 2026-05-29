@@ -89,15 +89,19 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 	blacklist := apirepository.NewDBTokenBlacklist(tokenBlacklistRepo)
 	defer blacklist.Stop()
 
-	// Initialize application repository and service
+	// Initialize repositories
 	applicationRepo := repository.NewApplicationRepository(pool)
-	serviceDependencyRepo := repository.NewServiceDependencyRepository(pool)
+	serviceRepo := repository.NewServiceRepository(pool)
 	componentRepo := repository.NewComponentRepository(pool)
+	serviceDependencyRepo := repository.NewServiceDependencyRepository(pool)
+
 	catalogProvider, err := catalog.NewCatalogProvider()
 	if err != nil {
 		return fmt.Errorf("failed to initialize catalog provider: %w", err)
 	}
-	applicationService := apirepository.NewApplicationService(applicationRepo, serviceDependencyRepo, componentRepo, catalogProvider)
+
+	// Initialize application service with all required repositories
+	applicationService := apirepository.NewApplicationService(applicationRepo, serviceRepo, componentRepo, serviceDependencyRepo, catalogProvider)
 
 	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
 	authSvc := auth.NewAuthService(userRepo, tokenMgr, blacklist)

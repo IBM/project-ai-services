@@ -377,6 +377,42 @@ func FlattenMapToKeys(m map[string]any, prefix string) map[string]string {
 	return result
 }
 
+// FlattenMapWithValues converts a nested map into a flat map with dotted keys and string values.
+// Unlike FlattenMapToKeys which returns empty strings, this converts actual values to strings.
+// Example: {"ui": {"port": 8080}, "items": [1,2,3]} -> {"ui.port": "8080", "items": "1,2,3"}.
+func FlattenMapWithValues(m map[string]any, prefix string) map[string]string {
+	result := make(map[string]string)
+	for key, val := range m {
+		fullKey := key
+		if prefix != "" {
+			fullKey = prefix + "." + key
+		}
+
+		switch v := val.(type) {
+		case map[string]any:
+			// Recursively flatten nested maps
+			nested := FlattenMapWithValues(v, fullKey)
+			maps.Copy(result, nested)
+		case string:
+			result[fullKey] = v
+		case int, int64, float64, bool:
+			result[fullKey] = fmt.Sprintf("%v", v)
+		case []interface{}:
+			// For arrays, convert to comma-separated string
+			strArr := make([]string, len(v))
+			for i, item := range v {
+				strArr[i] = fmt.Sprintf("%v", item)
+			}
+			result[fullKey] = strings.Join(strArr, ",")
+		default:
+			// For other types, use fmt.Sprintf
+			result[fullKey] = fmt.Sprintf("%v", v)
+		}
+	}
+
+	return result
+}
+
 // GetEnv retrieves an environment variable or returns a default value if not set.
 func GetEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
@@ -418,4 +454,15 @@ func ValidateBaseDir(baseDir string) (string, error) {
 	}
 
 	return baseDir, nil
+}
+
+func CreateDir(path string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		err := os.MkdirAll(path, constants.DirPerm)
+		if err != nil {
+			return fmt.Errorf("failed to create target directory: %w", err)
+		}
+	}
+
+	return nil
 }

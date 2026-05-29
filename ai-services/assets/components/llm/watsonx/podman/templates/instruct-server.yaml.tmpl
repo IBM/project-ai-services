@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "llm-{{ .InstanceSlug }}"
+  labels:
+    ai-services.io/template: "{{ .TemplateID }}"
+spec:
+  containers:
+    - name: litellm
+      image: "{{ .Values.image }}"
+      command: ["litellm"]
+      args:
+        - --config
+        - /app/config.yaml
+        - --port
+        - "8000"
+        - --debug
+      env:
+        - name: WATSONX_APIKEY
+          value: "{{ .Values.watsonxApiKey }}"
+        - name: WATSONX_PROJECT_ID
+          value: "{{ .Values.watsonxProjectId }}"
+        - name: WATSONX_URL
+          value: "{{ .Values.watsonxUrl }}"
+        - name: INSTRUCT_MODEL
+          value: "watsonx/{{ .Values.model }}"
+        - name: INSTRUCT_MODEL_NAME
+          value: "{{ .Values.model }}"
+      livenessProbe:
+        httpGet:
+          path: /health/liveness
+          port: 8000
+        initialDelaySeconds: 30
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+      readinessProbe:
+        httpGet:
+          path: /health/readiness
+          port: 8000
+        initialDelaySeconds: 10
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
+      ports:
+        - containerPort: 8000
+          protocol: TCP
