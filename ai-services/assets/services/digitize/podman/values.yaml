@@ -9,5 +9,5 @@ digitizeUi:
   image: icr.io/ai-services-cicd/digitize-ui:v0.0.19
 
 postgres:
-  image: icr.io/ai-services-cicd/postgres:18
+  image: icr.io/ai-services-cicd/postgres:18-2
   password: "Aiservicesdb@1234"
