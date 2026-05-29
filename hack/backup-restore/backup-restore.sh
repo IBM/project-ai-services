@@ -20,6 +20,7 @@
 # 5. Cleans up the sidecar container after completion
 
 set -e
+set -o pipefail
 
 VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -280,7 +281,16 @@ $VOLUMES
 EOF
     
     print_info "Waiting for pod to be ready..."
-    oc wait --for=condition=Ready pod/$POD_NAME -n $NAMESPACE --timeout=60s
+    if ! oc wait --for=condition=Ready pod/$POD_NAME -n $NAMESPACE --timeout=60s; then
+        print_error "Pod failed to become ready within 60s"
+        print_info "Fetching pod status and logs for debugging..."
+        oc describe pod/$POD_NAME -n $NAMESPACE || true
+        oc logs pod/$POD_NAME -n $NAMESPACE --all-containers=true || true
+        
+        print_warning "Cleaning up failed pod..."
+        cleanup_resources "openshift" "$POD_NAME" "$NAMESPACE"
+        return 1
+    fi
     echo "  ✓ Pod ready: $POD_NAME"
 }
 
@@ -297,6 +307,190 @@ cleanup_resources() {
     else
         podman stop $RESOURCE_NAME 2>/dev/null
     fi
+}
+
+# Copy directory from container/pod to host
+# Usage: copy_from_runtime <runtime> <source> <dest> [namespace]
+copy_from_runtime() {
+    local RUNTIME="$1"
+    local SOURCE="$2"      # For podman: container:/path, for openshift: pod:/path
+    local DEST="$3"
+    local NAMESPACE="$4"   # Only used for openshift
+    
+    if [ "$RUNTIME" = "openshift" ]; then
+        oc cp "$NAMESPACE/$SOURCE" "$DEST"
+    else
+        podman cp "$SOURCE" "$DEST"
+    fi
+}
+
+# Copy directory from host to container/pod
+# Usage: copy_to_runtime <runtime> <source> <dest> [namespace]
+copy_to_runtime() {
+    local RUNTIME="$1"
+    local SOURCE="$2"
+    local DEST="$3"        # For podman: container:/path, for openshift: pod:/path
+    local NAMESPACE="$4"   # Only used for openshift
+    
+    if [ "$RUNTIME" = "openshift" ]; then
+        oc cp "$SOURCE" "$NAMESPACE/$DEST"
+    else
+        podman cp "$SOURCE" "$DEST"
+    fi
+}
+
+# Create tar archive from directory
+# Usage: create_tar_archive <source-dir> <output-file>
+create_tar_archive() {
+    local SOURCE_DIR="$1"
+    local OUTPUT_FILE="$2"
+    
+    cd "$SOURCE_DIR"
+    if ! tar -czf "$OUTPUT_FILE" backup/; then
+        cd "$OLDPWD"
+        return 1
+    fi
+    cd "$OLDPWD"
+    return 0
+}
+
+# Extract tar archive to directory
+# Usage: extract_tar_archive <backup-file> <dest-dir>
+extract_tar_archive() {
+    local BACKUP_FILE="$1"
+    local DEST_DIR="$2"
+    
+    tar -xzf "$BACKUP_FILE" -C "$DEST_DIR"
+}
+
+# Count files and calculate size in a directory
+# Usage: count_backup_files <directory>
+# Returns: "file_count|size_string"
+count_backup_files() {
+    local DIR="$1"
+    local FILES=$(find "$DIR" -type f 2>/dev/null | wc -l)
+    local SIZE=$(du -sh "$DIR" 2>/dev/null | awk '{print $1}')
+    echo "$FILES|$SIZE"
+}
+
+# Create helper pod with PVC mount for OpenShift operations
+# Usage: create_pvc_helper_pod <pod-name> <namespace> <pvc-name> [mount-path]
+# Returns: 0 on success, 1 on failure
+create_pvc_helper_pod() {
+    local POD_NAME="$1"
+    local NAMESPACE="$2"
+    local PVC_NAME="$3"
+    local MOUNT_PATH="${4:-/data}"
+    
+    local SECURITY_CONTEXT="  securityContext:
+    runAsUser: 0"
+    
+    local VOLUME_MOUNTS="    volumeMounts:
+    - name: data
+      mountPath: $MOUNT_PATH"
+    
+    local VOLUMES="  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: $PVC_NAME"
+    
+    create_openshift_pod "$POD_NAME" "$NAMESPACE" "registry.access.redhat.com/ubi9/ubi-minimal:9.4" "$SECURITY_CONTEXT" "$VOLUME_MOUNTS" "$VOLUMES"
+}
+
+# Find digitize pod and create helper pod with PVC mount
+# Usage: find_digitize_pod_and_create_helper <app-name> <operation>
+# Sets global variables: NAMESPACE, DIGITIZE_POD, HELPER_POD, PVC_NAME
+# Returns: 0 on success, exits on failure
+find_digitize_pod_and_create_helper() {
+    local APP_NAME="$1"
+    local OPERATION="$2"  # "backup" or "restore"
+    
+    # Find and validate digitize pod
+    find_and_validate_pod_openshift "$APP_NAME" "digitize"
+    DIGITIZE_POD="$POD_NAME"
+    
+    # If pod not found by labels, try fallback strategies
+    if [ -z "$DIGITIZE_POD" ]; then
+        echo "  Searching for digitize pod with fallback strategies..."
+        
+        # Use app name as the namespace (convention: namespace = app-name)
+        NAMESPACE="$APP_NAME"
+        
+        echo "  ✓ Using namespace: $NAMESPACE"
+        
+        # Strategy 1: By digitize label in namespace
+        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -l "ai-services.io/component=digitize" -o name 2>/dev/null | sed -n '1s|pod/||p')
+    fi
+    
+    if [ -z "$DIGITIZE_POD" ]; then
+        echo "  Label search failed, trying name pattern..."
+        # Strategy 2: By name pattern with backend
+        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -im1 "digitize.*backend" | sed 's|pod/||')
+    fi
+    
+    if [ -z "$DIGITIZE_POD" ]; then
+        echo "  Backend pattern failed, trying any digitize pod..."
+        # Strategy 3: Any pod with digitize in name
+        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -im1 "digitize" | sed 's|pod/||')
+    fi
+    
+    if [ -z "$DIGITIZE_POD" ]; then
+        print_error "Digitize pod not found in namespace: $NAMESPACE"
+        print_error "Available pods:"
+        oc get pods -n $NAMESPACE
+        exit 1
+    fi
+
+    echo "  ✓ Found pod: $DIGITIZE_POD"
+    
+    # Get PVC for digitize pod
+    print_info "Getting pod details and PVC..."
+    PVC_NAME=$(oc get pod $DIGITIZE_POD -n $NAMESPACE -o jsonpath='{.spec.volumes[?(@.persistentVolumeClaim)].persistentVolumeClaim.claimName}' 2>/dev/null | awk '{print $1}')
+    
+    if [ -z "$PVC_NAME" ]; then
+        print_error "No PVC found for digitize pod"
+        exit 1
+    fi
+    
+    echo "  ✓ Found PVC: $PVC_NAME"
+    
+    # Create helper pod with PVC mount
+    HELPER_POD="digitize-${OPERATION}-helper-$(date +%s)"
+    create_pvc_helper_pod "$HELPER_POD" "$NAMESPACE" "$PVC_NAME" "/data"
+
+# Create OpenSearch sidecar pod for backup/restore operations
+# Usage: create_opensearch_sidecar_pod <app-name> <operation>
+# Sets global variables: NAMESPACE, OPENSEARCH_POD, SIDECAR_POD, OPENSEARCH_SERVICE
+# Returns: 0 on success, exits on failure
+create_opensearch_sidecar_pod() {
+    local APP_NAME="$1"
+    local OPERATION="$2"  # "backup" or "restore"
+    
+    # Find and validate OpenSearch pod
+    find_and_validate_pod_openshift "$APP_NAME" "vectordb"
+    OPENSEARCH_POD="$POD_NAME"
+    
+    # Get OpenSearch service name
+    OPENSEARCH_SERVICE=$(get_opensearch_service "$APP_NAME" "$NAMESPACE")
+    echo "  ✓ OpenSearch service: $OPENSEARCH_SERVICE"
+    
+    # Create sidecar pod
+    SIDECAR_POD="opensearch-${OPERATION}-sidecar-$(date +%s)"
+    
+    local SECURITY_CONTEXT=""
+    
+    local VOLUME_MOUNTS="    env:
+    - name: OPENSEARCH_PASSWORD
+      value: \"$OPENSEARCH_PASSWORD\"
+    - name: OPENSEARCH_HOST
+      value: \"$OPENSEARCH_SERVICE\""
+    
+    local VOLUMES=""
+    
+    create_openshift_pod "$SIDECAR_POD" "$NAMESPACE" "registry.access.redhat.com/ubi9/python-312:9.7" "$SECURITY_CONTEXT" "$VOLUME_MOUNTS" "$VOLUMES"
+    
+    install_opensearch_dependencies "$SIDECAR_POD" "$NAMESPACE"
+}
 }
 
 # Manage Podman sidecar container lifecycle
@@ -327,9 +521,7 @@ manage_podman_sidecar() {
     fi
     
     print_info "Installing dependencies in sidecar..."
-    podman exec "$SIDECAR_NAME" pip install --no-cache-dir opensearch-py==2.3.1
-    
-    if [ $? -ne 0 ]; then
+    if ! podman exec "$SIDECAR_NAME" pip install --no-cache-dir opensearch-py==2.3.1; then
         print_error "Failed to install dependencies"
         podman stop "$SIDECAR_NAME" 2>/dev/null
         rm -f "$SCRIPT_FILE"
@@ -339,9 +531,7 @@ manage_podman_sidecar() {
     # Copy script to sidecar
     local SCRIPT_NAME=$(basename "$SCRIPT_FILE")
     print_info "Copying ${OPERATION} script to sidecar..."
-    podman cp "$SCRIPT_FILE" "$SIDECAR_NAME:/${SCRIPT_NAME}"
-    
-    if [ $? -ne 0 ]; then
+    if ! podman cp "$SCRIPT_FILE" "$SIDECAR_NAME:/${SCRIPT_NAME}"; then
         print_error "Failed to copy script"
         podman stop "$SIDECAR_NAME" 2>/dev/null
         rm -f "$SCRIPT_FILE"
@@ -351,9 +541,7 @@ manage_podman_sidecar() {
     # Execute based on operation type
     if [ "$OPERATION" = "backup" ]; then
         print_info "Running backup from sidecar..."
-        podman exec "$SIDECAR_NAME" python3 "/${SCRIPT_NAME}" "$APP_NAME" "/tmp/$OUTPUT_FILE"
-        
-        if [ $? -ne 0 ]; then
+        if ! podman exec "$SIDECAR_NAME" python3 "/${SCRIPT_NAME}" "$APP_NAME" "/tmp/$OUTPUT_FILE"; then
             print_error "Backup failed"
             podman stop "$SIDECAR_NAME" 2>/dev/null
             rm -f "$SCRIPT_FILE"
@@ -361,13 +549,16 @@ manage_podman_sidecar() {
         fi
         
         print_info "Copying backup to host..."
-        podman cp "$SIDECAR_NAME:/tmp/$OUTPUT_FILE" "./$OUTPUT_FILE"
+        if ! podman cp "$SIDECAR_NAME:/tmp/$OUTPUT_FILE" "./$OUTPUT_FILE"; then
+            print_error "Failed to copy backup from sidecar"
+            podman stop "$SIDECAR_NAME" 2>/dev/null
+            rm -f "$SCRIPT_FILE"
+            return 1
+        fi
     else
         # Restore operation
         print_info "Copying backup to sidecar..."
-        podman cp "$OUTPUT_FILE" "$SIDECAR_NAME:/tmp/backup.tar.gz"
-        
-        if [ $? -ne 0 ]; then
+        if ! podman cp "$OUTPUT_FILE" "$SIDECAR_NAME:/tmp/backup.tar.gz"; then
             print_error "Failed to copy backup"
             podman stop "$SIDECAR_NAME" 2>/dev/null
             rm -f "$SCRIPT_FILE"
@@ -375,9 +566,7 @@ manage_podman_sidecar() {
         fi
         
         print_info "Running restore from sidecar..."
-        podman exec "$SIDECAR_NAME" python3 "/${SCRIPT_NAME}" /tmp/backup.tar.gz
-        
-        if [ $? -ne 0 ]; then
+        if ! podman exec "$SIDECAR_NAME" python3 "/${SCRIPT_NAME}" /tmp/backup.tar.gz; then
             print_error "Restore failed"
             podman stop "$SIDECAR_NAME" 2>/dev/null
             rm -f "$SCRIPT_FILE"
@@ -412,18 +601,12 @@ install_opensearch_dependencies() {
     local NAMESPACE="$2"
     
     print_info "Installing opensearch-py..."
-    oc exec $POD_NAME -n $NAMESPACE -- pip install opensearch-py==2.3.1 >/dev/null 2>&1
+    if ! oc exec $POD_NAME -n $NAMESPACE -- pip install opensearch-py==2.3.1 >/dev/null; then
+        print_error "Failed to install opensearch-py"
+        return 1
+    fi
 }
 
-# Install tar/gzip in helper pod
-# Usage: install_tar_dependencies <pod-name> <namespace>
-install_tar_dependencies() {
-    local POD_NAME="$1"
-    local NAMESPACE="$2"
-    
-    print_info "Installing tar in helper pod..."
-    oc exec $POD_NAME -n $NAMESPACE -- microdnf install -y tar gzip >/dev/null 2>&1
-}
 
 # Create OpenSearch backup Python script
 # Usage: create_opensearch_backup_script <output-file>
@@ -585,7 +768,6 @@ export_opensearch_podman() {
 
     if [ -z "$CONTAINER_NAME" ]; then
         print_error "OpenSearch container not found for app: $APP_NAME"
-        print_error "Make sure the container has label 'ai-services.io/application=${APP_NAME}' and name contains 'opensearch'"
         exit 1
     fi
 
@@ -617,60 +799,71 @@ export_opensearch_podman() {
     ls -lh "$OUTPUT_FILE"
 }
 
-# Export Digitize (Podman)
-export_digitize_podman() {
-    local APP_NAME="$1"
-    local OUTPUT_FILE="$2"
+# Unified Digitize Export (works for both Podman and OpenShift)
+# Usage: export_digitize <runtime> <app-name> <output-file> <resource-name> <source-path> [namespace]
+export_digitize() {
+    local RUNTIME="$1"
+    local APP_NAME="$2"
+    local OUTPUT_FILE="$3"
+    local RESOURCE_NAME="$4"  # Container name or Pod name
+    local SOURCE_PATH="$5"     # Path in container/pod (e.g., /var/cache or /data)
+    local NAMESPACE="$6"       # Only for OpenShift
 
-    print_header "Digitize Data Export"
-    echo "Container cache path: /var/cache"
+    print_header "Digitize Data Export ($RUNTIME)"
     print_operation_details "export" "$APP_NAME" "$OUTPUT_FILE"
 
-    local DIGITIZE_CONTAINER=$(podman ps --filter "label=ai-services.io/application=${APP_NAME}" --format "{{.Names}}" | grep -Em1 "digitize.*(backend|server)")
+    print_info "Creating backup from $RUNTIME resource ($RESOURCE_NAME)..."
+    local TEMP_DIR=$(mktemp -d)
+    local BACKUP_DIR="$TEMP_DIR/backup"
+    mkdir -p "$BACKUP_DIR"
 
-    if [ -z "$DIGITIZE_CONTAINER" ]; then
-        print_error "Digitize backend container not found for app: $APP_NAME"
-        print_error "Make sure the container has label 'ai-services.io/application=${APP_NAME}' and name contains 'digitize' with 'backend' or 'server'"
-        exit 1
-    fi
-
-    print_info "Creating backup from container ($DIGITIZE_CONTAINER)..."
-    TEMP_DIR=$(mktemp -d)
-    cd "$TEMP_DIR"
-
-    mkdir -p backup
-
-    # Backup entire /var/cache from CONTAINER
-    print_info "Backing up /var/cache from container..."
-    
-    # Use podman cp to copy directory directly (no tar needed in container)
-    # Copy /var/cache to backup/cache (podman cp creates the target directory)
-    podman cp $DIGITIZE_CONTAINER:/var/cache ./backup/cache
-    
-    if [ $? -ne 0 ]; then
-        print_error "Failed to copy files from container"
-        cd "$OLDPWD"
+    # Copy files from container/pod to host
+    print_info "Backing up $SOURCE_PATH..."
+    if ! copy_from_runtime "$RUNTIME" "$RESOURCE_NAME:$SOURCE_PATH" "$BACKUP_DIR/cache" "$NAMESPACE"; then
+        print_error "Failed to copy data from $RUNTIME resource"
         rm -rf "$TEMP_DIR"
-        exit 1
+        return 1
     fi
     
-    # Verify backup has files
-    TOTAL_FILES=$(find backup/cache -type f 2>/dev/null | wc -l)
-    TOTAL_SIZE=$(du -sh backup/cache 2>/dev/null | awk '{print $1}')
+    # Count files and calculate size
+    local STATS=$(count_backup_files "$BACKUP_DIR/cache")
+    local TOTAL_FILES=$(echo "$STATS" | cut -d'|' -f1)
+    local TOTAL_SIZE=$(echo "$STATS" | cut -d'|' -f2)
     
     if [ "$TOTAL_FILES" -eq "0" ]; then
-        print_warning "No files found in container /var/cache"
+        print_warning "No files found in $SOURCE_PATH"
     fi
 
-    echo "  ✓ Backed up $TOTAL_FILES files ($TOTAL_SIZE) from container"
+    echo "  ✓ Backed up $TOTAL_FILES files ($TOTAL_SIZE)"
 
-    tar -czf "$OLDPWD/$OUTPUT_FILE" backup/
-    cd "$OLDPWD"
+    # Create tar archive on host
+    print_info "Creating backup archive..."
+    if ! create_tar_archive "$TEMP_DIR" "$OLDPWD/$OUTPUT_FILE"; then
+        print_error "Failed to create backup archive"
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
     rm -rf "$TEMP_DIR"
 
     echo ""
     print_success "Digitize data export completed!"
     echo "Backup file: $OUTPUT_FILE"
+    ls -lh "$OUTPUT_FILE" 2>/dev/null || true
+}
+
+# Export Digitize (Podman) - wrapper for unified function
+export_digitize_podman() {
+    local APP_NAME="$1"
+    local OUTPUT_FILE="$2"
+
+    local DIGITIZE_CONTAINER=$(podman ps --filter "label=ai-services.io/application=${APP_NAME}" --format "{{.Names}}" | grep -Em1 "digitize.*(backend|server)")
+
+    if [ -z "$DIGITIZE_CONTAINER" ]; then
+        print_error "Digitize backend container not found for app: $APP_NAME"
+        exit 1
+    fi
+
+    export_digitize "podman" "$APP_NAME" "$OUTPUT_FILE" "$DIGITIZE_CONTAINER" "/var/cache"
 }
 
 
@@ -683,7 +876,6 @@ import_opensearch_podman() {
 
     if [ -z "$CONTAINER_NAME" ]; then
         print_error "OpenSearch container not found for app: $APP_NAME"
-        print_error "Make sure the container has label 'ai-services.io/application=${APP_NAME}' and name contains 'opensearch'"
         exit 1
     fi
 
@@ -713,19 +905,28 @@ import_opensearch_podman() {
     print_success "OpenSearch import completed!"
 }
 
-# Import Digitize (Podman)
-import_digitize_podman() {
-    local APP_NAME="$1"
-    local BACKUP_FILE="$2"
+# Unified Digitize Import (works for both Podman and OpenShift)
+# Usage: import_digitize <runtime> <app-name> <backup-file> <resource-name> <dest-path> [namespace]
+import_digitize() {
+    local RUNTIME="$1"
+    local APP_NAME="$2"
+    local BACKUP_FILE="$3"
+    local RESOURCE_NAME="$4"  # Container name or Pod name
+    local DEST_PATH="$5"       # Path in container/pod (e.g., /var/cache or /data)
+    local NAMESPACE="$6"       # Only for OpenShift
 
-    print_header "Digitize Data Import"
+    print_header "Digitize Data Import ($RUNTIME)"
     print_operation_details "import" "$APP_NAME" "$BACKUP_FILE"
 
     local TEMP_DIR=$(mktemp -d)
 
-    # Extract backup
+    # Extract backup on host
     print_info "Extracting backup..."
-    tar -xzf "$BACKUP_FILE" -C "$TEMP_DIR"
+    if ! extract_tar_archive "$BACKUP_FILE" "$TEMP_DIR"; then
+        print_error "Failed to extract backup archive"
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
 
     if [ ! -d "$TEMP_DIR/backup/cache" ]; then
         print_error "No cache directory found in backup"
@@ -733,25 +934,12 @@ import_digitize_podman() {
         exit 1
     fi
 
-    # Restore to container - MIRROR the export strategy
-    print_info "Restoring to digitize container..."
+    # Count files in backup
+    local STATS=$(count_backup_files "$TEMP_DIR/backup/cache")
+    local TOTAL_FILES=$(echo "$STATS" | cut -d'|' -f1)
+    local TOTAL_SIZE=$(echo "$STATS" | cut -d'|' -f2)
     
-    local DIGITIZE_CONTAINER=$(podman ps --filter "label=ai-services.io/application=${APP_NAME}" --format "{{.Names}}" | grep -Em1 "digitize.*(backend|server)")
-
-    if [ -z "$DIGITIZE_CONTAINER" ]; then
-        print_error "Digitize backend container not found for app: $APP_NAME"
-        print_error "Make sure the container has label 'ai-services.io/application=${APP_NAME}' and name contains 'digitize' with 'backend' or 'server'"
-        rm -rf "$TEMP_DIR"
-        exit 1
-    fi
-
-    echo "  ✓ Found container: $DIGITIZE_CONTAINER"
-    
-    # Show what we're restoring
-    print_info "Backup contains:"
-    TOTAL_FILES=$(find "$TEMP_DIR/backup/cache" -type f 2>/dev/null | wc -l)
-    TOTAL_SIZE=$(du -sh "$TEMP_DIR/backup/cache" 2>/dev/null | awk '{print $1}')
-    echo "  Total files in backup: $TOTAL_FILES ($TOTAL_SIZE)"
+    print_info "Backup contains: $TOTAL_FILES files ($TOTAL_SIZE)"
     
     if [ "$TOTAL_FILES" -eq "0" ]; then
         print_error "No files found in backup!"
@@ -759,52 +947,41 @@ import_digitize_podman() {
         exit 1
     fi
     
-    # RESTORE STRATEGY (mirrors export):
-    # Use podman cp to copy directory directly (no tar needed in container)
-    
-    print_info "Restoring files to container..."
-    cd "$TEMP_DIR"
-    
-    # Copy the cache directory directly to container's /var/cache
-    # podman cp will overwrite existing files
-    podman cp backup/cache/. $DIGITIZE_CONTAINER:/var/cache/
-    
-    if [ $? -ne 0 ]; then
-        print_error "Failed to copy files to container"
-        cd "$OLDPWD"
+    # Copy files to container/pod
+    print_info "Restoring files to $RUNTIME resource..."
+    if ! copy_to_runtime "$RUNTIME" "$TEMP_DIR/backup/cache/." "$RESOURCE_NAME:$DEST_PATH/" "$NAMESPACE"; then
+        print_error "Failed to copy data to $RUNTIME resource"
         rm -rf "$TEMP_DIR"
-        exit 1
+        return 1
     fi
-    cd "$OLDPWD"
-    
-    # Verify restoration on host side
-    print_info "Verifying restoration..."
-    RESTORED_FILES=$(find "$TEMP_DIR/backup/cache" -type f 2>/dev/null | wc -l)
-    RESTORED_SIZE=$(du -sh "$TEMP_DIR/backup/cache" 2>/dev/null | awk '{print $1}')
     
     rm -rf "$TEMP_DIR"
     
-    echo "  ✓ Restored to /var/cache: $RESTORED_FILES files ($RESTORED_SIZE)"
-    
-    # Simple check: verify container can access the directory
-    if podman exec $DIGITIZE_CONTAINER test -d /var/cache 2>/dev/null; then
-        echo "  ✓ Container /var/cache is accessible"
-    else
-        print_warning "Cannot verify container /var/cache access"
-    fi
-    
-    if [ "$RESTORED_FILES" -eq "0" ]; then
-        print_warning "No files found in backup!"
-    fi
+    echo "  ✓ Restored $TOTAL_FILES files ($TOTAL_SIZE) to $DEST_PATH"
 
     echo ""
     print_success "Digitize data import completed!"
-    echo "📁 Restored $RESTORED_FILES files to container /var/cache"
+    echo "📁 Restored $TOTAL_FILES files to $DEST_PATH"
     echo "🔄 Refresh your browser to see restored documents"
     echo ""
     print_info "Note: Documents require BOTH digitize files AND OpenSearch metadata"
     print_info "If documents don't appear, also restore OpenSearch data:"
     echo "  ./backup-restore.sh import opensearch $APP_NAME opensearch_backup.tar.gz"
+}
+
+# Import Digitize (Podman) - wrapper for unified function
+import_digitize_podman() {
+    local APP_NAME="$1"
+    local BACKUP_FILE="$2"
+
+    local DIGITIZE_CONTAINER=$(podman ps --filter "label=ai-services.io/application=${APP_NAME}" --format "{{.Names}}" | grep -Em1 "digitize.*(backend|server)")
+
+    if [ -z "$DIGITIZE_CONTAINER" ]; then
+        print_error "Digitize backend container not found for app: $APP_NAME"
+        exit 1
+    fi
+
+    import_digitize "podman" "$APP_NAME" "$BACKUP_FILE" "$DIGITIZE_CONTAINER" "/var/cache"
 }
 
 
@@ -816,33 +993,11 @@ export_opensearch_openshift() {
     print_header "OpenSearch Data Export (OpenShift)"
     print_operation_details "export" "$APP_NAME" "$OUTPUT_FILE"
 
-    # Find and validate OpenSearch pod
-    find_and_validate_pod_openshift "$APP_NAME" "vectordb"
-    local OPENSEARCH_POD="$POD_NAME"
-    
-    # Get OpenSearch service name
-    local OPENSEARCH_SERVICE=$(get_opensearch_service "$APP_NAME" "$NAMESPACE")
-    echo "  ✓ OpenSearch service: $OPENSEARCH_SERVICE"
-    
-    # Create sidecar pod
-    local SIDECAR_POD="opensearch-backup-sidecar-$(date +%s)"
-    
-    local SECURITY_CONTEXT=""
-    
-    local VOLUME_MOUNTS="    env:
-    - name: OPENSEARCH_PASSWORD
-      value: \"$OPENSEARCH_PASSWORD\"
-    - name: OPENSEARCH_HOST
-      value: \"$OPENSEARCH_SERVICE\""
-    
-    local VOLUMES=""
-    
-    create_openshift_pod "$SIDECAR_POD" "$NAMESPACE" "registry.access.redhat.com/ubi9/python-312:9.7" "$SECURITY_CONTEXT" "$VOLUME_MOUNTS" "$VOLUMES"
-    
-    install_opensearch_dependencies "$SIDECAR_POD" "$NAMESPACE"
+    # Create sidecar pod (sets NAMESPACE, OPENSEARCH_POD, SIDECAR_POD, OPENSEARCH_SERVICE)
+    create_opensearch_sidecar_pod "$APP_NAME" "backup"
     
     print_info "Running backup..."
-    cat << 'EOFPYTHON' | oc exec -i $SIDECAR_POD -n $NAMESPACE -- python3 2>/dev/null
+    if ! cat << 'EOFPYTHON' | oc exec -i $SIDECAR_POD -n $NAMESPACE -- python3
 import json, os
 from pathlib import Path
 from opensearchpy import OpenSearch
@@ -891,10 +1046,34 @@ if __name__ == "__main__":
     backup = OpenSearchBackup()
     backup.run()
 EOFPYTHON
+    then
+        print_error "Failed to run backup script in sidecar pod"
+        return 1
+    fi
 
     print_info "Copying backup from sidecar pod..."
-    oc exec $SIDECAR_POD -n $NAMESPACE -- tar czf /tmp/backup.tar.gz -C /tmp opensearch_backup 2>/dev/null
-    oc cp $NAMESPACE/$SIDECAR_POD:/tmp/backup.tar.gz "$OUTPUT_FILE" 2>/dev/null
+    # Create temporary directory for backup
+    local TEMP_DIR=$(mktemp -d)
+    local BACKUP_DIR="$TEMP_DIR/opensearch_backup"
+    
+    # Use oc cp to copy the entire backup directory (no tar needed in pod)
+    if ! oc cp $NAMESPACE/$SIDECAR_POD:/tmp/opensearch_backup "$BACKUP_DIR"; then
+        print_error "Failed to copy backup from sidecar pod"
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+    
+    # Create tar archive on host
+    print_info "Creating backup archive..."
+    cd "$TEMP_DIR"
+    if ! tar -czf "$OLDPWD/$OUTPUT_FILE" opensearch_backup/; then
+        print_error "Failed to create backup archive"
+        cd "$OLDPWD"
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+    cd "$OLDPWD"
+    rm -rf "$TEMP_DIR"
     
     cleanup_resources "openshift" "$SIDECAR_POD" "$NAMESPACE"
     
@@ -902,98 +1081,18 @@ EOFPYTHON
     print_success "OpenSearch export completed!"
 }
 
-# Export Digitize (OpenShift)
+# Export Digitize (OpenShift) - wrapper for unified function
 export_digitize_openshift() {
     local APP_NAME="$1"
     local OUTPUT_FILE="$2"
 
-    print_header "Digitize Data Export (OpenShift)"
-    print_operation_details "export" "$APP_NAME" "$OUTPUT_FILE"
-
-    # Find and validate digitize pod
-    find_and_validate_pod_openshift "$APP_NAME" "digitize"
-    local DIGITIZE_POD="$POD_NAME"
+    # Find digitize pod and create helper pod (sets NAMESPACE, DIGITIZE_POD, HELPER_POD, PVC_NAME)
+    find_digitize_pod_and_create_helper "$APP_NAME" "backup"
     
-    # If pod not found by labels, try fallback strategies
-    if [ -z "$DIGITIZE_POD" ]; then
-        echo "  Searching for digitize pod with fallback strategies..."
-        
-        # Use app name as the namespace (convention: namespace = app-name)
-        NAMESPACE="$APP_NAME"
-        
-        echo "  ✓ Using namespace: $NAMESPACE"
-        
-        # Strategy 1: By digitize label in namespace
-        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -l "ai-services.io/component=digitize" -o name 2>/dev/null | sed -n '1s|pod/||p')
-    fi
-    
-    if [ -z "$DIGITIZE_POD" ]; then
-        echo "  Label search failed, trying name pattern..."
-        # Strategy 2: By name pattern with backend
-        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -im1 "digitize.*backend" | sed 's|pod/||')
-    fi
-    
-    if [ -z "$DIGITIZE_POD" ]; then
-        echo "  Backend pattern failed, trying any digitize pod..."
-        # Strategy 3: Any pod with digitize in name
-        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -im1 "digitize" | sed 's|pod/||')
-    fi
-    
-    if [ -z "$DIGITIZE_POD" ]; then
-        print_error "Digitize pod not found in namespace: $NAMESPACE"
-        print_error "Available pods:"
-        oc get pods -n $NAMESPACE
-        exit 1
-    fi
-
-    echo "  ✓ Found pod: $DIGITIZE_POD"
-    
-    # Get PVC for digitize pod (batched operation - single oc call)
-    print_info "Getting pod details and PVC..."
-    local PVC_NAME=$(oc get pod $DIGITIZE_POD -n $NAMESPACE -o jsonpath='{.spec.volumes[?(@.persistentVolumeClaim)].persistentVolumeClaim.claimName}' 2>/dev/null | awk '{print $1}')
-    
-    if [ -z "$PVC_NAME" ]; then
-        print_error "No PVC found for digitize pod"
-        exit 1
-    fi
-    
-    echo "  ✓ Found PVC: $PVC_NAME"
-    
-    # Create helper pod with PVC mount
-    local HELPER_POD="digitize-backup-helper-$(date +%s)"
-    
-    local SECURITY_CONTEXT="  securityContext:
-    runAsUser: 0"
-    
-    local VOLUME_MOUNTS="    volumeMounts:
-    - name: data
-      mountPath: /data"
-    
-    local VOLUMES="  volumes:
-  - name: data
-    persistentVolumeClaim:
-      claimName: $PVC_NAME"
-    
-    create_openshift_pod "$HELPER_POD" "$NAMESPACE" "registry.access.redhat.com/ubi9/ubi-minimal:9.4" "$SECURITY_CONTEXT" "$VOLUME_MOUNTS" "$VOLUMES"
-    
-    install_tar_dependencies "$HELPER_POD" "$NAMESPACE"
-    
-    print_info "Creating backup in helper pod..."
-    oc exec $HELPER_POD -n $NAMESPACE -- tar czf /tmp/backup.tar.gz -C /data . 2>/dev/null
-    
-    print_info "Copying backup from helper pod..."
-    oc cp $NAMESPACE/$HELPER_POD:/tmp/backup.tar.gz "$OUTPUT_FILE" 2>/dev/null
-    
-    # Count files from the created backup
-    local TOTAL_FILES=$(tar -tzf "$OUTPUT_FILE" 2>/dev/null | grep -v '/$' | wc -l)
-    echo "  ✓ Backed up $TOTAL_FILES files from PVC"
+    # Use unified export function
+    export_digitize "openshift" "$APP_NAME" "$OUTPUT_FILE" "$HELPER_POD" "/data" "$NAMESPACE"
     
     cleanup_resources "openshift" "$HELPER_POD" "$NAMESPACE"
-    
-    echo ""
-    print_success "Digitize data export completed!"
-    echo "Backup file: $OUTPUT_FILE"
-    ls -lh "$OUTPUT_FILE"
 }
 
 # Import OpenSearch (OpenShift)
@@ -1004,43 +1103,39 @@ import_opensearch_openshift() {
     print_header "OpenSearch Data Import (OpenShift)"
     print_operation_details "import" "$APP_NAME" "$BACKUP_FILE"
 
-    # Find and validate OpenSearch pod
-    find_and_validate_pod_openshift "$APP_NAME" "vectordb"
-    local OPENSEARCH_POD="$POD_NAME"
+    # Create sidecar pod (sets NAMESPACE, OPENSEARCH_POD, SIDECAR_POD, OPENSEARCH_SERVICE)
+    create_opensearch_sidecar_pod "$APP_NAME" "restore"
     
-    # Get OpenSearch service name
-    local OPENSEARCH_SERVICE=$(get_opensearch_service "$APP_NAME" "$NAMESPACE")
-    echo "  ✓ OpenSearch service: $OPENSEARCH_SERVICE"
-    
-    # Create sidecar pod
-    local SIDECAR_POD="opensearch-restore-sidecar-$(date +%s)"
-    
-    local SECURITY_CONTEXT=""
-    
-    local VOLUME_MOUNTS="    env:
-    - name: OPENSEARCH_PASSWORD
-      value: \"$OPENSEARCH_PASSWORD\"
-    - name: OPENSEARCH_HOST
-      value: \"$OPENSEARCH_SERVICE\""
-    
-    local VOLUMES=""
-    
-    create_openshift_pod "$SIDECAR_POD" "$NAMESPACE" "registry.access.redhat.com/ubi9/python-312:9.7" "$SECURITY_CONTEXT" "$VOLUME_MOUNTS" "$VOLUMES"
-    
-    install_opensearch_dependencies "$SIDECAR_POD" "$NAMESPACE"
+    print_info "Extracting backup archive on host..."
+    local TEMP_DIR=$(mktemp -d)
+    cd "$TEMP_DIR"
+    if ! tar -xzf "$BACKUP_FILE"; then
+        print_error "Failed to extract backup archive"
+        cd "$OLDPWD"
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
     
     print_info "Copying backup to sidecar pod..."
-    oc cp "$BACKUP_FILE" $NAMESPACE/$SIDECAR_POD:/tmp/backup.tar.gz 2>/dev/null
+    # Use oc cp to copy the entire backup directory (no tar needed in pod)
+    if ! oc cp "$TEMP_DIR/opensearch_backup" $NAMESPACE/$SIDECAR_POD:/tmp/opensearch_backup; then
+        print_error "Failed to copy backup to sidecar pod"
+        cd "$OLDPWD"
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+    cd "$OLDPWD"
+    rm -rf "$TEMP_DIR"
     
     print_info "Running restore..."
-    cat << 'EOFPYTHON' | oc exec -i $SIDECAR_POD -n $NAMESPACE -- python3 - /tmp/backup.tar.gz
-import json, os, sys, tarfile, tempfile
+    cat << 'EOFPYTHON' | oc exec -i $SIDECAR_POD -n $NAMESPACE -- python3
+import json, os, sys
 from pathlib import Path
 from opensearchpy import OpenSearch, helpers
 
 class OpenSearchRestore:
-    def __init__(self, backup_file):
-        self.backup_file = backup_file
+    def __init__(self):
+        self.backup_dir = Path("/tmp/opensearch_backup")
         host = os.environ.get("OPENSEARCH_HOST", "opensearch")
         password = os.environ.get("OPENSEARCH_PASSWORD", "AiServices@12345")
         print(f"Connecting to OpenSearch at {host}:9200...")
@@ -1081,32 +1176,20 @@ class OpenSearchRestore:
         return 0
     
     def run(self):
-        print("Extracting backup...")
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-            with tarfile.open(self.backup_file, "r:gz") as tar:
-                tar.extractall(temp_path)
-            
-            # Check for backup/opensearch directory structure (matches export format)
-            backup_dir = temp_path / "backup" / "opensearch"
-            if not backup_dir.exists():
-                # Fallback to old format
-                backup_dir = temp_path / "opensearch_backup"
-            
-            if backup_dir.exists():
-                indices = [f.stem.replace("_data", "") for f in backup_dir.glob("*_data.json")]
-                print(f"Found {len(indices)} indices to restore")
-                total_docs = 0
-                for idx in indices:
-                    total_docs += self.restore_index(idx, backup_dir)
-                print(f"✓ Restore completed: {len(indices)} indices, {total_docs} documents")
-            else:
-                print("ERROR: No backup data found in archive")
-                sys.exit(1)
+        if not self.backup_dir.exists():
+            print(f"ERROR: Backup directory not found: {self.backup_dir}")
+            sys.exit(1)
+        
+        indices = [f.stem.replace("_data", "") for f in self.backup_dir.glob("*_data.json")]
+        print(f"Found {len(indices)} indices to restore")
+        total_docs = 0
+        for idx in indices:
+            total_docs += self.restore_index(idx, self.backup_dir)
+        print(f"✓ Restore completed: {len(indices)} indices, {total_docs} documents")
 
 if __name__ == "__main__":
     try:
-        restore = OpenSearchRestore(sys.argv[1])
+        restore = OpenSearchRestore()
         restore.run()
     except Exception as e:
         print(f"ERROR: {str(e)}")
@@ -1121,78 +1204,16 @@ EOFPYTHON
     print_success "OpenSearch import completed!"
 }
 
-# Import Digitize (OpenShift)
+# Import Digitize (OpenShift) - wrapper for unified function
 import_digitize_openshift() {
     local APP_NAME="$1"
     local BACKUP_FILE="$2"
 
-    print_header "Digitize Data Import (OpenShift)"
-    print_operation_details "import" "$APP_NAME" "$BACKUP_FILE"
-
-    # Find and validate digitize pod
-    find_and_validate_pod_openshift "$APP_NAME" "digitize"
-    local DIGITIZE_POD="$POD_NAME"
+    # Find digitize pod and create helper pod (sets NAMESPACE, DIGITIZE_POD, HELPER_POD, PVC_NAME)
+    find_digitize_pod_and_create_helper "$APP_NAME" "restore"
     
-    if [ -z "$DIGITIZE_POD" ]; then
-        echo "  Searching for digitize pod with fallback strategies..."
-        
-        # Use app name as the namespace (convention: namespace = app-name)
-        NAMESPACE="$APP_NAME"
-        
-        echo "  ✓ Using namespace: $NAMESPACE"
-        
-        # Strategy: Any pod with digitize in name
-        DIGITIZE_POD=$(timeout 10 oc get pods -n $NAMESPACE -o name 2>/dev/null | grep -im1 "digitize" | sed 's|pod/||')
-    fi
-    
-    if [ -z "$DIGITIZE_POD" ]; then
-        print_error "Digitize pod not found in namespace: $NAMESPACE"
-        print_error "Available pods:"
-        oc get pods -n $NAMESPACE
-        exit 1
-    fi
-
-    echo "  ✓ Found pod: $DIGITIZE_POD"
-    
-    # Get PVC for digitize pod (batched operation - single oc call)
-    print_info "Getting pod details and PVC..."
-    local PVC_NAME=$(oc get pod $DIGITIZE_POD -n $NAMESPACE -o jsonpath='{.spec.volumes[?(@.persistentVolumeClaim)].persistentVolumeClaim.claimName}' 2>/dev/null | awk '{print $1}')
-    
-    if [ -z "$PVC_NAME" ]; then
-        print_error "No PVC found for digitize pod"
-        exit 1
-    fi
-    
-    echo "  ✓ Found PVC: $PVC_NAME"
-    
-    # Create helper pod with PVC mount
-    local HELPER_POD="digitize-restore-helper-$(date +%s)"
-    
-    local SECURITY_CONTEXT="  securityContext:
-    runAsUser: 0"
-    
-    local VOLUME_MOUNTS="    volumeMounts:
-    - name: data
-      mountPath: /data"
-    
-    local VOLUMES="  volumes:
-  - name: data
-    persistentVolumeClaim:
-      claimName: $PVC_NAME"
-    
-    create_openshift_pod "$HELPER_POD" "$NAMESPACE" "registry.access.redhat.com/ubi9/ubi-minimal:9.4" "$SECURITY_CONTEXT" "$VOLUME_MOUNTS" "$VOLUMES"
-    
-    install_tar_dependencies "$HELPER_POD" "$NAMESPACE"
-    
-    print_info "Copying backup to helper pod..."
-    oc cp "$BACKUP_FILE" $NAMESPACE/$HELPER_POD:/tmp/restore.tar.gz 2>/dev/null
-    
-    print_info "Extracting backup in helper pod..."
-    oc exec $HELPER_POD -n $NAMESPACE -- tar xzf /tmp/restore.tar.gz -C /data 2>/dev/null
-    
-    # Count files from the backup archive
-    local RESTORED_FILES=$(tar -tzf "$BACKUP_FILE" 2>/dev/null | grep -v '/$' | wc -l)
-    echo "  ✓ Restored $RESTORED_FILES files to PVC"
+    # Use unified import function
+    import_digitize "openshift" "$APP_NAME" "$BACKUP_FILE" "$HELPER_POD" "/data" "$NAMESPACE"
     
     cleanup_resources "openshift" "$HELPER_POD" "$NAMESPACE"
     
@@ -1200,10 +1221,6 @@ import_digitize_openshift() {
     print_info "Restarting digitize pod to refresh UI..."
     oc delete pod $DIGITIZE_POD -n $NAMESPACE --wait=false
     echo "  ✓ Digitize pod restart initiated"
-    
-    echo ""
-    print_success "Digitize data import completed!"
-    print_info "Wait for pods to restart, then refresh your browser to see documents"
 }
 
 # Main command dispatcher
