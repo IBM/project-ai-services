@@ -49,22 +49,29 @@ def get_changed_files(base_ref: str) -> List[str]:
         sys.exit(1)
 
 
-def get_makefile_tag(makefile_path: Path, ref: Optional[str] = None) -> Optional[str]:
+def get_makefile_tag(makefile_path: Path, ref: Optional[str] = None, repo_root: Optional[Path] = None) -> Optional[str]:
     """
     Extract TAG value from a Makefile.
-    
+
     Args:
         makefile_path: Path to the Makefile
         ref: Git ref to read from (e.g., 'origin/main'). If None, reads from working tree.
-    
+        repo_root: Repository root path (needed for git operations)
+
     Returns:
         TAG value or None if not found
     """
     try:
         if ref:
+            # Convert to relative path for git
+            if repo_root:
+                relative_path = makefile_path.relative_to(repo_root)
+            else:
+                relative_path = makefile_path
+            
             # Read from git ref
             result = subprocess.run(
-                ["git", "show", f"{ref}:{makefile_path}"],
+                ["git", "show", f"{ref}:{relative_path}"],
                 capture_output=True,
                 text=True,
                 check=True,
@@ -73,7 +80,7 @@ def get_makefile_tag(makefile_path: Path, ref: Optional[str] = None) -> Optional
         else:
             # Read from working tree
             content = makefile_path.read_text()
-        
+
         # Match TAG= or TAG?= with optional whitespace
         tag_match = re.search(r"^TAG\s*\??\s*=\s*(\S+)", content, re.MULTILINE)
         if tag_match:
@@ -81,7 +88,8 @@ def get_makefile_tag(makefile_path: Path, ref: Optional[str] = None) -> Optional
         return None
     except subprocess.CalledProcessError as e:
         # File doesn't exist in the ref or git error
-        print(f"   ⚠️  Warning: Could not read {makefile_path} from {ref}: {e.stderr}")
+        stderr = e.stderr.strip() if e.stderr else "unknown error"
+        print(f"   ⚠️  Warning: Could not read {makefile_path} from {ref}: {stderr}")
         return None
     except FileNotFoundError:
         return None
@@ -97,7 +105,7 @@ def check_component_version_bump(
 ) -> Tuple[bool, Optional[str]]:
     """
     Check if a component's Makefile TAG has been bumped.
-    
+
     Returns:
         (needs_check, error_message) tuple
         - needs_check: True if component has changes and needs version check
@@ -107,27 +115,28 @@ def check_component_version_bump(
     component_changed = any(
         f.startswith(f"{component_path}/") for f in changed_files
     )
-    
+
     if not component_changed:
         return False, None
+    print(f"component_changed {component_changed}...")
     
     makefile_path = repo_root / component_path / "Makefile"
-    
+
     if not makefile_path.exists():
         return True, f"❌ Makefile not found: {component_path}/Makefile"
-    
+
     # Get TAG from base branch
     base_tag = get_makefile_tag(makefile_path, f"origin/{base_ref}")
-    
+
     # Get TAG from current branch
     head_tag = get_makefile_tag(makefile_path)
-    
+
     if base_tag is None:
         return True, f"❌ Could not find TAG in base branch: {component_path}/Makefile"
-    
+
     if head_tag is None:
         return True, f"❌ Could not find TAG in current branch: {component_path}/Makefile"
-    
+
     # Check if TAG was bumped
     if base_tag == head_tag:
         error_msg = [
@@ -137,18 +146,19 @@ def check_component_version_bump(
             f"   Changes to {component_path}/** require a version bump.",
             f"   Please update TAG in {component_path}/Makefile",
         ]
-        
+
         if values_yaml_key:
             error_msg.extend([
                 f"   and the corresponding {values_yaml_key}.image references",
                 "   in all values.yaml files under ai-services/assets/.",
             ])
-        
+
         error_msg.append("")
-        error_msg.append("   Run: python3 .github/scripts/check_image_names.py  (after bumping)")
-        
+        error_msg.append(
+            "   Run: python3 .github/scripts/check_image_names.py  (after bumping)")
+
         return True, "\n".join(error_msg)
-    
+
     # TAG was bumped successfully
     print(f"✅ {name}: TAG bumped {base_tag} → {head_tag}")
     return True, None
@@ -158,66 +168,66 @@ def main() -> int:
     """Main entry point."""
     # Get base branch from environment or default to 'main'
     base_ref = sys.argv[1] if len(sys.argv) > 1 else "main"
-    
+
     repo_root = Path(__file__).parent.parent.parent
-    
+
     print("=" * 70)
     print("Checking Makefile version bumps for changed components...")
     print(f"Base branch: {base_ref}")
     print("=" * 70)
     print()
-    
+
     # Get changed files
     changed_files = get_changed_files(base_ref)
-    
+
     if not changed_files:
         print("ℹ️  No files changed")
         return 0
-    
+
     print(f"Changed files: {len(changed_files)}")
     print()
-    
+
     errors = []
     passed_components = []
     failed_components = []
-    
+
     # Check each component
     for component_path, values_yaml_key, name in COMPONENTS:
         needs_check, error_msg = check_component_version_bump(
             component_path, values_yaml_key, name, changed_files, base_ref, repo_root
         )
-        
+
         if needs_check:
             if error_msg:
                 errors.append(error_msg)
                 failed_components.append(name)
             else:
                 passed_components.append(name)
-    
+
     print()
-    
+
     if not passed_components and not failed_components:
         print("ℹ️  No components with changes detected")
         return 0
-    
+
     # Display summary
     print("=" * 70)
     print("SUMMARY")
     print("=" * 70)
     print()
-    
+
     if passed_components:
         print(f"✅ PASSED ({len(passed_components)}):")
         for name in passed_components:
             print(f"   • {name}")
         print()
-    
+
     if failed_components:
         print(f"❌ FAILED ({len(failed_components)}):")
         for name in failed_components:
             print(f"   • {name}")
         print()
-    
+
     if errors:
         print("=" * 70)
         print("DETAILED ERRORS")
@@ -231,9 +241,10 @@ def main() -> int:
             "corresponding Makefile and update image references in values.yaml files."
         )
         return 1
-    
+
     print("=" * 70)
-    print(f"✅ All {len(passed_components)} component(s) have proper version bumps!")
+    print(
+        f"✅ All {len(passed_components)} component(s) have proper version bumps!")
     print("=" * 70)
     return 0
 
