@@ -74,11 +74,16 @@ def get_makefile_tag(makefile_path: Path, ref: Optional[str] = None) -> Optional
             # Read from working tree
             content = makefile_path.read_text()
         
-        tag_match = re.search(r"^TAG\s*\??=\s*(\S+)", content, re.MULTILINE)
+        # Match TAG= or TAG?= with optional whitespace
+        tag_match = re.search(r"^TAG\s*\??\s*=\s*(\S+)", content, re.MULTILINE)
         if tag_match:
             return tag_match.group(1)
         return None
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except subprocess.CalledProcessError as e:
+        # File doesn't exist in the ref or git error
+        print(f"   ⚠️  Warning: Could not read {makefile_path} from {ref}: {e.stderr}")
+        return None
+    except FileNotFoundError:
         return None
 
 
@@ -173,7 +178,8 @@ def main() -> int:
     print()
     
     errors = []
-    checked_components = []
+    passed_components = []
+    failed_components = []
     
     # Check each component
     for component_path, values_yaml_key, name in COMPONENTS:
@@ -182,19 +188,39 @@ def main() -> int:
         )
         
         if needs_check:
-            checked_components.append(name)
             if error_msg:
                 errors.append(error_msg)
+                failed_components.append(name)
+            else:
+                passed_components.append(name)
     
     print()
     
-    if not checked_components:
+    if not passed_components and not failed_components:
         print("ℹ️  No components with changes detected")
         return 0
     
+    # Display summary
+    print("=" * 70)
+    print("SUMMARY")
+    print("=" * 70)
+    print()
+    
+    if passed_components:
+        print(f"✅ PASSED ({len(passed_components)}):")
+        for name in passed_components:
+            print(f"   • {name}")
+        print()
+    
+    if failed_components:
+        print(f"❌ FAILED ({len(failed_components)}):")
+        for name in failed_components:
+            print(f"   • {name}")
+        print()
+    
     if errors:
         print("=" * 70)
-        print(f"❌ FAILED — {len(errors)} component(s) need version bumps:")
+        print("DETAILED ERRORS")
         print("=" * 70)
         print()
         for err in errors:
@@ -207,7 +233,7 @@ def main() -> int:
         return 1
     
     print("=" * 70)
-    print(f"✅ All {len(checked_components)} component(s) have proper version bumps!")
+    print(f"✅ All {len(passed_components)} component(s) have proper version bumps!")
     print("=" * 70)
     return 0
 
