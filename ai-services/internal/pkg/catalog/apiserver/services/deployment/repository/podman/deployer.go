@@ -383,22 +383,12 @@ func (d *PodmanDeployer) deployComponentsConcurrently(components map[string]*Com
 		go func(h string, c *ComponentPlan) {
 			defer wg.Done()
 			if err := d.deployComponent(h, c, plan, &mu); err != nil {
-				// Update component status to Error
-				if c.DatabaseID != uuid.Nil {
-					errMsg := fmt.Sprintf("Component deployment failed: %v", err)
-					if updateErr := d.componentRepo.UpdateStatus(context.Background(), c.DatabaseID, models.ComponentStatusError, errMsg); updateErr != nil {
-						logger.Errorf("Failed to update component %s status: %v\n", h, updateErr)
-					}
-				}
+				d.handleComponentDeploymentError(h, c, err)
 				errChan <- fmt.Errorf("failed to deploy component %s: %w", h, err)
-			} else {
-				// Update component status to Running after successful deployment
-				if c.DatabaseID != uuid.Nil {
-					if err := d.componentRepo.UpdateStatus(context.Background(), c.DatabaseID, models.ComponentStatusRunning, "Component deployed successfully"); err != nil {
-						logger.Errorf("Failed to update component %s status to Running: %v\n", h, err)
-					}
-				}
+
+				return
 			}
+			d.handleComponentDeploymentSuccess(h, c)
 		}(hash, comp)
 	}
 
@@ -440,6 +430,27 @@ func (d *PodmanDeployer) deployComponent(hash string, comp *ComponentPlan, plan 
 	logger.Infof("Component %s deployed successfully\n", comp.ComponentType)
 
 	return nil
+}
+
+// handleComponentDeploymentError updates component status to Error when deployment fails.
+func (d *PodmanDeployer) handleComponentDeploymentError(hash string, comp *ComponentPlan, err error) {
+	if comp.DatabaseID == uuid.Nil {
+		return
+	}
+	errMsg := fmt.Sprintf("Component deployment failed: %v", err)
+	if updateErr := d.componentRepo.UpdateStatus(context.Background(), comp.DatabaseID, models.ComponentStatusError, errMsg); updateErr != nil {
+		logger.Errorf("Failed to update component %s status: %v\n", hash, updateErr)
+	}
+}
+
+// handleComponentDeploymentSuccess updates component status to Running after successful deployment.
+func (d *PodmanDeployer) handleComponentDeploymentSuccess(hash string, comp *ComponentPlan) {
+	if comp.DatabaseID == uuid.Nil {
+		return
+	}
+	if err := d.componentRepo.UpdateStatus(context.Background(), comp.DatabaseID, models.ComponentStatusRunning, "Component deployed successfully"); err != nil {
+		logger.Errorf("Failed to update component %s status to Running: %v\n", hash, err)
+	}
 }
 
 // loadComponentResources loads all necessary resources for a component.
