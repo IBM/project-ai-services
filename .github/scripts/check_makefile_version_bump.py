@@ -13,24 +13,24 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 # Map of component paths to their configuration
-# Format: (component_path, values_yaml_key, name)
+# Format: (component_path, name)
 COMPONENTS = [
     # Services Images
-    ("services/chatbot", "backend", "chatbot-service"),
-    ("services/digitize", "digitize", "digitize-service"),
-    ("services/similarity", "similarity", "similarity-service"),
-    ("services/summarize", "summarize", "summarize-service"),
+    ("services/chatbot", "chatbot-service"),
+    ("services/digitize", "digitize-service"),
+    ("services/similarity", "similarity-service"),
+    ("services/summarize", "summarize-service"),
     # Images
-    ("images/service-base", "", "service-base"),
-    ("images/postgres", "postgres", "postgres"),
-    ("images/caddy", "caddy", "caddy"),
-    ("images/litellm", "litellm", "litellm"),
+    ("images/service-base", "service-base"),
+    ("images/postgres", "postgres"),
+    ("images/caddy", "caddy"),
+    ("images/litellm", "litellm"),
     # UI Images
-    ("ui/chatbot", "ui", "chatbot-ui"),
-    ("ui/digitize", "digitizeUi", "digitize-ui"),
+    ("ui/chatbot", "chatbot-ui"),
+    ("ui/digitize", "digitize-ui"),
     # Catalog
-    ("ui/catalog", "ui", "catalog-ui"),
-    ("ai-services", "backend", "ai-services"),
+    ("ui/catalog", "catalog-ui"),
+    ("ai-services", "ai-services"),
 ]
 
 
@@ -91,7 +91,6 @@ def get_makefile_tag(makefile_path: Path, ref: Optional[str] = None, componentPa
 
 def check_component_version_bump(
     component_path: str,
-    values_yaml_key: str,
     name: str,
     changed_files: List[str],
     base_ref: str,
@@ -112,7 +111,6 @@ def check_component_version_bump(
 
     if not component_changed:
         return False, None
-    print(f"component_changed {component_changed}...")
     
     makefile_path = repo_root / component_path / "Makefile"
 
@@ -139,17 +137,10 @@ def check_component_version_bump(
             f"   Current TAG  : {head_tag}",
             f"   Changes to {component_path}/** require a version bump.",
             f"   Please update TAG in {component_path}/Makefile",
+            f"   and update image references in values.yaml files under ai-services/assets/.",
+            "",
+            "   Run: python3 .github/scripts/check_image_names.py  (after bumping)",
         ]
-
-        if values_yaml_key:
-            error_msg.extend([
-                f"   and the corresponding {values_yaml_key}.image references",
-                "   in all values.yaml files under ai-services/assets/.",
-            ])
-
-        error_msg.append("")
-        error_msg.append(
-            "   Run: python3 .github/scripts/check_image_names.py  (after bumping)")
 
         return True, "\n".join(error_msg)
 
@@ -184,9 +175,9 @@ def main() -> int:
     failed_components = []
 
     # Check each component
-    for component_path, values_yaml_key, name in COMPONENTS:
+    for component_path, name in COMPONENTS:
         needs_check, error_msg = check_component_version_bump(
-            component_path, values_yaml_key, name, changed_files, base_ref, repo_root
+            component_path, name, changed_files, base_ref, repo_root
         )
 
         if needs_check:
