@@ -159,6 +159,7 @@ func hasNonEmptyProperties(schema map[string]any) bool {
 	if properties, ok := schema["properties"].(map[string]any); ok {
 		return len(properties) > 0
 	}
+
 	return false
 }
 
