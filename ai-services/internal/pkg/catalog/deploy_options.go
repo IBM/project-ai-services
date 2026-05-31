@@ -38,6 +38,12 @@ func (p *CatalogProvider) GetArchitectureDeployOptions(architectureID string) (*
 			return nil, fmt.Errorf("failed to load service '%s': %w", svcRef.ID, err)
 		}
 
+		// Load service runtime metadata to get version
+		serviceVersion := ""
+		if runtimeMetadata, err := p.LoadServiceRuntimeMetadata(service.ID); err == nil {
+			serviceVersion = runtimeMetadata.Version
+		}
+
 		// Build all components for this service from its dependencies
 		components := make([]types.DeployOptionsComponent, 0, len(service.Dependencies))
 		for _, dep := range service.Dependencies {
@@ -49,9 +55,9 @@ func (p *CatalogProvider) GetArchitectureDeployOptions(architectureID string) (*
 		}
 
 		deployOptionsService := types.DeployOptionsService{
-			Type:       service.Type,
 			ID:         service.ID,
 			Name:       service.Name,
+			Version:    serviceVersion,
 			Components: components,
 		}
 
@@ -66,6 +72,7 @@ func (p *CatalogProvider) GetArchitectureDeployOptions(architectureID string) (*
 	return &types.DeployOptionsArchitecture{
 		ID:               arch.ID,
 		Name:             arch.Name,
+		Version:          arch.Version,
 		GlobalComponents: globalComponents,
 		Services:         services,
 	}, nil
@@ -77,6 +84,12 @@ func (p *CatalogProvider) GetServiceDeployOptions(serviceID string) (*types.Depl
 	service, err := p.LoadService(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("service not found: %w", err)
+	}
+
+	// Load service runtime metadata to get version
+	serviceVersion := ""
+	if runtimeMetadata, err := p.LoadServiceRuntimeMetadata(service.ID); err == nil {
+		serviceVersion = runtimeMetadata.Version
 	}
 
 	// Build components list
@@ -94,6 +107,7 @@ func (p *CatalogProvider) GetServiceDeployOptions(serviceID string) (*types.Depl
 	deployOptions := &types.DeployOptionsService{
 		ID:         service.ID,
 		Name:       service.Name,
+		Version:    serviceVersion,
 		Components: components,
 	}
 
@@ -127,11 +141,18 @@ func (p *CatalogProvider) buildDeployOptionsComponent(componentType string) (*ty
 			componentName = comp.ComponentName
 		}
 
+		// Load component runtime metadata to get version
+		providerVersion := ""
+		if runtimeMetadata, err := p.LoadComponentRuntimeMetadata(componentType, comp.ID); err == nil {
+			providerVersion = runtimeMetadata.Version
+		}
+
 		// Build provider
 		provider := types.DeployOptionsProvider{
 			ID:          comp.ID,
 			Name:        comp.Name,
 			Description: comp.Description,
+			Version:     providerVersion,
 		}
 
 		// Only add schema if the schema file has non-empty properties
