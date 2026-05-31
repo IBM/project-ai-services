@@ -164,8 +164,7 @@ def main() -> int:
     base_ref = sys.argv[1] if len(sys.argv) > 1 else "main"
 
     repo_root = Path(__file__).parent.parent.parent
-    print("repo_root: {repo_root}")
-
+    
     print("=" * 70)
     print("Checking Makefile version bumps for changed components...")
     print(f"Base branch: {base_ref}")
