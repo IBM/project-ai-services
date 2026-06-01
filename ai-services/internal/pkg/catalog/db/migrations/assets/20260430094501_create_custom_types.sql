@@ -17,11 +17,19 @@ CREATE TYPE service_status AS ENUM (
     'Running',
     'Error'
 );
+
+-- Component status enum
+CREATE TYPE component_status AS ENUM (
+    'Initializing',
+    'Running',
+    'Error'
+);
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
 -- Drop custom types in reverse order
+DROP TYPE IF EXISTS component_status;
 DROP TYPE IF EXISTS service_status;
 DROP TYPE IF EXISTS status;
 -- +goose StatementEnd

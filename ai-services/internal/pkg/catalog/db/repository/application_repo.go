@@ -98,7 +98,7 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 	query := `
 		WITH paged_applications AS (
 			SELECT
-				a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at
+				a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.version, a.created_by, a.created_at, a.updated_at
 			FROM applications a
 	`
 
@@ -124,7 +124,7 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 	query += `
 		)
 		SELECT
-			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at,
+			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.version, a.created_by, a.created_at, a.updated_at,
 			s.id, s.app_id, s.catalog_id, s.status, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM paged_applications a
 		INNER JOIN services s ON a.id = s.app_id
@@ -148,7 +148,7 @@ func (r *applicationRepo) scanApplicationsWithServices(rows pgx.Rows) ([]models.
 
 		err := rows.Scan(
 			&app.ID, &app.Name, &app.CatalogID, &app.DeploymentType, &app.Status,
-			&message, &app.CreatedBy, &app.CreatedAt, &app.UpdatedAt,
+			&message, &app.Version, &app.CreatedBy, &app.CreatedAt, &app.UpdatedAt,
 			&svc.id, &svc.appID, &svc.catalogID, &svc.status,
 			&svc.endpoint, &svc.version, &svc.created, &svc.updated,
 		)
@@ -256,7 +256,7 @@ func scanApplicationWithService(rows pgx.Rows, app *models.Application) (*models
 
 	err := rows.Scan(
 		&app.ID, &app.Name, &app.CatalogID, &app.DeploymentType, &app.Status,
-		&message, &app.CreatedBy, &app.CreatedAt, &app.UpdatedAt,
+		&message, &app.Version, &app.CreatedBy, &app.CreatedAt, &app.UpdatedAt,
 		&svc.id, &svc.appID, &svc.catalogID, &svc.status,
 		&svc.endpoint, &svc.version, &svc.created, &svc.updated,
 	)
@@ -303,7 +303,7 @@ func collectApplication(rows pgx.Rows) (*models.Application, error) {
 func (r *applicationRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Application, error) {
 	query := `
 		SELECT
-			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at,
+			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.version, a.created_by, a.created_at, a.updated_at,
 			s.id, s.app_id, s.catalog_id, s.status, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM applications a
 		INNER JOIN services s ON a.id = s.app_id
@@ -324,8 +324,8 @@ func (r *applicationRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Ap
 func (r *applicationRepo) GetByName(ctx context.Context, name string) (*models.Application, error) {
 	query := `
 		SELECT
-			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.created_by, a.created_at, a.updated_at,
-			s.id, s.app_id, s.type, s.status, s.endpoints, s.version, s.created_at, s.updated_at
+			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.version, a.created_by, a.created_at, a.updated_at,
+			s.id, s.app_id, s.catalog_id, s.status, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM applications a
 		LEFT JOIN services s ON a.id = s.app_id
 		WHERE a.name = $1
@@ -344,8 +344,8 @@ func (r *applicationRepo) GetByName(ctx context.Context, name string) (*models.A
 // Insert creates a new application in the database.
 func (r *applicationRepo) Insert(ctx context.Context, app *models.Application) error {
 	query := `
-		INSERT INTO applications (id, name, catalog_id, deployment_type, status, message, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO applications (id, name, catalog_id, deployment_type, status, message, version, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING created_at, updated_at
 	`
 
@@ -363,6 +363,7 @@ func (r *applicationRepo) Insert(ctx context.Context, app *models.Application) e
 		app.DeploymentType,
 		app.Status,
 		sql.NullString{String: app.Message, Valid: app.Message != ""},
+		sql.NullString{String: app.Version, Valid: app.Version != ""},
 		app.CreatedBy,
 	).Scan(&app.CreatedAt, &app.UpdatedAt)
 

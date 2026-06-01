@@ -14,6 +14,7 @@ CREATE TABLE applications (
     deployment_type deployment_type,
     status status,
     message TEXT,
+    version VARCHAR(50),
     created_by VARCHAR(100),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
