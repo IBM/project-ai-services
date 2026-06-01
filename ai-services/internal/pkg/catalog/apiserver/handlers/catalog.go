@@ -234,6 +234,35 @@ func (h *CatalogHandler) GetComponentProviderParams(c *gin.Context) {
 	c.JSON(http.StatusOK, schema)
 }
 
+// GetServiceParams godoc
+//
+//	@Summary		Get service parameters
+//	@Description	Retrieves the configuration schema (JSON Schema) for a specific service. Returns a JSON Schema object with properties that define the service's configurable parameters.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string					true	"Service ID (e.g., 'chat', 'digitize', 'similarity')"
+//	@Success		200	{object}	map[string]interface{}	"JSON Schema object with $schema, type, and properties defining service parameters"
+//	@Failure		400	{object}	ErrorResponse			"Bad Request - Invalid service ID"
+//	@Failure		401	{object}	ErrorResponse			"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse			"Service not found"
+//	@Failure		500	{object}	ErrorResponse			"Internal Server Error"
+//	@Router			/services/{id}/params [get]
+func (h *CatalogHandler) GetServiceParams(c *gin.Context) {
+	serviceID := c.Param("id")
+
+	schema, err := h.provider.GetServiceParams(serviceID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get parameters for service '%s': %v", serviceID, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, schema)
+}
+
 // ErrorResponse represents an error response.
 type ErrorResponse struct {
 	Error string `json:"error"`
