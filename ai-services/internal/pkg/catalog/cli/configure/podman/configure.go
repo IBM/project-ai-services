@@ -167,11 +167,20 @@ func prepareCatalogValues(tp templates.Template, podmanURI, authFilePath, passwo
 	// Base64 encode the database password for Kubernetes secret
 	dbPasswordBase64 := base64.StdEncoding.EncodeToString([]byte(dbPassword))
 
+	// Read and encode auth file content for secret
+	authFileContent, err := os.ReadFile(authFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read auth file from %s: %w", authFilePath, err)
+	}
+
+	// Base64 encode the auth file content for Kubernetes secret
+	authFileBase64 := base64.StdEncoding.EncodeToString(authFileContent)
+
 	// Set configure-specific values
 	argParams["backend.adminPasswordHash"] = passwordHash
 	argParams["backend.runtime"] = "podman"
 	argParams["backend.podman.uri"] = podmanURI
-	argParams["backend.podman.authFile"] = authFilePath
+	argParams["backend.podman.authFileContent"] = authFileBase64
 	argParams["db.password"] = dbPasswordBase64
 
 	// Load values from catalog
