@@ -10,9 +10,10 @@ from unittest.mock import Mock, patch
 class TestSearchOnly:
     """Tests for search_only function delegating to perform_similarity_search"""
 
-    def _patch_settings(self, monkeypatch, threshold=0.5):
+    def _patch_settings(self, monkeypatch, threshold=0.5, search_mode="hybrid"):
         mock_settings = Mock()
         mock_settings.chatbot.score_threshold = threshold
+        mock_settings.chatbot.search_mode = search_mode
         monkeypatch.setattr("chatbot.backend_utils.settings", mock_settings)
 
     def test_delegates_to_perform_similarity_search_with_hybrid_rerank(self, monkeypatch):
