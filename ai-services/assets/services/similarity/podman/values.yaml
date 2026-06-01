@@ -1,6 +1,6 @@
 similarity:
   port: ""
-  image: icr.io/ai-services-cicd/similarity-service:v0.0.4
+  image: icr.io/ai-services-cicd/similarity-service:v0.0.5
   log_level: "INFO"
 
 # Made with Bob
