@@ -162,7 +162,7 @@ class RAGConfig(BaseSettings):
         description="Estimated token count for query prompt template",
     )
 
-    conversational_rag_initial_system_message: str = Field(
+    system_prompt: str = Field(
         default=(
             "You are a helpful, conversational AI assistant. "
             "Engage naturally with users across multiple turns of conversation. "
@@ -173,7 +173,7 @@ class RAGConfig(BaseSettings):
         description="Initial system prompt for conversational behavior",
     )
 
-    conversational_rag_query_system_message: str = Field(
+    query_system_message: str = Field(
         default=(
             "Retrieved Context:\n{context}\n\n"
             "Rephrased Query: {rephrased_query}\n\n"
@@ -269,10 +269,10 @@ class RAGConfig(BaseSettings):
             logger.warning(f"Setting prompt_template_token_count to default '250' as it is missing in the settings")
             return 250
         return v
-    @field_validator('conversational_rag_initial_system_message', mode='after')
+    @field_validator('system_prompt', mode='after')
     @classmethod
-    def validate_conversational_rag_initial_system_message(cls, v, info):
-        """Validate conversational_rag_initial_system_message with language detection, warning fallback and LLM validation."""
+    def validate_system_prompt(cls, v, info):
+        """Validate system_prompt with language detection, warning fallback and LLM validation."""
         default_prompt = (
             "You are a helpful, conversational AI assistant. "
             "Engage naturally with users across multiple turns of conversation. "
@@ -282,7 +282,7 @@ class RAGConfig(BaseSettings):
         
         if not v or not isinstance(v, str):
             logger.warning(
-                "Invalid conversational_rag_initial_system_message provided. "
+                "Invalid system_prompt provided. "
                 "Falling back to default system prompt."
             )
             return default_prompt
@@ -291,21 +291,21 @@ class RAGConfig(BaseSettings):
         v_stripped = v.strip()
         if len(v_stripped) == 0:
             logger.warning(
-                "Empty conversational_rag_initial_system_message provided. "
+                "Empty system_prompt provided. "
                 "Falling back to default system prompt."
             )
             return default_prompt
         
         if len(v_stripped) < 10:
             logger.warning(
-                f"conversational_rag_initial_system_message too short ({len(v_stripped)} chars). "
+                f"system_prompt too short ({len(v_stripped)} chars). "
                 "Falling back to default system prompt."
             )
             return default_prompt
         
         if len(v_stripped) > 5000:
             logger.warning(
-                f"conversational_rag_initial_system_message too long ({len(v_stripped)} chars). "
+                f"system_prompt too long ({len(v_stripped)} chars). "
                 "Truncating to 5000 characters."
             )
             v_stripped = v_stripped[:5000]
@@ -342,20 +342,20 @@ class RAGConfig(BaseSettings):
                 
                 if not validation_result.is_valid():
                     logger.warning(
-                        f"LLM validation failed for conversational_rag_initial_system_message: "
+                        f"LLM validation failed for system_prompt: "
                         f"{validation_result.reason} (confidence: {validation_result.confidence:.2f}). "
                         f"Falling back to default system prompt."
                     )
                     return default_prompt
                 
                 logger.info(
-                    f"LLM validation passed for conversational_rag_initial_system_message: "
+                    f"LLM validation passed for system_prompt: "
                     f"{validation_result.reason}"
                 )
             except Exception as e:
                 logger.warning(f"Error during LLM validation: {e}. Proceeding with basic validation only.")
         
-        logger.info("Using custom conversational_rag_initial_system_message from environment")
+        logger.info("Using custom system_prompt from environment")
         return v_stripped
 
 class Settings(BaseSettings):

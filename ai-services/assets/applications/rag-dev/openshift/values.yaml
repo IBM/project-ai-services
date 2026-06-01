@@ -8,7 +8,7 @@ backend:
   # @hidden
   log_level: "INFO"
   # @description Custom initial system prompt for conversational RAG. Leave empty to use default. Must be at least 10 characters.
-  conversationalRagInitialSystemMessage: ""
+  systemPrompt: ""
 
 summarize:
   # @hidden
