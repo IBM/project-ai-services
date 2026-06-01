@@ -699,14 +699,17 @@ const DigitalAssistantsPage = () => {
                       className={styles.codeButton}
                       renderIcon={Code}
                       onClick={() =>
-                        window.open("https://github.com/IBM/project-ai-services/tree/main/services/chatbot", "_blank")
+                        window.open(
+                          "https://github.com/IBM/project-ai-services/tree/main/services/chatbot",
+                          "_blank",
+                        )
                       }
                     >
                       View code
                     </Button>
                     <div className={styles.architectureDiagram}>
                       <img
-                        src="/images/architectureDiagram.png"
+                        src="https://www.ibm.com/docs/en/SSXZBY_2026.03.0/IBM-AI-services/ai-services-assets/rag-arch-v020.png"
                         alt="RAG Architecture Diagram"
                         className={styles.diagramImage}
                       />
