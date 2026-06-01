@@ -1402,11 +1402,11 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "memory": {
-                    "description": "Memory in MB",
+                    "description": "Memory in bytes",
                     "type": "integer"
                 },
                 "storage": {
-                    "description": "Storage in MB",
+                    "description": "Storage in bytes",
                     "type": "integer"
                 }
             }
@@ -1437,9 +1437,6 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
-                },
-                "resources": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources"
                 },
                 "type": {
                     "description": "\"service\"",

@@ -8,10 +8,4 @@ description: "Deploy llm models using watsonx"
 component_type: llm
 component_name: "Large Language Model (LLM)"
 
-# Resource requirements
-resources:
-  cpu: 2
-  memory: 4096 # 4Gi in MB
-
-
 # Made with Bob

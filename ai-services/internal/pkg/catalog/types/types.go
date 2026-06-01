@@ -50,9 +50,9 @@ type DependencyReference struct {
 // Resources represents resource requirements for a service or component.
 type Resources struct {
 	CPU          int            `yaml:"cpu,omitempty" json:"cpu,omitempty"`                   // CPU cores
-	Memory       int            `yaml:"memory,omitempty" json:"memory,omitempty"`             // Memory in MB
+	Memory       int            `yaml:"memory,omitempty" json:"memory,omitempty"`             // Memory in bytes
 	Accelerators map[string]int `yaml:"accelerators,omitempty" json:"accelerators,omitempty"` // Accelerator cards (e.g., "ibm.com/spyre_pf": 1)
-	Storage      int            `yaml:"storage,omitempty" json:"storage,omitempty"`           // Storage in MB
+	Storage      int            `yaml:"storage,omitempty" json:"storage,omitempty"`           // Storage in bytes
 }
 
 // Service represents a deployable AI service.
@@ -64,7 +64,6 @@ type Service struct {
 	CertifiedBy   string                `yaml:"certified_by" json:"certified_by"`
 	Architectures []string              `yaml:"architectures" json:"architectures"`
 	Dependencies  []DependencyReference `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
-	Resources     *Resources            `yaml:"resources,omitempty" json:"resources,omitempty"`
 }
 
 // ServiceSummary represents a service for list API responses.
@@ -78,13 +77,12 @@ type ServiceSummary struct {
 
 // Component represents an infrastructure component (vector_store, embedding, llm, etc.).
 type Component struct {
-	ID            string     `yaml:"id" json:"id"`
-	Name          string     `yaml:"name" json:"name"`
-	Description   string     `yaml:"description" json:"description"`
-	Type          string     `yaml:"type" json:"type"`                     // "component"
-	ComponentType string     `yaml:"component_type" json:"component_type"` // "vector_store", "embedding", "llm", etc.
-	ComponentName string     `yaml:"component_name" json:"component_name"` // Display name for component type (e.g., "Vector Store", "LLM Model")
-	Resources     *Resources `yaml:"resources,omitempty" json:"resources,omitempty"`
+	ID            string `yaml:"id" json:"id"`
+	Name          string `yaml:"name" json:"name"`
+	Description   string `yaml:"description" json:"description"`
+	Type          string `yaml:"type" json:"type"`                     // "component"
+	ComponentType string `yaml:"component_type" json:"component_type"` // "vector_store", "embedding", "llm", etc.
+	ComponentName string `yaml:"component_name" json:"component_name"` // Display name for component type (e.g., "Vector Store", "LLM Model")
 }
 
 // ComponentSummary represents a component for list API responses.

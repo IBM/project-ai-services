@@ -1,2 +1,8 @@
 name: embedding
 version: "1.0.0"
+
+# Resource requirements
+resources:
+  cpu: 8
+  memory: 4294967296 # 4Gi in bytes
+  storage: 10737418240 # 10Gi for embedding model storage in bytes

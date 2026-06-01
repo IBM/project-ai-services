@@ -393,29 +393,30 @@ Resource requirements are specified using a standardized format with four key me
 {
   "resources": {
     "cpu": 1,
-    "memory": 4096,
+    "memory": 4294967296,
     "accelerators": {
       "ibm.com/spyre_pf": 1
     },
-    "storage": 1024
+    "storage": 1073741824
   }
 }
 ```
 
 **Resource Fields:**
 
-| Field                           | Type    | Unit  | Description                                 |
-| ------------------------------- | ------- | ----- | ------------------------------------------- |
-| `cpu`                           | integer | cores | Number of CPU cores required                |
-| `memory`                        | integer | MB    | Memory requirement in megabytes             |
-| `accelerators.ibm.com/spyre_pf` | integer | count | Number of Spyre accelerator cards required  |
-| `storage`                       | integer | MB    | Persistent storage requirement in megabytes |
+| Field                           | Type    | Unit  | Description                                |
+| ------------------------------- | ------- | ----- | ------------------------------------------ |
+| `cpu`                           | integer | cores | Number of CPU cores required               |
+| `memory`                        | integer | bytes | Memory requirement in bytes                |
+| `accelerators.ibm.com/spyre_pf` | integer | count | Number of Spyre accelerator cards required |
+| `storage`                       | integer | bytes | Persistent storage requirement in bytes    |
 
 **Notes:**
 
 - All fields are optional; omitted fields indicate no specific requirement
 - Values represent minimum requirements for optimal performance
 - Actual resource usage may vary based on workload and configuration
+- **Memory and storage values are specified in bytes** for precision and consistency
 
 ### 9.3 Service-Level Resources
 
@@ -436,11 +437,11 @@ Service-level resources represent the base computational requirements for the se
   ],
   "resources": {
     "cpu": 1,
-    "memory": 4096,
+    "memory": 4294967296,
     "accelerators": {
       "ibm.com/spyre_pf": 1
     },
-    "storage": 1024
+    "storage": 1073741824
   }
 }
 ```
@@ -452,12 +453,12 @@ Total service deployment resources = Service base resources + Sum of selected co
 **Example Calculation:**
 
 ```
-Service (chat):           1 CPU, 4096 MB memory, 1 spyre_pf, 1024 MB storage
-+ Vector Store (opensearch): 1 CPU, 4096 MB memory, 1 spyre_pf, 1024 MB storage
-+ Embedding (vllm):          2 CPU, 8192 MB memory, 1 spyre_pf, 2048 MB storage
-+ LLM (vllm):                4 CPU, 16384 MB memory, 2 spyre_pf, 4096 MB storage
-─────────────────────────────────────────────────────────────────────────
-Total:                       8 CPU, 32768 MB memory, 5 spyre_pf, 8192 MB storage
+Service (chat):              1 CPU, 4294967296 bytes memory, 1 spyre_pf, 1073741824 bytes storage
++ Vector Store (opensearch): 1 CPU, 4294967296 bytes memory, 1 spyre_pf, 1073741824 bytes storage
++ Embedding (vllm):          2 CPU, 8589934592 bytes memory, 1 spyre_pf, 2147483648 bytes storage
++ LLM (vllm):                4 CPU, 17179869184 bytes memory, 2 spyre_pf, 4294967296 bytes storage
+──────────────────────────────────────────────────────────────────────────────────────────────────
+Total:                       8 CPU, 34359738368 bytes memory, 5 spyre_pf, 8589934592 bytes storage
 ```
 
 ### 9.4 Provider-Level Resources
@@ -478,11 +479,11 @@ Component providers can specify their own resource requirements, allowing client
       "schema": "/api/v1/components/vector_store/providers/opensearch/params",
       "resources": {
         "cpu": 1,
-        "memory": 4096,
+        "memory": 4294967296,
         "accelerators": {
           "ibm.com/spyre_pf": 1
         },
-        "storage": 1024
+        "storage": 1073741824
       }
     },
     {
@@ -546,10 +547,10 @@ dependencies:
   - id: llm
 resources:
   cpu: 1
-  memory: 4096
+  memory: 4294967296 # 4 GiB in bytes
   accelerators:
     ibm.com/spyre_pf: 1
-  storage: 1024
+  storage: 1073741824 # 1 GiB in bytes
 ```
 
 **Component Provider Metadata (`metadata.yaml`):**
@@ -627,11 +628,11 @@ curl -H "Authorization: Bearer $TOKEN" \
   "status": "running",
   "resources": {
     "cpu": 8,
-    "memory": 32768,
+    "memory": 34359738368,
     "accelerators": {
       "ibm.com/spyre_pf": 5
     },
-    "storage": 8192
+    "storage": 8589934592
   },
   "components": [
     {

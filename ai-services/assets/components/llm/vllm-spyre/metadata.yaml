@@ -7,10 +7,3 @@ description: "Deploy instruct models on vLLM inference engine with Spyre acceler
 # Component type this provider belongs to
 component_type: llm
 component_name: "Large Language Model (LLM)"
-
-# Resource requirements
-resources:
-  cpu: 12
-  memory: 153600 # 150Gi in MB
-  accelerators:
-    ibm.com/spyre_pf: 4

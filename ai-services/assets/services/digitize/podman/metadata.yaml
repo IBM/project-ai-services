@@ -2,3 +2,9 @@ name: digitize
 version: "1.0.0"
 podTemplateExecutions:
   - [postgres.yaml.tmpl, digitize.yaml.tmpl]
+
+# Resource requirements (UI + Backend + PostgreSQL)
+resources:
+  cpu: 16 # 50m (UI) + 16 (Backend) = ~16 cores
+  memory: 54223978496 # 512Mi (UI) + 50Gi (Backend) = 50.5Gi in bytes
+  storage: 10737418240 # 10Gi for PostgreSQL database and cache storage in bytes
