@@ -241,7 +241,6 @@ find_and_validate_pod_openshift() {
         print_error "Expected namespace: $APP_NAME (convention: namespace = app-name)"
         print_error "Make sure:"
         print_error "  1. Namespace '$APP_NAME' exists"
-        print_error "  2. Pod has labels: ai-services.io/application=${APP_NAME} and ai-services.io/component=${COMPONENT}"
         exit 1
     fi
     
@@ -395,6 +394,19 @@ create_pvc_helper_pod() {
       claimName: $PVC_NAME"
     
     create_openshift_pod "$POD_NAME" "$NAMESPACE" "registry.access.redhat.com/ubi9/ubi-minimal:9.4" "$SECURITY_CONTEXT" "$VOLUME_MOUNTS" "$VOLUMES"
+    
+    # Install tar in the helper pod (required for oc cp)
+    print_info "Installing tar in helper pod..."
+    if ! oc exec -n "$NAMESPACE" "$POD_NAME" -- microdnf install -y tar 2>/dev/null; then
+        print_warning "Failed to install tar, trying with microdnf update first..."
+        oc exec -n "$NAMESPACE" "$POD_NAME" -- microdnf update -y 2>/dev/null || true
+        if ! oc exec -n "$NAMESPACE" "$POD_NAME" -- microdnf install -y tar; then
+            print_error "Failed to install tar in helper pod"
+            oc delete pod "$POD_NAME" -n "$NAMESPACE" 2>/dev/null || true
+            return 1
+        fi
+    fi
+    echo "  ✓ tar installed successfully"
 }
 
 # Find digitize pod and create helper pod with PVC mount
@@ -456,7 +468,8 @@ find_digitize_pod_and_create_helper() {
     
     # Create helper pod with PVC mount
     HELPER_POD="digitize-${OPERATION}-helper-$(date +%s)"
-    create_pvc_helper_pod "$HELPER_POD" "$NAMESPACE" "$PVC_NAME" "/data"
+    create_pvc_helper_pod "$HELPER_POD" "$NAMESPACE" "$PVC_NAME" "/var/cache"
+}
 
 # Create OpenSearch sidecar pod for backup/restore operations
 # Usage: create_opensearch_sidecar_pod <app-name> <operation>
@@ -490,7 +503,6 @@ create_opensearch_sidecar_pod() {
     create_openshift_pod "$SIDECAR_POD" "$NAMESPACE" "registry.access.redhat.com/ubi9/python-312:9.7" "$SECURITY_CONTEXT" "$VOLUME_MOUNTS" "$VOLUMES"
     
     install_opensearch_dependencies "$SIDECAR_POD" "$NAMESPACE"
-}
 }
 
 # Manage Podman sidecar container lifecycle
@@ -812,6 +824,9 @@ export_digitize() {
     print_header "Digitize Data Export ($RUNTIME)"
     print_operation_details "export" "$APP_NAME" "$OUTPUT_FILE"
 
+    # Save current working directory
+    local CURRENT_DIR="$PWD"
+    
     print_info "Creating backup from $RUNTIME resource ($RESOURCE_NAME)..."
     local TEMP_DIR=$(mktemp -d)
     local BACKUP_DIR="$TEMP_DIR/backup"
@@ -838,7 +853,7 @@ export_digitize() {
 
     # Create tar archive on host
     print_info "Creating backup archive..."
-    if ! create_tar_archive "$TEMP_DIR" "$OLDPWD/$OUTPUT_FILE"; then
+    if ! create_tar_archive "$TEMP_DIR" "$CURRENT_DIR/$OUTPUT_FILE"; then
         print_error "Failed to create backup archive"
         rm -rf "$TEMP_DIR"
         return 1
@@ -848,7 +863,7 @@ export_digitize() {
     echo ""
     print_success "Digitize data export completed!"
     echo "Backup file: $OUTPUT_FILE"
-    ls -lh "$OUTPUT_FILE" 2>/dev/null || true
+    ls -lh "$CURRENT_DIR/$OUTPUT_FILE" 2>/dev/null || true
 }
 
 # Export Digitize (Podman) - wrapper for unified function
@@ -1090,7 +1105,7 @@ export_digitize_openshift() {
     find_digitize_pod_and_create_helper "$APP_NAME" "backup"
     
     # Use unified export function
-    export_digitize "openshift" "$APP_NAME" "$OUTPUT_FILE" "$HELPER_POD" "/data" "$NAMESPACE"
+    export_digitize "openshift" "$APP_NAME" "$OUTPUT_FILE" "$HELPER_POD" "/var/cache" "$NAMESPACE"
     
     cleanup_resources "openshift" "$HELPER_POD" "$NAMESPACE"
 }
@@ -1108,10 +1123,8 @@ import_opensearch_openshift() {
     
     print_info "Extracting backup archive on host..."
     local TEMP_DIR=$(mktemp -d)
-    cd "$TEMP_DIR"
-    if ! tar -xzf "$BACKUP_FILE"; then
+    if ! extract_tar_archive "$BACKUP_FILE" "$TEMP_DIR"; then
         print_error "Failed to extract backup archive"
-        cd "$OLDPWD"
         rm -rf "$TEMP_DIR"
         return 1
     fi
@@ -1120,11 +1133,9 @@ import_opensearch_openshift() {
     # Use oc cp to copy the entire backup directory (no tar needed in pod)
     if ! oc cp "$TEMP_DIR/opensearch_backup" $NAMESPACE/$SIDECAR_POD:/tmp/opensearch_backup; then
         print_error "Failed to copy backup to sidecar pod"
-        cd "$OLDPWD"
         rm -rf "$TEMP_DIR"
         return 1
     fi
-    cd "$OLDPWD"
     rm -rf "$TEMP_DIR"
     
     print_info "Running restore..."
@@ -1213,7 +1224,7 @@ import_digitize_openshift() {
     find_digitize_pod_and_create_helper "$APP_NAME" "restore"
     
     # Use unified import function
-    import_digitize "openshift" "$APP_NAME" "$BACKUP_FILE" "$HELPER_POD" "/data" "$NAMESPACE"
+    import_digitize "openshift" "$APP_NAME" "$BACKUP_FILE" "$HELPER_POD" "/var/cache" "$NAMESPACE"
     
     cleanup_resources "openshift" "$HELPER_POD" "$NAMESPACE"
     
