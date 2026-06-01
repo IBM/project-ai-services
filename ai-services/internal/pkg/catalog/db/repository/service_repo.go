@@ -22,8 +22,8 @@ type ServiceRepository interface {
 	GetByAppID(ctx context.Context, appID uuid.UUID) ([]models.Service, error)
 	// Update updates a service in the database.
 	Update(ctx context.Context, service *models.Service) error
-	// UpdateStatus updates only the status of a service.
-	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ApplicationStatus) error
+	// UpdateStatus updates only the status and message of a service.
+	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ServiceStatus, message string) error
 	// UpdateEndpoints updates only the endpoints of a service.
 	UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints map[string]any) error
 }
@@ -41,8 +41,8 @@ func NewServiceRepository(pool *pgxpool.Pool) ServiceRepository {
 // Insert creates a new service in the database.
 func (r *serviceRepo) Insert(ctx context.Context, service *models.Service) error {
 	query := `
-		INSERT INTO services (id, app_id, catalog_id, status, endpoints, version)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO services (id, app_id, catalog_id, status, message, endpoints, version)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING created_at, updated_at
 	`
 
@@ -68,6 +68,7 @@ func (r *serviceRepo) Insert(ctx context.Context, service *models.Service) error
 		service.AppID,
 		service.CatalogID,
 		service.Status,
+		sql.NullString{String: service.Message, Valid: service.Message != ""},
 		endpointsJSON,
 		sql.NullString{String: service.Version, Valid: service.Version != ""},
 	).Scan(&service.CreatedAt, &service.UpdatedAt)
@@ -194,15 +195,15 @@ func (r *serviceRepo) Update(ctx context.Context, service *models.Service) error
 	return nil
 }
 
-// UpdateStatus updates only the status of a service.
-func (r *serviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status models.ApplicationStatus) error {
+// UpdateStatus updates only the status and message of a service.
+func (r *serviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status models.ServiceStatus, message string) error {
 	query := `
 		UPDATE services
-		SET status = $1, updated_at = NOW()
-		WHERE id = $2
+		SET status = $1, message = $2, updated_at = NOW()
+		WHERE id = $3
 	`
 
-	result, err := r.pool.Exec(ctx, query, status, id)
+	result, err := r.pool.Exec(ctx, query, status, sql.NullString{String: message, Valid: message != ""}, id)
 	if err != nil {
 		return fmt.Errorf("failed to update service status: %w", err)
 	}

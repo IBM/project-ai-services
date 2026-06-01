@@ -6,6 +6,7 @@ CREATE TABLE services (
     app_id UUID NOT NULL,
     catalog_id VARCHAR(100),
     status service_status,
+    message TEXT,
     endpoints JSONB,
     version TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),

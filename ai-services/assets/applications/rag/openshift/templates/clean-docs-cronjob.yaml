@@ -16,11 +16,11 @@ spec:
         spec:
           containers:
             - name: docs
-              image: "{{ .Values.backend.image }}"
+              image: "{{ .Values.digitize.image }}"
               command:
                 - "/var/venv/bin/python"
                 - "-m"
-                - "ingest.cli"
+                - "cli"
                 - "clean-db"
               resources:
                 requests:
@@ -30,6 +30,23 @@ spec:
                   cpu: "20m"
                   memory: "1Gi"
               env:
+              - name: POSTGRES_HOST
+                value: "postgres"
+              - name: POSTGRES_PORT
+                value: "5432"
+              - name: POSTGRES_DB
+                value: "{{ .Values.digitize.database }}"
+              - name: POSTGRES_USER
+                value: "postgres"
+              - name: POSTGRES_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: "postgres-credentials"
+                    key: password
+              - name: DB_POOL_SIZE
+                value: "5"
+              - name: DB_MAX_OVERFLOW
+                value: "5"
               - name: OPENSEARCH_HOST
                 value: "opensearch"
               - name: OPENSEARCH_PORT
@@ -48,6 +65,8 @@ spec:
                   secretKeyRef:
                     name: "opensearch-credentials"
                     key: password
+              - name: OPENSEARCH_NUM_SHARDS
+                value: "1"
               volumeMounts:
                 - name: cache
                   mountPath: /var/cache

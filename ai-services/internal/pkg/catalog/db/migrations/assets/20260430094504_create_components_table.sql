@@ -5,6 +5,8 @@ CREATE TABLE components (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     type VARCHAR(100),
     provider VARCHAR(100),
+    status component_status,
+    message TEXT,
     endpoints JSONB,
     version TEXT,
     metadata JSONB,
