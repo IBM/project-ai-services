@@ -22,9 +22,15 @@ spec:
         - name: POSTGRES_DB
           value: "{{ .Values.digitize.database }}"
         - name: POSTGRES_USER
-          value: "postgres"
+          valueFrom:
+            secretKeyRef:
+              name: "postgres-secret-{{ .InstanceSlug }}"
+              key: username
         - name: POSTGRES_PASSWORD
-          value: "{{ .Values.postgres.password }}"
+          valueFrom:
+            secretKeyRef:
+              name: "postgres-secret-{{ .InstanceSlug }}"
+              key: password
   containers:
     - name: ui
       image: "{{ .Values.digitizeUi.image }}"
@@ -88,9 +94,15 @@ spec:
         - name: POSTGRES_DB
           value: "{{ .Values.digitize.database }}"
         - name: POSTGRES_USER
-          value: "postgres"
+          valueFrom:
+            secretKeyRef:
+              name: "postgres-secret-{{ .InstanceSlug }}"
+              key: username
         - name: POSTGRES_PASSWORD
-          value: "{{ .Values.postgres.password }}"
+          valueFrom:
+            secretKeyRef:
+              name: "postgres-secret-{{ .InstanceSlug }}"
+              key: password
         - name: DB_POOL_SIZE
           value: "5"
         - name: DB_MAX_OVERFLOW
@@ -118,9 +130,15 @@ spec:
         - name: OPENSEARCH_INDEX_NAME
           value: "RAG_INDEX"
         - name: OPENSEARCH_USERNAME
-          value: "{{ .Values.vector_store.auth.username }}"
+          valueFrom:
+            secretKeyRef:
+              name: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
+              key: username
         - name: OPENSEARCH_PASSWORD
-          value: "{{ .Values.vector_store.auth.password }}"
+          valueFrom:
+            secretKeyRef:
+              name: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
+              key: password
         - name: OPENSEARCH_NUM_SHARDS
           value: "1"
         - name: LOG_LEVEL

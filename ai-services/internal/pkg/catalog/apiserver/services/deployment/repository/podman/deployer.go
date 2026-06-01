@@ -502,6 +502,14 @@ func (d *PodmanDeployer) mergeEndpointIntoService(comp *ComponentPlan, plan *Dep
 		svc.Values = make(map[string]any)
 	}
 
+	// Add instanceSlug to the component's values in the service
+	// This allows templates to reference it as .Values.vector_store.instanceSlug
+	if componentValues, ok := svc.Values[comp.ComponentType].(map[string]any); ok {
+		instanceSlug := generateInstanceSlug(comp.DatabaseID.String())
+		componentValues["instanceSlug"] = instanceSlug
+		logger.Infof("Added instanceSlug '%s' to component %s in service %s\n", instanceSlug, comp.ComponentType, serviceID)
+	}
+
 	endpointData, ok := comp.Endpoints[comp.ComponentType]
 	if !ok {
 		logger.Errorf("Component %s endpoint data not found in comp.Endpoints map\n", comp.ComponentType)

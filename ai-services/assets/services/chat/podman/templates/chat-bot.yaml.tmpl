@@ -84,9 +84,15 @@ spec:
         - name: OPENSEARCH_INDEX_NAME
           value: "RAG_INDEX"
         - name: OPENSEARCH_USERNAME
-          value: "{{ .Values.vector_store.auth.username }}"
+          valueFrom:
+            secretKeyRef:
+              name: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
+              key: username
         - name: OPENSEARCH_PASSWORD
-          value: "{{ .Values.vector_store.auth.password }}"
+          valueFrom:
+            secretKeyRef:
+              name: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
+              key: password
         - name: OPENSEARCH_NUM_SHARDS
           value: "1"
         - name: LOG_LEVEL

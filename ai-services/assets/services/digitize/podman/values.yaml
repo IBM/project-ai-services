@@ -10,4 +10,6 @@ digitizeUi:
 
 postgres:
   image: icr.io/ai-services-cicd/postgres:18-2
-  password: "Aiservicesdb@1234"
+  username: "postgres"
+  # @generate:password
+  password: ""
