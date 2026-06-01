@@ -113,6 +113,7 @@ type DeployOptionsService struct {
 	Type       string                   `json:"type,omitempty"`
 	ID         string                   `json:"id"`
 	Name       string                   `json:"name"`
+	Schema     string                   `json:"schema,omitempty"`
 	Components []DeployOptionsComponent `json:"components"`
 }
 

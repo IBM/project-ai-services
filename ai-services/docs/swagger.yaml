@@ -235,6 +235,8 @@ definitions:
         type: string
       name:
         type: string
+      schema:
+        type: string
       type:
         type: string
     type: object
@@ -985,6 +987,47 @@ paths:
       security:
       - BearerAuth: []
       summary: Get service deploy options
+      tags:
+      - Catalog
+  /services/{id}/params:
+    get:
+      description: Retrieves the configuration schema (JSON Schema) for a specific
+        service. Returns a JSON Schema object with properties that define the service's
+        configurable parameters.
+      parameters:
+      - description: Service ID (e.g., 'chat', 'digitize', 'similarity')
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: JSON Schema object with $schema, type, and properties defining
+            service parameters
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request - Invalid service ID
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Service not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get service parameters
       tags:
       - Catalog
 securityDefinitions:

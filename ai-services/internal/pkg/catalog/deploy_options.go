@@ -48,12 +48,19 @@ func (p *CatalogProvider) GetArchitectureDeployOptions(architectureID string) (*
 			components = append(components, *component)
 		}
 
-		services = append(services, types.DeployOptionsService{
+		deployOptionsService := types.DeployOptionsService{
 			Type:       service.Type,
 			ID:         service.ID,
 			Name:       service.Name,
 			Components: components,
-		})
+		}
+
+		// Only add schema if the service has non-empty schema properties
+		if schema, err := p.GetServiceParams(service.ID); err == nil && hasNonEmptyProperties(schema) {
+			deployOptionsService.Schema = fmt.Sprintf("/api/v1/services/%s/params", service.ID)
+		}
+
+		services = append(services, deployOptionsService)
 	}
 
 	return &types.DeployOptionsArchitecture{
@@ -84,11 +91,18 @@ func (p *CatalogProvider) GetServiceDeployOptions(serviceID string) (*types.Depl
 		components = append(components, *component)
 	}
 
-	return &types.DeployOptionsService{
+	deployOptions := &types.DeployOptionsService{
 		ID:         service.ID,
 		Name:       service.Name,
 		Components: components,
-	}, nil
+	}
+
+	// Only add schema if the service has non-empty schema properties
+	if schema, err := p.GetServiceParams(serviceID); err == nil && hasNonEmptyProperties(schema) {
+		deployOptions.Schema = fmt.Sprintf("/api/v1/services/%s/params", serviceID)
+	}
+
+	return deployOptions, nil
 }
 
 // buildDeployOptionsComponent builds a DeployOptionsComponent for a given component type.
@@ -121,7 +135,7 @@ func (p *CatalogProvider) buildDeployOptionsComponent(componentType string) (*ty
 		}
 
 		// Only add schema if the schema file has non-empty properties
-		if p.hasNonEmptySchemaProperties(componentType, comp.ID) {
+		if schema, err := p.GetComponentProviderParams(componentType, comp.ID); err == nil && hasNonEmptyProperties(schema) {
 			provider.Schema = fmt.Sprintf("/api/v1/components/%s/providers/%s/params", componentType, comp.ID)
 		}
 
@@ -140,32 +154,8 @@ func (p *CatalogProvider) buildDeployOptionsComponent(componentType string) (*ty
 	}, nil
 }
 
-// hasNonEmptySchemaProperties checks if a component provider has a schema file with non-empty properties.
-func (p *CatalogProvider) hasNonEmptySchemaProperties(componentType, providerID string) bool {
-	// Get the component's catalog path
-	componentKey := fmt.Sprintf("%s/%s", componentType, providerID)
-	componentPath, err := p.GetCatalogItemPath(componentKey)
-	if err != nil {
-		return false
-	}
-
-	// Get runtime from global factory
-	runtime := vars.RuntimeFactory.GetRuntimeType()
-	runtimeStr := string(runtime)
-
-	// Try to load values.schema.json for the current runtime
-	schemaPath := filepath.Join(componentPath, runtimeStr, "values.schema.json")
-	schemaData, err := assets.CatalogFS.ReadFile(schemaPath)
-	if err != nil {
-		return false
-	}
-
-	var schema map[string]any
-	if err := json.Unmarshal(schemaData, &schema); err != nil {
-		return false
-	}
-
-	// Check if properties field exists and is not empty
+// hasNonEmptyProperties checks if a schema has non-empty properties.
+func hasNonEmptyProperties(schema map[string]any) bool {
 	if properties, ok := schema["properties"].(map[string]any); ok {
 		return len(properties) > 0
 	}
@@ -193,6 +183,41 @@ func (p *CatalogProvider) GetComponentProviderParams(componentType, providerID s
 	runtime := vars.RuntimeFactory.GetRuntimeType()
 	runtimeStr := string(runtime)
 	schemaPath := filepath.Join(componentPath, runtimeStr, "values.schema.json")
+	schemaData, err := assets.CatalogFS.ReadFile(schemaPath)
+	if err != nil {
+		// If schema file doesn't exist, return empty schema instead of failing
+		logger.Warningf(fmt.Sprintf("schema file not found at '%s': %v", schemaPath, err))
+
+		return map[string]any{}, nil
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal(schemaData, &schema); err != nil {
+		return nil, fmt.Errorf("failed to parse schema: %w", err)
+	}
+
+	return schema, nil
+}
+
+// GetServiceParams returns the JSON schema for a specific service's configuration.
+// If the schema file is not present, returns an empty schema instead of failing.
+func (p *CatalogProvider) GetServiceParams(serviceID string) (map[string]any, error) {
+	// Verify service exists and get its path
+	_, err := p.LoadService(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("service not found: %w", err)
+	}
+
+	// Get the service's catalog path
+	servicePath, err := p.GetCatalogItemPath(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service path: %w", err)
+	}
+
+	// Get runtime from global factory
+	runtime := vars.RuntimeFactory.GetRuntimeType()
+	runtimeStr := string(runtime)
+	schemaPath := filepath.Join(servicePath, runtimeStr, "values.schema.json")
 	schemaData, err := assets.CatalogFS.ReadFile(schemaPath)
 	if err != nil {
 		// If schema file doesn't exist, return empty schema instead of failing
