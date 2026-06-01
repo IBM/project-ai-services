@@ -1,5 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "properties": {}
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "title": "System Prompt",
+      "description": "Custom initial system prompt for conversational RAG",
+      "default": ""
+    }
+  }
 }

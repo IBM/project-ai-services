@@ -1,6 +1,7 @@
 import { UserType } from '@carbon/ai-chat';
 import axios from 'axios';
 import { OpenAI } from 'openai';
+import { DEFAULT_CONFIG } from '../config/chatbotConfig.js';
 
 async function customSendMessage(
   request,
@@ -189,11 +190,31 @@ async function customSendMessage(
     // Now fetch reference docs using the rephrased query (or original if not rephrased)
     let docs = [];
     try {
+      // Fetch chatbot configuration from the config endpoint
+      let mode, topK, rerank;
+
+      try {
+        const configResponse = await axios.get('/config');
+        const config = configResponse.data;
+        mode = config.searchMode || DEFAULT_CONFIG.searchMode;
+        topK = parseInt(
+          config.numChunksPostReranker || String(DEFAULT_CONFIG.topK),
+          10,
+        );
+        rerank = config.rerank === 'true' || config.rerank === true;
+      } catch (configError) {
+        // If config fetch fails, use defaults from shared config
+        console.warn(
+          'Failed to fetch config, using defaults:',
+          configError.message,
+        );
+      }
+
       const context_response = await axios.post('/v1/similarity-search', {
         query: rephrasedQuery,
-        mode: 'hybrid',
-        top_k: 3,
-        rerank: true,
+        mode: mode,
+        top_k: topK,
+        rerank: rerank,
         headers: {
           'Content-Type': 'application/json',
         },

@@ -25,8 +25,22 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
         return_timings=True,
     )
 
-    ranked_documents = docs[:top_r]
-    ranked_scores = scores[:top_r]
+    start_time = time.time()
+    retrieved_documents, retrieved_scores = retrieve_documents(question, emb_model, emb_endpoint, max_tokens,
+                                                               vectorstore, top_k, settings.chatbot.search_mode)
+    perf_stat_dict["retrieve_time"] = time.time() - start_time
+
+    start_time = time.time()
+    reranked = rerank_documents(question, retrieved_documents, reranker_model, reranker_endpoint)
+    perf_stat_dict["rerank_time"] = time.time() - start_time
+    
+    ranked_documents = []
+    ranked_scores = []
+    for i, (doc, score) in enumerate(reranked, 1):
+        ranked_documents.append(doc)
+        ranked_scores.append(score)
+        if i == top_r:
+            break
 
     logger.debug(f"Ranked documents: {ranked_documents}")
     logger.debug(f"Score threshold:  {settings.chatbot.score_threshold}")

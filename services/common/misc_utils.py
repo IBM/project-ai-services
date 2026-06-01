@@ -260,16 +260,16 @@ def verify_checksum(file, checksum_file):
     return False
 
 
-def validate_pdf_file(filename: str, content) -> None:
+def validate_document_file(filename: str, content) -> None:
     """
-    Validate a PDF file with comprehensive checks.
+    Validate a document file (PDF or DOCX) with comprehensive checks.
 
     Performs validation checks:
     1. Filename exists
     2. Content was read successfully (not an Exception)
     3. Content is not empty
-    4. File has .pdf extension
-    5. File content is valid PDF (magic bytes check)
+    4. File has .pdf or .docx extension
+    5. File content matches expected format (magic bytes check)
 
     Args:
         filename: Name of the file
@@ -278,17 +278,31 @@ def validate_pdf_file(filename: str, content) -> None:
     Raises:
         ValueError: If validation fails
     """
+    from pathlib import Path
+
     # Check filename exists
     if not filename:
         raise ValueError("File must have a filename.")
 
-    # Validate .pdf extension
-    if not filename.lower().endswith('.pdf'):
-        raise ValueError(f"Only PDF files are allowed. Invalid file: {filename}")
+    # Validate extension and format
+    allowed_extensions = {'.pdf', '.docx'}
+    file_ext = Path(filename).suffix.lower()
 
-    pdf_signature = b'%PDF'
-    if not content.startswith(pdf_signature):
-        raise ValueError(f"File has .pdf extension but unsupported format: {filename}")
+    if file_ext not in allowed_extensions:
+        raise ValueError(f"Only PDF and DOCX files are allowed. Invalid file: {filename}")
+
+    # Validate file signatures (magic bytes)
+    if file_ext == '.pdf':
+        pdf_signature = b'%PDF'
+        if not content.startswith(pdf_signature):
+            raise ValueError(f"File has .pdf extension but invalid PDF format: {filename}")
+
+    elif file_ext == '.docx':
+        # DOCX files are ZIP archives (Office Open XML format)
+        # ZIP signature: PK\x03\x04
+        docx_signature = b'PK\x03\x04'
+        if not content.startswith(docx_signature):
+            raise ValueError(f"File has .docx extension but invalid DOCX format: {filename}")
 
     # Check content is bytes (not an exception from failed read)
     if isinstance(content, Exception):

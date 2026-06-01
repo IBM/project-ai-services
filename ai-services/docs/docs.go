@@ -169,14 +169,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get detailed information about a specific application",
+                "description": "Retrieves a single application by its unique identifier for the authenticated user",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Applications"
                 ],
-                "summary": "Get application details",
+                "summary": "Get application by ID",
                 "parameters": [
                     {
                         "type": "string",
@@ -188,17 +188,27 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Application details",
+                        "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Application not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     }
                 }
@@ -209,7 +219,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Update an existing application's configuration",
+                "description": "Updates the display name of an existing application",
                 "consumes": [
                     "application/json"
                 ],
@@ -223,25 +233,56 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Application ID",
+                        "description": "Application ID (UUID)",
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "Update request",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.UpdateApplicationRequest"
+                        }
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "Application updated",
+                        "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or name validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "User doesn't own this application",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Application not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     }
                 }
@@ -252,7 +293,10 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Delete a specific application and all its resources",
+                "description": "Initiates async deletion of an application and all its resources. Returns 202 immediately.",
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "Applications"
                 ],
@@ -260,25 +304,59 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Application ID",
+                        "description": "Application ID (UUID)",
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "When true, also deletes orphaned component records",
+                        "name": "force",
+                        "in": "query"
                     }
                 ],
                 "responses": {
-                    "200": {
-                        "description": "Application deleted",
+                    "202": {
+                        "description": "Accepted",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid application ID",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "User doesn't own this application",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Application not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Application is already being deleted",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     }
                 }
@@ -675,6 +753,43 @@ const docTemplate = `{
                 }
             }
         },
+        "/resources": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves system resource information including CPU, memory, and accelerator availability",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "Get system resources",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ResourcesResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/services": {
             "get": {
                 "security": [
@@ -818,6 +933,65 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/services/{id}/params": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves the configuration schema (JSON Schema) for a specific service. Returns a JSON Schema object with properties that define the service's configurable parameters.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "Get service parameters",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Service ID (e.g., 'chat', 'digitize', 'similarity')",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "JSON Schema object with $schema, type, and properties defining service parameters",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request - Invalid service ID",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Service not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -825,8 +999,7 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "component_type",
-                "provider_id",
-                "type"
+                "provider_id"
             ],
             "properties": {
                 "component_type": {
@@ -837,12 +1010,12 @@ const docTemplate = `{
                 },
                 "params": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "provider_id": {
                     "type": "string"
                 },
-                "type": {
+                "version": {
                     "type": "string"
                 }
             }
@@ -850,12 +1023,12 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest": {
             "type": "object",
             "required": [
-                "catalogid",
+                "catalog_id",
                 "name",
                 "services"
             ],
             "properties": {
-                "catalogid": {
+                "catalog_id": {
                     "type": "string"
                 },
                 "name": {
@@ -868,10 +1041,42 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service"
                     }
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service": {
+            "type": "object",
+            "required": [
+                "catalog_id",
+                "components"
+            ],
+            "properties": {
+                "catalog_id": {
+                    "type": "string"
+                },
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component"
+                    }
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse": {
             "type": "object",
             "properties": {
                 "id": {
@@ -881,31 +1086,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service": {
-            "type": "object",
-            "required": [
-                "components",
-                "service_id",
-                "type"
-            ],
-            "properties": {
-                "components": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component"
-                    }
-                },
-                "service_id": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                },
-                "version": {
                     "type": "string"
                 }
             }
@@ -931,7 +1111,7 @@ const docTemplate = `{
                 "services": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus"
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService"
                     }
                 },
                 "status": {
@@ -956,6 +1136,42 @@ const docTemplate = `{
                 },
                 "pagination": {
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService": {
+            "type": "object",
+            "properties": {
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "endpoints": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -1077,6 +1293,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService"
                     }
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -1114,6 +1333,9 @@ const docTemplate = `{
                 },
                 "schema": {
                     "type": "string"
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -1132,7 +1354,10 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
-                "type": {
+                "schema": {
+                    "type": "string"
+                },
+                "version": {
                     "type": "string"
                 }
             }
@@ -1193,6 +1418,21 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp": {
+            "type": "object",
+            "properties": {
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceReference": {
             "type": "object",
             "properties": {
@@ -1203,20 +1443,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceStatus": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "type": {
                     "type": "string"
                 }
             }
@@ -1244,11 +1470,74 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo": {
+            "type": "object",
+            "properties": {
+                "available_cores": {
+                    "type": "number"
+                },
+                "total_cores": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo": {
+            "type": "object",
+            "properties": {
+                "available_bytes": {
+                    "type": "integer"
+                },
+                "total_bytes": {
+                    "type": "integer"
+                }
+            }
+        },
         "internal_pkg_catalog_apiserver_handlers.ErrorResponse": {
             "type": "object",
             "properties": {
                 "error": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_pkg_catalog_apiserver_handlers.ResourcesResponse": {
+            "type": "object",
+            "properties": {
+                "accelerators": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo"
+                    }
+                },
+                "cpu": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.CPUInfo"
+                },
+                "memory": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_models.MemoryInfo"
+                }
+            }
+        },
+        "internal_pkg_catalog_apiserver_handlers.UpdateApplicationRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 3
                 }
             }
         },

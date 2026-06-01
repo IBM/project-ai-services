@@ -3,44 +3,37 @@ name: Check Makefile Version Bump
 on:
   pull_request:
     paths:
-      - 'spyre-rag/src/**'
-      - 'spyre-rag/ui/**'
-      - 'images/rag-base/**'
-      - 'digitize-ui/**'
+      - 'services/chatbot/**'
+      - 'services/digitize/**'
+      - 'services/similarity/**'
+      - 'services/summarize/**'
+      - 'images/**'
+      - 'ui/**'
+      - 'ai-services/**'
+      - '.github/workflows/bump-makefile-version.yml'
+      - '.github/scripts/check_make_version_tag.py'
     branches:
       - main
 
 jobs:
-  check-spyre-rag-src:
-    name: Check spyre-rag/src
-    uses: ./.github/workflows/bump-makefile-version-component.yml
-    with:
-      component_path: 'spyre-rag/src'
-      values_yaml_key: 'backend'
+  check-version-bump:
+    name: Check Makefile Version Bumps
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
 
-  check-spyre-rag-ui:
-    name: Check spyre-rag/ui
-    uses: ./.github/workflows/bump-makefile-version-component.yml
-    with:
-      component_path: 'spyre-rag/ui'
-      values_yaml_key: 'ui'
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
-  check-rag-base:
-    name: Check images/rag-base
-    uses: ./.github/workflows/bump-makefile-version-component.yml
-    with:
-      component_path: 'images/rag-base'
-      additional_notes: |
-        Note: This is the base image used by spyre-rag containers.
-        After bumping, you may also need to update references in:
-        - spyre-rag/src/Makefile (BASE_IMAGE)
-        - Any other dependent Makefiles or Containerfiles
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
-  check-digitize-ui:
-    name: Check digitize-ui
-    uses: ./.github/workflows/bump-makefile-version-component.yml
-    with:
-      component_path: 'digitize-ui'
-      values_yaml_key: 'digitizeUi'
+      - name: Check version bumps for all components
+        run: |
+          python3 .github/scripts/check_makefile_version_bump.py ${{ github.base_ref }}
 
 # Made with Bob

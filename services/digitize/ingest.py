@@ -1,18 +1,19 @@
 from pathlib import Path
 import time
-from typing import Optional, Callable
+from typing import Optional
 
 import common.db_utils as db
 from common.emb_utils import get_embedder
 from common.misc_utils import *
 from digitize.doc_utils import process_documents
-from digitize.status import StatusManager, get_utc_timestamp, get_job_document_stats
+from digitize.digitize_utils import get_utc_timestamp, get_job_document_stats
 from digitize.models import JobStatus, DocStatus
 from digitize.settings import settings
+from digitize.db_operations import get_status_manager, DatabaseStatusManager
 
 logger = get_logger("ingest")
 
-def create_indexing_handler(emb_model_dict: dict, status_mgr: Optional[StatusManager], doc_id_dict: Optional[dict]):
+def create_indexing_handler(emb_model_dict: dict, status_mgr: Optional[DatabaseStatusManager], doc_id_dict: Optional[dict]):
     """
     Create an indexing handler that can be called immediately after chunking of a document.
 
@@ -124,21 +125,23 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
     # Initialize LLM session for all API calls (LLM and embedding)
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
 
-    # Initialize status manager
+    # Initialize database-first status manager
     status_mgr = None
     if job_id:
-        status_mgr = StatusManager(job_id)
+        status_mgr = get_status_manager(job_id)
         status_mgr.update_job_progress("", DocStatus.ACCEPTED, JobStatus.IN_PROGRESS)
         logger.info(f"Job {job_id} status updated to IN_PROGRESS")
 
     try:
         # Files are already staged and validated at API level in app.py
-        # Just collect the PDF files from the staging directory
-        input_file_paths = [str(p) for p in directory_path.glob("*.pdf")]
+        # Collect both PDF and DOCX files from the staging directory
+        pdf_files = list(directory_path.glob("*.pdf"))
+        docx_files = list(directory_path.glob("*.docx"))
+        input_file_paths = [str(p) for p in pdf_files + docx_files]
 
-        total_pdfs = len(input_file_paths)
+        total_documents = len(input_file_paths)
 
-        logger.info(f"Processing {total_pdfs} document(s)")
+        logger.info(f"Processing {total_documents} document(s)")
 
         emb_model_dict, llm_model_dict, _ = get_model_endpoints()
 
@@ -173,8 +176,8 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
             completed_docs = doc_stats["completed_docs"]
 
             logger.info(
-                    f"Ingestion summary: {len(completed_docs)}/{total_pdfs} files ingested "
-                    f"({len(completed_docs) / total_pdfs * 100:.2f}% of total PDF files)"
+                    f"Ingestion summary: {len(completed_docs)}/{total_documents} files ingested "
+                    f"({len(completed_docs) / total_documents * 100:.2f}% of total documents)"
                 )
 
             if len(failed_docs) > 0:
@@ -193,7 +196,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
 
                 # User-friendly error message for job status
                 job_error_message = (
-                    f"{len(failed_docs)} of {total_pdfs} document(s) failed to ingest. "
+                    f"{len(failed_docs)} of {total_documents} document(s) failed to ingest. "
                     f"Check the document status for details on the failures."
                 )
 
@@ -202,8 +205,8 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
                 # All documents completed successfully
                 logger.info(f"✅ Ingestion completed successfully, Time taken: {file_processing_time:.2f} seconds. You can query your documents via chatbot")
                 logger.info(
-                    f"Ingestion summary: {len(completed_docs)}/{total_pdfs} files ingested "
-                    f"(100.00% of total PDF files)"
+                    f"Ingestion summary: {len(completed_docs)}/{total_documents} files ingested "
+                    f"(100.00% of total documents)"
                 )
 
                 status_mgr.update_job_progress("", DocStatus.COMPLETED, JobStatus.COMPLETED)

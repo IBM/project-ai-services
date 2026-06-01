@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"fmt"
+	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -21,7 +22,11 @@ var (
 	runtimeType string
 	// Base directory flag for catalog configure command.
 	baseDir string
+	// HTTPS port flag for catalog configure command.
+	httpsPort int
 )
+
+const defaultHTTPSPort = 443
 
 // NewConfigureCmd creates a new configure command for the catalog service.
 func NewConfigureCmd() *cobra.Command {
@@ -50,38 +55,51 @@ Examples:
 			return err
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Prompt for admin password
-			adminPassword, err := promptForPassword()
-			if err != nil {
-				return fmt.Errorf("failed to read admin password: %w", err)
-			}
-
-			var aiServicesDir string
-
-			// Use default base directory if not specified, otherwise validate
-			if baseDir == "" {
-				aiServicesDir = constants.DefaultBaseDir
-			} else {
-				aiServicesDir, err = utils.ValidateBaseDir(baseDir)
-				if err != nil {
-					return fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
-				}
-			}
-
-			logger.Infof("Using base directory: %s\n", aiServicesDir, logger.VerbosityLevelDebug)
-
-			return configure.Run(configure.ConfigureOptions{
-				AdminPassword: adminPassword,
-				Runtime:       vars.RuntimeFactory.GetRuntimeType(),
-				BaseDir:       aiServicesDir,
-				ArgParams:     argParams,
-			})
+			return runConfigure(argParams)
 		},
 	}
 
 	configureConfigureFlags(cmd, &rawArgParams)
 
 	return cmd
+}
+
+// runConfigure executes the catalog configuration process.
+func runConfigure(argParams map[string]string) error {
+	// Prompt for admin password
+	adminPassword, err := promptForPassword()
+	if err != nil {
+		return fmt.Errorf("failed to read admin password: %w", err)
+	}
+
+	var aiServicesDir string
+
+	// Use default base directory if not specified, otherwise validate
+	if baseDir == "" {
+		aiServicesDir = constants.DefaultBaseDir
+	} else {
+		aiServicesDir, err = utils.ValidateBaseDir(baseDir)
+		if err != nil {
+			return fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
+		}
+	}
+
+	logger.Infof("Using base directory: %s\n", aiServicesDir, logger.VerbosityLevelDebug)
+
+	// create model directory
+	modelPath := filepath.Join(aiServicesDir, "models")
+	err = utils.CreateDir(modelPath)
+	if err != nil {
+		return fmt.Errorf("failed to create model directory: %w", err)
+	}
+
+	return configure.Run(configure.ConfigureOptions{
+		AdminPassword: adminPassword,
+		Runtime:       vars.RuntimeFactory.GetRuntimeType(),
+		BaseDir:       aiServicesDir,
+		ArgParams:     argParams,
+		HttpsPort:     httpsPort,
+	})
 }
 
 // validateConfigureFlags validates the configure command flags and initializes runtime.
@@ -98,6 +116,11 @@ func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
 	// Check if podman runtime is being used on unsupported platform
 	if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
 		return nil, err
+	}
+
+	// Validate HTTPS port range
+	if httpsPort < 1 || httpsPort > 65535 {
+		return nil, fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
 	}
 
 	// Parse params if provided
@@ -126,6 +149,15 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 		"",
 		"Base directory for AI services data (applications, models, cache).\n"+
 			"Example: --basedir /custom/path\n",
+	)
+
+	// Add HTTPS port flag
+	cmd.Flags().IntVar(
+		&httpsPort,
+		"https-port",
+		defaultHTTPSPort,
+		"Custom HTTPS port to expose the service endpoints externally (podman runtime only).\n"+
+			"Example: --https-port 8443\n",
 	)
 
 	cmd.Flags().StringSliceVar(

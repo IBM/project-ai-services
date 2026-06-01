@@ -83,7 +83,7 @@ func (img *Images) Run(policy ImagePullPolicy) error {
 	case PullAlways:
 		return img.always(images)
 	case PullIfNotPresent:
-		return img.ifNotPresent(images)
+		return img.IfNotPresent(images)
 	case PullNever:
 		return img.never(images)
 	default:
@@ -98,8 +98,8 @@ func (img *Images) always(images []string) error {
 	return pullImageFromRegistry(img.Runtime, images)
 }
 
-// ifNotPresent -> pulls only the missing images for a given app template.
-func (img *Images) ifNotPresent(images []string) error {
+// IfNotPresent pulls only the missing images for a given app template.
+func (img *Images) IfNotPresent(images []string) error {
 	notFoundImages, err := fetchImagesNotFound(img.Runtime, images)
 	if err != nil {
 		return err

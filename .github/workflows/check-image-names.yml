@@ -3,9 +3,8 @@ name: Check Image Names
 on:
   pull_request:
     paths:
-      - 'spyre-rag/src/Makefile'
-      - 'spyre-rag/ui/Makefile'
-      - 'digitize-ui/Makefile'
+      - 'services/*'
+      - 'ui/*'
       - 'ai-services/assets/**/values.yaml'
       - .github/workflows/check-image-names.yml
       - .github/workflows/bump-makefile-version.yml
@@ -16,6 +15,7 @@ on:
 jobs:
   check:
     name: Verify image names and versions are consistent
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

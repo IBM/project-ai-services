@@ -1,21 +1,21 @@
 Day N:
 
-{{- if ne .UI_PORT "" }}
+{{- if ne .CATALOG_UI_DOMAIN "" }}
 {{- if eq .UI_STATUS "running" }}
 
-- Catalog UI is available at http://{{ .HOST_IP }}:{{ .UI_PORT }}
+- Catalog UI is available at https://{{ .CATALOG_UI_DOMAIN }}{{ if ne .HTTPS_PORT "443" }}:{{ .HTTPS_PORT }}{{ end }}
 {{- else }}
 
-- Catalog UI is unavailable. Please make sure '{{ .AppName }}--catalog' pod is running.
+- Catalog UI is unavailable. Please make sure '{{ .AppName }}--catalog-ui' container is running.
 {{- end }}
 {{- end }}
 
-{{- if ne .BACKEND_PORT "" }}
+{{- if ne .CATALOG_API_DOMAIN "" }}
 {{- if eq .BACKEND_STATUS "running" }}
 
-- Catalog Backend API is available at http://{{ .HOST_IP }}:{{ .BACKEND_PORT }}
+- Catalog Backend API is available at https://{{ .CATALOG_API_DOMAIN }}{{ if ne .HTTPS_PORT "443" }}:{{ .HTTPS_PORT }}{{ end }}
 {{- else }}
 
-- Catalog Backend API is unavailable. Please make sure '{{ .AppName }}--catalog' pod is running.
+- Catalog Backend API is unavailable. Please make sure '{{ .AppName }}--catalog-backend' container is running.
 {{- end }}
 {{- end }}

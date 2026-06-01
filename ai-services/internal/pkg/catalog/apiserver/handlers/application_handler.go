@@ -4,8 +4,13 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -18,6 +23,10 @@ var _ types.ApplicationListResponse
 // ApplicationHandler handles application-related HTTP requests.
 type ApplicationHandler struct {
 	appService *repository.ApplicationService
+}
+
+type UpdateApplicationRequest struct {
+	Name string `json:"name" binding:"required,min=3,max=100"`
 }
 
 // NewApplicationHandler creates a new application handler.
@@ -90,6 +99,62 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// UpdateApplication godoc
+//
+//	@Summary		Update application
+//	@Description	Updates the display name of an existing application
+//	@Tags			Applications
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path		string						true	"Application ID (UUID)"
+//	@Param			body	body		UpdateApplicationRequest	true	"Update request"
+//	@Success		200		{object}	types.Application
+//	@Failure		400		{object}	ErrorResponse	"Invalid request body or name validation failed"
+//	@Failure		401		{object}	ErrorResponse	"Unauthorized"
+//	@Failure		403		{object}	ErrorResponse	"User doesn't own this application"
+//	@Failure		404		{object}	ErrorResponse	"Application not found"
+//	@Failure		500		{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/applications/{id} [put]
+func (h *ApplicationHandler) UpdateApplication(c *gin.Context) {
+	appID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid application ID format"})
+
+		return
+	}
+	var req UpdateApplicationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: fmt.Sprintf("Invalid request body: %v", err)})
+
+		return
+	}
+	// Get authenticated user ID
+	userID := c.GetString(middleware.CtxUserIDKey)
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "User not authenticated"})
+
+		return
+	}
+	updatedApp, err := h.appService.UpdateApplication(c.Request.Context(), appID, userID, req.Name)
+	if err != nil {
+		if err == repository.ErrApplicationNotFound {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "Application not found"})
+
+			return
+		}
+		if err == repository.ErrUnauthorized {
+			c.JSON(http.StatusForbidden, ErrorResponse{Error: "User doesn't own this application"})
+
+			return
+		}
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to update application: %v", err)})
+
+		return
+	}
+	c.JSON(http.StatusOK, updatedApp)
+}
+
 // CreateApplication godoc
 //
 //	@Summary		Create new application
@@ -118,6 +183,17 @@ func (h *ApplicationHandler) CreateApplication(c *gin.Context) {
 		return
 	}
 
+	// Extract user ID from auth context
+	userID := c.GetString(middleware.CtxUserIDKey)
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Error: "Unauthorized: user ID not found in context",
+		})
+
+		return
+	}
+	req.CreatedBy = userID
+
 	// Call service layer to create application
 	response, err := h.appService.CreateApplication(c.Request.Context(), req)
 	if err != nil {
@@ -129,6 +205,107 @@ func (h *ApplicationHandler) CreateApplication(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusAccepted, response)
+}
+
+// GetApplicationByID godoc
+//
+//	@Summary		Get application by ID
+//	@Description	Retrieves a single application by its unique identifier for the authenticated user
+//	@Tags			Applications
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string	true	"Application ID"
+//	@Success		200	{object}	types.Application
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized"
+//	@Failure		404	{object}	ErrorResponse	"Application not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/applications/{id} [get]
+func (h *ApplicationHandler) GetApplicationByID(c *gin.Context) {
+	appID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid application ID format"})
+
+		return
+	}
+
+	// Call service layer
+	response, err := h.appService.GetApplicationByID(c.Request.Context(), appID)
+	if err != nil {
+		if err == repository.ErrApplicationNotFound {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "Application not found"})
+
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get application: %v", err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// DeleteApplication godoc
+//
+//	@Summary		Delete application
+//	@Description	Initiates async deletion of an application and all its resources. Returns 202 immediately.
+//	@Tags			Applications
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path		string	true	"Application ID (UUID)"
+//	@Param			force	query		bool	false	"When true, also deletes orphaned component records"
+//	@Success		202		{object}	repository.DeleteApplicationResponse
+//	@Failure		400		{object}	ErrorResponse	"Invalid application ID"
+//	@Failure		401		{object}	ErrorResponse	"Unauthorized"
+//	@Failure		403		{object}	ErrorResponse	"User doesn't own this application"
+//	@Failure		404		{object}	ErrorResponse	"Application not found"
+//	@Failure		409		{object}	ErrorResponse	"Application is already being deleted"
+//	@Failure		500		{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/applications/{id} [delete]
+func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
+	appID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid application ID format, expected UUID"})
+
+		return
+	}
+
+	force := c.Query("force") == "true"
+
+	userIDVal, exists := c.Get(middleware.CtxUserIDKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "authentication required"})
+
+		return
+	}
+
+	userID := userIDVal.(string)
+
+	response, err := h.appService.DeleteApplication(c.Request.Context(), appID, userID, force)
+	if err != nil {
+		h.handleDeleteError(c, err)
+
+		return
+	}
+
+	c.JSON(http.StatusAccepted, response)
+}
+
+func (h *ApplicationHandler) handleDeleteError(c *gin.Context, err error) {
+	msg := err.Error()
+
+	switch {
+	case strings.Contains(msg, "not found"):
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: msg})
+	case strings.Contains(msg, "forbidden"):
+		c.JSON(http.StatusForbidden, ErrorResponse{Error: msg})
+	case strings.Contains(msg, "conflict"):
+		c.JSON(http.StatusConflict, ErrorResponse{Error: msg})
+	default:
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
+	}
 }
 
 // Made with Bob

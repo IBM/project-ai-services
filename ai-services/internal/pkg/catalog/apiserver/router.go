@@ -32,6 +32,7 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 
 	authHandler := handlers.NewAuthHandler(authSvc)
 	catalogHandler := handlers.NewCatalogHandler()
+	resourcesHandler := handlers.NewResourcesHandler()
 	applicationHandler := handlers.NewApplicationHandler(appService)
 
 	v1 := router.Group("/api/v1")
@@ -46,72 +47,26 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	catalog := v1.Group("")
 	catalog.Use(middleware.AuthMiddleware(tokenMgr, blacklist))
 	{
+		catalog.GET("/resources", resourcesHandler.GetResources)
 		catalog.GET("/architectures", catalogHandler.ListArchitectures)
 		catalog.GET("/architectures/:id", catalogHandler.GetArchitectureDetails)
 		catalog.GET("/architectures/:id/deploy-options", catalogHandler.GetArchitectureDeployOptions)
 		catalog.GET("/services", catalogHandler.ListServices)
 		catalog.GET("/services/:id", catalogHandler.GetServiceDetails)
 		catalog.GET("/services/:id/deploy-options", catalogHandler.GetServiceDeployOptions)
+		catalog.GET("/services/:id/params", catalogHandler.GetServiceParams)
 		catalog.GET("/components/:component_type/providers/:provider_id/params", catalogHandler.GetComponentProviderParams)
 	}
 
 	applications := v1.Group("applications")
 	applications.Use(middleware.AuthMiddleware(tokenMgr, blacklist))
 	{
-		// Implemented endpoints
 		applications.GET("/", applicationHandler.ListApplications)
+		applications.GET("/:id", applicationHandler.GetApplicationByID)
 		applications.POST("/", applicationHandler.CreateApplication)
-
-		// Draft endpoints - placeholders for future implementation
-		applications.GET("/:id", getApplication)
-		applications.PUT("/:id", updateApplication)
-		applications.DELETE("/:id", deleteApplication)
+		applications.PUT("/:id", applicationHandler.UpdateApplication)
+		applications.DELETE("/:id", applicationHandler.DeleteApplication)
 	}
 
 	return router
-}
-
-// GetApplication godoc
-//
-//	@Summary		Get application details
-//	@Description	Get detailed information about a specific application
-//	@Tags			Applications
-//	@Produce		json
-//	@Security		BearerAuth
-//	@Param			id	path		string					true	"Application ID"
-//	@Success		200	{object}	map[string]interface{}	"Application details"
-//	@Failure		404	{object}	map[string]interface{}	"Application not found"
-//	@Router			/applications/{id} [get]
-func getApplication(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "This is a placeholder endpoint for " + c.FullPath()})
-}
-
-// UpdateApplication godoc
-//
-//	@Summary		Update application
-//	@Description	Update an existing application's configuration
-//	@Tags			Applications
-//	@Accept			json
-//	@Produce		json
-//	@Security		BearerAuth
-//	@Param			id	path		string					true	"Application ID"
-//	@Success		200	{object}	map[string]interface{}	"Application updated"
-//	@Failure		404	{object}	map[string]interface{}	"Application not found"
-//	@Router			/applications/{id} [put]
-func updateApplication(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "This is a placeholder endpoint for " + c.FullPath()})
-}
-
-// DeleteApplication godoc
-//
-//	@Summary		Delete application
-//	@Description	Delete a specific application and all its resources
-//	@Tags			Applications
-//	@Security		BearerAuth
-//	@Param			id	path		string					true	"Application ID"
-//	@Success		200	{object}	map[string]interface{}	"Application deleted"
-//	@Failure		404	{object}	map[string]interface{}	"Application not found"
-//	@Router			/applications/{id} [delete]
-func deleteApplication(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "This is a placeholder endpoint for " + c.FullPath()})
 }

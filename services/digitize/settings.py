@@ -176,16 +176,6 @@ class DigitizeConfig(BaseSettings):
     )
 
     @property
-    def docs_dir(self) -> Path:
-        """Directory for document storage."""
-        return self.cache_dir / "docs"
-
-    @property
-    def jobs_dir(self) -> Path:
-        """Directory for job tracking."""
-        return self.cache_dir / "jobs"
-
-    @property
     def staging_dir(self) -> Path:
         """Directory for staging files."""
         return self.cache_dir / "staging"

@@ -16,14 +16,15 @@ from digitize.settings import settings
 
 set_log_level(settings.common.app.log_level)
 
-from common.misc_utils import validate_pdf_file, set_request_id, configure_uvicorn_logging
+from common.misc_utils import validate_document_file, set_request_id, configure_uvicorn_logging
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 import digitize.digitize_utils as dg_util
 import digitize.models as models
 from digitize.digitize_core import digitize
 from digitize.cleanup import reset_db
 from digitize.ingest import ingest
-from digitize.status import StatusManager
+from digitize.db_operations import get_status_manager
+from digitize.db.connection import check_db_connection, close_db_connections
 
 # Semaphores for concurrency limiting
 digitization_semaphore = asyncio.BoundedSemaphore(settings.digitize.digitization_concurrency_limit)
@@ -48,9 +49,32 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error initializing language detector: {e}", exc_info=True)
 
+    # Check database connection (required for ingestion/digitize operation)
+    try:
+        if check_db_connection():
+            logger.info("✅ Database connection established")
+            
+            # Initialize database schema (create tables if they don't exist)
+            try:
+                from digitize.db.models import Base
+                from digitize.db.connection import engine
+                Base.metadata.create_all(bind=engine)
+                logger.info("✅ Database schema initialized")
+            except Exception as schema_error:
+                logger.error(f"❌ Failed to initialize database schema: {schema_error}")
+                raise RuntimeError(f"Database schema initialization failed: {schema_error}")
+        else:
+            logger.error("❌ Database connection failed - service requires database to operate")
+            raise RuntimeError("Database connection required but not available. Please check database configuration.")
+    except RuntimeError:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Database check failed: {e}")
+        raise RuntimeError(f"Database connection required but failed: {e}")
+
     # Scan for orphan jobs and mark them as failed
     try:
-        orphan_count = dg_util.scan_and_recover_orphan_jobs(settings.digitize.jobs_dir)
+        orphan_count = dg_util.scan_and_recover_orphan_jobs()
         if orphan_count > 0:
             logger.info(f"Found {orphan_count} orphan job(s) from previous app server run")
     except Exception as e:
@@ -60,6 +84,14 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Application shutting down...")
+    
+    # Close database connections
+    try:
+        close_db_connections()
+        logger.info("Database connections closed")
+    except Exception as e:
+        logger.error(f"Error closing database connections: {e}", exc_info=True)
+    
     stderr_monitor.stop()
 
 
@@ -81,8 +113,8 @@ tags_metadata = [
 
 app = FastAPI(
     title="Digitize Documents Service",
-    description="Document digitization and ingestion API for processing PDFs into searchable content. "
-                "Supports both digitization (converting PDFs to text/markdown/JSON) and ingestion "
+    description="Document digitization and ingestion API for processing PDF and DOCX files into searchable content. "
+                "Supports both digitization (converting documents to text/markdown/JSON) and ingestion "
                 "(processing and indexing documents into a vector database for semantic search).",
     version="1.0.0",
     lifespan=lifespan,
@@ -129,7 +161,7 @@ async def health_check():
     return {"status": "ok"}
 
 async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: models.OutputFormat):
-    status_mgr = StatusManager(job_id)
+    status_mgr = get_status_manager(job_id)
     job_staging_path = settings.digitize.staging_dir / f"{job_id}"
 
     try:
@@ -149,7 +181,7 @@ async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: mode
         logger.debug(f"Semaphore slot released from digitization job {job_id}")
 
 async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict):
-    status_mgr = StatusManager(job_id)
+    status_mgr = get_status_manager(job_id)
     job_staging_path = settings.digitize.staging_dir / f"{job_id}"
 
     try:
@@ -173,7 +205,7 @@ async def validate_pdf_files(
     file_contents_raw: List[bytes | BaseException]
 ) -> tuple[List[str], List[bytes]]:
     """
-    Validate uploaded PDF files using shared validation logic.
+    Validate uploaded document files (PDF or DOCX) using shared validation logic.
 
     Raises APIError on any validation failure.
 
@@ -190,7 +222,7 @@ async def validate_pdf_files(
 
         # Use shared validation function
         try:
-            await asyncio.to_thread(validate_pdf_file, filename, content)
+            await asyncio.to_thread(validate_document_file, filename, content)
         except ValueError as e:
             APIError.raise_error(ErrorCode.UNSUPPORTED_MEDIA_TYPE, str(e))
 
@@ -208,16 +240,16 @@ async def validate_pdf_files(
     tags=["jobs"],
     summary="Create async jobs to upload and process documents",
     description=(
-        "Upload PDF documents for processing. Supports two operation types:\n\n"
+        "Upload documents (PDF or DOCX) for processing. Supports two operation types:\n\n"
         "- **ingestion**: Process and index documents into vector database for semantic search\n"
-        "- **digitization**: Convert PDF to text/markdown/JSON format (single file only)\n\n"
+        "- **digitization**: Convert document to text/markdown/JSON format (single file only)\n\n"
         "The operation runs asynchronously in the background. Use the returned `job_id` to track progress."
     ),
     response_description="Job ID for tracking the processing status"
 )
 async def digitize_document(
     background_tasks: BackgroundTasks,
-    files: List[UploadFile] = File(..., description="PDF files to process (multiple for ingestion, single for digitization)"),
+    files: List[UploadFile] = File(..., description="Document files (PDF or DOCX) to process (multiple for ingestion, single for digitization)"),
     operation: models.OperationType = Query(
         models.OperationType.INGESTION,
         description="Operation type: 'ingestion' (index into vector DB) or 'digitization' (convert to text/md/json)"
@@ -300,34 +332,21 @@ async def get_all_jobs(
 ):
     """Retrieve information about all submitted jobs with pagination and filtering."""
     try:
-        # Read all job status files
-        all_jobs = dg_util.read_all_job_files()
+        # Use database function
+        from digitize.db_operations import get_all_jobs
 
-        # Apply filters in single pass
-        filtered_jobs = [
-            j for j in all_jobs
-            if (status is None or j.status == status) and
-               (operation is None or j.operation == operation.value)
-        ]
-
-        # sorting by submitted_at
-        filtered_jobs = sorted(
-            filtered_jobs,
-            key=lambda j: j.submitted_at,
-            reverse=True
+        # Get jobs from database
+        jobs_data, total = get_all_jobs(
+            status=status,
+            operation=operation.value if operation else None,
+            limit=limit if not latest else 1,
+            offset=offset if not latest else 0
         )
 
-        # Handle latest flag before pagination
-        if latest and filtered_jobs:
-            filtered_jobs = [filtered_jobs[0]]
-
-        total = len(filtered_jobs)
-
-        # Apply pagination
-        paginated_jobs = filtered_jobs[offset : offset + limit]
-
-        # Convert to response format
-        jobs_data = [job.to_dict() for job in paginated_jobs]
+        # Handle latest flag (already handled in query if latest=True)
+        if latest and jobs_data:
+            jobs_data = [jobs_data[0]]
+            total = 1
 
         return models.JobsListResponse(
             pagination=models.PaginationInfo(total=total, limit=limit, offset=offset),
@@ -352,21 +371,16 @@ async def get_all_jobs(
 async def get_job_by_id(job_id: str):
     """Retrieve detailed status of a specific job by its ID."""
     try:
-        job_status_file = settings.digitize.jobs_dir / f"{job_id}_status.json"
+        # Use database function
+        from digitize.db_operations import get_job
 
-        if not job_status_file.exists():
+        job_data = get_job(job_id)
+        
+        if job_data is None:
             APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"No job found with id '{job_id}'")
-
-        if not job_status_file.is_file():
-            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Job status path for '{job_id}' is not a valid file")
-
-        job_state = dg_util.read_job_file(job_status_file)
-        if job_state is None:
-            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to read job status for '{job_id}'")
             return  # This line should never be reached, but helps type checker
 
-        # Convert JobState object to JSON-compatible dictionary
-        return job_state.to_dict()
+        return job_data
     except HTTPException as e:
         logger.error(f"HTTP error retrieving job {job_id}: "
         f"status={e.status_code}, detail={e.detail}")
@@ -387,26 +401,26 @@ async def get_job_by_id(job_id: str):
     response_description="No content on successful deletion"
 )
 async def delete_job(job_id: str):
-    """Deletes a job status file. Does not touch associated document metadata."""
+    """Deletes a job record from database. Does not touch associated document metadata."""
     try:
-        job_status_file = settings.digitize.jobs_dir / f"{job_id}_status.json"
+        # Use database function to get job
+        from digitize.db_operations import get_job
+        from digitize.db.manager import db_manager
 
-        if not job_status_file.exists():
+        job_data = get_job(job_id)
+        
+        if job_data is None:
             APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"No job found with id '{job_id}'")
 
         # Reject deletion if the job is still active
-        job_state = dg_util.read_job_file(job_status_file)
-        if job_state is None:
-            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Failed to read job status for '{job_id}'")
-            return  # This line should never be reached, but helps type checker
-
-        # Compare with JobStatus enum
-        if job_state.status in (models.JobStatus.ACCEPTED, models.JobStatus.IN_PROGRESS):
+        job_status = job_data.get("status", "")
+        if job_status in (models.JobStatus.ACCEPTED, models.JobStatus.IN_PROGRESS):
             APIError.raise_error(ErrorCode.RESOURCE_LOCKED, f"Job '{job_id}' is still active and cannot be deleted")
 
-        # Delete the job status file (missing_ok=True handles race conditions)
-        job_status_file.unlink(missing_ok=True)
-        logger.info(f"Deleted job status file for job '{job_id}'")
+        # Delete the job from database (CASCADE will delete associated documents)
+        db_manager.delete_job(job_id)
+        logger.info(f"Deleted job '{job_id}' from database")
+        
         return
     except HTTPException as e:
         logger.error(f"HTTP error deleting job {job_id}: "
@@ -457,22 +471,26 @@ async def list_documents(
                 f"Invalid status '{status}'. Must be one of: {', '.join(sorted(valid_statuses))}"
             )
 
-        all_documents = dg_util.get_all_documents(status_filter=status, name_filter=name)
+        # Use database function
+        from digitize.db_operations import get_all_documents_paginated
 
-        # Calculate pagination
-        total = len(all_documents)
-        start_idx = offset
-        end_idx = offset + limit
+        documents_data, total = get_all_documents_paginated(
+            status=status,
+            name=name,
+            limit=limit,
+            offset=offset
+        )
 
-        # Apply pagination
-        paginated_documents = all_documents[start_idx:end_idx]
+        logger.debug(f"Returning {len(documents_data)} documents out of {total} total (offset={offset}, limit={limit})")
 
-        logger.debug(f"Returning {len(paginated_documents)} documents out of {total} total (offset={offset}, limit={limit})")
+        # Convert to DocumentListItem if needed
+        from digitize.models import DocumentListItem
+        doc_items = [DocumentListItem(**doc) for doc in documents_data]
 
         # Return properly typed response
         return models.DocumentsListResponse(
             pagination=models.PaginationInfo(total=total, limit=limit, offset=offset),
-            data=paginated_documents
+            data=doc_items
         )
 
     except HTTPException as e:
@@ -507,13 +525,13 @@ async def get_document_metadata(doc_id: str, details: bool = Query(False, descri
     - Document metadata with optional detailed information
     """
     try:
-        response = dg_util.get_document_by_id(doc_id, include_details=details)
+        # Use database function - now returns DocumentDetailResponse directly
+        from digitize.db_operations import get_document
+
+        response = get_document(doc_id, include_details=details)
         return response
     except FileNotFoundError as e:
         APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(e))
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse metadata file for document {doc_id}: {e}")
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to read document metadata")
     except HTTPException as e:
         logger.error(f"Failed to get document by id {doc_id}, HTTP error: {e}")
         # Re-raise HTTPException as-is
@@ -602,7 +620,7 @@ async def delete_document(doc_id: str):
         # 1. Fetch Metadata (if it exists)
         doc_metadata = None
         try:
-            doc_metadata = dg_util.get_document_by_id(doc_id, include_details=False)
+            doc_metadata = dg_util.get_document(doc_id, include_details=False)
         except FileNotFoundError:
             logger.error(f"Metadata for {doc_id} not found. Proceeding with vectorstore cleanup.")
 
@@ -642,7 +660,21 @@ async def delete_document(doc_id: str):
                 logger.error(f"VDB cleaned but file deletion failed for {doc_id}")
                 APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Search data removed but files remain: {e}")
 
-        # 5. Idempotent Success
+        # 5. Step C: Database Cleanup
+        # Delete the document record from the database
+        try:
+            from digitize.db.manager import db_manager
+            success = db_manager.delete_document(doc_id)
+            if success:
+                logger.info(f"Database record for {doc_id} deleted successfully.")
+            else:
+                logger.warning(f"Database record for {doc_id} not found (may have been deleted already).")
+        except Exception as e:
+            logger.error(f"Failed to delete database record for {doc_id}: {e}")
+            # If VDB and files are cleaned but DB fails, report error so user can retry
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, f"Search data and files removed but database cleanup failed: {e}")
+
+        # 6. Idempotent Success
         # If we reach here, either everything is deleted, or metadata was already deleted and VDB is now clean.
         return None
 
