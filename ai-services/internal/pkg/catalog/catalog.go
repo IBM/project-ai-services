@@ -10,6 +10,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogtemplate "github.com/project-ai-services/ai-services/internal/pkg/catalog/template"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -668,9 +669,9 @@ func (p *CatalogProvider) LoadComponentTemplates(componentType, providerID strin
 			return fmt.Errorf("failed to read template %s: %w", path, err)
 		}
 
-		// Parse template
+		// Parse template with custom functions
 		templateName := filepath.Base(path)
-		tmpl, err := texttemplate.New(templateName).Parse(string(templateData))
+		tmpl, err := texttemplate.New(templateName).Funcs(catalogtemplate.GetFuncMap()).Parse(string(templateData))
 		if err != nil {
 			return fmt.Errorf("failed to parse template %s: %w", templateName, err)
 		}
@@ -761,9 +762,9 @@ func (p *CatalogProvider) LoadServiceTemplates(serviceID string) (map[string]*te
 			return fmt.Errorf("failed to read template %s: %w", path, err)
 		}
 
-		// Parse template
+		// Parse template with custom functions
 		templateName := filepath.Base(path)
-		tmpl, err := texttemplate.New(templateName).Parse(string(templateData))
+		tmpl, err := texttemplate.New(templateName).Funcs(catalogtemplate.GetFuncMap()).Parse(string(templateData))
 		if err != nil {
 			return fmt.Errorf("failed to parse template %s: %w", templateName, err)
 		}
