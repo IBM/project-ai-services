@@ -1,2 +1,8 @@
 name: instruct
 version: "1.0.0"
+
+# Resource requirements
+resources:
+  cpu: 12
+  memory: 107374182400 # 100Gi in bytes
+  storage: 53687091200 # 50Gi for model storage in bytes

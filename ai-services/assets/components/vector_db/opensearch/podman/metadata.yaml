@@ -1,2 +1,8 @@
 name: opensearch
 version: "1.0.0"
+
+# Resource requirements
+resources:
+  cpu: 2
+  memory: 8589934592 # 8Gi in bytes
+  storage: 21474836480 # 20Gi for OpenSearch data storage in bytes

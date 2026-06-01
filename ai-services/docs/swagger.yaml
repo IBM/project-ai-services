@@ -222,6 +222,8 @@ definitions:
         type: string
       name:
         type: string
+      resources:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources'
       schema:
         type: string
       version:
@@ -237,6 +239,8 @@ definitions:
         type: string
       name:
         type: string
+      resources:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources'
       schema:
         type: string
       version:
@@ -255,6 +259,23 @@ definitions:
       total_items:
         type: integer
       total_pages:
+        type: integer
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources:
+    properties:
+      accelerators:
+        additionalProperties:
+          type: integer
+        description: 'Accelerator cards (e.g., "ibm.com/spyre_pf": 1)'
+        type: object
+      cpu:
+        description: CPU cores
+        type: integer
+      memory:
+        description: Memory in bytes
+        type: integer
+      storage:
+        description: Storage in bytes
         type: integer
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service:

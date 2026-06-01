@@ -45,7 +45,7 @@ func (p *CatalogProvider) GetArchitectureDeployOptions(architectureID string) (*
 func (p *CatalogProvider) buildGlobalComponents(compRefs []types.ComponentReference) ([]types.DeployOptionsComponent, error) {
 	globalComponents := make([]types.DeployOptionsComponent, 0, len(compRefs))
 	for _, compRef := range compRefs {
-		component, err := p.buildDeployOptionsComponent(compRef.Type)
+		component, err := p.buildDeployOptionsComponent(compRef.Type, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build global component '%s': %w", compRef.Type, err)
 		}
@@ -102,7 +102,7 @@ func (p *CatalogProvider) buildSingleService(serviceID string) (*types.DeployOpt
 func (p *CatalogProvider) buildServiceComponents(serviceID string, dependencies []types.DependencyReference) ([]types.DeployOptionsComponent, error) {
 	components := make([]types.DeployOptionsComponent, 0, len(dependencies))
 	for _, dep := range dependencies {
-		component, err := p.buildDeployOptionsComponent(dep.ID)
+		component, err := p.buildDeployOptionsComponent(dep.ID, true)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build component '%s' for service '%s': %w", dep.ID, serviceID, err)
 		}
@@ -145,7 +145,7 @@ func (p *CatalogProvider) GetServiceDeployOptions(serviceID string) (*types.Depl
 	// Build components list
 	components := make([]types.DeployOptionsComponent, 0, len(service.Dependencies))
 	for _, dep := range service.Dependencies {
-		component, err := p.buildDeployOptionsComponent(dep.ID)
+		component, err := p.buildDeployOptionsComponent(dep.ID, true)
 		if err != nil {
 			logger.Errorf(fmt.Sprintf("failed to build component '%s': %v", dep.ID, err))
 
@@ -154,11 +154,25 @@ func (p *CatalogProvider) GetServiceDeployOptions(serviceID string) (*types.Depl
 		components = append(components, *component)
 	}
 
+	// Load resources from runtime-specific metadata
+	var resources *types.Resources
+	runtimeMetadata, err := p.LoadServiceRuntimeMetadata(service.ID)
+	if err == nil && runtimeMetadata.Resources != nil {
+		// Convert RuntimeResources to types.Resources
+		resources = &types.Resources{
+			CPU:          runtimeMetadata.Resources.CPU,
+			Memory:       runtimeMetadata.Resources.Memory,
+			Storage:      runtimeMetadata.Resources.Storage,
+			Accelerators: runtimeMetadata.Resources.Accelerators,
+		}
+	}
+
 	deployOptions := &types.DeployOptionsService{
 		ID:         service.ID,
 		Name:       service.Name,
 		Version:    serviceVersion,
 		Components: components,
+		Resources:  resources,
 	}
 
 	// Only add schema if the service has non-empty schema properties
@@ -170,7 +184,8 @@ func (p *CatalogProvider) GetServiceDeployOptions(serviceID string) (*types.Depl
 }
 
 // buildDeployOptionsComponent builds a DeployOptionsComponent for a given component type.
-func (p *CatalogProvider) buildDeployOptionsComponent(componentType string) (*types.DeployOptionsComponent, error) {
+// includeResources controls whether to include resource information in providers.
+func (p *CatalogProvider) buildDeployOptionsComponent(componentType string, includeResources bool) (*types.DeployOptionsComponent, error) {
 	// List all components of this type
 	allComponents, err := p.ListComponents()
 	if err != nil {
@@ -191,25 +206,8 @@ func (p *CatalogProvider) buildDeployOptionsComponent(componentType string) (*ty
 			componentName = comp.ComponentName
 		}
 
-		// Load component runtime metadata to get version
-		providerVersion := ""
-		if runtimeMetadata, err := p.LoadComponentRuntimeMetadata(componentType, comp.ID); err == nil {
-			providerVersion = runtimeMetadata.Version
-		}
-
-		// Build provider
-		provider := types.DeployOptionsProvider{
-			ID:          comp.ID,
-			Name:        comp.Name,
-			Description: comp.Description,
-			Version:     providerVersion,
-		}
-
-		// Only add schema if the schema file has non-empty properties
-		if schema, err := p.GetComponentProviderParams(componentType, comp.ID); err == nil && hasNonEmptyProperties(schema) {
-			provider.Schema = fmt.Sprintf("/api/v1/components/%s/providers/%s/params", componentType, comp.ID)
-		}
-
+		// Build provider with version, resources and schema
+		provider := p.buildProvider(comp, componentType, includeResources)
 		providers = append(providers, provider)
 	}
 
@@ -223,6 +221,42 @@ func (p *CatalogProvider) buildDeployOptionsComponent(componentType string) (*ty
 		Name:      componentName,
 		Providers: providers,
 	}, nil
+}
+
+// buildProvider builds a DeployOptionsProvider from a component, including version, resources and schema if applicable.
+func (p *CatalogProvider) buildProvider(comp types.Component, componentType string, includeResources bool) types.DeployOptionsProvider {
+	// Load component runtime metadata
+	providerVersion := ""
+	var resources *types.Resources
+
+	if runtimeMetadata, err := p.LoadComponentRuntimeMetadata(componentType, comp.ID); err == nil {
+		providerVersion = runtimeMetadata.Version
+
+		// Only include resources if requested and available
+		if includeResources && runtimeMetadata.Resources != nil {
+			resources = &types.Resources{
+				CPU:          runtimeMetadata.Resources.CPU,
+				Memory:       runtimeMetadata.Resources.Memory,
+				Storage:      runtimeMetadata.Resources.Storage,
+				Accelerators: runtimeMetadata.Resources.Accelerators,
+			}
+		}
+	}
+
+	provider := types.DeployOptionsProvider{
+		ID:          comp.ID,
+		Name:        comp.Name,
+		Description: comp.Description,
+		Version:     providerVersion,
+		Resources:   resources,
+	}
+
+	// Only add schema if the schema file has non-empty properties
+	if schema, err := p.GetComponentProviderParams(componentType, comp.ID); err == nil && hasNonEmptyProperties(schema) {
+		provider.Schema = fmt.Sprintf("/api/v1/components/%s/providers/%s/params", componentType, comp.ID)
+	}
+
+	return provider
 }
 
 // hasNonEmptyProperties checks if a schema has non-empty properties.

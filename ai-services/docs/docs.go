@@ -1331,6 +1331,9 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "resources": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources"
+                },
                 "schema": {
                     "type": "string"
                 },
@@ -1353,6 +1356,9 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "resources": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources"
                 },
                 "schema": {
                     "type": "string"
@@ -1381,6 +1387,30 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources": {
+            "type": "object",
+            "properties": {
+                "accelerators": {
+                    "description": "Accelerator cards (e.g., \"ibm.com/spyre_pf\": 1)",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "cpu": {
+                    "description": "CPU cores",
+                    "type": "integer"
+                },
+                "memory": {
+                    "description": "Memory in bytes",
+                    "type": "integer"
+                },
+                "storage": {
+                    "description": "Storage in bytes",
                     "type": "integer"
                 }
             }
