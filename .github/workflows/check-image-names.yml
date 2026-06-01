@@ -3,9 +3,8 @@ name: Check Image Names
 on:
   pull_request:
     paths:
-      - 'spyre-rag/src/Makefile'
-      - 'spyre-rag/ui/Makefile'
-      - 'digitize-ui/Makefile'
+      - 'services/*'
+      - 'ui/*'
       - 'ai-services/assets/**/values.yaml'
       - .github/workflows/check-image-names.yml
       - .github/workflows/bump-makefile-version.yml
