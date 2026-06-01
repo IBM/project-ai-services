@@ -14,6 +14,10 @@ const (
 	DefaultPasswordLength = 16
 	// passwordCharset contains all characters used for password generation.
 	passwordCharset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}|;:,.<>?"
+	// minAnnotationParts is the minimum number of parts in a valid annotation.
+	minAnnotationParts = 2
+	// customLengthParts is the number of parts when custom length is specified.
+	customLengthParts = 3
 )
 
 // GenerateRandomPassword generates a cryptographically secure random password
@@ -73,41 +77,59 @@ func processNodeForGenerate(node *yaml.Node) error {
 
 	switch node.Kind {
 	case yaml.DocumentNode:
-		// Process document content
-		for _, child := range node.Content {
-			if err := processNodeForGenerate(child); err != nil {
-				return err
-			}
-		}
+		return processDocumentNode(node)
 	case yaml.MappingNode:
-		// Process key-value pairs
-		for i := 0; i < len(node.Content); i += 2 {
-			keyNode := node.Content[i]
-			valueNode := node.Content[i+1]
-
-			// Check if the value node has a @generate annotation in its HeadComment
-			if hasGenerateAnnotation(valueNode) {
-				// Generate the value based on the annotation
-				annotation := extractGenerateAnnotation(valueNode)
-				generated, err := generateValue(annotation)
-				if err != nil {
-					return fmt.Errorf("failed to generate value for key '%s': %w", keyNode.Value, err)
-				}
-				// Replace the value
-				valueNode.Value = generated
-			}
-
-			// Recursively process nested structures
-			if err := processNodeForGenerate(valueNode); err != nil {
-				return err
-			}
-		}
+		return processMappingNode(node)
 	case yaml.SequenceNode:
-		// Process array elements
-		for _, child := range node.Content {
-			if err := processNodeForGenerate(child); err != nil {
-				return err
+		return processSequenceNode(node)
+	}
+
+	return nil
+}
+
+// processDocumentNode processes a YAML document node.
+func processDocumentNode(node *yaml.Node) error {
+	for _, child := range node.Content {
+		if err := processNodeForGenerate(child); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// processMappingNode processes a YAML mapping node (key-value pairs).
+func processMappingNode(node *yaml.Node) error {
+	for i := 0; i < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+
+		// Check if the value node has a @generate annotation in its HeadComment
+		if hasGenerateAnnotation(valueNode) {
+			// Generate the value based on the annotation
+			annotation := extractGenerateAnnotation(valueNode)
+			generated, err := generateValue(annotation)
+			if err != nil {
+				return fmt.Errorf("failed to generate value for key '%s': %w", keyNode.Value, err)
 			}
+			// Replace the value
+			valueNode.Value = generated
+		}
+
+		// Recursively process nested structures
+		if err := processNodeForGenerate(valueNode); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// processSequenceNode processes a YAML sequence node (array).
+func processSequenceNode(node *yaml.Node) error {
+	for _, child := range node.Content {
+		if err := processNodeForGenerate(child); err != nil {
+			return err
 		}
 	}
 
@@ -119,6 +141,7 @@ func hasGenerateAnnotation(n *yaml.Node) bool {
 	if n == nil {
 		return false
 	}
+
 	return strings.Contains(n.HeadComment, "@generate:")
 }
 
@@ -147,7 +170,7 @@ func extractGenerateAnnotation(n *yaml.Node) string {
 // generateValue generates a value based on the annotation string.
 func generateValue(annotation string) (string, error) {
 	parts := strings.Split(annotation, ":")
-	if len(parts) < 2 {
+	if len(parts) < minAnnotationParts {
 		return "", fmt.Errorf("invalid annotation format: %s", annotation)
 	}
 
@@ -156,13 +179,14 @@ func generateValue(annotation string) (string, error) {
 	case "password":
 		// Check if a custom length is specified
 		length := DefaultPasswordLength
-		if len(parts) > 2 {
+		if len(parts) >= customLengthParts {
 			var err error
 			_, err = fmt.Sscanf(parts[2], "%d", &length)
 			if err != nil {
 				return "", fmt.Errorf("invalid password length in annotation '%s': %w", annotation, err)
 			}
 		}
+
 		return GenerateRandomPassword(length)
 	default:
 		return "", fmt.Errorf("unsupported annotation type: %s", annotationType)
