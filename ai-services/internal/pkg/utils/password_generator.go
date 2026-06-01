@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -12,30 +13,62 @@ import (
 const (
 	// DefaultPasswordLength is the default length for generated passwords.
 	DefaultPasswordLength = 16
-	// passwordCharset contains all characters used for password generation.
-	passwordCharset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}|;:,.<>?"
-	// minAnnotationParts is the minimum number of parts in a valid annotation.
-	minAnnotationParts = 2
-	// customLengthParts is the number of parts when custom length is specified.
-	customLengthParts = 3
+	// Character sets for password generation.
+	lowercaseChars = "abcdefghijklmnopqrstuvwxyz"
+	uppercaseChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	digitChars     = "0123456789"
+	specialChars   = "!@#$%^&*()-_=+[]{}|;:,.<>?"
+
+	// Annotation parsing constants.
+	minAnnotationParts     = 2
+	annotationPartsWithOpt = 3
+	keyValueParts          = 2
 )
 
-// GenerateRandomPassword generates a cryptographically secure random password
-// of the specified length using crypto/rand.
-func GenerateRandomPassword(length int) (string, error) {
-	if length <= 0 {
+// passwordOptions contains options for password generation.
+type passwordOptions struct {
+	Length  int
+	Lower   bool
+	Upper   bool
+	Digits  bool
+	Special bool
+}
+
+// generateRandomPasswordWithOptions generates a cryptographically secure random password
+// with the specified options using crypto/rand.
+func generateRandomPasswordWithOptions(opts passwordOptions) (string, error) {
+	if opts.Length <= 0 {
 		return "", fmt.Errorf("password length must be greater than 0")
 	}
 
-	password := make([]byte, length)
-	charsetLen := big.NewInt(int64(len(passwordCharset)))
+	// Build charset based on options
+	var charset string
+	if opts.Lower {
+		charset += lowercaseChars
+	}
+	if opts.Upper {
+		charset += uppercaseChars
+	}
+	if opts.Digits {
+		charset += digitChars
+	}
+	if opts.Special {
+		charset += specialChars
+	}
 
-	for i := 0; i < length; i++ {
+	if charset == "" {
+		return "", fmt.Errorf("at least one character type must be enabled")
+	}
+
+	password := make([]byte, opts.Length)
+	charsetLen := big.NewInt(int64(len(charset)))
+
+	for i := 0; i < opts.Length; i++ {
 		randomIndex, err := rand.Int(rand.Reader, charsetLen)
 		if err != nil {
 			return "", fmt.Errorf("failed to generate random password: %w", err)
 		}
-		password[i] = passwordCharset[randomIndex.Int64()]
+		password[i] = charset[randomIndex.Int64()]
 	}
 
 	return string(password), nil
@@ -46,8 +79,8 @@ func GenerateRandomPassword(length int) (string, error) {
 // and replaces empty string values with generated values.
 // Returns the processed YAML as bytes.
 // Supported annotations:
-//   - @generate:password - generates a random password using GenerateRandomPassword
-//   - @generate:password:length - generates a password of specified length (e.g., @generate:password:20)
+//   - @generate:password - generates a random password with default options
+//   - @generate:password length=24, special=true, upper=true - generates with custom options
 func ProcessGenerateAnnotationsFromYAML(yamlData []byte) ([]byte, error) {
 	// Parse into yaml.Node to preserve comments
 	var rootNode yaml.Node
@@ -55,8 +88,23 @@ func ProcessGenerateAnnotationsFromYAML(yamlData []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to unmarshal YAML with comments: %w", err)
 	}
 
-	// Process the node tree
-	if err := processNodeForGenerate(&rootNode); err != nil {
+	// Create a processor function for @generate annotations
+	generateProcessor := func(keyNode, valueNode *yaml.Node) error {
+		// Check if the value node has a @generate annotation
+		if hasGenerateAnnotation(valueNode) {
+			annotation := extractGenerateAnnotation(valueNode)
+			generated, err := generateValue(annotation)
+			if err != nil {
+				return fmt.Errorf("failed to generate value for key '%s': %w", keyNode.Value, err)
+			}
+			valueNode.Value = generated
+		}
+
+		return nil
+	}
+
+	// Use the generic ProcessYAMLNode function from util.go
+	if err := ProcessYAMLNode(&rootNode, generateProcessor); err != nil {
 		return nil, err
 	}
 
@@ -69,74 +117,8 @@ func ProcessGenerateAnnotationsFromYAML(yamlData []byte) ([]byte, error) {
 	return processedData, nil
 }
 
-// processNodeForGenerate recursively processes yaml.Node tree looking for @generate annotations.
-func processNodeForGenerate(node *yaml.Node) error {
-	if node == nil {
-		return nil
-	}
-
-	switch node.Kind {
-	case yaml.DocumentNode:
-		return processDocumentNode(node)
-	case yaml.MappingNode:
-		return processMappingNode(node)
-	case yaml.SequenceNode:
-		return processSequenceNode(node)
-	}
-
-	return nil
-}
-
-// processDocumentNode processes a YAML document node.
-func processDocumentNode(node *yaml.Node) error {
-	for _, child := range node.Content {
-		if err := processNodeForGenerate(child); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// processMappingNode processes a YAML mapping node (key-value pairs).
-func processMappingNode(node *yaml.Node) error {
-	for i := 0; i < len(node.Content); i += 2 {
-		keyNode := node.Content[i]
-		valueNode := node.Content[i+1]
-
-		// Check if the value node has a @generate annotation in its HeadComment
-		if hasGenerateAnnotation(valueNode) {
-			// Generate the value based on the annotation
-			annotation := extractGenerateAnnotation(valueNode)
-			generated, err := generateValue(annotation)
-			if err != nil {
-				return fmt.Errorf("failed to generate value for key '%s': %w", keyNode.Value, err)
-			}
-			// Replace the value
-			valueNode.Value = generated
-		}
-
-		// Recursively process nested structures
-		if err := processNodeForGenerate(valueNode); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// processSequenceNode processes a YAML sequence node (array).
-func processSequenceNode(node *yaml.Node) error {
-	for _, child := range node.Content {
-		if err := processNodeForGenerate(child); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // hasGenerateAnnotation checks if a yaml.Node has a @generate annotation in its HeadComment.
+// Similar to isHidden in util.go.
 func hasGenerateAnnotation(n *yaml.Node) bool {
 	if n == nil {
 		return false
@@ -146,6 +128,8 @@ func hasGenerateAnnotation(n *yaml.Node) bool {
 }
 
 // extractGenerateAnnotation extracts the @generate annotation from a yaml.Node's HeadComment.
+// Returns the full annotation string (e.g., "@generate:password" or "@generate:password length=24").
+// Similar to getDescription in util.go.
 func extractGenerateAnnotation(n *yaml.Node) string {
 	if n == nil {
 		return ""
@@ -157,7 +141,7 @@ func extractGenerateAnnotation(n *yaml.Node) string {
 		return ""
 	}
 
-	// Extract the annotation (e.g., "@generate:password" or "@generate:password:16")
+	// Extract the annotation starting from @generate:
 	annotation := comment[idx:]
 	// Take only the first line if there are multiple lines
 	if newlineIdx := strings.Index(annotation, "\n"); newlineIdx > 0 {
@@ -165,6 +149,66 @@ func extractGenerateAnnotation(n *yaml.Node) string {
 	}
 
 	return strings.TrimSpace(annotation)
+}
+
+// parsePasswordOptions parses password options from annotation string.
+// Format: @generate:password length=24, special=true, upper=true.
+func parsePasswordOptions(annotation string) (passwordOptions, error) {
+	// Default options
+	opts := passwordOptions{
+		Length:  DefaultPasswordLength,
+		Lower:   true,
+		Upper:   true,
+		Digits:  true,
+		Special: true,
+	}
+
+	// Remove @generate:password prefix
+	parts := strings.SplitN(annotation, ":", annotationPartsWithOpt)
+	if len(parts) < minAnnotationParts || parts[1] != "password" {
+		return opts, fmt.Errorf("invalid annotation format: %s", annotation)
+	}
+
+	// If there's a third part, parse the options
+	if len(parts) == annotationPartsWithOpt {
+		parseOptions(parts[2], &opts)
+	}
+
+	return opts, nil
+}
+
+// parseOptions parses key=value pairs and updates password options.
+func parseOptions(optStr string, opts *passwordOptions) {
+	pairs := strings.SplitSeq(optStr, ",")
+	for pair := range pairs {
+		pair = strings.TrimSpace(pair)
+		kv := strings.SplitN(pair, "=", keyValueParts)
+		if len(kv) != keyValueParts {
+			continue
+		}
+
+		key := strings.TrimSpace(kv[0])
+		value := strings.TrimSpace(kv[1])
+		applyOption(key, value, opts)
+	}
+}
+
+// applyOption applies a single option to password options.
+func applyOption(key, value string, opts *passwordOptions) {
+	switch key {
+	case "length":
+		if length, err := strconv.Atoi(value); err == nil {
+			opts.Length = length
+		}
+	case "lower":
+		opts.Lower = value == "true"
+	case "upper":
+		opts.Upper = value == "true"
+	case "digits":
+		opts.Digits = value == "true"
+	case "special":
+		opts.Special = value == "true"
+	}
 }
 
 // generateValue generates a value based on the annotation string.
@@ -177,17 +221,12 @@ func generateValue(annotation string) (string, error) {
 	annotationType := parts[1]
 	switch annotationType {
 	case "password":
-		// Check if a custom length is specified
-		length := DefaultPasswordLength
-		if len(parts) >= customLengthParts {
-			var err error
-			_, err = fmt.Sscanf(parts[2], "%d", &length)
-			if err != nil {
-				return "", fmt.Errorf("invalid password length in annotation '%s': %w", annotation, err)
-			}
+		opts, err := parsePasswordOptions(annotation)
+		if err != nil {
+			return "", err
 		}
 
-		return GenerateRandomPassword(length)
+		return generateRandomPasswordWithOptions(opts)
 	default:
 		return "", fmt.Errorf("unsupported annotation type: %s", annotationType)
 	}

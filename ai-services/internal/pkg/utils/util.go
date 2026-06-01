@@ -166,6 +166,71 @@ func getDescription(n *yaml.Node) string {
 	return strings.TrimSpace(desc)
 }
 
+// NodeProcessor is a function type for processing individual yaml nodes.
+// It receives the key node, value node, and returns an error if processing fails.
+type NodeProcessor func(keyNode, valueNode *yaml.Node) error
+
+// ProcessYAMLNode recursively processes a yaml.Node tree with a custom processor function.
+// This is a generic traversal function that can be used for various node processing tasks.
+func ProcessYAMLNode(node *yaml.Node, processor NodeProcessor) error {
+	if node == nil {
+		return nil
+	}
+
+	switch node.Kind {
+	case yaml.DocumentNode:
+		return processDocumentNode(node, processor)
+	case yaml.MappingNode:
+		return processMappingNode(node, processor)
+	case yaml.SequenceNode:
+		return processSequenceNode(node, processor)
+	}
+
+	return nil
+}
+
+// processDocumentNode processes a document node by recursively processing its children.
+func processDocumentNode(node *yaml.Node, processor NodeProcessor) error {
+	for _, child := range node.Content {
+		if err := ProcessYAMLNode(child, processor); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// processMappingNode processes a mapping node by applying the processor to each key-value pair.
+func processMappingNode(node *yaml.Node, processor NodeProcessor) error {
+	for i := 0; i < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+
+		// Apply processor to this key-value pair
+		if err := processor(keyNode, valueNode); err != nil {
+			return err
+		}
+
+		// Recursively process nested structures
+		if err := ProcessYAMLNode(valueNode, processor); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// processSequenceNode processes a sequence node by recursively processing its children.
+func processSequenceNode(node *yaml.Node, processor NodeProcessor) error {
+	for _, child := range node.Content {
+		if err := ProcessYAMLNode(child, processor); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func FlattenNode(prefix string, n *yaml.Node, descMap map[string]string) {
 	if n == nil {
 		return
