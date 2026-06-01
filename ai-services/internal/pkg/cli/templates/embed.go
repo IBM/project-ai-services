@@ -14,6 +14,7 @@ import (
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	templatefuncs "github.com/project-ai-services/ai-services/internal/pkg/template"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 
@@ -179,7 +180,14 @@ func (e *embedTemplateProvider) LoadAllTemplates(app string) (map[string]*templa
 			return nil
 		}
 
-		t, err := template.ParseFS(e.fs, path)
+		// Read template content
+		data, err := e.fs.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+
+		// Parse template with custom functions
+		t, err := template.New(d.Name()).Funcs(templatefuncs.GetFuncMap()).Parse(string(data))
 		if err != nil {
 			return fmt.Errorf("parse %s: %w", path, err)
 		}

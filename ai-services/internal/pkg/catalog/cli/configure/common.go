@@ -36,9 +36,6 @@ func Run(opts ConfigureOptions) error {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	// Convert passwordHash to base64 encoded text for Kubernetes/Podman secret
-	passwordHashBase64 := base64.StdEncoding.EncodeToString([]byte(passwordHash))
-
 	// Deploy catalog service based on runtime
 	switch opts.Runtime {
 	case types.RuntimeTypePodman:
@@ -48,7 +45,7 @@ func Run(opts ConfigureOptions) error {
 		// Determine auth file path
 		authFilePath := getAuthFilePath()
 
-		return catalogPodman.DeployCatalog(ctx, podmanURI, authFilePath, passwordHashBase64, opts.BaseDir, opts.ArgParams, opts.HttpsPort)
+		return catalogPodman.DeployCatalog(ctx, podmanURI, authFilePath, passwordHash, opts.BaseDir, opts.ArgParams, opts.HttpsPort)
 
 	case types.RuntimeTypeOpenShift:
 		return fmt.Errorf("openshift runtime is not yet supported for catalog configure")

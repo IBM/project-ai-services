@@ -5,7 +5,7 @@ import (
 	"text/template"
 )
 
-// GetFuncMap returns custom template functions for use in catalog templates.
+// GetFuncMap returns custom template functions for use in templates.
 // These functions are available in all component and service templates.
 func GetFuncMap() template.FuncMap {
 	return template.FuncMap{

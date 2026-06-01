@@ -159,13 +159,10 @@ func loadCatalogTemplates(s *spinner.Spinner) (templates.Template, *templates.Ap
 // prepareCatalogValues prepares the values map with configure-specific configuration.
 func prepareCatalogValues(tp templates.Template, podmanURI, authFilePath, passwordHash string, argParams map[string]string) (map[string]any, error) {
 	// Generate database password
-	dbPassword, err := utils.GenerateRandomPassword(utils.DefaultPasswordLength)
+	dbPassword, err := utils.GenerateRandomPassword()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate database password: %w", err)
 	}
-
-	// Base64 encode the database password for Kubernetes secret
-	dbPasswordBase64 := base64.StdEncoding.EncodeToString([]byte(dbPassword))
 
 	// Read and encode auth file content for secret
 	authFileContent, err := os.ReadFile(authFilePath)
@@ -181,9 +178,9 @@ func prepareCatalogValues(tp templates.Template, podmanURI, authFilePath, passwo
 	argParams["backend.runtime"] = "podman"
 	argParams["backend.podman.uri"] = podmanURI
 	argParams["backend.podman.authFileContent"] = authFileBase64
-	argParams["db.password"] = dbPasswordBase64
+	argParams["db.password"] = dbPassword
 
-	// Load values from catalog
+	// Load values from catalog - this will process @generate:password annotations
 	return tp.LoadValues(catalogAppTemplate, nil, argParams)
 }
 
