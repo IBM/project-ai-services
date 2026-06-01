@@ -18,69 +18,69 @@ EXPECTED_REGISTRY = "icr.io/ai-services-cicd"
 # Map of: makefile_path -> list of (values_yaml_path, values_key)
 # values_key is the top-level key in values.yaml that contains the image reference
 COMPONENTS = {
-    # "services/chatbot/Makefile": [
-    #     ("ai-services/assets/applications/rag/podman/values.yaml", "backend"),
-    #     ("ai-services/assets/applications/rag/openshift/values.yaml", "backend"),
-    #     ("ai-services/assets/applications/rag-dev/podman/values.yaml", "backend"),
-    #     ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "backend"),
-    #     ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "backend"),
-    #     ("ai-services/assets/services/chat/podman/values.yaml", "backend"),
-    # ],
-    # "services/digitize/Makefile": [
-    #     ("ai-services/assets/applications/rag/podman/values.yaml", "digitize"),
-    #     ("ai-services/assets/applications/rag/openshift/values.yaml", "digitize"),
-    #     ("ai-services/assets/applications/rag-dev/podman/values.yaml", "digitize"),
-    #     ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "digitize"),
-    #     ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "digitize"),
-    #     ("ai-services/assets/services/digitize/podman/values.yaml", "digitize"),
-    # ],
-    # "services/summarize/Makefile": [
-    #     ("ai-services/assets/applications/rag/podman/values.yaml", "summarize"),
-    #     ("ai-services/assets/applications/rag/openshift/values.yaml", "summarize"),
-    #     ("ai-services/assets/applications/rag-dev/podman/values.yaml", "summarize"),
-    #     ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "summarize"),
-    #     ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "summarize"),
-    #     ("ai-services/assets/services/summarize/podman/values.yaml", "summarize"),
-    # ],
-    # "services/similarity/Makefile": [
-    #     ("ai-services/assets/applications/rag/podman/values.yaml", "similarity"),
-    #     ("ai-services/assets/applications/rag/openshift/values.yaml", "similarity"),
-    #     ("ai-services/assets/applications/rag-dev/podman/values.yaml", "similarity"),
-    #     ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "similarity"),
-    #     ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "similarity"),
-    #     ("ai-services/assets/services/similarity/podman/values.yaml", "similarity"),
-    # ],
-    # "ui/chatbot/Makefile": [
-    #     ("ai-services/assets/applications/rag/podman/values.yaml", "ui"),
-    #     ("ai-services/assets/applications/rag-dev/podman/values.yaml", "ui"),
-    #     ("ai-services/assets/applications/rag/openshift/values.yaml", "ui"),
-    #     ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "ui"),
-    #     ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "ui"),
-    # ],
-    # "ui/digitize/Makefile": [
-    #     ("ai-services/assets/applications/rag/openshift/values.yaml", "digitizeUi"),
-    #     ("ai-services/assets/applications/rag/podman/values.yaml", "digitizeUi"),
-    #     ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "digitizeUi"),
-    #     ("ai-services/assets/applications/rag-dev/podman/values.yaml", "digitizeUi"),
-    #     ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "digitizeUi"),
-    # ],
-    # "ui/catalog/Makefile": [
-    #     ("ai-services/assets/catalog/podman/values.yaml", "ui"),
-    # ],
-    # "ai-services/Makefile": [
-    #     ("ai-services/assets/catalog/podman/values.yaml", "backend"),
-    # ],
-    # "images/postgres/Makefile": [
-    #     ("ai-services/assets/catalog/podman/values.yaml", "db"),
-    #     ("ai-services/assets/applications/rag/podman/values.yaml", "postgres"),
-    #     ("ai-services/assets/applications/rag/openshift/values.yaml", "postgres"),
-    #     ("ai-services/assets/applications/rag-dev/podman/values.yaml", "postgres"),
-    #     ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "postgres"),
-    #     ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "postgres"),
-    # ],
-    # "images/litellm/Makefile": [
-    #     ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "litellm"),
-    # ],
+    "services/chatbot/Makefile": [
+        ("ai-services/assets/applications/rag/podman/values.yaml", "backend"),
+        ("ai-services/assets/applications/rag/openshift/values.yaml", "backend"),
+        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "backend"),
+        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "backend"),
+        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "backend"),
+        ("ai-services/assets/services/chat/podman/values.yaml", "backend"),
+    ],
+    "services/digitize/Makefile": [
+        ("ai-services/assets/applications/rag/podman/values.yaml", "digitize"),
+        ("ai-services/assets/applications/rag/openshift/values.yaml", "digitize"),
+        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "digitize"),
+        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "digitize"),
+        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "digitize"),
+        ("ai-services/assets/services/digitize/podman/values.yaml", "digitize"),
+    ],
+    "services/summarize/Makefile": [
+        ("ai-services/assets/applications/rag/podman/values.yaml", "summarize"),
+        ("ai-services/assets/applications/rag/openshift/values.yaml", "summarize"),
+        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "summarize"),
+        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "summarize"),
+        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "summarize"),
+        ("ai-services/assets/services/summarize/podman/values.yaml", "summarize"),
+    ],
+    "services/similarity/Makefile": [
+        ("ai-services/assets/applications/rag/podman/values.yaml", "similarity"),
+        ("ai-services/assets/applications/rag/openshift/values.yaml", "similarity"),
+        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "similarity"),
+        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "similarity"),
+        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "similarity"),
+        ("ai-services/assets/services/similarity/podman/values.yaml", "similarity"),
+    ],
+    "ui/chatbot/Makefile": [
+        ("ai-services/assets/applications/rag/podman/values.yaml", "ui"),
+        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "ui"),
+        ("ai-services/assets/applications/rag/openshift/values.yaml", "ui"),
+        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "ui"),
+        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "ui"),
+    ],
+    "ui/digitize/Makefile": [
+        ("ai-services/assets/applications/rag/openshift/values.yaml", "digitizeUi"),
+        ("ai-services/assets/applications/rag/podman/values.yaml", "digitizeUi"),
+        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "digitizeUi"),
+        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "digitizeUi"),
+        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "digitizeUi"),
+    ],
+    "ui/catalog/Makefile": [
+        ("ai-services/assets/catalog/podman/values.yaml", "ui"),
+    ],
+    "ai-services/Makefile": [
+        ("ai-services/assets/catalog/podman/values.yaml", "backend"),
+    ],
+    "images/postgres/Makefile": [
+        ("ai-services/assets/catalog/podman/values.yaml", "db"),
+        ("ai-services/assets/applications/rag/podman/values.yaml", "postgres"),
+        ("ai-services/assets/applications/rag/openshift/values.yaml", "postgres"),
+        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "postgres"),
+        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "postgres"),
+        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "postgres"),
+    ],
+    "images/litellm/Makefile": [
+        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "litellm"),
+    ],
     "images/caddy/Makefile": [
         ("ai-services/assets/catalog/podman/values.yaml", "caddy"),
     ]
