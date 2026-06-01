@@ -381,12 +381,12 @@ class TestPromptTemplates:
         assert "CONFIDENCE:" in template
         assert "injection" in template.lower()
     
-    def test_query_system_message_template(self):
+    def test_query_system_prompt_template(self):
         """Test query system message template contains required placeholders."""
         from chatbot.settings import RAGConfig
         
         config = RAGConfig()
-        template = config.query_system_message
+        template = config.query_system_prompt
         
         assert "{context}" in template
         assert "{rephrased_query}" in template

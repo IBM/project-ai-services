@@ -240,7 +240,7 @@ def query_vllm_payload(
             if truncated_messages:
                 message_array.extend(truncated_messages)
 
-        final_system_content = chatbot_settings.chatbot.query_system_message.format(
+        final_system_content = chatbot_settings.chatbot.query_system_prompt.format(
             context=context,
             rephrased_query=rephrased_query or question,
         )

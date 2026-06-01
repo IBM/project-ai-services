@@ -173,7 +173,7 @@ class RAGConfig(BaseSettings):
         description="Initial system prompt for conversational behavior",
     )
 
-    query_system_message: str = Field(
+    query_system_prompt: str = Field(
         default=(
             "Retrieved Context:\n{context}\n\n"
             "Rephrased Query: {rephrased_query}\n\n"
