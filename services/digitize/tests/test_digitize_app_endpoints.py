@@ -12,7 +12,7 @@ from digitize.models import JobStatus, OperationType, OutputFormat
 
 
 @pytest.fixture
-def digitize_test_client(monkeypatch, tmp_path):
+def digitize_test_client(monkeypatch, tmp_path, mock_db_operations):
     digitized_dir = tmp_path / "digitized"
     staging_dir = tmp_path / "staging"
 
@@ -37,25 +37,11 @@ def digitize_test_client(monkeypatch, tmp_path):
     monkeypatch.setattr(digitize_app.dg_util, "generate_uuid", Mock(return_value="job-123"))
     monkeypatch.setattr(digitize_app.dg_util, "stage_upload_files", AsyncMock())
     monkeypatch.setattr(digitize_app.dg_util, "initialize_job_state", Mock(return_value={"sample.pdf": "doc-1"}))
-    monkeypatch.setattr(db_ops, "get_all_jobs", Mock(return_value=([], 0)))
-    monkeypatch.setattr(db_ops, "get_job", Mock())
-    monkeypatch.setattr(db_ops, "get_all_documents_paginated", Mock(return_value=([], 0)))
-    monkeypatch.setattr(db_ops, "get_document", Mock())
     monkeypatch.setattr(digitize_app.dg_util, "get_document_content", Mock())
     monkeypatch.setattr(digitize_app.dg_util, "is_document_in_active_job", Mock(return_value=False))
     monkeypatch.setattr(digitize_app.dg_util, "delete_document_files", Mock())
     monkeypatch.setattr(digitize_app, "reset_db", Mock())
     monkeypatch.setattr(digitize_app, "configure_uvicorn_logging", Mock())
-
-    # Mock database engine to prevent DatabaseStatusManager from failing
-    mock_engine = Mock()
-    monkeypatch.setattr(db_conn, "engine", mock_engine)
-
-    # Mock get_status_manager to return a mock status manager
-    mock_status_manager = Mock()
-    mock_status_manager.update_doc_metadata = Mock()
-    mock_status_manager.update_job_progress = Mock()
-    monkeypatch.setattr(db_ops, "get_status_manager", Mock(return_value=mock_status_manager))
 
     return TestClient(digitize_app.app)
 
@@ -185,7 +171,7 @@ class TestJobsEndpoints:
                 to_dict=lambda: {"job_id": "job-1", "status": "accepted"},
             ),
         ]
-        monkeypatch.setattr(digitize_app.dg_util, "read_all_job_files", Mock(return_value=jobs))
+        monkeypatch.setattr(db_ops, "get_all_jobs", Mock(return_value=([job.to_dict() for job in jobs], 2)))
 
         response = digitize_test_client.get("/v1/jobs?latest=true&operation=digitization")
 
@@ -196,7 +182,7 @@ class TestJobsEndpoints:
 
     def test_get_job_by_id(self, digitize_test_client, monkeypatch, tmp_path):
         monkeypatch.setattr(
-            digitize_app.dg_util,
+            db_ops,
             "get_job",
             Mock(return_value={"job_id": "job-123"}),
         )
@@ -208,7 +194,7 @@ class TestJobsEndpoints:
 
     def test_get_missing_job_returns_404(self, digitize_test_client, monkeypatch):
         monkeypatch.setattr(
-            digitize_app.dg_util,
+            db_ops,
             "get_job",
             Mock(return_value=None),
         )
@@ -219,7 +205,7 @@ class TestJobsEndpoints:
 
     def test_delete_completed_job_succeeds(self, digitize_test_client, monkeypatch):
         monkeypatch.setattr(
-            digitize_app.dg_util,
+            db_ops,
             "get_job",
             Mock(return_value={"job_id": "job-123", "status": JobStatus.COMPLETED.value}),
         )
@@ -233,7 +219,7 @@ class TestJobsEndpoints:
 
     def test_delete_active_job_returns_409(self, digitize_test_client, monkeypatch):
         monkeypatch.setattr(
-            digitize_app.dg_util,
+            db_ops,
             "get_job",
             Mock(return_value={"job_id": "job-123", "status": JobStatus.IN_PROGRESS.value}),
         )
@@ -255,7 +241,7 @@ class TestDocumentEndpoints:
                 "submitted_at": "2024-01-01T00:00:00Z",
             }
         ]
-        monkeypatch.setattr(digitize_app.dg_util, "get_all_documents", Mock(return_value=docs))
+        monkeypatch.setattr(db_ops, "get_all_documents_paginated", Mock(return_value=(docs, 1)))
 
         response = digitize_test_client.get("/v1/documents?status=completed&name=alp")
 
@@ -268,10 +254,19 @@ class TestDocumentEndpoints:
         assert response.status_code == 400
 
     def test_get_document_metadata_without_and_with_details(self, digitize_test_client, monkeypatch):
+        from digitize.models import DocumentDetailResponse
+        mock_doc = DocumentDetailResponse(
+            id="doc-1",
+            job_id="job-1",
+            name="sample.pdf",
+            type="digitization",
+            status="completed",
+            output_format="json"
+        )
         monkeypatch.setattr(
-            digitize_app.dg_util,
-            "get_document_by_id",
-            Mock(return_value={"id": "doc-1", "name": "sample.pdf", "type": "digitization", "status": "completed", "output_format": "json"}),
+            db_ops,
+            "get_document",
+            Mock(return_value=mock_doc),
         )
 
         response = digitize_test_client.get("/v1/documents/doc-1")
@@ -279,11 +274,15 @@ class TestDocumentEndpoints:
 
         assert response.status_code == 200
         assert detailed.status_code == 200
-        assert digitize_app.dg_util.get_document_by_id.call_args_list[0].kwargs["include_details"] is False
-        assert digitize_app.dg_util.get_document_by_id.call_args_list[1].kwargs["include_details"] is True
+        assert db_ops.get_document.call_args_list[0][1]["include_details"] is False
+        assert db_ops.get_document.call_args_list[1][1]["include_details"] is True
 
     def test_get_missing_document_returns_404(self, digitize_test_client, monkeypatch):
-        monkeypatch.setattr(digitize_app.dg_util, "get_document_by_id", Mock(side_effect=FileNotFoundError("missing")))
+        # Mock get_document to raise FileNotFoundError which should be caught and converted to 404
+        def mock_get_document(doc_id, include_details=False):
+            raise FileNotFoundError(f"Document with ID '{doc_id}' not found")
+
+        monkeypatch.setattr(db_ops, "get_document", mock_get_document)
 
         response = digitize_test_client.get("/v1/documents/doc-404")
 
@@ -302,15 +301,24 @@ class TestDocumentEndpoints:
         assert response.json()["output_format"] == "json"
 
     def test_delete_document_success(self, digitize_test_client, monkeypatch):
+        from digitize.models import DocumentDetailResponse
+        mock_doc = DocumentDetailResponse(
+            id="doc-1",
+            job_id="job-1",
+            name="test.pdf",
+            type="digitization",
+            status="completed",
+            output_format="json"
+        )
+        # The delete endpoint uses dg_util.get_document, not db_ops.get_document
         monkeypatch.setattr(
             digitize_app.dg_util,
-            "get_document_by_id",
-            Mock(return_value=SimpleNamespace(job_id="job-1", output_format="json")),
+            "get_document",
+            Mock(return_value=mock_doc),
         )
 
         fake_vector_store = Mock()
         fake_vector_store.delete_document_by_id.return_value = 5
-        fake_db = SimpleNamespace(get_vector_store=Mock(return_value=fake_vector_store))
 
         with patch("common.db_utils.get_vector_store", return_value=fake_vector_store):
             response = digitize_test_client.delete("/v1/documents/doc-1")
@@ -320,10 +328,20 @@ class TestDocumentEndpoints:
         digitize_app.dg_util.delete_document_files.assert_called_once_with("doc-1", output_format="json")
 
     def test_delete_active_document_returns_409(self, digitize_test_client, monkeypatch):
+        from digitize.models import DocumentDetailResponse
+        mock_doc = DocumentDetailResponse(
+            id="doc-1",
+            job_id="job-1",
+            name="test.pdf",
+            type="digitization",
+            status="in_progress",
+            output_format="json"
+        )
+        # The delete endpoint uses dg_util.get_document, not db_ops.get_document
         monkeypatch.setattr(
             digitize_app.dg_util,
-            "get_document_by_id",
-            Mock(return_value=SimpleNamespace(job_id="job-1", output_format="json")),
+            "get_document",
+            Mock(return_value=mock_doc),
         )
         monkeypatch.setattr(digitize_app.dg_util, "is_document_in_active_job", Mock(return_value=True))
 
