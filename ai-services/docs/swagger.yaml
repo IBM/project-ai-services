@@ -11,12 +11,11 @@ definitions:
         type: object
       provider_id:
         type: string
-      type:
+      version:
         type: string
     required:
     - component_type
     - provider_id
-    - type
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest:
     properties:
@@ -30,6 +29,8 @@ definitions:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service'
         type: array
+      version:
+        type: string
     required:
     - catalog_id
     - name
@@ -48,14 +49,11 @@ definitions:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component'
         type: array
-      type:
-        type: string
       version:
         type: string
     required:
     - catalog_id
     - components
-    - type
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse:
     properties:
@@ -200,6 +198,8 @@ definitions:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService'
         type: array
+      version:
+        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent:
     properties:
@@ -226,6 +226,8 @@ definitions:
         $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources'
       schema:
         type: string
+      version:
+        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService:
     properties:
@@ -241,7 +243,7 @@ definitions:
         $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources'
       schema:
         type: string
-      type:
+      version:
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata:

@@ -993,8 +993,7 @@
             "type": "object",
             "required": [
                 "component_type",
-                "provider_id",
-                "type"
+                "provider_id"
             ],
             "properties": {
                 "component_type": {
@@ -1010,7 +1009,7 @@
                 "provider_id": {
                     "type": "string"
                 },
-                "type": {
+                "version": {
                     "type": "string"
                 }
             }
@@ -1036,6 +1035,9 @@
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service"
                     }
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -1051,8 +1053,7 @@
             "type": "object",
             "required": [
                 "catalog_id",
-                "components",
-                "type"
+                "components"
             ],
             "properties": {
                 "catalog_id": {
@@ -1063,9 +1064,6 @@
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component"
                     }
-                },
-                "type": {
-                    "type": "string"
                 },
                 "version": {
                     "type": "string"
@@ -1289,6 +1287,9 @@
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService"
                     }
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -1329,6 +1330,9 @@
                 },
                 "schema": {
                     "type": "string"
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -1353,7 +1357,7 @@
                 "schema": {
                     "type": "string"
                 },
-                "type": {
+                "version": {
                     "type": "string"
                 }
             }

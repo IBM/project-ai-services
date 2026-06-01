@@ -34,6 +34,15 @@ const (
 	ServiceStatusError        ServiceStatus = "Error"
 )
 
+// ComponentStatus represents the status of a component.
+type ComponentStatus string
+
+const (
+	ComponentStatusInitializing ComponentStatus = "Initializing"
+	ComponentStatusRunning      ComponentStatus = "Running"
+	ComponentStatusError        ComponentStatus = "Error"
+)
+
 // Application represents an application in the catalog.
 type Application struct {
 	ID             uuid.UUID         `json:"id"`
@@ -42,6 +51,7 @@ type Application struct {
 	DeploymentType DeploymentType    `json:"deployment_type"`
 	Status         ApplicationStatus `json:"status"`
 	Message        string            `json:"message,omitempty"`
+	Version        string            `json:"version,omitempty"`
 	CreatedBy      string            `json:"created_by"`
 	CreatedAt      time.Time         `json:"created_at"`
 	UpdatedAt      time.Time         `json:"updated_at"`

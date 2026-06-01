@@ -999,8 +999,7 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "component_type",
-                "provider_id",
-                "type"
+                "provider_id"
             ],
             "properties": {
                 "component_type": {
@@ -1016,7 +1015,7 @@ const docTemplate = `{
                 "provider_id": {
                     "type": "string"
                 },
-                "type": {
+                "version": {
                     "type": "string"
                 }
             }
@@ -1042,6 +1041,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service"
                     }
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -1057,8 +1059,7 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "catalog_id",
-                "components",
-                "type"
+                "components"
             ],
             "properties": {
                 "catalog_id": {
@@ -1069,9 +1070,6 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component"
                     }
-                },
-                "type": {
-                    "type": "string"
                 },
                 "version": {
                     "type": "string"
@@ -1295,6 +1293,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService"
                     }
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -1335,6 +1336,9 @@ const docTemplate = `{
                 },
                 "schema": {
                     "type": "string"
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -1359,7 +1363,7 @@ const docTemplate = `{
                 "schema": {
                     "type": "string"
                 },
-                "type": {
+                "version": {
                     "type": "string"
                 }
             }

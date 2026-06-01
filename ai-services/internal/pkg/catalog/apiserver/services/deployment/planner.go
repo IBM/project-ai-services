@@ -74,6 +74,7 @@ func (p *DeploymentPlanner) PlanDeployment(
 		ApplicationID:   uuid.New(),
 		ApplicationName: req.Name,
 		CatalogID:       req.CatalogID,
+		Version:         req.Version,
 		IsArchitecture:  isArchitecture,
 		Components:      make(map[string]*ComponentPlan),
 		Services:        make(map[string]*ServicePlan),
@@ -186,6 +187,7 @@ func (p *DeploymentPlanner) processComponent(
 		ComponentType:  comp.ComponentType,
 		ProviderID:     comp.ProviderID,
 		CatalogPath:    fmt.Sprintf("%s/%s", componentPath, runtimeType),
+		Version:        comp.Version,
 		Params:         comp.Params,
 		UsedByServices: []string{catalogID},
 	}
