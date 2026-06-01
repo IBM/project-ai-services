@@ -45,7 +45,10 @@ func Run(opts ConfigureOptions) error {
 		// Determine Podman URI
 		podmanURI := getPodmanURI()
 
-		return catalogPodman.DeployCatalog(ctx, podmanURI, passwordHashBase64, opts.BaseDir, opts.ArgParams, opts.HttpsPort)
+		// Determine auth file path
+		authFilePath := getAuthFilePath()
+
+		return catalogPodman.DeployCatalog(ctx, podmanURI, authFilePath, passwordHashBase64, opts.BaseDir, opts.ArgParams, opts.HttpsPort)
 
 	case types.RuntimeTypeOpenShift:
 		return fmt.Errorf("openshift runtime is not yet supported for catalog configure")
@@ -60,6 +63,13 @@ func getPodmanURI() string {
 	// TODO: Need to take care for getting rootless socket
 	// Return default local Unix socket
 	return "/run/podman/podman.sock"
+}
+
+// getAuthFilePath determines the auth.json file path.
+func getAuthFilePath() string {
+	// TODO: Need to take care for getting rootless user auth file path
+	// Return default root user auth file path
+	return "/run/user/0/containers/auth.json"
 }
 
 // hashPasswordPBKDF2 generates a PBKDF2 hash of the password with a random salt.

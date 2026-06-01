@@ -9,6 +9,7 @@ backend:
   adminPasswordHash: ""
   podman:
     uri: "/run/podman/podman.sock"
+    authFile: "/run/user/0/containers/auth.json"
 
 db:
   port: ""

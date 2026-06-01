@@ -149,8 +149,10 @@ spec:
     - name: podman-auth
       hostPath:
         # Mount the auth file from host
+        # For rootless podman: /run/user/$(id -u)/containers/auth.json
+        # For root podman: /run/user/0/containers/auth.json
         # NOTE: Ensure the file has read permissions (chmod 644) for the container user
-        path: /run/user/0/containers/auth.json
+        path: {{ .Values.backend.podman.authFile }}
         type: File
     - name: iommu-groups
       hostPath:
