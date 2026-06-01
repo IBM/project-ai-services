@@ -9,6 +9,20 @@ metadata:
     ai-services.io/secret: "catalog-db-secret"
     ai-services.io/secret-skip-cleanup: "true"
 spec:
+  initContainers:
+  - name: fix-permissions
+    image: "{{ .Values.db.image }}"
+    command:
+    - /bin/sh
+    - -c
+    - |
+      chown -R 26:0 /var/lib/pgsql
+      chmod -R g=u /var/lib/pgsql
+    volumeMounts:
+    - name: postgres-data
+      mountPath: /var/lib/pgsql
+    securityContext:
+      runAsUser: 0
   containers:
   - name: postgresql
     image: "{{ .Values.db.image }}"
@@ -25,9 +39,11 @@ spec:
           key: db-password
     - name: POSTGRES_DB
       value: "{{ .Values.db.database }}"
+    - name: PGDATA
+      value: "/var/lib/pgsql/data"
     volumeMounts:
     - name: postgres-data
-      mountPath: /var/lib/pgsql/18/data
+      mountPath: /var/lib/pgsql
     livenessProbe:
       exec:
         command:
@@ -46,5 +62,5 @@ spec:
   volumes:
   - name: postgres-data
     hostPath:
-      path: {{ .BaseDir }}/db
+      path: "{{ .BaseDir }}/db"
       type: DirectoryOrCreate

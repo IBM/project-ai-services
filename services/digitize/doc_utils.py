@@ -2,6 +2,7 @@ import json
 import time
 import logging
 import os
+import re
 import shutil
 import random
 
@@ -39,6 +40,277 @@ HEAVY_PDF_PAGE_THRESHOLD = settings.digitize.heavy_pdf_page_threshold
 POOL_SIZE = settings.common.llm.max_batch_size
 
 is_debug = logger.isEnabledFor(logging.DEBUG)
+
+TABLE_CAPTION_PATTERN = re.compile(
+    r"^\s*table\s+\d+(?:[.-]\d+)*\s*[:.-]?\s+.+$",
+    re.IGNORECASE
+)
+
+
+def _parse_ref_index(ref: str, prefix: str) -> int | None:
+    """
+    Parse a Docling ref like '#/texts/616' or '#/tables/2' into its integer index.
+    """
+    try:
+        expected_prefix = f"#/{prefix}/"
+        if not isinstance(ref, str) or not ref.startswith(expected_prefix):
+            logger.debug(f"_parse_ref_index: ref '{ref}' does not match expected prefix '{expected_prefix}'")
+            return None
+        parsed_idx = int(ref[len(expected_prefix):])
+        logger.debug(f"_parse_ref_index: parsed ref '{ref}' with prefix '{prefix}' to index {parsed_idx}")
+        return parsed_idx
+    except Exception as e:
+        logger.debug(f"_parse_ref_index: failed to parse ref '{ref}' with prefix '{prefix}': {e}")
+        return None
+
+
+def _get_body_children_refs(converted_doc) -> list[str]:
+    """
+    Return top-level body child refs in document order.
+    """
+    try:
+        children = getattr(converted_doc.body, "children", []) or []
+        refs = []
+        logger.debug(f"_get_body_children_refs: found {len(children)} top-level body children")
+        for idx, child in enumerate(children):
+            if isinstance(child, dict) and "$ref" in child:
+                refs.append(child["$ref"])
+            else:
+                child_ref = (
+                    getattr(child, "ref", None)
+                    or getattr(child, "$ref", None)
+                    or getattr(child, "cref", None)
+                    or getattr(child, "self_ref", None)
+                )
+                if not child_ref and hasattr(child, "__dict__"):
+                    logger.debug(
+                        f"_get_body_children_refs: child[{idx}] available attrs={list(vars(child).keys())}, type={type(child)}"
+                    )
+                if child_ref:
+                    refs.append(child_ref)
+        logger.debug(f"_get_body_children_refs: extracted {len(refs)} refs")
+        return refs
+    except Exception as e:
+        logger.debug(f"_get_body_children_refs: failed to extract body children refs: {e}", exc_info=True)
+        return []
+
+
+def _get_text_value_by_ref(converted_doc, ref: str) -> str:
+    """
+    Resolve a '#/texts/<n>' ref to its text content.
+    """
+    idx = _parse_ref_index(ref, "texts")
+    if idx is None:
+        logger.debug(f"_get_text_value_by_ref: could not parse text ref '{ref}'")
+        return ""
+
+    try:
+        text_obj = converted_doc.texts[idx]
+        text = getattr(text_obj, "text", None)
+        if text:
+            resolved_text = str(text).strip()
+            logger.debug(f"_get_text_value_by_ref: resolved '{ref}' from text field -> '{resolved_text}'")
+            return resolved_text
+
+        orig = getattr(text_obj, "orig", None)
+        if orig:
+            resolved_orig = str(orig).strip()
+            logger.debug(f"_get_text_value_by_ref: resolved '{ref}' from orig field -> '{resolved_orig}'")
+            return resolved_orig
+
+        logger.debug(f"_get_text_value_by_ref: ref '{ref}' resolved to empty text/orig")
+    except Exception as e:
+        logger.debug(f"_get_text_value_by_ref: failed to resolve ref '{ref}': {e}", exc_info=True)
+
+    return ""
+
+
+def _looks_like_table_caption(text: str) -> bool:
+    """
+    Heuristic check for real table captions such as:
+    'Table 1-1 VIOS release schedule'
+    """
+    if not text:
+        logger.debug("_looks_like_table_caption: empty text -> False")
+        return False
+    text_stripped = text.strip()
+    is_match = bool(TABLE_CAPTION_PATTERN.match(text_stripped))
+    logger.debug(f"_looks_like_table_caption: text='{text_stripped}' match={is_match}")
+    return is_match
+
+
+def _get_ref_value(ref_obj) -> str | None:
+    """
+    Extract a Docling ref string from dict-like or object-like refs.
+    """
+    if isinstance(ref_obj, dict):
+        return ref_obj.get("$ref")
+    return (
+        getattr(ref_obj, "ref", None)
+        or getattr(ref_obj, "$ref", None)
+        or getattr(ref_obj, "cref", None)
+        or getattr(ref_obj, "self_ref", None)
+    )
+
+
+def _get_doc_item_by_ref(converted_doc, ref: str):
+    """
+    Resolve a Docling ref to the underlying object when possible.
+    """
+    for prefix in ("texts", "tables", "groups", "pictures"):
+        idx = _parse_ref_index(ref, prefix)
+        if idx is None:
+            continue
+        try:
+            collection = getattr(converted_doc, prefix, None)
+            if collection is not None:
+                return collection[idx]
+        except Exception as e:
+            logger.debug(f"_get_doc_item_by_ref: failed to resolve '{ref}' in '{prefix}': {e}", exc_info=True)
+            return None
+    logger.debug(f"_get_doc_item_by_ref: unsupported or unresolved ref '{ref}'")
+    return None
+
+
+def _get_parent_ref_for_table(converted_doc, table_ix: int) -> str:
+    """
+    Resolve the parent ref for a table, if any.
+    """
+    try:
+        table_obj = converted_doc.tables[table_ix]
+        parent = getattr(table_obj, "parent", None)
+        parent_ref = _get_ref_value(parent) if parent is not None else None
+        logger.debug(f"_get_parent_ref_for_table: table_ix={table_ix}, parent_ref={parent_ref}")
+        return parent_ref or ""
+    except Exception as e:
+        logger.debug(f"_get_parent_ref_for_table: failed for table_ix={table_ix}: {e}", exc_info=True)
+        return ""
+
+
+def _get_child_refs(item) -> list[str]:
+    """
+    Return child refs for a Docling item in document order.
+    """
+    try:
+        children = getattr(item, "children", []) or []
+        refs = []
+        for child in children:
+            child_ref = _get_ref_value(child)
+            if child_ref:
+                refs.append(child_ref)
+        return refs
+    except Exception as e:
+        logger.debug(f"_get_child_refs: failed to extract child refs: {e}", exc_info=True)
+        return []
+
+
+def _find_matching_caption_near_refs(converted_doc, ordered_refs: list[str], target_ref: str, search_window: int) -> str:
+    """
+    Look for a caption-like text node near the target ref inside an ordered ref list.
+    """
+    if not ordered_refs:
+        logger.debug("_find_matching_caption_near_refs: ordered_refs empty")
+        return ""
+
+    try:
+        target_pos = ordered_refs.index(target_ref)
+        logger.debug(f"_find_matching_caption_near_refs: found {target_ref} at pos={target_pos}")
+    except ValueError:
+        logger.debug(f"_find_matching_caption_near_refs: target_ref {target_ref} not found in ordered refs")
+        return ""
+
+    candidate_positions = list(range(max(0, target_pos - search_window), target_pos))
+    candidate_positions.reverse()
+    candidate_positions.extend(range(target_pos + 1, min(len(ordered_refs), target_pos + 1 + search_window)))
+
+    candidate_refs = [(pos, ordered_refs[pos]) for pos in candidate_positions]
+    logger.debug(f"_find_matching_caption_near_refs: candidate positions/refs={candidate_refs}")
+
+    for pos in candidate_positions:
+        ref = ordered_refs[pos]
+
+        if not ref.startswith("#/texts/"):
+            logger.debug(f"_find_matching_caption_near_refs: skipping non-text ref {ref}")
+            continue
+
+        text = _get_text_value_by_ref(converted_doc, ref)
+        logger.debug(f"_find_matching_caption_near_refs: resolved ref {ref} to text='{text}'")
+
+        if _looks_like_table_caption(text):
+            logger.debug(f"_find_matching_caption_near_refs: matched caption '{text}' near {target_ref}")
+            return text
+
+    logger.debug(f"_find_matching_caption_near_refs: no caption match found near {target_ref}")
+    return ""
+
+
+def _get_enclosing_section_header_for_table(converted_doc, table_ix: int) -> str:
+    """
+    Secondary fallback for DOCX-like structures where a table is nested under
+    a section/container node but has no explicit caption paragraph.
+    """
+    parent_ref = _get_parent_ref_for_table(converted_doc, table_ix)
+    if not parent_ref:
+        logger.debug(f"_get_enclosing_section_header_for_table: no parent ref for table_ix={table_ix}")
+        return ""
+
+    parent_item = _get_doc_item_by_ref(converted_doc, parent_ref)
+    if parent_item is None:
+        logger.debug(f"_get_enclosing_section_header_for_table: could not resolve parent item for {parent_ref}")
+        return ""
+
+    label = getattr(parent_item, "label", None)
+    text = (getattr(parent_item, "text", None) or getattr(parent_item, "orig", None) or "").strip()
+    logger.debug(
+        f"_get_enclosing_section_header_for_table: table_ix={table_ix}, parent_ref={parent_ref}, "
+        f"label={label}, text='{text}'"
+    )
+
+    if label == "section_header" and text:
+        return text
+
+    return ""
+
+
+def recover_table_caption_from_body_context(converted_doc, table_ix: int, search_window: int = 3) -> str:
+    """
+    Recover a table caption using layered fallbacks:
+    1. nearby caption paragraph in top-level body order
+    2. nearby caption paragraph within the enclosing parent/container children
+    3. enclosing section header text as semantic fallback
+    """
+    target_ref = f"#/tables/{table_ix}"
+    logger.debug(f"recover_table_caption_from_body_context: looking for caption near {target_ref} with search_window={search_window}")
+
+    body_refs = _get_body_children_refs(converted_doc)
+    caption = _find_matching_caption_near_refs(converted_doc, body_refs, target_ref, search_window)
+    if caption:
+        logger.debug(f"recover_table_caption_from_body_context: using body-level caption '{caption}' for {target_ref}")
+        return caption
+
+    parent_ref = _get_parent_ref_for_table(converted_doc, table_ix)
+    if parent_ref:
+        parent_item = _get_doc_item_by_ref(converted_doc, parent_ref)
+        if parent_item is not None:
+            parent_child_refs = _get_child_refs(parent_item)
+            caption = _find_matching_caption_near_refs(converted_doc, parent_child_refs, target_ref, search_window)
+            if caption:
+                logger.debug(
+                    f"recover_table_caption_from_body_context: using parent-level nearby caption '{caption}' "
+                    f"for {target_ref} within parent {parent_ref}"
+                )
+                return caption
+
+    section_header = _get_enclosing_section_header_for_table(converted_doc, table_ix)
+    if section_header:
+        logger.debug(
+            f"recover_table_caption_from_body_context: using enclosing section header '{section_header}' "
+            f"as secondary fallback for {target_ref}"
+        )
+        return section_header
+
+    logger.debug(f"recover_table_caption_from_body_context: no caption match found for {target_ref}")
+    return ""
 tqdm_wrapper = tqdm if is_debug else (lambda x, **kwargs: x)
 
 excluded_labels = {
@@ -344,7 +616,12 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
         table_dict[table_ix] = {}
         # Use Markdown format for better LLM understanding
         table_dict[table_ix]["markdown"] = table.export_to_markdown(doc=converted_doc)
-        table_dict[table_ix]["caption"] = table.caption_text(doc=converted_doc)
+
+        caption = table.caption_text(doc=converted_doc)
+        if not caption:
+            caption = recover_table_caption_from_body_context(converted_doc, table_ix)
+
+        table_dict[table_ix]["caption"] = caption
         table_dict[table_ix]["page_number"] = table.prov[0].page_no if table.prov else None
 
     # Merge tables that span multiple consecutive pages with matching headers

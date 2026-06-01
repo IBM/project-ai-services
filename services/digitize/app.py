@@ -530,6 +530,8 @@ async def get_document_metadata(doc_id: str, details: bool = Query(False, descri
 
         response = get_document(doc_id, include_details=details)
         return response
+    except FileNotFoundError as e:
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(e))
     except HTTPException as e:
         logger.error(f"Failed to get document by id {doc_id}, HTTP error: {e}")
         # Re-raise HTTPException as-is
