@@ -2,7 +2,8 @@ name: opensearch
 version: "1.0.0"
 
 podTemplateExecutions:
-  - [opensearch.yaml.tmpl, opensearch-secret.yaml.tmpl]
+  - [opensearch-secret.yaml.tmpl]
+  - [opensearch.yaml.tmpl]
 
 # Resource requirements
 resources:

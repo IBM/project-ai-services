@@ -24,12 +24,12 @@ spec:
         - name: POSTGRES_USER
           valueFrom:
             secretKeyRef:
-              name: "postgres-secret-{{ .InstanceSlug }}"
+              name: "digitize-db-secret-{{ .InstanceSlug }}"
               key: username
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: "postgres-secret-{{ .InstanceSlug }}"
+              name: "digitize-db-secret-{{ .InstanceSlug }}"
               key: password
   containers:
     - name: ui
@@ -96,12 +96,12 @@ spec:
         - name: POSTGRES_USER
           valueFrom:
             secretKeyRef:
-              name: "postgres-secret-{{ .InstanceSlug }}"
+              name: "digitize-db-secret-{{ .InstanceSlug }}"
               key: username
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: "postgres-secret-{{ .InstanceSlug }}"
+              name: "digitize-db-secret-{{ .InstanceSlug }}"
               key: password
         - name: DB_POOL_SIZE
           value: "5"

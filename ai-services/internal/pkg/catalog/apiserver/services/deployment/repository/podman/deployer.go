@@ -790,13 +790,13 @@ func (d *PodmanDeployer) deployComponentTemplate(
 	}
 
 	// Get environment parameters and render final template
-	finalPodSpec, err := d.renderFinalPodTemplate(podTemplate, podTemplateName, initialParams, podSpec, plan)
+	finalPodSpec, renderedBytes, err := d.renderFinalPodTemplate(podTemplate, podTemplateName, initialParams, podSpec, plan)
 	if err != nil {
 		return err
 	}
 
-	// Deploy the pod
-	if err := d.deployPodSpec(finalPodSpec, podTemplateName); err != nil {
+	// Deploy the pod using rendered bytes directly
+	if err := d.deployPodSpec(finalPodSpec, renderedBytes, podTemplateName); err != nil {
 		return err
 	}
 
@@ -828,16 +828,17 @@ func (d *PodmanDeployer) renderAndParsePodTemplate(
 }
 
 // renderFinalPodTemplate renders the final pod template with environment parameters.
+// Returns both the PodSpec (for metadata) and the rendered bytes (for deployment).
 func (d *PodmanDeployer) renderFinalPodTemplate(
 	podTemplate *template.Template,
 	templateName string,
 	initialParams map[string]any,
 	podSpec *podmodels.PodSpec,
 	plan *DeploymentPlan,
-) (*podmodels.PodSpec, error) {
+) (*podmodels.PodSpec, []byte, error) {
 	env, err := d.getEnvParamsForComponent(podSpec, plan)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get env params: %w", err)
+		return nil, nil, fmt.Errorf("failed to get env params: %w", err)
 	}
 
 	// Always set/overwrite the env to ensure Spyre card PCI addresses are included
@@ -845,25 +846,25 @@ func (d *PodmanDeployer) renderFinalPodTemplate(
 
 	var finalRendered bytes.Buffer
 	if err := podTemplate.Execute(&finalRendered, initialParams); err != nil {
-		return nil, fmt.Errorf("failed to render template %s with env: %w", templateName, err)
+		return nil, nil, fmt.Errorf("failed to render template %s with env: %w", templateName, err)
 	}
 
+	renderedBytes := finalRendered.Bytes()
+
+	// Parse into PodSpec for metadata (annotations, name, etc.) but don't use it for deployment
 	var finalPodSpec podmodels.PodSpec
-	if err := k8syaml.Unmarshal(finalRendered.Bytes(), &finalPodSpec); err != nil {
-		return nil, fmt.Errorf("failed to parse final rendered pod spec: %w", err)
+	if err := k8syaml.Unmarshal(renderedBytes, &finalPodSpec); err != nil {
+		return nil, nil, fmt.Errorf("failed to parse final rendered pod spec: %w", err)
 	}
 
-	return &finalPodSpec, nil
+	return &finalPodSpec, renderedBytes, nil
 }
 
-// deployPodSpec deploys a pod specification.
-func (d *PodmanDeployer) deployPodSpec(podSpec *podmodels.PodSpec, templateName string) error {
-	yamlBytes, err := k8syaml.Marshal(podSpec)
-	if err != nil {
-		return fmt.Errorf("failed to marshal pod spec: %w", err)
-	}
+// deployPodSpec deploys a pod using the rendered YAML bytes directly.
+func (d *PodmanDeployer) deployPodSpec(podSpec *podmodels.PodSpec, renderedBytes []byte, templateName string) error {
+	// Use the rendered bytes directly instead of marshaling PodSpec
 
-	reader := bytes.NewReader(yamlBytes)
+	reader := bytes.NewReader(renderedBytes)
 	podAnnotations := specs.FetchPodAnnotations(*podSpec)
 	podDeployOptions := clipodman.ConstructPodDeployOptions(podAnnotations)
 
@@ -947,9 +948,18 @@ func (d *PodmanDeployer) deployPodTemplate(
 		return nil, fmt.Errorf("pod template '%s' not found", podTemplateName)
 	}
 
-	podSpec, err := d.renderAndParsePodTemplate(podTemplate, podTemplateName, initialParams)
-	if err != nil {
-		return nil, err
+	// Render template to get both PodSpec and raw bytes
+	var rendered bytes.Buffer
+	if err := podTemplate.Execute(&rendered, initialParams); err != nil {
+		return nil, fmt.Errorf("failed to render template %s: %w", podTemplateName, err)
+	}
+
+	renderedBytes := rendered.Bytes()
+
+	// Parse into PodSpec for metadata
+	var podSpec podmodels.PodSpec
+	if err := k8syaml.Unmarshal(renderedBytes, &podSpec); err != nil {
+		return nil, fmt.Errorf("failed to parse rendered pod spec: %w", err)
 	}
 
 	exists, err := d.runtime.PodExists(podSpec.Name)
@@ -959,38 +969,17 @@ func (d *PodmanDeployer) deployPodTemplate(
 
 	if exists {
 		logger.Infof("Pod '%s' already exists, skipping deployment\n", podSpec.Name)
-
-		return d.extractPodEndpoints(podSpec), nil
+		return d.extractPodEndpoints(&podSpec), nil
 	}
 
-	if err := d.deployPodFromSpec(podSpec, podTemplateName); err != nil {
+	// Deploy using rendered bytes directly (same as components)
+	if err := d.deployPodSpec(&podSpec, renderedBytes, podTemplateName); err != nil {
 		return nil, err
 	}
 
 	logger.Infof("Service template '%s' deployed successfully\n", podTemplateName)
 
-	return d.extractPodEndpoints(podSpec), nil
-}
-
-// deployPodFromSpec deploys a pod from its specification.
-func (d *PodmanDeployer) deployPodFromSpec(
-	podSpec *podmodels.PodSpec,
-	templateName string,
-) error {
-	yamlBytes, err := k8syaml.Marshal(podSpec)
-	if err != nil {
-		return fmt.Errorf("failed to marshal pod spec: %w", err)
-	}
-
-	reader := bytes.NewReader(yamlBytes)
-	podAnnotations := specs.FetchPodAnnotations(*podSpec)
-	podDeployOptions := clipodman.ConstructPodDeployOptions(podAnnotations)
-
-	if err := clipodman.DeployPodAndReadinessCheck(d.runtime, podSpec, templateName, reader, podDeployOptions); err != nil {
-		return fmt.Errorf("failed to deploy pod: %w", err)
-	}
-
-	return nil
+	return d.extractPodEndpoints(&podSpec), nil
 }
 
 // extractPodEndpoints extracts endpoint information from a pod specification.

@@ -17,7 +17,7 @@ const (
 	lowercaseChars = "abcdefghijklmnopqrstuvwxyz"
 	uppercaseChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	digitChars     = "0123456789"
-	specialChars   = "!@#$%^&*()-_=+[]{}|;:,.<>?"
+	specialChars   = "@#$%^*-_+"
 
 	// Annotation parsing constants.
 	minAnnotationParts     = 2
@@ -61,9 +61,36 @@ func generateRandomPasswordWithOptions(opts passwordOptions) (string, error) {
 	}
 
 	password := make([]byte, opts.Length)
-	charsetLen := big.NewInt(int64(len(charset)))
 
-	for i := 0; i < opts.Length; i++ {
+	// First character should not be a special character
+	// Build charset without special chars for first character
+	firstCharset := ""
+	if opts.Lower {
+		firstCharset += lowercaseChars
+	}
+	if opts.Upper {
+		firstCharset += uppercaseChars
+	}
+	if opts.Digits {
+		firstCharset += digitChars
+	}
+
+	// If no non-special charset available, fall back to full charset
+	if firstCharset == "" {
+		firstCharset = charset
+	}
+
+	// Generate first character from non-special charset
+	firstCharsetLen := big.NewInt(int64(len(firstCharset)))
+	randomIndex, err := rand.Int(rand.Reader, firstCharsetLen)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate random password: %w", err)
+	}
+	password[0] = firstCharset[randomIndex.Int64()]
+
+	// Generate remaining characters from full charset
+	charsetLen := big.NewInt(int64(len(charset)))
+	for i := 1; i < opts.Length; i++ {
 		randomIndex, err := rand.Int(rand.Reader, charsetLen)
 		if err != nil {
 			return "", fmt.Errorf("failed to generate random password: %w", err)
@@ -90,9 +117,9 @@ func ProcessGenerateAnnotationsFromYAML(yamlData []byte) ([]byte, error) {
 
 	// Create a processor function for @generate annotations
 	generateProcessor := func(keyNode, valueNode *yaml.Node) error {
-		// Check if the value node has a @generate annotation
-		if hasGenerateAnnotation(valueNode) {
-			annotation := extractGenerateAnnotation(valueNode)
+		// Check if the KEY node has a @generate annotation
+		if keyNode != nil && hasGenerateAnnotation(keyNode) {
+			annotation := extractGenerateAnnotation(keyNode)
 			generated, err := generateValue(annotation)
 			if err != nil {
 				return fmt.Errorf("failed to generate value for key '%s': %w", keyNode.Value, err)
