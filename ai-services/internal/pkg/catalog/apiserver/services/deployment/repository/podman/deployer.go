@@ -969,6 +969,7 @@ func (d *PodmanDeployer) deployPodTemplate(
 
 	if exists {
 		logger.Infof("Pod '%s' already exists, skipping deployment\n", podSpec.Name)
+
 		return d.extractPodEndpoints(&podSpec), nil
 	}
 

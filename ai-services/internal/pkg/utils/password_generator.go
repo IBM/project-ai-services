@@ -37,7 +37,7 @@ type passwordOptions struct {
 // GenerateRandomPassword generates a cryptographically secure random password with default settings.
 // The password will be 16 characters long and include uppercase, lowercase, digits, and special characters.
 // The first character will always be alphanumeric (not a special character).
-// TODO: This is currently being used in Catalog for DB password which should be later moved to use new @generate annotation
+// TODO: This is currently being used in Catalog for DB password which should be later moved to use new @generate annotation.
 func GenerateRandomPassword() (string, error) {
 	return generateRandomPasswordWithOptions(passwordOptions{
 		Length:  DefaultPasswordLength,
@@ -55,64 +55,62 @@ func generateRandomPasswordWithOptions(opts passwordOptions) (string, error) {
 		return "", fmt.Errorf("password length must be greater than 0")
 	}
 
-	// Build charset based on options
-	var charset string
-	if opts.Lower {
-		charset += lowercaseChars
-	}
-	if opts.Upper {
-		charset += uppercaseChars
-	}
-	if opts.Digits {
-		charset += digitChars
-	}
-	if opts.Special {
-		charset += specialChars
-	}
-
+	charset := buildPasswordCharset(opts, true)
 	if charset == "" {
 		return "", fmt.Errorf("at least one character type must be enabled")
 	}
 
-	password := make([]byte, opts.Length)
-
-	// First character should not be a special character
-	// Build charset without special chars for first character
-	firstCharset := ""
-	if opts.Lower {
-		firstCharset += lowercaseChars
-	}
-	if opts.Upper {
-		firstCharset += uppercaseChars
-	}
-	if opts.Digits {
-		firstCharset += digitChars
-	}
-
-	// If no non-special charset available, fall back to full charset
+	firstCharset := buildPasswordCharset(opts, false)
 	if firstCharset == "" {
 		firstCharset = charset
 	}
 
-	// Generate first character from non-special charset
-	firstCharsetLen := big.NewInt(int64(len(firstCharset)))
-	randomIndex, err := rand.Int(rand.Reader, firstCharsetLen)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate random password: %w", err)
-	}
-	password[0] = firstCharset[randomIndex.Int64()]
+	password := make([]byte, opts.Length)
 
-	// Generate remaining characters from full charset
-	charsetLen := big.NewInt(int64(len(charset)))
+	firstChar, err := randomCharsetByte(firstCharset)
+	if err != nil {
+		return "", err
+	}
+	password[0] = firstChar
+
 	for i := 1; i < opts.Length; i++ {
-		randomIndex, err := rand.Int(rand.Reader, charsetLen)
+		char, err := randomCharsetByte(charset)
 		if err != nil {
-			return "", fmt.Errorf("failed to generate random password: %w", err)
+			return "", err
 		}
-		password[i] = charset[randomIndex.Int64()]
+		password[i] = char
 	}
 
 	return string(password), nil
+}
+
+func buildPasswordCharset(opts passwordOptions, includeSpecial bool) string {
+	var charset strings.Builder
+
+	if opts.Lower {
+		charset.WriteString(lowercaseChars)
+	}
+	if opts.Upper {
+		charset.WriteString(uppercaseChars)
+	}
+	if opts.Digits {
+		charset.WriteString(digitChars)
+	}
+	if includeSpecial && opts.Special {
+		charset.WriteString(specialChars)
+	}
+
+	return charset.String()
+}
+
+func randomCharsetByte(charset string) (byte, error) {
+	charsetLen := big.NewInt(int64(len(charset)))
+	randomIndex, err := rand.Int(rand.Reader, charsetLen)
+	if err != nil {
+		return 0, fmt.Errorf("failed to generate random password: %w", err)
+	}
+
+	return charset[randomIndex.Int64()], nil
 }
 
 // ProcessGenerateAnnotationsFromYAML processes @generate annotations in raw YAML data.
