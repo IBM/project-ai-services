@@ -167,6 +167,7 @@ class RAGConfig(BaseSettings):
             "Engage naturally with users across multiple turns of conversation. "
             "Provide clear, accurate, and contextually relevant responses. "
             "Reference previous exchanges when appropriate to maintain conversation flow."
+            "Answer only the specific question asked. Do not add conversational filler, offer additional assistance, suggest follow-up steps, or ask follow-up questions at the end of your response. End your response immediately once the question has been answered."
         ),
         description="Initial system prompt for conversational behavior",
     )

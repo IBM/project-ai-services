@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
 
@@ -99,6 +100,32 @@ func BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName string) ([]Rout
 	}
 
 	return routes, nil
+}
+
+// FindCaddyPodNameFromTemplates finds the Caddy pod name by looking for the pod with component=proxy label in templates.
+func FindCaddyPodNameFromTemplates(tp templates.Template, appTemplateName, catalogAppName string, argParams map[string]string) (string, error) {
+	// Load all templates
+	tmpls, err := tp.LoadAllTemplates(appTemplateName)
+	if err != nil {
+		return "", fmt.Errorf("failed to load templates: %w", err)
+	}
+
+	// Loop through all templates to find the Caddy pod
+	for templateName := range tmpls {
+		podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, templateName, catalogAppName, nil, argParams)
+		if err != nil {
+			return "", fmt.Errorf("failed to load template %s: %w", templateName, err)
+		}
+
+		// Check if this is the Caddy pod (component=proxy label)
+		if podSpec.Labels != nil {
+			if component, ok := podSpec.Labels["ai-services.io/component"]; ok && component == "proxy" {
+				return podSpec.Name, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no Caddy pod found with component=proxy label in templates")
 }
 
 // Made with Bob

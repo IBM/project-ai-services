@@ -5,7 +5,8 @@ metadata:
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
   annotations:
-    ai-services.io/ports: "{{ .Values.digitizeUi.port }}:4001, {{ .Values.digitize.port }}:4000"
+    ai-services.io/routes: "4001:digitize-ui,4000:digitize-backend"
+    # ai-services.io/ports: "{{ .Values.digitizeUi.port }}:4001, {{ .Values.digitize.port }}:4000"  # Uncomment to expose ports directly (bypasses Caddy)
     io.podman.annotations.pids-limit/backend-server: "4096"
 spec:
   initContainers:
@@ -22,9 +23,15 @@ spec:
         - name: POSTGRES_DB
           value: "{{ .Values.digitize.database }}"
         - name: POSTGRES_USER
-          value: "postgres"
+          valueFrom:
+            secretKeyRef:
+              name: "digitize-db-secret-{{ .InstanceSlug }}"
+              key: username
         - name: POSTGRES_PASSWORD
-          value: "{{ .Values.postgres.password }}"
+          valueFrom:
+            secretKeyRef:
+              name: "digitize-db-secret-{{ .InstanceSlug }}"
+              key: password
   containers:
     - name: ui
       image: "{{ .Values.digitizeUi.image }}"
@@ -88,9 +95,15 @@ spec:
         - name: POSTGRES_DB
           value: "{{ .Values.digitize.database }}"
         - name: POSTGRES_USER
-          value: "postgres"
+          valueFrom:
+            secretKeyRef:
+              name: "digitize-db-secret-{{ .InstanceSlug }}"
+              key: username
         - name: POSTGRES_PASSWORD
-          value: "{{ .Values.postgres.password }}"
+          valueFrom:
+            secretKeyRef:
+              name: "digitize-db-secret-{{ .InstanceSlug }}"
+              key: password
         - name: DB_POOL_SIZE
           value: "5"
         - name: DB_MAX_OVERFLOW
@@ -118,9 +131,15 @@ spec:
         - name: OPENSEARCH_INDEX_NAME
           value: "RAG_INDEX"
         - name: OPENSEARCH_USERNAME
-          value: "{{ .Values.vector_store.auth.username }}"
+          valueFrom:
+            secretKeyRef:
+              name: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
+              key: username
         - name: OPENSEARCH_PASSWORD
-          value: "{{ .Values.vector_store.auth.password }}"
+          valueFrom:
+            secretKeyRef:
+              name: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
+              key: password
         - name: OPENSEARCH_NUM_SHARDS
           value: "1"
         - name: LOG_LEVEL

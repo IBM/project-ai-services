@@ -1,7 +1,9 @@
 name: digitize
 version: "1.0.0"
 podTemplateExecutions:
-  - [postgres.yaml.tmpl, digitize.yaml.tmpl]
+  - [postgres-secret.yaml.tmpl]
+  - [postgres.yaml.tmpl]
+  - [digitize.yaml.tmpl]
 
 # Resource requirements (UI + Backend + PostgreSQL)
 resources:
