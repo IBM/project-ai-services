@@ -276,11 +276,6 @@ ai-services catalog configure --http-port 8443
 **Rationale**:
 - Port 8443 is a common alternative to 443 for HTTPS services
 - Avoids requiring system-level configuration changes (`net.ipv4.ip_unprivileged_port_start`)
-- Maintains security by not granting unnecessary privileges to non-root users
-- Users can configure their firewall/load balancer to forward port 443 to 8443 if needed
-
-**Alternative Approach** (not recommended):
-System administrators could modify `/etc/sysctl.conf` to allow non-root users to bind to lower ports, but this reduces system security and is not the preferred solution.
 
 ---
 
