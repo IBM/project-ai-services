@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"os"
 
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -47,7 +48,10 @@ func Run(opts ConfigureOptions) error {
 		}
 
 		// Determine auth file path
-		authFilePath := getAuthFilePath()
+		authFilePath, err := getAuthFilePath()
+		if err != nil {
+			return fmt.Errorf("failed to get auth file path: %w", err)
+		}
 
 		return catalogPodman.DeployCatalog(ctx, podmanURI, authFilePath, passwordHash, opts.BaseDir, opts.ArgParams, opts.HttpsPort)
 
@@ -60,10 +64,12 @@ func Run(opts ConfigureOptions) error {
 }
 
 // getAuthFilePath determines the auth.json file path.
-func getAuthFilePath() string {
-	// TODO: Need to take care for getting rootless user auth file path
-	// Return default root user auth file path
-	return "/run/user/0/containers/auth.json"
+func getAuthFilePath() (string, error) {
+	if os.Geteuid() == 0 {
+		return "/run/user/0/containers/auth.json", nil
+	}
+
+	return fmt.Sprintf("/run/user/%d/containers/auth.json", os.Getuid()), nil
 }
 
 // hashPasswordPBKDF2 generates a PBKDF2 hash of the password with a random salt.
