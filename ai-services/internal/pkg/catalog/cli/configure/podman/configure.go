@@ -39,29 +39,13 @@ func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, b
 	s := spinner.New("Deploying catalog service...")
 	s.Start(ctx)
 
-	// Initialize runtime
-	rt, err := podman.NewPodmanClient()
+	// Initialize and validate
+	rt, tp, appMetadata, tmpls, argParams, err := initializeCatalogDeployment(argParams, httpsPort, s)
 	if err != nil {
-		s.Fail("failed to initialize podman client")
-
-		return fmt.Errorf("failed to initialize podman client: %w", err)
+		return err
 	}
 
-	// Load template provider and metadata
-	tp, appMetadata, tmpls, err := loadCatalogTemplates(s)
-	if err != nil {
-		s.Fail("failed to load catalog templates")
-
-		return fmt.Errorf("failed to load catalog templates: %w", err)
-	}
-
-	// Set httpsPort in argParams before any template loading
-	if argParams == nil {
-		argParams = make(map[string]string)
-	}
-	argParams["caddy.httpsPort"] = fmt.Sprintf("%d", httpsPort)
-
-	// collect all secret names used as part of deployment
+	// Check existing deployment status
 	isDeployed, existingResources, err := checkCatalogStatus(rt, tp, tmpls, argParams)
 	if err != nil {
 		s.Fail("failed to check existing resources")
@@ -76,76 +60,10 @@ func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, b
 		return nil
 	}
 
-	hostIP, values, err := prepareCatalogDeployment(tp, podmanURI, authFilePath, passwordHash, baseDir, argParams, s)
+	// Prepare deployment
+	hostIP, caddyPodName, caddyAdminURL, values, err := prepareCatalogDeployment(tp, podmanURI, passwordHash, baseDir, argParams, s)
 	if err != nil {
 		return err
-	}
-
-	if err := executePodLayers(rt, tp, tmpls, appMetadata, values, baseDir, hostIP, argParams, s, existingResources); err != nil {
-		return err
-	}
-
-	s.Stop("Catalog service deployed successfully")
-	logger.Infoln("-------")
-
-	return handlePostDeployment(rt, tp, argParams)
-}
-
-// initializeCatalogDeployment initializes runtime and loads catalog templates.
-func initializeCatalogDeployment(s *spinner.Spinner, argParams map[string]string, httpsPort int) (*podman.PodmanClient, templates.Template, *templates.AppMetadata, map[string]*template.Template, error) {
-	rt, err := podman.NewPodmanClient()
-	if err != nil {
-		s.Fail("failed to initialize podman client")
-
-		return nil, nil, nil, nil, fmt.Errorf("failed to initialize podman client: %w", err)
-	}
-
-	tp, appMetadata, tmpls, err := loadCatalogTemplates(s)
-	if err != nil {
-		s.Fail("failed to load catalog templates")
-
-		return nil, nil, nil, nil, fmt.Errorf("failed to load catalog templates: %w", err)
-	}
-
-	// Set HTTPS port in argParams (caller ensures argParams is not nil)
-	argParams["caddy.httpsPort"] = fmt.Sprintf("%d", httpsPort)
-
-	return rt, tp, appMetadata, tmpls, nil
-}
-
-// prepareCatalogDeployment prepares host IP, values, and Caddyfile for deployment.
-func prepareCatalogDeployment(tp templates.Template, podmanURI, passwordHash, baseDir string, argParams map[string]string, s *spinner.Spinner) (string, map[string]any, error) {
-	hostIP, err := utils.GetHostIP()
-	if err != nil {
-		s.Fail("failed to get host IP")
-
-		return fmt.Errorf("failed to get host IP: %w", err)
-	}
-
-	// Find Caddy pod name from templates to build admin URL for container
-	caddyPodName, err := findCaddyPodNameFromTemplates(tp, catalogAppTemplate, argParams)
-	if err != nil {
-		s.Fail("failed to find Caddy pod name")
-
-		return fmt.Errorf("failed to find Caddy pod name: %w", err)
-	}
-
-	// Build admin URL for container (uses internal port 2019)
-	caddyAdminURL := fmt.Sprintf("http://%s:2019", caddyPodName)
-
-	// Prepare values with configure-specific configuration
-	values, err := prepareCatalogValues(tp, podmanURI, passwordHash, argParams)
-	if err != nil {
-		s.Fail("failed to load values")
-
-		return fmt.Errorf("failed to load values: %w", err)
-	}
-
-	// Generate and write Caddyfile before deploying
-	if err := generateCaddyfile(baseDir, values); err != nil {
-		s.Fail("failed to generate Caddyfile")
-
-		return fmt.Errorf("failed to generate Caddyfile: %w", err)
 	}
 
 	// Execute pod templates
@@ -157,6 +75,79 @@ func prepareCatalogDeployment(tp templates.Template, podmanURI, passwordHash, ba
 	logger.Infoln("-------")
 
 	return handlePostDeployment(rt, tp, argParams, hostIP, caddyPodName)
+}
+
+// initializeCatalogDeployment handles initialization and validation steps.
+func initializeCatalogDeployment(argParams map[string]string, httpsPort int, s *spinner.Spinner) (
+	*podman.PodmanClient,
+	templates.Template,
+	*templates.AppMetadata,
+	map[string]*template.Template,
+	map[string]string,
+	error,
+) {
+	// Initialize runtime
+	rt, err := podman.NewPodmanClient()
+	if err != nil {
+		s.Fail("failed to initialize podman client")
+
+		return nil, nil, nil, nil, nil, fmt.Errorf("failed to initialize podman client: %w", err)
+	}
+
+	// Load template provider and metadata
+	tp, appMetadata, tmpls, err := loadCatalogTemplates(s)
+	if err != nil {
+		s.Fail("failed to load catalog templates")
+
+		return nil, nil, nil, nil, nil, fmt.Errorf("failed to load catalog templates: %w", err)
+	}
+
+	// Set httpsPort in argParams
+	if argParams == nil {
+		argParams = make(map[string]string)
+	}
+	argParams["caddy.httpsPort"] = fmt.Sprintf("%d", httpsPort)
+
+	return rt, tp, appMetadata, tmpls, argParams, nil
+}
+
+// prepareCatalogDeployment prepares all necessary data for deployment.
+func prepareCatalogDeployment(tp templates.Template, podmanURI, passwordHash, baseDir string, argParams map[string]string, s *spinner.Spinner) (string, string, string, map[string]any, error) {
+	// Get host IP for template rendering
+	hostIP, err := utils.GetHostIP()
+	if err != nil {
+		s.Fail("failed to get host IP")
+
+		return "", "", "", nil, fmt.Errorf("failed to get host IP: %w", err)
+	}
+
+	// Find Caddy pod name from templates to build admin URL for container
+	caddyPodName, err := findCaddyPodNameFromTemplates(tp, catalogAppTemplate, argParams)
+	if err != nil {
+		s.Fail("failed to find Caddy pod name")
+
+		return "", "", "", nil, fmt.Errorf("failed to find Caddy pod name: %w", err)
+	}
+
+	// Build admin URL for container (uses internal port 2019)
+	caddyAdminURL := fmt.Sprintf("http://%s:2019", caddyPodName)
+
+	// Prepare values with configure-specific configuration
+	values, err := prepareCatalogValues(tp, podmanURI, passwordHash, argParams)
+	if err != nil {
+		s.Fail("failed to load values")
+
+		return "", "", "", nil, fmt.Errorf("failed to load values: %w", err)
+	}
+
+	// Generate and write Caddyfile before deploying
+	if err := generateCaddyfile(baseDir, values); err != nil {
+		s.Fail("failed to generate Caddyfile")
+
+		return "", "", "", nil, fmt.Errorf("failed to generate Caddyfile: %w", err)
+	}
+
+	return hostIP, caddyPodName, caddyAdminURL, values, nil
 }
 
 // handlePostDeployment handles route registration and next steps display after catalog deployment.

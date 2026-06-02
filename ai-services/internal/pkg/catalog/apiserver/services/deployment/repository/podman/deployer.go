@@ -730,53 +730,89 @@ func (d *PodmanDeployer) deployServicePods(
 
 	// If PodTemplateExecutions is defined, use it for ordered deployment
 	if len(metadata.PodTemplateExecutions) > 0 {
-		// Execute each pod template in the service following the defined order
-		for _, layer := range metadata.PodTemplateExecutions {
-			for _, podTemplateName := range layer {
-				// Prepare initialParams for the template
-				initialParams := map[string]any{
-					"InstanceSlug": generateInstanceSlug(applicationID.String()),
-					"TemplateID":   svc.DatabaseID,
-					"BaseDir":      utils.GetBaseDir(),
-					"Values":       values,
-					"env":          map[string]map[string]string{},
-				}
+		return d.deployPodTemplatesInOrder(applicationID, svc, metadata, tmpls, values)
+	}
 
-				_, podName, routes, err := d.deployPodTemplate(podTemplateName, tmpls, initialParams)
-				if err != nil {
-					return fmt.Errorf("failed to deploy pod template %s: %w", podTemplateName, err)
-				}
+	// If no PodTemplateExecutions defined, deploy all templates
+	logger.Infof("No PodTemplateExecutions defined for service %s, deploying all templates\n", svc.CatalogID)
 
-				if routes != "" {
-					svc.Routes[podName] = routes
-				}
-			}
-		}
-	} else {
-		// If no PodTemplateExecutions defined, deploy all templates
-		logger.Infof("No PodTemplateExecutions defined for service %s, deploying all templates\n", svc.CatalogID)
-		for templateName := range tmpls {
-			// Prepare initialParams for the template
-			initialParams := map[string]any{
-				"InstanceSlug": generateInstanceSlug(applicationID.String()),
-				"TemplateID":   svc.DatabaseID,
-				"BaseDir":      utils.GetBaseDir(),
-				"Values":       values,
-				"env":          map[string]map[string]string{},
-			}
+	return d.deployAllPodTemplates(applicationID, svc, tmpls, values)
+}
 
-			_, podName, routes, err := d.deployPodTemplate(templateName, tmpls, initialParams)
-			if err != nil {
-				return fmt.Errorf("failed to deploy pod template %s: %w", templateName, err)
-			}
-
-			if routes != "" {
-				svc.Routes[podName] = routes
-			}
+// deployPodTemplatesInOrder deploys pod templates following the defined execution order.
+func (d *PodmanDeployer) deployPodTemplatesInOrder(
+	applicationID uuid.UUID,
+	svc *ServicePlan,
+	metadata *templates.AppMetadata,
+	tmpls map[string]*template.Template,
+	values map[string]any,
+) error {
+	// Execute each pod template in the service following the defined order
+	for _, layer := range metadata.PodTemplateExecutions {
+		if err := d.deployPodTemplateLayer(applicationID, svc, layer, tmpls, values); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// deployPodTemplateLayer deploys all pod templates in a single layer.
+func (d *PodmanDeployer) deployPodTemplateLayer(
+	applicationID uuid.UUID,
+	svc *ServicePlan,
+	layer []string,
+	tmpls map[string]*template.Template,
+	values map[string]any,
+) error {
+	for _, podTemplateName := range layer {
+		initialParams := d.buildInitialParams(applicationID, svc.DatabaseID, values)
+
+		_, podName, routes, err := d.deployPodTemplate(podTemplateName, tmpls, initialParams)
+		if err != nil {
+			return fmt.Errorf("failed to deploy pod template %s: %w", podTemplateName, err)
+		}
+
+		if routes != "" {
+			svc.Routes[podName] = routes
+		}
+	}
+
+	return nil
+}
+
+// deployAllPodTemplates deploys all pod templates without a specific order.
+func (d *PodmanDeployer) deployAllPodTemplates(
+	applicationID uuid.UUID,
+	svc *ServicePlan,
+	tmpls map[string]*template.Template,
+	values map[string]any,
+) error {
+	for templateName := range tmpls {
+		initialParams := d.buildInitialParams(applicationID, svc.DatabaseID, values)
+
+		_, podName, routes, err := d.deployPodTemplate(templateName, tmpls, initialParams)
+		if err != nil {
+			return fmt.Errorf("failed to deploy pod template %s: %w", templateName, err)
+		}
+
+		if routes != "" {
+			svc.Routes[podName] = routes
+		}
+	}
+
+	return nil
+}
+
+// buildInitialParams creates the initial parameters map for template deployment.
+func (d *PodmanDeployer) buildInitialParams(applicationID uuid.UUID, databaseID uuid.UUID, values map[string]any) map[string]any {
+	return map[string]any{
+		"InstanceSlug": generateInstanceSlug(applicationID.String()),
+		"TemplateID":   databaseID,
+		"BaseDir":      utils.GetBaseDir(),
+		"Values":       values,
+		"env":          map[string]map[string]string{},
+	}
 }
 
 // deployComponentTemplate deploys a component pod template.
