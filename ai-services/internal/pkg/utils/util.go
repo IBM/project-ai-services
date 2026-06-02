@@ -172,6 +172,7 @@ type NodeProcessor func(keyNode, valueNode *yaml.Node) error
 
 // ProcessYAMLNode recursively processes a yaml.Node tree with a custom processor function.
 // This is a generic traversal function that can be used for various node processing tasks.
+// TODO: Utilize this new helper method to process any HeadCommentNodes and remove the older methods.
 func ProcessYAMLNode(node *yaml.Node, processor NodeProcessor) error {
 	if node == nil {
 		return nil
