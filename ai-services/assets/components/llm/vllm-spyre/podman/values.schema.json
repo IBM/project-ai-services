@@ -14,6 +14,12 @@
         }
       ],
       "default": "ibm-granite/granite-3.3-8b-instruct"
+    },
+    "apiKey": {
+      "type": "string",
+      "title": "API Key",
+      "format": "password",
+      "description": "API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication."
     }
   }
 }
