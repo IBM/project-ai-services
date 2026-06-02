@@ -34,6 +34,12 @@ COMPONENTS = [
     ("ai-services", "ai-services"),
 ]
 
+# Paths that don't require version bumps when modified
+EXCLUDED_PATHS = [
+    "ai-services/assets/catalog",
+    "ai-services/assets/bootstrap",
+]
+
 
 def get_changed_files(base_ref: str) -> List[str]:
     """Get list of changed files compared to base branch."""
@@ -133,9 +139,11 @@ def check_component_version_bump(
         - needs_check: True if component has changes and needs version check
         - error_message: Error message if TAG wasn't bumped, None otherwise
     """
-    # Check if any files in this component changed
+    # Check if any files in this component changed (excluding certain paths)
     component_changed = any(
-        f.startswith(f"{component_path}/") for f in changed_files
+        f.startswith(f"{component_path}/") and
+        not any(f.startswith(excluded) for excluded in EXCLUDED_PATHS)
+        for f in changed_files
     )
 
     if not component_changed:
