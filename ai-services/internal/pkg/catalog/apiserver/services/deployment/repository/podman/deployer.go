@@ -1008,7 +1008,7 @@ func (d *PodmanDeployer) deployPodTemplate(
 	// Render template to get both PodSpec and raw bytes
 	var rendered bytes.Buffer
 	if err := podTemplate.Execute(&rendered, initialParams); err != nil {
-		return nil, fmt.Errorf("failed to render template %s: %w", podTemplateName, err)
+		return nil, "", "", fmt.Errorf("failed to render template %s: %w", podTemplateName, err)
 	}
 
 	renderedBytes := rendered.Bytes()
