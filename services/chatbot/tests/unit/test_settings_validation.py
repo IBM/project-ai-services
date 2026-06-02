@@ -353,14 +353,13 @@ class TestQueryRephrasingConfig:
 
 @pytest.mark.unit
 class TestPromptTemplates:
-    """Tests for prompt template fields in RAGConfig."""
+    """Tests for prompt template constants in prompt_validator module."""
     
     def test_semantic_validation_prompt_template(self):
         """Test semantic validation prompt template contains required placeholders."""
-        from chatbot.settings import RAGConfig
+        from chatbot.prompt_validator import SEMANTIC_VALIDATION_PROMPT_TEMPLATE
         
-        config = RAGConfig()
-        template = config.semantic_validation_prompt_template
+        template = SEMANTIC_VALIDATION_PROMPT_TEMPLATE
         
         assert "{prompt_type}" in template
         assert "{prompt}" in template
@@ -370,10 +369,9 @@ class TestPromptTemplates:
     
     def test_injection_detection_prompt_template(self):
         """Test injection detection prompt template contains required placeholders."""
-        from chatbot.settings import RAGConfig
+        from chatbot.prompt_validator import INJECTION_DETECTION_PROMPT_TEMPLATE
         
-        config = RAGConfig()
-        template = config.injection_detection_prompt_template
+        template = INJECTION_DETECTION_PROMPT_TEMPLATE
         
         assert "{prompt}" in template
         assert "VERDICT:" in template
