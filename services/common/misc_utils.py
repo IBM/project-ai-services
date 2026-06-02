@@ -130,19 +130,21 @@ def get_logger(name):
     logger.setLevel(LOG_LEVEL)
     logger.propagate = False
 
-    # Add the filter to inject request_id
-    logger.addFilter(RequestIDFilter())
+    # Only add handler if none exist to prevent duplicate log messages
+    if not logger.handlers:
+        # Add the filter to inject request_id
+        logger.addFilter(RequestIDFilter())
 
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(LOG_LEVEL)
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(LOG_LEVEL)
 
-    # Use custom formatter that conditionally includes request_id
-    formatter = RequestIDFormatter(
-        '%(asctime)s - %(name)-18s - %(levelname)-8s - [%(request_id)s] - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S')
-    console_handler.setFormatter(formatter)
+        # Use custom formatter that conditionally includes request_id
+        formatter = RequestIDFormatter(
+            '%(asctime)s - %(name)-18s - %(levelname)-8s - [%(request_id)s] - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S')
+        console_handler.setFormatter(formatter)
 
-    logger.addHandler(console_handler)
+        logger.addHandler(console_handler)
 
     return logger
 
