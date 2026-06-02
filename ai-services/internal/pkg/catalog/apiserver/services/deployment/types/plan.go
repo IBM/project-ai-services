@@ -12,6 +12,7 @@ type DeploymentPlan struct {
 	ApplicationID   uuid.UUID                 // Generated application ID
 	ApplicationName string                    // Application name
 	CatalogID       string                    // Architecture or service catalog ID
+	Version         string                    // Application version from request
 	IsArchitecture  bool                      // true for architecture, false for standalone service
 	Components      map[string]*ComponentPlan // Key: component hash, Value: component plan
 	Services        map[string]*ServicePlan   // Key: service ID, Value: service plan
@@ -25,6 +26,7 @@ type ComponentPlan struct {
 	ProviderID     string         // e.g., "opensearch", "vllm"
 	CatalogPath    string         // Dynamic catalog path (e.g., "components/llm/vllm-cpu/podman")
 	DatabaseID     uuid.UUID      // Database UUID for this component record (set after DB insertion)
+	Version        string         // Component version
 	Params         map[string]any // Component parameters
 	UsedByServices []string       // List of service IDs that use this component
 	Values         map[string]any // Structured values from LoadComponentValues

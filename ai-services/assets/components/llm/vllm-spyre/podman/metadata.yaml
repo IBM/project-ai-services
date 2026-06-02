@@ -1,2 +1,10 @@
 name: instruct
 version: "1.0.0"
+
+# Resource requirements
+resources:
+  cpu: 12
+  memory: 161061273600 # 150Gi in bytes
+  storage: 53687091200 # 50Gi for model storage in bytes
+  accelerators:
+    ibm.com/spyre_pf: 4

@@ -353,6 +353,7 @@ func (s *ApplicationService) insertApplicationRecord(
 		DeploymentType: utils.GetDeploymentType(plan.IsArchitecture),
 		Status:         models.ApplicationStatusDownloading,
 		Message:        "Initializing deployment",
+		Version:        plan.Version,
 		CreatedBy:      createdBy,
 	}
 
@@ -377,6 +378,8 @@ func (s *ApplicationService) insertComponentRecords(
 			ID:       instanceUUID,
 			Type:     comp.ComponentType,
 			Provider: comp.ProviderID,
+			Status:   models.ComponentStatusInitializing,
+			Version:  comp.Version,
 			Metadata: comp.Params,
 		}
 

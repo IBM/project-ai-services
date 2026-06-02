@@ -2,7 +2,7 @@ ui:
   # @description Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.37
+  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.38
 
 backend:
   # @description Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.
@@ -16,7 +16,7 @@ digitize:
   # @description Host port for the DIGITIZE API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/digitize-service:v0.0.7
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.9
   # @hidden
   log_level: "INFO"
   # @description Database name for the DIGITIZE service. Default is "digitize_metadata".
@@ -26,7 +26,7 @@ digitizeUi:
   # @description Host port for the DIGITIZE UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/digitize-ui:v0.0.19
+  image: icr.io/ai-services-cicd/digitize-ui:v0.0.20
 
 ingest:
   # @hidden

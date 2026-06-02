@@ -1,2 +1,8 @@
 name: summarize
 version: "1.0.0"
+
+# Resource requirements
+resources:
+  cpu: 1 # 500m (0.5 cores) rounded up
+  memory: 1073741824 # 1Gi in bytes
+  storage: 0 # No persistent storage required

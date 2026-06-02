@@ -11,12 +11,11 @@ definitions:
         type: object
       provider_id:
         type: string
-      type:
+      version:
         type: string
     required:
     - component_type
     - provider_id
-    - type
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest:
     properties:
@@ -30,6 +29,8 @@ definitions:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Service'
         type: array
+      version:
+        type: string
     required:
     - catalog_id
     - name
@@ -48,14 +49,11 @@ definitions:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component'
         type: array
-      type:
-        type: string
       version:
         type: string
     required:
     - catalog_id
     - components
-    - type
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse:
     properties:
@@ -200,6 +198,8 @@ definitions:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService'
         type: array
+      version:
+        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent:
     properties:
@@ -222,7 +222,11 @@ definitions:
         type: string
       name:
         type: string
+      resources:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources'
       schema:
+        type: string
+      version:
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsService:
@@ -235,7 +239,11 @@ definitions:
         type: string
       name:
         type: string
-      type:
+      resources:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources'
+      schema:
+        type: string
+      version:
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata:
@@ -251,6 +259,23 @@ definitions:
       total_items:
         type: integer
       total_pages:
+        type: integer
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources:
+    properties:
+      accelerators:
+        additionalProperties:
+          type: integer
+        description: 'Accelerator cards (e.g., "ibm.com/spyre_pf": 1)'
+        type: object
+      cpu:
+        description: CPU cores
+        type: integer
+      memory:
+        description: Memory in bytes
+        type: integer
+      storage:
+        description: Storage in bytes
         type: integer
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service:
@@ -985,6 +1010,47 @@ paths:
       security:
       - BearerAuth: []
       summary: Get service deploy options
+      tags:
+      - Catalog
+  /services/{id}/params:
+    get:
+      description: Retrieves the configuration schema (JSON Schema) for a specific
+        service. Returns a JSON Schema object with properties that define the service's
+        configurable parameters.
+      parameters:
+      - description: Service ID (e.g., 'chat', 'digitize', 'similarity')
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: JSON Schema object with $schema, type, and properties defining
+            service parameters
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request - Invalid service ID
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Service not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get service parameters
       tags:
       - Catalog
 securityDefinitions:

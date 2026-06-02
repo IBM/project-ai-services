@@ -24,6 +24,8 @@ type ComponentRepository interface {
 	GetByType(ctx context.Context, componentType string) ([]models.Component, error)
 	// Update updates a component in the database.
 	Update(ctx context.Context, component *models.Component) error
+	// UpdateStatus updates only the status and message of a component.
+	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ComponentStatus, message string) error
 	// UpdateEndpoints updates only the endpoints of a component.
 	UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints map[string]any) error
 	// Delete removes a component from the database.
@@ -43,8 +45,8 @@ func NewComponentRepository(pool *pgxpool.Pool) ComponentRepository {
 // Insert creates a new component in the database.
 func (r *componentRepo) Insert(ctx context.Context, component *models.Component) error {
 	query := `
-		INSERT INTO components (id, type, provider, endpoints, version, metadata)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO components (id, type, provider, status, message, endpoints, version, metadata)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING created_at, updated_at
 	`
 
@@ -78,6 +80,8 @@ func (r *componentRepo) Insert(ctx context.Context, component *models.Component)
 		component.ID,
 		component.Type,
 		component.Provider,
+		component.Status,
+		sql.NullString{String: component.Message, Valid: component.Message != ""},
 		endpointsJSON,
 		sql.NullString{String: component.Version, Valid: component.Version != ""},
 		metadataJSON,
@@ -311,6 +315,26 @@ func (r *componentRepo) Update(ctx context.Context, component *models.Component)
 		}
 
 		return fmt.Errorf("failed to update component: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateStatus updates only the status and message of a component.
+func (r *componentRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status models.ComponentStatus, message string) error {
+	query := `
+		UPDATE components
+		SET status = $1, message = $2, updated_at = NOW()
+		WHERE id = $3
+	`
+
+	result, err := r.pool.Exec(ctx, query, status, sql.NullString{String: message, Valid: message != ""}, id)
+	if err != nil {
+		return fmt.Errorf("failed to update component status: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return pgx.ErrNoRows
 	}
 
 	return nil

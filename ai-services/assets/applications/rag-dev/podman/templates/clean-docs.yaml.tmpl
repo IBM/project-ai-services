@@ -11,11 +11,11 @@ metadata:
 spec:
   containers:
     - name: clean-docs
-      image: "{{ .Values.backend.image }}"
+      image: "{{ .Values.digitize.image }}"
       command:
         - "/var/venv/bin/python"
         - "-m"
-        - "digitize.cli"
+        - "cli"
         - "clean-db"
       resources:
         requests:
@@ -23,6 +23,20 @@ spec:
         limits:
           memory: "1Gi"
       env:
+        - name: POSTGRES_HOST
+          value: "{{ .AppName }}--postgres"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.digitize.database }}"
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          value: "{{ .Values.postgres.password }}"
+        - name: DB_POOL_SIZE
+          value: "5"
+        - name: DB_MAX_OVERFLOW
+          value: "5"
         - name: OPENSEARCH_HOST
           value: "{{ .AppName  }}--opensearch"
         - name: OPENSEARCH_PORT
@@ -35,6 +49,8 @@ spec:
           value: "{{ .Values.opensearch.auth.username }}"
         - name: OPENSEARCH_PASSWORD
           value: "{{ .Values.opensearch.auth.password }}"
+        - name: OPENSEARCH_NUM_SHARDS
+          value: "1"
       volumeMounts:
         - mountPath: /var/cache:z
           name: cache
