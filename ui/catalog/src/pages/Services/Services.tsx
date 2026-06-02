@@ -63,7 +63,7 @@ const Services = () => {
     </>
   );
 
-  // No results - service cards are being implemented by another developer
+  // TODO: Entire page code needs to be updated
   const results = null;
 
   return (
@@ -82,5 +82,3 @@ const Services = () => {
 };
 
 export default Services;
-
-// Made with Bob
