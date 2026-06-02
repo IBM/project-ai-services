@@ -26,23 +26,10 @@ function App() {
               path={ROUTES.AI_DEPLOYMENTS}
               element={<ApplicationsListPage />}
             />
-<<<<<<< HEAD
             <Route path={ROUTES.SERVICES} element={<Services />} />
             <Route
               path={ROUTES.REFERENCE_USE_CASES}
               element={<ReferenceUseCases />}
-=======
-            <Route path={ROUTES.ARCHITECTURES} element={<Architectures />} />
-            <Route path={ROUTES.SERVICES} element={<Services />} />
-            <Route
-<<<<<<< HEAD
-              path={ROUTES.SOLUTIONS_AND_USE_CASES}
-              element={<SolutionsAndUseCases />}
->>>>>>> 6fd5e63 (feat(catalog-ui): Three catalog pages)
-=======
-              path={ROUTES.REFERENCE_USE_CASES}
-              element={<ReferenceUseCases />}
->>>>>>> 7acc377 (Rename solutions and use cases to reference use cases)
             />
           </Route>
         </Route>
