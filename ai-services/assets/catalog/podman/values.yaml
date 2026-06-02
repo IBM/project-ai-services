@@ -16,7 +16,6 @@ db:
   image: icr.io/ai-services-cicd/postgres:18-2
   user: "admin"
   database: "ai_services"
-  # @generate:password
   password: ""
   resources:
     requests:

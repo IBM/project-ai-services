@@ -34,6 +34,20 @@ type passwordOptions struct {
 	Special bool
 }
 
+// GenerateRandomPassword generates a cryptographically secure random password with default settings.
+// The password will be 16 characters long and include uppercase, lowercase, digits, and special characters.
+// The first character will always be alphanumeric (not a special character).
+// TODO: This is currently being used in Catalog for DB password which should be later moved to use new @generate annotation
+func GenerateRandomPassword() (string, error) {
+	return generateRandomPasswordWithOptions(passwordOptions{
+		Length:  DefaultPasswordLength,
+		Lower:   true,
+		Upper:   true,
+		Digits:  true,
+		Special: true,
+	})
+}
+
 // generateRandomPasswordWithOptions generates a cryptographically secure random password
 // with the specified options using crypto/rand.
 func generateRandomPasswordWithOptions(opts passwordOptions) (string, error) {
