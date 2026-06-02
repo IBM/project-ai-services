@@ -5,28 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
-
-// isRunningInContainer checks if the code is running inside a container
-// by checking for the presence of /.dockerenv or /run/.containerenv files.
-func isRunningInContainer() bool {
-	// Check for Docker container indicator
-	if _, err := os.Stat("/.dockerenv"); err == nil {
-		return true
-	}
-	// Check for Podman container indicator
-	if _, err := os.Stat("/run/.containerenv"); err == nil {
-		return true
-	}
-
-	return false
-}
 
 // caddyManager implements ProxyManager interface for Caddy.
 type caddyManager struct {
@@ -155,7 +138,8 @@ func (c *caddyManager) createRoute(routeConfig map[string]interface{}) error {
 //   - appName: Name of the application (e.g., "ai-services" for catalog)
 //   - serverName: Caddy server name (e.g., "ai_services")
 //   - routesAnnotation: Routes annotation value in format "port:subdomain,port:subdomain,..."
-//   - caddyPodName: Name of the Caddy pod
+//   - adminURL: Caddy admin API URL (e.g., "http://localhost:37249" or "http://ai-services--caddy:2019")
+//   - hostIP: Host IP for building route domains (e.g., "192.168.1.100")
 //   - servicePodName: Name of the service pod for upstream configuration
 //
 // Returns:
@@ -166,32 +150,14 @@ func RegisterRoutesForAppAndReturn(
 	appName string,
 	serverName string,
 	routesAnnotation string,
-	caddyPodName string,
+	adminURL string,
+	hostIP string,
 	servicePodName string,
 ) ([]Route, error) {
-	// Step 1: Get Caddy admin port from Caddy pod port mappings
-	adminPort, err := GetCaddyAdminPort(rt, caddyPodName)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"failed to get Caddy admin port, routes not registered: %w",
-			err,
-		)
-	}
-
-	// Step 2: Determine admin URL based on context
-	// If we're running inside a container (catalog backend), use pod name
-	// If we're running on host (CLI), use localhost
-	var adminURL string
-	if isRunningInContainer() {
-		// Running in catalog backend container - use Caddy pod name with internal port
-		adminURL = fmt.Sprintf("http://%s:2019", caddyPodName)
-	} else {
-		// Running on host (CLI) - use localhost with mapped port
-		adminURL = fmt.Sprintf("http://localhost:%s", adminPort)
-	}
+	// Step 1: Create proxy manager with the provided admin URL
 	proxyManager := NewCaddyManager(adminURL, serverName)
 
-	// Step 3: Perform health check on Caddy
+	// Step 2: Perform health check on Caddy
 	if err := proxyManager.HealthCheck(); err != nil {
 		return nil, fmt.Errorf(
 			"caddy health check failed, routes not registered: %w",
@@ -199,25 +165,13 @@ func RegisterRoutesForAppAndReturn(
 		)
 	}
 
-	// Step 4: Get host IP for route domain generation
-	// Prefer HOST_IP env var (set in catalog backend) over auto-detection
-	hostIP := os.Getenv("HOST_IP")
-	if hostIP == "" {
-		// Fallback to auto-detection (for CLI usage)
-		var err error
-		hostIP, err = utils.GetHostIP()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get host IP: %w", err)
-		}
-	}
-
-	// Step 5: Build routes from the annotation string using service pod name for upstreams
+	// Step 3: Build routes from the annotation string using service pod name for upstreams
 	routes, err := BuildRoutesFromAnnotation(routesAnnotation, hostIP, servicePodName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build routes: %w", err)
 	}
 
-	// Step 6: Register each route with Caddy
+	// Step 4: Register each route with Caddy
 	var registrationErrors []error
 	for _, route := range routes {
 		if err := proxyManager.RegisterRoute(route); err != nil {

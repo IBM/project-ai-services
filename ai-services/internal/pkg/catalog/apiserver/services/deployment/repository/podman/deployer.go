@@ -15,7 +15,6 @@ import (
 	"text/template"
 
 	"github.com/google/uuid"
-	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
@@ -731,12 +730,49 @@ func (d *PodmanDeployer) deployServicePods(
 
 	// If PodTemplateExecutions is defined, use it for ordered deployment
 	if len(metadata.PodTemplateExecutions) > 0 {
-		if err := d.deployServicePodsWithExecutions(metadata, tmpls, applicationID, svc, values); err != nil {
-			return err
+		// Execute each pod template in the service following the defined order
+		for _, layer := range metadata.PodTemplateExecutions {
+			for _, podTemplateName := range layer {
+				// Prepare initialParams for the template
+				initialParams := map[string]any{
+					"InstanceSlug": generateInstanceSlug(applicationID.String()),
+					"TemplateID":   svc.DatabaseID,
+					"BaseDir":      utils.GetBaseDir(),
+					"Values":       values,
+					"env":          map[string]map[string]string{},
+				}
+
+				_, podName, routes, err := d.deployPodTemplate(podTemplateName, tmpls, initialParams)
+				if err != nil {
+					return fmt.Errorf("failed to deploy pod template %s: %w", podTemplateName, err)
+				}
+
+				if routes != "" {
+					svc.Routes[podName] = routes
+				}
+			}
 		}
 	} else {
-		if err := d.deployServicePodsWithoutExecutions(tmpls, applicationID, svc, values); err != nil {
-			return err
+		// If no PodTemplateExecutions defined, deploy all templates
+		logger.Infof("No PodTemplateExecutions defined for service %s, deploying all templates\n", svc.CatalogID)
+		for templateName := range tmpls {
+			// Prepare initialParams for the template
+			initialParams := map[string]any{
+				"InstanceSlug": generateInstanceSlug(applicationID.String()),
+				"TemplateID":   svc.DatabaseID,
+				"BaseDir":      utils.GetBaseDir(),
+				"Values":       values,
+				"env":          map[string]map[string]string{},
+			}
+
+			_, podName, routes, err := d.deployPodTemplate(templateName, tmpls, initialParams)
+			if err != nil {
+				return fmt.Errorf("failed to deploy pod template %s: %w", templateName, err)
+			}
+
+			if routes != "" {
+				svc.Routes[podName] = routes
+			}
 		}
 	}
 
@@ -795,58 +831,6 @@ func (d *PodmanDeployer) deployComponentTemplate(
 	return nil
 }
 
-// deployServicePodsWithExecutions deploys service pods following PodTemplateExecutions order.
-func (d *PodmanDeployer) deployServicePodsWithExecutions(metadata *templates.AppMetadata, tmpls map[string]*template.Template, applicationID uuid.UUID, svc *ServicePlan, values map[string]any) error {
-	for _, layer := range metadata.PodTemplateExecutions {
-		for _, podTemplateName := range layer {
-			initialParams := map[string]any{
-				"InstanceSlug": generateInstanceSlug(applicationID.String()),
-				"TemplateID":   svc.DatabaseID,
-				"BaseDir":      utils.GetBaseDir(),
-				"Values":       values,
-				"env":          map[string]map[string]string{},
-			}
-
-			_, podName, routes, err := d.deployPodTemplate(podTemplateName, tmpls, initialParams)
-			if err != nil {
-				return fmt.Errorf("failed to deploy pod template %s: %w", podTemplateName, err)
-			}
-
-			if routes != "" {
-				svc.Routes[podName] = routes
-			}
-		}
-	}
-
-	return nil
-}
-
-// deployServicePodsWithoutExecutions deploys all service pod templates without specific order.
-func (d *PodmanDeployer) deployServicePodsWithoutExecutions(tmpls map[string]*template.Template, applicationID uuid.UUID, svc *ServicePlan, values map[string]any) error {
-	logger.Infof("No PodTemplateExecutions defined for service %s, deploying all templates\n", svc.CatalogID)
-
-	for templateName := range tmpls {
-		initialParams := map[string]any{
-			"InstanceSlug": generateInstanceSlug(applicationID.String()),
-			"TemplateID":   svc.DatabaseID,
-			"BaseDir":      utils.GetBaseDir(),
-			"Values":       values,
-			"env":          map[string]map[string]string{},
-		}
-
-		_, podName, routes, err := d.deployPodTemplate(templateName, tmpls, initialParams)
-		if err != nil {
-			return fmt.Errorf("failed to deploy pod template %s: %w", templateName, err)
-		}
-
-		if routes != "" {
-			svc.Routes[podName] = routes
-		}
-	}
-
-	return nil
-}
-
 // renderAndParsePodTemplate renders a pod template and parses it into a PodSpec.
 func (d *PodmanDeployer) renderAndParsePodTemplate(
 	podTemplate *template.Template,
@@ -880,9 +864,8 @@ func (d *PodmanDeployer) renderFinalPodTemplate(
 		return nil, nil, fmt.Errorf("failed to get env params: %w", err)
 	}
 
-	if _, exists := initialParams["env"]; !exists {
-		initialParams["env"] = env
-	}
+	// Always set/overwrite the env to ensure Spyre card PCI addresses are included
+	initialParams["env"] = env
 
 	var finalRendered bytes.Buffer
 	if err := podTemplate.Execute(&finalRendered, initialParams); err != nil {
@@ -1139,8 +1122,6 @@ func generateInstanceSlug(id string) string {
 	return hexHash[:10]
 }
 
-// Made with Bob
-
 // registerApplicationRoutes registers routes for all services with Caddy proxy.
 func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *DeploymentPlan) error {
 	logger.Infof("Registering routes for application '%s'\n", plan.ApplicationName)
@@ -1164,13 +1145,21 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 		return nil
 	}
 
-	// Find catalog Caddy pod
-	caddyPodName, err := d.findCatalogCaddyPod()
-	if err != nil {
-		return fmt.Errorf("failed to find catalog Caddy pod: %w", err)
+	// Get Caddy admin URL from env var (set during catalog configure)
+	// Running in catalog backend container, so env vars should be available
+	adminURL := utils.GetEnv("CADDY_ADMIN_URL", "")
+	if adminURL == "" {
+		return fmt.Errorf("CADDY_ADMIN_URL environment variable not set")
 	}
 
-	logger.Infof("Found catalog Caddy pod: %s\n", caddyPodName)
+	// Get host IP from env var (set during catalog configure)
+	hostIP := utils.GetEnv("HOST_IP", "")
+	if hostIP == "" {
+		return fmt.Errorf("HOST_IP environment variable not set")
+	}
+
+	logger.Infof("Using Caddy admin URL: %s\n", adminURL)
+	logger.Infof("Using host IP: %s\n", hostIP)
 
 	// Register routes for each pod
 	var registrationErrors []error
@@ -1180,7 +1169,8 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 			catalogconstants.CatalogAppName,
 			constants.CaddyServerName,
 			routes,
-			caddyPodName,
+			adminURL,
+			hostIP,
 			podName,
 		); err != nil {
 			registrationErrors = append(registrationErrors, fmt.Errorf("pod %s: %w", podName, err))
@@ -1198,15 +1188,4 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 	return nil
 }
 
-// findCatalogCaddyPod finds the catalog Caddy pod name from catalog templates.
-func (d *PodmanDeployer) findCatalogCaddyPod() (string, error) {
-	tp := templates.NewEmbedTemplateProvider(&assets.CatalogFS, "")
-	argParams := make(map[string]string)
-
-	caddyPodName, err := proxy.FindCaddyPodNameFromTemplates(tp, "catalog", catalogconstants.CatalogAppName, argParams)
-	if err != nil {
-		return "", fmt.Errorf("failed to find Caddy pod from templates: %w", err)
-	}
-
-	return caddyPodName, nil
-}
+// Made with Bob
