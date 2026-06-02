@@ -134,11 +134,11 @@ func (d *PodmanDeployer) ExecuteDeployment(
 		}
 	}
 
-	logger.Infof("Starting routing for '%s'\n", plan.ApplicationName)
 	// Step 5: Register routes with Caddy proxy
 	if err := d.registerApplicationRoutes(ctx, plan); err != nil {
-		logger.Errorf("Failed to register routes: %v\n", err)
-		// Don't fail deployment if route registration fails
+		d.handleDeploymentError(ctx, plan.ApplicationID, "Failed to register application routes", err)
+
+		return fmt.Errorf("failed to register application routes: %w", err)
 	}
 
 	// Step 6: Update application status to Running
@@ -734,8 +734,6 @@ func (d *PodmanDeployer) deployServicePods(
 	}
 
 	// If no PodTemplateExecutions defined, deploy all templates
-	logger.Infof("No PodTemplateExecutions defined for service %s, deploying all templates\n", svc.CatalogID)
-
 	return d.deployAllPodTemplates(applicationID, svc, tmpls, values)
 }
 
@@ -1024,15 +1022,9 @@ func (d *PodmanDeployer) deployPodTemplate(
 	// Extract routes annotation if present
 	routes := ""
 	if podSpec.Annotations != nil {
-		logger.Infof("DEBUG: Pod '%s' annotations: %+v\n", podSpec.Name, podSpec.Annotations)
 		if r, ok := podSpec.Annotations[constants.PodRoutesAnnotationKey]; ok {
 			routes = r
-			logger.Infof("DEBUG: Found routes annotation for pod '%s': %s\n", podSpec.Name, routes)
-		} else {
-			logger.Infof("DEBUG: No routes annotation found for pod '%s' (key: %s)\n", podSpec.Name, constants.PodRoutesAnnotationKey)
 		}
-	} else {
-		logger.Infof("DEBUG: Pod '%s' has nil annotations\n", podSpec.Name)
 	}
 
 	exists, err := d.runtime.PodExists(podSpec.Name)
@@ -1164,11 +1156,8 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 
 	// Collect all routes from services
 	allRoutes := make(map[string]string) // podName -> routes annotation
-	logger.Infof("DEBUG: Checking %d services for routes\n", len(plan.Services))
-	for serviceID, svc := range plan.Services {
-		logger.Infof("DEBUG: Service '%s' has %d routes entries\n", serviceID, len(svc.Routes))
+	for _, svc := range plan.Services {
 		if len(svc.Routes) > 0 {
-			logger.Infof("Service '%s' has %d pod(s) with routes\n", serviceID, len(svc.Routes))
 			for podName, routes := range svc.Routes {
 				allRoutes[podName] = routes
 			}
@@ -1193,9 +1182,6 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 	if hostIP == "" {
 		return fmt.Errorf("HOST_IP environment variable not set")
 	}
-
-	logger.Infof("Using Caddy admin URL: %s\n", adminURL)
-	logger.Infof("Using host IP: %s\n", hostIP)
 
 	// Register routes for each pod
 	var registrationErrors []error
