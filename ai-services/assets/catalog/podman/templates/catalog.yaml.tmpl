@@ -129,6 +129,7 @@ spec:
           mountPath: {{ .Values.backend.podman.uri }}
         - name: podman-auth
           mountPath: /run/containers/auth.json
+          subPath: auth.json
           readOnly: true
         - name: iommu-groups
           mountPath: /sys/kernel/iommu_groups
@@ -147,13 +148,8 @@ spec:
         path: {{ .Values.backend.podman.uri }}
         type: Socket
     - name: podman-auth
-      hostPath:
-        # Mount the auth file from host
-        # For rootless podman: /run/user/$(id -u)/containers/auth.json
-        # For root podman: /run/user/0/containers/auth.json
-        # NOTE: Ensure the file has read permissions (chmod 644) for the container user
-        path: {{ .Values.backend.podman.authFile }}
-        type: File
+      secret:
+        secretName: podman-auth-secret
     - name: iommu-groups
       hostPath:
         path: /sys/kernel/iommu_groups
