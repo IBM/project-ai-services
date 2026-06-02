@@ -71,54 +71,52 @@ This document proposes a comprehensive design for Import and Export API endpoint
 
 #### Endpoint
 ```
-POST /v1/admin/import
+POST /v1/import
 ```
 
 #### Purpose
-Import metadata from JSON data sent over the network into PostgreSQL database. Supports both initial migration and incremental imports.
+Import metadata from JSON data sent over the network into PostgreSQL database. Supports both initial migration and incremental imports. The request body structure matches the Export API response format for seamless backup/restore workflows.
 
 #### Request Body
 ```json
 {
-  "jobs": [
-    {
-      "job_id": "job-uuid-123",
-      "operation": "ingestion",
-      "status": "completed",
-      "job_name": "My Import Job",
-      "submitted_at": "2024-01-15T10:00:00Z",
-      "completed_at": "2024-01-15T10:30:00Z",
-      "stats": {
-        "total_documents": 10,
-        "completed": 8,
-        "failed": 2,
-        "in_progress": 0
+  "data": {
+    "jobs": [
+      {
+        "job_id": "job-uuid-123",
+        "operation": "ingestion",
+        "status": "completed",
+        "job_name": "My Import Job",
+        "submitted_at": "2024-01-15T10:00:00Z",
+        "completed_at": "2024-01-15T10:30:00Z",
+        "stats": {
+          "total_documents": 10,
+          "completed": 8,
+          "failed": 2,
+          "in_progress": 0
+        }
       }
-    }
-  ],
-  "documents": [
-    {
-      "id": "doc-uuid-456",
-      "job_id": "job-uuid-123",
-      "name": "document.pdf",
-      "type": "ingestion",
-      "status": "completed",
-      "output_format": "txt",
-      "submitted_at": "2024-01-15T10:00:00Z",
-      "completed_at": "2024-01-15T10:15:00Z",
-      "error": null,
-      "metadata": {
-        "pages": 10,
-        "tables": 5,
-        "language": "en"
+    ],
+    "documents": [
+      {
+        "id": "doc-uuid-456",
+        "job_id": "job-uuid-123",
+        "name": "document.pdf",
+        "type": "ingestion",
+        "status": "completed",
+        "output_format": "txt",
+        "submitted_at": "2024-01-15T10:00:00Z",
+        "completed_at": "2024-01-15T10:15:00Z",
+        "error": null,
+        "metadata": {
+          "pages": 10,
+          "tables": 5,
+          "language": "en"
+        }
       }
-    }
-  ],
-  "options": {
-    "mode": "merge",
-    "validate_only": false,
-    "batch_size": 100
-  }
+    ]
+  },
+  "validate_only": false
 }
 ```
 
@@ -126,11 +124,15 @@ Import metadata from JSON data sent over the network into PostgreSQL database. S
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `jobs` | array | Yes | [] | Array of job metadata objects to import |
-| `documents` | array | Yes | [] | Array of document metadata objects to import |
-| `options.mode` | enum | No | "merge" | Import strategy: "merge" (upsert), "replace" (delete+insert), "skip" (skip existing) |
-| `options.validate_only` | boolean | No | false | Dry-run mode: validate without importing |
-| `options.batch_size` | integer | No | 100 | Number of records to process per batch |
+| `data.jobs` | array | Yes | [] | Array of job metadata objects to import |
+| `data.documents` | array | Yes | [] | Array of document metadata objects to import |
+| `validate_only` | boolean | No | false | Dry-run mode: validate without importing |
+
+**Note**:
+- The import uses "skip" mode by default - existing records with the same ID are skipped, only new records are inserted
+- The `data` structure matches the Export API response format, allowing direct use of export responses for import
+- For large datasets exported with pagination, import each batch separately by calling the Import API multiple times
+- Internal batch processing (100 records per transaction) is handled automatically for memory efficiency
 
 #### Response (Success - 200 OK)
 ```json
@@ -138,13 +140,13 @@ Import metadata from JSON data sent over the network into PostgreSQL database. S
   "status": "completed",
   "summary": {
     "jobs": {
-      "total_found": 150,
+      "total_received": 150,
       "imported": 145,
       "skipped": 3,
       "failed": 2
     },
     "documents": {
-      "total_found": 1500,
+      "total_received": 1500,
       "imported": 1480,
       "skipped": 15,
       "failed": 5
@@ -153,14 +155,16 @@ Import metadata from JSON data sent over the network into PostgreSQL database. S
   "duration_seconds": 12.5,
   "errors": [
     {
-      "file": "/path/to/job_123_status.json",
+      "record_type": "job",
+      "record_id": "job-uuid-123",
       "type": "validation_error",
       "message": "Missing required field: job_id"
     }
   ],
   "warnings": [
     {
-      "file": "/path/to/doc_456_metadata.json",
+      "record_type": "document",
+      "record_id": "doc-uuid-456",
       "type": "orphaned_document",
       "message": "Document references non-existent job_id: job-999"
     }
@@ -175,7 +179,7 @@ Import metadata from JSON data sent over the network into PostgreSQL database. S
 {
   "error": {
     "code": "INVALID_REQUEST",
-    "message": "Invalid job data: missing required field 'job_id' in jobs[0]",
+    "message": "Invalid job data: missing required field 'job_id' in data.jobs[0]",
     "status": 400,
     "details": {
       "validation_errors": [
@@ -237,43 +241,25 @@ Import metadata from JSON data sent over the network into PostgreSQL database. S
 
 #### Endpoint
 ```
-POST /v1/admin/export
+GET /v1/export?limit=10000&offset=0
 ```
 
 #### Purpose
 Export metadata from PostgreSQL database as JSON data in the response body for backup/restore purposes.
 
-#### Request Body
-```json
-{
-  "filters": {
-    "job_ids": [],
-    "job_status": [],
-    "date_range": {
-      "start": "2024-01-01T00:00:00Z",
-      "end": "2024-12-31T23:59:59Z"
-    }
-  },
-  "options": {
-    "include_completed": true,
-    "include_failed": true,
-    "include_active": false,
-    "limit": 10000
-  }
-}
-```
-
-#### Request Parameters
+#### Query Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `filters.job_ids` | array | No | [] | Specific job IDs to export (empty = all) |
-| `filters.job_status` | array | No | [] | Filter by job status (empty = all) |
-| `filters.date_range` | object | No | null | Filter by submission date range |
-| `options.include_completed` | boolean | No | true | Include completed jobs/documents |
-| `options.include_failed` | boolean | No | true | Include failed jobs/documents |
-| `options.include_active` | boolean | No | false | Include active jobs/documents (not recommended for backup) |
-| `options.limit` | integer | No | 10000 | Maximum number of records to export (jobs + documents combined) |
+| `limit` | integer | No | 10000 | Maximum number of records to export per request (jobs + documents combined) |
+| `offset` | integer | No | 0 | Number of records to skip for pagination |
+
+#### Example Requests
+```
+GET /v1/export
+GET /v1/export?limit=5000
+GET /v1/export?limit=10000&offset=10000
+```
 
 #### Response (Success - 200 OK)
 ```json
@@ -330,6 +316,8 @@ Export metadata from PostgreSQL database as JSON data in the response body for b
   "export_timestamp": "2024-01-15T10:30:00Z",
   "duration_seconds": 2.5,
   "pagination": {
+    "limit": 10000,
+    "offset": 0,
     "has_more": false,
     "total_records": 1625,
     "returned_records": 1625
@@ -344,8 +332,12 @@ Export metadata from PostgreSQL database as JSON data in the response body for b
 {
   "error": {
     "code": "INVALID_REQUEST",
-    "message": "Invalid date range: start date must be before end date",
-    "status": 400
+    "message": "Invalid pagination parameters: offset cannot be negative",
+    "status": 400,
+    "details": {
+      "parameter": "offset",
+      "value": -10
+    }
   }
 }
 ```
@@ -359,8 +351,8 @@ Export metadata from PostgreSQL database as JSON data in the response body for b
     "status": 413,
     "details": {
       "max_records": 10000,
-      "requested_records": 50000,
-      "suggestion": "Use filters or pagination to reduce result set"
+      "requested_limit": 50000,
+      "suggestion": "Use pagination with limit <= 10000 and iterate using offset"
     }
   }
 }
@@ -417,44 +409,6 @@ Export metadata from PostgreSQL database as JSON data in the response body for b
 - Use streaming for large exports
 - Provide progress tracking
 
-```python
-async def import_in_batches(
-    jobs: List[dict],
-    documents: List[dict],
-    batch_size: int = 100
-) -> ImportResult:
-    """Import records in batches to avoid memory issues."""
-    results = ImportResult()
-    
-    # Process jobs in batches
-    total_jobs = len(jobs)
-    for i in range(0, total_jobs, batch_size):
-        batch = jobs[i:i + batch_size]
-        batch_result = await process_job_batch(batch)
-        results.merge_jobs(batch_result)
-        
-        # Commit after each batch
-        db_manager.commit()
-        
-        # Log progress
-        logger.info(f"Processed {min(i + batch_size, total_jobs)}/{total_jobs} jobs")
-    
-    # Process documents in batches
-    total_docs = len(documents)
-    for i in range(0, total_docs, batch_size):
-        batch = documents[i:i + batch_size]
-        batch_result = await process_document_batch(batch)
-        results.merge_documents(batch_result)
-        
-        # Commit after each batch
-        db_manager.commit()
-        
-        # Log progress
-        logger.info(f"Processed {min(i + batch_size, total_docs)}/{total_docs} documents")
-    
-    return results
-```
-
 ### 5. Request Size Limits
 
 **Problem**: Large payloads could exhaust memory or cause timeouts
@@ -476,9 +430,9 @@ MAX_RECORDS_PER_REQUEST = 10000
 **Problem**: Importing same data multiple times
 
 **Solution**:
-- Support three modes: merge (upsert), replace (delete+insert), skip (ignore existing)
-- Use database primary keys and unique constraints
-- Track and report duplicates in response
+- Use "skip" mode: existing records are skipped, only new records are inserted
+- Use database primary keys and unique constraints to detect duplicates
+- Track and report skipped duplicates in response
 
 ### 7. Partial Failures
 
@@ -496,19 +450,48 @@ MAX_RECORDS_PER_REQUEST = 10000
 
 **Solution**:
 - Implement record limits (default: 10,000 records)
-- Return pagination information
-- Support filtering to reduce result set
+- Return pagination information (limit, offset, has_more, total_records)
+- Support offset-based pagination via query parameters
 - Suggest multiple requests for very large exports
+
+**Example Pagination Workflow**:
+```bash
+# First request
+GET /v1/export?limit=10000&offset=0
+
+# Second request (if has_more is true)
+GET /v1/export?limit=10000&offset=10000
+
+# Third request (if has_more is true)
+GET /v1/export?limit=10000&offset=20000
+
+# Continue until has_more is false
+```
 
 ### 10. Backup/Restore Workflow
 
-**Problem**: Ensuring reliable backup and restore process with network-based APIs
+**Problem**: Ensuring reliable backup and restore process with network-based APIs when dealing with large datasets
 
 **Solution**:
-- Client saves export response containing json metadata structures to local files
-- Client validates data integrity
-- Client sends data back via Import API for restore
-- Support incremental backups via filters
+
+**Backup Process (Export with Pagination)**:
+1. Backup script calls Export API with `limit` and `offset` query parameters
+2. Script iterates through all pages using pagination (`has_more` flag)
+3. Accumulates all jobs and documents from paginated responses
+4. Saves complete dataset to local backup file
+
+**Restore Process (Import from Backup)**:
+1. Restore script loads backup file containing jobs and documents
+2. Sends data to Import API using the `data` structure (same format as Export response)
+3. Import API processes records and returns summary of imported/skipped/failed records
+4. For very large backups, can split into multiple Import API calls with smaller chunks
+
+**Key Points**:
+- Export API returns paginated data with `limit` and `offset` query parameters
+- Backup script iterates through all pages and accumulates records into a single backup file
+- Import API accepts the same `data` structure that Export API returns
+- The `data` structure is consistent between Export response and Import request, enabling seamless workflows
+- For very large datasets, restore can be split into multiple Import API calls
 
 ## Conclusion
 
