@@ -60,8 +60,8 @@ func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, b
 		return nil
 	}
 
-	// Prepare deployment
-	hostIP, caddyPodName, caddyAdminURL, values, err := prepareCatalogDeployment(tp, podmanURI, passwordHash, baseDir, argParams, s)
+	// Prepare deployment with authFilePath
+	hostIP, caddyPodName, caddyAdminURL, values, err := prepareCatalogDeployment(tp, podmanURI, authFilePath, passwordHash, baseDir, argParams, s)
 	if err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func initializeCatalogDeployment(argParams map[string]string, httpsPort int, s *
 }
 
 // prepareCatalogDeployment prepares all necessary data for deployment.
-func prepareCatalogDeployment(tp templates.Template, podmanURI, passwordHash, baseDir string, argParams map[string]string, s *spinner.Spinner) (string, string, string, map[string]any, error) {
+func prepareCatalogDeployment(tp templates.Template, podmanURI, authFilePath, passwordHash, baseDir string, argParams map[string]string, s *spinner.Spinner) (string, string, string, map[string]any, error) {
 	// Get host IP for template rendering
 	hostIP, err := utils.GetHostIP()
 	if err != nil {
@@ -133,7 +133,7 @@ func prepareCatalogDeployment(tp templates.Template, podmanURI, passwordHash, ba
 	caddyAdminURL := fmt.Sprintf("http://%s:2019", caddyPodName)
 
 	// Prepare values with configure-specific configuration
-	values, err := prepareCatalogValues(tp, podmanURI, passwordHash, argParams)
+	values, err := prepareCatalogValues(tp, podmanURI, authFilePath, passwordHash, argParams)
 	if err != nil {
 		s.Fail("failed to load values")
 
