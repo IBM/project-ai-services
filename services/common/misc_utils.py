@@ -319,3 +319,13 @@ def validate_document_file(filename: str, content) -> None:
 
 def get_unprocessed_files(original_files, processed_pdfs):
     return set(original_files).difference(set(processed_pdfs))
+
+def get_utc_timestamp() -> str:
+    """
+    Generate UTC timestamp in ISO format with 'Z' suffix.
+
+    Returns:
+        ISO 8601 formatted timestamp string with 'Z' suffix
+    """
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

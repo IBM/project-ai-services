@@ -180,12 +180,12 @@ class SummarizationConfig(BaseSettings):
     @property
     def staging_dir(self) -> Path:
         """Directory for staging uploaded files during processing."""
-        return self.cache_dir / "summarize" / "staging"
+        return self.cache_dir  / "staging"
 
     @property
     def results_dir(self) -> Path:
         """Directory for storing completed summarization results."""
-        return self.cache_dir / "summarize" / "results"
+        return self.cache_dir / "results"
 
 
 class DatabaseConfig(BaseSettings):

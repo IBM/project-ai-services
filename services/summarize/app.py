@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
 from common.misc_utils import set_log_level, get_logger
-from summarize.summ_utils import create_job_with_db
+from summarize.db_operations import create_job_with_db
 from summarize.settings import settings
 from summarize.models import SummarizationType
 

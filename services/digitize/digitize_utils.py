@@ -22,19 +22,9 @@ from digitize.db_operations import (
     get_status_manager
 )
 
+from common.misc_utils import get_utc_timestamp
+
 logger = get_logger("digitize_utils")
-
-
-def get_utc_timestamp() -> str:
-    """
-    Generate UTC timestamp in ISO format with 'Z' suffix.
-
-    Returns:
-        ISO 8601 formatted timestamp string with 'Z' suffix
-    """
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
 
 def get_job_document_stats(job_id: str) -> dict:
     """
