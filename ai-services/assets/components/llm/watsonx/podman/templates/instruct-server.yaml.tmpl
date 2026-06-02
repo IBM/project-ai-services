@@ -19,17 +19,17 @@ spec:
         - name: WATSONX_APIKEY
           valueFrom:
             secretKeyRef:
-              name: "llm-secret-{{ .InstanceSlug }}"
+              name: "watsonx-secret-{{ .InstanceSlug }}"
               key: apiKey
         - name: WATSONX_PROJECT_ID
           valueFrom:
             secretKeyRef:
-              name: "llm-secret-{{ .InstanceSlug }}"
+              name: "watsonx-secret-{{ .InstanceSlug }}"
               key: projectId
         - name: WATSONX_URL
           valueFrom:
             secretKeyRef:
-              name: "llm-secret-{{ .InstanceSlug }}"
+              name: "watsonx-secret-{{ .InstanceSlug }}"
               key: url
         - name: INSTRUCT_MODEL
           value: "watsonx/{{ .Values.model }}"
