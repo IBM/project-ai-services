@@ -36,10 +36,11 @@ spec:
         value: auto
       - name: VLLM_CPU_KVCACHE_SPACE
         value: "32"
-      {{- if .Values.apiKey }}
       - name: VLLM_API_KEY
-        value: "{{ .Values.apiKey }}"
-      {{- end }}
+        valueFrom:
+          secretKeyRef:
+            name: "llm-secret-{{ .InstanceSlug }}"
+            key: apiKey
       resources:
         requests:
           memory: "100Gi"
