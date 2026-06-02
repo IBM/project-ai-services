@@ -515,6 +515,13 @@ func fixSELinuxVFIOPolicy() RepairResult {
 		return RepairResult{CheckName: checkName, Status: StatusSkipped, Message: msg}
 	}
 
+	// Check if policy is already installed
+	exitCode, stdout, _, err := utils.ExecuteCommand("semodule", "-l")
+	if err == nil && exitCode == 0 && strings.Contains(stdout, "vllm_vfio_policy") {
+		return RepairResult{CheckName: checkName, Status: StatusSkipped,
+			Message: "SELinux VFIO policy already installed"}
+	}
+
 	tmpDir, err := os.MkdirTemp("", "selinux_build")
 	if err != nil {
 		return RepairResult{CheckName: checkName, Status: StatusFailedToFix,
@@ -602,13 +609,6 @@ func fixSELinuxPodmanSocketPolicy() RepairResult {
 	enabled, msg := isSELinuxEnabledAndActive()
 	if !enabled {
 		return RepairResult{CheckName: checkName, Status: StatusSkipped, Message: msg}
-	}
-
-	// Check if policy is already installed
-	exitCode, stdout, _, err := utils.ExecuteCommand("semodule", "-l")
-	if err == nil && exitCode == 0 && strings.Contains(stdout, "vllm_vfio_policy") {
-		return RepairResult{CheckName: checkName, Status: StatusSkipped,
-			Message: "SELinux VFIO policy already installed"}
 	}
 
 	tmpDir, err := os.MkdirTemp("", "selinux_podman_build")
