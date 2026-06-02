@@ -1,11 +1,41 @@
-from pathlib import Path
+from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from summarize.summ_types import JobStatus
 from summarize.settings import settings
 
+class SummarizationType(str, Enum):
+    DIRECT = "direct"
+    CHUNKED = "chunked"
+
+class SummarizationLevel(str, Enum):
+    BRIEF = "brief"
+    STANDARD = "standard"
+    DETAILED = "detailed"
+
+
+
+class JobStatus(str, Enum):
+    ACCEPTED = "accepted"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+class PaginationInfo(BaseModel):
+    total: int
+    limit: int
+    offset: int
+
+class JobsListResponse(BaseModel):
+    pagination: PaginationInfo
+    data: List[dict]
+
+class JobCreatedResponse(BaseModel):
+    """Response model for job creation."""
+    job_id: str
+
+ 
 
 
 class JobMetadata(BaseModel):

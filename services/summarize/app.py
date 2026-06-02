@@ -14,7 +14,7 @@ from starlette.concurrency import iterate_in_threadpool
 from common.misc_utils import set_log_level, get_logger
 from summarize.summ_utils import create_job_with_db
 from summarize.settings import settings
-from summarize.summ_types import SummarizationType
+from summarize.models import SummarizationType
 
 set_log_level(settings.common.app.log_level)
 

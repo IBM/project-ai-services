@@ -13,7 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from common.misc_utils import get_logger
 from summarize.db.models import SummarizeJob
 from summarize.db.connection import get_db_session
-from summarize.summ_types import JobStatus, SummarizationLevel, SummarizationType
+from summarize.models import JobStatus, SummarizationLevel, SummarizationType
 
 logger = get_logger("db_repository")
 

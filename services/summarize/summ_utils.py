@@ -13,7 +13,7 @@ from common.misc_utils import set_log_level, get_logger, resolve_model_max_len
 
 
 from common.misc_utils import get_logger
-from summarize.summ_types import JobStatus
+from summarize.models import JobStatus
 from summarize.settings import settings
 from summarize.db.manager import db_repo
 from summarize.db.connection import engine
