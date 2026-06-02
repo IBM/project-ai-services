@@ -16,7 +16,7 @@ from fastapi import UploadFile
 from common.misc_utils import get_logger
 from summarize.settings import settings
 from summarize.db.models import SummarizeJob
-from summarize.db.database import get_db_session
+from summarize.db.connection import get_db_session
 
 logger = get_logger("job_utils")
 

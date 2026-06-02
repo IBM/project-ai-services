@@ -42,7 +42,7 @@ from summarize.job_utils import (
     stage_uploaded_file,
     cleanup_staging_directory,
 )
-from summarize.db.database import check_db_connection, close_db_connections
+from summarize.db.connection import check_db_connection, close_db_connections
 
 logger = get_logger("app")
 
@@ -65,7 +65,7 @@ async def lifespan(app):
             # Initialize database schema (create tables if they don't exist)
             try:
                 from summarize.db.models import Base
-                from summarize.db.database import engine
+                from summarize.db.connection import engine
                 Base.metadata.create_all(bind=engine)
                 logger.info("✅ Database schema initialized")
             except Exception as schema_error:

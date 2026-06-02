@@ -12,13 +12,13 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from common.misc_utils import get_logger
 from summarize.db.models import SummarizeJob
-from summarize.db.database import get_db_session
+from summarize.db.connection import get_db_session
 from summarize.summ_types import JobStatus, SummarizationLevel, SummarizationType
 
 logger = get_logger("db_repository")
 
 
-class DatabaseRepository:
+class DatabaseManager:
     """Repository for database operations with error handling and logging."""
 
     @staticmethod
@@ -279,4 +279,4 @@ class DatabaseRepository:
 
 
 # Singleton instance for easy access
-db_repo = DatabaseRepository()
+db_repo = DatabaseManager()
