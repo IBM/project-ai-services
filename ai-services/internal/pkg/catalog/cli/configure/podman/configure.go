@@ -180,7 +180,7 @@ func prepareCatalogValues(tp templates.Template, podmanURI, authFilePath, passwo
 	argParams["backend.podman.authFileContent"] = authFileBase64
 	argParams["db.password"] = dbPassword
 
-	// Load values from catalog - this will process @generate:password annotations
+	// Load values from catalog
 	return tp.LoadValues(catalogAppTemplate, nil, argParams)
 }
 
