@@ -123,6 +123,16 @@ class RAGConfig(BaseSettings):
     
     model_config = SettingsConfigDict(env_prefix="CHATBOT_")
 
+    similarity_service_url: str = Field(
+        default="http://similarity:8080",
+        description="URL of the similarity search service"
+    )
+
+    rerank: bool = Field(
+        default=True,
+        description="Enable reranking of search results"
+    )
+
     search_mode: str = Field(
         default="hybrid",
         description="Search mode for document retrieval (e.g., 'hybrid', 'dense', 'sparse')"
