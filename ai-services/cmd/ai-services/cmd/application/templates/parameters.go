@@ -22,6 +22,11 @@ func NewParametersCmd() *cobra.Command {
 		Use:   "parameters",
 		Short: "Display supported parameters for a specific template",
 		Long:  `Display all supported parameters for a specific template ID (service or architecture) from the catalog`,
+		Example: `  # Display parameters for a service
+  ai-services application templates parameters --template digitize --runtime podman
+
+  # Display parameters for an architecture
+  ai-services application templates parameters --template rag --runtime podman`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
