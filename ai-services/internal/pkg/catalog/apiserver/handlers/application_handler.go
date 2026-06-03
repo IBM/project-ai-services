@@ -247,6 +247,46 @@ func (h *ApplicationHandler) GetApplicationByID(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// GetApplicationResources godoc
+//
+//	@Summary		Get application resources
+//	@Description	Retrieves CPU (in cores), memory usage (in bytes), and Spyre accelerator cards for an application and its services
+//	@Tags			Applications
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string	true	"Application ID"
+//	@Success		200	{object}	types.ApplicationResourcesResponse
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized"
+//	@Failure		404	{object}	ErrorResponse	"Application not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/applications/{id}/resources [get]
+func (h *ApplicationHandler) GetApplicationResources(c *gin.Context) {
+	appID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid application ID format"})
+
+		return
+	}
+
+	// Call service layer
+	response, err := h.appService.GetApplicationResources(c.Request.Context(), appID)
+	if err != nil {
+		if err == repository.ErrApplicationNotFound {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "Application not found"})
+
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get application resources: %v", err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
 // DeleteApplication godoc
 //
 //	@Summary		Delete application

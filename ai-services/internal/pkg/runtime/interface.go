@@ -21,6 +21,7 @@ type Runtime interface {
 	InspectPod(nameOrId string) (*types.Pod, error)
 	PodExists(nameOrID string) (bool, error)
 	PodLogs(nameOrID string) error
+	GetPodResources(nameOrID string) (*types.PodResources, error)
 
 	// Secret operations
 	ListSecrets(filters map[string][]string) ([]string, error)

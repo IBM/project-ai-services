@@ -17,7 +17,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 var (
@@ -659,6 +661,220 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 			logger.Errorf("failed to delete orphaned component %s: %s", componentID, err)
 		}
 	}
+}
+
+// GetApplicationResources retrieves resource usage (CPU, memory) for an application using runtime-specific stats.
+func (s *ApplicationService) GetApplicationResources(ctx context.Context, id uuid.UUID) (*types.ApplicationResourcesResponse, error) {
+	// Fetch application from database
+	app, err := s.appRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, handleGetApplicationError(err)
+	}
+
+	// Create runtime client
+	runtimeClient, err := vars.RuntimeFactory.Create("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create runtime client: %w", err)
+	}
+
+	// Create catalog provider to load service metadata
+	catalogProvider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
+	}
+
+	// Collect resources from all services
+	resourceTotals := s.collectServiceResources(ctx, app, runtimeClient, catalogProvider)
+
+	// Build and return response
+	return buildResourcesResponse(resourceTotals), nil
+}
+
+// handleGetApplicationError handles errors from GetByID.
+func handleGetApplicationError(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrApplicationNotFound
+	}
+
+	return fmt.Errorf("failed to get application: %w", err)
+}
+
+// resourceTotals holds aggregated resource information.
+type resourceTotals struct {
+	allocatedCPU    int
+	allocatedMemory int
+	usedCPU         float64
+	usedMemory      uint64
+	spyreCards      map[string]bool
+}
+
+// collectServiceResources aggregates resources from all services in an application.
+func (s *ApplicationService) collectServiceResources(
+	ctx context.Context,
+	app *models.Application,
+	runtimeClient runtime.Runtime,
+	catalogProvider *catalog.CatalogProvider,
+) *resourceTotals {
+	totals := &resourceTotals{
+		spyreCards: make(map[string]bool),
+	}
+
+	// Track components we've already counted to avoid double-counting shared components
+	countedComponents := make(map[uuid.UUID]bool)
+
+	for _, service := range app.Services {
+		s.processServiceResources(ctx, app.Name, service, runtimeClient, catalogProvider, totals, countedComponents)
+	}
+
+	return totals
+}
+
+// processServiceResources processes a single service and updates resource totals.
+func (s *ApplicationService) processServiceResources(
+	ctx context.Context,
+	appName string,
+	service models.Service,
+	runtimeClient runtime.Runtime,
+	catalogProvider *catalog.CatalogProvider,
+	totals *resourceTotals,
+	countedComponents map[uuid.UUID]bool,
+) {
+	// Load allocated resources from service metadata
+	s.addServiceAllocatedResources(service.CatalogID, catalogProvider, totals)
+
+	// Load allocated resources from deployed components for this service
+	// Pass countedComponents to avoid double-counting shared components
+	s.addComponentAllocatedResources(ctx, service.ID, catalogProvider, totals, countedComponents)
+
+	// Get pod name and fetch runtime resources
+	podName := getPodNameForService(appName, service.CatalogID)
+	addUsedResources(podName, runtimeClient, totals)
+}
+
+// addServiceAllocatedResources adds allocated resources from service metadata.
+func (s *ApplicationService) addServiceAllocatedResources(
+	catalogID string,
+	catalogProvider *catalog.CatalogProvider,
+	totals *resourceTotals,
+) {
+	runtimeMetadata, err := catalogProvider.LoadServiceRuntimeMetadata(catalogID)
+	if err == nil && runtimeMetadata.Resources != nil {
+		totals.allocatedCPU += runtimeMetadata.Resources.CPU
+		totals.allocatedMemory += runtimeMetadata.Resources.Memory
+	}
+}
+
+// addComponentAllocatedResources adds allocated resources from the actual deployed component providers.
+// This ensures we only count resources for the specific component providers deployed for this service,
+// not all possible provider options. Components are tracked to avoid double-counting when shared across services.
+func (s *ApplicationService) addComponentAllocatedResources(
+	ctx context.Context,
+	serviceID uuid.UUID,
+	catalogProvider *catalog.CatalogProvider,
+	totals *resourceTotals,
+	countedComponents map[uuid.UUID]bool,
+) {
+	// Get service dependencies (components) from database
+	dependencies, err := s.serviceDependencyRepo.GetDependenciesByServiceID(ctx, serviceID)
+	if err != nil {
+		logger.Warningf("Failed to get dependencies for service %s: %v\n", serviceID, err)
+
+		return
+	}
+
+	// Process each component dependency
+	for _, dep := range dependencies {
+		if dep.DependencyType != models.DependencyTypeComponent {
+			continue
+		}
+
+		// Skip if we've already counted this component (shared across services)
+		if countedComponents[dep.DependencyID] {
+			continue
+		}
+
+		// Get component details from database
+		component, err := s.componentRepo.GetByID(ctx, dep.DependencyID)
+		if err != nil {
+			logger.Warningf("Failed to get component %s: %v\n", dep.DependencyID, err)
+
+			continue
+		}
+
+		// Load component runtime metadata for the specific provider
+		runtimeMetadata, err := catalogProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider)
+		if err != nil {
+			logger.Warningf("Failed to load runtime metadata for component %s/%s: %v\n", component.Type, component.Provider, err)
+
+			continue
+		}
+
+		// Add resources from this specific component provider
+		if runtimeMetadata.Resources != nil {
+			totals.allocatedCPU += runtimeMetadata.Resources.CPU
+			totals.allocatedMemory += runtimeMetadata.Resources.Memory
+		}
+
+		// Mark this component as counted
+		countedComponents[dep.DependencyID] = true
+	}
+}
+
+// addUsedResources fetches and adds used resources from runtime.
+func addUsedResources(
+	podName string,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+) {
+	resources, err := runtimeClient.GetPodResources(podName)
+	if err != nil {
+		logger.Warningf("Failed to get resources for pod %s: %v\n", podName, err)
+
+		return
+	}
+
+	// Track all unique Spyre cards
+	for _, card := range resources.SpyreCards {
+		totals.spyreCards[card] = true
+	}
+
+	// Accumulate used resources
+	totals.usedCPU += resources.CPUCores
+	totals.usedMemory += resources.MemUsage
+}
+
+// buildResourcesResponse constructs the final response from resource totals.
+func buildResourcesResponse(totals *resourceTotals) *types.ApplicationResourcesResponse {
+	// Convert map to slice for Spyre cards
+	totalSpyreCards := make([]string, 0, len(totals.spyreCards))
+	for card := range totals.spyreCards {
+		totalSpyreCards = append(totalSpyreCards, card)
+	}
+
+	// Build accelerators map
+	accelerators := make(map[string][]string)
+	if len(totalSpyreCards) > 0 {
+		accelerators["spyre"] = totalSpyreCards
+	}
+
+	// Build response with total and used resources
+	return &types.ApplicationResourcesResponse{
+		CPU: types.ApplicationCPUInfo{
+			TotalCores: float64(totals.allocatedCPU),
+			UsedCores:  totals.usedCPU,
+		},
+		Memory: types.ApplicationMemInfo{
+			TotalBytes: int64(totals.allocatedMemory),
+			UsedBytes:  int64(totals.usedMemory),
+		},
+		Accelerators: accelerators,
+	}
+}
+
+// getPodNameForService constructs the pod name for a service.
+func getPodNameForService(appName, serviceID string) string {
+	// Pod naming convention: appName--serviceID
+	return fmt.Sprintf("%s--%s", appName, serviceID)
 }
 
 // Made with Bob
