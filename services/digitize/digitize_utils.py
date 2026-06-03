@@ -22,7 +22,8 @@ from digitize.db_operations import (
     get_status_manager
 )
 
-from common.misc_utils import get_utc_timestamp
+from common.misc_utils import get_utc_timestamp, cleanup_staging_directory
+
 
 logger = get_logger("digitize_utils")
 
@@ -557,34 +558,5 @@ def scan_and_recover_orphan_jobs() -> int:
     else:
         logger.debug("✅ No orphan jobs found on startup")
     return orphan_count
-
-
-def cleanup_staging_directory(job_id: str, staging_base_dir: Path) -> bool:
-    """
-    Clean up the staging directory for a specific job.
-
-    This helper function safely removes the staging directory and all its contents.
-    It's used across multiple places in the codebase to ensure consistent cleanup behavior.
-
-    Args:
-        job_id: Unique identifier of the job
-        staging_base_dir: Base directory where staging directories are created
-
-    Returns:
-        True if cleanup was successful or directory didn't exist, False if cleanup failed
-    """
-    staging_dir = staging_base_dir / job_id
-
-    if not staging_dir.exists():
-        logger.debug(f"Staging directory does not exist (already cleaned up): {staging_dir}")
-        return True
-
-    try:
-        shutil.rmtree(staging_dir)
-        logger.info(f"🗑️  Cleaned up staging directory: {staging_dir}")
-        return True
-    except Exception as e:
-        logger.warning(f"Failed to clean up staging directory {staging_dir}: {e}")
-        return False
 
 # Made with Bob

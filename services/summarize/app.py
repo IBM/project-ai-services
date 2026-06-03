@@ -40,9 +40,9 @@ from summarize.job_utils import (
     ensure_directories,
     validate_file_extension,
     stage_uploaded_file,
-    cleanup_staging_directory,
 )
 from summarize.db.connection import check_db_connection, close_db_connections
+from common.misc_utils import cleanup_staging_directory
 
 logger = get_logger("app")
 
@@ -524,7 +524,7 @@ async def create_summarization_job(
         except Exception as e:
             logger.error(f"Failed to create job record for {job_id}: {e}")
             # Clean up staged file
-            cleanup_staging_directory(job_id)
+            cleanup_staging_directory(job_id, settings.summarize.staging_dir)
             raise SummarizeException(
                 500,
                 "DATABASE_ERROR",

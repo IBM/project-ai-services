@@ -96,20 +96,4 @@ def stage_uploaded_file(job_id: str, file: UploadFile) -> Path:
         raise IOError(f"Failed to stage file: {e}")
 
 
-def cleanup_staging_directory(job_id: str) -> None:
-    """
-    Clean up the staging directory for a job.
-    
-    Args:
-        job_id: UUID of the job
-    """
-    job_staging_dir = settings.summarize.staging_dir / job_id
-    
-    if job_staging_dir.exists():
-        try:
-            shutil.rmtree(job_staging_dir)
-            logger.debug(f"Cleaned up staging directory for job {job_id}")
-        except Exception as e:
-            logger.warning(f"Failed to clean up staging directory for job {job_id}: {e}")
-
 
