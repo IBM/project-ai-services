@@ -177,13 +177,13 @@ func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
 
 // validateSSLFlags validates SSL certificate and key flags.
 func validateSSLFlags() error {
-	if err := checkSSLFlagsPaired(); err != nil {
-		return err
-	}
-
 	// If no SSL cert/key provided, validation passes
 	if sslCertPath == "" && sslKeyPath == "" {
 		return nil
+	}
+
+	if err := checkSSLFlagsPaired(); err != nil {
+		return err
 	}
 
 	warnIfBothCertAndDomainProvided()
@@ -270,8 +270,9 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 		&domainName,
 		"domain-name",
 		"",
-		"Custom domain name for self-signed certificates (optional).\n"+
+		"Custom domain name for self-signed certificates (podman runtime only).\n"+
 			"If not provided, uses wildcard DNS format: <service>.<ip>.nip.io\n"+
+			"If a custom SSL certificate/key pair is provided, the domain is extracted from the certificate and the --domain flag is ignored.\n"+
 			"Example: --domain-name example.com generates certs for *.example.com\n",
 	)
 

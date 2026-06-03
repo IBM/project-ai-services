@@ -21,40 +21,35 @@ import (
 
 // ValidateCertificateFiles verifies that certificate and key files exist and are readable.
 func ValidateCertificateFiles(certPath, keyPath string) error {
-	// Check certificate file
+	// Validate paths are not empty (fail-fast)
 	if certPath == "" {
 		return fmt.Errorf("certificate path is empty")
 	}
-
-	certInfo, err := os.Stat(certPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("certificate file does not exist: %s", certPath)
-		}
-
-		return fmt.Errorf("cannot access certificate file: %w", err)
-	}
-
-	if certInfo.IsDir() {
-		return fmt.Errorf("certificate path is a directory, not a file: %s", certPath)
-	}
-
-	// Check key file
 	if keyPath == "" {
 		return fmt.Errorf("key path is empty")
 	}
 
-	keyInfo, err := os.Stat(keyPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("key file does not exist: %s", keyPath)
-		}
-
-		return fmt.Errorf("cannot access key file: %w", err)
+	// Validate certificate file
+	if err := validateFilePath(certPath, "certificate"); err != nil {
+		return err
 	}
 
-	if keyInfo.IsDir() {
-		return fmt.Errorf("key path is a directory, not a file: %s", keyPath)
+	// Validate key file
+	return validateFilePath(keyPath, "key")
+}
+
+// validateFilePath checks if a file exists and is accessible.
+func validateFilePath(path, fileType string) error {
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%s file does not exist: %s", fileType, path)
+		}
+		return fmt.Errorf("cannot access %s file: %w", fileType, err)
+	}
+
+	if fileInfo.IsDir() {
+		return fmt.Errorf("%s path is a directory, not a file: %s", fileType, path)
 	}
 
 	return nil
@@ -89,7 +84,7 @@ func ValidateCertificateKeyPair(certPath, keyPath string) error {
 	// Load the certificate and key pair
 	_, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
-		return fmt.Errorf("certificate and key do not match: %w", err)
+		return fmt.Errorf("failed to load certificate with given key: %w", err)
 	}
 
 	return nil
