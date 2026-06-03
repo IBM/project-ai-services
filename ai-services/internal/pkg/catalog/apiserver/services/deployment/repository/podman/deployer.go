@@ -1017,7 +1017,7 @@ func (d *PodmanDeployer) deployPodTemplate(
 	renderedBytes := rendered.Bytes()
 	if strings.TrimSpace(string(renderedBytes)) == "" {
 		// skip deploy if there is nothing to apply
-		return nil, nil
+		return nil, "", "", nil
 	}
 
 	// Parse into PodSpec for metadata
