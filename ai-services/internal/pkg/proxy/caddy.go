@@ -139,9 +139,8 @@ func (c *caddyManager) createRoute(routeConfig map[string]interface{}) error {
 //   - serverName: Caddy server name (e.g., "ai_services")
 //   - routesAnnotation: Routes annotation value in format "port:subdomain,port:subdomain,..."
 //   - adminURL: Caddy admin API URL (e.g., "http://localhost:37249" or "http://ai-services--caddy:2019")
-//   - hostIP: Host IP for building route domains (e.g., "192.168.1.100")
+//   - domainSuffix: Pre-computed domain suffix (e.g., "example.com" or "192.168.1.100.nip.io")
 //   - servicePodName: Name of the service pod for upstream configuration
-//   - domainConfig: Optional domain configuration for custom/certificate-based domains
 //
 // Returns:
 //   - []Route: List of successfully built and registered routes
@@ -152,9 +151,8 @@ func RegisterRoutesForAppAndReturn(
 	serverName string,
 	routesAnnotation string,
 	adminURL string,
-	hostIP string,
+	domainSuffix string,
 	servicePodName string,
-	domainConfig *DomainConfig,
 ) ([]Route, error) {
 	// Step 1: Create proxy manager with the provided admin URL
 	proxyManager := NewCaddyManager(adminURL, serverName)
@@ -167,18 +165,13 @@ func RegisterRoutesForAppAndReturn(
 		)
 	}
 
-	// Step 3: Ensure domain config has HostIP set
-	if domainConfig != nil && domainConfig.HostIP == "" {
-		domainConfig.HostIP = hostIP
-	}
-
-	// Step 4: Build routes from the annotation string using service pod name for upstreams
-	routes, err := BuildRoutesFromAnnotation(routesAnnotation, hostIP, servicePodName, domainConfig)
+	// Step 3: Build routes from the annotation string using service pod name for upstreams
+	routes, err := BuildRoutesFromAnnotation(routesAnnotation, domainSuffix, servicePodName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build routes: %w", err)
 	}
 
-	// Step 5: Register each route with Caddy
+	// Step 4: Register each route with Caddy
 	var registrationErrors []error
 	for _, route := range routes {
 		if err := proxyManager.RegisterRoute(route); err != nil {

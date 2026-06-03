@@ -28,56 +28,17 @@ func GetCaddyAdminPort(rt runtime.Runtime, podName string) (string, error) {
 	return "", fmt.Errorf("admin port mapping not found in pod ports")
 }
 
-// DomainConfig holds configuration for domain generation with priority-based selection.
-type DomainConfig struct {
-	HostIP       string // Used for nip.io-based domains (lowest priority)
-	CustomDomain string // User-provided custom domain (medium priority)
-	CertDomain   string // Domain extracted from SSL certificate (highest priority)
-}
-
-// BuildRouteDomain generates a domain name for a route using priority-based selection:
-// 1. CertDomain (highest priority) - from wildcard SSL certificate
-// 2. CustomDomain (medium priority) - user-provided via --domain-name flag
-// 3. HostIP with nip.io (lowest priority) - default fallback for self-signed certificates.
-func BuildRouteDomain(subdomain string, config DomainConfig) string {
-	// Priority 1: Certificate domain (from wildcard cert)
-	if config.CertDomain != "" {
-		return fmt.Sprintf("%s.%s", subdomain, config.CertDomain)
-	}
-
-	// Priority 2: Custom domain (user-provided)
-	if config.CustomDomain != "" {
-		return fmt.Sprintf("%s.%s", subdomain, config.CustomDomain)
-	}
-
-	// Priority 3: nip.io with host IP (default fallback)
-	return fmt.Sprintf("%s.%s.nip.io", subdomain, config.HostIP)
-}
-
 // BuildRoutesFromAnnotation parses a routes annotation string and builds Route objects.
 // The annotation format is: "port:subdomain, port:subdomain, ...".
 // Example: "8081:catalog-ui, 8080:catalog-api".
-func BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName string, domainConfig *DomainConfig) ([]Route, error) {
+// The domainSuffix is pre-computed (e.g., "example.com" or "192.168.1.100.nip.io").
+func BuildRoutesFromAnnotation(routesAnnotation, domainSuffix, podName string) ([]Route, error) {
 	if routesAnnotation == "" {
 		return nil, nil
 	}
 
 	routes := []Route{}
 	const expectedParts = 2
-
-	// Use provided domain configuration or create default with HostIP
-	var config DomainConfig
-	if domainConfig != nil {
-		config = *domainConfig
-		// Ensure HostIP is set for fallback
-		if config.HostIP == "" {
-			config.HostIP = hostIP
-		}
-	} else {
-		config = DomainConfig{
-			HostIP: hostIP,
-		}
-	}
 
 	// Parse routes annotation (format: "port:subdomain, port:subdomain, ...")
 	for _, r := range strings.Split(routesAnnotation, ",") {
@@ -100,9 +61,10 @@ func BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName string, domainC
 		}
 
 		// Build route - use pod name as upstream since containers are in the same pod
+		// Domain is simply: subdomain.domainSuffix
 		route := Route{
 			ID:       fmt.Sprintf("%s--%s", podName, subdomain),
-			Domain:   BuildRouteDomain(subdomain, config),
+			Domain:   fmt.Sprintf("%s.%s", subdomain, domainSuffix),
 			Upstream: fmt.Sprintf("%s:%s", podName, port),
 			Terminal: true,
 		}

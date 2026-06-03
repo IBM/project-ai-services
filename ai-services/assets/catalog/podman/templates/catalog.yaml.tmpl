@@ -109,12 +109,12 @@ spec:
               key: db-password
         - name: AI_SERVICES_BASE_DIR
           value: "{{ .BaseDir }}"
-        - name: HOST_IP
-          value: "{{ .HostIP }}"
         - name: CADDY_ADMIN_URL
           value: "{{ .CaddyAdminURL }}"
         - name: CADDY_HTTPS_PORT
           value: "{{ .Values.caddy.httpsPort }}"
+        - name: DOMAIN_SUFFIX
+          value: "{{ .DomainSuffix }}"
       ports:
         - containerPort: 8080
           protocol: TCP

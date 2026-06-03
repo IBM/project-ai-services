@@ -1184,10 +1184,11 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 		return fmt.Errorf("CADDY_ADMIN_URL environment variable not set")
 	}
 
-	// Get host IP from env var (set during catalog configure)
-	hostIP := utils.GetEnv("HOST_IP", "")
-	if hostIP == "" {
-		return fmt.Errorf("HOST_IP environment variable not set")
+	// Get domain suffix from env var (set during catalog configure)
+	// This is pre-computed: certDomain OR customDomain OR hostIP.nip.io
+	domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
+	if domainSuffix == "" {
+		return fmt.Errorf("DOMAIN_SUFFIX environment variable not set")
 	}
 
 	// Register routes for each pod
@@ -1199,9 +1200,8 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 			constants.CaddyServerName,
 			routes,
 			adminURL,
-			hostIP,
+			domainSuffix,
 			podName,
-			nil, // domainConfig - nil for default nip.io domains
 		); err != nil {
 			registrationErrors = append(registrationErrors, fmt.Errorf("pod %s: %w", podName, err))
 
