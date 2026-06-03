@@ -718,6 +718,7 @@ const DigitalAssistantsPage = () => {
                 </Layer>
 
                 {/* Demos and Prototypes Section */}
+                {/* TODO: This needs to be updated, awaiting for response from the design team */}
                 <Layer withBackground className={styles.sideBySideColumn}>
                   <section className={styles.demosSection}>
                     <h4 className={styles.aboutSectionTitle}>
@@ -725,7 +726,7 @@ const DigitalAssistantsPage = () => {
                     </h4>
                     <div className={styles.demoCard}>
                       <img
-                        src="/images/videoThumbnail.png"
+                        src=""
                         alt="RAG Demo"
                         className={styles.demoImage}
                       />
