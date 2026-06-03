@@ -865,6 +865,7 @@ func addUsedResourcesByTemplateID(
 	pods, err := runtimeClient.ListPods(filters)
 	if err != nil {
 		logger.Warningf("Failed to list pods for template %s: %v\n", templateID, err)
+
 		return
 	}
 

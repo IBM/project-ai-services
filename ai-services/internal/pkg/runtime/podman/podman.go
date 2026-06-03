@@ -573,11 +573,23 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 	}, nil
 }
 
-// collectSpyreCards extracts Spyre card PCI addresses from container annotations.
+// collectSpyreCards extracts Spyre card PCI addresses from container environment variables.
 func collectSpyreCards(containerInspect *define.InspectContainerData, spyreCards *[]string) {
-	if containerInspect.Config != nil && containerInspect.Config.Annotations != nil {
-		if pciAddress, ok := containerInspect.Config.Annotations["SPYRE_PCI_ADDRESS"]; ok && pciAddress != "" {
-			*spyreCards = append(*spyreCards, pciAddress)
+	if containerInspect.Config != nil && containerInspect.Config.Env != nil {
+		for _, env := range containerInspect.Config.Env {
+			if strings.HasPrefix(env, "AIU_PCIE_IDS=") {
+				// Extract the value after "AIU_PCIE_IDS="
+				pciAddresses := strings.TrimPrefix(env, "AIU_PCIE_IDS=")
+				// Split by spaces and filter out empty strings
+				addresses := strings.Fields(pciAddresses)
+				for _, addr := range addresses {
+					if addr != "" {
+						*spyreCards = append(*spyreCards, addr)
+					}
+				}
+
+				return
+			}
 		}
 	}
 }
