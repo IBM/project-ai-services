@@ -11,6 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
@@ -744,11 +745,14 @@ func (s *ApplicationService) processServiceResources(
 
 	// Load allocated resources from deployed components for this service
 	// Pass countedComponents to avoid double-counting shared components
-	s.addComponentAllocatedResources(ctx, service.ID, catalogProvider, totals, countedComponents)
+	// Also collect used resources from component pods
+	s.addComponentAllocatedResources(ctx, service.ID, catalogProvider, runtimeClient, totals, countedComponents)
 
-	// Get pod name and fetch runtime resources
-	podName := getPodNameForService(appName, service.CatalogID)
-	addUsedResources(podName, runtimeClient, totals)
+	// Get pod name for service and fetch runtime resources
+	// Service pod names follow the pattern: {catalogID}-{instance-slug}
+	instanceSlug := podman.GenerateInstanceSlug(service.ID.String())
+	servicePodName := fmt.Sprintf("%s-%s", service.CatalogID, instanceSlug)
+	addUsedResources(servicePodName, runtimeClient, totals)
 }
 
 // addServiceAllocatedResources adds allocated resources from service metadata.
@@ -767,10 +771,12 @@ func (s *ApplicationService) addServiceAllocatedResources(
 // addComponentAllocatedResources adds allocated resources from the actual deployed component providers.
 // This ensures we only count resources for the specific component providers deployed for this service,
 // not all possible provider options. Components are tracked to avoid double-counting when shared across services.
+// Also collects used resources from component pods.
 func (s *ApplicationService) addComponentAllocatedResources(
 	ctx context.Context,
 	serviceID uuid.UUID,
 	catalogProvider *catalog.CatalogProvider,
+	runtimeClient runtime.Runtime,
 	totals *resourceTotals,
 	countedComponents map[uuid.UUID]bool,
 ) {
@@ -809,11 +815,17 @@ func (s *ApplicationService) addComponentAllocatedResources(
 			continue
 		}
 
-		// Add resources from this specific component provider
+		// Add allocated resources from this specific component provider
 		if runtimeMetadata.Resources != nil {
 			totals.allocatedCPU += runtimeMetadata.Resources.CPU
 			totals.allocatedMemory += runtimeMetadata.Resources.Memory
 		}
+
+		// Get used resources from component pod
+		// Component pod names follow the pattern: {type}-{instance-slug}
+		instanceSlug := podman.GenerateInstanceSlug(component.ID.String())
+		componentPodName := fmt.Sprintf("%s-%s", component.Type, instanceSlug)
+		addUsedResources(componentPodName, runtimeClient, totals)
 
 		// Mark this component as counted
 		countedComponents[dep.DependencyID] = true
@@ -869,12 +881,6 @@ func buildResourcesResponse(totals *resourceTotals) *types.ApplicationResourcesR
 		},
 		Accelerators: accelerators,
 	}
-}
-
-// getPodNameForService constructs the pod name for a service.
-func getPodNameForService(appName, serviceID string) string {
-	// Pod naming convention: appName--serviceID
-	return fmt.Sprintf("%s--%s", appName, serviceID)
 }
 
 // Made with Bob

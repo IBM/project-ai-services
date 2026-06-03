@@ -1139,13 +1139,19 @@ func (d *PodmanDeployer) getEnvParamsForComponent(podSpec *podmodels.PodSpec, pl
 	return env, nil
 }
 
-// generateInstanceSlug creates a short slug from an ID using SHA256 hash.
+// GenerateInstanceSlug creates a short slug from an ID using SHA256 hash.
 // Returns the first 10 characters of the hex-encoded hash.
-func generateInstanceSlug(id string) string {
+// This is used to generate pod names from database IDs.
+func GenerateInstanceSlug(id string) string {
 	hash := sha256.Sum256([]byte(id))
 	hexHash := hex.EncodeToString(hash[:])
 
 	return hexHash[:10]
+}
+
+// generateInstanceSlug is a wrapper for backward compatibility.
+func generateInstanceSlug(id string) string {
+	return GenerateInstanceSlug(id)
 }
 
 // registerApplicationRoutes registers routes for all services with Caddy proxy.
