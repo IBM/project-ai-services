@@ -97,9 +97,6 @@ const ReferenceUseCases = () => {
     [],
   );
   const [isPanelOpen, setIsPanelOpen] = useState(false);
-  const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(
-    null,
-  );
 
   const handleProviderChange = (checked: boolean, value: string) => {
     setSelectedProviders((prev) =>
@@ -385,8 +382,7 @@ const ReferenceUseCases = () => {
             description={sol.description}
             tags={sol.assets}
             category={sol.domain}
-            onViewDetails={(id) => {
-              setSelectedSolutionId(id);
+            onViewDetails={() => {
               setIsPanelOpen(true);
             }}
           />
@@ -411,9 +407,7 @@ const ReferenceUseCases = () => {
         open={isPanelOpen}
         onClose={() => {
           setIsPanelOpen(false);
-          setSelectedSolutionId(null);
         }}
-        solutionId={selectedSolutionId}
       />
     </>
   );
