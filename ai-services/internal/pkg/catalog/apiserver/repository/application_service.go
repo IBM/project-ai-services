@@ -376,7 +376,10 @@ func (s *ApplicationService) insertComponentRecords(
 		instanceUUID := uuid.New()
 
 		// Filter metadata to exclude sensitive data based on schema
-		metadata := s.filterComponentMetadata(comp.ComponentType, comp.ProviderID, comp.Params)
+		metadata, err := s.filterComponentMetadata(comp.ComponentType, comp.ProviderID, comp.Params)
+		if err != nil {
+			return nil, fmt.Errorf("failed to filter component metadata for %s: %w", hash, err)
+		}
 
 		component := &models.Component{
 			ID:       instanceUUID,
@@ -707,45 +710,50 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 
 // filterComponentMetadata filters component parameters to exclude sensitive data.
 // It reads the component's schema and excludes fields marked as sensitive (e.g., format: "password").
-func (s *ApplicationService) filterComponentMetadata(componentType, providerID string, params map[string]any) map[string]any {
+// Returns an error if the schema cannot be loaded or parsed.
+func (s *ApplicationService) filterComponentMetadata(componentType, providerID string, params map[string]any) (map[string]any, error) {
 	if params == nil {
-		return nil
+		return nil, nil
 	}
 
 	// Load component schema to determine which fields are sensitive
 	schema, err := s.provider.GetComponentProviderParams(componentType, providerID)
 	if err != nil {
-		logger.Warningf("Failed to load schema for component %s/%s: %v. Including all params in metadata.", componentType, providerID, err)
-		return params
+		return nil, fmt.Errorf("failed to load schema for component %s/%s: %w", componentType, providerID, err)
 	}
 
 	// Extract properties from schema
 	properties, ok := schema["properties"].(map[string]any)
 	if !ok {
-		logger.Warningf("Schema for component %s/%s has no properties. Including all params in metadata.", componentType, providerID)
-		return params
+		return nil, fmt.Errorf("schema for component %s/%s has no properties", componentType, providerID)
 	}
 
 	// Filter out sensitive fields recursively
-	return s.filterSensitiveFields(params, properties)
+	metadata, err := s.filterSensitiveFields(params, properties)
+	if err != nil {
+		return nil, fmt.Errorf("failed to filter sensitive fields: %w", err)
+	}
+
+	return metadata, nil
 }
 
 // filterSensitiveFields recursively filters out sensitive fields from params based on schema properties.
-func (s *ApplicationService) filterSensitiveFields(params map[string]any, properties map[string]any) map[string]any {
+// Returns an error if there are issues processing nested structures.
+func (s *ApplicationService) filterSensitiveFields(params map[string]any, properties map[string]any) (map[string]any, error) {
 	metadata := make(map[string]any)
 
 	for key, value := range params {
 		// Check if this field exists in the schema
 		fieldSchema, exists := properties[key].(map[string]any)
 		if !exists {
-			// If field not in schema, include it (backward compatibility)
-			metadata[key] = value
+			// If field not in schema, skip it (don't include in metadata)
 			continue
 		}
 
 		// Check if field is marked as sensitive (format: "password")
 		if format, hasFormat := fieldSchema["format"].(string); hasFormat && format == "password" {
 			logger.Infof("Excluding sensitive field '%s' from component metadata", key)
+
 			continue
 		}
 
@@ -754,7 +762,12 @@ func (s *ApplicationService) filterSensitiveFields(params map[string]any, proper
 			// Check if the field schema has nested properties
 			if nestedProps, hasNestedProps := fieldSchema["properties"].(map[string]any); hasNestedProps {
 				// Recursively filter nested object
-				metadata[key] = s.filterSensitiveFields(valueMap, nestedProps)
+				filteredNested, err := s.filterSensitiveFields(valueMap, nestedProps)
+				if err != nil {
+					return nil, fmt.Errorf("failed to filter nested field '%s': %w", key, err)
+				}
+				metadata[key] = filteredNested
+
 				continue
 			}
 		}
@@ -763,7 +776,7 @@ func (s *ApplicationService) filterSensitiveFields(params map[string]any, proper
 		metadata[key] = value
 	}
 
-	return metadata
+	return metadata, nil
 }
 
 // Made with Bob
