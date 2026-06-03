@@ -610,6 +610,11 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
         out_path.write_text(json.dumps({}, indent=2), encoding="utf-8")
         return table_count, process_time
 
+    # Determine if this is a DOCX file
+    from pathlib import Path
+    file_ext = Path(pdf_path).suffix.lower()
+    is_docx = file_ext == '.docx'
+    
     table_dict = {}
     for table_ix, table in enumerate(tqdm_wrapper(converted_doc.tables, desc=f"Processing table content of '{pdf_path}'")):
         table_dict[table_ix] = {}
@@ -621,7 +626,18 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
             caption = recover_table_caption_from_body_context(converted_doc, table_ix)
 
         table_dict[table_ix]["caption"] = caption
-        table_dict[table_ix]["page_number"] = table.prov[0].page_no if table.prov else None
+        
+        # Get page number from provenance if available (PDF files)
+        # For DOCX files, assign sequential page numbers based on table order
+        if table.prov and table.prov[0].page_no is not None:
+            table_dict[table_ix]["page_number"] = table.prov[0].page_no
+        elif is_docx:
+            # Assign sequential page numbers for DOCX files (1-based)
+            # This enables table merging logic to work for DOCX files
+            table_dict[table_ix]["page_number"] = table_ix + 1
+            logger.debug(f"Assigned page number {table_ix + 1} to DOCX table {table_ix}")
+        else:
+            table_dict[table_ix]["page_number"] = None
 
     # Merge tables that span multiple consecutive pages with matching headers
     logger.debug(f"Merging tables spanning multiple pages for '{pdf_path}'")
@@ -629,7 +645,9 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
 
     table_markdowns = [merged_table_dict[key]["markdown"] for key in sorted(merged_table_dict)]
     table_captions_list = [merged_table_dict[key]["caption"] for key in sorted(merged_table_dict)]
-    table_page_numbers = [merged_table_dict[key]["page_number"] for key in sorted(merged_table_dict)]
+    # For PDF files: extract actual page numbers
+    # For DOCX files: create list of None values (same length as other lists for zip())
+    table_page_numbers = [merged_table_dict[key]["page_number"] for key in sorted(merged_table_dict)] if not is_docx else [None] * len(merged_table_dict)
 
     # Summarize and classify tables - use markdown directly
     table_summaries, decisions = summarize_and_classify_tables(
