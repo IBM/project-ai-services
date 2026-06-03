@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useReducer, useMemo } from "react";
 import { AccordionItem, Checkbox } from "@carbon/react";
 import CatalogBrowseLayout from "@/layouts/CatalogBrowseLayout";
 import SolutionCard from "@/components/SolutionCard";
@@ -6,47 +6,146 @@ import SolutionDetailPanel from "@/components/SolutionDetailPanel";
 import { useUseCases } from "@/hooks/useUseCases";
 import { normalizeString } from "@/utils/string";
 
+// State type definition
+interface FilterState {
+  searchValue: string;
+  selectedProviders: string[];
+  selectedDomains: string[];
+  selectedAssets: string[];
+  selectedArchitectures: string[];
+  isPanelOpen: boolean;
+  selectedSolutionId: string | null;
+}
+
+// Action types
+type FilterAction =
+  | { type: "SET_SEARCH"; payload: string }
+  | { type: "TOGGLE_PROVIDER"; payload: { checked: boolean; value: string } }
+  | { type: "TOGGLE_DOMAIN"; payload: { checked: boolean; value: string } }
+  | { type: "TOGGLE_ASSET"; payload: { checked: boolean; value: string } }
+  | {
+      type: "TOGGLE_ARCHITECTURE";
+      payload: { checked: boolean; value: string };
+    }
+  | { type: "CLEAR_FILTERS" }
+  | { type: "OPEN_PANEL"; payload: string }
+  | { type: "CLOSE_PANEL" };
+
+// Initial state
+const initialState: FilterState = {
+  searchValue: "",
+  selectedProviders: [],
+  selectedDomains: [],
+  selectedAssets: [],
+  selectedArchitectures: [],
+  isPanelOpen: false,
+  selectedSolutionId: null,
+};
+
+// Reducer function
+const filterReducer = (
+  state: FilterState,
+  action: FilterAction,
+): FilterState => {
+  switch (action.type) {
+    case "SET_SEARCH":
+      return { ...state, searchValue: action.payload };
+
+    case "TOGGLE_PROVIDER":
+      return {
+        ...state,
+        selectedProviders: action.payload.checked
+          ? [...state.selectedProviders, action.payload.value]
+          : state.selectedProviders.filter((p) => p !== action.payload.value),
+      };
+
+    case "TOGGLE_DOMAIN":
+      return {
+        ...state,
+        selectedDomains: action.payload.checked
+          ? [...state.selectedDomains, action.payload.value]
+          : state.selectedDomains.filter((d) => d !== action.payload.value),
+      };
+
+    case "TOGGLE_ASSET":
+      return {
+        ...state,
+        selectedAssets: action.payload.checked
+          ? [...state.selectedAssets, action.payload.value]
+          : state.selectedAssets.filter((a) => a !== action.payload.value),
+      };
+
+    case "TOGGLE_ARCHITECTURE":
+      return {
+        ...state,
+        selectedArchitectures: action.payload.checked
+          ? [...state.selectedArchitectures, action.payload.value]
+          : state.selectedArchitectures.filter(
+              (a) => a !== action.payload.value,
+            ),
+      };
+
+    case "CLEAR_FILTERS":
+      return {
+        ...state,
+        searchValue: "",
+        selectedProviders: [],
+        selectedDomains: [],
+        selectedAssets: [],
+        selectedArchitectures: [],
+      };
+
+    case "OPEN_PANEL":
+      return {
+        ...state,
+        isPanelOpen: true,
+        selectedSolutionId: action.payload,
+      };
+
+    case "CLOSE_PANEL":
+      return {
+        ...state,
+        isPanelOpen: false,
+        selectedSolutionId: null,
+      };
+
+    default:
+      return state;
+  }
+};
+
 const UseCaseReferences = () => {
   const { useCases: solutions, isLoading, error } = useUseCases();
-  const [searchValue, setSearchValue] = useState("");
-  const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
-  const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
-  const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
-  const [selectedArchitectures, setSelectedArchitectures] = useState<string[]>(
-    [],
-  );
-  const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [state, dispatch] = useReducer(filterReducer, initialState);
+
+  const {
+    searchValue,
+    selectedProviders,
+    selectedDomains,
+    selectedAssets,
+    selectedArchitectures,
+    isPanelOpen,
+    selectedSolutionId,
+  } = state;
 
   const handleProviderChange = (checked: boolean, value: string) => {
-    setSelectedProviders((prev) =>
-      checked ? [...prev, value] : prev.filter((p) => p !== value),
-    );
+    dispatch({ type: "TOGGLE_PROVIDER", payload: { checked, value } });
   };
 
   const handleDomainChange = (checked: boolean, value: string) => {
-    setSelectedDomains((prev) =>
-      checked ? [...prev, value] : prev.filter((d) => d !== value),
-    );
+    dispatch({ type: "TOGGLE_DOMAIN", payload: { checked, value } });
   };
 
   const handleAssetChange = (checked: boolean, value: string) => {
-    setSelectedAssets((prev) =>
-      checked ? [...prev, value] : prev.filter((a) => a !== value),
-    );
+    dispatch({ type: "TOGGLE_ASSET", payload: { checked, value } });
   };
 
   const handleArchitectureChange = (checked: boolean, value: string) => {
-    setSelectedArchitectures((prev) =>
-      checked ? [...prev, value] : prev.filter((a) => a !== value),
-    );
+    dispatch({ type: "TOGGLE_ARCHITECTURE", payload: { checked, value } });
   };
 
   const handleClearFilters = () => {
-    setSearchValue("");
-    setSelectedProviders([]);
-    setSelectedDomains([]);
-    setSelectedAssets([]);
-    setSelectedArchitectures([]);
+    dispatch({ type: "CLEAR_FILTERS" });
   };
 
   const totalSelectedFilters =
@@ -280,24 +379,27 @@ const UseCaseReferences = () => {
     </>
   );
 
-  const results =
-    filteredSolutions.length > 0 ? (
-      <>
-        {filteredSolutions.map((sol) => (
-          <SolutionCard
-            key={sol.id}
-            id={sol.id}
-            title={sol.title}
-            description={sol.description}
-            tags={sol.assets}
-            category={sol.domain}
-            onViewDetails={() => {
-              setIsPanelOpen(true);
-            }}
-          />
-        ))}
-      </>
-    ) : null;
+  const results = isLoading ? (
+    <div>Loading use cases...</div>
+  ) : error ? (
+    <div>Error loading use cases: {error}</div>
+  ) : filteredSolutions.length > 0 ? (
+    <>
+      {filteredSolutions.map((sol) => (
+        <SolutionCard
+          key={sol.id}
+          id={sol.id}
+          title={sol.title}
+          description={sol.description}
+          tags={sol.assets}
+          category={sol.domain}
+          onViewDetails={(id) => {
+            dispatch({ type: "OPEN_PANEL", payload: id });
+          }}
+        />
+      ))}
+    </>
+  ) : null;
 
   return (
     <>
@@ -305,7 +407,9 @@ const UseCaseReferences = () => {
         title="Use case references"
         subtitle="Ready-to-explore use cases based on real-world AI solutions to help you envision how AI can solve common business problems—and accelerate your AI journey."
         searchValue={searchValue}
-        onSearchChange={setSearchValue}
+        onSearchChange={(value) =>
+          dispatch({ type: "SET_SEARCH", payload: value })
+        }
         totalSelectedFilters={totalSelectedFilters}
         onClearFilters={handleClearFilters}
         filterAccordions={filterAccordions}
@@ -316,8 +420,9 @@ const UseCaseReferences = () => {
       <SolutionDetailPanel
         open={isPanelOpen}
         onClose={() => {
-          setIsPanelOpen(false);
+          dispatch({ type: "CLOSE_PANEL" });
         }}
+        solutionId={selectedSolutionId}
       />
     </>
   );

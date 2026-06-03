@@ -50,7 +50,7 @@ const Navbar = (props: NavbarProps) => {
 
           <SideNavDivider />
 
-          <SideNavMenuItem as={NavLink} to={ROUTES.REFERENCE_USE_CASES}>
+          <SideNavMenuItem as={NavLink} to={ROUTES.USE_CASE_REFERENCES}>
             Reference use cases
           </SideNavMenuItem>
         </SideNavItems>

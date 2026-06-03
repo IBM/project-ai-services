@@ -78,7 +78,6 @@
   flex-direction: column;
   gap: spacing.$spacing-05;
   padding: spacing.$spacing-05;
-  border-radius: 4px;
   margin-bottom: spacing.$spacing-05;
 }
 
@@ -129,7 +128,6 @@
 
 .storyCard {
   padding: 0;
-  border-radius: 4px;
   overflow: hidden;
 }
 
@@ -150,7 +148,9 @@
 
   @include breakpoint.breakpoint(md) {
     width: 120px;
-    height: 120px;
+    height: auto;
+    min-height: 120px;
+    align-self: stretch;
   }
 }
 

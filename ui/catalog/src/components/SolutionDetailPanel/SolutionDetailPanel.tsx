@@ -8,6 +8,7 @@ import styles from "./SolutionDetailPanel.module.scss";
 interface SolutionDetailPanelProps {
   open: boolean;
   onClose: () => void;
+  solutionId: string | null;
 }
 
 const SolutionDetailPanel = ({

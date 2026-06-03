@@ -63,13 +63,13 @@
       "assets": [
         "Digital assistant"
       ],
-      "clientStories": [
-        {
-          "company": "MIDRANGE",
-          "description": "MIDRANGE (ITP Verlag GmbH) is a leading German media company and trusted information platform for IT professionals in small and medium-sized businesses. For more than 30 years, MIDRANGE has provided deep expertise on digital transformation, infrastructure, security, and modernization, serving as a go-to resource for decision-makers driving IT strategy. Through their editorial content, industry publications, and events such as the POW3R Conference, MIDRANGE connects the IBM i and IBM® Power® community and fosters knowledge sharing across the European IT landscape. Their long-standing partnerships with technology leaders ensure that readers gain timely insights into emerging innovations and industry best practices. By bridging independent analysis with community engagement, MIDRANGE continues to shape the conversation on the future of enterprise IT in Europe.\n\nAt their flagship POW3R Conference, MIDRANGE distributes presentation slides to participants after each event. However, with hundreds of presentations spanning two days, attendees often struggled to locate the specific information they needed. MIDRANGE wanted to enable faster and AI-powered search across all conference materials to create a real value-add for conference attendees. To address this, the organization explored solutions that could automatically index and categorize slide content in real time. This not only enhanced the attendee experience but also positioned MIDRANGE as an innovator in delivering smarter access to knowledge.\n\nWorking closely with IBM, MIDRANGE piloted a solution to make conference presentations searchable using large language models (LLMs) and open-source AI components. The project combined open-source software such as ChromaDB and IBM Granite Visual models for AI insights. Over an initial workshop and several follow-up calls, IBM Technical Sales Specialists guided MIDRANGE through the pilot. The solution was deployed as a first-of-its-kind AI application in their daily business with plans to expand to additional events and features such as speaker contact integration and downloadable presentations.\n\nThe AI-enabled search tool enhances the participant experience by helping attendees quickly find relevant material and increasing the long-term value of the conference. MIDRANGE has seen higher conference participation as attendees gain more value from the event as well as increased subscriptions to their online content platform. They have also gained new industry recognition as an early adopter of AI-powered event services. The solution has strengthened relationships with key partners who view MIDRANGE as a forward-thinking leader in the IT publishing space. It has also opened the door to new business opportunities, as other organizations now look to replicate this model for their own events.",
-          "url": "https://www.ibm.com/it-infrastructure/us-en/resources/power/ibm-i-customer-stories/"
-        }
-      ]
+      "featuredArticle": {
+        "company": "MIDRANGE",
+        "title": "AI-Powered Search Enhances Conference Experiences on IBM i",
+        "imagePath": "https://assets.ibm.com/is/image/ibm/adobestock_259078609?$original$&fmt=png-alpha&bfc=off",
+        "articleUrl": "https://www.ibm.com/downloads/documents/us-en/16ddd5a53eb94e4e",
+        "description": "MIDRANGE (ITP Verlag GmbH) Outcomes worked with IBM to implement an AI-powered search solution for its POW3R Conference using large language models (LLMs), opensource AI technologies, and IBM Granite Vision models. The solution enables attendees to quickly search and locate relevant content across hundreds of conference presentations, creating a smarter and more valuable conference experience."
+      }
     },
     {
       "id": "5",
@@ -86,7 +86,7 @@
       "featuredArticle": {
         "company": "Portolan",
         "title": "Portolan Modernizes Financial Software with AI Search on IBM Power",
-        "imagePath": "images/portolan.png",
+        "imagePath": "https://assets.ibm.com/is/image/ibm/06e2f56c8e3ab188-Edited?$original$&fmt=png-alpha&bfc=off",
         "articleUrl": "https://www.ibm.com/downloads/documents/us-en/1550f7e8f4d0d263"
       }
     },
@@ -137,10 +137,10 @@
       "creator": "IBM",
       "domain": "Banking & Finance",
       "architectures": [
-        "Deep process integration"
+        "Digitize documents"
       ],
       "assets": [
-        "Deep process integration"
+        "Digitize documents"
       ],
       "demo": "https://mediacenter.ibm.com/media/AI+on+PowerA+IBM+Power10+Entity+Extraction+%28Demo%29/1_0r3zgnd4",
       "demoTitle": "AI on Power: IBM Power10 Entity Extraction (Demo)",
@@ -158,10 +158,10 @@
       "creator": "IBM",
       "domain": "Enterprise Resource Planning",
       "architectures": [
-        "Deep process integration"
+        "Extract information"
       ],
       "assets": [
-        "Deep process integration"
+        "Extract information"
       ],
       "demo": "https://mediacenter.ibm.com/media/IBM+Spyre+for+Power%3A+Turn-key+AI/1_etcvyc6u",
       "demoTitle": "IBM Spyre Accelerator: Turn-key solution for AI enterprise workloads",
@@ -170,7 +170,7 @@
       "featuredArticle": {
         "company": "Hans Geis",
         "title": "Hans Geis Speeds Up Order Processing by 5X with AI on IBM i and Power",
-        "imagePath": "images/hans.png",
+        "imagePath": "https://assets.ibm.com/is/image/ibm/2021_SpencerLowell_WorkingWorld_11?$original$&fmt=png-alpha&bfc=off",
         "articleUrl": "https://www.ibm.com/downloads/documents/us-en/1443d5dc5ecf4367.",
         "description": "Global logistics provider and IBM Power client Hans Geis has followed the \"Deep process integration\" reference architecture with the \"Extract and tag information\" AI service within their order processing pipeline for incoming quote requests. Their end customers raise thousands of quote requests daily to ask Hans Geis and their competitors for transportation services of cargo they need to get shipped. In this competitive market, answering to requests quickly matters because logistic companies that respond timely are more likely to win an order.\n\nIn a joint project, Hans Geis and IBM have integrated the \"Extract and tag\" AI service into Hans Geis' ERP system running on IBM i, automating the order processing pipeline for quote requests. In their staging system, Hans Geis has measured a speed-up of 5x for their order processing process and an individual employee productivity gain of 80%."
       }
@@ -201,15 +201,15 @@
       "creator": "IBM",
       "domain": "Real estate",
       "architectures": [
-        "Digital assistant"
+        "XXXXXXXXXXX"
       ],
       "assets": [
-        "Digital assistant"
+        "XXXXXXXXXXX"
       ],
       "featuredArticle": {
-        "company": " Edsvard Hallbarhet AB",
+        "company": "Edsvard Hallbarhet AB",
         "title": "From contract headache to strategic asset: How Edsvard makes sense of unstructured real estate data with IBM Cloud and watsonx.data",
-        "imagePath": "images/estate.png",
+        "imagePath": "https://assets.ibm.com/is/image/ibm/202410_thomasprior_nyc_cityscape_0003?$original$&fmt=png-alpha&bfc=off",
         "articleUrl": "https://www.ibm.com/new/product-blog/how-edsvard-makes-sense-of-unstructured-real-estate-data-with-ibm-cloud-and-watsonx-data"
       },
       "partnerStories": [
@@ -239,7 +239,7 @@
       "featuredArticle": {
         "company": "BECOM Electronics GmbH",
         "title": "AI on IBM i Optimizes Production Planning",
-        "imagePath": "images/production.png",
+        "imagePath": "https://assets.ibm.com/is/image/ibm/202502_ibm_z-inside_ibm_tp_day_01_0619?$original$&fmt=png-alpha&bfc=off",
         "articleUrl": "https://www.ibm.com/downloads/documents/us-en/15db45f02d520e7a"
       }
     }
