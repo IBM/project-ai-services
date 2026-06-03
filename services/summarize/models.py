@@ -3,7 +3,6 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from summarize.settings import settings
 
 class SummarizationType(str, Enum):
     DIRECT = "direct"

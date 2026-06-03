@@ -7,7 +7,6 @@ Provides CRUD operations with proper error handling and transaction management.
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy import select, update, delete, func, or_, and_
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from common.misc_utils import get_logger

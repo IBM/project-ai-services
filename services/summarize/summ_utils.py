@@ -1,21 +1,14 @@
 import re
-from typing import Optional
+
 import pypdfium2 as pdfium
 from pydantic import BaseModel, Field
 import threading
-from datetime import datetime, timezone
-from datetime import datetime
-from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional
 
-from summarize.settings import settings
 from common.misc_utils import set_log_level, get_logger, resolve_model_max_len
-
-
 from common.misc_utils import get_logger
 from summarize.settings import settings
 
-from common.misc_utils import get_utc_timestamp
 
 set_log_level(settings.common.app.log_level)
 logger = get_logger("summarize")
