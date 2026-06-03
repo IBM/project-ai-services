@@ -6,10 +6,11 @@ import common.db_utils as db
 from common.emb_utils import get_embedder
 from common.misc_utils import *
 from digitize.doc_utils import process_documents
-from digitize.digitize_utils import get_utc_timestamp, get_job_document_stats
+from digitize.digitize_utils import get_job_document_stats
 from digitize.models import JobStatus, DocStatus
 from digitize.settings import settings
 from digitize.db_operations import get_status_manager, DatabaseStatusManager
+from common.misc_utils import get_utc_timestamp
 
 logger = get_logger("ingest")
 

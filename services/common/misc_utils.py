@@ -1,6 +1,9 @@
 import hashlib
 import logging
 import os
+import shutil
+from pathlib import Path
+
 import requests
 from contextvars import ContextVar
 from requests.adapters import HTTPAdapter
@@ -10,7 +13,6 @@ request_id_ctx = ContextVar("request_id", default="-")
 
 # Global SESSION for all LLM and embedding API calls
 SESSION = None
-
 
 class DoclingConversionError(Exception):
     """Exception raised when Docling document conversion fails.
@@ -319,3 +321,47 @@ def validate_document_file(filename: str, content) -> None:
 
 def get_unprocessed_files(original_files, processed_pdfs):
     return set(original_files).difference(set(processed_pdfs))
+
+def get_utc_timestamp() -> str:
+    """
+    Generate UTC timestamp in ISO format with 'Z' suffix.
+
+    Returns:
+        ISO 8601 formatted timestamp string with 'Z' suffix
+    """
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+logger = get_logger("cleanup")
+
+is_debug = logger.isEnabledFor(logging.DEBUG)
+
+def cleanup_staging_directory(job_id: str, staging_base_dir: Path) -> bool:
+    """
+    Clean up the staging directory for a specific job.
+
+    This helper function safely removes the staging directory and all its contents.
+    It's used across multiple places in the codebase to ensure consistent cleanup behavior.
+
+    Args:
+        job_id: Unique identifier of the job
+        staging_base_dir: Base directory where staging directories are created
+
+    Returns:
+        True if cleanup was successful or directory didn't exist, False if cleanup failed
+    """
+
+    staging_dir = staging_base_dir / job_id
+
+    if not staging_dir.exists():
+        logger.debug(f"Staging directory does not exist (already cleaned up): {staging_dir}")
+        return True
+
+    try:
+        shutil.rmtree(staging_dir)
+        logger.info(f"🗑️  Cleaned up staging directory: {staging_dir}")
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to clean up staging directory {staging_dir}: {e}")
+        return False

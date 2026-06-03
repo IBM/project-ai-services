@@ -21,6 +21,24 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
       automountServiceAccountToken: false
+      initContainers:
+        - name: summarize-db-init
+          image: "{{ .Values.summarize.image }}"
+          command: [ "/var/venv/bin/python", "db/scripts/init_db.py" ]
+          env:
+            - name: POSTGRES_HOST
+              value: "{{ .AppName }}--postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: "{{ .Values.summarize.database }}"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "postgres-credentials"
+                  key: password
       containers:
         - name: summarize-api
           image: "{{ .Values.summarize.image }}"
@@ -38,6 +56,23 @@ spec:
             - "--http"
             - "httptools"
           env:
+            - name: POSTGRES_HOST
+              value: "postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: "{{ .Values.digitize.database }}"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "postgres-credentials"
+                  key: password
+            - name: DB_POOL_SIZE
+              value: "5"
+            - name: DB_MAX_OVERFLOW
+              value: "5"
             - name: PORT
               value: "6000"
             - name: LLM_ENDPOINT
