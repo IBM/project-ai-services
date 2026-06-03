@@ -38,6 +38,8 @@ import (
 	k8syaml "sigs.k8s.io/yaml"
 )
 
+const defaultHTTPSPort = "443"
+
 // ComponentInfo holds the information derived from a deployed component.
 type ComponentInfo struct {
 	Endpoint string
@@ -1168,7 +1170,7 @@ func generateInstanceSlug(id string) string {
 func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *DeploymentPlan) error {
 	logger.Infof("Registering routes for application '%s'\n", plan.ApplicationName)
 
-	adminURL, hostIP, err := d.getCaddyConfiguration()
+	adminURL, hostIP, httpsPort, err := d.getCaddyConfiguration()
 	if err != nil {
 		return err
 	}
@@ -1180,7 +1182,7 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 			continue
 		}
 
-		if err := d.registerServiceRoutes(ctx, svc, adminURL, hostIP, &registrationErrors); err != nil {
+		if err := d.registerServiceRoutes(ctx, svc, adminURL, hostIP, httpsPort, &registrationErrors); err != nil {
 			registrationErrors = append(registrationErrors, err)
 		}
 	}
@@ -1195,18 +1197,20 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 }
 
 // getCaddyConfiguration retrieves Caddy admin URL and host IP from environment variables.
-func (d *PodmanDeployer) getCaddyConfiguration() (string, string, error) {
+func (d *PodmanDeployer) getCaddyConfiguration() (string, string, string, error) {
 	adminURL := utils.GetEnv("CADDY_ADMIN_URL", "")
 	if adminURL == "" {
-		return "", "", fmt.Errorf("CADDY_ADMIN_URL environment variable not set")
+		return "", "", "", fmt.Errorf("CADDY_ADMIN_URL environment variable not set")
 	}
 
 	hostIP := utils.GetEnv("HOST_IP", "")
 	if hostIP == "" {
-		return "", "", fmt.Errorf("HOST_IP environment variable not set")
+		return "", "", "", fmt.Errorf("HOST_IP environment variable not set")
 	}
 
-	return adminURL, hostIP, nil
+	httpsPort := utils.GetEnv("CADDY_HTTPS_PORT", defaultHTTPSPort)
+
+	return adminURL, hostIP, httpsPort, nil
 }
 
 // registerServiceRoutes registers routes for a single service and updates its endpoints in the database.
@@ -1215,6 +1219,7 @@ func (d *PodmanDeployer) registerServiceRoutes(
 	svc *ServicePlan,
 	adminURL string,
 	hostIP string,
+	httpsPort string,
 	registrationErrors *[]error,
 ) error {
 	var serviceEndpoints []map[string]any
@@ -1238,8 +1243,14 @@ func (d *PodmanDeployer) registerServiceRoutes(
 
 		// Convert registered routes to endpoint format
 		for _, route := range registeredRoutes {
+			url := fmt.Sprintf("https://%s", route.Domain)
+			if httpsPort != defaultHTTPSPort {
+				// if not 443 then we need to append the port too
+				url = url + ":" + httpsPort
+			}
+
 			endpoint := map[string]any{
-				"endpoint": fmt.Sprintf("https://%s", route.Domain),
+				"endpoint": url,
 				"type":     "external",
 			}
 			serviceEndpoints = append(serviceEndpoints, endpoint)
