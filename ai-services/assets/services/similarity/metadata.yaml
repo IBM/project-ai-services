@@ -1,6 +1,6 @@
 # Service identification
 id: similarity
-name: "Similarity Search"
+name: "Find Similar Items"
 description: "Finds semantically similar content using embeddings and reranking"
 type: service
 
@@ -16,5 +16,7 @@ dependencies:
   - id: vector_store
   - id: embedding
   - id: reranker
+
+standalone: true
 
 # Made with Bob
