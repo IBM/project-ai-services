@@ -1,4 +1,4 @@
-import { Tag, IconButton, Tooltip } from "@carbon/react";
+import { Tag, Tooltip, ClickableTile } from "@carbon/react";
 import {
   ArrowRight,
   AgricultureAnalytics,
@@ -12,6 +12,7 @@ import {
   UserService,
   UserMultiple,
   Hotel,
+  Industry,
 } from "@carbon/icons-react";
 import styles from "./SolutionCard.module.scss";
 
@@ -29,7 +30,7 @@ const categoryIcons: Record<
   React.ComponentType<{ size?: string | number }>
 > = {
   Agriculture: AgricultureAnalytics,
-  "Banking and Finance": PiggyBank,
+  "Banking & Finance": PiggyBank,
   "Dev operations": IbmZOpenEditor,
   "Enterprise resource planning": IbmPlanningAnalytics,
   Healthcare: Stethoscope,
@@ -37,7 +38,8 @@ const categoryIcons: Record<
   "IT operations": SettingsServices,
   "Professional services": UserService,
   "Public sector": UserMultiple,
-  "Real estates": Hotel,
+  "Real estate": Hotel,
+  Manufacturing: Industry,
 };
 
 const SolutionCard = ({
@@ -52,7 +54,7 @@ const SolutionCard = ({
   const primaryTag = tags[0] || "Digital assistant";
 
   return (
-    <div className={styles.card}>
+    <ClickableTile className={styles.card} onClick={() => onViewDetails?.(id)}>
       <div className={styles.cardHeader}>
         <div className={styles.iconContainer}>
           <IconComponent size={32} />
@@ -74,16 +76,9 @@ const SolutionCard = ({
         <Tag type="gray" size="md">
           {primaryTag}
         </Tag>
-        <IconButton
-          kind="ghost"
-          size="sm"
-          label="View details"
-          onClick={() => onViewDetails?.(id)}
-        >
-          <ArrowRight size={20} />
-        </IconButton>
+        <ArrowRight size={20} />
       </div>
-    </div>
+    </ClickableTile>
   );
 };
 

@@ -1,0 +1,234 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/type";
+@use "@carbon/react/scss/breakpoint";
+
+.panelContent {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-06;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-07;
+  padding-bottom: spacing.$spacing-06;
+  border-bottom: 1px solid var(--cds-border-subtle-01);
+}
+
+.description {
+  @include type.type-style("body-long-01");
+}
+
+.tags {
+  display: flex;
+  align-items: center;
+  gap: spacing.$spacing-05;
+}
+
+.certifiedTag {
+  display: inline-flex;
+  align-items: center;
+  gap: spacing.$spacing-02;
+  @include type.type-style("body-short-01");
+}
+
+.badgeIcon {
+  color: var(--cds-support-success);
+}
+
+.domainSection,
+.demoSection,
+.storiesSection {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--cds-border-subtle-01);
+}
+
+.domainSection {
+  gap: spacing.$spacing-02;
+  padding-bottom: spacing.$spacing-07;
+}
+
+.domainSectionTitle {
+  @include type.type-style("label-01");
+}
+
+.domainList {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+
+  li {
+    @include type.type-style("body-long-01");
+  }
+}
+
+.demoSection {
+  gap: spacing.$spacing-05;
+  padding-bottom: spacing.$spacing-05;
+}
+
+.demoSectionTitle {
+  @include type.type-style("heading-compact-02");
+}
+
+.demoCard {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-05;
+  padding: spacing.$spacing-05;
+  margin-bottom: spacing.$spacing-05;
+}
+
+.demoCardTitle {
+  @include type.type-style("heading-03");
+}
+
+.demoCardDescription {
+  @include type.type-style("body-long-02");
+}
+
+.demoCardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: spacing.$spacing-05;
+  margin-top: spacing.$spacing-03;
+}
+
+.demoDuration {
+  @include type.type-style("body-compact-01");
+  color: var(--cds-text-secondary);
+}
+
+.demoLink {
+  display: inline-flex;
+  align-items: center;
+  gap: spacing.$spacing-02;
+  text-decoration: none;
+}
+
+.storiesSection {
+  gap: spacing.$spacing-05;
+  border-bottom: none;
+  padding-top: spacing.$spacing-03;
+  padding-bottom: 0;
+}
+
+.storiesSectionTitle {
+  @include type.type-style("heading-02");
+}
+
+.storiesContainer {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-03;
+}
+
+.storyCard {
+  padding: 0;
+  overflow: hidden;
+}
+
+.storyCardContent {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+
+  @include breakpoint.breakpoint(md) {
+    flex-direction: row;
+  }
+}
+
+.storyCardImage {
+  flex-shrink: 0;
+  width: 100%;
+  height: 200px;
+
+  @include breakpoint.breakpoint(md) {
+    width: 120px;
+    height: auto;
+    min-height: 120px;
+    align-self: stretch;
+  }
+}
+
+.story {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-04;
+}
+
+.storyCompany {
+  @include type.type-style("heading-01");
+}
+
+.storyDescription {
+  @include type.type-style("body-long-01");
+  margin-top: spacing.$spacing-04;
+}
+
+.demoButton {
+  justify-content: flex-start;
+  max-width: fit-content;
+}
+
+.storyImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.storyCardText {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-05;
+  padding: spacing.$spacing-05;
+}
+
+.storyCardTitle {
+  @include type.type-style("heading-03");
+  margin: 0;
+}
+
+.storyLink {
+  display: inline-flex;
+  align-items: center;
+  gap: spacing.$spacing-02;
+  text-decoration: none;
+  margin-top: auto;
+  align-self: flex-end;
+}
+
+.testimonialSection {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-05;
+  padding-top: spacing.$spacing-04;
+  border-top: none;
+}
+
+.testimonialContent {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-05;
+}
+
+.testimonialCompany {
+  @include type.type-style("heading-02");
+  margin: 0;
+}
+
+.testimonialQuote {
+  @include type.type-style("body-long-02");
+  font-style: italic;
+  margin: 0;
+}
+
+.testimonialAttribution {
+  @include type.type-style("body-long-02");
+  margin: 0;
+}

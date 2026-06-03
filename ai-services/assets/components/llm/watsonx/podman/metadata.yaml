@@ -1,6 +1,10 @@
 name: llm
 version: "1.0.0"
 
+podTemplateExecutions:
+  - [watsonx-secret.yaml.tmpl]
+  - [watsonx-server.yaml.tmpl]
+
 # Resource requirements
 resources:
   cpu: 2
