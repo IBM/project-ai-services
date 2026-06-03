@@ -1071,6 +1071,11 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component"
                     }
                 },
+                "params": {
+                    "description": "Service-level parameters",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
                 "version": {
                     "type": "string"
                 }

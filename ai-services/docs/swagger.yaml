@@ -49,6 +49,10 @@ definitions:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component'
         type: array
+      params:
+        additionalProperties: {}
+        description: Service-level parameters
+        type: object
       version:
         type: string
     required:
