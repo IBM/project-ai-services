@@ -1250,8 +1250,8 @@ func (d *PodmanDeployer) registerServiceRoutes(
 			}
 
 			endpoint := map[string]any{
-				"endpoint": url,
-				"type":     "external",
+				"type": "external",
+				"url":  url,
 			}
 			serviceEndpoints = append(serviceEndpoints, endpoint)
 		}
@@ -1269,8 +1269,8 @@ func (d *PodmanDeployer) registerServiceRoutes(
 }
 
 // updateComponentEndpointsInDB updates component endpoints in the database.
-// Component endpoints are internal (not exposed via Caddy) and stored in format.
-// {"host": "pod-name", "port": "8080", "type": "internal"}.
+// Component endpoints are internal (not exposed via Caddy) and stored in list format.
+// [{"type": "internal", "url": "http://host:port"}].
 func (d *PodmanDeployer) updateComponentEndpointsInDB(comp *ComponentPlan) error {
 	if comp.DatabaseID == uuid.Nil {
 		logger.Infof("Component %s has no database ID, skipping endpoint update\n", comp.ComponentType)
@@ -1292,15 +1292,25 @@ func (d *PodmanDeployer) updateComponentEndpointsInDB(comp *ComponentPlan) error
 		return fmt.Errorf("invalid endpoint data format for component %s", comp.ComponentType)
 	}
 
-	// Add type field to indicate this is an internal endpoint
-	endpointMap["type"] = "internal"
+	// Build URL from host and port
+	host := endpointMap["host"].(string)
+	port := endpointMap["port"].(string)
+
+	// Create endpoint list with type and url
+	url := fmt.Sprintf("http://%s:%s", host, port)
+	endpointsList := []map[string]any{
+		{
+			"type": "internal",
+			"url":  url,
+		},
+	}
 
 	// Update component endpoints in database
-	if err := d.componentRepo.UpdateEndpoints(context.Background(), comp.DatabaseID, endpointMap); err != nil {
+	if err := d.componentRepo.UpdateEndpoints(context.Background(), comp.DatabaseID, endpointsList); err != nil {
 		return fmt.Errorf("failed to update component %s endpoints: %w", comp.ComponentType, err)
 	}
 
-	logger.Infof("Updated component %s with internal endpoint in database: %v\n", comp.ComponentType, endpointMap)
+	logger.Infof("Updated component %s with internal endpoint in database: %v\n", comp.ComponentType, endpointsList)
 
 	return nil
 }
