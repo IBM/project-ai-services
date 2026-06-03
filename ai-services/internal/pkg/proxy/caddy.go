@@ -9,7 +9,6 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // caddyManager implements ProxyManager interface for Caddy.
@@ -139,7 +138,8 @@ func (c *caddyManager) createRoute(routeConfig map[string]interface{}) error {
 //   - appName: Name of the application (e.g., "ai-services" for catalog)
 //   - serverName: Caddy server name (e.g., "ai_services")
 //   - routesAnnotation: Routes annotation value in format "port:subdomain,port:subdomain,..."
-//   - caddyPodName: Name of the Caddy pod
+//   - adminURL: Caddy admin API URL (e.g., "http://localhost:37249" or "http://ai-services--caddy:2019")
+//   - hostIP: Host IP for building route domains (e.g., "192.168.1.100")
 //   - servicePodName: Name of the service pod for upstream configuration
 //
 // Returns:
@@ -150,23 +150,14 @@ func RegisterRoutesForAppAndReturn(
 	appName string,
 	serverName string,
 	routesAnnotation string,
-	caddyPodName string,
+	adminURL string,
+	hostIP string,
 	servicePodName string,
 ) ([]Route, error) {
-	// Step 1: Get Caddy admin port from Caddy pod port mappings
-	adminPort, err := GetCaddyAdminPort(rt, caddyPodName)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"failed to get Caddy admin port, routes not registered: %w",
-			err,
-		)
-	}
-
-	// Step 2: Create proxy manager with the discovered admin URL
-	adminURL := fmt.Sprintf("http://localhost:%s", adminPort)
+	// Step 1: Create proxy manager with the provided admin URL
 	proxyManager := NewCaddyManager(adminURL, serverName)
 
-	// Step 3: Perform health check on Caddy
+	// Step 2: Perform health check on Caddy
 	if err := proxyManager.HealthCheck(); err != nil {
 		return nil, fmt.Errorf(
 			"caddy health check failed, routes not registered: %w",
@@ -174,19 +165,13 @@ func RegisterRoutesForAppAndReturn(
 		)
 	}
 
-	// Step 4: Get host IP for route domain generation
-	hostIP, err := utils.GetHostIP()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get host IP: %w", err)
-	}
-
-	// Step 5: Build routes from the annotation string using service pod name for upstreams
+	// Step 3: Build routes from the annotation string using service pod name for upstreams
 	routes, err := BuildRoutesFromAnnotation(routesAnnotation, hostIP, servicePodName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build routes: %w", err)
 	}
 
-	// Step 6: Register each route with Caddy
+	// Step 4: Register each route with Caddy
 	var registrationErrors []error
 	for _, route := range routes {
 		if err := proxyManager.RegisterRoute(route); err != nil {

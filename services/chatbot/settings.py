@@ -2,14 +2,15 @@
 Configuration settings for Chatbot/RAG service.
 These values can be overridden via environment variables.
 """
+from typing import ClassVar
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, create_llm_session
+import common.misc_utils as misc_utils
 from common.settings import Settings as CommonSettings
 
 logger = get_logger("settings")
-
 
 class QueryRephrasingConfig(BaseSettings):
     """Query rephrasing configuration for conversational RAG."""
@@ -122,6 +123,13 @@ class RAGConfig(BaseSettings):
     """RAG retrieval and ranking settings."""
     
     model_config = SettingsConfigDict(env_prefix="CHATBOT_")
+    DEFAULT_SYSTEM_PROMPT: ClassVar[str] = (
+        "You are a helpful, conversational AI assistant. "
+        "Engage naturally with users across multiple turns of conversation. "
+        "Provide clear, accurate, and contextually relevant responses. "
+        "Reference previous exchanges when appropriate to maintain conversation flow."
+        "Answer only the specific question asked. Do not add conversational filler, offer additional assistance, suggest follow-up steps, or ask follow-up questions at the end of your response. End your response immediately once the question has been answered."
+    )
 
     search_mode: str = Field(
         default="hybrid",
@@ -161,17 +169,12 @@ class RAGConfig(BaseSettings):
         description="Estimated token count for query prompt template",
     )
 
-    conversational_rag_initial_system_message: str = Field(
-        default=(
-            "You are a helpful, conversational AI assistant. "
-            "Engage naturally with users across multiple turns of conversation. "
-            "Provide clear, accurate, and contextually relevant responses. "
-            "Reference previous exchanges when appropriate to maintain conversation flow."
-        ),
+    system_prompt: str = Field(
+        default=DEFAULT_SYSTEM_PROMPT,
         description="Initial system prompt for conversational behavior",
     )
 
-    conversational_rag_query_system_message: str = Field(
+    query_system_prompt: str = Field(
         default=(
             "Retrieved Context:\n{context}\n\n"
             "Rephrased Query: {rephrased_query}\n\n"
@@ -227,6 +230,11 @@ class RAGConfig(BaseSettings):
         description="German prompt template for query streaming",
     )
 
+    llm_validate_custom_system_prompt: bool = Field(
+        default=True,
+        description="Enable/disable LLM-based validation for custom system prompts"
+    )
+
     @field_validator('score_threshold')
     @classmethod
     def validate_score_threshold(cls, v):
@@ -262,6 +270,78 @@ class RAGConfig(BaseSettings):
             logger.warning(f"Setting prompt_template_token_count to default '250' as it is missing in the settings")
             return 250
         return v
+    @field_validator('system_prompt', mode='after')
+    @classmethod
+    def validate_system_prompt(cls, v, info):
+        """Validate system_prompt with language detection, warning fallback and LLM validation."""
+        default_prompt = cls.DEFAULT_SYSTEM_PROMPT
+        
+        # Basic validation: check if prompt is not empty and has reasonable length
+        v_stripped = v.strip()
+        if len(v_stripped) == 0:
+            return default_prompt
+        
+        if len(v_stripped) < 10:
+            logger.warning(
+                f"system_prompt too short ({len(v_stripped)} chars). "
+                "Falling back to default system prompt."
+            )
+            return default_prompt
+        
+        if len(v_stripped) > 5000:
+            logger.warning(
+                f"system_prompt too long ({len(v_stripped)} chars). "
+                "Truncating to 5000 characters."
+            )
+            v_stripped = v_stripped[:5000]
+        
+        # Language detection: Only allow English custom system prompts
+        try:
+            from common.lang_utils import detect_language, lang_en
+            detected_lang = detect_language(v_stripped, min_confidence=0.7)
+            if detected_lang != lang_en:
+                logger.warning(
+                    f"Custom system prompt detected as non-English language ({detected_lang}). "
+                    "Custom system prompts are only supported in English. "
+                    "Falling back to default system prompt."
+                )
+                return default_prompt
+            logger.info("Custom system prompt language validation passed (English detected)")
+        except Exception as e:
+            logger.warning(f"Error during language detection for custom system prompt: {e}. Proceeding with validation.")
+        
+        # LLM-based validation (if enabled)
+        llm_validation_enabled = info.data.get('llm_validate_custom_system_prompt', True)
+        if llm_validation_enabled:
+            try:
+                from chatbot.prompt_validator import validate_prompt_with_llm
+                if misc_utils.SESSION is None:
+                    create_llm_session(pool_maxsize=1)
+                
+                validation_result = validate_prompt_with_llm(
+                    v_stripped,
+                    prompt_type="initial_system",
+                    enable_semantic_check=True,
+                    enable_injection_check=True
+                )
+                
+                if not validation_result.is_valid():
+                    logger.warning(
+                        f"LLM validation failed for system_prompt: "
+                        f"{validation_result.reason}. "
+                        f"Falling back to default system prompt."
+                    )
+                    return default_prompt
+                
+                logger.info(
+                    f"LLM validation passed for system_prompt: "
+                    f"{validation_result.reason}"
+                )
+            except Exception as e:
+                logger.warning(f"Error during LLM validation: {e}. Proceeding with basic validation only.")
+        
+        logger.info("Using custom system_prompt from environment")
+        return v_stripped
 
 class Settings(BaseSettings):
     common: CommonSettings = Field(default_factory=CommonSettings)

@@ -5,6 +5,7 @@ import (
 	"maps"
 	"net"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -164,6 +165,72 @@ func getDescription(n *yaml.Node) string {
 	desc := comment[idx+len("@description"):]
 
 	return strings.TrimSpace(desc)
+}
+
+// NodeProcessor is a function type for processing individual yaml nodes.
+// It receives the key node, value node, and returns an error if processing fails.
+type NodeProcessor func(keyNode, valueNode *yaml.Node) error
+
+// ProcessYAMLNode recursively processes a yaml.Node tree with a custom processor function.
+// This is a generic traversal function that can be used for various node processing tasks.
+// TODO: Utilize this new helper method to process any HeadCommentNodes and remove the older methods.
+func ProcessYAMLNode(node *yaml.Node, processor NodeProcessor) error {
+	if node == nil {
+		return nil
+	}
+
+	switch node.Kind {
+	case yaml.DocumentNode:
+		return processDocumentNode(node, processor)
+	case yaml.MappingNode:
+		return processMappingNode(node, processor)
+	case yaml.SequenceNode:
+		return processSequenceNode(node, processor)
+	}
+
+	return nil
+}
+
+// processDocumentNode processes a document node by recursively processing its children.
+func processDocumentNode(node *yaml.Node, processor NodeProcessor) error {
+	for _, child := range node.Content {
+		if err := ProcessYAMLNode(child, processor); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// processMappingNode processes a mapping node by applying the processor to each key-value pair.
+func processMappingNode(node *yaml.Node, processor NodeProcessor) error {
+	for i := 0; i < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+
+		// Apply processor to this key-value pair
+		if err := processor(keyNode, valueNode); err != nil {
+			return err
+		}
+
+		// Recursively process nested structures
+		if err := ProcessYAMLNode(valueNode, processor); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// processSequenceNode processes a sequence node by recursively processing its children.
+func processSequenceNode(node *yaml.Node, processor NodeProcessor) error {
+	for _, child := range node.Content {
+		if err := ProcessYAMLNode(child, processor); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func FlattenNode(prefix string, n *yaml.Node, descMap map[string]string) {
@@ -465,4 +532,37 @@ func CreateDir(path string) error {
 	}
 
 	return nil
+}
+
+func ResolvePodmanURI() (string, error) {
+	if v, found := os.LookupEnv("CONTAINER_HOST"); found {
+		return v, nil
+	}
+
+	if os.Geteuid() == 0 {
+		return getPodmanURIAsRoot()
+	}
+
+	return fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", os.Getuid()), nil
+}
+
+// getPodmanURIAsRoot determines the appropriate Podman socket URI when running with root privileges.
+// If the process was elevated via sudo (SUDO_USER is set), it returns the socket path
+// for the original user's rootless Podman instance to maintain user context.
+// Otherwise, it returns the system-wide root Podman socket path.
+func getPodmanURIAsRoot() (string, error) {
+	sudoUser := os.Getenv("SUDO_USER")
+	if sudoUser == "" {
+		return "unix:///run/podman/podman.sock", nil
+	}
+
+	u, err := user.Lookup(sudoUser)
+	if err != nil {
+		return "", fmt.Errorf("failed to lookup user %s: %w", sudoUser, err)
+	}
+
+	return fmt.Sprintf(
+		"unix:///run/user/%s/podman/podman.sock",
+		u.Uid,
+	), nil
 }

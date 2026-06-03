@@ -73,7 +73,13 @@ def classify_license(trivy_data, parlay_data):
             "License by Trivy": trivy_pkg_license,
             "License by Parlay": parlay_pkg_license,
         }
-        
+
+        # TODO: Remove this temporary override after Parlay fixes PyPI license enrichment.
+        # Upstream issue: https://github.com/snyk/parlay/issues/146
+        if pkg_name == "scipy" or pkg_name == "pandas":
+            pkg_licenses = "BSD-3-Clause"
+            pkg_license_dic["License by Parlay"] = pkg_licenses
+
         if is_pkg_license_approved(pkg_name, pkg_licenses, approved_pkgs):
             classified_pkg["allowed"][pkg_name_and_version] = pkg_license_dic
         elif is_licence_exist(deny_license_list, pkg_licenses):

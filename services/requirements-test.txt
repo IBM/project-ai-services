@@ -41,3 +41,4 @@ pdfplumber==0.11.9
 RapidFuzz==3.13.0
 docling==2.77.0
 sentence-splitter==1.4
+SQLAlchemy==2.0.49

@@ -10,8 +10,6 @@ metadata:
   annotations:
     ai-services.io/routes: "8081:catalog-ui, 8080:catalog-api"
     # ai-services.io/ports: "{{ .Values.ui.port }}:8081, {{ .Values.backend.port }}:8080"  # Uncomment to expose ports directly (bypasses Caddy)
-    io.podman.annotations.userns: "keep-id"
-    run.oci.keep_original_groups: "1"
 spec:
   initContainers:
     - name: db-migration
@@ -87,12 +85,11 @@ spec:
       command: ["/bin/sh", "-c"]
       args:
         - "/usr/bin/ai-services catalog apiserver --port=8080 --admin-username=admin --admin-password-hash=${ADMIN_PASSWORD} --runtime={{ .Values.backend.runtime }}"
-      securityContext:
-        seLinuxOptions:
-          type: "spc_t"
       env:
         - name: CONTAINER_HOST
           value: "unix://{{ .Values.backend.podman.uri }}"
+        - name: REGISTRY_AUTH_FILE
+          value: "/run/containers/auth.json"
         - name: ADMIN_PASSWORD
           valueFrom:
             secretKeyRef:
@@ -111,6 +108,12 @@ spec:
               key: db-password
         - name: AI_SERVICES_BASE_DIR
           value: "{{ .BaseDir }}"
+        - name: HOST_IP
+          value: "{{ .HostIP }}"
+        - name: CADDY_ADMIN_URL
+          value: "{{ .CaddyAdminURL }}"
+        - name: CADDY_HTTPS_PORT
+          value: "{{ .Values.caddy.httpsPort }}"
       ports:
         - containerPort: 8080
           protocol: TCP
@@ -125,6 +128,10 @@ spec:
       volumeMounts:
         - name: podman-socket
           mountPath: {{ .Values.backend.podman.uri }}
+        - name: podman-auth
+          mountPath: /run/containers/auth.json
+          subPath: auth.json
+          readOnly: true
         - name: iommu-groups
           mountPath: /sys/kernel/iommu_groups
           readOnly: true
@@ -141,6 +148,9 @@ spec:
         # For root podman: /run/podman/podman.sock
         path: {{ .Values.backend.podman.uri }}
         type: Socket
+    - name: podman-auth
+      secret:
+        secretName: podman-auth-secret
     - name: iommu-groups
       hostPath:
         path: /sys/kernel/iommu_groups

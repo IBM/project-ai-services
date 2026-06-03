@@ -7,7 +7,8 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
   annotations:
-    ai-services.io/ports: "{{ or .Values.similarity.port }}:7000"
+    ai-services.io/routes: "7000:similarity-api"
+    # ai-services.io/ports: "{{ or .Values.similarity.port }}:7000"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
   containers:
     - name: similarity-api

@@ -88,6 +88,7 @@ func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool)
 	baseDir := utils.GetBaseDir()
 
 	secretsToDelete, secretsToSkip := fetchSecretsToDelete(pods)
+	secretsToDelete = append(secretsToDelete, catalogConstants.PodmanAuthSecret)
 
 	// Delete catalog pods
 	if err := podsDeletion(rt, pods); err != nil {

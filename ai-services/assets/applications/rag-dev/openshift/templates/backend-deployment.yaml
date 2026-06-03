@@ -84,6 +84,8 @@ spec:
               value: "{{ .Values.chatbot.numChunksPostReranker }}"
             - name: CHATBOT_RERANK
               value: "{{ .Values.chatbot.rerank }}"
+            - name: CHATBOT_SYSTEM_PROMPT
+              value: "{{ .Values.backend.systemPrompt }}"
           ports:
             - containerPort: 5000
               protocol: TCP

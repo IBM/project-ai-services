@@ -6,13 +6,15 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, Request, UploadFile
+from fastapi import FastAPI, Request, UploadFile, File, Form, BackgroundTasks
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
 from common.misc_utils import set_log_level, get_logger
+from summarize.db_operations import create_job_with_db
 from summarize.settings import settings
+from summarize.models import SummarizationType
 
 set_log_level(settings.common.app.log_level)
 
@@ -27,7 +29,6 @@ from summarize.summ_utils import (
     build_success_response,
     build_messages,
     trim_to_last_sentence,
-    MAX_INPUT_WORDS,
     compute_target_and_max_tokens,
     SummarizeSuccessResponse,
     validate_summary_length,
@@ -35,6 +36,13 @@ from summarize.summ_utils import (
     validate_input_and_get_available_tokens,
     extract_text_from_pdf
 )
+from summarize.job_utils import (
+    ensure_directories,
+    validate_file_extension,
+    stage_uploaded_file,
+)
+from summarize.db.connection import check_db_connection, close_db_connections
+from common.misc_utils import cleanup_staging_directory
 
 logger = get_logger("app")
 
@@ -48,7 +56,46 @@ async def lifespan(app):
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     initialize_models()
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
+    
+    # Check database connection and initialize schema (required for operation)
+    try:
+        if check_db_connection():
+            logger.info("✅ Database connection established")
+            
+            # Initialize database schema (create tables if they don't exist)
+            try:
+                from summarize.db.models import Base
+                from summarize.db.connection import engine
+                Base.metadata.create_all(bind=engine)
+                logger.info("✅ Database schema initialized")
+            except Exception as schema_error:
+                logger.error(f"❌ Failed to initialize database schema: {schema_error}")
+                raise RuntimeError(f"Database schema initialization failed: {schema_error}")
+        else:
+            logger.error("❌ Database connection failed - service requires database to operate")
+            raise RuntimeError("Database connection required but not available. Please check database configuration.")
+    except RuntimeError:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Database check failed: {e}")
+        raise RuntimeError(f"Database connection required but failed: {e}")
+
+    logger.info("Ensuring cache directories exist...")
+    ensure_directories()
+
+    # TODO: Scan for orphan jobs and mark them as failed
+    
     yield
+
+    # Shutdown
+    logger.info("Application shutting down...")
+    
+    # Close database connections
+    try:
+        close_db_connections()
+        logger.info("Database connections closed")
+    except Exception as e:
+        logger.error(f"Error closing database connections: {e}", exc_info=True)
     stderr_monitor.stop()
 
 # OpenAPI tags metadata for endpoint organization
@@ -56,6 +103,10 @@ tags_metadata = [
     {
         "name": "summarization",
         "description": "Text and document summarization operations"
+    },
+    {
+        "name": "jobs",
+        "description": "Async summarization job management"
     },
     {
         "name": "health",
@@ -367,8 +418,138 @@ async def summarize(request: Request):
         raise se
     except Exception as e:
         logger.error(f"Got exception while generating summary: {e}")
-        raise SummarizeException(500, "INTERNAL_SERVER_ERROR",
-                                 f"Failed to generate summary, error: {e} Please try again later")
+
+# Background task stub for async job processing
+async def process_summarization_job(job_id: str):
+    """
+    Background task to process a summarization job.
+    
+    This is a stub implementation that logs the job processing.
+    Actual summarization logic will be implemented in a future phase.
+    
+    Args:
+        job_id: UUID of the job to process
+    """
+    logger.info(f"[STUB] Background processing started for job {job_id}")
+    # TODO: Implement actual summarization logic:
+    # 1. Read staged file
+    # 2. Extract text (PDF or TXT)
+    # 3. Determine strategy (direct vs chunked)
+    # 4. Perform summarization
+    # 5. Write result file
+    # 6. Update job status to 'completed'
+    # 7. Clean up staging directory
+    logger.info(f"[STUB] Background processing completed for job {job_id}")
+
+
+@app.post(
+    "/v1/summarize/jobs",
+    status_code=202,
+    responses={
+        202: {"description": "Job created successfully"},
+        400: http_error_responses[400],
+        415: http_error_responses[415],
+        500: http_error_responses[500],
+    },
+    summary="Create async summarization job",
+    description=(
+        "Submit a file (.txt or .pdf) for asynchronous summarization. "
+        "Returns immediately with a job_id that can be used to track progress and retrieve results.\n\n"
+        "**Form parameters:**\n"
+        "- `file` (required): A single .txt or .pdf file to summarize\n"
+        "- `level` (optional): Abstraction level - 'brief', 'standard' (default), or 'detailed'\n"
+        "- `job_name` (optional): Human-readable label for the job\n\n"
+        "**Note:** Unlike the synchronous endpoint, there is no file size limit. "
+        "Large documents will be processed using chunked summarization."
+    ),
+    response_description="Job created with job_id",
+    tags=["jobs"],
+)
+async def create_summarization_job(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    level: Optional[str] = Form(None),
+    job_name: Optional[str] = Form(None),
+):
+    """
+    Create an async summarization job.
+    
+    Validates the file, stages it, creates a database record, and launches background processing.
+    """
+    try:
+        # Validate file extension
+        filename = file.filename or ""
+        is_valid, ext = validate_file_extension(filename)
+        
+        if not is_valid:
+            raise SummarizeException(
+                415,
+                "UNSUPPORTED_FILE_TYPE",
+                f"Only .txt and .pdf files are allowed. Received: {ext or 'unknown'}"
+            )
+        
+        # Validate level parameter
+        if level is not None:
+            level = validate_summary_level(level)
+        else:
+            level = 'standard'  # Default level
+        
+        # Generate job ID
+        job_id = str(uuid.uuid4())
+        
+        logger.info(f"Creating summarization job {job_id} for file: {filename}")
+        
+        # Stage the uploaded file
+        try:
+            staged_path = stage_uploaded_file(job_id, file)
+            logger.debug(f"File staged at: {staged_path}")
+        except IOError as e:
+            logger.error(f"Failed to stage file for job {job_id}: {e}")
+            raise SummarizeException(
+                500,
+                "FILE_STAGING_ERROR",
+                "Failed to save uploaded file"
+            )
+        
+        # Create job record in database
+        try:
+            create_job_with_db(job_id,
+                             SummarizationType.DIRECT.value,
+                             0,
+                             level if level is not None else 'standard',
+                             job_name,
+                             filename)
+
+            logger.info(f"Job record created: {job_id}")
+        except Exception as e:
+            logger.error(f"Failed to create job record for {job_id}: {e}")
+            # Clean up staged file
+            cleanup_staging_directory(job_id, settings.summarize.staging_dir)
+            raise SummarizeException(
+                500,
+                "DATABASE_ERROR",
+                "Failed to create job record"
+            )
+        
+        # Launch background processing (stub for now)
+        background_tasks.add_task(process_summarization_job, job_id)
+        
+        # Return 202 Accepted with job_id
+        return JSONResponse(
+            status_code=202,
+            content={"job_id": job_id}
+        )
+        
+    except SummarizeException as se:
+        raise se
+    except Exception as e:
+        logger.error(f"Unexpected error creating summarization job: {e}", exc_info=True)
+        raise SummarizeException(
+            500,
+            "INTERNAL_SERVER_ERROR",
+            f"Failed to create summarization job: {str(e)}"
+        )
+
 
 @app.get(
     "/health",

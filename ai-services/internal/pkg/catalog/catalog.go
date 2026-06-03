@@ -528,9 +528,15 @@ func (p *CatalogProvider) LoadServiceValues(serviceID string, argParams map[stri
 		return nil, fmt.Errorf("failed to read values.yaml at %s: %w", valuesPath, err)
 	}
 
+	// Process @generate annotations for dynamic value generation before parsing
+	processedData, err := utils.ProcessGenerateAnnotationsFromYAML(valuesData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process generate annotations: %w", err)
+	}
+
 	// Parse values
 	values := make(map[string]any)
-	if err := yaml.Unmarshal(valuesData, &values); err != nil {
+	if err := yaml.Unmarshal(processedData, &values); err != nil {
 		return nil, fmt.Errorf("failed to parse values.yaml: %w", err)
 	}
 
@@ -570,9 +576,15 @@ func (p *CatalogProvider) LoadComponentValues(componentType, providerID string, 
 		return nil, fmt.Errorf("failed to read values.yaml at %s: %w", valuesPath, err)
 	}
 
+	// Process @generate annotations for dynamic value generation before parsing
+	processedData, err := utils.ProcessGenerateAnnotationsFromYAML(valuesData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process generate annotations: %w", err)
+	}
+
 	// Parse values
 	values := make(map[string]any)
-	if err := yaml.Unmarshal(valuesData, &values); err != nil {
+	if err := yaml.Unmarshal(processedData, &values); err != nil {
 		return nil, fmt.Errorf("failed to parse values.yaml: %w", err)
 	}
 

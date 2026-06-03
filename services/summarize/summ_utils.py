@@ -1,11 +1,13 @@
 import re
-from typing import Optional
+
 import pypdfium2 as pdfium
 from pydantic import BaseModel, Field
 import threading
+from typing import Optional
 
-from summarize.settings import settings
 from common.misc_utils import set_log_level, get_logger, resolve_model_max_len
+from summarize.settings import settings
+
 
 set_log_level(settings.common.app.log_level)
 logger = get_logger("summarize")
