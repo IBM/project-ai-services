@@ -362,6 +362,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/applications/{id}/resources": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves CPU (in cores), memory usage (in bytes), and Spyre accelerator cards for an application and its services",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Applications"
+                ],
+                "summary": "Get application resources",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Application ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationResourcesResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Application not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/architectures": {
             "get": {
                 "security": [
@@ -1125,6 +1177,19 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationCPUInfo": {
+            "type": "object",
+            "properties": {
+                "total_cores": {
+                    "description": "Total allocated CPU cores",
+                    "type": "number"
+                },
+                "used_cores": {
+                    "description": "Actually used CPU cores",
+                    "type": "number"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationListResponse": {
             "type": "object",
             "properties": {
@@ -1136,6 +1201,39 @@ const docTemplate = `{
                 },
                 "pagination": {
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationMemInfo": {
+            "type": "object",
+            "properties": {
+                "total_bytes": {
+                    "description": "Total allocated memory in bytes",
+                    "type": "integer"
+                },
+                "used_bytes": {
+                    "description": "Actually used memory in bytes",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationResourcesResponse": {
+            "type": "object",
+            "properties": {
+                "accelerators": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "cpu": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationCPUInfo"
+                },
+                "memory": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationMemInfo"
                 }
             }
         },
