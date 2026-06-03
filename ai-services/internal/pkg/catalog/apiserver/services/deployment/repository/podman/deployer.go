@@ -38,8 +38,6 @@ import (
 	k8syaml "sigs.k8s.io/yaml"
 )
 
-const defaultHTTPSPort = "443"
-
 // ComponentInfo holds the information derived from a deployed component.
 type ComponentInfo struct {
 	Endpoint string
@@ -1208,7 +1206,7 @@ func (d *PodmanDeployer) getCaddyConfiguration() (string, string, string, error)
 		return "", "", "", fmt.Errorf("HOST_IP environment variable not set")
 	}
 
-	httpsPort := utils.GetEnv("CADDY_HTTPS_PORT", defaultHTTPSPort)
+	httpsPort := utils.GetEnv("CADDY_HTTPS_PORT", catalogconstants.DefaultHTTPSPort)
 
 	return adminURL, hostIP, httpsPort, nil
 }
@@ -1243,11 +1241,7 @@ func (d *PodmanDeployer) registerServiceRoutes(
 
 		// Convert registered routes to endpoint format
 		for _, route := range registeredRoutes {
-			url := fmt.Sprintf("https://%s", route.Domain)
-			if httpsPort != defaultHTTPSPort {
-				// if not 443 then we need to append the port too
-				url = url + ":" + httpsPort
-			}
+			url := catalogutils.BuildExternalURL(route.Domain, httpsPort)
 
 			endpoint := map[string]any{
 				"type": "external",
