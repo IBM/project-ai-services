@@ -99,7 +99,7 @@ func init() {
 	templatesCmd.AddCommand(appTemplates.NewParametersCmd())
 }
 
-// listCatalogTemplates lists architectures, services, and components from the catalog
+// listCatalogTemplates lists architectures, services, and components from the catalog.
 func listCatalogTemplates(cmd *cobra.Command) error {
 	// Create catalog provider
 	provider, err := catalog.NewCatalogProvider()
@@ -141,7 +141,7 @@ func listCatalogTemplates(cmd *cobra.Command) error {
 	return nil
 }
 
-// displayArchitectureWithServiceList displays an architecture with just the list of service IDs
+// displayArchitectureWithServiceList displays an architecture with just the list of service IDs.
 func displayArchitectureWithServiceList(arch catalogTypes.Architecture) {
 	logger.Infof("- %s (%s)", arch.ID, arch.Name)
 	if arch.Description != "" {
@@ -157,7 +157,7 @@ func displayArchitectureWithServiceList(arch catalogTypes.Architecture) {
 	}
 }
 
-// displayServiceWithComponents displays a service with its metadata and required components
+// displayServiceWithComponents displays a service with its metadata and required components.
 func displayServiceWithComponents(svc catalogTypes.Service, components []catalogTypes.Component) {
 	logger.Infof("- %s (%s)", svc.ID, svc.Name)
 	if svc.Description != "" {
