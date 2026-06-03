@@ -1,6 +1,6 @@
 digitize:
   port: ""
-  image: icr.io/ai-services-cicd/digitize-service:v0.0.11
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.12
   log_level: "INFO"
   database: "digitize_metadata"
 
