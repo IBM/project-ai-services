@@ -1239,8 +1239,7 @@ func (d *PodmanDeployer) registerServiceRoutes(
 		// Convert registered routes to endpoint format
 		for _, route := range registeredRoutes {
 			endpoint := map[string]any{
-				"endpoint": fmt.Sprintf("http://%s", route.Domain),
-				"name":     podName,
+				"endpoint": fmt.Sprintf("https://%s", route.Domain),
 				"type":     "external",
 			}
 			serviceEndpoints = append(serviceEndpoints, endpoint)
@@ -1249,7 +1248,7 @@ func (d *PodmanDeployer) registerServiceRoutes(
 
 	// Update service endpoints in database
 	if len(serviceEndpoints) > 0 {
-		if err := d.serviceRepo.UpdateEndpoints(ctx, svc.DatabaseID, map[string]any{"endpoints": serviceEndpoints}); err != nil {
+		if err := d.serviceRepo.UpdateEndpoints(ctx, svc.DatabaseID, serviceEndpoints); err != nil {
 			return fmt.Errorf("service %s DB update: %w", svc.DatabaseID, err)
 		}
 		logger.Infof("Updated service %s with %d endpoint(s) in database\n", svc.DatabaseID, len(serviceEndpoints))

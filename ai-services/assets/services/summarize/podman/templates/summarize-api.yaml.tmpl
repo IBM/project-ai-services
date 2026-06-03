@@ -5,7 +5,7 @@ metadata:
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
   annotations:
-    ai-services.io/routes: "6000:summarize-api"
+    ai-services.io/routes: "6000:summarize-api-{{ .InstanceSlug }}"
     # ai-services.io/ports: "{{ or .Values.summarize.port }}:6000"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
   containers:
