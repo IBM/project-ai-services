@@ -17,6 +17,6 @@ dependencies:
   - id: embedding
   - id: llm
 
-standalone: false
+standalone: true
 
 # Made with Bob

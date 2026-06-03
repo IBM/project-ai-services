@@ -17,6 +17,6 @@ dependencies:
   - id: embedding
   - id: reranker
 
-standalone: true
+standalone: false
 
 # Made with Bob
