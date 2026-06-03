@@ -40,8 +40,8 @@ const Navbar = (props: NavbarProps) => {
         ref={navRef}
       >
         <SideNavItems>
-          <SideNavMenuItem as={NavLink} to={ROUTES.AI_DEPLOYMENTS}>
-            AI deployments
+          <SideNavMenuItem as={NavLink} to={ROUTES.DIGITAL_ASSISTANTS}>
+            Digital Assistants
           </SideNavMenuItem>
 
           <SideNavMenuItem as={NavLink} to={ROUTES.SERVICES}>
@@ -51,7 +51,7 @@ const Navbar = (props: NavbarProps) => {
           <SideNavDivider />
 
           <SideNavMenuItem as={NavLink} to={ROUTES.USE_CASE_REFERENCES}>
-            Reference use cases
+            Use case references
           </SideNavMenuItem>
         </SideNavItems>
       </SideNav>
