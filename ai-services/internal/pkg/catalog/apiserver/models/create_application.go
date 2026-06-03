@@ -11,9 +11,10 @@ type CreateApplicationRequest struct {
 
 // Service represents a service configuration in the application.
 type Service struct {
-	CatalogID  string      `json:"catalog_id" binding:"required"`
-	Version    string      `json:"version"`
-	Components []Component `json:"components" binding:"required,dive"`
+	CatalogID  string         `json:"catalog_id" binding:"required"`
+	Version    string         `json:"version"`
+	Components []Component    `json:"components" binding:"required,dive"`
+	Params     map[string]any `json:"params"` // Service-level parameters
 }
 
 // Component represents a component configuration for a service.
