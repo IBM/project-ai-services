@@ -375,13 +375,16 @@ func (s *ApplicationService) insertComponentRecords(
 	for hash, comp := range plan.Components {
 		instanceUUID := uuid.New()
 
+		// Filter metadata to only include model information (exclude sensitive data like API keys)
+		metadata := s.filterComponentMetadata(comp.Params)
+
 		component := &models.Component{
 			ID:       instanceUUID,
 			Type:     comp.ComponentType,
 			Provider: comp.ProviderID,
 			Status:   models.ComponentStatusInitializing,
 			Version:  comp.Version,
-			Metadata: comp.Params,
+			Metadata: metadata,
 		}
 
 		if err := s.componentRepo.Insert(ctx, component); err != nil {
@@ -700,6 +703,23 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 			logger.Errorf("failed to delete orphaned component %s: %s", componentID, err)
 		}
 	}
+}
+
+// filterComponentMetadata filters component parameters to only include model information.
+// This excludes sensitive data like API keys, URLs, and project IDs from being stored in the database.
+func (s *ApplicationService) filterComponentMetadata(params map[string]any) map[string]any {
+	if params == nil {
+		return nil
+	}
+
+	metadata := make(map[string]any)
+
+	// Only include model-related fields
+	if model, ok := params["model"]; ok {
+		metadata["model"] = model
+	}
+
+	return metadata
 }
 
 // Made with Bob
