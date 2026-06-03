@@ -835,19 +835,24 @@ func (d *PodmanDeployer) deployComponentTemplate(
 		return err
 	}
 
+	// Get environment parameters and render final template
+	finalPodSpec, renderedBytes, err := d.renderFinalPodTemplate(podTemplate, podTemplateName, initialParams, podSpec, plan)
+	if err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(string(renderedBytes)) == "" {
+		// skip deploy if there is nothing to apply
+		return nil
+	}
+
 	// Check if pod already exists
-	if exists, err := d.runtime.PodExists(podSpec.Name); err != nil {
+	if exists, err := d.runtime.PodExists(finalPodSpec.Name); err != nil {
 		return fmt.Errorf("failed to check pod existence: %w", err)
 	} else if exists {
 		logger.Infof("Pod '%s' already exists, skipping deployment\n", podSpec.Name)
 
 		return nil
-	}
-
-	// Get environment parameters and render final template
-	finalPodSpec, renderedBytes, err := d.renderFinalPodTemplate(podTemplate, podTemplateName, initialParams, podSpec, plan)
-	if err != nil {
-		return err
 	}
 
 	// Deploy the pod using rendered bytes directly
@@ -1010,6 +1015,10 @@ func (d *PodmanDeployer) deployPodTemplate(
 	}
 
 	renderedBytes := rendered.Bytes()
+	if strings.TrimSpace(string(renderedBytes)) == "" {
+		// skip deploy if there is nothing to apply
+		return nil, "", "", nil
+	}
 
 	// Parse into PodSpec for metadata
 	var podSpec podmodels.PodSpec

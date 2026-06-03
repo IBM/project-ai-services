@@ -17,11 +17,20 @@ spec:
         - --debug
       env:
         - name: WATSONX_APIKEY
-          value: "{{ .Values.watsonxApiKey }}"
+          valueFrom:
+            secretKeyRef:
+              name: "watsonx-secret-{{ .InstanceSlug }}"
+              key: apiKey
         - name: WATSONX_PROJECT_ID
-          value: "{{ .Values.watsonxProjectId }}"
+          valueFrom:
+            secretKeyRef:
+              name: "watsonx-secret-{{ .InstanceSlug }}"
+              key: projectId
         - name: WATSONX_URL
-          value: "{{ .Values.watsonxUrl }}"
+          valueFrom:
+            secretKeyRef:
+              name: "watsonx-secret-{{ .InstanceSlug }}"
+              key: url
         - name: INSTRUCT_MODEL
           value: "watsonx/{{ .Values.model }}"
         - name: INSTRUCT_MODEL_NAME
