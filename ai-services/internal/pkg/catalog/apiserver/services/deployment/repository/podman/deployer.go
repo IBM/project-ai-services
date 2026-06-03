@@ -1168,17 +1168,9 @@ func generateInstanceSlug(id string) string {
 func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *DeploymentPlan) error {
 	logger.Infof("Registering routes for application '%s'\n", plan.ApplicationName)
 
-	// Get Caddy admin URL from env var (set during catalog configure)
-	// Running in catalog backend container, so env vars should be available
-	adminURL := utils.GetEnv("CADDY_ADMIN_URL", "")
-	if adminURL == "" {
-		return fmt.Errorf("CADDY_ADMIN_URL environment variable not set")
-	}
-
-	// Get host IP from env var (set during catalog configure)
-	hostIP := utils.GetEnv("HOST_IP", "")
-	if hostIP == "" {
-		return fmt.Errorf("HOST_IP environment variable not set")
+	adminURL, hostIP, err := d.getCaddyConfiguration()
+	if err != nil {
+		return err
 	}
 
 	// Register routes for each service and update endpoints in database
@@ -1188,43 +1180,8 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 			continue
 		}
 
-		// Collect endpoints for this service
-		var serviceEndpoints []map[string]any
-
-		// Register routes for each pod in the service
-		for podName, routes := range svc.Routes {
-			registeredRoutes, err := proxy.RegisterRoutesForAppAndReturn(
-				d.runtime,
-				catalogconstants.CatalogAppName,
-				constants.CaddyServerName,
-				routes,
-				adminURL,
-				hostIP,
-				podName,
-			)
-			if err != nil {
-				registrationErrors = append(registrationErrors, fmt.Errorf("pod %s: %w", podName, err))
-				continue
-			}
-
-			// Convert registered routes to endpoint format
-			for _, route := range registeredRoutes {
-				endpoint := map[string]any{
-					"endpoint": fmt.Sprintf("http://%s", route.Domain),
-					"name":     podName,
-					"type":     "external",
-				}
-				serviceEndpoints = append(serviceEndpoints, endpoint)
-			}
-		}
-
-		// Update service endpoints in database
-		if len(serviceEndpoints) > 0 {
-			if err := d.serviceRepo.UpdateEndpoints(ctx, svc.DatabaseID, map[string]any{"endpoints": serviceEndpoints}); err != nil {
-				registrationErrors = append(registrationErrors, fmt.Errorf("service %s DB update: %w", svc.DatabaseID, err))
-			} else {
-				logger.Infof("Updated service %s with %d endpoint(s) in database\n", svc.DatabaseID, len(serviceEndpoints))
-			}
+		if err := d.registerServiceRoutes(ctx, svc, adminURL, hostIP, &registrationErrors); err != nil {
+			registrationErrors = append(registrationErrors, err)
 		}
 	}
 
@@ -1237,12 +1194,77 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 	return nil
 }
 
+// getCaddyConfiguration retrieves Caddy admin URL and host IP from environment variables.
+func (d *PodmanDeployer) getCaddyConfiguration() (string, string, error) {
+	adminURL := utils.GetEnv("CADDY_ADMIN_URL", "")
+	if adminURL == "" {
+		return "", "", fmt.Errorf("CADDY_ADMIN_URL environment variable not set")
+	}
+
+	hostIP := utils.GetEnv("HOST_IP", "")
+	if hostIP == "" {
+		return "", "", fmt.Errorf("HOST_IP environment variable not set")
+	}
+
+	return adminURL, hostIP, nil
+}
+
+// registerServiceRoutes registers routes for a single service and updates its endpoints in the database.
+func (d *PodmanDeployer) registerServiceRoutes(
+	ctx context.Context,
+	svc *ServicePlan,
+	adminURL string,
+	hostIP string,
+	registrationErrors *[]error,
+) error {
+	var serviceEndpoints []map[string]any
+
+	// Register routes for each pod in the service
+	for podName, routes := range svc.Routes {
+		registeredRoutes, err := proxy.RegisterRoutesForAppAndReturn(
+			d.runtime,
+			catalogconstants.CatalogAppName,
+			constants.CaddyServerName,
+			routes,
+			adminURL,
+			hostIP,
+			podName,
+		)
+		if err != nil {
+			*registrationErrors = append(*registrationErrors, fmt.Errorf("pod %s: %w", podName, err))
+
+			continue
+		}
+
+		// Convert registered routes to endpoint format
+		for _, route := range registeredRoutes {
+			endpoint := map[string]any{
+				"endpoint": fmt.Sprintf("http://%s", route.Domain),
+				"name":     podName,
+				"type":     "external",
+			}
+			serviceEndpoints = append(serviceEndpoints, endpoint)
+		}
+	}
+
+	// Update service endpoints in database
+	if len(serviceEndpoints) > 0 {
+		if err := d.serviceRepo.UpdateEndpoints(ctx, svc.DatabaseID, map[string]any{"endpoints": serviceEndpoints}); err != nil {
+			return fmt.Errorf("service %s DB update: %w", svc.DatabaseID, err)
+		}
+		logger.Infof("Updated service %s with %d endpoint(s) in database\n", svc.DatabaseID, len(serviceEndpoints))
+	}
+
+	return nil
+}
+
 // updateComponentEndpointsInDB updates component endpoints in the database.
-// Component endpoints are internal (not exposed via Caddy) and stored in format:
-// {"host": "pod-name", "port": "8080", "type": "internal"}
+// Component endpoints are internal (not exposed via Caddy) and stored in format.
+// {"host": "pod-name", "port": "8080", "type": "internal"}.
 func (d *PodmanDeployer) updateComponentEndpointsInDB(comp *ComponentPlan) error {
 	if comp.DatabaseID == uuid.Nil {
 		logger.Infof("Component %s has no database ID, skipping endpoint update\n", comp.ComponentType)
+
 		return nil
 	}
 
@@ -1251,6 +1273,7 @@ func (d *PodmanDeployer) updateComponentEndpointsInDB(comp *ComponentPlan) error
 	endpointData, ok := comp.Endpoints[comp.ComponentType]
 	if !ok {
 		logger.Infof("No endpoint data found for component %s\n", comp.ComponentType)
+
 		return nil
 	}
 
@@ -1268,6 +1291,7 @@ func (d *PodmanDeployer) updateComponentEndpointsInDB(comp *ComponentPlan) error
 	}
 
 	logger.Infof("Updated component %s with internal endpoint in database: %v\n", comp.ComponentType, endpointMap)
+
 	return nil
 }
 
