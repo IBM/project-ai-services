@@ -157,13 +157,28 @@ func displaySchemaParameters(schema map[string]any, prefix string) {
 		return
 	}
 
+	displayPropertiesRecursive(properties, prefix)
+}
+
+// displayPropertiesRecursive recursively displays properties, handling nested objects.
+func displayPropertiesRecursive(properties map[string]any, prefix string) {
 	for paramName, propValue := range properties {
 		prop, ok := propValue.(map[string]any)
 		if !ok {
 			continue
 		}
 
+		propType, _ := prop["type"].(string)
 		description, _ := prop["description"].(string)
+
+		// If this is an object type with nested properties, recurse into it
+		if propType == "object" {
+			if nestedProps, ok := prop["properties"].(map[string]any); ok {
+				displayPropertiesRecursive(nestedProps, fmt.Sprintf("%s.%s", prefix, paramName))
+
+				continue
+			}
+		}
 
 		// Append default value if present and not empty
 		if defaultValue, hasDefault := prop["default"]; hasDefault && defaultValue != nil && defaultValue != "" {
