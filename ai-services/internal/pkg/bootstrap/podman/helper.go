@@ -279,7 +279,7 @@ func setupSELinuxPodmanSocketPolicy() error {
 	// Apply root Podman socket policy
 	result := spyre.ApplySELinuxPolicy(
 		"SELinux Podman socket policy configuration",
-		"podman_socket_policy",
+		"ai_services_root_policy",
 		selinux.RootPodmanSocketPolicyContent,
 		"SELinux Podman socket policy configured successfully",
 	)
@@ -291,7 +291,7 @@ func setupSELinuxPodmanSocketPolicy() error {
 	// Apply rootless Podman socket policy
 	rootlessResult := spyre.ApplySELinuxPolicy(
 		"SELinux rootless Podman socket policy configuration",
-		"rootless_podman_socket_policy",
+		"ai_services_nonroot_policy",
 		selinux.RootlessPodmanSocketPolicyContent,
 		"SELinux rootless Podman socket policy configured successfully",
 	)
