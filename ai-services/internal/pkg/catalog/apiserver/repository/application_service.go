@@ -11,7 +11,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
@@ -748,11 +747,9 @@ func (s *ApplicationService) processServiceResources(
 	// Also collect used resources from component pods
 	s.addComponentAllocatedResources(ctx, service.ID, catalogProvider, runtimeClient, totals, countedComponents)
 
-	// Get pod name for service and fetch runtime resources
-	// Service pod names follow the pattern: {catalogID}-{instance-slug}
-	instanceSlug := podman.GenerateInstanceSlug(service.ID.String())
-	servicePodName := fmt.Sprintf("%s-%s", service.CatalogID, instanceSlug)
-	addUsedResources(servicePodName, runtimeClient, totals)
+	// Get all pods for this service using the template ID label
+	// Each pod deployed has label: ai-services.io/template: "<service-database-id>"
+	addUsedResourcesByTemplateID(service.ID.String(), runtimeClient, totals)
 }
 
 // addServiceAllocatedResources adds allocated resources from service metadata.
@@ -821,18 +818,16 @@ func (s *ApplicationService) addComponentAllocatedResources(
 			totals.allocatedMemory += runtimeMetadata.Resources.Memory
 		}
 
-		// Get used resources from component pod
-		// Component pod names follow the pattern: {type}-{instance-slug}
-		instanceSlug := podman.GenerateInstanceSlug(component.ID.String())
-		componentPodName := fmt.Sprintf("%s-%s", component.Type, instanceSlug)
-		addUsedResources(componentPodName, runtimeClient, totals)
+		// Get all pods for this component using the template ID label
+		// Each pod deployed has label: ai-services.io/template: "<component-database-id>"
+		addUsedResourcesByTemplateID(component.ID.String(), runtimeClient, totals)
 
 		// Mark this component as counted
 		countedComponents[dep.DependencyID] = true
 	}
 }
 
-// addUsedResources fetches and adds used resources from runtime.
+// addUsedResources fetches and adds used resources from a single pod.
 func addUsedResources(
 	podName string,
 	runtimeClient runtime.Runtime,
@@ -853,6 +848,30 @@ func addUsedResources(
 	// Accumulate used resources
 	totals.usedCPU += resources.CPUCores
 	totals.usedMemory += resources.MemUsage
+}
+
+// addUsedResourcesByTemplateID fetches and adds used resources from all pods with a given template ID label.
+// This handles cases where a service or component has multiple pods (e.g., digitize has digitize-{slug} and digitize-db-{slug}).
+func addUsedResourcesByTemplateID(
+	templateID string,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+) {
+	// List all pods with the template ID label
+	filters := map[string][]string{
+		"label": {fmt.Sprintf("ai-services.io/template=%s", templateID)},
+	}
+
+	pods, err := runtimeClient.ListPods(filters)
+	if err != nil {
+		logger.Warningf("Failed to list pods for template %s: %v\n", templateID, err)
+		return
+	}
+
+	// Aggregate resources from all pods
+	for _, pod := range pods {
+		addUsedResources(pod.Name, runtimeClient, totals)
+	}
 }
 
 // buildResourcesResponse constructs the final response from resource totals.
