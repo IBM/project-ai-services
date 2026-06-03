@@ -6,7 +6,6 @@ import threading
 from typing import Optional
 
 from common.misc_utils import set_log_level, get_logger, resolve_model_max_len
-from common.misc_utils import get_logger
 from summarize.settings import settings
 
 
