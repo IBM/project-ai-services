@@ -163,7 +163,7 @@ const AppHeader = (props: AppHeaderProps) => {
                   size="sm"
                   primaryButtonText="Log out"
                   secondaryButtonText="Cancel"
-                  modalHeading="Are you sure you want to log out of IBM Open-Source AI
+                  modalHeading="Are you sure you want to log out of IBM AI
                     Foundation for Power?"
                   onRequestClose={() => {
                     dispatch({ type: "CLOSE_LOGOUT_MODAL" });

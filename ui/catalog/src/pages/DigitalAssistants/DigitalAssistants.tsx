@@ -725,11 +725,7 @@ const DigitalAssistantsPage = () => {
                       Demos and prototypes
                     </h4>
                     <div className={styles.demoCard}>
-                      <img
-                        src=""
-                        alt="RAG Demo"
-                        className={styles.demoImage}
-                      />
+                      <img src="" alt="RAG Demo" className={styles.demoImage} />
                       <div className={styles.demoContent}>
                         <h5 className={styles.demoTitle}>
                           Retrieval-Augmented Generation (RAG)
