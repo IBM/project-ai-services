@@ -64,6 +64,12 @@ func (b *ParamBuilder) BuildServiceParams(
 		ArgParams: make(map[string]string),
 	}
 
+	// Flatten service-level params (without prefix) and add to argParams
+	if len(svcReq.Params) > 0 {
+		serviceArgParams := utils.FlattenMapWithValues(svcReq.Params, "")
+		maps.Copy(params.ArgParams, serviceArgParams)
+	}
+
 	// Build component params for each component
 	componentParams := make(map[string]*ComponentParams)
 	for _, compReq := range svcReq.Components {

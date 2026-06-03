@@ -38,7 +38,10 @@ spec:
         value: "32"
       {{- if .Values.apiKey }}
       - name: VLLM_API_KEY
-        value: "{{ .Values.apiKey }}"
+        valueFrom:
+          secretKeyRef:
+            name: "vllm-secret-{{ .InstanceSlug }}"
+            key: apiKey
       {{- end }}
       resources:
         requests:

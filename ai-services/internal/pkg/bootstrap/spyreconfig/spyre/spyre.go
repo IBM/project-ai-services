@@ -77,7 +77,6 @@ func RunChecks() []check.CheckResult {
 		checkVfioModule(),
 		checkVfioAccessPermission(),
 		checkSELinuxVFIOPolicy(),
-		checkSELinuxPodmanSocketPolicy(),
 		checkSystemdUserSliceLimits(),
 		checkPodmanServiceSupplementaryGroups(),
 	}
@@ -642,11 +641,6 @@ func checkSELinuxPolicy(checkName, policyName, requiredPath string) *check.Check
 // checkSELinuxVFIOPolicy validates SELinux policy for VFIO device access.
 func checkSELinuxVFIOPolicy() *check.Check {
 	return checkSELinuxPolicy("SELinux VFIO policy configuration", "vllm_vfio_policy", "/dev/vfio")
-}
-
-// checkSELinuxPodmanSocketPolicy validates SELinux policy for Podman socket access.
-func checkSELinuxPodmanSocketPolicy() *check.Check {
-	return checkSELinuxPolicy("SELinux Podman socket policy configuration", "podman_socket_policy", "/run/podman/podman.sock")
 }
 
 func setCheckResult(confCheck *check.ConfigurationFileCheck, found, correctValue bool) {

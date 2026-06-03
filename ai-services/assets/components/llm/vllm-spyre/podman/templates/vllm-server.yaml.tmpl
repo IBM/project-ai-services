@@ -53,6 +53,13 @@ spec:
           value: "32"
         - name: MASTER_PORT
           value: "12355"
+        {{- if .Values.apiKey }}
+        - name: VLLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: "vllm-secret-{{ .InstanceSlug }}"
+              key: apiKey
+        {{- end }}
         {{- /* Check if .env.llm exists and is a non-empty map */}}
         {{- with .env.llm }}
           {{- /* If it does, '.' (dot) is now scoped to .env.llm */}}

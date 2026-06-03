@@ -1,6 +1,10 @@
 name: instruct
 version: "1.0.0"
 
+podTemplateExecutions:
+  - [vllm-secret.yaml.tmpl]
+  - [vllm-server.yaml.tmpl]
+
 # Resource requirements
 resources:
   cpu: 12
