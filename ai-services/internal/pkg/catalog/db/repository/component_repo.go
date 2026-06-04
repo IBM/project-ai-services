@@ -158,6 +158,49 @@ func (r *componentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Comp
 	return &component, nil
 }
 
+// scanComponent scans a component row and unmarshals JSON fields.
+func scanComponent(rows pgx.Rows) (*models.Component, error) {
+	var (
+		component     models.Component
+		endpointsJSON []byte
+		metadataJSON  []byte
+		version       sql.NullString
+		message       sql.NullString
+	)
+
+	err := rows.Scan(&component.ID, &component.Type, &component.Provider, &component.Status, &message,
+		&endpointsJSON, &version, &metadataJSON, &component.CreatedAt, &component.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan component: %w", err)
+	}
+
+	if version.Valid {
+		component.Version = version.String
+	}
+
+	if message.Valid {
+		component.Message = message.String
+	}
+
+	if len(endpointsJSON) > 0 {
+		var endpoints []map[string]any
+		if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal endpoints: %w", err)
+		}
+		component.Endpoints = endpoints
+	}
+
+	if len(metadataJSON) > 0 {
+		var metadata map[string]any
+		if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+		}
+		component.Metadata = metadata
+	}
+
+	return &component, nil
+}
+
 // GetAll retrieves all components from the database.
 func (r *componentRepo) GetAll(ctx context.Context) ([]models.Component, error) {
 	query := `
@@ -174,45 +217,11 @@ func (r *componentRepo) GetAll(ctx context.Context) ([]models.Component, error) 
 
 	var components []models.Component
 	for rows.Next() {
-		var (
-			component     models.Component
-			endpointsJSON []byte
-			metadataJSON  []byte
-			version       sql.NullString
-			message       sql.NullString
-		)
-
-		err := rows.Scan(&component.ID, &component.Type, &component.Provider, &component.Status, &message,
-			&endpointsJSON, &version, &metadataJSON, &component.CreatedAt, &component.UpdatedAt)
+		component, err := scanComponent(rows)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan component: %w", err)
+			return nil, err
 		}
-
-		if version.Valid {
-			component.Version = version.String
-		}
-
-		if message.Valid {
-			component.Message = message.String
-		}
-
-		if len(endpointsJSON) > 0 {
-			var endpoints []map[string]any
-			if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal endpoints: %w", err)
-			}
-			component.Endpoints = endpoints
-		}
-
-		if len(metadataJSON) > 0 {
-			var metadata map[string]any
-			if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-			}
-			component.Metadata = metadata
-		}
-
-		components = append(components, component)
+		components = append(components, *component)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -239,45 +248,11 @@ func (r *componentRepo) GetByType(ctx context.Context, componentType string) ([]
 
 	var components []models.Component
 	for rows.Next() {
-		var (
-			component     models.Component
-			endpointsJSON []byte
-			metadataJSON  []byte
-			version       sql.NullString
-			message       sql.NullString
-		)
-
-		err := rows.Scan(&component.ID, &component.Type, &component.Provider, &component.Status, &message,
-			&endpointsJSON, &version, &metadataJSON, &component.CreatedAt, &component.UpdatedAt)
+		component, err := scanComponent(rows)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan component: %w", err)
+			return nil, err
 		}
-
-		if version.Valid {
-			component.Version = version.String
-		}
-
-		if message.Valid {
-			component.Message = message.String
-		}
-
-		if len(endpointsJSON) > 0 {
-			var endpoints []map[string]any
-			if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal endpoints: %w", err)
-			}
-			component.Endpoints = endpoints
-		}
-
-		if len(metadataJSON) > 0 {
-			var metadata map[string]any
-			if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-			}
-			component.Metadata = metadata
-		}
-
-		components = append(components, component)
+		components = append(components, *component)
 	}
 
 	if err := rows.Err(); err != nil {
