@@ -513,11 +513,6 @@ func (pc *PodmanClient) GetPodResources(nameOrID string) (*types.PodResources, e
 	return pc.aggregateContainerResourcesWithStats(podInspect)
 }
 
-// isInfraContainer checks if a container is an infrastructure container.
-func isInfraContainer(containerName, infraContainerID string) bool {
-	return containerName == infraContainerID[:12] || strings.HasSuffix(containerName, "-infra")
-}
-
 // aggregateContainerResourcesWithStats collects and aggregates resources from all non-infra containers using podman stats.
 func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entities.PodInspectReport) (*types.PodResources, error) {
 	var totalMemUsage uint64
@@ -526,7 +521,7 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 
 	for _, container := range podInspect.Containers {
 		// Skip infra container
-		if isInfraContainer(container.Name, podInspect.InfraContainerID) {
+		if container.ID == podInspect.InfraContainerID {
 			continue
 		}
 
@@ -577,9 +572,10 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 func collectSpyreCards(containerInspect *define.InspectContainerData, spyreCards *[]string) {
 	if containerInspect.Config != nil && containerInspect.Config.Env != nil {
 		for _, env := range containerInspect.Config.Env {
-			if strings.HasPrefix(env, "AIU_PCIE_IDS=") {
+			pciAddressPrefix := string(constants.PCIAddressKey) + "="
+			if strings.HasPrefix(env, pciAddressPrefix) {
 				// Extract the value after "AIU_PCIE_IDS="
-				pciAddresses := strings.TrimPrefix(env, "AIU_PCIE_IDS=")
+				pciAddresses := strings.TrimPrefix(env, pciAddressPrefix)
 				// Split by spaces and filter out empty strings
 				addresses := strings.Fields(pciAddresses)
 				for _, addr := range addresses {

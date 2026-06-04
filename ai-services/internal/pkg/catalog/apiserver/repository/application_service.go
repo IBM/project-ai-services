@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -16,6 +17,7 @@ import (
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	consts "github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
@@ -927,14 +929,14 @@ func buildResourcesResponse(totals *resourceTotals) *types.ApplicationResourcesR
 	// Build accelerators map
 	accelerators := make(map[string][]string)
 	if len(totalSpyreCards) > 0 {
-		accelerators["spyre"] = totalSpyreCards
+		accelerators["ibm.com/spyre_pf"] = totalSpyreCards
 	}
 
 	// Build response with total and used resources
 	return &types.ApplicationResourcesResponse{
 		CPU: types.ApplicationCPUInfo{
 			TotalCores: float64(totals.allocatedCPU),
-			UsedCores:  totals.usedCPU,
+			UsedCores:  math.Round(totals.usedCPU*consts.PercentageDivisor) / consts.PercentageDivisor,
 		},
 		Memory: types.ApplicationMemInfo{
 			TotalBytes: int64(totals.allocatedMemory),
