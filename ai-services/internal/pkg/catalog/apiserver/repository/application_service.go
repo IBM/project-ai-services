@@ -17,6 +17,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
@@ -156,9 +157,10 @@ func (s *ApplicationService) buildServiceStatuses(services []models.Service) []t
 		}
 
 		statuses = append(statuses, types.ApplicationService{
-			ID:     svc.ID.String(),
-			Type:   serviceDisplayName,
-			Status: string(svc.Status),
+			ID:      svc.ID.String(),
+			Type:    serviceDisplayName,
+			Status:  string(svc.Status),
+			Message: svc.Message,
 		})
 	}
 
@@ -374,13 +376,19 @@ func (s *ApplicationService) insertComponentRecords(
 	for hash, comp := range plan.Components {
 		instanceUUID := uuid.New()
 
+		// Filter metadata to exclude sensitive data based on schema
+		metadata, err := s.filterComponentMetadata(comp.ComponentType, comp.ProviderID, comp.Params)
+		if err != nil {
+			return nil, fmt.Errorf("failed to filter component metadata for %s: %w", hash, err)
+		}
+
 		component := &models.Component{
 			ID:       instanceUUID,
 			Type:     comp.ComponentType,
 			Provider: comp.ProviderID,
 			Status:   models.ComponentStatusInitializing,
 			Version:  comp.Version,
-			Metadata: comp.Params,
+			Metadata: metadata,
 		}
 
 		if err := s.componentRepo.Insert(ctx, component); err != nil {
@@ -581,7 +589,6 @@ func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID
 		return nil, err
 	}
 
-	// Service status update deferred until later
 	go s.performDeletion(context.Background(), id, app.Services, force)
 
 	return &DeleteApplicationResponse{
@@ -647,6 +654,34 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 		}
 	}
 
+	// delete pods before removing DB records
+	rt, err := podmanRuntime.NewPodmanClient()
+	if err != nil {
+		logger.Errorf("failed to init podman client for app %s: %s", appID, err)
+		_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, "failed to init podman client")
+
+		return
+	}
+
+	forceDelete := true
+
+	for _, svc := range services {
+		pods, err := rt.ListPods(map[string][]string{
+			"label": {fmt.Sprintf("ai-services.io/template=%s", svc.ID)},
+		})
+		if err != nil {
+			logger.Errorf("failed to list pods for service %s: %s", svc.ID, err)
+
+			continue
+		}
+
+		for _, pod := range pods {
+			if err := rt.DeletePod(pod.ID, &forceDelete); err != nil {
+				logger.Errorf("failed to delete pod %s for service %s: %s", pod.ID, svc.ID, err)
+			}
+		}
+	}
+
 	// Delete the application; CASCADE removes services and service_dependencies.
 	if err := s.appRepo.Delete(ctx, appID); err != nil {
 		logger.Errorf("failed to delete application %s: %s", appID, err)
@@ -655,10 +690,94 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 	}
 
 	for _, componentID := range orphanedComponents {
+		pods, err := rt.ListPods(map[string][]string{
+			"label": {fmt.Sprintf("ai-services.io/template=%s", componentID)},
+		})
+		if err != nil {
+			logger.Errorf("failed to list pods for component %s: %s", componentID, err)
+		} else {
+			for _, pod := range pods {
+				if err := rt.DeletePod(pod.ID, &forceDelete); err != nil {
+					logger.Errorf("failed to delete pod %s for component %s: %s", pod.ID, componentID, err)
+				}
+			}
+		}
+
 		if err := s.componentRepo.Delete(ctx, componentID); err != nil {
 			logger.Errorf("failed to delete orphaned component %s: %s", componentID, err)
 		}
 	}
+}
+
+// filterComponentMetadata filters component parameters to exclude sensitive data.
+// It reads the component's schema and excludes fields marked as sensitive (e.g., format: "password").
+// Returns an error if the schema cannot be loaded or parsed.
+func (s *ApplicationService) filterComponentMetadata(componentType, providerID string, params map[string]any) (map[string]any, error) {
+	if params == nil {
+		return nil, nil
+	}
+
+	// Load component schema to determine which fields are sensitive
+	schema, err := s.provider.GetComponentProviderParams(componentType, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load schema for component %s/%s: %w", componentType, providerID, err)
+	}
+
+	// Extract properties from schema
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("schema for component %s/%s has no properties", componentType, providerID)
+	}
+
+	// Filter out sensitive fields recursively
+	metadata, err := s.filterSensitiveFields(params, properties)
+	if err != nil {
+		return nil, fmt.Errorf("failed to filter sensitive fields: %w", err)
+	}
+
+	return metadata, nil
+}
+
+// filterSensitiveFields recursively filters out sensitive fields from params based on schema properties.
+// Returns an error if there are issues processing nested structures.
+func (s *ApplicationService) filterSensitiveFields(params map[string]any, properties map[string]any) (map[string]any, error) {
+	metadata := make(map[string]any)
+
+	for key, value := range params {
+		// Check if this field exists in the schema
+		fieldSchema, exists := properties[key].(map[string]any)
+		if !exists {
+			// If field not in schema, skip it (don't include in metadata)
+			continue
+		}
+
+		// Check if field is marked as sensitive (format: "password")
+		if format, hasFormat := fieldSchema["format"].(string); hasFormat && format == "password" {
+			logger.Infof("Excluding sensitive field '%s' from component metadata", key)
+
+			continue
+		}
+
+		// Handle nested objects recursively
+		if valueMap, isMap := value.(map[string]any); isMap {
+			// Check if the field schema has nested properties
+			if nestedProps, hasNestedProps := fieldSchema["properties"].(map[string]any); hasNestedProps {
+				// Recursively filter nested object
+				filteredNested, err := s.filterSensitiveFields(valueMap, nestedProps)
+				if err != nil {
+					return nil, fmt.Errorf("failed to filter nested field '%s': %w", key, err)
+				}
+				metadata[key] = filteredNested
+
+				continue
+			}
+		}
+
+		// Include non-sensitive fields
+		metadata[key] = value
+	}
+
+	return metadata, nil
 }
 
 // Made with Bob

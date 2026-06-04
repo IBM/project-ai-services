@@ -15,7 +15,7 @@ type Service struct {
 	Message   string           `json:"message,omitempty"`
 	Endpoints []map[string]any `json:"endpoints,omitempty"`
 	Component Component        `json:"component,omitempty"`
-	Version   string           `json:"version,omitempty"`
+	Version   string           `json:"version"`
 	CreatedAt time.Time        `json:"created_at"`
 	UpdatedAt time.Time        `json:"updated_at"`
 }

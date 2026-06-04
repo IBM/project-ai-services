@@ -25,7 +25,7 @@ type ServiceRepository interface {
 	// UpdateStatus updates only the status and message of a service.
 	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ServiceStatus, message string) error
 	// UpdateEndpoints updates only the endpoints of a service.
-	UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints map[string]any) error
+	UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints []map[string]any) error
 }
 
 // serviceRepo implements ServiceRepository using pgx.
@@ -96,10 +96,53 @@ func (r *serviceRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// scanService scans a service row and unmarshals JSON fields.
+func scanService(rows pgx.Rows) (*models.Service, error) {
+	var (
+		service        models.Service
+		endpointsJSON  []byte
+		serviceVersion sql.NullString
+		message        sql.NullString
+	)
+
+	err := rows.Scan(
+		&service.ID,
+		&service.AppID,
+		&service.CatalogID,
+		&service.Status,
+		&message,
+		&endpointsJSON,
+		&serviceVersion,
+		&service.CreatedAt,
+		&service.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan service: %w", err)
+	}
+
+	if serviceVersion.Valid {
+		service.Version = serviceVersion.String
+	}
+
+	if message.Valid {
+		service.Message = message.String
+	}
+
+	if len(endpointsJSON) > 0 {
+		var endpoints []map[string]any
+		if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal service endpoints: %w", err)
+		}
+		service.Endpoints = endpoints
+	}
+
+	return &service, nil
+}
+
 // GetByAppID retrieves all services for a specific application.
 func (r *serviceRepo) GetByAppID(ctx context.Context, appID uuid.UUID) ([]models.Service, error) {
 	query := `
-		SELECT id, app_id, type, status, endpoints, version, created_at, updated_at
+		SELECT id, app_id, catalog_id, status, message, endpoints, version, created_at, updated_at
 		FROM services
 		WHERE app_id = $1
 		ORDER BY created_at
@@ -113,39 +156,11 @@ func (r *serviceRepo) GetByAppID(ctx context.Context, appID uuid.UUID) ([]models
 
 	var services []models.Service
 	for rows.Next() {
-		var (
-			service        models.Service
-			endpointsJSON  []byte
-			serviceVersion sql.NullString
-		)
-
-		err := rows.Scan(
-			&service.ID,
-			&service.AppID,
-			&service.CatalogID,
-			&service.Status,
-			&endpointsJSON,
-			&serviceVersion,
-			&service.CreatedAt,
-			&service.UpdatedAt,
-		)
+		service, err := scanService(rows)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan service: %w", err)
+			return nil, err
 		}
-
-		if serviceVersion.Valid {
-			service.Version = serviceVersion.String
-		}
-
-		if len(endpointsJSON) > 0 {
-			var endpoints []map[string]any
-			if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal service endpoints: %w", err)
-			}
-			service.Endpoints = endpoints
-		}
-
-		services = append(services, service)
+		services = append(services, *service)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -216,7 +231,7 @@ func (r *serviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status mod
 }
 
 // UpdateEndpoints updates only the endpoints of a service.
-func (r *serviceRepo) UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints map[string]any) error {
+func (r *serviceRepo) UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints []map[string]any) error {
 	query := `
 		UPDATE services
 		SET endpoints = $1, updated_at = NOW()

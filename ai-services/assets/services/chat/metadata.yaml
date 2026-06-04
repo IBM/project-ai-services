@@ -17,3 +17,5 @@ dependencies:
   - id: embedding
   - id: llm
   - id: reranker
+
+standalone: false
