@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -17,7 +18,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
@@ -35,6 +35,7 @@ type ApplicationService struct {
 	provider              *catalog.CatalogProvider
 	deploymentPlanner     *deployment.DeploymentPlanner
 	deploymentExecutor    *deployment.DeploymentExecutor
+	deletionService       *deletion.DeletionService
 }
 
 // NewApplicationService creates a new application service.
@@ -53,6 +54,7 @@ func NewApplicationService(
 		provider:              provider,
 		deploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo),
 		deploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo),
+		deletionService:       deletion.NewDeletionService(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
 	}
 }
 
@@ -567,7 +569,7 @@ type DeleteApplicationResponse struct {
 }
 
 // DeleteApplication initiates async deletion of an application and returns immediately.
-func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string, force bool) (*DeleteApplicationResponse, error) {
+func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool) (*DeleteApplicationResponse, error) {
 	app, err := s.appRepo.GetByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -589,124 +591,13 @@ func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID
 		return nil, err
 	}
 
-	go s.performDeletion(context.Background(), id, app.Services, force)
+	go s.deletionService.PerformDeletion(context.Background(), id, app.Services, keepData)
 
 	return &DeleteApplicationResponse{
 		ID:      id.String(),
 		Status:  string(models.ApplicationStatusDeleting),
 		Message: "Deletion initiated successfully",
 	}, nil
-}
-
-// performDeletion carries out the async cascade deletion for an application.
-// When force is true, orphaned component records are also deleted.
-//
-//nolint:cyclop,gocognit,nestif,funlen
-func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, force bool) {
-	serviceIDs := make(map[uuid.UUID]bool, len(services))
-	for _, svc := range services {
-		serviceIDs[svc.ID] = true
-	}
-
-	// Identify orphaned components before deletion while service_dependencies still exist.
-	var orphanedComponents []uuid.UUID
-
-	if force {
-		componentCandidates := make(map[uuid.UUID]bool)
-
-		for _, svc := range services {
-			deps, err := s.serviceDependencyRepo.GetDependenciesByServiceID(ctx, svc.ID)
-			if err != nil {
-				logger.Errorf("failed to get dependencies for service %s: %s", svc.ID, err)
-				_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, "failed to get service dependencies")
-
-				return
-			}
-
-			for _, dep := range deps {
-				if dep.DependencyType == models.DependencyTypeComponent {
-					componentCandidates[dep.DependencyID] = true
-				}
-			}
-		}
-
-		for componentID := range componentCandidates {
-			dependentServices, err := s.serviceDependencyRepo.GetServicesByDependency(ctx, componentID, models.DependencyTypeComponent)
-			if err != nil {
-				logger.Errorf("failed to check component %s orphan status: %s", componentID, err)
-
-				continue
-			}
-
-			isOrphan := true
-
-			for _, svcID := range dependentServices {
-				if !serviceIDs[svcID] {
-					isOrphan = false
-
-					break
-				}
-			}
-
-			if isOrphan {
-				orphanedComponents = append(orphanedComponents, componentID)
-			}
-		}
-	}
-
-	// delete pods before removing DB records
-	rt, err := podmanRuntime.NewPodmanClient()
-	if err != nil {
-		logger.Errorf("failed to init podman client for app %s: %s", appID, err)
-		_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, "failed to init podman client")
-
-		return
-	}
-
-	forceDelete := true
-
-	for _, svc := range services {
-		pods, err := rt.ListPods(map[string][]string{
-			"label": {fmt.Sprintf("ai-services.io/template=%s", svc.ID)},
-		})
-		if err != nil {
-			logger.Errorf("failed to list pods for service %s: %s", svc.ID, err)
-
-			continue
-		}
-
-		for _, pod := range pods {
-			if err := rt.DeletePod(pod.ID, &forceDelete); err != nil {
-				logger.Errorf("failed to delete pod %s for service %s: %s", pod.ID, svc.ID, err)
-			}
-		}
-	}
-
-	// Delete the application; CASCADE removes services and service_dependencies.
-	if err := s.appRepo.Delete(ctx, appID); err != nil {
-		logger.Errorf("failed to delete application %s: %s", appID, err)
-
-		return
-	}
-
-	for _, componentID := range orphanedComponents {
-		pods, err := rt.ListPods(map[string][]string{
-			"label": {fmt.Sprintf("ai-services.io/template=%s", componentID)},
-		})
-		if err != nil {
-			logger.Errorf("failed to list pods for component %s: %s", componentID, err)
-		} else {
-			for _, pod := range pods {
-				if err := rt.DeletePod(pod.ID, &forceDelete); err != nil {
-					logger.Errorf("failed to delete pod %s for component %s: %s", pod.ID, componentID, err)
-				}
-			}
-		}
-
-		if err := s.componentRepo.Delete(ctx, componentID); err != nil {
-			logger.Errorf("failed to delete orphaned component %s: %s", componentID, err)
-		}
-	}
 }
 
 // filterComponentMetadata filters component parameters to exclude sensitive data.

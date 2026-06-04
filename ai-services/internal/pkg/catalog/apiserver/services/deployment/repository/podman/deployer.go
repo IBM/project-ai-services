@@ -3,8 +3,6 @@ package podman
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -520,7 +518,7 @@ func (d *PodmanDeployer) mergeEndpointIntoService(comp *ComponentPlan, plan *Dep
 	// Add instanceSlug to the component's values in the service
 	// This allows templates to reference it as .Values.vector_store.instanceSlug
 	if componentValues, ok := svc.Values[comp.ComponentType].(map[string]any); ok {
-		instanceSlug := generateInstanceSlug(comp.DatabaseID.String())
+		instanceSlug := catalogutils.GenerateInstanceSlug(comp.DatabaseID.String())
 		componentValues["instanceSlug"] = instanceSlug
 		logger.Infof("Added instanceSlug '%s' to component %s in service %s\n", instanceSlug, comp.ComponentType, serviceID)
 	}
@@ -584,7 +582,7 @@ func (d *PodmanDeployer) deployComponentPods(
 			for _, podTemplateName := range layer {
 				// Prepare initialParams for the template
 				initialParams := map[string]any{
-					"InstanceSlug": generateInstanceSlug(comp.DatabaseID.String()),
+					"InstanceSlug": catalogutils.GenerateInstanceSlug(comp.DatabaseID.String()),
 					"TemplateID":   comp.DatabaseID,
 					"BaseDir":      utils.GetBaseDir(),
 					"Values":       values,
@@ -603,7 +601,7 @@ func (d *PodmanDeployer) deployComponentPods(
 		for templateName := range tmpls {
 			// Prepare initialParams for the template
 			initialParams := map[string]any{
-				"InstanceSlug": generateInstanceSlug(comp.DatabaseID.String()),
+				"InstanceSlug": catalogutils.GenerateInstanceSlug(comp.DatabaseID.String()),
 				"TemplateID":   comp.DatabaseID,
 				"BaseDir":      utils.GetBaseDir(),
 				"Values":       values,
@@ -810,7 +808,7 @@ func (d *PodmanDeployer) deployAllPodTemplates(
 // buildInitialParams creates the initial parameters map for template deployment.
 func (d *PodmanDeployer) buildInitialParams(applicationID uuid.UUID, databaseID uuid.UUID, values map[string]any) map[string]any {
 	return map[string]any{
-		"InstanceSlug": generateInstanceSlug(applicationID.String()),
+		"InstanceSlug": catalogutils.GenerateInstanceSlug(applicationID.String()),
 		"TemplateID":   databaseID,
 		"BaseDir":      utils.GetBaseDir(),
 		"Values":       values,
@@ -1153,15 +1151,6 @@ func (d *PodmanDeployer) getEnvParamsForComponent(podSpec *podmodels.PodSpec, pl
 	}
 
 	return env, nil
-}
-
-// generateInstanceSlug creates a short slug from an ID using SHA256 hash.
-// Returns the first 10 characters of the hex-encoded hash.
-func generateInstanceSlug(id string) string {
-	hash := sha256.Sum256([]byte(id))
-	hexHash := hex.EncodeToString(hash[:])
-
-	return hexHash[:10]
 }
 
 // registerApplicationRoutes registers routes for all services with Caddy proxy and updates endpoints in database.

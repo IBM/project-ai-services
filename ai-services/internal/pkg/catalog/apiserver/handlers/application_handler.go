@@ -255,7 +255,7 @@ func (h *ApplicationHandler) GetApplicationByID(c *gin.Context) {
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			id		path		string	true	"Application ID (UUID)"
-//	@Param			force	query		bool	false	"When true, also deletes orphaned component records"
+//	@Param			keep_data	query		bool	false	"When true, preserves underlying data (pods, volumes, orphaned components)"
 //	@Success		202		{object}	repository.DeleteApplicationResponse
 //	@Failure		400		{object}	ErrorResponse	"Invalid application ID"
 //	@Failure		401		{object}	ErrorResponse	"Unauthorized"
@@ -272,7 +272,7 @@ func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
 		return
 	}
 
-	force := c.Query("force") == "true"
+	keepData := c.Query("keep_data") == "true"
 
 	userIDVal, exists := c.Get(middleware.CtxUserIDKey)
 	if !exists {
@@ -283,7 +283,7 @@ func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
 
 	userID := userIDVal.(string)
 
-	response, err := h.appService.DeleteApplication(c.Request.Context(), appID, userID, force)
+	response, err := h.appService.DeleteApplication(c.Request.Context(), appID, userID, keepData)
 	if err != nil {
 		h.handleDeleteError(c, err)
 

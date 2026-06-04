@@ -4,6 +4,7 @@ metadata:
   name: "llm-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
+    ai-services.io/secret: "vllm-secret-{{ .InstanceSlug }}"
   annotations:
     io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
     io.podman.annotations.userns: "keep-id"

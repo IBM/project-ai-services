@@ -136,6 +136,8 @@ spec:
         - name: iommu-groups
           mountPath: /sys/kernel/iommu_groups
           readOnly: true
+        - name: ai-services-data
+          mountPath: {{ .BaseDir }}
       resources:
         requests:
           podman.io/device=/dev/vfio: 4
@@ -156,3 +158,7 @@ spec:
       hostPath:
         path: /sys/kernel/iommu_groups
         type: Directory
+    - name: ai-services-data
+      hostPath:
+        path: {{ .BaseDir }}
+        type: DirectoryOrCreate

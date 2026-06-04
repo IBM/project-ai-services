@@ -430,6 +430,12 @@ func (kc *OpenshiftClient) ListSecrets(filters map[string][]string) ([]string, e
 	return nil, nil
 }
 
+func (kc *OpenshiftClient) DeleteSecret(name string) error {
+	logger.Warningln("Not implemented")
+
+	return nil
+}
+
 // GetSystemInfo returns empty system information for OpenShift runtime.
 // Resource information is managed by Kubernetes/OpenShift and not directly accessible.
 func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {

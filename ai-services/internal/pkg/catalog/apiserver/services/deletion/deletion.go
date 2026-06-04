@@ -1,0 +1,391 @@
+package deletion
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	appUtils "github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+)
+
+// DeletionService handles application deletion operations.
+type DeletionService struct {
+	appRepo               dbrepo.ApplicationRepository
+	serviceRepo           dbrepo.ServiceRepository
+	componentRepo         dbrepo.ComponentRepository
+	serviceDependencyRepo dbrepo.ServiceDependencyRepository
+}
+
+// NewDeletionService creates a new deletion service instance.
+func NewDeletionService(
+	appRepo dbrepo.ApplicationRepository,
+	serviceRepo dbrepo.ServiceRepository,
+	componentRepo dbrepo.ComponentRepository,
+	serviceDependencyRepo dbrepo.ServiceDependencyRepository,
+) *DeletionService {
+	return &DeletionService{
+		appRepo:               appRepo,
+		serviceRepo:           serviceRepo,
+		componentRepo:         componentRepo,
+		serviceDependencyRepo: serviceDependencyRepo,
+	}
+}
+
+// PerformDeletion carries out the async cascade deletion for an application.
+// When keepData is true, preserves underlying data (pods, volumes, orphaned components).
+// When keepData is false, deletes all data including application data directory.
+func (s *DeletionService) PerformDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, keepData bool) {
+	// Identify orphaned components before deletion
+	orphanedComponents, err := s.identifyOrphanedComponents(ctx, appID, services)
+	if err != nil {
+		return // Error already logged and status updated
+	}
+
+	// Initialize runtime client
+	rt, err := vars.RuntimeFactory.Create("")
+	if err != nil {
+		logger.Errorf("failed to init runtime client for app %s: %s", appID, err)
+		_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, "failed to init runtime client")
+
+		return
+	}
+
+	// Delete services and track errors
+	errorMessages := s.deleteServices(ctx, rt, services, keepData)
+
+	// Delete orphaned components and track errors
+	componentErrors := s.deleteOrphanedComponents(ctx, rt, orphanedComponents, keepData)
+	errorMessages = append(errorMessages, componentErrors...)
+
+	// Delete application data directory if keepData is false
+	if !keepData {
+		if err := s.deleteInstanceData(appID, "application"); err != nil {
+			errMsg := fmt.Sprintf("failed to delete application data: %s", err)
+			errorMessages = append(errorMessages, errMsg)
+			logger.Errorf("application %s: %s", appID, errMsg)
+		}
+	}
+
+	// Check if any errors occurred during deletion
+	if len(errorMessages) > 0 {
+		s.handleDeletionFailure(ctx, appID, errorMessages)
+
+		return
+	}
+
+	// Delete application from DB only if no errors occurred
+	if err := s.appRepo.Delete(ctx, appID); err != nil {
+		errMsg := fmt.Sprintf("failed to delete application: %s", err)
+		logger.Errorf("application %s: %s", appID, errMsg)
+		_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, errMsg)
+
+		return
+	}
+
+	logger.Infof("Application %s deleted successfully", appID)
+}
+
+// identifyOrphanedComponents identifies components that will become orphaned after service deletion.
+func (s *DeletionService) identifyOrphanedComponents(ctx context.Context, appID uuid.UUID, services []models.Service) ([]uuid.UUID, error) {
+	serviceIDs := s.buildServiceIDMap(services)
+
+	componentCandidates, err := s.collectComponentCandidates(ctx, appID, services)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.filterOrphanedComponents(ctx, componentCandidates, serviceIDs), nil
+}
+
+// buildServiceIDMap creates a map of service IDs for quick lookup.
+func (s *DeletionService) buildServiceIDMap(services []models.Service) map[uuid.UUID]bool {
+	serviceIDs := make(map[uuid.UUID]bool, len(services))
+	for _, svc := range services {
+		serviceIDs[svc.ID] = true
+	}
+
+	return serviceIDs
+}
+
+// collectComponentCandidates gathers all components used by services being deleted.
+func (s *DeletionService) collectComponentCandidates(ctx context.Context, appID uuid.UUID, services []models.Service) (map[uuid.UUID]bool, error) {
+	componentCandidates := make(map[uuid.UUID]bool)
+
+	for _, svc := range services {
+		deps, err := s.serviceDependencyRepo.GetDependenciesByServiceID(ctx, svc.ID)
+		if err != nil {
+			logger.Errorf("failed to get dependencies for service %s: %s", svc.ID, err)
+			_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, "failed to get service dependencies")
+
+			return nil, err
+		}
+
+		for _, dep := range deps {
+			if dep.DependencyType == models.DependencyTypeComponent {
+				componentCandidates[dep.DependencyID] = true
+			}
+		}
+	}
+
+	return componentCandidates, nil
+}
+
+// filterOrphanedComponents checks which components are truly orphaned.
+func (s *DeletionService) filterOrphanedComponents(ctx context.Context, componentCandidates map[uuid.UUID]bool, serviceIDs map[uuid.UUID]bool) []uuid.UUID {
+	var orphanedComponents []uuid.UUID
+
+	for componentID := range componentCandidates {
+		if s.isComponentOrphaned(ctx, componentID, serviceIDs) {
+			orphanedComponents = append(orphanedComponents, componentID)
+		}
+	}
+
+	return orphanedComponents
+}
+
+// isComponentOrphaned checks if a component has no remaining dependent services.
+func (s *DeletionService) isComponentOrphaned(ctx context.Context, componentID uuid.UUID, serviceIDs map[uuid.UUID]bool) bool {
+	dependentServices, err := s.serviceDependencyRepo.GetServicesByDependency(ctx, componentID, models.DependencyTypeComponent)
+	if err != nil {
+		logger.Errorf("failed to check component %s orphan status: %s", componentID, err)
+
+		return false
+	}
+
+	for _, svcID := range dependentServices {
+		if !serviceIDs[svcID] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// deleteServices deletes all services (pods + DB records) and returns any error messages.
+func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime, services []models.Service, keepData bool) []string {
+	var errorMessages []string
+	forceDelete := true
+
+	for _, svc := range services {
+		// List service pods
+		pods, err := rt.ListPods(map[string][]string{
+			"label": {fmt.Sprintf("ai-services.io/template=%s", svc.ID)},
+		})
+		if err != nil {
+			errMsg := fmt.Sprintf("service %s: failed to list pods: %s", svc.ID, err)
+			errorMessages = append(errorMessages, errMsg)
+			_ = s.serviceRepo.UpdateStatus(ctx, svc.ID, models.ServiceStatusError, fmt.Sprintf("failed to list pods: %s", err))
+
+			continue
+		}
+
+		// Delete service secrets
+		secretErrors := s.deleteSecretsFromPods(rt, pods, keepData, "service", svc.ID)
+		if len(secretErrors) > 0 {
+			errorMessages = append(errorMessages, secretErrors...)
+		}
+
+		// Delete service pods
+		podErrors := s.deleteServicePods(rt, pods, forceDelete)
+		if len(podErrors) > 0 {
+			errMsg := fmt.Sprintf("service %s: failed to delete %d pod(s)", svc.ID, len(podErrors))
+			errorMessages = append(errorMessages, errMsg)
+			_ = s.serviceRepo.UpdateStatus(ctx, svc.ID, models.ServiceStatusError, fmt.Sprintf("failed to delete %d pod(s)", len(podErrors)))
+		}
+
+		// Delete service from DB
+		if err := s.serviceRepo.Delete(ctx, svc.ID); err != nil {
+			errMsg := fmt.Sprintf("service %s: failed to delete from DB: %s", svc.ID, err)
+			errorMessages = append(errorMessages, errMsg)
+			_ = s.serviceRepo.UpdateStatus(ctx, svc.ID, models.ServiceStatusError, fmt.Sprintf("failed to delete from DB: %s", err))
+		}
+	}
+
+	return errorMessages
+}
+
+// deleteServicePods deletes all pods for a service and returns any error messages.
+func (s *DeletionService) deleteServicePods(rt runtime.Runtime, pods []runtimeTypes.Pod, forceDelete bool) []string {
+	var podErrors []string
+	for _, pod := range pods {
+		if err := rt.DeletePod(pod.ID, &forceDelete); err != nil {
+			errMsg := fmt.Sprintf("failed to delete pod %s: %s", pod.ID, err)
+			podErrors = append(podErrors, errMsg)
+		}
+	}
+
+	return podErrors
+}
+
+// deleteOrphanedComponents deletes orphaned components (pods + DB records) and returns any error messages.
+func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runtime.Runtime, componentIDs []uuid.UUID, keepData bool) []string {
+	var errorMessages []string
+	forceDelete := true
+
+	for _, componentID := range componentIDs {
+		// List component pods
+		pods, err := rt.ListPods(map[string][]string{
+			"label": {fmt.Sprintf("ai-services.io/template=%s", componentID)},
+		})
+		if err != nil {
+			errMsg := fmt.Sprintf("component %s: failed to list pods: %s", componentID, err)
+			errorMessages = append(errorMessages, errMsg)
+			_ = s.componentRepo.UpdateStatus(ctx, componentID, models.ComponentStatusError, fmt.Sprintf("failed to list pods: %s", err))
+
+			continue
+		}
+
+		// Delete component secrets
+		secretErrors := s.deleteSecretsFromPods(rt, pods, keepData, "component", componentID)
+		if len(secretErrors) > 0 {
+			errorMessages = append(errorMessages, secretErrors...)
+		}
+
+		// Delete component pods
+		podErrors := s.deleteComponentPods(rt, pods, forceDelete)
+		if len(podErrors) > 0 {
+			errMsg := fmt.Sprintf("component %s: failed to delete %d pod(s)", componentID, len(podErrors))
+			errorMessages = append(errorMessages, errMsg)
+			_ = s.componentRepo.UpdateStatus(ctx, componentID, models.ComponentStatusError, fmt.Sprintf("failed to delete %d pod(s)", len(podErrors)))
+		}
+
+		// Delete component data directory if keepData is false
+		if !keepData {
+			if err := s.deleteInstanceData(componentID, "component"); err != nil {
+				errMsg := fmt.Sprintf("component %s: failed to delete component data: %s", componentID, err)
+				errorMessages = append(errorMessages, errMsg)
+				logger.Errorf("component %s: %s", componentID, errMsg)
+			}
+		}
+
+		// Delete component from DB
+		if err := s.componentRepo.Delete(ctx, componentID); err != nil {
+			errMsg := fmt.Sprintf("component %s: failed to delete from DB: %s", componentID, err)
+			errorMessages = append(errorMessages, errMsg)
+			_ = s.componentRepo.UpdateStatus(ctx, componentID, models.ComponentStatusError, fmt.Sprintf("failed to delete from DB: %s", err))
+		}
+	}
+
+	return errorMessages
+}
+
+// deleteComponentPods deletes all pods for a component and returns any error messages.
+func (s *DeletionService) deleteComponentPods(rt runtime.Runtime, pods []runtimeTypes.Pod, forceDelete bool) []string {
+	var podErrors []string
+	for _, pod := range pods {
+		if err := rt.DeletePod(pod.ID, &forceDelete); err != nil {
+			errMsg := fmt.Sprintf("failed to delete pod %s: %s", pod.ID, err)
+			podErrors = append(podErrors, errMsg)
+		}
+	}
+
+	return podErrors
+}
+
+// handleDeletionFailure updates application status when deletion fails.
+func (s *DeletionService) handleDeletionFailure(ctx context.Context, appID uuid.UUID, errorMessages []string) {
+	errMsg := fmt.Sprintf("Application deletion failed with %d error(s), application not deleted", len(errorMessages))
+	logger.Errorf("application %s: %s", appID, errMsg)
+	_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, errMsg)
+}
+
+// deleteInstanceData removes an instance's (application or component) data directory from the filesystem.
+// The data directory path is constructed using the instance ID slug.
+// instanceType should be either "application" or "component".
+func (s *DeletionService) deleteInstanceData(instanceID uuid.UUID, instanceType string) error {
+	// Generate slug from instance ID (same as used during deployment)
+	slug := utils.GenerateInstanceSlug(instanceID.String())
+
+	// Determine base path based on instance type
+	var basePath string
+	switch instanceType {
+	case "application":
+		basePath = appUtils.GetApplicationsPath()
+	case "component":
+		basePath = appUtils.GetComponentsPath()
+	default:
+		return fmt.Errorf("invalid instance type: %s", instanceType)
+	}
+
+	// Construct data path using the base directory and slug
+	dataPath := filepath.Join(basePath, slug)
+
+	// Check if data directory exists
+	if _, err := os.Stat(dataPath); os.IsNotExist(err) {
+		logger.Infof("%s data directory does not exist: %s", instanceType, dataPath)
+
+		return nil
+	}
+
+	logger.Infof("Deleting %s data at: %s", instanceType, dataPath)
+
+	// Remove the data directory
+	if err := os.RemoveAll(dataPath); err != nil {
+		return fmt.Errorf("failed to remove %s data directory: %w", instanceType, err)
+	}
+
+	logger.Infof("Successfully removed %s data at: %s", instanceType, dataPath)
+
+	return nil
+}
+
+// deleteSecretsFromPods extracts secret names from pod labels and deletes them.
+//
+// Deletion logic:
+//   - If keepData=false: Delete ALL secrets (default behavior - complete cleanup)
+//   - If keepData=true: Only delete secrets WITHOUT skip-cleanup label OR with skip-cleanup="false" (e.g., API keys)
+//     Preserve secrets WITH skip-cleanup="true" (e.g., DB credentials)
+//
+// Returns a list of error messages for any secrets that failed to delete.
+func (s *DeletionService) deleteSecretsFromPods(rt runtime.Runtime, pods []runtimeTypes.Pod, keepData bool, instanceType string, instanceID uuid.UUID) []string {
+	var errorMessages []string
+	secretsToDelete := make(map[string]bool) // Use map to avoid duplicates
+
+	// Extract secret names from pod labels
+	for _, pod := range pods {
+		if secretName, ok := pod.Labels[constants.CatalogSecretLabel]; ok {
+			// If keepData=false, delete ALL secrets
+			if !keepData {
+				secretsToDelete[secretName] = true
+			} else {
+				// If keepData=true, only delete secrets without skip-cleanup or with skip-cleanup="false"
+				if skipValue, hasSkipLabel := pod.Labels[constants.CatalogSecretSkipLabel]; !hasSkipLabel || skipValue == "false" {
+					secretsToDelete[secretName] = true
+				}
+			}
+		}
+	}
+
+	if len(secretsToDelete) == 0 {
+		logger.Infof("%s %s: no secrets found to delete", instanceType, instanceID)
+
+		return errorMessages
+	}
+
+	logger.Infof("Deleting %d secret(s) for %s %s (keepData=%v)", len(secretsToDelete), instanceType, instanceID, keepData)
+
+	// Delete each unique secret
+	for secretName := range secretsToDelete {
+		if err := rt.DeleteSecret(secretName); err != nil {
+			errMsg := fmt.Sprintf("%s %s: failed to delete secret %s: %s", instanceType, instanceID, secretName, err)
+			errorMessages = append(errorMessages, errMsg)
+			logger.Errorf(errMsg)
+		} else {
+			logger.Infof("Successfully deleted secret: %s", secretName)
+		}
+	}
+
+	return errorMessages
+}
+
+// Made with Bob
