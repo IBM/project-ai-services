@@ -109,6 +109,15 @@ EOF
 # Validate runtime parameter
 validate_runtime() {
     local RUNTIME="$1"
+    
+    # Check if runtime parameter is provided
+    if [[ -z "$RUNTIME" ]]; then
+        print_error "--runtime parameter is mandatory"
+        echo ""
+        exit 1
+    fi
+    
+    # Check if runtime value is valid
     if [[ "$RUNTIME" != "podman" && "$RUNTIME" != "openshift" ]]; then
         print_error "Error: Invalid runtime value '$RUNTIME'. Must be 'podman' or 'openshift'"
         echo ""
@@ -123,6 +132,30 @@ validate_app_name() {
         print_error "App name is required"
         exit 1
     fi
+}
+
+# Validate target parameter
+validate_target() {
+    local TARGET="$1"
+    
+    # Check if target parameter is provided
+    if [ -z "$TARGET" ] || [[ "$TARGET" == --* ]]; then
+        print_error "Target is required"
+        echo "Valid targets: opensearch, digitize"
+        exit 1
+    fi
+    
+    # Check if target value is valid
+    case "$TARGET" in
+        opensearch|digitize)
+            # Valid target, continue
+            ;;
+        *)
+            print_error "Unknown target: $TARGET"
+            echo "Valid targets: opensearch, digitize"
+            exit 1
+            ;;
+    esac
 }
 
 # Validate backup file parameter
@@ -393,7 +426,7 @@ create_pvc_helper_pod() {
     persistentVolumeClaim:
       claimName: $PVC_NAME"
     
-    create_openshift_pod "$POD_NAME" "$NAMESPACE" "registry.access.redhat.com/ubi9/ubi-minimal:9.4" "$SECURITY_CONTEXT" "$VOLUME_MOUNTS" "$VOLUMES"
+    create_openshift_pod "$POD_NAME" "$NAMESPACE" "registry.access.redhat.com/ubi9/ubi-minimal:9.8" "$SECURITY_CONTEXT" "$VOLUME_MOUNTS" "$VOLUMES"
     
     # Install tar in the helper pod (required for oc cp)
     print_info "Installing tar in helper pod..."
@@ -500,7 +533,7 @@ create_opensearch_sidecar_pod() {
     
     local VOLUMES=""
     
-    create_openshift_pod "$SIDECAR_POD" "$NAMESPACE" "registry.access.redhat.com/ubi9/python-312:9.7" "$SECURITY_CONTEXT" "$VOLUME_MOUNTS" "$VOLUMES"
+    create_openshift_pod "$SIDECAR_POD" "$NAMESPACE" "registry.access.redhat.com/ubi9/python-312:9.8" "$SECURITY_CONTEXT" "$VOLUME_MOUNTS" "$VOLUMES"
     
     install_opensearch_dependencies "$SIDECAR_POD" "$NAMESPACE"
 }
@@ -1258,43 +1291,16 @@ main() {
             # Check and set OpenSearch password
             check_and_set_opensearch_password
 
-            # Validate runtime parameter
+            # Extract and validate runtime parameter
             RUNTIME=$(echo "$@" | grep -oP '(?<=--runtime\s)\S+' || true)
-
-            # Validate runtime parameter is provided
-            if [[ -z "$RUNTIME" ]]; then
-                print_error "--runtime parameter is mandatory"
-                echo ""
-                exit 1
-            fi
-
-            # Validate runtime parameter value
             validate_runtime "$RUNTIME"
             
-            # Now parse remaining parameters
+            # Parse remaining parameters
             local TARGET="$2"
             local APP_NAME="$3"
             
-            # Validate target parameter first
-            if [ -z "$TARGET" ] || [[ "$TARGET" == --* ]]; then
-                print_error "Target is required"
-                echo "Valid targets: opensearch, digitize"
-                exit 1
-            fi
-            
-            # Validate target value
-            case "$TARGET" in
-                opensearch|digitize)
-                    # Valid target, continue
-                    ;;
-                *)
-                    print_error "Unknown target: $TARGET"
-                    echo "Valid targets: opensearch, digitize"
-                    exit 1
-                    ;;
-            esac
-            
-            # Validate app name parameter
+            # Validate target and app name parameters
+            validate_target "$TARGET"
             validate_app_name "$APP_NAME"
             
             # Execute command-specific operations
