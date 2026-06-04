@@ -1051,7 +1051,8 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "component_type",
-                "provider_id"
+                "provider_id",
+                "version"
             ],
             "properties": {
                 "component_type": {
@@ -1077,7 +1078,8 @@ const docTemplate = `{
             "required": [
                 "catalog_id",
                 "name",
-                "services"
+                "services",
+                "version"
             ],
             "properties": {
                 "catalog_id": {
@@ -1111,7 +1113,8 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "catalog_id",
-                "components"
+                "components",
+                "version"
             ],
             "properties": {
                 "catalog_id": {
@@ -1262,6 +1265,9 @@ const docTemplate = `{
                     }
                 },
                 "id": {
+                    "type": "string"
+                },
+                "message": {
                     "type": "string"
                 },
                 "status": {

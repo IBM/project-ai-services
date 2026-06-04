@@ -12,23 +12,23 @@ pytest-mock>=3.11.0
 httpx>=0.24.0
 fastapi>=0.104.0
 starlette>=0.27.0
-uvicorn==0.38.0
-requests==2.33.0
-python-multipart==0.0.27
+uvicorn==0.44.0
+requests==2.34.2
+python-multipart==0.0.28
 
 # Additional utilities
 python-dotenv>=1.0.0
 pydantic>=2.0.0
-pydantic-settings==2.13.1
+pydantic-settings==2.14.1
 
 # Language detection (required by chatbot)
-lingua-language-detector>=1.4.2
+lingua-language-detector==2.2.0
 
 # Common dependencies with specific versions for test compatibility
 tqdm==4.67.3
-opensearch-py==3.0.0
-cohere==5.19.0
-numpy==2.4.1
+opensearch-py==3.1.0
+cohere==7.0.3
+numpy==2.4.4
 psutil==7.2.2
 
 # Database dependencies (required by digitize)
@@ -36,9 +36,8 @@ SQLAlchemy==2.0.49
 psycopg2-binary==2.9.11
 
 # Document processing (required by digitize)
-pypdfium2==5.6.0
+pypdfium2==5.9.0
 pdfplumber==0.11.9
-RapidFuzz==3.13.0
-docling==2.77.0
+RapidFuzz==3.14.5
+docling==2.95.0
 sentence-splitter==1.4
-SQLAlchemy==2.0.49

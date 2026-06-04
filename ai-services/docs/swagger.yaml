@@ -16,6 +16,7 @@ definitions:
     required:
     - component_type
     - provider_id
+    - version
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest:
     properties:
@@ -35,6 +36,7 @@ definitions:
     - catalog_id
     - name
     - services
+    - version
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationResponse:
     properties:
@@ -58,6 +60,7 @@ definitions:
     required:
     - catalog_id
     - components
+    - version
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse:
     properties:
@@ -145,6 +148,8 @@ definitions:
           type: object
         type: array
       id:
+        type: string
+      message:
         type: string
       status:
         type: string

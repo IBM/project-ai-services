@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "digitize-db-{{ .InstanceSlug }}"
+  name: "summarize-db-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
   annotations:
@@ -23,12 +23,12 @@ spec:
         - name: POSTGRES_USER
           valueFrom:
             secretKeyRef:
-              name: "digitize-db-secret-{{ .InstanceSlug }}"
+              name: "summarize-db-secret-{{ .InstanceSlug }}"
               key: username
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: "digitize-db-secret-{{ .InstanceSlug }}"
+              name: "summarize-db-secret-{{ .InstanceSlug }}"
               key: password
         - name: POSTGRES_DB
           value: "postgres"
@@ -67,5 +67,5 @@ spec:
   volumes:
     - name: postgres-data
       hostPath:
-        path: "{{ .BaseDir }}/applications/{{ .InstanceSlug }}/volumes/postgres-digitize"
+        path: "{{ .BaseDir }}/applications/{{ .InstanceSlug }}/volumes/postgres-summarize"
         type: DirectoryOrCreate

@@ -53,15 +53,15 @@ func BuildRouteDomain(subdomain string, config DomainConfig) string {
 }
 
 // BuildRoutesFromAnnotation parses a routes annotation string and builds Route objects.
-// The annotation format is: "port:subdomain, port:subdomain, ...".
-// Example: "8081:catalog-ui, 8080:catalog-api".
+// The annotation format is: "port:subdomain:type, port:subdomain:type, ...".
+// Example: "8081:catalog-ui:ui, 8080:catalog-api:api".
 func BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName string) ([]Route, error) {
 	if routesAnnotation == "" {
 		return nil, nil
 	}
 
 	routes := []Route{}
-	const expectedParts = 2
+	const expectedParts = 3
 
 	// Prepare domain configuration
 	domainConfig := DomainConfig{
@@ -69,7 +69,7 @@ func BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName string) ([]Rout
 		// Future: Add CustomDomain and CertPath from flags/config
 	}
 
-	// Parse routes annotation (format: "port:subdomain, port:subdomain, ...")
+	// Parse routes annotation (format: "port:subdomain:type, port:subdomain:type, ...")
 	for _, r := range strings.Split(routesAnnotation, ",") {
 		r = strings.TrimSpace(r)
 		if r == "" {
@@ -79,14 +79,21 @@ func BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName string) ([]Rout
 		// Split by colon
 		parts := strings.Split(r, ":")
 		if len(parts) != expectedParts {
-			continue
+			return nil, fmt.Errorf("invalid route format '%s': expected 'port:subdomain:type', got %d parts", r, len(parts))
 		}
 
 		port := strings.TrimSpace(parts[0])
 		subdomain := strings.TrimSpace(parts[1])
+		routeType := strings.ToLower(strings.TrimSpace(parts[2]))
 
-		if port == "" || subdomain == "" {
-			continue
+		if port == "" {
+			return nil, fmt.Errorf("invalid route '%s': port cannot be empty", r)
+		}
+		if subdomain == "" {
+			return nil, fmt.Errorf("invalid route '%s': subdomain cannot be empty", r)
+		}
+		if routeType == "" {
+			return nil, fmt.Errorf("invalid route '%s': type cannot be empty", r)
 		}
 
 		// Build route - use pod name as upstream since containers are in the same pod
@@ -95,6 +102,7 @@ func BuildRoutesFromAnnotation(routesAnnotation, hostIP, podName string) ([]Rout
 			Domain:   BuildRouteDomain(subdomain, domainConfig),
 			Upstream: fmt.Sprintf("%s:%s", podName, port),
 			Terminal: true,
+			Type:     routeType,
 		}
 		routes = append(routes, route)
 	}

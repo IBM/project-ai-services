@@ -1045,7 +1045,8 @@
             "type": "object",
             "required": [
                 "component_type",
-                "provider_id"
+                "provider_id",
+                "version"
             ],
             "properties": {
                 "component_type": {
@@ -1071,7 +1072,8 @@
             "required": [
                 "catalog_id",
                 "name",
-                "services"
+                "services",
+                "version"
             ],
             "properties": {
                 "catalog_id": {
@@ -1105,7 +1107,8 @@
             "type": "object",
             "required": [
                 "catalog_id",
-                "components"
+                "components",
+                "version"
             ],
             "properties": {
                 "catalog_id": {
@@ -1256,6 +1259,9 @@
                     }
                 },
                 "id": {
+                    "type": "string"
+                },
+                "message": {
                     "type": "string"
                 },
                 "status": {

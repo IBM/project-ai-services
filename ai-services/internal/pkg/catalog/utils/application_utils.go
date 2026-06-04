@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 )
@@ -49,6 +50,17 @@ func UpdateApplicationStatus(ctx context.Context, appRepo dbrepo.ApplicationRepo
 	log.Printf("Application %s status updated: %s - %s", appUUID, status, message)
 
 	return nil
+}
+
+// BuildExternalURL constructs an HTTPS URL from a domain and optional port.
+// If the port is not the default HTTPS port (443), it appends the port to the URL.
+func BuildExternalURL(domain string, httpsPort string) string {
+	url := fmt.Sprintf("https://%s", domain)
+	if httpsPort != constants.DefaultHTTPSPort {
+		url = url + ":" + httpsPort
+	}
+
+	return url
 }
 
 // Made with Bob
