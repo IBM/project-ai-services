@@ -5,7 +5,7 @@ metadata:
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
     ai-services.io/secret: "opensearch-secret-{{ .InstanceSlug }}"
-    ai-services.io/secret-skip-cleanup: "false"
+    ai-services.io/secret-skip-cleanup: "true"
   annotations:
     io.podman.annotations.pids-limit/opensearch: "4096"
 spec:

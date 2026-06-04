@@ -5,7 +5,7 @@ metadata:
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
     ai-services.io/secret: "summarize-db-secret-{{ .InstanceSlug }}"
-    ai-services.io/secret-skip-cleanup: "false"
+    ai-services.io/secret-skip-cleanup: "true"
   annotations:
     ai-services.io/routes: "6000:summarize-api-{{ .InstanceSlug }}:api"
     # ai-services.io/ports: "{{ or .Values.summarize.port }}:6000"  # Uncomment to expose ports directly (bypasses Caddy)
