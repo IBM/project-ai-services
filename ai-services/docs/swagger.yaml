@@ -521,11 +521,11 @@ paths:
         name: id
         required: true
         type: string
-      - description: When true, preserves underlying data (volumes of databases/service
-          resources)
+      - description: 'When ''true'', preserves underlying data (volumes of databases/service
+          resources). Default: ''false'''
         in: query
         name: keep_data
-        type: boolean
+        type: string
       produces:
       - application/json
       responses:
@@ -534,7 +534,7 @@ paths:
           schema:
             $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_repository.DeleteApplicationResponse'
         "400":
-          description: Invalid application ID
+          description: Invalid application ID or keep_data parameter
           schema:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "401":

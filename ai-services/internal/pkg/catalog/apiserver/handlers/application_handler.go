@@ -255,9 +255,9 @@ func (h *ApplicationHandler) GetApplicationByID(c *gin.Context) {
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			id			path		string	true	"Application ID (UUID)"
-//	@Param			keep_data	query		bool	false	"When true, preserves underlying data (volumes of databases/service resources)"
+//	@Param			keep_data	query		string	false	"When 'true', preserves underlying data (volumes of databases/service resources). Default: 'false'"
 //	@Success		202			{object}	repository.DeleteApplicationResponse
-//	@Failure		400			{object}	ErrorResponse	"Invalid application ID"
+//	@Failure		400			{object}	ErrorResponse	"Invalid application ID or keep_data parameter"
 //	@Failure		401			{object}	ErrorResponse	"Unauthorized"
 //	@Failure		403			{object}	ErrorResponse	"User doesn't own this application"
 //	@Failure		404			{object}	ErrorResponse	"Application not found"
@@ -272,8 +272,6 @@ func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
 		return
 	}
 
-	keepData := c.Query("keep_data") == "true"
-
 	userIDVal, exists := c.Get(middleware.CtxUserIDKey)
 	if !exists {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "authentication required"})
@@ -282,6 +280,17 @@ func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
 	}
 
 	userID := userIDVal.(string)
+
+	// Parse and validate keep_data parameter (default: false)
+	keepData := false
+	keepDataParam := c.Query("keep_data")
+	if keepDataParam != "" {
+		if keepDataParam != "true" && keepDataParam != "false" {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid keep_data parameter: must be 'true' or 'false'"})
+			return
+		}
+		keepData = keepDataParam == "true"
+	}
 
 	response, err := h.appService.DeleteApplication(c.Request.Context(), appID, userID, keepData)
 	if err != nil {
