@@ -18,6 +18,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -254,7 +256,7 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 
 	// Phase 2: Create deployment plan (synchronous - fail fast if invalid)
 	// Use podman as default runtime type for planning
-	plan, err := s.deploymentPlanner.PlanDeployment(ctx, req, runtime.RuntimeTypePodman.String())
+	plan, err := s.deploymentPlanner.PlanDeployment(ctx, req, runtimeTypes.RuntimeTypePodman.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create deployment plan: %w", err)
 	}
