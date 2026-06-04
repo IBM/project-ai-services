@@ -6,9 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/spyreconfig/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 )
 
 const (
@@ -25,57 +23,29 @@ func (p *PodmanBootstrap) Configure() error {
 
 	ctx := context.Background()
 
-	s := spinner.New("Checking podman installation")
-	s.Start(ctx)
 	// 1. Install and configure Podman if not done
-	// 1.1 Install Podman
-	if _, err := utils.Podman(); err != nil {
-		s.UpdateMessage("Installing podman")
-		// setup podman socket and enable service
-		if err := installPodman(); err != nil {
-			s.Fail("failed to install podman")
-
-			return err
-		}
-		s.Stop("podman installed successfully")
-	} else {
-		s.Stop("podman already installed")
+	if err := ensurePodmanInstalled(ctx); err != nil {
+		return err
 	}
 
-	s = spinner.New("Verifying podman configuration")
-	s.Start(ctx)
-	// 1.2 Configure Podman
-	if err := utils.PodmanHealthCheck(); err != nil {
-		s.UpdateMessage("Configuring podman")
-		if err := setupPodman(); err != nil {
-			s.Fail("failed to configure podman")
-
-			return err
-		}
-		s.Stop("podman configured successfully")
-	} else {
-		s.Stop("Podman already configured")
+	if err := ensurePodmanConfigured(ctx); err != nil {
+		return err
 	}
 
-	s = spinner.New("Checking spyre card configuration")
-	s.Start(ctx)
 	// 2. Spyre cards – validate and repair spyre configurations
-	if err := configureSpyre(); err != nil {
-		s.Fail("failed to configure spyre card")
-
+	if err := ensureSpyreConfigured(ctx); err != nil {
 		return err
 	}
-	s.Stop("Spyre cards configuration validated successfully.")
 
-	s = spinner.New("Configuring SMT level to 2")
-	s.Start(ctx)
 	// 3. Configure SMT level to 2 and persist via systemd
-	if err := setupSMTLevel(); err != nil {
-		s.Fail("failed to configure SMT level")
-
+	if err := ensureSMTConfigured(ctx); err != nil {
 		return err
 	}
-	s.Stop("SMT level configured successfully (set to 2)")
+
+	// 4. Configure SELinux policy for Podman socket access
+	if err := ensureSELinuxPolicyConfigured(ctx); err != nil {
+		return err
+	}
 
 	logger.Infoln("LPAR configured successfully")
 

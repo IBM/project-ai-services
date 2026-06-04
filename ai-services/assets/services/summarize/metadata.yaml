@@ -14,3 +14,5 @@ architectures:
 # Dependencies on other components
 dependencies:
   - id: llm
+
+standalone: true

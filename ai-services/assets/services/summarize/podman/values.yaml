@@ -1,4 +1,4 @@
 summarize:
   port: ""
-  image: icr.io/ai-services-cicd/summarize-service:v0.0.5
+  image: icr.io/ai-services-cicd/summarize-service:v0.0.6
   log_level: "INFO"

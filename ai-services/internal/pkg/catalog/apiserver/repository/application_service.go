@@ -18,7 +18,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -255,7 +254,7 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 
 	// Phase 2: Create deployment plan (synchronous - fail fast if invalid)
 	// Use podman as default runtime type for planning
-	plan, err := s.deploymentPlanner.PlanDeployment(ctx, req, runtimeTypes.RuntimeTypePodman.String())
+	plan, err := s.deploymentPlanner.PlanDeployment(ctx, req, runtime.RuntimeTypePodman.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create deployment plan: %w", err)
 	}
@@ -583,7 +582,6 @@ func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID
 		return nil, err
 	}
 
-	// Service status update deferred until later
 	go s.performDeletion(context.Background(), id, app.Services, force)
 
 	return &DeleteApplicationResponse{
@@ -649,6 +647,34 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 		}
 	}
 
+	// delete pods before removing DB records
+	rt, err := podmanRuntime.NewPodmanClient()
+	if err != nil {
+		logger.Errorf("failed to init podman client for app %s: %s", appID, err)
+		_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, "failed to init podman client")
+
+		return
+	}
+
+	forceDelete := true
+
+	for _, svc := range services {
+		pods, err := rt.ListPods(map[string][]string{
+			"label": {fmt.Sprintf("ai-services.io/template=%s", svc.ID)},
+		})
+		if err != nil {
+			logger.Errorf("failed to list pods for service %s: %s", svc.ID, err)
+
+			continue
+		}
+
+		for _, pod := range pods {
+			if err := rt.DeletePod(pod.ID, &forceDelete); err != nil {
+				logger.Errorf("failed to delete pod %s for service %s: %s", pod.ID, svc.ID, err)
+			}
+		}
+	}
+
 	// Delete the application; CASCADE removes services and service_dependencies.
 	if err := s.appRepo.Delete(ctx, appID); err != nil {
 		logger.Errorf("failed to delete application %s: %s", appID, err)
@@ -657,6 +683,19 @@ func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUI
 	}
 
 	for _, componentID := range orphanedComponents {
+		pods, err := rt.ListPods(map[string][]string{
+			"label": {fmt.Sprintf("ai-services.io/template=%s", componentID)},
+		})
+		if err != nil {
+			logger.Errorf("failed to list pods for component %s: %s", componentID, err)
+		} else {
+			for _, pod := range pods {
+				if err := rt.DeletePod(pod.ID, &forceDelete); err != nil {
+					logger.Errorf("failed to delete pod %s for component %s: %s", pod.ID, componentID, err)
+				}
+			}
+		}
+
 		if err := s.componentRepo.Delete(ctx, componentID); err != nil {
 			logger.Errorf("failed to delete orphaned component %s: %s", componentID, err)
 		}

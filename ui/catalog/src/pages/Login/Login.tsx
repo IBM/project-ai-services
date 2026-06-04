@@ -11,6 +11,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import styles from "./Login.module.scss";
 import { login } from "@/services/auth";
+import { ROUTES } from "@/constants/endpoints.constants";
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -31,7 +32,7 @@ const LoginPage = () => {
         password,
       });
 
-      navigate("/ai-deployments");
+      navigate(ROUTES.DIGITAL_ASSISTANTS);
     } catch {
       setError(true);
     } finally {

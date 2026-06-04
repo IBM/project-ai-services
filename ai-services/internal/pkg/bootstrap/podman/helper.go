@@ -14,6 +14,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/spyreconfig/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils/selinux"
 )
 
 // configureSpyre validates and repairs Spyre card configuration.
@@ -270,4 +272,118 @@ func getSMTLevel(output string) (int, error) {
 	}
 
 	return SMTlevel, nil
+}
+
+// setupSELinuxPodmanSocketPolicy configures SELinux policy for Podman socket access.
+func setupSELinuxPodmanSocketPolicy() error {
+	// Apply root Podman socket policy
+	result := spyre.ApplySELinuxPolicy(
+		"SELinux Podman socket policy configuration",
+		"ai_services_root_policy",
+		selinux.RootPodmanSocketPolicyContent,
+		"SELinux Podman socket policy configured successfully",
+	)
+
+	if result.Status == spyre.StatusFailedToFix {
+		return result.Error
+	}
+
+	// Apply rootless Podman socket policy
+	rootlessResult := spyre.ApplySELinuxPolicy(
+		"SELinux rootless Podman socket policy configuration",
+		"ai_services_nonroot_policy",
+		selinux.RootlessPodmanSocketPolicyContent,
+		"SELinux rootless Podman socket policy configured successfully",
+	)
+
+	if rootlessResult.Status == spyre.StatusFailedToFix {
+		return rootlessResult.Error
+	}
+
+	return nil
+}
+
+// ensurePodmanInstalled checks if podman is installed and installs it if needed.
+func ensurePodmanInstalled(ctx context.Context) error {
+	s := spinner.New("Checking podman installation")
+	s.Start(ctx)
+
+	if _, err := utils.Podman(); err != nil {
+		s.UpdateMessage("Installing podman")
+		if err := installPodman(); err != nil {
+			s.Fail("failed to install podman")
+
+			return err
+		}
+		s.Stop("podman installed successfully")
+	} else {
+		s.Stop("podman already installed")
+	}
+
+	return nil
+}
+
+// ensurePodmanConfigured verifies podman configuration and sets it up if needed.
+func ensurePodmanConfigured(ctx context.Context) error {
+	s := spinner.New("Verifying podman configuration")
+	s.Start(ctx)
+
+	if err := utils.PodmanHealthCheck(); err != nil {
+		s.UpdateMessage("Configuring podman")
+		if err := setupPodman(); err != nil {
+			s.Fail("failed to configure podman")
+
+			return err
+		}
+		s.Stop("podman configured successfully")
+	} else {
+		s.Stop("Podman already configured")
+	}
+
+	return nil
+}
+
+// ensureSpyreConfigured validates and repairs Spyre card configuration.
+func ensureSpyreConfigured(ctx context.Context) error {
+	s := spinner.New("Checking spyre card configuration")
+	s.Start(ctx)
+
+	if err := configureSpyre(); err != nil {
+		s.Fail("failed to configure spyre card")
+
+		return err
+	}
+	s.Stop("Spyre cards configuration validated successfully.")
+
+	return nil
+}
+
+// ensureSMTConfigured sets up SMT level to 2 and persists via systemd.
+func ensureSMTConfigured(ctx context.Context) error {
+	s := spinner.New("Configuring SMT level to 2")
+	s.Start(ctx)
+
+	if err := setupSMTLevel(); err != nil {
+		s.Fail("failed to configure SMT level")
+
+		return err
+	}
+	s.Stop("SMT level configured successfully (set to 2)")
+
+	return nil
+}
+
+// ensureSELinuxPolicyConfigured sets up SELinux policy for Podman socket access.
+func ensureSELinuxPolicyConfigured(ctx context.Context) error {
+	s := spinner.New("Configuring SELinux Podman socket policy")
+	s.Start(ctx)
+
+	if err := setupSELinuxPodmanSocketPolicy(); err != nil {
+		s.Fail("failed to configure SELinux Podman socket policy")
+
+		return err
+	}
+	s.Stop("SELinux Podman socket policy configured successfully")
+
+	return nil
 }

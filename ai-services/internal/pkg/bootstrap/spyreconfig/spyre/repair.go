@@ -7,6 +7,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/spyreconfig/check"
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/spyreconfig/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils/selinux"
 )
 
 // RepairStatus represents the status of a repair operation.
@@ -60,7 +61,6 @@ func Repair(checks []check.CheckResult) []RepairResult {
 	results = append(results, fixVFIOPermissions(checkMap, userGroupResult))
 	results = append(results, fixSystemdUserSliceLimits(checkMap))
 	results = append(results, fixSELinuxVFIOPolicy())
-	results = append(results, fixSELinuxPodmanSocketPolicy())
 	results = append(results, fixPodmanServiceSupplementaryGroups(checkMap))
 
 	return results
@@ -508,10 +508,10 @@ func isSELinuxEnabledAndActive() (bool, string) {
 // fixSELinuxVFIOPolicy configures SELinux policy for VFIO device access.
 // This allows containers with container_t type to access VFIO devices.
 func fixSELinuxVFIOPolicy() RepairResult {
-	result := applySELinuxPolicy(
+	result := ApplySELinuxPolicy(
 		"SELinux VFIO policy configuration",
 		"vllm_vfio_policy",
-		vfioPolicyContent,
+		selinux.VFIOPolicyContent,
 		"SELinux VFIO policy configured successfully",
 	)
 
@@ -529,8 +529,8 @@ func fixSELinuxVFIOPolicy() RepairResult {
 	return result
 }
 
-// applySELinuxPolicy is a generic helper to apply SELinux policies.
-func applySELinuxPolicy(checkName, policyName, policyContent, successMessage string) RepairResult {
+// ApplySELinuxPolicy is a generic helper to apply SELinux policies.
+func ApplySELinuxPolicy(checkName, policyName, policyContent, successMessage string) RepairResult {
 	enabled, msg := isSELinuxEnabledAndActive()
 	if !enabled {
 		return RepairResult{CheckName: checkName, Status: StatusSkipped, Message: msg}
@@ -593,17 +593,6 @@ func buildAndInstallSELinuxPolicy(tmpDir, policyName, teContent string, reinstal
 	}
 
 	return nil
-}
-
-// fixSELinuxPodmanSocketPolicy configures SELinux policy for Podman socket access.
-// This allows containers with container_t type to access the Podman socket.
-func fixSELinuxPodmanSocketPolicy() RepairResult {
-	return applySELinuxPolicy(
-		"SELinux Podman socket policy configuration",
-		"podman_socket_policy",
-		podmanSocketPolicyContent,
-		"SELinux Podman socket policy configured successfully",
-	)
 }
 
 // fixPodmanServiceSupplementaryGroups repairs the podman service SupplementaryGroups configuration.
