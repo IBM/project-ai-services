@@ -17,7 +17,7 @@ defusedxml==0.7.1
 dill==0.4.1
 distro==1.9.0
 dnspython==2.8.0
-docling==2.97.0
+docling==2.95.0
 docling-core==2.78.0
 docling-ibm-models==3.13.2
 docling-slim==2.95.0
