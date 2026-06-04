@@ -61,35 +61,7 @@ Examples:
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Prompt for admin password
-			adminPassword, err := promptForPassword()
-			if err != nil {
-				return fmt.Errorf("failed to read admin password: %w", err)
-			}
-
-			var aiServicesDir string
-
-			// Use default base directory if not specified, otherwise validate
-			if baseDir == "" {
-				aiServicesDir = constants.DefaultBaseDir
-			} else {
-				aiServicesDir, err = utils.ValidateBaseDir(baseDir)
-				if err != nil {
-					return fmt.Errorf("invalid base directory '%s': %w", baseDir, err)
-				}
-			}
-
-			logger.Infof("Using base directory: %s\n", aiServicesDir, logger.VerbosityLevelDebug)
-
-			return configure.Run(configure.ConfigureOptions{
-				AdminPassword: adminPassword,
-				Runtime:       vars.RuntimeFactory.GetRuntimeType(),
-				BaseDir:       aiServicesDir,
-				ArgParams:     argParams,
-				DomainName:    domainName,
-				SSLCertPath:   sslCertPath,
-				SSLKeyPath:    sslKeyPath,
-				HttpsPort:     httpsPort,
-			})
+			return runConfigure(argParams)
 		},
 	}
 
@@ -132,6 +104,9 @@ func runConfigure(argParams map[string]string) error {
 		Runtime:       vars.RuntimeFactory.GetRuntimeType(),
 		BaseDir:       aiServicesDir,
 		ArgParams:     argParams,
+		DomainName:    domainName,
+		SSLCertPath:   sslCertPath,
+		SSLKeyPath:    sslKeyPath,
 		HttpsPort:     httpsPort,
 	})
 }

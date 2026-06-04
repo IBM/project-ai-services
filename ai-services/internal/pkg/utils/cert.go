@@ -45,6 +45,7 @@ func validateFilePath(path, fileType string) error {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("%s file does not exist: %s", fileType, path)
 		}
+
 		return fmt.Errorf("cannot access %s file: %w", fileType, err)
 	}
 

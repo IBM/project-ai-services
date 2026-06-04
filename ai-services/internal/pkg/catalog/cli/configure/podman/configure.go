@@ -20,6 +20,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
@@ -36,10 +37,68 @@ const (
 	caddyContainerDataDir = "/data/caddy"
 )
 
+// catalogDeploymentContext holds cached values during catalog deployment to avoid redundant lookups.
+type catalogDeploymentContext struct {
+	// Pod identification
+	caddyPodName string
+
+	// Admin API access
+	caddyAdminPort         string // Dynamic port assigned by Podman
+	caddyContainerAdminURL string // http://<podName>:2019 (for container use in templates)
+	caddyHostAdminURL      string // http://localhost:<port> (for host VM use in post-deployment)
+
+	// Network configuration
+	hostIP       string
+	domainSuffix string
+}
+
+// getCaddyPodName retrieves the Caddy pod name, using cache if available.
+func (c *catalogDeploymentContext) getCaddyPodName(tp templates.Template, appTemplateName string, argParams map[string]string) (string, error) {
+	if c.caddyPodName != "" {
+		return c.caddyPodName, nil
+	}
+
+	name, err := findCaddyPodNameFromTemplates(tp, appTemplateName, argParams)
+	if err != nil {
+		return "", err
+	}
+
+	c.caddyPodName = name
+
+	return name, nil
+}
+
+// getCaddyHostAdminURL retrieves the Caddy admin URL for host VM use, using cache if available.
+func (c *catalogDeploymentContext) getCaddyHostAdminURL(rt *podman.PodmanClient, tp templates.Template, appTemplateName string, argParams map[string]string) (string, error) {
+	if c.caddyHostAdminURL != "" {
+		return c.caddyHostAdminURL, nil
+	}
+
+	// Get pod name (will use cache if available)
+	podName, err := c.getCaddyPodName(tp, appTemplateName, argParams)
+	if err != nil {
+		return "", err
+	}
+
+	// Get admin port
+	adminPort, err := proxy.GetCaddyAdminPort(rt, podName)
+	if err != nil {
+		return "", err
+	}
+
+	c.caddyAdminPort = adminPort
+	c.caddyHostAdminURL = fmt.Sprintf("http://localhost:%s", adminPort)
+
+	return c.caddyHostAdminURL, nil
+}
+
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
 func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, baseDir string, argParams map[string]string, domainName string, sslCertPath, sslKeyPath string, httpsPort int) error {
 	s := spinner.New("Deploying catalog service...")
 	s.Start(ctx)
+
+	// Initialize deployment context for caching
+	deployCtx := &catalogDeploymentContext{}
 
 	// Initialize and validate
 	rt, tp, appMetadata, tmpls, argParams, err := initializeCatalogDeployment(argParams, httpsPort, s)
@@ -63,13 +122,13 @@ func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, b
 	}
 
 	// Prepare deployment with domain suffix computation
-	hostIP, caddyPodName, caddyAdminURL, domainSuffix, values, err := prepareCatalogDeployment(tp, podmanURI, authFilePath, passwordHash, baseDir, domainName, sslCertPath, sslKeyPath, argParams, s)
+	values, err := prepareCatalogDeployment(deployCtx, tp, podmanURI, authFilePath, passwordHash, baseDir, domainName, sslCertPath, sslKeyPath, argParams, s)
 	if err != nil {
 		return err
 	}
 
-	// Execute pod templates
-	if err := executePodLayers(rt, tp, tmpls, appMetadata, values, baseDir, hostIP, caddyAdminURL, domainSuffix, argParams, s, existingResources); err != nil {
+	// Execute pod templates (using cached values from context)
+	if err := executePodLayers(rt, tp, tmpls, appMetadata, values, baseDir, deployCtx.caddyContainerAdminURL, deployCtx.domainSuffix, argParams, s, existingResources); err != nil {
 		return err
 	}
 
@@ -77,11 +136,11 @@ func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, b
 	logger.Infoln("-------")
 
 	// Load SSL certificates if provided
-	if err := loadSSLCertificatesIfProvided(rt, tp, baseDir, sslCertPath, sslKeyPath, argParams); err != nil {
+	if err := loadSSLCertificatesIfProvided(deployCtx, rt, tp, baseDir, sslCertPath, sslKeyPath, argParams); err != nil {
 		return err
 	}
 
-	return handlePostDeployment(rt, tp, argParams, domainSuffix, caddyPodName)
+	return handlePostDeployment(deployCtx, rt, tp, argParams)
 }
 
 // initializeCatalogDeployment handles initialization and validation steps.
@@ -119,16 +178,18 @@ func initializeCatalogDeployment(argParams map[string]string, httpsPort int, s *
 }
 
 // handlePostDeployment handles route registration and next steps display after catalog deployment.
-func handlePostDeployment(rt *podman.PodmanClient, tp templates.Template, argParams map[string]string, domainSuffix, caddyPodName string) error {
-	// Get Caddy admin port for route registration (running on host VM during catalog configure)
-	adminPort, err := proxy.GetCaddyAdminPort(rt, caddyPodName)
+func handlePostDeployment(deployCtx *catalogDeploymentContext, rt *podman.PodmanClient, tp templates.Template, argParams map[string]string) error {
+	// Get Caddy admin URL from cache (will fetch and cache if not already cached)
+	adminURL, err := deployCtx.getCaddyHostAdminURL(rt, tp, catalogAppTemplate, argParams)
 	if err != nil {
-		return fmt.Errorf("failed to get Caddy admin port: %w", err)
+		return fmt.Errorf("failed to get Caddy admin URL: %w", err)
 	}
-	adminURL := fmt.Sprintf("http://localhost:%s", adminPort)
+
+	// Get Caddy pod name from cache
+	caddyPodName := deployCtx.caddyPodName
 
 	// Register routes with Caddy and get the registered route domains
-	routeDomains, err := registerCatalogRoutes(rt, tp, catalogAppTemplate, argParams, domainSuffix, adminURL)
+	routeDomains, err := registerCatalogRoutes(rt, tp, catalogAppTemplate, argParams, deployCtx.domainSuffix, adminURL)
 	if err != nil {
 		return fmt.Errorf("route registration failed: %w", err)
 	}
@@ -167,80 +228,77 @@ func extractCertDomainIfProvided(sslCertPath, sslKeyPath string, s *spinner.Spin
 }
 
 // prepareCatalogDeployment prepares all necessary data for deployment including domain suffix computation.
-func prepareCatalogDeployment(tp templates.Template, podmanURI, authFilePath, passwordHash, baseDir, domainName, sslCertPath, sslKeyPath string, argParams map[string]string, s *spinner.Spinner) (string, string, string, string, map[string]any, error) {
-	// Get host IP for template rendering
+func prepareCatalogDeployment(deployCtx *catalogDeploymentContext, tp templates.Template, podmanURI, authFilePath, passwordHash, baseDir, domainName, sslCertPath, sslKeyPath string, argParams map[string]string, s *spinner.Spinner) (map[string]any, error) {
+	// Get host IP and cache it
 	hostIP, err := utils.GetHostIP()
 	if err != nil {
 		s.Fail("failed to get host IP")
 
-		return "", "", "", "", nil, fmt.Errorf("failed to get host IP: %w", err)
+		return nil, fmt.Errorf("failed to get host IP: %w", err)
 	}
+	deployCtx.hostIP = hostIP
 
 	// Extract domain from certificate if provided
 	certDomain, err := extractCertDomainIfProvided(sslCertPath, sslKeyPath, s)
 	if err != nil {
-		return "", "", "", "", nil, err
+		return nil, err
 	}
 
 	// Compute domain suffix using priority: certDomain > customDomain > hostIP.nip.io
-	domainSuffix, err := computeDomainSuffix(certDomain, domainName)
+	domainSuffix, err := computeDomainSuffix(certDomain, domainName, hostIP)
 	if err != nil {
 		s.Fail("failed to compute domain suffix")
-		return "", "", "", "", nil, fmt.Errorf("failed to compute domain suffix: %w", err)
+		return nil, fmt.Errorf("failed to compute domain suffix: %w", err)
 	}
+	deployCtx.domainSuffix = domainSuffix
 
 	logger.Infof("Using domain suffix: %s\n", domainSuffix, logger.VerbosityLevelDebug)
 
-	// Find Caddy pod name from templates to build admin URL for container
-	caddyPodName, err := findCaddyPodNameFromTemplates(tp, catalogAppTemplate, argParams)
+	// Get Caddy pod name from cache (will be cached for subsequent calls)
+	caddyPodName, err := deployCtx.getCaddyPodName(tp, catalogAppTemplate, argParams)
 	if err != nil {
 		s.Fail("failed to find Caddy pod name")
 
-		return "", "", "", "", nil, fmt.Errorf("failed to find Caddy pod name: %w", err)
+		return nil, fmt.Errorf("failed to find Caddy pod name: %w", err)
 	}
 
-	// Build admin URL for container (uses internal port 2019)
-	caddyAdminURL := fmt.Sprintf("http://%s:2019", caddyPodName)
+	// Build admin URL for container (uses internal port 2019) and cache it
+	deployCtx.caddyContainerAdminURL = fmt.Sprintf("http://%s:2019", caddyPodName)
 
 	// Prepare values with configure-specific configuration
 	values, err := prepareCatalogValues(tp, podmanURI, authFilePath, passwordHash, argParams)
 	if err != nil {
 		s.Fail("failed to load values")
 
-		return "", "", "", "", nil, fmt.Errorf("failed to load values: %w", err)
+		return nil, fmt.Errorf("failed to load values: %w", err)
 	}
 
 	// Generate and write Caddyfile before deploying
 	if err := generateCaddyfile(baseDir, values); err != nil {
 		s.Fail("failed to generate Caddyfile")
 
-		return "", "", "", "", nil, fmt.Errorf("failed to generate Caddyfile: %w", err)
+		return nil, fmt.Errorf("failed to generate Caddyfile: %w", err)
 	}
 
-	return hostIP, caddyPodName, caddyAdminURL, domainSuffix, values, nil
+	return values, nil
 }
 
 // loadSSLCertificatesIfProvided stages user-provided certificates for the Caddy pod and updates TLS config via Admin API.
-func loadSSLCertificatesIfProvided(rt *podman.PodmanClient, tp templates.Template, baseDir, sslCertPath, sslKeyPath string, argParams map[string]string) error {
+func loadSSLCertificatesIfProvided(deployCtx *catalogDeploymentContext, rt *podman.PodmanClient, tp templates.Template, baseDir, sslCertPath, sslKeyPath string, argParams map[string]string) error {
 	if sslCertPath == "" || sslKeyPath == "" {
 		return nil
 	}
 
-	caddyPodName, err := findCaddyPodNameFromTemplates(tp, catalogAppTemplate, argParams)
+	// Get Caddy admin URL from cache (will fetch and cache if not already cached)
+	adminURL, err := deployCtx.getCaddyHostAdminURL(rt, tp, catalogAppTemplate, argParams)
 	if err != nil {
-		return fmt.Errorf("failed to find Caddy pod: %w", err)
-	}
-
-	adminPort, err := proxy.GetCaddyAdminPort(rt, caddyPodName)
-	if err != nil {
-		return fmt.Errorf("failed to get Caddy admin port: %w", err)
+		return fmt.Errorf("failed to get Caddy admin URL: %w", err)
 	}
 
 	if err := stageCertificatesForCaddy(baseDir, sslCertPath, sslKeyPath); err != nil {
 		return fmt.Errorf("failed to stage certificates for Caddy: %w", err)
 	}
 
-	adminURL := fmt.Sprintf("http://localhost:%s", adminPort)
 	if err := utils.LoadUserCertificates(
 		filepath.Join(baseDir, "common", "caddy", caddyCertsDirName, "tls.crt"),
 		filepath.Join(baseDir, "common", "caddy", caddyCertsDirName, "tls.key"),
@@ -360,13 +418,13 @@ func prepareCatalogValues(tp templates.Template, podmanURI, authFilePath, passwo
 
 // executePodLayers executes all pod template layers.
 func executePodLayers(rt *podman.PodmanClient, tp templates.Template, tmpls map[string]*template.Template,
-	appMetadata *templates.AppMetadata, values map[string]any, baseDir, hostIP, caddyAdminURL, domainSuffix string, argParams map[string]string,
+	appMetadata *templates.AppMetadata, values map[string]any, baseDir, caddyAdminURL, domainSuffix string, argParams map[string]string,
 	s *spinner.Spinner, existingResources []string) error {
 	for i, layer := range appMetadata.PodTemplateExecutions {
 		logger.Infof("\n Executing Layer %d/%d: %v\n", i+1, len(appMetadata.PodTemplateExecutions), layer)
 		logger.Infoln("-------")
 
-		if err := executeLayer(rt, tp, tmpls, layer, appMetadata.Version, values, baseDir, hostIP, caddyAdminURL, domainSuffix, argParams, i, existingResources); err != nil {
+		if err := executeLayer(rt, tp, tmpls, layer, appMetadata.Version, values, baseDir, caddyAdminURL, domainSuffix, argParams, i, existingResources); err != nil {
 			s.Fail("failed to deploy catalog pod")
 
 			return err
@@ -380,7 +438,7 @@ func executePodLayers(rt *podman.PodmanClient, tp templates.Template, tmpls map[
 
 // executeLayer executes a single layer of pod templates.
 func executeLayer(rt *podman.PodmanClient, tp templates.Template, tmpls map[string]*template.Template,
-	layer []string, version string, values map[string]any, baseDir, hostIP, caddyAdminURL, domainSuffix string, argParams map[string]string,
+	layer []string, version string, values map[string]any, baseDir, caddyAdminURL, domainSuffix string, argParams map[string]string,
 	layerIndex int, existingResources []string) error {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(layer))
@@ -390,7 +448,7 @@ func executeLayer(rt *podman.PodmanClient, tp templates.Template, tmpls map[stri
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
-			if err := executePodTemplate(rt, tp, tmpls, t, catalogAppTemplate, catalogconstants.CatalogAppName, values, version, nil, baseDir, hostIP, caddyAdminURL, domainSuffix, argParams, existingResources); err != nil {
+			if err := executePodTemplate(rt, tp, tmpls, t, catalogAppTemplate, catalogconstants.CatalogAppName, values, version, nil, baseDir, caddyAdminURL, domainSuffix, argParams, existingResources); err != nil {
 				errCh <- err
 			}
 		}(podTemplateName)
@@ -416,7 +474,7 @@ func executeLayer(rt *podman.PodmanClient, tp templates.Template, tmpls map[stri
 // executePodTemplate executes a single pod template.
 func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls map[string]*template.Template,
 	podTemplateName, appTemplateName, appName string, values map[string]any, version string,
-	valuesFiles []string, baseDir, hostIP, caddyAdminURL, domainSuffix string, argParams map[string]string, existingResources []string) error {
+	valuesFiles []string, baseDir, caddyAdminURL, domainSuffix string, argParams map[string]string, existingResources []string) error {
 	logger.Infof("Processing template: %s\n", podTemplateName)
 
 	// Fetch pod spec
@@ -431,7 +489,6 @@ func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 		"AppTemplateName": appTemplateName,
 		"Version":         version,
 		"BaseDir":         baseDir,
-		"HostIP":          hostIP,
 		"CaddyAdminURL":   caddyAdminURL,
 		"DomainSuffix":    domainSuffix,
 		"Values":          values,
@@ -527,24 +584,38 @@ type TemplateRouteInfo struct {
 	RoutesAnnotation string
 }
 
+// processPodTemplates loads all templates and processes each pod spec with the provided callback.
+// This helper function eliminates duplicate template loading and iteration logic.
+func processPodTemplates(tp templates.Template, appTemplateName string, argParams map[string]string,
+	processor func(templateName string, podSpec *models.PodSpec) error) error {
+	// Load all templates once
+	tmpls, err := tp.LoadAllTemplates(appTemplateName)
+	if err != nil {
+		return fmt.Errorf("failed to load templates: %w", err)
+	}
+
+	// Iterate through templates and process each pod spec
+	for templateName := range tmpls {
+		podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, templateName,
+			catalogconstants.CatalogAppName, nil, argParams)
+		if err != nil {
+			return fmt.Errorf("failed to load template %s: %w", templateName, err)
+		}
+
+		if err := processor(templateName, podSpec); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // extractAllRoutesFromTemplates extracts routes annotations from all templates that have them.
 // Returns a slice of TemplateRouteInfo containing pod name and routes for each template.
 func extractAllRoutesFromTemplates(tp templates.Template, appTemplateName string, argParams map[string]string) ([]TemplateRouteInfo, error) {
-	// Load all templates
-	tmpls, err := tp.LoadAllTemplates(appTemplateName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load templates: %w", err)
-	}
-
 	var routeInfos []TemplateRouteInfo
 
-	// Loop through all templates to find those with routes annotation
-	for templateName := range tmpls {
-		podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, templateName, catalogconstants.CatalogAppName, nil, argParams)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load template %s: %w", templateName, err)
-		}
-
+	err := processPodTemplates(tp, appTemplateName, argParams, func(templateName string, podSpec *models.PodSpec) error {
 		// Check if this template has the routes annotation
 		if podSpec.Annotations != nil {
 			if routes, ok := podSpec.Annotations[constants.PodRoutesAnnotationKey]; ok {
@@ -554,32 +625,36 @@ func extractAllRoutesFromTemplates(tp templates.Template, appTemplateName string
 				})
 			}
 		}
-	}
+		return nil
+	})
 
-	return routeInfos, nil
+	return routeInfos, err
 }
 
 // findCaddyPodNameFromTemplates finds the Caddy pod name by looking for the pod with component=proxy label in templates.
 func findCaddyPodNameFromTemplates(tp templates.Template, appTemplateName string, argParams map[string]string) (string, error) {
-	// Load all templates
-	tmpls, err := tp.LoadAllTemplates(appTemplateName)
-	if err != nil {
-		return "", fmt.Errorf("failed to load templates: %w", err)
-	}
+	var caddyPodName string
 
-	// Loop through all templates to find the Caddy pod
-	for templateName := range tmpls {
-		podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, templateName, catalogconstants.CatalogAppName, nil, argParams)
-		if err != nil {
-			return "", fmt.Errorf("failed to load template %s: %w", templateName, err)
-		}
-
+	err := processPodTemplates(tp, appTemplateName, argParams, func(templateName string, podSpec *models.PodSpec) error {
 		// Check if this is the Caddy pod (component=proxy label)
 		if podSpec.Labels != nil {
 			if component, ok := podSpec.Labels["ai-services.io/component"]; ok && component == "proxy" {
-				return podSpec.Name, nil
+				caddyPodName = podSpec.Name
+				// Return a sentinel error to stop iteration early
+				return fmt.Errorf("found")
 			}
 		}
+		return nil
+	})
+
+	// Check if we found the Caddy pod (err will be "found" sentinel)
+	if caddyPodName != "" {
+		return caddyPodName, nil
+	}
+
+	// If err is not nil and we didn't find the pod, it's a real error
+	if err != nil && err.Error() != "found" {
+		return "", err
 	}
 
 	return "", fmt.Errorf("no Caddy pod found with component=proxy label in templates")
@@ -628,18 +703,13 @@ func registerCatalogRoutes(rt *podman.PodmanClient, tp templates.Template, appTe
 	return routeDomains, nil
 }
 
-// computeDomainSuffix computes the domain suffix using priority: certDomain > customDomain > hostIP.nip.io
-func computeDomainSuffix(certDomain, customDomain string) (string, error) {
+// computeDomainSuffix computes the domain suffix using priority: certDomain > customDomain > hostIP.nip.io.
+func computeDomainSuffix(certDomain, customDomain, hostIP string) (string, error) {
 	if certDomain != "" {
 		return certDomain, nil
 	}
 	if customDomain != "" {
 		return customDomain, nil
-	}
-
-	hostIP, err := utils.GetHostIP()
-	if err != nil {
-		return "", fmt.Errorf("failed to get host IP: %w", err)
 	}
 
 	return fmt.Sprintf("%s.nip.io", hostIP), nil
