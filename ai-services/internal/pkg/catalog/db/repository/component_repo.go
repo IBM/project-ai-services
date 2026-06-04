@@ -27,7 +27,7 @@ type ComponentRepository interface {
 	// UpdateStatus updates only the status and message of a component.
 	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ComponentStatus, message string) error
 	// UpdateEndpoints updates only the endpoints of a component.
-	UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints map[string]any) error
+	UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints []map[string]any) error
 	// Delete removes a component from the database.
 	Delete(ctx context.Context, id uuid.UUID) error
 }
@@ -341,7 +341,7 @@ func (r *componentRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status m
 }
 
 // UpdateEndpoints updates only the endpoints of a component.
-func (r *componentRepo) UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints map[string]any) error {
+func (r *componentRepo) UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints []map[string]any) error {
 	query := `
 		UPDATE components
 		SET endpoints = $1, updated_at = NOW()

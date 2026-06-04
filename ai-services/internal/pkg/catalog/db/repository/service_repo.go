@@ -25,7 +25,7 @@ type ServiceRepository interface {
 	// UpdateStatus updates only the status and message of a service.
 	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ServiceStatus, message string) error
 	// UpdateEndpoints updates only the endpoints of a service.
-	UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints map[string]any) error
+	UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints []map[string]any) error
 }
 
 // serviceRepo implements ServiceRepository using pgx.
@@ -216,7 +216,7 @@ func (r *serviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status mod
 }
 
 // UpdateEndpoints updates only the endpoints of a service.
-func (r *serviceRepo) UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints map[string]any) error {
+func (r *serviceRepo) UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints []map[string]any) error {
 	query := `
 		UPDATE services
 		SET endpoints = $1, updated_at = NOW()
