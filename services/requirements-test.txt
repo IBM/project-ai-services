@@ -22,7 +22,7 @@ pydantic>=2.0.0
 pydantic-settings==2.14.1
 
 # Language detection (required by chatbot)
-lingua-language-detector==2.2.2
+lingua-language-detector==2.2.0
 
 # Common dependencies with specific versions for test compatibility
 tqdm==4.67.3
