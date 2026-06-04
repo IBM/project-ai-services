@@ -99,7 +99,7 @@ func (r *serviceRepo) Delete(ctx context.Context, id uuid.UUID) error {
 // GetByAppID retrieves all services for a specific application.
 func (r *serviceRepo) GetByAppID(ctx context.Context, appID uuid.UUID) ([]models.Service, error) {
 	query := `
-		SELECT id, app_id, type, status, endpoints, version, created_at, updated_at
+		SELECT id, app_id, catalog_id, status, message, endpoints, version, created_at, updated_at
 		FROM services
 		WHERE app_id = $1
 		ORDER BY created_at
@@ -117,6 +117,7 @@ func (r *serviceRepo) GetByAppID(ctx context.Context, appID uuid.UUID) ([]models
 			service        models.Service
 			endpointsJSON  []byte
 			serviceVersion sql.NullString
+			message        sql.NullString
 		)
 
 		err := rows.Scan(
@@ -124,6 +125,7 @@ func (r *serviceRepo) GetByAppID(ctx context.Context, appID uuid.UUID) ([]models
 			&service.AppID,
 			&service.CatalogID,
 			&service.Status,
+			&message,
 			&endpointsJSON,
 			&serviceVersion,
 			&service.CreatedAt,
@@ -135,6 +137,10 @@ func (r *serviceRepo) GetByAppID(ctx context.Context, appID uuid.UUID) ([]models
 
 		if serviceVersion.Valid {
 			service.Version = serviceVersion.String
+		}
+
+		if message.Valid {
+			service.Message = message.String
 		}
 
 		if len(endpointsJSON) > 0 {

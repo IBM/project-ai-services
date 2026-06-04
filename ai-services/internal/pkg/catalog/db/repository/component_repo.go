@@ -97,7 +97,7 @@ func (r *componentRepo) Insert(ctx context.Context, component *models.Component)
 // GetByID retrieves a component by ID.
 func (r *componentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Component, error) {
 	query := `
-		SELECT id, type, provider, endpoints, version, metadata, created_at, updated_at
+		SELECT id, type, provider, status, message, endpoints, version, metadata, created_at, updated_at
 		FROM components
 		WHERE id = $1
 	`
@@ -107,12 +107,15 @@ func (r *componentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Comp
 		endpointsJSON []byte
 		metadataJSON  []byte
 		version       sql.NullString
+		message       sql.NullString
 	)
 
 	err := r.pool.QueryRow(ctx, query, id).Scan(
 		&component.ID,
 		&component.Type,
 		&component.Provider,
+		&component.Status,
+		&message,
 		&endpointsJSON,
 		&version,
 		&metadataJSON,
@@ -132,8 +135,12 @@ func (r *componentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Comp
 		component.Version = version.String
 	}
 
+	if message.Valid {
+		component.Message = message.String
+	}
+
 	if len(endpointsJSON) > 0 {
-		var endpoints map[string]any
+		var endpoints []map[string]any
 		if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal endpoints: %w", err)
 		}
@@ -154,7 +161,7 @@ func (r *componentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Comp
 // GetAll retrieves all components from the database.
 func (r *componentRepo) GetAll(ctx context.Context) ([]models.Component, error) {
 	query := `
-		SELECT id, type, provider, endpoints, version, metadata, created_at, updated_at
+		SELECT id, type, provider, status, message, endpoints, version, metadata, created_at, updated_at
 		FROM components
 		ORDER BY created_at DESC
 	`
@@ -172,10 +179,11 @@ func (r *componentRepo) GetAll(ctx context.Context) ([]models.Component, error) 
 			endpointsJSON []byte
 			metadataJSON  []byte
 			version       sql.NullString
+			message       sql.NullString
 		)
 
-		err := rows.Scan(&component.ID, &component.Type, &component.Provider, &endpointsJSON,
-			&version, &metadataJSON, &component.CreatedAt, &component.UpdatedAt)
+		err := rows.Scan(&component.ID, &component.Type, &component.Provider, &component.Status, &message,
+			&endpointsJSON, &version, &metadataJSON, &component.CreatedAt, &component.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan component: %w", err)
 		}
@@ -184,8 +192,12 @@ func (r *componentRepo) GetAll(ctx context.Context) ([]models.Component, error) 
 			component.Version = version.String
 		}
 
+		if message.Valid {
+			component.Message = message.String
+		}
+
 		if len(endpointsJSON) > 0 {
-			var endpoints map[string]any
+			var endpoints []map[string]any
 			if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal endpoints: %w", err)
 			}
@@ -213,7 +225,7 @@ func (r *componentRepo) GetAll(ctx context.Context) ([]models.Component, error) 
 // GetByType retrieves all components of a specific type.
 func (r *componentRepo) GetByType(ctx context.Context, componentType string) ([]models.Component, error) {
 	query := `
-		SELECT id, type, provider, endpoints, version, metadata, created_at, updated_at
+		SELECT id, type, provider, status, message, endpoints, version, metadata, created_at, updated_at
 		FROM components
 		WHERE type = $1
 		ORDER BY created_at DESC
@@ -232,10 +244,11 @@ func (r *componentRepo) GetByType(ctx context.Context, componentType string) ([]
 			endpointsJSON []byte
 			metadataJSON  []byte
 			version       sql.NullString
+			message       sql.NullString
 		)
 
-		err := rows.Scan(&component.ID, &component.Type, &component.Provider, &endpointsJSON,
-			&version, &metadataJSON, &component.CreatedAt, &component.UpdatedAt)
+		err := rows.Scan(&component.ID, &component.Type, &component.Provider, &component.Status, &message,
+			&endpointsJSON, &version, &metadataJSON, &component.CreatedAt, &component.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan component: %w", err)
 		}
@@ -244,8 +257,12 @@ func (r *componentRepo) GetByType(ctx context.Context, componentType string) ([]
 			component.Version = version.String
 		}
 
+		if message.Valid {
+			component.Message = message.String
+		}
+
 		if len(endpointsJSON) > 0 {
-			var endpoints map[string]any
+			var endpoints []map[string]any
 			if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal endpoints: %w", err)
 			}
