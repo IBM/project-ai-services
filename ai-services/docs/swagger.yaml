@@ -521,9 +521,10 @@ paths:
         name: id
         required: true
         type: string
-      - description: When true, also deletes orphaned component records
+      - description: When true, preserves underlying data (volumes of databases/service
+          resources)
         in: query
-        name: force
+        name: keep_data
         type: boolean
       produces:
       - application/json

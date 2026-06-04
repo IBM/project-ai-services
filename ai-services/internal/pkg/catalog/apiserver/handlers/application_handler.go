@@ -254,15 +254,15 @@ func (h *ApplicationHandler) GetApplicationByID(c *gin.Context) {
 //	@Tags			Applications
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id		path		string	true	"Application ID (UUID)"
-//	@Param			keep_data	query		bool	false	"When true, preserves underlying data (pods, volumes, orphaned components)"
-//	@Success		202		{object}	repository.DeleteApplicationResponse
-//	@Failure		400		{object}	ErrorResponse	"Invalid application ID"
-//	@Failure		401		{object}	ErrorResponse	"Unauthorized"
-//	@Failure		403		{object}	ErrorResponse	"User doesn't own this application"
-//	@Failure		404		{object}	ErrorResponse	"Application not found"
-//	@Failure		409		{object}	ErrorResponse	"Application is already being deleted"
-//	@Failure		500		{object}	ErrorResponse	"Internal Server Error"
+//	@Param			id			path		string	true	"Application ID (UUID)"
+//	@Param			keep_data	query		bool	false	"When true, preserves underlying data (volumes of databases/service resources)"
+//	@Success		202			{object}	repository.DeleteApplicationResponse
+//	@Failure		400			{object}	ErrorResponse	"Invalid application ID"
+//	@Failure		401			{object}	ErrorResponse	"Unauthorized"
+//	@Failure		403			{object}	ErrorResponse	"User doesn't own this application"
+//	@Failure		404			{object}	ErrorResponse	"Application not found"
+//	@Failure		409			{object}	ErrorResponse	"Application is already being deleted"
+//	@Failure		500			{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/applications/{id} [delete]
 func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
 	appID, err := uuid.Parse(c.Param("id"))

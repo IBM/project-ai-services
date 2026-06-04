@@ -311,8 +311,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "boolean",
-                        "description": "When true, also deletes orphaned component records",
-                        "name": "force",
+                        "description": "When true, preserves underlying data (volumes of databases/service resources)",
+                        "name": "keep_data",
                         "in": "query"
                     }
                 ],
