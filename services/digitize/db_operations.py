@@ -7,6 +7,7 @@ and other utility functions.
 """
 
 from datetime import datetime, timezone
+from time import perf_counter
 from typing import List, Optional, Dict, Any, Mapping
 
 from common.misc_utils import get_logger
@@ -17,7 +18,19 @@ from digitize.models import (
     JobState,
     DocStatus,
     JobDocumentSummary,
-    JobStats
+    JobStats,
+    ExportJobRecord,
+    ExportDocumentRecord,
+    ImportRequest,
+    ImportResponse,
+    ImportSummary,
+    ImportEntitySummary,
+    ImportRecordIssue,
+    ExportResponse,
+    ExportSummary,
+    ExportEntitySummary,
+    ExportPagination,
+    ImportExportData,
 )
 from digitize.db.manager import db_manager
 from digitize.db.connection import engine
@@ -372,6 +385,309 @@ def get_all_document_ids() -> list[str]:
     except Exception as e:
         logger.error(f"Failed to read document IDs from database: {e}", exc_info=True)
         raise
+
+
+IMPORT_EXPORT_DEFAULT_LIMIT = 10000
+IMPORT_EXPORT_BATCH_SIZE = 100
+MAX_IMPORT_RECORDS = 10000
+
+
+def _parse_iso_datetime(timestamp: Optional[str]) -> Optional[datetime]:
+    """Parse ISO-8601 timestamps with optional Z suffix."""
+    if not timestamp:
+        return None
+    return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+
+
+def _serialize_datetime(timestamp: Optional[datetime]) -> Optional[str]:
+    """Serialize datetime to ISO-8601 string with Z suffix."""
+    if timestamp is None:
+        return None
+    return timestamp.isoformat().replace("+00:00", "Z")
+
+
+def _build_import_summary(total_jobs: int, total_documents: int) -> ImportSummary:
+    """Create an initialized import summary object."""
+    return ImportSummary(
+        jobs=ImportEntitySummary(total_received=total_jobs),
+        documents=ImportEntitySummary(total_received=total_documents),
+    )
+
+
+def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -> ExportResponse:
+    """
+    Export jobs and documents from PostgreSQL as JSON-serializable metadata.
+
+    Args:
+        limit: Maximum combined records to return. Use -1 to return all records.
+        offset: Number of combined records to skip.
+
+    Returns:
+        ExportResponse with exported jobs/documents and pagination metadata.
+    """
+    if engine is None:
+        raise RuntimeError("Database not available. Cannot export metadata without database connection.")
+
+    if offset < 0:
+        raise ValueError("offset cannot be negative")
+
+    if limit == 0 or limit < -1:
+        raise ValueError("limit must be -1 or a positive integer")
+
+    started_at = perf_counter()
+
+    jobs, total_jobs = db_manager.get_all_jobs(limit=IMPORT_EXPORT_DEFAULT_LIMIT if limit == -1 else limit, offset=0 if limit == -1 else offset)
+    documents, total_documents = db_manager.get_all_documents(limit=IMPORT_EXPORT_DEFAULT_LIMIT if limit == -1 else limit, offset=0 if limit == -1 else offset)
+
+    if limit == -1:
+        remaining_job_offset = len(jobs)
+        while remaining_job_offset < total_jobs:
+            batch, _ = db_manager.get_all_jobs(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=remaining_job_offset)
+            if not batch:
+                break
+            jobs.extend(batch)
+            remaining_job_offset += len(batch)
+
+        remaining_doc_offset = len(documents)
+        while remaining_doc_offset < total_documents:
+            batch, _ = db_manager.get_all_documents(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=remaining_doc_offset)
+            if not batch:
+                break
+            documents.extend(batch)
+            remaining_doc_offset += len(batch)
+
+    exported_jobs = [
+        ExportJobRecord(
+            job_id=job.job_id,
+            operation=job.operation,
+            status=job.status,
+            job_name=job.job_name,
+            submitted_at=_serialize_datetime(job.submitted_at) or "",
+            completed_at=_serialize_datetime(job.completed_at),
+            stats=job.stats or {},
+            error=job.error,
+        )
+        for job in jobs
+    ]
+
+    exported_documents = [
+        ExportDocumentRecord(
+            id=doc.doc_id,
+            job_id=doc.job_id,
+            name=doc.name,
+            type=doc.type,
+            status=doc.status,
+            output_format=doc.output_format,
+            submitted_at=_serialize_datetime(doc.submitted_at) or "",
+            completed_at=_serialize_datetime(doc.completed_at),
+            error=doc.error,
+            metadata=doc.doc_metadata or {},
+        )
+        for doc in documents
+    ]
+
+    returned_records = len(exported_jobs) + len(exported_documents)
+    total_records = total_jobs + total_documents
+    effective_limit = returned_records if limit == -1 else limit
+
+    return ExportResponse(
+        status="completed",
+        data=ImportExportData(jobs=exported_jobs, documents=exported_documents),
+        summary=ExportSummary(
+            jobs=ExportEntitySummary(
+                total_exported=len(exported_jobs),
+                completed=sum(1 for job in exported_jobs if job.status == JobStatus.COMPLETED.value),
+                failed=sum(1 for job in exported_jobs if job.status == JobStatus.FAILED.value),
+            ),
+            documents=ExportEntitySummary(
+                total_exported=len(exported_documents),
+                completed=sum(1 for doc in exported_documents if doc.status == DocStatus.COMPLETED.value),
+                failed=sum(1 for doc in exported_documents if doc.status == DocStatus.FAILED.value),
+            ),
+        ),
+        export_timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        duration_seconds=round(perf_counter() - started_at, 4),
+        pagination=ExportPagination(
+            limit=effective_limit,
+            offset=0 if limit == -1 else offset,
+            has_more=False if limit == -1 else (offset + returned_records) < total_records,
+            total_records=total_records,
+            returned_records=returned_records,
+        ),
+    )
+
+
+def import_metadata(payload: ImportRequest) -> ImportResponse:
+    """
+    Import jobs and documents into PostgreSQL in skip-existing mode.
+
+    Args:
+        payload: Import request payload.
+
+    Returns:
+        ImportResponse with import summary, warnings, and errors.
+    """
+    if engine is None:
+        raise RuntimeError("Database not available. Cannot import metadata without database connection.")
+
+    total_records = len(payload.data.jobs) + len(payload.data.documents)
+    if total_records > MAX_IMPORT_RECORDS:
+        raise ValueError(f"Maximum {MAX_IMPORT_RECORDS} records allowed per import request")
+
+    started_at = perf_counter()
+    summary = _build_import_summary(len(payload.data.jobs), len(payload.data.documents))
+    warnings: list[ImportRecordIssue] = []
+    errors: list[ImportRecordIssue] = []
+
+    existing_job_ids = {
+        job.get("job_id")
+        for job in get_all_jobs(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=0)[0]
+        if job.get("job_id")
+    }
+    existing_document_ids = set(get_all_document_ids())
+
+    importable_job_ids = set(existing_job_ids)
+
+    for job_record in payload.data.jobs:
+        if job_record.job_id in existing_job_ids:
+            summary.jobs.skipped += 1
+            continue
+
+        try:
+            _parse_iso_datetime(job_record.submitted_at)
+            _parse_iso_datetime(job_record.completed_at)
+        except ValueError as exc:
+            summary.jobs.failed += 1
+            errors.append(
+                ImportRecordIssue(
+                    record_type="job",
+                    record_id=job_record.job_id,
+                    type="validation_error",
+                    message=f"Invalid timestamp: {exc}",
+                )
+            )
+            continue
+
+        if payload.validate_only:
+            summary.jobs.imported += 1
+            importable_job_ids.add(job_record.job_id)
+            continue
+
+        created_job = db_manager.create_job(
+            job_id=job_record.job_id,
+            operation=job_record.operation,
+            status=JobStatus(job_record.status),
+            job_name=job_record.job_name,
+            submitted_at=_parse_iso_datetime(job_record.submitted_at),
+            stats=job_record.stats,
+        )
+
+        if created_job is None:
+            summary.jobs.failed += 1
+            errors.append(
+                ImportRecordIssue(
+                    record_type="job",
+                    record_id=job_record.job_id,
+                    type="database_error",
+                    message="Failed to create job record",
+                )
+            )
+            continue
+
+        if job_record.completed_at or job_record.error or job_record.status != JobStatus.ACCEPTED.value:
+            db_manager.update_job(
+                job_record.job_id,
+                status=JobStatus(job_record.status),
+                completed_at=_parse_iso_datetime(job_record.completed_at),
+                error=job_record.error,
+                stats=job_record.stats,
+            )
+
+        summary.jobs.imported += 1
+        importable_job_ids.add(job_record.job_id)
+
+    for document_record in payload.data.documents:
+        if document_record.id in existing_document_ids:
+            summary.documents.skipped += 1
+            continue
+
+        if document_record.job_id and document_record.job_id not in importable_job_ids:
+            summary.documents.failed += 1
+            warnings.append(
+                ImportRecordIssue(
+                    record_type="document",
+                    record_id=document_record.id,
+                    type="orphaned_document",
+                    message=f"Document references non-existent job_id: {document_record.job_id}",
+                )
+            )
+            continue
+
+        try:
+            _parse_iso_datetime(document_record.submitted_at)
+            _parse_iso_datetime(document_record.completed_at)
+        except ValueError as exc:
+            summary.documents.failed += 1
+            errors.append(
+                ImportRecordIssue(
+                    record_type="document",
+                    record_id=document_record.id,
+                    type="validation_error",
+                    message=f"Invalid timestamp: {exc}",
+                )
+            )
+            continue
+
+        if payload.validate_only:
+            summary.documents.imported += 1
+            continue
+
+        created_document = db_manager.create_document(
+            doc_id=document_record.id,
+            name=document_record.name,
+            doc_type=document_record.type,
+            status=DocStatus(document_record.status),
+            output_format=document_record.output_format,
+            submitted_at=_parse_iso_datetime(document_record.submitted_at),
+            job_id=document_record.job_id,
+            metadata=document_record.metadata,
+        )
+
+        if created_document is None:
+            summary.documents.failed += 1
+            errors.append(
+                ImportRecordIssue(
+                    record_type="document",
+                    record_id=document_record.id,
+                    type="database_error",
+                    message="Failed to create document record",
+                )
+            )
+            continue
+
+        if (
+            document_record.completed_at
+            or document_record.error
+            or document_record.status != DocStatus.ACCEPTED.value
+            or document_record.metadata
+        ):
+            db_manager.update_document(
+                document_record.id,
+                status=DocStatus(document_record.status),
+                completed_at=_parse_iso_datetime(document_record.completed_at),
+                error=document_record.error,
+                metadata=document_record.metadata,
+            )
+
+        summary.documents.imported += 1
+
+    return ImportResponse(
+        status="completed",
+        summary=summary,
+        duration_seconds=round(perf_counter() - started_at, 4),
+        errors=errors,
+        warnings=warnings,
+    )
 
 
 # ============================================================================

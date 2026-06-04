@@ -25,6 +25,7 @@ from digitize.cleanup import reset_db
 from digitize.ingest import ingest
 from digitize.db_operations import get_status_manager
 from digitize.db.connection import check_db_connection, close_db_connections
+import digitize.db_operations as db_ops
 
 # Semaphores for concurrency limiting
 digitization_semaphore = asyncio.BoundedSemaphore(settings.digitize.digitization_concurrency_limit)
@@ -58,6 +59,8 @@ async def lifespan(app: FastAPI):
             try:
                 from digitize.db.models import Base
                 from digitize.db.connection import engine
+                if engine is None:
+                    raise RuntimeError("Database engine is not initialized")
                 Base.metadata.create_all(bind=engine)
                 logger.info("✅ Database schema initialized")
             except Exception as schema_error:
@@ -313,6 +316,72 @@ async def digitize_document(
     except Exception as e:
         logger.error(f"Unexpected error in digitize_document: {e}")
         APIError.raise_error("INTERNAL_SERVER_ERROR", str(e))
+
+@app.post(
+    "/v1/import",
+    response_model=models.ImportResponse,
+    responses={400: http_error_responses[400], 409: http_error_responses[409], 413: http_error_responses[413], 500: http_error_responses[500]},
+    tags=["jobs"],
+    summary="Import metadata into PostgreSQL",
+    description="Import job and document metadata into PostgreSQL using the export-compatible JSON payload.",
+    response_description="Import summary with imported, skipped, failed records and warnings"
+)
+async def import_metadata(payload: models.ImportRequest):
+    """Import job and document metadata into PostgreSQL."""
+    try:
+        total_records = len(payload.data.jobs) + len(payload.data.documents)
+        if total_records > db_ops.MAX_IMPORT_RECORDS:
+            APIError.raise_error(
+                ErrorCode.CONTEXT_LIMIT_EXCEEDED,
+                f"Request contains {total_records} records, maximum allowed is {db_ops.MAX_IMPORT_RECORDS}",
+            )
+
+        has_active, active_job_ids = dg_util.has_active_jobs()
+        if has_active:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                f"Cannot import while jobs are active. Active jobs: {', '.join(active_job_ids)}",
+            )
+
+        return db_ops.import_metadata(payload)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.error(f"Invalid import request: {exc}")
+        APIError.raise_error(ErrorCode.INVALID_REQUEST, str(exc))
+    except Exception as exc:
+        logger.error(f"Failed to import metadata: {exc}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Database connection failed during import")
+
+
+@app.get(
+    "/v1/export",
+    response_model=models.ExportResponse,
+    responses={400: http_error_responses[400], 413: http_error_responses[413], 500: http_error_responses[500]},
+    tags=["jobs"],
+    summary="Export metadata from PostgreSQL",
+    description="Export job and document metadata from PostgreSQL as JSON for backup and restore workflows.",
+    response_description="Exported metadata with summary and pagination details"
+)
+async def export_metadata(
+    limit: int = Query(db_ops.IMPORT_EXPORT_DEFAULT_LIMIT, description="Maximum combined records to export. Use -1 to export all records in one response."),
+    offset: int = Query(0, ge=0, description="Number of combined records to skip for pagination"),
+):
+    """Export job and document metadata from PostgreSQL."""
+    try:
+        if limit < -1 or limit == 0:
+            APIError.raise_error(ErrorCode.INVALID_REQUEST, "limit must be -1 or a positive integer")
+
+        return db_ops.export_metadata(limit=limit, offset=offset)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.error(f"Invalid export request: {exc}")
+        APIError.raise_error(ErrorCode.INVALID_REQUEST, str(exc))
+    except Exception as exc:
+        logger.error(f"Failed to export metadata: {exc}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Database query failed during export")
+
 
 @app.get(
     "/v1/jobs",
