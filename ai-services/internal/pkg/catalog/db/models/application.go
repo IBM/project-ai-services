@@ -51,7 +51,7 @@ type Application struct {
 	DeploymentType DeploymentType    `json:"deployment_type"`
 	Status         ApplicationStatus `json:"status"`
 	Message        string            `json:"message,omitempty"`
-	Version        string            `json:"version,omitempty"`
+	Version        string            `json:"version"`
 	CreatedBy      string            `json:"created_by"`
 	CreatedAt      time.Time         `json:"created_at"`
 	UpdatedAt      time.Time         `json:"updated_at"`

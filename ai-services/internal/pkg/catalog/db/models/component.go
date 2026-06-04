@@ -16,7 +16,7 @@ type Component struct {
 	Status    ComponentStatus `json:"status"`
 	Message   string          `json:"message,omitempty"`
 	Endpoints map[string]any  `json:"endpoints,omitempty"` // JSONB field for endpoint configurations
-	Version   string          `json:"version,omitempty"`   // Component version
+	Version   string          `json:"version"`             // Component version
 	Metadata  map[string]any  `json:"metadata,omitempty"`  // JSONB field for additional metadata
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
