@@ -3,6 +3,13 @@ import axios from 'axios';
 import { OpenAI } from 'openai';
 import { DEFAULT_CONFIG } from '../config/chatbotConfig.js';
 
+// Helper function to escape HTML entities to prevent rendering issues with angle brackets
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 async function customSendMessage(
   request,
   _options,
@@ -148,7 +155,7 @@ async function customSendMessage(
         await instance.messaging.addMessageChunk({
           partial_item: {
             response_type: 'text',
-            text: textChunk,
+            text: escapeHtml(textChunk),
             streaming_metadata: {
               id: itemId,
               cancellable: true,
@@ -171,7 +178,7 @@ async function customSendMessage(
     await instance.messaging.addMessageChunk({
       complete_item: {
         response_type: 'text',
-        text: fullText,
+        text: escapeHtml(fullText),
         streaming_metadata: {
           id: itemId,
           stream_stopped: false,
@@ -233,7 +240,7 @@ async function customSendMessage(
     const responseBlocks = [
       {
         response_type: 'text',
-        text: fullText,
+        text: escapeHtml(fullText),
         streaming_metadata: {
           id: itemId,
           stream_stopped: false,
