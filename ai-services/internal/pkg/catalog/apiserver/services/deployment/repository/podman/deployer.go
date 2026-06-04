@@ -1223,12 +1223,12 @@ func (d *PodmanDeployer) registerServiceRoutes(
 	var serviceEndpoints []map[string]any
 
 	// Register routes for each pod in the service
-	for podName, routes := range svc.Routes {
+	for podName, routesAnnotation := range svc.Routes {
 		registeredRoutes, err := proxy.RegisterRoutesForAppAndReturn(
 			d.runtime,
 			catalogconstants.CatalogAppName,
 			constants.CaddyServerName,
-			routes,
+			routesAnnotation,
 			adminURL,
 			hostIP,
 			podName,
@@ -1239,12 +1239,12 @@ func (d *PodmanDeployer) registerServiceRoutes(
 			continue
 		}
 
-		// Convert registered routes to endpoint format
+		// Convert registered routes to endpoint format using route type
 		for _, route := range registeredRoutes {
 			url := catalogutils.BuildExternalURL(route.Domain, httpsPort)
 
 			endpoint := map[string]any{
-				"type": "external",
+				"type": route.Type,
 				"url":  url,
 			}
 			serviceEndpoints = append(serviceEndpoints, endpoint)
@@ -1263,8 +1263,8 @@ func (d *PodmanDeployer) registerServiceRoutes(
 }
 
 // updateComponentEndpointsInDB updates component endpoints in the database.
-// Component endpoints are internal (not exposed via Caddy) and stored in list format.
-// [{"type": "internal", "url": "http://host:port"}].
+// Component endpoints are service endpoints (not exposed via Caddy) and stored in list format.
+// [{"type": "service", "url": "http://host:port"}].
 func (d *PodmanDeployer) updateComponentEndpointsInDB(comp *ComponentPlan) error {
 	if comp.DatabaseID == uuid.Nil {
 		logger.Infof("Component %s has no database ID, skipping endpoint update\n", comp.ComponentType)
@@ -1294,7 +1294,7 @@ func (d *PodmanDeployer) updateComponentEndpointsInDB(comp *ComponentPlan) error
 	url := fmt.Sprintf("http://%s:%s", host, port)
 	endpointsList := []map[string]any{
 		{
-			"type": "internal",
+			"type": "service",
 			"url":  url,
 		},
 	}
@@ -1304,7 +1304,7 @@ func (d *PodmanDeployer) updateComponentEndpointsInDB(comp *ComponentPlan) error
 		return fmt.Errorf("failed to update component %s endpoints: %w", comp.ComponentType, err)
 	}
 
-	logger.Infof("Updated component %s with internal endpoint in database: %v\n", comp.ComponentType, endpointsList)
+	logger.Infof("Updated component %s with service endpoint in database: %v\n", comp.ComponentType, endpointsList)
 
 	return nil
 }

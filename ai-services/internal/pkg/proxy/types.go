@@ -22,6 +22,9 @@ type Route struct {
 
 	// Terminal indicates if route matching should stop after this route
 	Terminal bool
+
+	// Type indicates the endpoint type
+	Type string
 }
 
 // Made with Bob
