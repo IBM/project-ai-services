@@ -585,9 +585,10 @@ func isSentientGroupPresent(value string) bool {
 	return slices.Contains(groups, sentientGroup)
 }
 
-// checkSELinuxVFIOPolicy validates SELinux policy for VFIO device access.
-func checkSELinuxVFIOPolicy() *check.Check {
-	selinuxCheck := check.NewCheck("SELinux VFIO policy configuration")
+// checkSELinuxPolicy is a helper function that validates SELinux policy installation.
+// It checks if SELinux is enabled, if the required path exists, and if the policy is installed.
+func checkSELinuxPolicy(checkName, policyName, requiredPath string) *check.Check {
+	selinuxCheck := check.NewCheck(checkName)
 
 	// Check if SELinux is enabled
 	exitCode, stdout, _, err := utils.ExecuteCommand("getenforce")
@@ -606,17 +607,16 @@ func checkSELinuxVFIOPolicy() *check.Check {
 		return selinuxCheck
 	}
 
-	// Check if VFIO devices exist
-	if !utils.FileExists("/dev/vfio") {
-		// No VFIO devices - skip check (pass)
+	// Check if required path exists (if specified)
+	if requiredPath != "" && !utils.FileExists(requiredPath) {
+		// Required path doesn't exist - skip check (pass)
 		selinuxCheck.SetStatus(true)
 
 		return selinuxCheck
 	}
 
 	// Check if policy is installed (requires root/sudo)
-	var stderr string
-	exitCode, stdout, stderr, err = utils.ExecuteCommand("semodule", "-l")
+	exitCode, stdout, stderr, err := utils.ExecuteCommand("semodule", "-l")
 	if err != nil || exitCode != 0 {
 		// If permission denied, assume policy needs to be checked with sudo
 		// This is expected when running without sudo - skip check (pass)
@@ -631,11 +631,16 @@ func checkSELinuxVFIOPolicy() *check.Check {
 		return selinuxCheck
 	}
 
-	// Policy should be installed
-	policyInstalled := strings.Contains(stdout, "vllm_vfio_policy")
+	// Check if policy is installed
+	policyInstalled := strings.Contains(stdout, policyName)
 	selinuxCheck.SetStatus(policyInstalled)
 
 	return selinuxCheck
+}
+
+// checkSELinuxVFIOPolicy validates SELinux policy for VFIO device access.
+func checkSELinuxVFIOPolicy() *check.Check {
+	return checkSELinuxPolicy("SELinux VFIO policy configuration", "vllm_vfio_policy", "/dev/vfio")
 }
 
 func setCheckResult(confCheck *check.ConfigurationFileCheck, found, correctValue bool) {

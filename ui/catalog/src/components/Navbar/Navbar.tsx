@@ -8,6 +8,7 @@ import {
 import { NavLink } from "react-router-dom";
 import { useRef, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { ROUTES } from "@/constants";
 
 type NavbarProps = {
   isSideNavOpen: boolean;
@@ -39,22 +40,18 @@ const Navbar = (props: NavbarProps) => {
         ref={navRef}
       >
         <SideNavItems>
-          <SideNavMenuItem as={NavLink} to="/ai-deployments">
-            AI Deployments
+          <SideNavMenuItem as={NavLink} to={ROUTES.DIGITAL_ASSISTANTS}>
+            Digital Assistants
           </SideNavMenuItem>
 
-          <SideNavMenuItem as={NavLink} to="/architectures">
-            Architectures
-          </SideNavMenuItem>
-
-          <SideNavMenuItem as={NavLink} to="/services">
+          <SideNavMenuItem as={NavLink} to={ROUTES.SERVICES}>
             Services
           </SideNavMenuItem>
 
           <SideNavDivider />
 
-          <SideNavMenuItem as={NavLink} to="/solutions-and-use-cases">
-            Solutions and use cases
+          <SideNavMenuItem as={NavLink} to={ROUTES.USE_CASE_REFERENCES}>
+            Use case references
           </SideNavMenuItem>
         </SideNavItems>
       </SideNav>

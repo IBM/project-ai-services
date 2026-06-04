@@ -1,3 +1,9 @@
+# Pre-builder image for building Python packages from source
+# This image contains all build dependencies required to compile Python packages
+# that may not have pre-built wheels available for all architectures.
+#
+# Note: Most packages are now available in the devpi index, reducing the need for this stage.
+# This stage is maintained for future requirements or architecture-specific builds.
 FROM registry.access.redhat.com/ubi9/ubi:9.7
 
 RUN yum install -y --setopt=tsflags=nodocs gcc-c++ python3.12-devel python3.12-pip git rust cargo openssl-devel libffi-devel zlib-devel && \

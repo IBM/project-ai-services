@@ -5,7 +5,8 @@ metadata:
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
   annotations:
-    ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"
+    ai-services.io/routes: "3000:chat-bot-ui,5000:chat-bot-backend"
+    # ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
   containers:
     - name: ui
@@ -30,6 +31,8 @@ spec:
           value: "{{ .Values.backend.chatbot.numChunksPostReranker }}"
         - name: CHATBOT_RERANK
           value: "{{ .Values.backend.chatbot.rerank }}"
+        - name: CHATBOT_SYSTEM_PROMPT
+          value: "{{ .Values.backend.systemPrompt }}"
       ports:
         - containerPort: 3000
           protocol: TCP
@@ -84,9 +87,15 @@ spec:
         - name: OPENSEARCH_INDEX_NAME
           value: "RAG_INDEX"
         - name: OPENSEARCH_USERNAME
-          value: "{{ .Values.vector_store.auth.username }}"
+          valueFrom:
+            secretKeyRef:
+              name: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
+              key: username
         - name: OPENSEARCH_PASSWORD
-          value: "{{ .Values.vector_store.auth.password }}"
+          valueFrom:
+            secretKeyRef:
+              name: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
+              key: password
         - name: OPENSEARCH_NUM_SHARDS
           value: "1"
         - name: LOG_LEVEL

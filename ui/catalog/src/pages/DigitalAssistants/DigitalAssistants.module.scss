@@ -1,0 +1,336 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/type";
+@use "@carbon/react/scss/theme";
+@use "@carbon/react/scss/breakpoint" as *;
+
+.tableContent {
+  padding: spacing.$spacing-07;
+
+  :global(.cds--data-table) {
+    width: 100%;
+
+    // Make first 4 columns compact (sized to content)
+    :global(th:not(:last-child)),
+    :global(td:not(:last-child)) {
+      width: 1%;
+      white-space: nowrap;
+    }
+
+    // Last column takes remaining space and aligns content to right
+    :global(th:last-child),
+    :global(td:last-child) {
+      width: 100%;
+      text-align: right;
+    }
+
+    :global(th:last-child) {
+      position: sticky;
+      right: 0;
+      z-index: 1;
+      padding-right: spacing.$spacing-03;
+      padding-left: 0;
+      width: spacing.$spacing-09;
+      background-color: theme.$layer-accent;
+      box-shadow: calc(-1 * spacing.$spacing-01) 0 spacing.$spacing-02
+        var(--cds-shadow);
+    }
+
+    :global(td:last-child) {
+      position: sticky;
+      right: 0;
+      z-index: 2;
+      padding-right: spacing.$spacing-03;
+      padding-left: 0;
+      box-shadow: calc(-1 * spacing.$spacing-01) 0 spacing.$spacing-02
+        var(--cds-shadow);
+    }
+
+    :global(th:first-child) {
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      background-color: theme.$layer-accent;
+      box-shadow: spacing.$spacing-01 0 spacing.$spacing-02 var(--cds-shadow);
+    }
+
+    :global(td:first-child) {
+      position: sticky;
+      left: 0;
+      z-index: 2;
+      box-shadow: spacing.$spacing-01 0 spacing.$spacing-02 var(--cds-shadow);
+    }
+  }
+}
+
+.noDataContent {
+  padding: spacing.$spacing-07;
+}
+
+.tableColumn {
+  margin: 0;
+}
+
+.deleteConfirmation {
+  margin-top: spacing.$spacing-07;
+  @include type.type-style("heading-compact-01");
+}
+
+.customToast {
+  position: fixed;
+  top: spacing.$spacing-10;
+  right: spacing.$spacing-07;
+  z-index: 9000;
+}
+
+.exportStatus {
+  display: flex;
+  align-items: center;
+  gap: spacing.$spacing-02;
+}
+
+:global(.cds--overflow-menu-options) {
+  &:has(.overflowMenuContent) {
+    min-width: 234px;
+    width: 234px;
+  }
+}
+
+.overflowMenuContent {
+  padding: spacing.$spacing-05;
+  padding-bottom: 0;
+  width: 100%;
+}
+
+.overflowMenuHeading {
+  margin-bottom: spacing.$spacing-03;
+  @include type.type-style("heading-compact-01");
+}
+
+.overflowMenuActions {
+  margin-top: spacing.$spacing-03;
+  margin-left: calc(-1 * spacing.$spacing-05);
+  margin-right: calc(-1 * spacing.$spacing-05);
+  display: flex;
+  gap: 0;
+
+  :global(.cds--btn) {
+    flex: 1;
+    border-radius: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.deleteMenuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.messageWithIcon {
+  display: flex;
+  align-items: center;
+  gap: spacing.$spacing-03;
+}
+
+.messageIconError {
+  flex-shrink: 0;
+  color: theme.$support-error;
+}
+
+.messageIconInfo {
+  flex-shrink: 0;
+  color: theme.$support-info;
+}
+
+.statusTagError {
+  :global(svg) {
+    fill: theme.$support-error;
+  }
+}
+
+.statusTagSuccess {
+  :global(svg) {
+    fill: theme.$support-success;
+  }
+}
+
+.statusTagInfo {
+  :global(svg) {
+    fill: theme.$support-info;
+  }
+}
+
+.statusTagSecondary {
+  :global(svg) {
+    fill: theme.$text-secondary;
+  }
+}
+
+.aboutContent {
+  padding: spacing.$spacing-06;
+}
+
+.aboutSection {
+  padding: spacing.$spacing-05;
+  margin-bottom: spacing.$spacing-05;
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: spacing.$spacing-05;
+}
+
+.aboutSectionTitle {
+  margin: 0;
+  @include type.type-style("heading-compact-01");
+}
+
+.servicesList {
+  list-style: disc;
+  padding-left: spacing.$spacing-06;
+  margin: 0;
+
+  li {
+    margin-bottom: spacing.$spacing-03;
+    @include type.type-style("heading-compact-01");
+    font-weight: 400;
+  }
+}
+
+.gridWithTopMargin {
+  margin-top: spacing.$spacing-05;
+}
+
+.useCaseDomain {
+  margin-bottom: spacing.$spacing-03;
+  @include type.type-style("label-01");
+  color: theme.$text-secondary;
+}
+
+.useCaseList {
+  list-style: disc;
+  padding-left: spacing.$spacing-06;
+  margin-bottom: spacing.$spacing-07;
+
+  li {
+    margin-bottom: spacing.$spacing-02;
+    @include type.type-style("heading-compact-01");
+    font-weight: 400;
+  }
+}
+
+.resourceItem {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-02;
+}
+
+.resourceLabel {
+  @include type.type-style("label-01");
+  color: theme.$text-secondary;
+}
+
+.resourceValue {
+  @include type.type-style("body-01");
+}
+
+.sideBySideGrid {
+  display: flex;
+  gap: 1rem;
+
+  @include breakpoint-down("md") {
+    flex-direction: column;
+  }
+}
+
+.sideBySideColumn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sideBySideSection {
+  display: flex;
+  flex-direction: column;
+  padding: spacing.$spacing-05;
+  flex: 1;
+}
+
+.architectureDiagram {
+  margin-top: spacing.$spacing-05;
+  padding: spacing.$spacing-05;
+}
+
+.diagramImage {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.demosSection {
+  padding: spacing.$spacing-05;
+  flex: 1;
+}
+
+.demoCard {
+  display: flex;
+  gap: 0;
+  padding: 0;
+  background-color: theme.$layer;
+  position: relative;
+  margin-top: spacing.$spacing-06;
+  overflow: hidden;
+}
+
+.demoImage {
+  width: spacing.$spacing-13;
+  height: 100%;
+  object-fit: cover;
+  flex-shrink: 0;
+  align-self: stretch;
+
+  // Hide image on screens smaller than 900px (between md and lg breakpoints)
+  @media (max-width: 899px) {
+    display: none;
+  }
+}
+
+.demoContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: spacing.$spacing-05;
+}
+
+.demoTitle {
+  @include type.type-style("heading-03");
+  margin: 0;
+}
+
+.demoDescription {
+  @include type.type-style("body-compact-01");
+  margin: spacing.$spacing-03 0 0 0;
+}
+
+.demoActions {
+  margin-top: auto;
+  text-align: right;
+
+  a {
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: none;
+    }
+  }
+}
+
+.codeButton {
+  margin-top: spacing.$spacing-07;
+}

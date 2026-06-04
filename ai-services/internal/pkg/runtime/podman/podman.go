@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"os/user"
 	"strings"
 	"syscall"
 
@@ -37,6 +36,17 @@ type PodmanClient struct {
 
 // NewPodmanClient creates and returns a new PodmanClient instance.
 func NewPodmanClient() (*PodmanClient, error) {
+	// Set XDG_RUNTIME_DIR for non-root users if not already set
+	// This is required for rootless Podman to access runtime directories
+	euid := os.Geteuid()
+	if euid != 0 && os.Getenv("XDG_RUNTIME_DIR") == "" {
+		uid := os.Getuid()
+		logger.Infof("Running as non-root user %d, setting XDG_RUNTIME_DIR", uid, logger.VerbosityLevelDebug)
+		if err := os.Setenv("XDG_RUNTIME_DIR", fmt.Sprintf("/run/user/%d", uid)); err != nil {
+			return nil, fmt.Errorf("failed to set XDG_RUNTIME_DIR: %w", err)
+		}
+	}
+
 	// Default Podman socket URI is unix:///run/podman/podman.sock running on the local machine,
 	// but it can be overridden by the CONTAINER_HOST and CONTAINER_SSHKEY environment variable to support remote connections.
 	// Please use `podman system connection list` to see available connections.
@@ -44,7 +54,7 @@ func NewPodmanClient() (*PodmanClient, error) {
 	// MacOS instructions running in a remote VM:
 	// export CONTAINER_HOST=ssh://root@127.0.0.1:62904/run/podman/podman.sock
 	// export CONTAINER_SSHKEY=/Users/manjunath/.local/share/containers/podman/machine/machine
-	uri, err := resolvePodmanURI()
+	uri, err := utils.ResolvePodmanURI()
 	if err != nil {
 		return nil, err
 	}
@@ -55,39 +65,6 @@ func NewPodmanClient() (*PodmanClient, error) {
 	}
 
 	return &PodmanClient{Context: ctx}, nil
-}
-
-func resolvePodmanURI() (string, error) {
-	if v, found := os.LookupEnv("CONTAINER_HOST"); found {
-		return v, nil
-	}
-
-	if os.Geteuid() == 0 {
-		return getPodmanURIAsRoot()
-	}
-
-	return fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", os.Getuid()), nil
-}
-
-// getPodmanURIAsRoot determines the appropriate Podman socket URI when running with root privileges.
-// If the process was elevated via sudo (SUDO_USER is set), it returns the socket path
-// for the original user's rootless Podman instance to maintain user context.
-// Otherwise, it returns the system-wide root Podman socket path.
-func getPodmanURIAsRoot() (string, error) {
-	sudoUser := os.Getenv("SUDO_USER")
-	if sudoUser == "" {
-		return "unix:///run/podman/podman.sock", nil
-	}
-
-	u, err := user.Lookup(sudoUser)
-	if err != nil {
-		return "", fmt.Errorf("failed to lookup user %s: %w", sudoUser, err)
-	}
-
-	return fmt.Sprintf(
-		"unix:///run/user/%s/podman/podman.sock",
-		u.Uid,
-	), nil
 }
 
 // ListImages function to list images (you can expand with more Podman functionalities).
@@ -102,7 +79,14 @@ func (pc *PodmanClient) ListImages() ([]types.Image, error) {
 
 func (pc *PodmanClient) PullImage(image string) error {
 	logger.Infof("Pulling image %s...\n", image)
-	_, err := images.Pull(pc.Context, image, nil)
+
+	// Create pull options with auth file from environment
+	opts := &images.PullOptions{}
+	if authFile := os.Getenv("REGISTRY_AUTH_FILE"); authFile != "" {
+		opts.Authfile = &authFile
+	}
+
+	_, err := images.Pull(pc.Context, image, opts)
 	if err != nil {
 		return fmt.Errorf("failed to pull image %s: %w", image, err)
 	}

@@ -8,7 +8,6 @@ metadata:
     ai-services.io/version: "{{ .Version }}"
   annotations:
     ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"
-spec:
   containers:
     - name: ui
       image: "{{ .Values.ui.image }}"
@@ -99,6 +98,8 @@ spec:
           value: "{{ .Values.chatbot.numChunksPostReranker }}"
         - name: CHATBOT_RERANK
           value: "{{ .Values.chatbot.rerank }}"
+        - name: CHATBOT_SYSTEM_PROMPT
+          value: "{{ .Values.backend.systemPrompt }}"
       ports:
         - containerPort: 5000
           protocol: TCP

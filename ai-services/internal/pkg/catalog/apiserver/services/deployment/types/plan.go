@@ -35,12 +35,13 @@ type ComponentPlan struct {
 
 // ServicePlan represents a single service deployment.
 type ServicePlan struct {
-	CatalogID     string         // Service catalog ID (e.g., "chat", "digitize")
-	CatalogPath   string         // Dynamic catalog path (e.g., "services/chat/podman")
-	DatabaseID    uuid.UUID      // Database UUID for this service record (set after DB insertion)
-	Version       string         // Service version
-	ComponentRefs []string       // List of component hashes this service uses
-	Values        map[string]any // Structured values from LoadServiceValues + component values
+	CatalogID     string            // Service catalog ID (e.g., "chat", "digitize")
+	CatalogPath   string            // Dynamic catalog path (e.g., "services/chat/podman")
+	DatabaseID    uuid.UUID         // Database UUID for this service record (set after DB insertion)
+	Version       string            // Service version
+	ComponentRefs []string          // List of component hashes this service uses
+	Values        map[string]any    // Structured values from LoadServiceValues + component values
+	Routes        map[string]string // Routes extracted during deployment: podName -> routes annotation
 }
 
 // SpyreCardPool manages allocation of PCI addresses to components.

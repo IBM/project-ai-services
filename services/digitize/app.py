@@ -16,7 +16,7 @@ from digitize.settings import settings
 
 set_log_level(settings.common.app.log_level)
 
-from common.misc_utils import validate_document_file, set_request_id, configure_uvicorn_logging
+from common.misc_utils import validate_document_file, set_request_id, configure_uvicorn_logging, cleanup_staging_directory
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 import digitize.digitize_utils as dg_util
 import digitize.models as models
@@ -174,7 +174,7 @@ async def digitize_documents(job_id: str, doc_id_dict: dict, output_format: mode
         status_mgr.update_job_progress("", models.DocStatus.FAILED, models.JobStatus.FAILED, error=f"Error occurred while processing digitization pipeline: {str(e)}")
     finally:
         # Always clean up staging directory, even on crashes
-        dg_util.cleanup_staging_directory(job_id, settings.digitize.staging_dir)
+        cleanup_staging_directory(job_id, settings.digitize.staging_dir)
 
         # Crucial: Always release the semaphore slot back to the API
         digitization_semaphore.release()
@@ -194,7 +194,7 @@ async def ingest_documents(job_id: str, filenames: List[str], doc_id_dict: dict)
         status_mgr.update_job_progress("", models.DocStatus.FAILED, models.JobStatus.FAILED, error=f"Error occurred while processing ingestion pipeline: {str(e)}")
     finally:
         # Always clean up staging directory, even on crashes
-        dg_util.cleanup_staging_directory(job_id, settings.digitize.staging_dir)
+        cleanup_staging_directory(job_id, settings.digitize.staging_dir)
 
         # Mandatory Semaphore Release
         ingestion_semaphore.release()

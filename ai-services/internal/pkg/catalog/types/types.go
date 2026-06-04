@@ -47,6 +47,14 @@ type DependencyReference struct {
 	ID string `yaml:"id" json:"id"`
 }
 
+// Resources represents resource requirements for a service or component.
+type Resources struct {
+	CPU          int            `yaml:"cpu,omitempty" json:"cpu,omitempty"`                   // CPU cores
+	Memory       int            `yaml:"memory,omitempty" json:"memory,omitempty"`             // Memory in bytes
+	Accelerators map[string]int `yaml:"accelerators,omitempty" json:"accelerators,omitempty"` // Accelerator cards (e.g., "ibm.com/spyre_pf": 1)
+	Storage      int            `yaml:"storage,omitempty" json:"storage,omitempty"`           // Storage in bytes
+}
+
 // Service represents a deployable AI service.
 type Service struct {
 	ID            string                `yaml:"id" json:"id"`
@@ -93,12 +101,13 @@ type RuntimeMetadata struct {
 
 // DeployOptionsProvider represents a provider for a component type.
 type DeployOptionsProvider struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Version     string `json:"version,omitempty"`
-	Default     bool   `json:"default,omitempty"`
-	Schema      string `json:"schema,omitempty"`
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	Version     string     `json:"version,omitempty"`
+	Default     bool       `json:"default,omitempty"`
+	Schema      string     `json:"schema,omitempty"`
+	Resources   *Resources `json:"resources,omitempty"`
 }
 
 // DeployOptionsComponent represents a component type with its providers.
@@ -115,6 +124,7 @@ type DeployOptionsService struct {
 	Version    string                   `json:"version,omitempty"`
 	Schema     string                   `json:"schema,omitempty"`
 	Components []DeployOptionsComponent `json:"components"`
+	Resources  *Resources               `json:"resources,omitempty"`
 }
 
 // DeployOptionsArchitecture represents deploy options for an architecture.

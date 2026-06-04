@@ -22,8 +22,16 @@ spec:
       env:
         - name: "discovery.type"
           value: "single-node"
+        - name: OPENSEARCH_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: "opensearch-secret-{{ .InstanceSlug }}"
+              key: username
         - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
-          value: "{{ .Values.auth.password }}"
+          valueFrom:
+            secretKeyRef:
+              name: "opensearch-secret-{{ .InstanceSlug }}"
+              key: password
         - name: OPENSEARCH_JAVA_OPTS
           value: "-Xms4g -Xmx4g -XX:MaxDirectMemorySize=2g -XX:-UseSuperWord -XX:TieredStopAtLevel=1"
       ports:
@@ -45,16 +53,13 @@ spec:
       livenessProbe:
         exec:
           command:
-          - curl
-          - -fk
-          - -u
-          - {{ .Values.auth.username }}:{{ .Values.auth.password }}
-          - https://localhost:9200/_cluster/health
+          - sh
+          - -c
+          - curl -fk -u "$OPENSEARCH_USERNAME:$OPENSEARCH_INITIAL_ADMIN_PASSWORD" https://localhost:9200/_cluster/health
         initialDelaySeconds: 90
         periodSeconds: 30
         timeoutSeconds: 20
         failureThreshold: 5
-
   volumes:
     - name: opensearch-data
       hostPath:

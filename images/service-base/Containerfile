@@ -1,6 +1,4 @@
-FROM localhost/prebuilder as prebuilder
-
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
 RUN microdnf install -y python3.12-devel python3.12-pip \
         lcms2-devel openblas-devel freetype libicu libjpeg-turbo && \
@@ -18,10 +16,9 @@ ENV DOCLING_MODELS_PATH=/var/docling-models
 COPY requirements.txt .
 COPY download_docling_models.py .
 
-RUN --mount=type=bind,from=prebuilder,source=/wheels,target=/wheels,ro \
-    python -m venv /var/venv && source /var/venv/bin/activate && \
+RUN python -m venv /var/venv && source /var/venv/bin/activate && \
     pip install --upgrade pip && \
-    pip install  /wheels/*.whl -r requirements.txt \
+    pip install -r requirements.txt \
         --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
         --prefer-binary && \
     pip cache purge && \

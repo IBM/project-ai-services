@@ -1,9 +1,7 @@
 export const ROUTES = {
   LOGIN: "/login",
   LOGOUT: "/logout",
-  AI_DEPLOYMENTS: "/ai-deployments",
-  ARCHITECTURES: "/architectures",
+  DIGITAL_ASSISTANTS: "/digital-assistants",
   SERVICES: "/services",
-  SOLUTIONS_AND_USE_CASES: "/solutions-and-use-cases",
-  CATALOG_DEMO: "/catalog-demo",
+  USE_CASE_REFERENCES: "/use-case-references",
 } as const;
