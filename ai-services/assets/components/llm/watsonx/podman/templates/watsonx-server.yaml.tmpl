@@ -22,15 +22,9 @@ spec:
               name: "watsonx-secret-{{ .InstanceSlug }}"
               key: apiKey
         - name: WATSONX_PROJECT_ID
-          valueFrom:
-            secretKeyRef:
-              name: "watsonx-secret-{{ .InstanceSlug }}"
-              key: projectId
+          value: "{{ .Values.watsonxProjectId }}"
         - name: WATSONX_URL
-          valueFrom:
-            secretKeyRef:
-              name: "watsonx-secret-{{ .InstanceSlug }}"
-              key: url
+          value: "{{ .Values.watsonxUrl }}"
         - name: INSTRUCT_MODEL
           value: "watsonx/{{ .Values.model }}"
         - name: INSTRUCT_MODEL_NAME
