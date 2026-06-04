@@ -1169,6 +1169,9 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "message": {
+                    "type": "string"
+                },
                 "status": {
                     "type": "string"
                 },
