@@ -287,6 +287,7 @@ func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
 	if keepDataParam != "" {
 		if keepDataParam != "true" && keepDataParam != "false" {
 			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid keep_data parameter: must be 'true' or 'false'"})
+
 			return
 		}
 		keepData = keepDataParam == "true"

@@ -506,7 +506,7 @@ func GetApplicationsPath() string {
 
 // GetComponentsPath returns the components path based on the configured base directory.
 func GetComponentsPath() string {
-	return filepath.Join(GetBaseDir(), "components")
+	return filepath.Join(GetBaseDir(), "applications", "components")
 }
 
 // GetModelsPath returns the models path based on the configured base directory.
