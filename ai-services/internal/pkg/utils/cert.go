@@ -16,8 +16,10 @@ import (
 )
 
 const (
-	// wildcardPrefix is the prefix used for wildcard domain certificates
+	// wildcardPrefix is the prefix used for wildcard domain certificates.
 	wildcardPrefix = "*."
+	// caddyAPITimeout is the timeout duration for Caddy API requests.
+	caddyAPITimeout = 10 * time.Second
 )
 
 // ValidateCertificateFiles verifies that certificate and key files exist and are readable.
@@ -310,7 +312,7 @@ func loadCertificatesIntoCaddy(certPath, keyPath, adminURL string) error {
 		},
 	}
 
-	client := resty.New().SetTimeout(10 * time.Second)
+	client := resty.New().SetTimeout(caddyAPITimeout)
 	resp, err := client.R().
 		SetHeader("Content-Type", "application/json").
 		SetBody(payload).

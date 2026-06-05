@@ -248,6 +248,7 @@ func prepareCatalogDeployment(deployCtx *catalogDeploymentContext, tp templates.
 	domainSuffix, err := computeDomainSuffix(certDomain, domainName, hostIP)
 	if err != nil {
 		s.Fail("failed to compute domain suffix")
+
 		return nil, fmt.Errorf("failed to compute domain suffix: %w", err)
 	}
 	deployCtx.domainSuffix = domainSuffix
@@ -625,6 +626,7 @@ func extractAllRoutesFromTemplates(tp templates.Template, appTemplateName string
 				})
 			}
 		}
+
 		return nil
 	})
 
@@ -644,6 +646,7 @@ func findCaddyPodNameFromTemplates(tp templates.Template, appTemplateName string
 				return fmt.Errorf("found")
 			}
 		}
+
 		return nil
 	})
 
