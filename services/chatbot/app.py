@@ -49,6 +49,12 @@ emb_model_dict = {}
 llm_model_dict = {}
 reranker_model_dict = {}
 
+# Language-specific messages
+NO_DOCUMENTS_FOUND_MESSAGES = {
+    "EN": "No documents found in the knowledge base for this query.",
+    "DE": "Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden."
+}
+
 # Cache for auth requirement check
 auth_required_cache = {"checked": False, "required": False}
 auth_cache_lock = asyncio.Lock()
@@ -388,15 +394,13 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                 return StreamingResponse(stream_query_length_error(), media_type="text/event-stream")
             APIError.raise_error(ErrorCode.INVALID_PARAMETER, error_msg)
 
-        lang = session_lang
-
         max_tokens = req.max_tokens
         # giving priority to max_tokens passed in the request, otherwise according to session language
         if not max_tokens:
-            if lang == language_codes["German"]:
+            if session_lang == language_codes["German"]:
                 max_tokens = settings.llm.german.max_tokens
             else:
-                max_tokens = max_tokens_map.get(lang, settings.llm.english.max_tokens)
+                max_tokens = max_tokens_map.get(session_lang, settings.llm.english.max_tokens)
 
         rephrased_query = current_query
         
@@ -416,7 +420,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     llm_endpoint=llm_endpoint,
                     llm_model=llm_model,
                     api_key=api_key,
-                    lang=lang,
+                    lang=session_lang,
                 )
 
         docs, perf_stat_dict = await asyncio.to_thread(
@@ -431,9 +435,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         )
         
         if not docs:
-            message = "No documents found in the knowledge base for this query."
-            if lang == language_codes["German"]:
-                message = "Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden."
+            message = NO_DOCUMENTS_FOUND_MESSAGES.get(session_lang, NO_DOCUMENTS_FOUND_MESSAGES["EN"])
             if req.stream:
                 async def stream_docs_not_found():
                     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
@@ -465,7 +467,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     max_tokens,
                     req.temperature,
                     perf_stat_dict,
-                    lang,
+                    session_lang,
                     api_key,
                     previous_messages,
                     rephrased_query,
@@ -487,7 +489,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                 max_tokens,
                 req.temperature,
                 perf_stat_dict,
-                lang,
+                session_lang,
                 api_key,
                 previous_messages,
                 rephrased_query,
