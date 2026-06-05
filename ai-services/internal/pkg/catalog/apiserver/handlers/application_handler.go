@@ -294,15 +294,15 @@ func (h *ApplicationHandler) GetApplicationResources(c *gin.Context) {
 //	@Tags			Applications
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id		path		string	true	"Application ID (UUID)"
-//	@Param			force	query		bool	false	"When true, also deletes orphaned component records"
-//	@Success		202		{object}	repository.DeleteApplicationResponse
-//	@Failure		400		{object}	ErrorResponse	"Invalid application ID"
-//	@Failure		401		{object}	ErrorResponse	"Unauthorized"
-//	@Failure		403		{object}	ErrorResponse	"User doesn't own this application"
-//	@Failure		404		{object}	ErrorResponse	"Application not found"
-//	@Failure		409		{object}	ErrorResponse	"Application is already being deleted"
-//	@Failure		500		{object}	ErrorResponse	"Internal Server Error"
+//	@Param			id			path		string	true	"Application ID (UUID)"
+//	@Param			keep_data	query		string	false	"When 'true', preserves underlying data (volumes of databases/service resources). Default: 'false'"
+//	@Success		202			{object}	repository.DeleteApplicationResponse
+//	@Failure		400			{object}	ErrorResponse	"Invalid application ID or keep_data parameter"
+//	@Failure		401			{object}	ErrorResponse	"Unauthorized"
+//	@Failure		403			{object}	ErrorResponse	"User doesn't own this application"
+//	@Failure		404			{object}	ErrorResponse	"Application not found"
+//	@Failure		409			{object}	ErrorResponse	"Application is already being deleted"
+//	@Failure		500			{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/applications/{id} [delete]
 func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
 	appID, err := uuid.Parse(c.Param("id"))
@@ -311,8 +311,6 @@ func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
 
 		return
 	}
-
-	force := c.Query("force") == "true"
 
 	userIDVal, exists := c.Get(middleware.CtxUserIDKey)
 	if !exists {
@@ -323,7 +321,19 @@ func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
 
 	userID := userIDVal.(string)
 
-	response, err := h.appService.DeleteApplication(c.Request.Context(), appID, userID, force)
+	// Parse and validate keep_data parameter (default: false)
+	keepData := false
+	keepDataParam := c.Query("keep_data")
+	if keepDataParam != "" {
+		if keepDataParam != "true" && keepDataParam != "false" {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid keep_data parameter: must be 'true' or 'false'"})
+
+			return
+		}
+		keepData = keepDataParam == "true"
+	}
+
+	response, err := h.appService.DeleteApplication(c.Request.Context(), appID, userID, keepData)
 	if err != nil {
 		h.handleDeleteError(c, err)
 

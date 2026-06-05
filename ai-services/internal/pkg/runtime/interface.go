@@ -25,6 +25,7 @@ type Runtime interface {
 
 	// Secret operations
 	ListSecrets(filters map[string][]string) ([]string, error)
+	DeleteSecret(name string) error
 
 	// Container operations
 	// ListContainers(filters map[string][]string) ([]types.Container, error)

@@ -310,9 +310,9 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "type": "boolean",
-                        "description": "When true, also deletes orphaned component records",
-                        "name": "force",
+                        "type": "string",
+                        "description": "When 'true', preserves underlying data (volumes of databases/service resources). Default: 'false'",
+                        "name": "keep_data",
                         "in": "query"
                     }
                 ],
@@ -324,7 +324,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Invalid application ID",
+                        "description": "Invalid application ID or keep_data parameter",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
