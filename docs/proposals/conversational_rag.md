@@ -1188,3 +1188,500 @@ def test_get_conversation_context():
    - Test single-turn queries (backward compatibility)
    - Test multi-turn conversations
    - Verify conversation resets on page refresh/restart
+
+---
+
+## 11. Addendum: Conversational Support for German
+
+### 11.1 Overview
+
+This addendum extends the conversational RAG implementation to support **German language conversations** with the same multi-turn capabilities as English. The implementation maintains the stateless architecture and client-side session management while adding German-specific conversational prompts and query rephrasing.
+
+### 11.2 Current State (English-Only Limitation)
+
+As of the initial conversational RAG implementation, the system has the following language support:
+
+**English (EN):**
+- ✅ Full conversational mode with history
+- ✅ Query rephrasing with context
+- ✅ Multi-turn dialogue support
+- ✅ History token budget management (2000 tokens)
+
+**German (DE):**
+- ✅ Single-turn queries with German responses
+- ❌ **No conversation history support**
+- ❌ **No query rephrasing**
+- ❌ Uses legacy non-conversational prompt template
+
+**Root Cause:** The conversational mode implementation in [`query_vllm_payload()`](../../services/common/llm_utils.py) and [`rephrase_query_with_context()`](../../services/chatbot/query_rephrasing.py) explicitly restricts conversational features to English only:
+
+```python
+# Current limitation in query_rephrasing.py
+if detected_lang != lang_en:
+    logger.debug("Query rephrasing skipped: Non-english detected")
+    return current_query
+
+# Current limitation in llm_utils.py
+if lang == lang_en:
+    # Full conversational mode
+else:
+    # Legacy single-turn mode
+```
+
+### 11.3 Proposed Solution
+
+**Extend the existing conversational framework to support German** by:
+
+1. Adding German-specific conversational prompts
+2. Enabling German query rephrasing with German prompt templates
+3. Refactoring payload construction to use conversational mode for both languages
+4. Maintaining language-specific token budgets
+
+**Design Principle:** Use a unified conversational architecture for both languages, with language-specific prompt templates selected at runtime.
+
+### 11.4 Architecture Changes
+
+#### 11.4.1 Unified Conversational Flow
+
+```mermaid
+flowchart TB
+    Query[User Query]
+    LangDetect[Language Detection<br/>lingua library]
+    
+    subgraph ConvMode["Conversational Mode (EN & DE)"]
+        SelectPrompts[Select Language-Specific Prompts<br/>EN: system_prompt<br/>DE: system_prompt_de]
+        Rephrase[Query Rephrasing<br/>EN: rephrase_prompt_template<br/>DE: rephrase_prompt_template_de]
+        BuildMsg[Build Message Array<br/>system + history + rag_context + query]
+    end
+    
+    subgraph Legacy["Legacy Mode (Other Languages)"]
+        SinglePrompt[Single-Turn Prompt]
+    end
+    
+    Query --> LangDetect
+    LangDetect -->|EN or DE| ConvMode
+    LangDetect -->|Other| Legacy
+    SelectPrompts --> Rephrase
+    Rephrase --> BuildMsg
+    BuildMsg --> LLM[LLM Generation]
+    SinglePrompt --> LLM
+    
+    style ConvMode fill:#e1f5ff
+    style Legacy fill:#f0f0f0
+```
+
+#### 11.4.2 Message Array Structure (German)
+
+**German Conversational Message Array:**
+```python
+[
+    {
+        "role": "system",
+        "content": "Sie sind ein hilfreicher, gesprächiger KI-Assistent..."
+    },
+    {
+        "role": "user",
+        "content": "Was ist maschinelles Lernen?"
+    },
+    {
+        "role": "assistant",
+        "content": "Maschinelles Lernen ist..."
+    },
+    {
+        "role": "system",
+        "content": "Abgerufener Kontext:\n{context}\n\nUmformulierte Anfrage: {rephrased_query}..."
+    },
+    {
+        "role": "user",
+        "content": "Können Sie Beispiele geben?"
+    }
+]
+```
+
+### 11.5 Implementation Details
+
+#### 11.5.1 Configuration Changes
+
+**File: [`services/chatbot/settings.py`](../../services/chatbot/settings.py)**
+
+Add German conversational prompts to `RAGConfig` class:
+
+```python
+class RAGConfig(BaseSettings):
+    # ... existing English prompts ...
+    
+    # German conversational prompts
+    system_prompt_de: str = Field(
+        default=(
+            "Sie sind ein hilfreicher, gesprächiger KI-Assistent. "
+            "Führen Sie natürliche Gespräche über mehrere Gesprächsrunden. "
+            "Geben Sie klare, präzise und kontextbezogene Antworten. "
+            "Beziehen Sie sich bei Bedarf auf frühere Nachrichten, um den Gesprächsfluss aufrechtzuerhalten. "
+            "Beantworten Sie nur die gestellte Frage. Fügen Sie keine Füllwörter hinzu, "
+            "bieten Sie keine zusätzliche Hilfe an, schlagen Sie keine Folgefragen vor."
+        ),
+        description="Initial system prompt for German conversational behavior"
+    )
+    
+    query_system_prompt_de: str = Field(
+        default=(
+            "Abgerufener Kontext:\n{context}\n\n"
+            "Umformulierte Anfrage: {rephrased_query}\n\n"
+            "Anweisungen: Beantworten Sie die Frage des Benutzers basierend auf dem oben abgerufenen Kontext. "
+            "Berücksichtigen Sie den Gesprächsverlauf für kontextbezogene Antworten. "
+            "Seien Sie gesprächig und beziehen Sie sich auf frühere Nachrichten, wenn relevant. "
+            "Wenn der Kontext nicht genügend Informationen enthält, geben Sie dies klar an."
+        ),
+        description="German RAG system prompt template with context and rephrased query"
+    )
+```
+
+Add German rephrasing template to `QueryRephrasingConfig` class:
+
+```python
+class QueryRephrasingConfig(BaseSettings):
+    # ... existing English template ...
+    
+    rephrase_prompt_template_de: str = Field(
+        default=(
+            "Erstellen Sie anhand des Gesprächsverlaufs und der aktuellen Frage eine eigenständige Suchanfrage.\n\n"
+            "Anweisungen:\n"
+            "1. Wenn die aktuelle Frage bereits eigenständig und klar ist, geben Sie sie GENAU so zurück\n"
+            "2. Wenn die Frage auf vorherigen Kontext verweist (Pronomen wie 'es', 'dies', 'das', 'sie'), "
+            "ersetzen Sie diese durch spezifische Substantive aus dem Gesprächsverlauf\n"
+            "3. Fügen Sie Kontext nur zusammen, wenn die Frage eindeutig eine Folgefrage ist\n"
+            "4. Entfernen Sie Füllwörter (z.B. 'Können Sie mir sagen', 'Auch', 'Danke', 'Bitte')\n"
+            "5. Halten Sie die Anfrage prägnant und fokussiert\n"
+            "6. Wenn der Gesprächsverlauf irrelevant ist, ignorieren Sie ihn\n"
+            "7. Geben Sie NUR die umformulierte Anfrage zurück, keine Erklärung\n\n"
+            "Gesprächsverlauf:\n{conversation_history}\n\n"
+            "Aktuelle Frage: {current_query}\n\n"
+            "Umformulierte Anfrage:"
+        ),
+        description="German prompt template for query rephrasing"
+    )
+```
+
+#### 11.5.2 Query Rephrasing Changes
+
+**File: [`services/chatbot/query_rephrasing.py`](../../services/chatbot/query_rephrasing.py)**
+
+Modify `rephrase_query_with_context()` to support German:
+
+```python
+async def rephrase_query_with_context(
+    current_query: str,
+    previous_messages: List[Dict[str, str]],
+    llm_endpoint: str,
+    llm_model: str,
+    config: Optional[Dict] = None,
+    api_key: str | None = None,
+    lang: Optional[str] = None
+) -> str:
+    # Use provided lang or detect if not provided
+    detected_lang = lang if lang is not None else detect_language(current_query)
+    
+    # Support both English and German
+    if detected_lang not in [lang_en, lang_de]:
+        logger.debug(f"Query rephrasing skipped: Unsupported language {detected_lang}")
+        return current_query
+    
+    # Always skip rephrasing if no conversation history
+    if not previous_messages or len(previous_messages) == 0:
+        logger.debug("Skipping query rephrasing: no conversation history")
+        return current_query
+    
+    # ... existing code ...
+    
+    # Select language-specific prompt template
+    if detected_lang == lang_en:
+        prompt_template = settings.query_rephrasing.rephrase_prompt_template
+    else:  # lang_de
+        prompt_template = settings.query_rephrasing.rephrase_prompt_template_de
+    
+    # Build rephrasing prompt
+    prompt = prompt_template.format(
+        conversation_history=conversation_history,
+        current_query=current_query
+    )
+    
+    # ... rest of existing code ...
+```
+
+#### 11.5.3 LLM Payload Construction Changes
+
+**File: [`services/common/llm_utils.py`](../../services/common/llm_utils.py)**
+
+Refactor `query_vllm_payload()` to support conversational mode for both languages:
+
+```python
+def query_vllm_payload(
+    question,
+    documents,
+    llm_endpoint,
+    llm_model,
+    stop_words,
+    max_new_tokens,
+    temperature,
+    stream,
+    lang,
+    api_key: str | None = None,
+    previous_messages: list | None = None,
+    rephrased_query: str | None = None,
+):
+    # ... existing code ...
+    
+    # Use conversational mode for both English and German
+    if lang in [lang_en, lang_de]:
+        # Select language-specific prompts
+        if lang == lang_en:
+            system_prompt = chatbot_settings.chatbot.system_prompt
+            query_system_prompt = chatbot_settings.chatbot.query_system_prompt
+        else:  # lang_de
+            system_prompt = chatbot_settings.chatbot.system_prompt_de
+            query_system_prompt = chatbot_settings.chatbot.query_system_prompt_de
+        
+        # ... existing token budget calculation ...
+        
+        # Build conversational message array (same structure for both languages)
+        message_array = [
+            {
+                "role": "system",
+                "content": system_prompt,
+            }
+        ]
+        
+        if previous_messages and history_budget > 0:
+            truncated_messages = truncate_history_by_tokens(
+                previous_messages,
+                history_budget,
+                lambda text: tokenize_with_llm(text, llm_endpoint)
+            )
+            if truncated_messages:
+                message_array.extend(truncated_messages)
+        
+        final_system_content = query_system_prompt.format(
+            context=context,
+            rephrased_query=rephrased_query or question,
+        )
+        message_array.append({
+            "role": "system",
+            "content": final_system_content,
+        })
+        message_array.append({
+            "role": "user",
+            "content": question,
+        })
+        
+        logger.debug(f"Using conversational mode for language: {lang}")
+    else:
+        # Legacy mode for unsupported languages
+        # ... existing legacy code ...
+        logger.debug(f"Using legacy prompt mode for unsupported language: {lang}")
+    
+    # ... rest of existing code ...
+```
+
+#### 11.5.4 Main Application Changes
+
+**File: [`services/chatbot/app.py`](../../services/chatbot/app.py)**
+
+Update chat completion endpoint to enable German rephrasing:
+
+```python
+@app.post("/v1/chat/completions")
+async def chat_completion(req: ChatCompletionRequest, ...):
+    # ... existing code ...
+    
+    # Process conversation history and rephrase query for English AND German
+    if previous_messages and lang in [lang_en, lang_de]:
+        # Truncate history for query rephrasing
+        truncated_history_for_rephrasing = await asyncio.to_thread(
+            truncate_history_by_tokens,
+            previous_messages,
+            settings.query_rephrasing.history_token_budget,
+            lambda text: tokenize_with_llm(text, llm_endpoint)
+        )
+        
+        if truncated_history_for_rephrasing:
+            rephrased_query = await rephrase_query_with_context(
+                current_query=current_query,
+                previous_messages=truncated_history_for_rephrasing,
+                llm_endpoint=llm_endpoint,
+                llm_model=llm_model,
+                api_key=api_key,
+                lang=lang,
+            )
+    
+    # ... rest of existing code ...
+```
+
+### 11.6 Configuration
+
+**Environment Variables** (optional overrides):
+
+```bash
+# German conversational prompts
+CHATBOT_SYSTEM_PROMPT_DE="Sie sind ein hilfreicher..."
+CHATBOT_QUERY_SYSTEM_PROMPT_DE="Abgerufener Kontext:..."
+
+# German query rephrasing
+QUERY_REPHRASING_REPHRASE_PROMPT_TEMPLATE_DE="Erstellen Sie anhand..."
+```
+
+### 11.7 Testing Strategy
+
+#### 11.7.1 Unit Tests
+
+**New Test File: `services/chatbot/tests/unit/test_german_conversation.py`**
+
+```python
+def test_german_query_rephrasing_with_context():
+    """Test German query rephrasing with conversation history."""
+    previous = [
+        {"role": "user", "content": "Was ist maschinelles Lernen?"},
+        {"role": "assistant", "content": "Maschinelles Lernen ist..."}
+    ]
+    result = await rephrase_query_with_context(
+        "Können Sie Beispiele geben?",
+        previous,
+        llm_endpoint,
+        llm_model,
+        lang="DE"
+    )
+    assert "maschinelles Lernen" in result.lower()
+
+def test_german_conversational_payload_structure():
+    """Verify German uses conversational mode."""
+    payload = query_vllm_payload(
+        question="Wie funktioniert es?",
+        documents=docs,
+        lang="DE",
+        previous_messages=[{"role": "user", "content": "Was ist KI?"}]
+    )
+    assert len(payload["messages"]) > 2  # Has history
+    assert "system" in [m["role"] for m in payload["messages"]]
+```
+
+#### 11.7.2 Integration Tests
+
+**Test Scenarios:**
+
+| Test Case | Description | Expected Result |
+|-----------|-------------|-----------------|
+| German single-turn | Single German query without history | Works as before (backward compatible) |
+| German follow-up | German follow-up question with pronouns | Rephrased query includes context |
+| German multi-turn | 3-5 turn German conversation | Maintains context across turns |
+| Language switching | Start in EN, switch to DE mid-conversation | Both languages work independently |
+| German long history | German conversation >10 turns | History truncated correctly |
+
+#### 11.7.3 Golden Dataset Validation
+
+**Create German Conversational Test Cases:**
+
+```csv
+corpus_language,query_language,turn,query,expected_context
+english,german,1,"Was ist Spyre?",""
+english,german,2,"Wie funktioniert es?","Spyre"
+english,german,3,"Welche Vorteile bietet es?","Spyre"
+german,german,1,"Was ist maschinelles Lernen?",""
+german,german,2,"Können Sie Beispiele nennen?","maschinelles Lernen"
+```
+
+**Target Metrics:**
+- **Language Relevance**: 100% (all responses in German)
+- **Answer Correctness**: ≥85% (matching golden answers)
+- **Context Preservation**: ≥90% (follow-ups use conversation context)
+
+### 11.8 Migration and Rollout
+
+#### 11.8.1 Backward Compatibility
+
+**Fully backward compatible:**
+- Existing English conversations work identically
+- Existing German single-turn queries work identically
+- No API contract changes
+- No breaking changes to existing clients
+
+#### 11.8.2 Deployment Steps
+
+1. **Backend Deployment**
+   - Deploy updated `settings.py` with German prompts
+   - Deploy modified `query_rephrasing.py`
+   - Deploy updated `llm_utils.py` and `app.py`
+   - No downtime required (stateless architecture)
+
+2. **Validation**
+   - Test English conversations (ensure no regression)
+   - Test German single-turn queries (backward compatibility)
+   - Test German multi-turn conversations (new feature)
+   - Test language switching scenarios
+
+3. **Monitoring**
+   - Track German query rephrasing latency
+   - Monitor German conversation token usage
+   - Track language detection accuracy for German
+
+#### 11.8.3 Rollback Plan
+
+If issues arise:
+1. Revert to previous version (stateless architecture enables instant rollback)
+2. German queries automatically fall back to single-turn mode
+3. No data loss (client-side session management)
+
+### 11.9 Performance Considerations
+
+**German-Specific Metrics:**
+
+| Metric | Expected Value | Notes |
+|--------|---------------|-------|
+| German rephrasing latency | <100ms | Similar to English |
+| German token budget | 700 tokens (max_tokens_de) | 37% higher than English due to German verbosity |
+| History token budget | 2000 tokens | Shared with English |
+| Language detection overhead | ~45ms | One-time per query (lingua library) |
+
+**Token Efficiency:**
+- German text typically requires ~30-40% more tokens than English
+- Existing `max_tokens_de` (700) already accounts for this
+- History truncation works identically for both languages
+
+### 11.10 Future Enhancements
+
+**Potential Extensions:**
+
+1. **Additional Languages**: French, Italian
+   - Same architecture, add language-specific prompts
+   - Minimal code changes required
+
+2. **Language-Specific History Budgets**
+   - Allow different history token budgets per language
+   - Optimize for language-specific token efficiency
+
+3. **Cross-Language Conversations**
+   - Support switching languages mid-conversation
+   - Translate history context if needed
+
+### 11.11 Summary
+
+This addendum extends the conversational RAG system to support **German language conversations** with the same capabilities as English:
+
+**Key Benefits:**
+- ✅ German multi-turn conversations with context
+- ✅ German query rephrasing with pronoun resolution
+- ✅ Unified architecture for both languages
+- ✅ Fully backward compatible
+- ✅ Scalable to additional languages
+
+**Implementation Scope:**
+- 4 files modified: `settings.py`, `query_rephrasing.py`, `llm_utils.py`, `app.py`
+- ~200 lines of code changes
+- ~15 new configuration fields
+- ~10 new unit tests
+
+**Timeline Estimate:**
+- Implementation: 2-3 days
+- Testing: 2-3 days
+- Validation: 1-2 days
+- **Total: 5-8 days**
+
+The implementation maintains the stateless architecture and client-side session management principles established in the original conversational RAG design, ensuring consistency, scalability, and maintainability.
