@@ -441,7 +441,6 @@ func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
 // GetPodResources retrieves resource usage and Spyre cards for a pod in a single call.
 // For OpenShift, this is not yet implemented and returns empty values.
 func (kc *OpenshiftClient) GetPodResources(nameOrID string) (*types.PodResources, error) {
-	// TODO: Implement resource retrieval for OpenShift
 	return &types.PodResources{
 		CPUCores:   0,
 		MemUsage:   0,

@@ -805,7 +805,10 @@ func (s *ApplicationService) GetApplicationResources(ctx context.Context, id uui
 	}
 
 	// Collect resources from all services
-	resourceTotals := s.collectServiceResources(ctx, app, runtimeClient, catalogProvider)
+	resourceTotals, err := s.collectServiceResources(ctx, app, runtimeClient, catalogProvider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect application resources: %w", err)
+	}
 
 	// Build and return response
 	return buildResourcesResponse(resourceTotals), nil
@@ -835,7 +838,7 @@ func (s *ApplicationService) collectServiceResources(
 	app *models.Application,
 	runtimeClient runtime.Runtime,
 	catalogProvider *catalog.CatalogProvider,
-) *resourceTotals {
+) (*resourceTotals, error) {
 	totals := &resourceTotals{
 		spyreCards: make(map[string]bool),
 	}
@@ -844,10 +847,12 @@ func (s *ApplicationService) collectServiceResources(
 	countedComponents := make(map[uuid.UUID]bool)
 
 	for _, service := range app.Services {
-		s.processServiceResources(ctx, app.Name, service, runtimeClient, catalogProvider, totals, countedComponents)
+		if err := s.processServiceResources(ctx, app.Name, service, runtimeClient, catalogProvider, totals, countedComponents); err != nil {
+			return nil, fmt.Errorf("failed to process service %s resources: %w", service.ID, err)
+		}
 	}
 
-	return totals
+	return totals, nil
 }
 
 // processServiceResources processes a single service and updates resource totals.
@@ -859,18 +864,26 @@ func (s *ApplicationService) processServiceResources(
 	catalogProvider *catalog.CatalogProvider,
 	totals *resourceTotals,
 	countedComponents map[uuid.UUID]bool,
-) {
+) error {
 	// Load allocated resources from service metadata
-	s.addServiceAllocatedResources(service.CatalogID, catalogProvider, totals)
+	if err := s.addServiceAllocatedResources(service.CatalogID, catalogProvider, totals); err != nil {
+		return fmt.Errorf("failed to get service allocated resources: %w", err)
+	}
 
 	// Load allocated resources from deployed components for this service
 	// Pass countedComponents to avoid double-counting shared components
 	// Also collect used resources from component pods
-	s.addComponentAllocatedResources(ctx, service.ID, catalogProvider, runtimeClient, totals, countedComponents)
+	if err := s.addComponentAllocatedResources(ctx, service.ID, catalogProvider, runtimeClient, totals, countedComponents); err != nil {
+		return fmt.Errorf("failed to get component allocated resources: %w", err)
+	}
 
 	// Get all pods for this service using the template ID label
 	// Each pod deployed has label: ai-services.io/template: "<service-database-id>"
-	addUsedResourcesByTemplateID(service.ID.String(), runtimeClient, totals)
+	if err := addUsedResourcesByTemplateID(service.ID.String(), runtimeClient, totals); err != nil {
+		return fmt.Errorf("failed to get service used resources: %w", err)
+	}
+
+	return nil
 }
 
 // addServiceAllocatedResources adds allocated resources from service metadata.
@@ -878,12 +891,18 @@ func (s *ApplicationService) addServiceAllocatedResources(
 	catalogID string,
 	catalogProvider *catalog.CatalogProvider,
 	totals *resourceTotals,
-) {
+) error {
 	runtimeMetadata, err := catalogProvider.LoadServiceRuntimeMetadata(catalogID)
-	if err == nil && runtimeMetadata.Resources != nil {
+	if err != nil {
+		return fmt.Errorf("failed to load service runtime metadata for catalog ID %s: %w", catalogID, err)
+	}
+
+	if runtimeMetadata.Resources != nil {
 		totals.allocatedCPU += runtimeMetadata.Resources.CPU
 		totals.allocatedMemory += runtimeMetadata.Resources.Memory
 	}
+
+	return nil
 }
 
 // addComponentAllocatedResources adds allocated resources from the actual deployed component providers.
@@ -897,13 +916,11 @@ func (s *ApplicationService) addComponentAllocatedResources(
 	runtimeClient runtime.Runtime,
 	totals *resourceTotals,
 	countedComponents map[uuid.UUID]bool,
-) {
+) error {
 	// Get service dependencies (components) from database
 	dependencies, err := s.serviceDependencyRepo.GetDependenciesByServiceID(ctx, serviceID)
 	if err != nil {
-		logger.Warningf("Failed to get dependencies for service %s: %v\n", serviceID, err)
-
-		return
+		return fmt.Errorf("failed to get dependencies for service %s: %w", serviceID, err)
 	}
 
 	// Process each component dependency
@@ -920,17 +937,13 @@ func (s *ApplicationService) addComponentAllocatedResources(
 		// Get component details from database
 		component, err := s.componentRepo.GetByID(ctx, dep.DependencyID)
 		if err != nil {
-			logger.Warningf("Failed to get component %s: %v\n", dep.DependencyID, err)
-
-			continue
+			return fmt.Errorf("failed to get component %s: %w", dep.DependencyID, err)
 		}
 
 		// Load component runtime metadata for the specific provider
 		runtimeMetadata, err := catalogProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider)
 		if err != nil {
-			logger.Warningf("Failed to load runtime metadata for component %s/%s: %v\n", component.Type, component.Provider, err)
-
-			continue
+			return fmt.Errorf("failed to load runtime metadata for component %s/%s: %w", component.Type, component.Provider, err)
 		}
 
 		// Add allocated resources from this specific component provider
@@ -941,11 +954,15 @@ func (s *ApplicationService) addComponentAllocatedResources(
 
 		// Get all pods for this component using the template ID label
 		// Each pod deployed has label: ai-services.io/template: "<component-database-id>"
-		addUsedResourcesByTemplateID(component.ID.String(), runtimeClient, totals)
+		if err := addUsedResourcesByTemplateID(component.ID.String(), runtimeClient, totals); err != nil {
+			return fmt.Errorf("failed to get component used resources for %s: %w", component.ID, err)
+		}
 
 		// Mark this component as counted
 		countedComponents[dep.DependencyID] = true
 	}
+
+	return nil
 }
 
 // addUsedResources fetches and adds used resources from a single pod.
@@ -953,12 +970,10 @@ func addUsedResources(
 	podName string,
 	runtimeClient runtime.Runtime,
 	totals *resourceTotals,
-) {
+) error {
 	resources, err := runtimeClient.GetPodResources(podName)
 	if err != nil {
-		logger.Warningf("Failed to get resources for pod %s: %v\n", podName, err)
-
-		return
+		return fmt.Errorf("failed to get resources for pod %s: %w", podName, err)
 	}
 
 	// Track all unique Spyre cards
@@ -969,6 +984,8 @@ func addUsedResources(
 	// Accumulate used resources
 	totals.usedCPU += resources.CPUCores
 	totals.usedMemory += resources.MemUsage
+
+	return nil
 }
 
 // addUsedResourcesByTemplateID fetches and adds used resources from all pods with a given template ID label.
@@ -977,7 +994,7 @@ func addUsedResourcesByTemplateID(
 	templateID string,
 	runtimeClient runtime.Runtime,
 	totals *resourceTotals,
-) {
+) error {
 	// List all pods with the template ID label
 	filters := map[string][]string{
 		"label": {fmt.Sprintf("ai-services.io/template=%s", templateID)},
@@ -985,15 +1002,17 @@ func addUsedResourcesByTemplateID(
 
 	pods, err := runtimeClient.ListPods(filters)
 	if err != nil {
-		logger.Warningf("Failed to list pods for template %s: %v\n", templateID, err)
-
-		return
+		return fmt.Errorf("failed to list pods for template %s: %w", templateID, err)
 	}
 
 	// Aggregate resources from all pods
 	for _, pod := range pods {
-		addUsedResources(pod.Name, runtimeClient, totals)
+		if err := addUsedResources(pod.Name, runtimeClient, totals); err != nil {
+			return fmt.Errorf("failed to get used resources for pod %s: %w", pod.Name, err)
+		}
 	}
+
+	return nil
 }
 
 // buildResourcesResponse constructs the final response from resource totals.
