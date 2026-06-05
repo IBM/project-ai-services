@@ -17,6 +17,7 @@ import (
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	consts "github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -805,7 +806,7 @@ func (s *ApplicationService) GetApplicationResources(ctx context.Context, id uui
 	}
 
 	// Collect resources from all services
-	resourceTotals, err := s.collectServiceResources(ctx, app, runtimeClient, catalogProvider)
+	resourceTotals, err := s.collectResources(ctx, app, runtimeClient, catalogProvider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect application resources: %w", err)
 	}
@@ -832,8 +833,8 @@ type resourceTotals struct {
 	spyreCards      map[string]bool
 }
 
-// collectServiceResources aggregates resources from all services in an application.
-func (s *ApplicationService) collectServiceResources(
+// collectResources aggregates resources from all services in an application.
+func (s *ApplicationService) collectResources(
 	ctx context.Context,
 	app *models.Application,
 	runtimeClient runtime.Runtime,
@@ -843,7 +844,7 @@ func (s *ApplicationService) collectServiceResources(
 		spyreCards: make(map[string]bool),
 	}
 
-	// Track components we've already counted to avoid double-counting shared components
+	// Map to track components to avoid double-counting shared components among services
 	countedComponents := make(map[uuid.UUID]bool)
 
 	for _, service := range app.Services {
@@ -865,19 +866,43 @@ func (s *ApplicationService) processServiceResources(
 	totals *resourceTotals,
 	countedComponents map[uuid.UUID]bool,
 ) error {
-	// Load allocated resources from service metadata
-	if err := s.addServiceAllocatedResources(service.CatalogID, catalogProvider, totals); err != nil {
+	// Get the resources (allocated + used) for deployed service
+	if err := s.addServiceResources(service, catalogProvider, runtimeClient, totals); err != nil {
 		return fmt.Errorf("failed to get service allocated resources: %w", err)
 	}
 
-	// Load allocated resources from deployed components for this service
+	// Get the resources (allocated + used) for deployed components for this service
 	// Pass countedComponents to avoid double-counting shared components
-	// Also collect used resources from component pods
-	if err := s.addComponentAllocatedResources(ctx, service.ID, catalogProvider, runtimeClient, totals, countedComponents); err != nil {
+	if err := s.addComponentResources(ctx, service.ID, catalogProvider, runtimeClient, totals, countedComponents); err != nil {
 		return fmt.Errorf("failed to get component allocated resources: %w", err)
 	}
 
-	// Get all pods for this service using the template ID label
+	return nil
+}
+
+// addAllocatedResources is a helper function that adds allocated CPU and memory from runtime metadata to totals.
+func addAllocatedResources(runtimeMetadata *clitemplates.AppMetadata, totals *resourceTotals) {
+	if runtimeMetadata.Resources != nil {
+		totals.allocatedCPU += runtimeMetadata.Resources.CPU
+		totals.allocatedMemory += runtimeMetadata.Resources.Memory
+	}
+}
+
+// addServiceResources adds allocated and used resources from service metadata.
+func (s *ApplicationService) addServiceResources(
+	service models.Service,
+	catalogProvider *catalog.CatalogProvider,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+) error {
+	runtimeMetadata, err := catalogProvider.LoadServiceRuntimeMetadata(service.CatalogID)
+	if err != nil {
+		return fmt.Errorf("failed to load service runtime metadata for catalog ID %s: %w", service.CatalogID, err)
+	}
+
+	addAllocatedResources(runtimeMetadata, totals)
+
+	// Get the used resources for the service by fetching pods with service id
 	// Each pod deployed has label: ai-services.io/template: "<service-database-id>"
 	if err := addUsedResourcesByTemplateID(service.ID.String(), runtimeClient, totals); err != nil {
 		return fmt.Errorf("failed to get service used resources: %w", err)
@@ -886,30 +911,10 @@ func (s *ApplicationService) processServiceResources(
 	return nil
 }
 
-// addServiceAllocatedResources adds allocated resources from service metadata.
-func (s *ApplicationService) addServiceAllocatedResources(
-	catalogID string,
-	catalogProvider *catalog.CatalogProvider,
-	totals *resourceTotals,
-) error {
-	runtimeMetadata, err := catalogProvider.LoadServiceRuntimeMetadata(catalogID)
-	if err != nil {
-		return fmt.Errorf("failed to load service runtime metadata for catalog ID %s: %w", catalogID, err)
-	}
-
-	if runtimeMetadata.Resources != nil {
-		totals.allocatedCPU += runtimeMetadata.Resources.CPU
-		totals.allocatedMemory += runtimeMetadata.Resources.Memory
-	}
-
-	return nil
-}
-
-// addComponentAllocatedResources adds allocated resources from the actual deployed component providers.
+// addComponentResources adds allocated and used resources from the actual deployed component providers.
 // This ensures we only count resources for the specific component providers deployed for this service,
 // not all possible provider options. Components are tracked to avoid double-counting when shared across services.
-// Also collects used resources from component pods.
-func (s *ApplicationService) addComponentAllocatedResources(
+func (s *ApplicationService) addComponentResources(
 	ctx context.Context,
 	serviceID uuid.UUID,
 	catalogProvider *catalog.CatalogProvider,
@@ -925,37 +930,14 @@ func (s *ApplicationService) addComponentAllocatedResources(
 
 	// Process each component dependency
 	for _, dep := range dependencies {
-		if dep.DependencyType != models.DependencyTypeComponent {
+		// skip if this is not a component dependency or if it is already counted
+		if (dep.DependencyType != models.DependencyTypeComponent) || countedComponents[dep.DependencyID] {
 			continue
 		}
 
-		// Skip if we've already counted this component (shared across services)
-		if countedComponents[dep.DependencyID] {
-			continue
-		}
-
-		// Get component details from database
-		component, err := s.componentRepo.GetByID(ctx, dep.DependencyID)
-		if err != nil {
-			return fmt.Errorf("failed to get component %s: %w", dep.DependencyID, err)
-		}
-
-		// Load component runtime metadata for the specific provider
-		runtimeMetadata, err := catalogProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider)
-		if err != nil {
-			return fmt.Errorf("failed to load runtime metadata for component %s/%s: %w", component.Type, component.Provider, err)
-		}
-
-		// Add allocated resources from this specific component provider
-		if runtimeMetadata.Resources != nil {
-			totals.allocatedCPU += runtimeMetadata.Resources.CPU
-			totals.allocatedMemory += runtimeMetadata.Resources.Memory
-		}
-
-		// Get all pods for this component using the template ID label
-		// Each pod deployed has label: ai-services.io/template: "<component-database-id>"
-		if err := addUsedResourcesByTemplateID(component.ID.String(), runtimeClient, totals); err != nil {
-			return fmt.Errorf("failed to get component used resources for %s: %w", component.ID, err)
+		// Process each component to count the allocated and used resources
+		if err := s.processComponentResources(ctx, dep.DependencyID, catalogProvider, runtimeClient, totals); err != nil {
+			return err
 		}
 
 		// Mark this component as counted
@@ -965,25 +947,33 @@ func (s *ApplicationService) addComponentAllocatedResources(
 	return nil
 }
 
-// addUsedResources fetches and adds used resources from a single pod.
-func addUsedResources(
-	podName string,
+// processComponentResources processes a single component and updates resource totals.
+func (s *ApplicationService) processComponentResources(
+	ctx context.Context,
+	componentID uuid.UUID,
+	catalogProvider *catalog.CatalogProvider,
 	runtimeClient runtime.Runtime,
 	totals *resourceTotals,
 ) error {
-	resources, err := runtimeClient.GetPodResources(podName)
+	component, err := s.componentRepo.GetByID(ctx, componentID)
 	if err != nil {
-		return fmt.Errorf("failed to get resources for pod %s: %w", podName, err)
+		return fmt.Errorf("failed to get component %s: %w", componentID, err)
 	}
 
-	// Track all unique Spyre cards
-	for _, card := range resources.SpyreCards {
-		totals.spyreCards[card] = true
+	// Load component runtime metadata for the specific provider
+	runtimeMetadata, err := catalogProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider)
+	if err != nil {
+		return fmt.Errorf("failed to load runtime metadata for component %s/%s: %w", component.Type, component.Provider, err)
 	}
 
-	// Accumulate used resources
-	totals.usedCPU += resources.CPUCores
-	totals.usedMemory += resources.MemUsage
+	// Add allocated resources from this specific component provider
+	addAllocatedResources(runtimeMetadata, totals)
+
+	// Get all used resources for the pods of this component
+	// Each pod deployed has label: ai-services.io/template: "<component-database-id>"
+	if err := addUsedResourcesByTemplateID(component.ID.String(), runtimeClient, totals); err != nil {
+		return fmt.Errorf("failed to get component used resources for %s: %w", component.ID, err)
+	}
 
 	return nil
 }
@@ -1007,10 +997,33 @@ func addUsedResourcesByTemplateID(
 
 	// Aggregate resources from all pods
 	for _, pod := range pods {
-		if err := addUsedResources(pod.Name, runtimeClient, totals); err != nil {
+		if err := collectPodResources(pod.Name, runtimeClient, totals); err != nil {
 			return fmt.Errorf("failed to get used resources for pod %s: %w", pod.Name, err)
 		}
 	}
+
+	return nil
+}
+
+// collectPodResources fetches and accumulates used resources from a single pod.
+func collectPodResources(
+	podName string,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+) error {
+	resources, err := runtimeClient.GetPodResources(podName)
+	if err != nil {
+		return fmt.Errorf("failed to get resources for pod %s: %w", podName, err)
+	}
+
+	// Track all unique Spyre cards
+	for _, card := range resources.SpyreCards {
+		totals.spyreCards[card] = true
+	}
+
+	// Accumulate used resources
+	totals.usedCPU += resources.CPUCores
+	totals.usedMemory += resources.MemUsage
 
 	return nil
 }
