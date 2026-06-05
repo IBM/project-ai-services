@@ -366,6 +366,38 @@ def get_all_documents_paginated(
         raise
 
 
+def get_all_job_ids() -> list[str]:
+    """
+    Read all job IDs from the database.
+
+    Returns:
+        List of job IDs found in database
+    """
+    if engine is None:
+        raise RuntimeError("Database not available. Cannot retrieve job IDs without database connection.")
+
+    try:
+        logger.debug("Reading job IDs from database")
+        all_jobs = []
+        offset = 0
+
+        while True:
+            jobs, total = db_manager.get_all_jobs(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=offset)
+            if not jobs:
+                break
+            all_jobs.extend(jobs)
+            offset += len(jobs)
+            if offset >= total:
+                break
+
+        job_ids = [job.job_id for job in all_jobs]
+        logger.info(f"Found {len(job_ids)} job IDs in database")
+        return job_ids
+    except Exception as e:
+        logger.error(f"Failed to read job IDs from database: {e}", exc_info=True)
+        raise
+
+
 def get_all_document_ids() -> list[str]:
     """
     Read all document IDs from the database.
@@ -378,8 +410,19 @@ def get_all_document_ids() -> list[str]:
 
     try:
         logger.debug("Reading document IDs from database")
-        documents, _ = db_manager.get_all_documents(limit=10000, offset=0)
-        doc_ids = [doc.doc_id for doc in documents]
+        all_documents = []
+        offset = 0
+
+        while True:
+            documents, total = db_manager.get_all_documents(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=offset)
+            if not documents:
+                break
+            all_documents.extend(documents)
+            offset += len(documents)
+            if offset >= total:
+                break
+
+        doc_ids = [doc.doc_id for doc in all_documents]
         logger.info(f"Found {len(doc_ids)} document IDs in database")
         return doc_ids
     except Exception as e:
@@ -436,10 +479,12 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
 
     started_at = perf_counter()
 
-    jobs, total_jobs = db_manager.get_all_jobs(limit=IMPORT_EXPORT_DEFAULT_LIMIT if limit == -1 else limit, offset=0 if limit == -1 else offset)
-    documents, total_documents = db_manager.get_all_documents(limit=IMPORT_EXPORT_DEFAULT_LIMIT if limit == -1 else limit, offset=0 if limit == -1 else offset)
-
     if limit == -1:
+        # Fetch all records in batches
+        jobs, total_jobs = db_manager.get_all_jobs(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=0)
+        documents, total_documents = db_manager.get_all_documents(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=0)
+
+        # Fetch remaining jobs
         remaining_job_offset = len(jobs)
         while remaining_job_offset < total_jobs:
             batch, _ = db_manager.get_all_jobs(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=remaining_job_offset)
@@ -448,6 +493,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
             jobs.extend(batch)
             remaining_job_offset += len(batch)
 
+        # Fetch remaining documents
         remaining_doc_offset = len(documents)
         while remaining_doc_offset < total_documents:
             batch, _ = db_manager.get_all_documents(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=remaining_doc_offset)
@@ -455,6 +501,32 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
                 break
             documents.extend(batch)
             remaining_doc_offset += len(batch)
+    else:
+        # Fetch records respecting the combined limit across jobs and documents
+        # First, get total counts
+        _, total_jobs = db_manager.get_all_jobs(limit=1, offset=0)
+        _, total_documents = db_manager.get_all_documents(limit=1, offset=0)
+
+        # Calculate how many records to skip and fetch
+        total_records = total_jobs + total_documents
+
+        # Determine which records fall within the requested range
+        jobs = []
+        documents = []
+
+        if offset < total_jobs:
+            # We need some jobs
+            jobs_to_fetch = min(limit, total_jobs - offset)
+            jobs, _ = db_manager.get_all_jobs(limit=jobs_to_fetch, offset=offset)
+
+            # If we haven't reached the limit, fetch documents
+            remaining_limit = limit - len(jobs)
+            if remaining_limit > 0:
+                documents, _ = db_manager.get_all_documents(limit=remaining_limit, offset=0)
+        else:
+            # Skip all jobs, fetch only documents
+            doc_offset = offset - total_jobs
+            documents, _ = db_manager.get_all_documents(limit=limit, offset=doc_offset)
 
     exported_jobs = [
         ExportJobRecord(
@@ -530,20 +602,12 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
     if engine is None:
         raise RuntimeError("Database not available. Cannot import metadata without database connection.")
 
-    total_records = len(payload.data.jobs) + len(payload.data.documents)
-    if total_records > MAX_IMPORT_RECORDS:
-        raise ValueError(f"Maximum {MAX_IMPORT_RECORDS} records allowed per import request")
-
     started_at = perf_counter()
     summary = _build_import_summary(len(payload.data.jobs), len(payload.data.documents))
     warnings: list[ImportRecordIssue] = []
     errors: list[ImportRecordIssue] = []
 
-    existing_job_ids = {
-        job.get("job_id")
-        for job in get_all_jobs(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=0)[0]
-        if job.get("job_id")
-    }
+    existing_job_ids = set(get_all_job_ids())
     existing_document_ids = set(get_all_document_ids())
 
     importable_job_ids = set(existing_job_ids)
@@ -553,9 +617,10 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             summary.jobs.skipped += 1
             continue
 
+        # Parse and validate timestamps once, then reuse
         try:
-            _parse_iso_datetime(job_record.submitted_at)
-            _parse_iso_datetime(job_record.completed_at)
+            submitted_at = _parse_iso_datetime(job_record.submitted_at)
+            completed_at = _parse_iso_datetime(job_record.completed_at)
         except ValueError as exc:
             summary.jobs.failed += 1
             errors.append(
@@ -578,7 +643,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             operation=job_record.operation,
             status=JobStatus(job_record.status),
             job_name=job_record.job_name,
-            submitted_at=_parse_iso_datetime(job_record.submitted_at),
+            submitted_at=submitted_at,
             stats=job_record.stats,
         )
 
@@ -594,13 +659,12 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             )
             continue
 
-        if job_record.completed_at or job_record.error or job_record.status != JobStatus.ACCEPTED.value:
+        # Update job with additional fields if present (completed_at, error)
+        if job_record.completed_at or job_record.error:
             db_manager.update_job(
                 job_record.job_id,
-                status=JobStatus(job_record.status),
-                completed_at=_parse_iso_datetime(job_record.completed_at),
+                completed_at=completed_at,
                 error=job_record.error,
-                stats=job_record.stats,
             )
 
         summary.jobs.imported += 1
@@ -623,9 +687,10 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             )
             continue
 
+        # Parse and validate timestamps once, then reuse
         try:
-            _parse_iso_datetime(document_record.submitted_at)
-            _parse_iso_datetime(document_record.completed_at)
+            submitted_at = _parse_iso_datetime(document_record.submitted_at)
+            completed_at = _parse_iso_datetime(document_record.completed_at)
         except ValueError as exc:
             summary.documents.failed += 1
             errors.append(
@@ -648,7 +713,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             doc_type=document_record.type,
             status=DocStatus(document_record.status),
             output_format=document_record.output_format,
-            submitted_at=_parse_iso_datetime(document_record.submitted_at),
+            submitted_at=submitted_at,
             job_id=document_record.job_id,
             metadata=document_record.metadata,
         )
@@ -665,18 +730,12 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             )
             continue
 
-        if (
-            document_record.completed_at
-            or document_record.error
-            or document_record.status != DocStatus.ACCEPTED.value
-            or document_record.metadata
-        ):
+        # Update document with additional fields if present (completed_at, error)
+        if document_record.completed_at or document_record.error:
             db_manager.update_document(
                 document_record.id,
-                status=DocStatus(document_record.status),
-                completed_at=_parse_iso_datetime(document_record.completed_at),
+                completed_at=completed_at,
                 error=document_record.error,
-                metadata=document_record.metadata,
             )
 
         summary.documents.imported += 1

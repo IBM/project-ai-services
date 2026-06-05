@@ -31,6 +31,10 @@ import digitize.db_operations as db_ops
 digitization_semaphore = asyncio.BoundedSemaphore(settings.digitize.digitization_concurrency_limit)
 ingestion_semaphore = asyncio.BoundedSemaphore(settings.digitize.ingestion_concurrency_limit)
 
+# Lock to prevent job creation during import/export operations
+import_export_lock = asyncio.Lock()
+import_export_in_progress = False
+
 logger = get_logger("digitize_server")
 
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
@@ -264,14 +268,22 @@ async def digitize_document(
     job_name: Optional[str] = Query(None, description="Optional human-readable name for the job")
 ):
     try:
-        # 1. Early exit if no files submitted
+        # 1. Check if import/export is in progress
+        global import_export_in_progress
+        if import_export_in_progress:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                "Cannot create new jobs while import/export operation is in progress"
+            )
+
+        # 2. Early exit if no files submitted
         if not files or len(files) == 0:
             APIError.raise_error(ErrorCode.INVALID_REQUEST, "No files provided. Please submit at least one file.")
 
         if operation == models.OperationType.DIGITIZATION and len(files) > 1:
             APIError.raise_error(ErrorCode.INVALID_REQUEST, "Only 1 file allowed for digitization.")
 
-        # 2. Check for active ingestion jobs BEFORE semaphore check (cross-process coordination)
+        # 3. Check for active ingestion jobs BEFORE semaphore check (cross-process coordination)
         if operation == models.OperationType.INGESTION:
             has_active, active_job_ids = dg_util.has_active_jobs(operation=operation.value)
             if has_active:
@@ -328,9 +340,12 @@ async def digitize_document(
 )
 async def import_metadata(payload: models.ImportRequest):
     """Import job and document metadata into PostgreSQL."""
+    global import_export_in_progress
+
     try:
         total_records = len(payload.data.jobs) + len(payload.data.documents)
-        if total_records > db_ops.MAX_IMPORT_RECORDS:
+        # MAX_IMPORT_RECORDS = -1 means no limit (allow importing all records)
+        if db_ops.MAX_IMPORT_RECORDS != -1 and total_records > db_ops.MAX_IMPORT_RECORDS:
             APIError.raise_error(
                 ErrorCode.CONTEXT_LIMIT_EXCEEDED,
                 f"Request contains {total_records} records, maximum allowed is {db_ops.MAX_IMPORT_RECORDS}",
@@ -343,7 +358,16 @@ async def import_metadata(payload: models.ImportRequest):
                 f"Cannot import while jobs are active. Active jobs: {', '.join(active_job_ids)}",
             )
 
-        return db_ops.import_metadata(payload)
+        # Set flag to prevent new job creation during import
+        async with import_export_lock:
+            import_export_in_progress = True
+
+        try:
+            return db_ops.import_metadata(payload)
+        finally:
+            # Clear flag after import completes
+            async with import_export_lock:
+                import_export_in_progress = False
     except HTTPException:
         raise
     except ValueError as exc:
@@ -368,11 +392,30 @@ async def export_metadata(
     offset: int = Query(0, ge=0, description="Number of combined records to skip for pagination"),
 ):
     """Export job and document metadata from PostgreSQL."""
+    global import_export_in_progress
+
     try:
         if limit < -1 or limit == 0:
             APIError.raise_error(ErrorCode.INVALID_REQUEST, "limit must be -1 or a positive integer")
 
-        return db_ops.export_metadata(limit=limit, offset=offset)
+        # Check for active jobs before allowing export
+        has_active, active_job_ids = dg_util.has_active_jobs()
+        if has_active:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                f"Cannot export while jobs are active. Active jobs: {', '.join(active_job_ids)}",
+            )
+
+        # Set flag to prevent new job creation during export
+        async with import_export_lock:
+            import_export_in_progress = True
+
+        try:
+            return db_ops.export_metadata(limit=limit, offset=offset)
+        finally:
+            # Clear flag after export completes
+            async with import_export_lock:
+                import_export_in_progress = False
     except HTTPException:
         raise
     except ValueError as exc:
