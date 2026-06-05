@@ -432,8 +432,6 @@ def get_all_document_ids() -> list[str]:
 
 IMPORT_EXPORT_DEFAULT_LIMIT = 10000
 IMPORT_EXPORT_BATCH_SIZE = 100
-MAX_IMPORT_RECORDS = 10000
-
 
 def _parse_iso_datetime(timestamp: Optional[str]) -> Optional[datetime]:
     """Parse ISO-8601 timestamps with optional Z suffix."""
@@ -659,13 +657,12 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             )
             continue
 
-        # Update job with additional fields if present (completed_at, error)
-        if job_record.completed_at or job_record.error:
-            db_manager.update_job(
-                job_record.job_id,
-                completed_at=completed_at,
-                error=job_record.error,
-            )
+        # Update job with completion fields (guaranteed to exist since import blocks on active jobs)
+        db_manager.update_job(
+            job_record.job_id,
+            completed_at=completed_at,
+            error=job_record.error,
+        )
 
         summary.jobs.imported += 1
         importable_job_ids.add(job_record.job_id)
@@ -730,13 +727,12 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             )
             continue
 
-        # Update document with additional fields if present (completed_at, error)
-        if document_record.completed_at or document_record.error:
-            db_manager.update_document(
-                document_record.id,
-                completed_at=completed_at,
-                error=document_record.error,
-            )
+        # Update document with completion fields (guaranteed to exist since import blocks on active jobs)
+        db_manager.update_document(
+            document_record.id,
+            completed_at=completed_at,
+            error=document_record.error,
+        )
 
         summary.documents.imported += 1
 

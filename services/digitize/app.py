@@ -31,9 +31,132 @@ import digitize.db_operations as db_ops
 digitization_semaphore = asyncio.BoundedSemaphore(settings.digitize.digitization_concurrency_limit)
 ingestion_semaphore = asyncio.BoundedSemaphore(settings.digitize.ingestion_concurrency_limit)
 
-# Lock to prevent job creation during import/export operations
-import_export_lock = asyncio.Lock()
-import_export_in_progress = False
+# Store active lock connection to keep it alive
+_import_export_lock_connection = None
+
+async def is_import_export_in_progress() -> bool:
+    """
+    Check if an import/export operation is currently in progress.
+    Returns True if locked, False if available.
+    """
+    import asyncio
+
+    def _sync_check():
+        from digitize.db.connection import get_db_session
+        from sqlalchemy import text
+
+        try:
+            with get_db_session() as session:
+                # Check if the advisory lock is currently held
+                # pg_try_advisory_lock returns true if lock acquired, false if already held
+                # We immediately release it if we acquired it (just checking status)
+                result = session.execute(text("SELECT pg_try_advisory_lock(123456789)")).scalar()
+                if result:
+                    # We acquired it, so it wasn't in use - release it immediately
+                    session.execute(text("SELECT pg_advisory_unlock(123456789)"))
+                    return False
+                else:
+                    # Lock is held by another process
+                    return True
+        except Exception as e:
+            logger.error(f"Failed to check import/export lock status: {e}")
+            # On error, assume it's not in progress to avoid blocking operations
+            return False
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _sync_check)
+
+async def acquire_import_export_lock() -> bool:
+    """
+    Acquire a distributed lock for import/export operations using PostgreSQL advisory locks.
+    Returns True if lock was acquired, False if another process holds the lock.
+    IMPORTANT: Keeps the database connection open to maintain the lock.
+    Runs in thread pool to avoid blocking the async event loop.
+    """
+    import asyncio
+    from functools import partial
+
+    def _sync_acquire():
+        global _import_export_lock_connection
+        from digitize.db.connection import engine
+        from sqlalchemy import text
+        import os
+
+        pid = os.getpid()
+        logger.info(f"[PID {pid}] Attempting to acquire import/export lock...")
+
+        if not engine:
+            logger.error(f"[PID {pid}] Database engine not initialized")
+            return False
+
+        conn = None
+        try:
+            # Create a new connection that we'll keep open
+            conn = engine.connect()
+            logger.debug(f"[PID {pid}] Database connection created")
+
+            # Try to acquire PostgreSQL advisory lock (non-blocking)
+            # Lock ID: 123456789 (arbitrary unique number for import/export operations)
+            result = conn.execute(text("SELECT pg_try_advisory_lock(123456789)")).scalar()
+            logger.debug(f"[PID {pid}] Lock acquisition result: {result}")
+
+            if result:
+                # Lock acquired - store connection to keep it alive
+                _import_export_lock_connection = conn
+                logger.warning(f"[PID {pid}] ✅ Import/export lock ACQUIRED successfully")
+                return True
+            else:
+                # Lock not acquired - close connection
+                conn.close()
+                logger.warning(f"[PID {pid}] ❌ Import/export lock ALREADY HELD by another process")
+                return False
+        except Exception as e:
+            logger.error(f"[PID {pid}] Failed to acquire import/export lock: {e}", exc_info=True)
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
+            return False
+
+    # Run in thread pool to avoid blocking event loop
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _sync_acquire)
+
+async def release_import_export_lock():
+    """Release the distributed import/export lock and close the connection."""
+    import asyncio
+
+    def _sync_release():
+        global _import_export_lock_connection
+        from sqlalchemy import text
+        import os
+
+        pid = os.getpid()
+        logger.info(f"[PID {pid}] Releasing import/export lock...")
+
+        try:
+            if _import_export_lock_connection:
+                # Release PostgreSQL advisory lock
+                _import_export_lock_connection.execute(text("SELECT pg_advisory_unlock(123456789)"))
+                _import_export_lock_connection.close()
+                _import_export_lock_connection = None
+                logger.warning(f"[PID {pid}] ✅ Import/export lock RELEASED successfully")
+            else:
+                logger.warning(f"[PID {pid}] No lock connection to release")
+        except Exception as e:
+            logger.error(f"[PID {pid}] Failed to release import/export lock: {e}", exc_info=True)
+            # Ensure connection is closed even on error
+            if _import_export_lock_connection:
+                try:
+                    _import_export_lock_connection.close()
+                except:
+                    pass
+                _import_export_lock_connection = None
+
+    # Run in thread pool to avoid blocking event loop
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _sync_release)
 
 logger = get_logger("digitize_server")
 
@@ -269,8 +392,7 @@ async def digitize_document(
 ):
     try:
         # 1. Check if import/export is in progress
-        global import_export_in_progress
-        if import_export_in_progress:
+        if await is_import_export_in_progress():
             APIError.raise_error(
                 ErrorCode.RESOURCE_LOCKED,
                 "Cannot create new jobs while import/export operation is in progress"
@@ -340,34 +462,35 @@ async def digitize_document(
 )
 async def import_metadata(payload: models.ImportRequest):
     """Import job and document metadata into PostgreSQL."""
-    global import_export_in_progress
 
     try:
-        total_records = len(payload.data.jobs) + len(payload.data.documents)
-        # MAX_IMPORT_RECORDS = -1 means no limit (allow importing all records)
-        if db_ops.MAX_IMPORT_RECORDS != -1 and total_records > db_ops.MAX_IMPORT_RECORDS:
-            APIError.raise_error(
-                ErrorCode.CONTEXT_LIMIT_EXCEEDED,
-                f"Request contains {total_records} records, maximum allowed is {db_ops.MAX_IMPORT_RECORDS}",
-            )
-
-        has_active, active_job_ids = dg_util.has_active_jobs()
-        if has_active:
+        # Try to acquire distributed lock (works across all worker processes)
+        if not await acquire_import_export_lock():
             APIError.raise_error(
                 ErrorCode.RESOURCE_LOCKED,
-                f"Cannot import while jobs are active. Active jobs: {', '.join(active_job_ids)}",
+                "Another import/export operation is already in progress. Please wait for it to complete.",
             )
 
-        # Set flag to prevent new job creation during import
-        async with import_export_lock:
-            import_export_in_progress = True
-
         try:
+            total_records = len(payload.data.jobs) + len(payload.data.documents)
+            # MAX_IMPORT_RECORDS = -1 means no limit (allow importing all records)
+            if db_ops.MAX_IMPORT_RECORDS != -1 and total_records > db_ops.MAX_IMPORT_RECORDS:
+                APIError.raise_error(
+                    ErrorCode.CONTEXT_LIMIT_EXCEEDED,
+                    f"Request contains {total_records} records, maximum allowed is {db_ops.MAX_IMPORT_RECORDS}",
+                )
+
+            has_active, active_job_ids = dg_util.has_active_jobs()
+            if has_active:
+                APIError.raise_error(
+                    ErrorCode.RESOURCE_LOCKED,
+                    f"Cannot import while jobs are active. Active jobs: {', '.join(active_job_ids)}",
+                )
+
             return db_ops.import_metadata(payload)
         finally:
-            # Clear flag after import completes
-            async with import_export_lock:
-                import_export_in_progress = False
+            # Release distributed lock
+            await release_import_export_lock()
     except HTTPException:
         raise
     except ValueError as exc:
@@ -392,30 +515,40 @@ async def export_metadata(
     offset: int = Query(0, ge=0, description="Number of combined records to skip for pagination"),
 ):
     """Export job and document metadata from PostgreSQL."""
-    global import_export_in_progress
+    import os
+    pid = os.getpid()
+    logger.warning(f"[PID {pid}] 🔵 Export request received (limit={limit}, offset={offset})")
 
     try:
-        if limit < -1 or limit == 0:
-            APIError.raise_error(ErrorCode.INVALID_REQUEST, "limit must be -1 or a positive integer")
-
-        # Check for active jobs before allowing export
-        has_active, active_job_ids = dg_util.has_active_jobs()
-        if has_active:
+        # Try to acquire distributed lock (works across all worker processes)
+        logger.info(f"[PID {pid}] Trying to acquire lock for export...")
+        if not await acquire_import_export_lock():
+            logger.warning(f"[PID {pid}] ❌ Export REJECTED - lock held by another process")
             APIError.raise_error(
                 ErrorCode.RESOURCE_LOCKED,
-                f"Cannot export while jobs are active. Active jobs: {', '.join(active_job_ids)}",
+                "Another import/export operation is already in progress. Please wait for it to complete.",
             )
 
-        # Set flag to prevent new job creation during export
-        async with import_export_lock:
-            import_export_in_progress = True
-
+        logger.warning(f"[PID {pid}] ✅ Export proceeding with lock acquired")
         try:
-            return db_ops.export_metadata(limit=limit, offset=offset)
+            if limit < -1 or limit == 0:
+                APIError.raise_error(ErrorCode.INVALID_REQUEST, "limit must be -1 or a positive integer")
+
+            # Check for active jobs before allowing export
+            has_active, active_job_ids = dg_util.has_active_jobs()
+            if has_active:
+                APIError.raise_error(
+                    ErrorCode.RESOURCE_LOCKED,
+                    f"Cannot export while jobs are active. Active jobs: {', '.join(active_job_ids)}",
+                )
+
+            logger.info(f"[PID {pid}] Starting export operation...")
+            result = db_ops.export_metadata(limit=limit, offset=offset)
+            logger.warning(f"[PID {pid}] ✅ Export completed successfully")
+            return result
         finally:
-            # Clear flag after export completes
-            async with import_export_lock:
-                import_export_in_progress = False
+            # Release distributed lock
+            await release_import_export_lock()
     except HTTPException:
         raise
     except ValueError as exc:
