@@ -99,14 +99,18 @@ func runConfigure(argParams map[string]string) error {
 		return fmt.Errorf("failed to create model directory: %w", err)
 	}
 
+	// Sanitize SSL certificate paths to prevent path traversal attacks
+	cleanCertPath := filepath.Clean(sslCertPath)
+	cleanKeyPath := filepath.Clean(sslKeyPath)
+
 	return configure.Run(configure.ConfigureOptions{
 		AdminPassword: adminPassword,
 		Runtime:       vars.RuntimeFactory.GetRuntimeType(),
 		BaseDir:       aiServicesDir,
 		ArgParams:     argParams,
 		DomainName:    domainName,
-		SSLCertPath:   sslCertPath,
-		SSLKeyPath:    sslKeyPath,
+		SSLCertPath:   cleanCertPath,
+		SSLKeyPath:    cleanKeyPath,
 		HttpsPort:     httpsPort,
 	})
 }

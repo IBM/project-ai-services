@@ -48,7 +48,6 @@ type catalogDeploymentContext struct {
 	caddyHostAdminURL      string // http://localhost:<port> (for host VM use in post-deployment)
 
 	// Network configuration
-	hostIP       string
 	domainSuffix string
 }
 
@@ -229,15 +228,6 @@ func extractCertDomainIfProvided(sslCertPath, sslKeyPath string, s *spinner.Spin
 
 // prepareCatalogDeployment prepares all necessary data for deployment including domain suffix computation.
 func prepareCatalogDeployment(deployCtx *catalogDeploymentContext, tp templates.Template, podmanURI, authFilePath, passwordHash, baseDir, domainName, sslCertPath, sslKeyPath string, argParams map[string]string, s *spinner.Spinner) (map[string]any, error) {
-	// Get host IP and cache it
-	hostIP, err := utils.GetHostIP()
-	if err != nil {
-		s.Fail("failed to get host IP")
-
-		return nil, fmt.Errorf("failed to get host IP: %w", err)
-	}
-	deployCtx.hostIP = hostIP
-
 	// Extract domain from certificate if provided
 	certDomain, err := extractCertDomainIfProvided(sslCertPath, sslKeyPath, s)
 	if err != nil {
@@ -245,7 +235,7 @@ func prepareCatalogDeployment(deployCtx *catalogDeploymentContext, tp templates.
 	}
 
 	// Compute domain suffix using priority: certDomain > customDomain > hostIP.nip.io
-	domainSuffix, err := computeDomainSuffix(certDomain, domainName, hostIP)
+	domainSuffix, err := computeDomainSuffix(certDomain, domainName)
 	if err != nil {
 		s.Fail("failed to compute domain suffix")
 
@@ -707,12 +697,21 @@ func registerCatalogRoutes(rt *podman.PodmanClient, tp templates.Template, appTe
 }
 
 // computeDomainSuffix computes the domain suffix using priority: certDomain > customDomain > hostIP.nip.io.
-func computeDomainSuffix(certDomain, customDomain, hostIP string) (string, error) {
+func computeDomainSuffix(certDomain, customDomain string) (string, error) {
 	if certDomain != "" {
 		return certDomain, nil
 	}
 	if customDomain != "" {
 		return customDomain, nil
+	}
+
+	// Only get hostIP if we actually need it (when both cert and custom domains are absent)
+	hostIP, err := utils.GetHostIP()
+	if err != nil {
+		return "", fmt.Errorf("failed to get host IP: %w", err)
+	}
+	if hostIP == "" {
+		return "", fmt.Errorf("no non-loopback IPv4 address found")
 	}
 
 	return fmt.Sprintf("%s.nip.io", hostIP), nil
