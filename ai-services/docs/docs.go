@@ -369,7 +369,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves used and total allocated CPU (in cores) and memory usage (in bytes), along with the Spyre accelerator cards for an application and its services",
+                "description": "Retrieves used and total allocated CPU (in cores) and memory usage (in bytes), along with the hardware accelerator cards for an application and its services",
                 "produces": [
                     "application/json"
                 ],

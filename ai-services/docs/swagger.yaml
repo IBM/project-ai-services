@@ -676,7 +676,7 @@ paths:
   /applications/{id}/resources:
     get:
       description: Retrieves used and total allocated CPU (in cores) and memory usage
-        (in bytes), along with the Spyre accelerator cards for an application and
+        (in bytes), along with the hardware accelerator cards for an application and
         its services
       parameters:
       - description: Application ID

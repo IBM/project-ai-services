@@ -250,7 +250,7 @@ func (h *ApplicationHandler) GetApplicationByID(c *gin.Context) {
 // GetApplicationResources godoc
 //
 //	@Summary		Get application resources
-//	@Description	Retrieves used and total allocated CPU (in cores) and memory usage (in bytes), along with the Spyre accelerator cards for an application and its services
+//	@Description	Retrieves used and total allocated CPU (in cores) and memory usage (in bytes), along with the hardware accelerator cards for an application and its services
 //	@Tags			Applications
 //	@Produce		json
 //	@Security		BearerAuth
