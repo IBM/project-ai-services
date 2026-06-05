@@ -7,6 +7,127 @@ from unittest.mock import Mock, patch
 
 
 @pytest.mark.unit
+class TestSearchOnly:
+    """Tests for search_only function delegating to perform_similarity_search"""
+
+    def _patch_settings(self, monkeypatch, threshold=0.5, search_mode="hybrid", rerank=True, similarity_url="http://similarity:8080"):
+        mock_settings = Mock()
+        mock_settings.chatbot.score_threshold = threshold
+        mock_settings.chatbot.search_mode = search_mode
+        mock_settings.chatbot.rerank = rerank
+        mock_settings.chatbot.similarity_service_url = similarity_url
+        monkeypatch.setattr("chatbot.backend_utils.settings", mock_settings)
+
+    def test_delegates_to_similarity_service_api_with_correct_params(self, monkeypatch):
+        """search_only must call similarity service API with correct parameters."""
+        from chatbot import backend_utils
+
+        self._patch_settings(monkeypatch, threshold=0.0, search_mode="hybrid", rerank=True)
+
+        # Mock the requests.post call
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "score_type": "relevance",
+            "results": []
+        }
+        mock_response.raise_for_status = Mock()
+        mock_post = Mock(return_value=mock_response)
+        monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
+
+        backend_utils.search_only(
+            question="q",
+            emb_model="m",
+            emb_endpoint="http://emb",
+            max_tokens=512,
+            reranker_model="r",
+            reranker_endpoint="http://rerank",
+            top_k=10,
+            top_r=5,
+            vectorstore=Mock(),
+        )
+
+        # Verify the API was called with correct parameters
+        assert mock_post.called
+        call_args = mock_post.call_args
+        assert call_args[0][0] == "http://similarity:8080/v1/similarity-search"
+        json_payload = call_args[1]["json"]
+        assert json_payload["query"] == "q"
+        assert json_payload["mode"] == "hybrid"
+        assert json_payload["top_k"] == 10
+        assert json_payload["rerank"] is True
+
+    def test_returns_perf_stat_dict_with_api_timing(self, monkeypatch):
+        """search_only must return perf_stat_dict with API call timing."""
+        from chatbot import backend_utils
+
+        self._patch_settings(monkeypatch, threshold=0.0)
+
+        doc = {"page_content": "x", "filename": "f", "type": "text", "source": "f", "chunk_id": "1", "score": 0.9}
+        mock_response = Mock()
+        mock_response.json.return_value = {"score_type": "relevance", "results": [doc]}
+        mock_response.raise_for_status = Mock()
+        mock_post = Mock(return_value=mock_response)
+        monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
+
+        _, perf_stat_dict = backend_utils.search_only(
+            question="q", emb_model="m", emb_endpoint="http://emb", max_tokens=512,
+            reranker_model="r", reranker_endpoint="http://rerank",
+            top_k=10, top_r=5, vectorstore=Mock(),
+        )
+
+        assert "similarity_api_time" in perf_stat_dict
+        assert perf_stat_dict["similarity_api_time"] >= 0
+
+    def test_applies_top_r_cutoff(self, monkeypatch):
+        """search_only must truncate to top_r documents after retrieval."""
+        from chatbot import backend_utils
+
+        self._patch_settings(monkeypatch, threshold=0.0)
+
+        docs = [{"page_content": str(i), "filename": "f", "type": "text",
+                 "source": "f", "chunk_id": str(i), "score": 0.9 - 0.05 * i} for i in range(10)]
+        mock_response = Mock()
+        mock_response.json.return_value = {"score_type": "relevance", "results": docs}
+        mock_response.raise_for_status = Mock()
+        mock_post = Mock(return_value=mock_response)
+        monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
+
+        filtered_docs, _ = backend_utils.search_only(
+            question="q", emb_model="m", emb_endpoint="http://emb", max_tokens=512,
+            reranker_model="r", reranker_endpoint="http://rerank",
+            top_k=10, top_r=3, vectorstore=Mock(),
+        )
+
+        assert len(filtered_docs) == 3
+        assert filtered_docs == docs[:3]
+
+    def test_filters_by_score_threshold(self, monkeypatch):
+        """search_only must drop documents whose score is below settings.chatbot.score_threshold."""
+        from chatbot import backend_utils
+
+        self._patch_settings(monkeypatch, threshold=0.5)
+
+        docs = [
+            {"page_content": "keep", "filename": "f", "type": "text", "source": "f", "chunk_id": "1", "score": 0.8},
+            {"page_content": "drop", "filename": "f", "type": "text", "source": "f", "chunk_id": "2", "score": 0.3},
+        ]
+        mock_response = Mock()
+        mock_response.json.return_value = {"score_type": "relevance", "results": docs}
+        mock_response.raise_for_status = Mock()
+        mock_post = Mock(return_value=mock_response)
+        monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
+
+        filtered_docs, _ = backend_utils.search_only(
+            question="q", emb_model="m", emb_endpoint="http://emb", max_tokens=512,
+            reranker_model="r", reranker_endpoint="http://rerank",
+            top_k=10, top_r=10, vectorstore=Mock(),
+        )
+
+        assert len(filtered_docs) == 1
+        assert filtered_docs[0]["page_content"] == "keep"
+
+
+@pytest.mark.unit
 class TestValidateQueryLength:
     """Tests for validate_query_length function"""
     
