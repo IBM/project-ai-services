@@ -656,30 +656,72 @@ func setCheckResult(confCheck *check.ConfigurationFileCheck, found, correctValue
 	}
 }
 
+// getUserIDForSliceCheck retrieves the user ID for the SUDO_USER.
+// Returns userID and ok status. If ok is false, the check should be skipped or failed.
+func getUserIDForSliceCheck() (userID string, shouldSkip bool, shouldFail bool) {
+	sudoUser := os.Getenv("SUDO_USER")
+	if sudoUser == "" {
+		// Not running via sudo, skip this check
+		return "", true, false
+	}
+
+	exitCode, stdout, stderr, err := utils.ExecuteCommand("id", "-u", sudoUser)
+	if err != nil || exitCode != 0 {
+		log.Printf("Failed to get user ID for %s: %v, stderr: %s", sudoUser, err, stderr)
+
+		return "", false, true
+	}
+
+	userID = strings.TrimSpace(stdout)
+
+	// Skip this check if the user is root (UID 0).
+	// Systemd user slice limits (LimitMEMLOCK and LimitNOFILE) only apply to non-root users
+	// running rootless podman. root users don't need to re-login to shell after configuration changes,
+	// as these values can be picked up from podman yaml annotations at runtime.
+	if userID == "0" {
+		return "", true, false
+	}
+
+	return userID, false, false
+}
+
+// validateSystemdLimitsFile reads and validates the systemd limits file for required values.
+func validateSystemdLimitsFile(limitsFile string) (hasNofile, hasMemlock bool, err error) {
+	lines, err := utils.ReadFileLines(limitsFile)
+	if err != nil {
+		return false, false, err
+	}
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, "LimitNOFILE="); ok {
+			hasNofile = after == "134217728"
+		}
+		if after, ok := strings.CutPrefix(line, "LimitMEMLOCK="); ok {
+			hasMemlock = after == "infinity"
+		}
+	}
+
+	return hasNofile, hasMemlock, nil
+}
+
 // checkSystemdUserSliceLimits validates that systemd user slice limits are configured for rootless podman.
 func checkSystemdUserSliceLimits() *check.ConfigurationFileCheck {
 	checkName := "Systemd user slice limits configuration"
 	confCheck := check.NewConfigurationFileCheck(checkName, "")
 
-	// Get the SUDO_USER to check their slice
-	sudoUser := os.Getenv("SUDO_USER")
-	if sudoUser == "" {
-		// Not running via sudo, skip this check
+	userID, shouldSkip, shouldFail := getUserIDForSliceCheck()
+	if shouldSkip {
 		confCheck.SetStatus(true)
 
 		return confCheck
 	}
-
-	// Get user ID
-	exitCode, stdout, stderr, err := utils.ExecuteCommand("id", "-u", sudoUser)
-	if err != nil || exitCode != 0 {
-		log.Printf("Failed to get user ID for %s: %v, stderr: %s", sudoUser, err, stderr)
+	if shouldFail {
 		confCheck.SetStatus(false)
 
 		return confCheck
 	}
 
-	userID := strings.TrimSpace(stdout)
 	limitsFile := fmt.Sprintf("/etc/systemd/system/user-%s.slice.d/limits.conf", userID)
 	confCheck.FilePath = limitsFile
 
@@ -693,26 +735,12 @@ func checkSystemdUserSliceLimits() *check.ConfigurationFileCheck {
 	}
 
 	// Read and validate limits file
-	lines, err := utils.ReadFileLines(limitsFile)
+	hasNofile, hasMemlock, err := validateSystemdLimitsFile(limitsFile)
 	if err != nil {
 		log.Printf("Failed to read %s: %v", limitsFile, err)
 		confCheck.SetStatus(false)
 
 		return confCheck
-	}
-
-	hasNofile := false
-	hasMemlock := false
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if after, ok := strings.CutPrefix(line, "LimitNOFILE="); ok {
-			value := after
-			hasNofile = value == "134217728"
-		}
-		if after, ok := strings.CutPrefix(line, "LimitMEMLOCK="); ok {
-			value := after
-			hasMemlock = value == "infinity"
-		}
 	}
 
 	confCheck.AddAttribute("LimitNOFILE=134217728", hasNofile, "", "134217728")

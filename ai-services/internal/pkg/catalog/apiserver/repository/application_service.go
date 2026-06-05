@@ -5,20 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	consts "github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 var (
@@ -35,6 +40,7 @@ type ApplicationService struct {
 	provider              *catalog.CatalogProvider
 	deploymentPlanner     *deployment.DeploymentPlanner
 	deploymentExecutor    *deployment.DeploymentExecutor
+	deletionService       *deletion.DeletionService
 }
 
 // NewApplicationService creates a new application service.
@@ -53,6 +59,7 @@ func NewApplicationService(
 		provider:              provider,
 		deploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo),
 		deploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo),
+		deletionService:       deletion.NewDeletionService(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
 	}
 }
 
@@ -567,7 +574,7 @@ type DeleteApplicationResponse struct {
 }
 
 // DeleteApplication initiates async deletion of an application and returns immediately.
-func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string, force bool) (*DeleteApplicationResponse, error) {
+func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool) (*DeleteApplicationResponse, error) {
 	app, err := s.appRepo.GetByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -589,124 +596,13 @@ func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID
 		return nil, err
 	}
 
-	go s.performDeletion(context.Background(), id, app.Services, force)
+	go s.deletionService.PerformDeletion(context.Background(), id, app.Services, keepData)
 
 	return &DeleteApplicationResponse{
 		ID:      id.String(),
 		Status:  string(models.ApplicationStatusDeleting),
 		Message: "Deletion initiated successfully",
 	}, nil
-}
-
-// performDeletion carries out the async cascade deletion for an application.
-// When force is true, orphaned component records are also deleted.
-//
-//nolint:cyclop,gocognit,nestif,funlen
-func (s *ApplicationService) performDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, force bool) {
-	serviceIDs := make(map[uuid.UUID]bool, len(services))
-	for _, svc := range services {
-		serviceIDs[svc.ID] = true
-	}
-
-	// Identify orphaned components before deletion while service_dependencies still exist.
-	var orphanedComponents []uuid.UUID
-
-	if force {
-		componentCandidates := make(map[uuid.UUID]bool)
-
-		for _, svc := range services {
-			deps, err := s.serviceDependencyRepo.GetDependenciesByServiceID(ctx, svc.ID)
-			if err != nil {
-				logger.Errorf("failed to get dependencies for service %s: %s", svc.ID, err)
-				_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, "failed to get service dependencies")
-
-				return
-			}
-
-			for _, dep := range deps {
-				if dep.DependencyType == models.DependencyTypeComponent {
-					componentCandidates[dep.DependencyID] = true
-				}
-			}
-		}
-
-		for componentID := range componentCandidates {
-			dependentServices, err := s.serviceDependencyRepo.GetServicesByDependency(ctx, componentID, models.DependencyTypeComponent)
-			if err != nil {
-				logger.Errorf("failed to check component %s orphan status: %s", componentID, err)
-
-				continue
-			}
-
-			isOrphan := true
-
-			for _, svcID := range dependentServices {
-				if !serviceIDs[svcID] {
-					isOrphan = false
-
-					break
-				}
-			}
-
-			if isOrphan {
-				orphanedComponents = append(orphanedComponents, componentID)
-			}
-		}
-	}
-
-	// delete pods before removing DB records
-	rt, err := podmanRuntime.NewPodmanClient()
-	if err != nil {
-		logger.Errorf("failed to init podman client for app %s: %s", appID, err)
-		_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, "failed to init podman client")
-
-		return
-	}
-
-	forceDelete := true
-
-	for _, svc := range services {
-		pods, err := rt.ListPods(map[string][]string{
-			"label": {fmt.Sprintf("ai-services.io/template=%s", svc.ID)},
-		})
-		if err != nil {
-			logger.Errorf("failed to list pods for service %s: %s", svc.ID, err)
-
-			continue
-		}
-
-		for _, pod := range pods {
-			if err := rt.DeletePod(pod.ID, &forceDelete); err != nil {
-				logger.Errorf("failed to delete pod %s for service %s: %s", pod.ID, svc.ID, err)
-			}
-		}
-	}
-
-	// Delete the application; CASCADE removes services and service_dependencies.
-	if err := s.appRepo.Delete(ctx, appID); err != nil {
-		logger.Errorf("failed to delete application %s: %s", appID, err)
-
-		return
-	}
-
-	for _, componentID := range orphanedComponents {
-		pods, err := rt.ListPods(map[string][]string{
-			"label": {fmt.Sprintf("ai-services.io/template=%s", componentID)},
-		})
-		if err != nil {
-			logger.Errorf("failed to list pods for component %s: %s", componentID, err)
-		} else {
-			for _, pod := range pods {
-				if err := rt.DeletePod(pod.ID, &forceDelete); err != nil {
-					logger.Errorf("failed to delete pod %s for component %s: %s", pod.ID, componentID, err)
-				}
-			}
-		}
-
-		if err := s.componentRepo.Delete(ctx, componentID); err != nil {
-			logger.Errorf("failed to delete orphaned component %s: %s", componentID, err)
-		}
-	}
 }
 
 // filterComponentMetadata filters component parameters to exclude sensitive data.
@@ -778,6 +674,277 @@ func (s *ApplicationService) filterSensitiveFields(params map[string]any, proper
 	}
 
 	return metadata, nil
+}
+
+// GetApplicationResources retrieves resource usage (CPU, memory) for an application using runtime-specific stats.
+func (s *ApplicationService) GetApplicationResources(ctx context.Context, id uuid.UUID) (*types.ApplicationResourcesResponse, error) {
+	// Fetch application from database
+	app, err := s.appRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, handleGetApplicationError(err)
+	}
+
+	// Create runtime client
+	runtimeClient, err := vars.RuntimeFactory.Create("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create runtime client: %w", err)
+	}
+
+	// Create catalog provider to load service metadata
+	catalogProvider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
+	}
+
+	// Collect resources from all services
+	resourceTotals, err := s.collectResources(ctx, app, runtimeClient, catalogProvider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect application resources: %w", err)
+	}
+
+	// Build and return response
+	return buildResourcesResponse(resourceTotals), nil
+}
+
+// handleGetApplicationError handles errors from GetByID.
+func handleGetApplicationError(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrApplicationNotFound
+	}
+
+	return fmt.Errorf("failed to get application: %w", err)
+}
+
+// resourceTotals holds aggregated resource information.
+type resourceTotals struct {
+	allocatedCPU    int
+	allocatedMemory int
+	usedCPU         float64
+	usedMemory      uint64
+	spyreCards      map[string]bool
+}
+
+// collectResources aggregates resources from all services in an application.
+func (s *ApplicationService) collectResources(
+	ctx context.Context,
+	app *models.Application,
+	runtimeClient runtime.Runtime,
+	catalogProvider *catalog.CatalogProvider,
+) (*resourceTotals, error) {
+	totals := &resourceTotals{
+		spyreCards: make(map[string]bool),
+	}
+
+	// Map to track components to avoid double-counting shared components among services
+	countedComponents := make(map[uuid.UUID]bool)
+
+	for _, service := range app.Services {
+		if err := s.processServiceResources(ctx, app.Name, service, runtimeClient, catalogProvider, totals, countedComponents); err != nil {
+			return nil, fmt.Errorf("failed to process service %s resources: %w", service.ID, err)
+		}
+	}
+
+	return totals, nil
+}
+
+// processServiceResources processes a single service and updates resource totals.
+func (s *ApplicationService) processServiceResources(
+	ctx context.Context,
+	appName string,
+	service models.Service,
+	runtimeClient runtime.Runtime,
+	catalogProvider *catalog.CatalogProvider,
+	totals *resourceTotals,
+	countedComponents map[uuid.UUID]bool,
+) error {
+	// Get the resources (allocated + used) for deployed service
+	if err := s.addServiceResources(service, catalogProvider, runtimeClient, totals); err != nil {
+		return fmt.Errorf("failed to get service allocated resources: %w", err)
+	}
+
+	// Get the resources (allocated + used) for deployed components for this service
+	// Pass countedComponents to avoid double-counting shared components
+	if err := s.addComponentResources(ctx, service.ID, catalogProvider, runtimeClient, totals, countedComponents); err != nil {
+		return fmt.Errorf("failed to get component allocated resources: %w", err)
+	}
+
+	return nil
+}
+
+// addAllocatedResources is a helper function that adds allocated CPU and memory from runtime metadata to totals.
+func addAllocatedResources(runtimeMetadata *clitemplates.AppMetadata, totals *resourceTotals) {
+	if runtimeMetadata.Resources != nil {
+		totals.allocatedCPU += runtimeMetadata.Resources.CPU
+		totals.allocatedMemory += runtimeMetadata.Resources.Memory
+	}
+}
+
+// addServiceResources adds allocated and used resources from service metadata.
+func (s *ApplicationService) addServiceResources(
+	service models.Service,
+	catalogProvider *catalog.CatalogProvider,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+) error {
+	runtimeMetadata, err := catalogProvider.LoadServiceRuntimeMetadata(service.CatalogID)
+	if err != nil {
+		return fmt.Errorf("failed to load service runtime metadata for catalog ID %s: %w", service.CatalogID, err)
+	}
+
+	addAllocatedResources(runtimeMetadata, totals)
+
+	// Get the used resources for the service by fetching pods with service id
+	// Each pod deployed has label: ai-services.io/template: "<service-database-id>"
+	if err := addUsedResourcesByTemplateID(service.ID.String(), runtimeClient, totals); err != nil {
+		return fmt.Errorf("failed to get service used resources: %w", err)
+	}
+
+	return nil
+}
+
+// addComponentResources adds allocated and used resources from the actual deployed component providers.
+// This ensures we only count resources for the specific component providers deployed for this service,
+// not all possible provider options. Components are tracked to avoid double-counting when shared across services.
+func (s *ApplicationService) addComponentResources(
+	ctx context.Context,
+	serviceID uuid.UUID,
+	catalogProvider *catalog.CatalogProvider,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+	countedComponents map[uuid.UUID]bool,
+) error {
+	// Get service dependencies (components) from database
+	dependencies, err := s.serviceDependencyRepo.GetDependenciesByServiceID(ctx, serviceID)
+	if err != nil {
+		return fmt.Errorf("failed to get dependencies for service %s: %w", serviceID, err)
+	}
+
+	// Process each component dependency
+	for _, dep := range dependencies {
+		// skip if this is not a component dependency or if it is already counted
+		if (dep.DependencyType != models.DependencyTypeComponent) || countedComponents[dep.DependencyID] {
+			continue
+		}
+
+		// Process each component to count the allocated and used resources
+		if err := s.processComponentResources(ctx, dep.DependencyID, catalogProvider, runtimeClient, totals); err != nil {
+			return err
+		}
+
+		// Mark this component as counted
+		countedComponents[dep.DependencyID] = true
+	}
+
+	return nil
+}
+
+// processComponentResources processes a single component and updates resource totals.
+func (s *ApplicationService) processComponentResources(
+	ctx context.Context,
+	componentID uuid.UUID,
+	catalogProvider *catalog.CatalogProvider,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+) error {
+	component, err := s.componentRepo.GetByID(ctx, componentID)
+	if err != nil {
+		return fmt.Errorf("failed to get component %s: %w", componentID, err)
+	}
+
+	// Load component runtime metadata for the specific provider
+	runtimeMetadata, err := catalogProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider)
+	if err != nil {
+		return fmt.Errorf("failed to load runtime metadata for component %s/%s: %w", component.Type, component.Provider, err)
+	}
+
+	// Add allocated resources from this specific component provider
+	addAllocatedResources(runtimeMetadata, totals)
+
+	// Get all used resources for the pods of this component
+	// Each pod deployed has label: ai-services.io/template: "<component-database-id>"
+	if err := addUsedResourcesByTemplateID(component.ID.String(), runtimeClient, totals); err != nil {
+		return fmt.Errorf("failed to get component used resources for %s: %w", component.ID, err)
+	}
+
+	return nil
+}
+
+// addUsedResourcesByTemplateID fetches and adds used resources from all pods with a given template ID label.
+// This handles cases where a service or component has multiple pods (e.g., digitize has digitize-{slug} and digitize-db-{slug}).
+func addUsedResourcesByTemplateID(
+	templateID string,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+) error {
+	// List all pods with the template ID label
+	filters := map[string][]string{
+		"label": {fmt.Sprintf("ai-services.io/template=%s", templateID)},
+	}
+
+	pods, err := runtimeClient.ListPods(filters)
+	if err != nil {
+		return fmt.Errorf("failed to list pods for template %s: %w", templateID, err)
+	}
+
+	// Aggregate resources from all pods
+	for _, pod := range pods {
+		if err := collectPodResources(pod.Name, runtimeClient, totals); err != nil {
+			return fmt.Errorf("failed to get used resources for pod %s: %w", pod.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// collectPodResources fetches and accumulates used resources from a single pod.
+func collectPodResources(
+	podName string,
+	runtimeClient runtime.Runtime,
+	totals *resourceTotals,
+) error {
+	resources, err := runtimeClient.GetPodResources(podName)
+	if err != nil {
+		return fmt.Errorf("failed to get resources for pod %s: %w", podName, err)
+	}
+
+	// Track all unique Spyre cards
+	for _, card := range resources.SpyreCards {
+		totals.spyreCards[card] = true
+	}
+
+	// Accumulate used resources
+	totals.usedCPU += resources.CPUCores
+	totals.usedMemory += resources.MemUsage
+
+	return nil
+}
+
+// buildResourcesResponse constructs the final response from resource totals.
+func buildResourcesResponse(totals *resourceTotals) *types.ApplicationResourcesResponse {
+	// Convert map to slice for Spyre cards
+	totalSpyreCards := make([]string, 0, len(totals.spyreCards))
+	for card := range totals.spyreCards {
+		totalSpyreCards = append(totalSpyreCards, card)
+	}
+
+	// Build accelerators map
+	accelerators := make(map[string][]string)
+	if len(totalSpyreCards) > 0 {
+		accelerators["ibm.com/spyre_pf"] = totalSpyreCards
+	}
+
+	// Build response with total and used resources
+	return &types.ApplicationResourcesResponse{
+		CPU: types.ApplicationCPUInfo{
+			TotalCores: float64(totals.allocatedCPU),
+			UsedCores:  math.Round(totals.usedCPU*consts.PercentageDivisor) / consts.PercentageDivisor,
+		},
+		Memory: types.ApplicationMemInfo{
+			TotalBytes: int64(totals.allocatedMemory),
+			UsedBytes:  int64(totals.usedMemory),
+		},
+		Accelerators: accelerators,
+	}
 }
 
 // Made with Bob

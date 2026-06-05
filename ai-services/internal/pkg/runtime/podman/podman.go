@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/containers/podman/v5/libpod/define"
 	"github.com/containers/podman/v5/pkg/bindings"
 	"github.com/containers/podman/v5/pkg/bindings/containers"
 	"github.com/containers/podman/v5/pkg/bindings/images"
@@ -17,6 +18,7 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/pods"
 	"github.com/containers/podman/v5/pkg/bindings/secrets"
 	"github.com/containers/podman/v5/pkg/bindings/system"
+	"github.com/containers/podman/v5/pkg/domain/entities"
 	"github.com/containers/podman/v5/pkg/specgen"
 	"github.com/project-ai-services/ai-services/internal/pkg/accelerator/spyre"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -489,4 +491,100 @@ func getAcceleratorInfo() map[string]*models.AcceleratorInfo {
 	}
 
 	return accelerators
+}
+
+// GetPodResources retrieves resource usage and Spyre cards for a pod in a single call.
+func (pc *PodmanClient) GetPodResources(nameOrID string) (*types.PodResources, error) {
+	// Inspect the pod to get its details
+	podInspect, err := pods.Inspect(pc.Context, nameOrID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect pod: %w", err)
+	}
+
+	if len(podInspect.Containers) == 0 {
+		return &types.PodResources{
+			CPUCores:   0,
+			MemUsage:   0,
+			SpyreCards: []string{},
+		}, nil
+	}
+
+	// Get stats and Spyre cards for all containers in the pod (excluding infra container)
+	return pc.aggregateContainerResourcesWithStats(podInspect)
+}
+
+// aggregateContainerResourcesWithStats collects and aggregates resources from all non-infra containers using podman stats.
+func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entities.PodInspectReport) (*types.PodResources, error) {
+	var totalMemUsage uint64
+	var totalCPUCores float64
+	spyreCards := []string{}
+
+	for _, container := range podInspect.Containers {
+		// Skip infra container
+		if container.ID == podInspect.InfraContainerID {
+			continue
+		}
+
+		// Get container stats for actual CPU and memory usage using podman stats
+		statsChan, err := containers.Stats(pc.Context, []string{container.ID}, &containers.StatsOptions{
+			Stream: utils.BoolPtr(false), // Get a single snapshot, not streaming
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get stats for container %s: %w", container.Name, err)
+		}
+
+		// Read from the stats channel (non-streaming mode returns one report)
+		statsReport, ok := <-statsChan
+		if ok && statsReport.Error != nil {
+			return nil, fmt.Errorf("error in stats report for container %s: %v", container.Name, statsReport.Error)
+		}
+		if ok && len(statsReport.Stats) > 0 {
+			stats := statsReport.Stats[0]
+
+			// Accumulate memory usage (in bytes)
+			totalMemUsage += stats.MemUsage
+
+			// Accumulate CPU usage
+			// The CPU field is a percentage (e.g., 150.0 = 1.5 cores)
+			// Convert percentage to cores by dividing by 100
+			totalCPUCores += stats.CPU / constants.PercentageDivisor
+		}
+
+		// Inspect container to get Spyre card annotations
+		containerInspect, err := containers.Inspect(pc.Context, container.ID, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
+		}
+
+		// Collect Spyre card PCI addresses from annotations
+		collectSpyreCards(containerInspect, &spyreCards)
+	}
+
+	return &types.PodResources{
+		CPUCores:   totalCPUCores,
+		MemUsage:   totalMemUsage,
+		SpyreCards: spyreCards,
+	}, nil
+}
+
+// collectSpyreCards extracts Spyre card PCI addresses from container environment variables.
+func collectSpyreCards(containerInspect *define.InspectContainerData, spyreCards *[]string) {
+	if containerInspect.Config != nil && containerInspect.Config.Env != nil {
+		for _, env := range containerInspect.Config.Env {
+			pciAddressPrefix := string(constants.PCIAddressKey) + "="
+			if strings.HasPrefix(env, pciAddressPrefix) {
+				// Extract the value after "AIU_PCIE_IDS="
+				pciAddresses := strings.TrimPrefix(env, pciAddressPrefix)
+				// Split by spaces and filter out empty strings
+				addresses := strings.Fields(pciAddresses)
+				for _, addr := range addresses {
+					if addr != "" {
+						*spyreCards = append(*spyreCards, addr)
+					}
+				}
+
+				return
+			}
+		}
+	}
 }

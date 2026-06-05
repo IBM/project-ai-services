@@ -4,6 +4,8 @@ metadata:
   name: "digitize-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
+    ai-services.io/secret: "digitize-db-secret-{{ .InstanceSlug }}"
+    ai-services.io/secret-skip-cleanup: "true"
   annotations:
     ai-services.io/routes: "4001:digitize-ui-{{ .InstanceSlug }}:ui,4000:digitize-backend-{{ .InstanceSlug }}:api"
     # ai-services.io/ports: "{{ .Values.digitizeUi.port }}:4001, {{ .Values.digitize.port }}:4000"  # Uncomment to expose ports directly (bypasses Caddy)

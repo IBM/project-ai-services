@@ -430,10 +430,26 @@ func (kc *OpenshiftClient) ListSecrets(filters map[string][]string) ([]string, e
 	return nil, nil
 }
 
+func (kc *OpenshiftClient) DeleteSecret(name string) error {
+	logger.Warningln("Not implemented")
+
+	return nil
+}
+
 // GetSystemInfo returns empty system information for OpenShift runtime.
 // Resource information is managed by Kubernetes/OpenShift and not directly accessible.
 func (kc *OpenshiftClient) GetSystemInfo() (*models.SystemInfo, error) {
 	return &models.SystemInfo{
 		Accelerators: make(map[string]*models.AcceleratorInfo),
+	}, nil
+}
+
+// GetPodResources retrieves resource usage and Spyre cards for a pod in a single call.
+// For OpenShift, this is not yet implemented and returns empty values.
+func (kc *OpenshiftClient) GetPodResources(nameOrID string) (*types.PodResources, error) {
+	return &types.PodResources{
+		CPUCores:   0,
+		MemUsage:   0,
+		SpyreCards: []string{},
 	}, nil
 }

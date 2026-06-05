@@ -49,4 +49,23 @@ type PaginationMetadata struct {
 	HasPrev    bool `json:"has_prev"`
 }
 
+// ApplicationResourcesResponse represents the resource usage response for an application.
+type ApplicationResourcesResponse struct {
+	CPU          ApplicationCPUInfo  `json:"cpu"`
+	Memory       ApplicationMemInfo  `json:"memory"`
+	Accelerators map[string][]string `json:"accelerators"`
+}
+
+// ApplicationCPUInfo represents CPU allocation and usage for an application.
+type ApplicationCPUInfo struct {
+	TotalCores float64 `json:"total_cores"` // Total allocated CPU cores
+	UsedCores  float64 `json:"used_cores"`  // Actually used CPU cores
+}
+
+// ApplicationMemInfo represents memory allocation and usage for an application.
+type ApplicationMemInfo struct {
+	TotalBytes int64 `json:"total_bytes"` // Total allocated memory in bytes
+	UsedBytes  int64 `json:"used_bytes"`  // Actually used memory in bytes
+}
+
 // Made with Bob

@@ -2,6 +2,8 @@ package utils
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 
@@ -61,6 +63,16 @@ func BuildExternalURL(domain string, httpsPort string) string {
 	}
 
 	return url
+}
+
+// GenerateInstanceSlug creates a short slug from an ID using SHA256 hash.
+// Returns the first 10 characters of the hex-encoded hash.
+// This is used to create consistent directory names for applications and components.
+func GenerateInstanceSlug(id string) string {
+	hash := sha256.Sum256([]byte(id))
+	hexHash := hex.EncodeToString(hash[:])
+
+	return hexHash[:10]
 }
 
 // Made with Bob
