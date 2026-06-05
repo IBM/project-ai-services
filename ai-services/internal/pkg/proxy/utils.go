@@ -38,7 +38,7 @@ func BuildRoutesFromAnnotation(routesAnnotation, domainSuffix, podName string) (
 	}
 
 	routes := []Route{}
-	const expectedParts = 2
+	const expectedParts = 3
 
 	// Parse routes annotation (format: "port:subdomain, port:subdomain, ...")
 	for _, r := range strings.Split(routesAnnotation, ",") {
@@ -50,14 +50,21 @@ func BuildRoutesFromAnnotation(routesAnnotation, domainSuffix, podName string) (
 		// Split by colon
 		parts := strings.Split(r, ":")
 		if len(parts) != expectedParts {
-			continue
+			return nil, fmt.Errorf("invalid route format '%s': expected 'port:subdomain:type', got %d parts", r, len(parts))
 		}
 
 		port := strings.TrimSpace(parts[0])
 		subdomain := strings.TrimSpace(parts[1])
+		routeType := strings.ToLower(strings.TrimSpace(parts[2]))
 
-		if port == "" || subdomain == "" {
-			continue
+		if port == "" {
+			return nil, fmt.Errorf("invalid route '%s': port cannot be empty", r)
+		}
+		if subdomain == "" {
+			return nil, fmt.Errorf("invalid route '%s': subdomain cannot be empty", r)
+		}
+		if routeType == "" {
+			return nil, fmt.Errorf("invalid route '%s': type cannot be empty", r)
 		}
 
 		// Build route - use pod name as upstream since containers are in the same pod
@@ -67,6 +74,7 @@ func BuildRoutesFromAnnotation(routesAnnotation, domainSuffix, podName string) (
 			Domain:   fmt.Sprintf("%s.%s", subdomain, domainSuffix),
 			Upstream: fmt.Sprintf("%s:%s", podName, port),
 			Terminal: true,
+			Type:     routeType,
 		}
 		routes = append(routes, route)
 	}

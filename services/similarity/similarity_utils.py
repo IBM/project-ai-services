@@ -1,3 +1,4 @@
+import time
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -83,18 +84,26 @@ def perform_similarity_search(
     vectorstore,
     top_k: int,
     rerank: bool,
-    mode:str,
+    mode: str,
     reranker_model: Optional[str] = None,
     reranker_endpoint: Optional[str] = None,
-) -> tuple[list[dict], list[float], str]:
+    return_timings: bool = False,
+):
     """
     Run vector similarity search using the specified mode, with optional Cohere reranking.
 
-    Returns:
+    Returns (return_timings=False):
         docs       - list of document dicts (page_content, filename, type, source, chunk_id)
         scores     - parallel list of float scores
         score_type - "cosine", "bm25", "hybrid", or "relevance" (when reranked)
+
+    Returns (return_timings=True):
+        docs, scores, score_type, perf_stat_dict
+        where perf_stat_dict contains "retrieve_time" and, when rerank=True, "rerank_time".
     """
+    perf_stat_dict: dict = {}
+
+    start_time = time.time()
     docs, scores = retrieve_documents(
         query,
         emb_model,
@@ -104,6 +113,7 @@ def perform_similarity_search(
         top_k,
         mode=mode,
     )
+    perf_stat_dict["retrieve_time"] = time.time() - start_time
 
     score_type_map = {
         "dense": "cosine",
@@ -115,9 +125,13 @@ def perform_similarity_search(
     if rerank:
         if reranker_model is None or reranker_endpoint is None:
             raise ValueError("reranker_model and reranker_endpoint are required when rerank=True")
+        start_time = time.time()
         reranked = rerank_documents(query, docs, reranker_model, reranker_endpoint)
+        perf_stat_dict["rerank_time"] = time.time() - start_time
         docs = [d for d, _ in reranked]
         scores = [s for _, s in reranked]
         score_type = "relevance"
 
+    if return_timings:
+        return docs, scores, score_type, perf_stat_dict
     return docs, scores, score_type

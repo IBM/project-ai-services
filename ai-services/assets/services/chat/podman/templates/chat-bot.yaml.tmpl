@@ -5,7 +5,7 @@ metadata:
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
   annotations:
-    ai-services.io/routes: "3000:chat-bot-ui,5000:chat-bot-backend"
+    ai-services.io/routes: "3000:chat-bot-ui-{{ .InstanceSlug }}:ui,5000:chat-bot-backend-{{ .InstanceSlug }}:api"
     # ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
   containers:
@@ -106,6 +106,8 @@ spec:
           value: "{{ .Values.backend.chatbot.numChunksPostReranker }}"
         - name: CHATBOT_RERANK
           value: "{{ .Values.backend.chatbot.rerank }}"
+        - name: CHATBOT_SIMILARITY_SERVICE_URL
+          value: "http://similarity-api-{{ .InstanceSlug }}:7000"
       ports:
         - containerPort: 5000
           protocol: TCP
