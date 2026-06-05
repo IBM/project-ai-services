@@ -530,14 +530,15 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 			Stream: utils.BoolPtr(false), // Get a single snapshot, not streaming
 		})
 		if err != nil {
-			logger.Warningf("Failed to get stats for container %s: %v\n", container.Name, err)
-
-			continue
+			return nil, fmt.Errorf("failed to get stats for container %s: %w", container.Name, err)
 		}
 
 		// Read from the stats channel (non-streaming mode returns one report)
 		statsReport, ok := <-statsChan
-		if ok && statsReport.Error == nil && len(statsReport.Stats) > 0 {
+		if ok && statsReport.Error != nil {
+			return nil, fmt.Errorf("error in stats report for container %s: %v", container.Name, statsReport.Error)
+		}
+		if ok && len(statsReport.Stats) > 0 {
 			stats := statsReport.Stats[0]
 
 			// Accumulate memory usage (in bytes)
@@ -552,9 +553,7 @@ func (pc *PodmanClient) aggregateContainerResourcesWithStats(podInspect *entitie
 		// Inspect container to get Spyre card annotations
 		containerInspect, err := containers.Inspect(pc.Context, container.ID, nil)
 		if err != nil {
-			logger.Warningf("Failed to inspect container %s: %v\n", container.Name, err)
-
-			continue
+			return nil, fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
 		}
 
 		// Collect Spyre card PCI addresses from annotations
