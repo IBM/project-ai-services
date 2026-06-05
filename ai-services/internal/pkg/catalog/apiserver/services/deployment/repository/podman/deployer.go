@@ -1168,7 +1168,7 @@ func generateInstanceSlug(id string) string {
 func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *DeploymentPlan) error {
 	logger.Infof("Registering routes for application '%s'\n", plan.ApplicationName)
 
-	adminURL, hostIP, httpsPort, err := d.getCaddyConfiguration()
+	adminURL, domainSuffix, httpsPort, err := d.getCaddyConfiguration()
 	if err != nil {
 		return err
 	}
@@ -1180,7 +1180,7 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 			continue
 		}
 
-		if err := d.registerServiceRoutes(ctx, svc, adminURL, hostIP, httpsPort, &registrationErrors); err != nil {
+		if err := d.registerServiceRoutes(ctx, svc, adminURL, domainSuffix, httpsPort, &registrationErrors); err != nil {
 			registrationErrors = append(registrationErrors, err)
 		}
 	}
@@ -1205,12 +1205,12 @@ func (d *PodmanDeployer) getCaddyConfiguration() (string, string, string, error)
 	// This is pre-computed: certDomain OR customDomain OR hostIP.nip.io
 	domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
 	if domainSuffix == "" {
-		return fmt.Errorf("DOMAIN_SUFFIX environment variable not set")
+		return "", "", "", fmt.Errorf("DOMAIN_SUFFIX environment variable not set")
 	}
 
 	httpsPort := utils.GetEnv("CADDY_HTTPS_PORT", catalogconstants.DefaultHTTPSPort)
 
-	return adminURL, hostIP, httpsPort, nil
+	return adminURL, domainSuffix, httpsPort, nil
 }
 
 // registerServiceRoutes registers routes for a single service and updates its endpoints in the database.
@@ -1218,7 +1218,7 @@ func (d *PodmanDeployer) registerServiceRoutes(
 	ctx context.Context,
 	svc *ServicePlan,
 	adminURL string,
-	hostIP string,
+	domainSuffix string,
 	httpsPort string,
 	registrationErrors *[]error,
 ) error {
