@@ -24,6 +24,7 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
         ai-services.io/component: database
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: postgres
           image: "{{ .Values.postgres.image }}"

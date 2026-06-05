@@ -27,7 +27,7 @@ spec:
           command: [ "/var/venv/bin/python", "db/scripts/init_db.py" ]
           env:
             - name: POSTGRES_HOST
-              value: "{{ .AppName }}--postgres"
+              value: "postgres"
             - name: POSTGRES_PORT
               value: "5432"
             - name: POSTGRES_DB
@@ -61,7 +61,7 @@ spec:
             - name: POSTGRES_PORT
               value: "5432"
             - name: POSTGRES_DB
-              value: "{{ .Values.digitize.database }}"
+              value: "{{ .Values.summarize.database }}"
             - name: POSTGRES_USER
               value: "postgres"
             - name: POSTGRES_PASSWORD
@@ -118,3 +118,10 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+          volumeMounts:
+            - mountPath: /var/cache
+              name: cache
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: cache
