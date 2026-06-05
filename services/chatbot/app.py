@@ -380,7 +380,10 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         max_tokens = req.max_tokens
         # giving priority to max_tokens passed in the request, otherwise according to session language
         if not max_tokens:
-            max_tokens = max_tokens_map.get(lang, settings.llm.english.max_tokens)
+            if lang == language_codes["German"]:
+                max_tokens = settings.llm.german.max_tokens
+            else:
+                max_tokens = max_tokens_map.get(lang, settings.llm.english.max_tokens)
 
         rephrased_query = current_query
         
