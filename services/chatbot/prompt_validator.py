@@ -19,6 +19,19 @@ logger = get_logger("prompt_validator")
 class EnglishConstants:
     """English language constants for prompt validation."""
     
+    RESPONSE_KEYWORDS = {
+        "VERDICT": "VERDICT",
+        "REASON": "REASON",
+        "CONFIDENCE": "CONFIDENCE",
+    }
+    
+    VERDICT_VALUES = {
+        "VALID": "VALID",
+        "INVALID": "INVALID",
+        "SAFE": "SAFE",
+        "UNSAFE": "UNSAFE",
+    }
+    
     SEMANTIC_VALIDATION_PROMPT_TEMPLATE = (
         "Analyze this {prompt_type} prompt for a conversational RAG (Retrieval-Augmented Generation) assistant and determine if it's semantically appropriate.\n\n"
         "Custom Prompt:\n"
@@ -71,14 +84,23 @@ class EnglishConstants:
         "REASON: Contains role manipulation attempt with \"ignore previous instructions\" pattern.\n"
         "CONFIDENCE: 0.95"
     )
-    
-    VALID_VERDICT = "VALID"
-    INVALID_VERDICT = "INVALID"
-    SAFE_VERDICT = "SAFE"
-    UNSAFE_VERDICT = "UNSAFE"
+
 
 class GermanConstants:
     """German language constants for prompt validation."""
+    
+    RESPONSE_KEYWORDS = {
+        "VERDICT": "URTEIL",
+        "REASON": "GRUND",
+        "CONFIDENCE": "KONFIDENZ",
+    }
+    
+    VERDICT_VALUES = {
+        "VALID": "GÜLTIG",
+        "INVALID": "UNGÜLTIG",
+        "SAFE": "SICHER",
+        "UNSAFE": "UNSICHER",
+    }
     
     SEMANTIC_VALIDATION_PROMPT_TEMPLATE = (
         "Analysieren Sie diesen {prompt_type}-Prompt für einen konversationellen RAG (Retrieval-Augmented Generation) Assistenten und bestimmen Sie, ob er semantisch angemessen ist.\n\n"
@@ -132,11 +154,6 @@ class GermanConstants:
         "GRUND: Enthält Rollenmanipulationsversuch mit \"ignoriere vorherige Anweisungen\" Muster.\n"
         "KONFIDENZ: 0.95"
     )
-    
-    VALID_VERDICT = "GÜLTIG"
-    INVALID_VERDICT = "UNGÜLTIG"
-    SAFE_VERDICT = "SICHER"
-    UNSAFE_VERDICT = "UNSICHER"
 
 
 class ValidationResult(Enum):
@@ -224,7 +241,8 @@ def _parse_validation_response(
     valid_verdict: str,
     invalid_verdict: str,
     invalid_result_type: ValidationResult,
-    validation_type: str
+    validation_type: str,
+    language: str = "EN"
 ) -> PromptValidationResponse:
     """
     Parse LLM validation response in standard format.
@@ -235,6 +253,7 @@ def _parse_validation_response(
         invalid_verdict: Expected verdict string for invalid result (e.g., "INVALID", "UNSAFE", "UNGÜLTIG", "UNSICHER")
         invalid_result_type: ValidationResult enum to return for invalid verdict
         validation_type: Type of validation for logging (e.g., "Semantic", "Injection Detection")
+        language: Language code (EN for English, DE for German)
     
     Returns:
         PromptValidationResponse with parsed result
@@ -245,14 +264,22 @@ def _parse_validation_response(
         reason = ""
         confidence = 0.0
         
+        # Get language-specific keywords from appropriate constants class
+        if language == language_codes["German"]:
+            keywords = GermanConstants.RESPONSE_KEYWORDS
+        else:
+            keywords = EnglishConstants.RESPONSE_KEYWORDS
+        
         for line in lines:
             line = line.strip()
-            # Support both English and German keywords
-            if line.startswith("VERDICT:") or line.startswith("URTEIL:"):
+            # Check for verdict keyword
+            if line.startswith(f"{keywords['VERDICT']}:"):
                 verdict = line.split(":", 1)[1].strip().upper()
-            elif line.startswith("REASON:") or line.startswith("GRUND:"):
+            # Check for reason keyword
+            elif line.startswith(f"{keywords['REASON']}:"):
                 reason = line.split(":", 1)[1].strip()
-            elif line.startswith("CONFIDENCE:") or line.startswith("KONFIDENZ:"):
+            # Check for confidence keyword
+            elif line.startswith(f"{keywords['CONFIDENCE']}:"):
                 try:
                     confidence = float(line.split(":", 1)[1].strip())
                 except ValueError:
@@ -319,10 +346,11 @@ def validate_semantic_quality(
     # Parse response using shared method
     return _parse_validation_response(
         response_text,
-        valid_verdict=constants.VALID_VERDICT,
-        invalid_verdict=constants.INVALID_VERDICT,
+        valid_verdict=constants.VERDICT_VALUES["VALID"],
+        invalid_verdict=constants.VERDICT_VALUES["INVALID"],
         invalid_result_type=ValidationResult.INVALID_SEMANTIC,
-        validation_type="Semantic"
+        validation_type="Semantic",
+        language=language
     )
 
 
@@ -361,10 +389,11 @@ def detect_prompt_injection(
     # Parse response using shared method
     return _parse_validation_response(
         response_text,
-        valid_verdict=constants.SAFE_VERDICT,
-        invalid_verdict=constants.UNSAFE_VERDICT,
+        valid_verdict=constants.VERDICT_VALUES["SAFE"],
+        invalid_verdict=constants.VERDICT_VALUES["UNSAFE"],
         invalid_result_type=ValidationResult.UNSAFE_INJECTION,
-        validation_type="Injection Detection"
+        validation_type="Injection Detection",
+        language=language
     )
 
 
