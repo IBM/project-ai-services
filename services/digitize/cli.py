@@ -47,12 +47,35 @@ if command_args.debug:
 set_log_level(log_level)
 
 from digitize.cleanup import reset_db
-from digitize.db.connection import check_db_connection
+from digitize.db.connection import check_db_connection, engine
 from digitize.digitize_utils import generate_uuid, has_active_jobs, initialize_job_state
 from digitize.ingest import ingest
 from digitize.models import OperationType, OutputFormat
 
 logger = get_logger("Ingest")
+
+
+def initialize_database_schema() -> bool:
+    """
+    Initialize database schema by creating tables if they don't exist.
+
+    Returns:
+        True if schema initialization successful, False otherwise
+    """
+    try:
+        from digitize.db.models import Base
+
+        if not engine:
+            logger.error("❌ Database engine not initialized")
+            return False
+
+        logger.info("Initializing database schema...")
+        Base.metadata.create_all(bind=engine)
+        logger.info("✅ Database schema initialized")
+        return True
+    except Exception as schema_error:
+        logger.error(f"❌ Failed to initialize database schema: {schema_error}")
+        return False
 
 
 def validate_input_directory(base_path: Path) -> list[Path]:
@@ -136,8 +159,16 @@ def print_ingestion_stats(converted_pdf_stats: dict) -> None:
 
 def run_ingest() -> int:
     """Run CLI ingestion with database validation and job initialization."""
+    # Check database connection (required for ingestion operation)
     if not check_db_connection():
-        logger.error("Database connection required but not available. Please check PostgreSQL configuration.")
+        logger.error("❌ Database connection required but not available. Please check PostgreSQL configuration.")
+        return 1
+
+    logger.debug("✅ Database connection established")
+
+    # Initialize database schema (create tables if they don't exist)
+    if not initialize_database_schema():
+        logger.error("❌ Database schema initialization failed - cannot proceed with ingestion")
         return 1
 
     has_active, active_job_ids = has_active_jobs(operation=OperationType.INGESTION.value)
@@ -174,8 +205,16 @@ def run_ingest() -> int:
 
 def run_clean_db() -> int:
     """Run cleanup with database validation."""
+    # Check database connection (required for cleanup operation)
     if not check_db_connection():
-        logger.error("Database connection required but not available. Please check PostgreSQL configuration.")
+        logger.error("❌ Database connection required but not available. Please check PostgreSQL configuration.")
+        return 1
+
+    logger.debug("✅ Database connection established")
+
+    # Initialize database schema (create tables if they don't exist)
+    if not initialize_database_schema():
+        logger.error("❌ Database schema initialization failed - cannot proceed with cleanup")
         return 1
 
     try:
