@@ -97,7 +97,7 @@ func (r *componentRepo) Insert(ctx context.Context, component *models.Component)
 // GetByID retrieves a component by ID.
 func (r *componentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Component, error) {
 	query := `
-		SELECT id, type, provider, endpoints, version, metadata, created_at, updated_at
+		SELECT id, type, provider, status, message, endpoints, version, metadata, created_at, updated_at
 		FROM components
 		WHERE id = $1
 	`
@@ -107,12 +107,15 @@ func (r *componentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Comp
 		endpointsJSON []byte
 		metadataJSON  []byte
 		version       sql.NullString
+		message       sql.NullString
 	)
 
 	err := r.pool.QueryRow(ctx, query, id).Scan(
 		&component.ID,
 		&component.Type,
 		&component.Provider,
+		&component.Status,
+		&message,
 		&endpointsJSON,
 		&version,
 		&metadataJSON,
@@ -132,8 +135,55 @@ func (r *componentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Comp
 		component.Version = version.String
 	}
 
+	if message.Valid {
+		component.Message = message.String
+	}
+
 	if len(endpointsJSON) > 0 {
-		var endpoints map[string]any
+		var endpoints []map[string]any
+		if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal endpoints: %w", err)
+		}
+		component.Endpoints = endpoints
+	}
+
+	if len(metadataJSON) > 0 {
+		var metadata map[string]any
+		if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+		}
+		component.Metadata = metadata
+	}
+
+	return &component, nil
+}
+
+// scanComponent scans a component row and unmarshals JSON fields.
+func scanComponent(rows pgx.Rows) (*models.Component, error) {
+	var (
+		component     models.Component
+		endpointsJSON []byte
+		metadataJSON  []byte
+		version       sql.NullString
+		message       sql.NullString
+	)
+
+	err := rows.Scan(&component.ID, &component.Type, &component.Provider, &component.Status, &message,
+		&endpointsJSON, &version, &metadataJSON, &component.CreatedAt, &component.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan component: %w", err)
+	}
+
+	if version.Valid {
+		component.Version = version.String
+	}
+
+	if message.Valid {
+		component.Message = message.String
+	}
+
+	if len(endpointsJSON) > 0 {
+		var endpoints []map[string]any
 		if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal endpoints: %w", err)
 		}
@@ -154,7 +204,7 @@ func (r *componentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Comp
 // GetAll retrieves all components from the database.
 func (r *componentRepo) GetAll(ctx context.Context) ([]models.Component, error) {
 	query := `
-		SELECT id, type, provider, endpoints, version, metadata, created_at, updated_at
+		SELECT id, type, provider, status, message, endpoints, version, metadata, created_at, updated_at
 		FROM components
 		ORDER BY created_at DESC
 	`
@@ -167,40 +217,11 @@ func (r *componentRepo) GetAll(ctx context.Context) ([]models.Component, error) 
 
 	var components []models.Component
 	for rows.Next() {
-		var (
-			component     models.Component
-			endpointsJSON []byte
-			metadataJSON  []byte
-			version       sql.NullString
-		)
-
-		err := rows.Scan(&component.ID, &component.Type, &component.Provider, &endpointsJSON,
-			&version, &metadataJSON, &component.CreatedAt, &component.UpdatedAt)
+		component, err := scanComponent(rows)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan component: %w", err)
+			return nil, err
 		}
-
-		if version.Valid {
-			component.Version = version.String
-		}
-
-		if len(endpointsJSON) > 0 {
-			var endpoints map[string]any
-			if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal endpoints: %w", err)
-			}
-			component.Endpoints = endpoints
-		}
-
-		if len(metadataJSON) > 0 {
-			var metadata map[string]any
-			if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-			}
-			component.Metadata = metadata
-		}
-
-		components = append(components, component)
+		components = append(components, *component)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -213,7 +234,7 @@ func (r *componentRepo) GetAll(ctx context.Context) ([]models.Component, error) 
 // GetByType retrieves all components of a specific type.
 func (r *componentRepo) GetByType(ctx context.Context, componentType string) ([]models.Component, error) {
 	query := `
-		SELECT id, type, provider, endpoints, version, metadata, created_at, updated_at
+		SELECT id, type, provider, status, message, endpoints, version, metadata, created_at, updated_at
 		FROM components
 		WHERE type = $1
 		ORDER BY created_at DESC
@@ -227,40 +248,11 @@ func (r *componentRepo) GetByType(ctx context.Context, componentType string) ([]
 
 	var components []models.Component
 	for rows.Next() {
-		var (
-			component     models.Component
-			endpointsJSON []byte
-			metadataJSON  []byte
-			version       sql.NullString
-		)
-
-		err := rows.Scan(&component.ID, &component.Type, &component.Provider, &endpointsJSON,
-			&version, &metadataJSON, &component.CreatedAt, &component.UpdatedAt)
+		component, err := scanComponent(rows)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan component: %w", err)
+			return nil, err
 		}
-
-		if version.Valid {
-			component.Version = version.String
-		}
-
-		if len(endpointsJSON) > 0 {
-			var endpoints map[string]any
-			if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal endpoints: %w", err)
-			}
-			component.Endpoints = endpoints
-		}
-
-		if len(metadataJSON) > 0 {
-			var metadata map[string]any
-			if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-			}
-			component.Metadata = metadata
-		}
-
-		components = append(components, component)
+		components = append(components, *component)
 	}
 
 	if err := rows.Err(); err != nil {

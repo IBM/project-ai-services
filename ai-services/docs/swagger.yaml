@@ -118,6 +118,8 @@ definitions:
         type: array
       id:
         type: string
+      message:
+        type: string
       status:
         type: string
       type:

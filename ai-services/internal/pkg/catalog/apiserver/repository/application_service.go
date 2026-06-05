@@ -157,9 +157,10 @@ func (s *ApplicationService) buildServiceStatuses(services []models.Service) []t
 		}
 
 		statuses = append(statuses, types.ApplicationService{
-			ID:     svc.ID.String(),
-			Type:   serviceDisplayName,
-			Status: string(svc.Status),
+			ID:      svc.ID.String(),
+			Type:    serviceDisplayName,
+			Status:  string(svc.Status),
+			Message: svc.Message,
 		})
 	}
 

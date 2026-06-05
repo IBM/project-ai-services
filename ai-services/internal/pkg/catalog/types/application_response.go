@@ -13,7 +13,7 @@ type Application struct {
 	DeploymentType string               `json:"deployment_type"`
 	Type           string               `json:"type"`
 	Status         string               `json:"status"`
-	Message        string               `json:"message,omitempty"`
+	Message        string               `json:"message"`
 	Services       []ApplicationService `json:"services,omitempty"`
 	CreatedAt      string               `json:"created_at"`
 	UpdatedAt      string               `json:"updated_at"`
@@ -23,12 +23,13 @@ type Application struct {
 type ApplicationService struct {
 	ID        string                 `json:"id"`
 	Type      string                 `json:"type"`
+	Status    string                 `json:"status,omitempty"`
+	Message   string                 `json:"message"`
 	Endpoints []map[string]any       `json:"endpoints,omitempty"`
 	Version   string                 `json:"version,omitempty"`
 	Component []ServiceComponentResp `json:"components,omitempty"`
 	CreatedAt string                 `json:"created_at,omitempty"`
 	UpdatedAt string                 `json:"updated_at,omitempty"`
-	Status    string                 `json:"status,omitempty"`
 }
 
 // ServiceComponentResp represents a service component in the get response.
