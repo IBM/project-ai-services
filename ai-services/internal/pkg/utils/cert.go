@@ -1,22 +1,23 @@
 package utils
 
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/go-resty/resty/v2"
+)
+
+const (
+	// wildcardPrefix is the prefix used for wildcard domain certificates
+	wildcardPrefix = "*."
 )
 
 // ValidateCertificateFiles verifies that certificate and key files exist and are readable.
@@ -101,7 +102,7 @@ func ValidateWildcardCertificate(certPath string) error {
 	// Check Subject Alternative Names (SANs)
 	hasWildcard := false
 	for _, san := range cert.DNSNames {
-		if strings.HasPrefix(san, "*.") {
+		if strings.HasPrefix(san, wildcardPrefix) {
 			hasWildcard = true
 
 			break
@@ -109,51 +110,52 @@ func ValidateWildcardCertificate(certPath string) error {
 	}
 
 	if !hasWildcard {
-		return fmt.Errorf("certificate does not contain a wildcard SAN entry (e.g., *.example.com)")
+		return fmt.Errorf("certificate does not contain a wildcard SAN entry (e.g., %sexample.com)", wildcardPrefix)
 	}
 
 	return nil
 }
 
-// ExtractDomainFromCertificate extracts the base domain from a certificate.
+// ExtractDomainFromCertificate extracts the base domain from a wildcard certificate.
 // For wildcard certificates (*.example.com), it returns the base domain (example.com).
-// For regular certificates, it returns the first DNS name or Common Name.
+// This function requires a wildcard certificate to support multiple service subdomains.
 func ExtractDomainFromCertificate(certPath string) (string, error) {
 	cert, err := LoadCertificate(certPath)
 	if err != nil {
 		return "", err
 	}
 
-	// First, check Subject Alternative Names (SANs) for wildcard domains
+	// Check Subject Alternative Names (SANs) for wildcard domains
 	for _, san := range cert.DNSNames {
-		if strings.HasPrefix(san, "*.") {
+		if strings.HasPrefix(san, wildcardPrefix) {
 			// Extract base domain from wildcard (*.example.com → example.com)
-			domain := strings.TrimPrefix(san, "*.")
+			domain := strings.TrimPrefix(san, wildcardPrefix)
 			if domain != "" {
 				return domain, nil
 			}
 		}
 	}
 
-	// If no wildcard found, check for regular DNS names in SANs
-	if len(cert.DNSNames) > 0 {
-		return cert.DNSNames[0], nil
+	// Check Common Name for wildcard
+	if cert.Subject.CommonName != "" && strings.HasPrefix(cert.Subject.CommonName, wildcardPrefix) {
+		domain := strings.TrimPrefix(cert.Subject.CommonName, wildcardPrefix)
+		if domain != "" {
+			return domain, nil
+		}
 	}
 
-	// Fall back to Common Name if no SANs
+	// Build error message with available domains for debugging
+	var availableDomains []string
+	availableDomains = append(availableDomains, cert.DNSNames...)
 	if cert.Subject.CommonName != "" {
-		// Handle wildcard in CN as well
-		if strings.HasPrefix(cert.Subject.CommonName, "*.") {
-			domain := strings.TrimPrefix(cert.Subject.CommonName, "*.")
-			if domain != "" {
-				return domain, nil
-			}
-		}
-
-		return cert.Subject.CommonName, nil
+		availableDomains = append(availableDomains, cert.Subject.CommonName)
 	}
 
-	return "", fmt.Errorf("no domain found in certificate (no SANs or Common Name)")
+	if len(availableDomains) > 0 {
+		return "", fmt.Errorf("certificate must contain a wildcard domain (%sexample.com) to support multiple service subdomains. Found non-wildcard domains: %v", wildcardPrefix, availableDomains)
+	}
+
+	return "", fmt.Errorf("certificate must contain a wildcard domain (%sexample.com) to support multiple service subdomains. No domains found in certificate", wildcardPrefix)
 }
 
 // LoadUserCertificates validates staged certificate files on the host and updates Caddy to load them from container-visible paths.
@@ -218,15 +220,15 @@ func validateCertificateForLoading(cert *x509.Certificate, keyBytes []byte) erro
 // checkWildcardSAN verifies certificate has wildcard SAN entry.
 func checkWildcardSAN(cert *x509.Certificate) error {
 	for _, dnsName := range cert.DNSNames {
-		if strings.HasPrefix(dnsName, "*.") {
+		if strings.HasPrefix(dnsName, wildcardPrefix) {
 			return nil
 		}
 	}
 
-	return fmt.Errorf("certificate must contain wildcard SAN entry (e.g., *.example.com)")
+	return fmt.Errorf("certificate must contain wildcard SAN entry (e.g., %sexample.com)", wildcardPrefix)
 }
 
-// checkCertificateExpiry validates certificate is not expired and warns if expiring soon.
+// checkCertificateExpiry validates certificate is not expired.
 func checkCertificateExpiry(cert *x509.Certificate) error {
 	now := time.Now()
 	if now.Before(cert.NotBefore) {
@@ -235,16 +237,6 @@ func checkCertificateExpiry(cert *x509.Certificate) error {
 
 	if now.After(cert.NotAfter) {
 		return fmt.Errorf("certificate has expired (expired on: %s)", cert.NotAfter)
-	}
-
-	// Warn if certificate expires soon
-	const (
-		hoursPerDay       = 24
-		expiryWarningDays = 30
-	)
-	daysUntilExpiry := cert.NotAfter.Sub(now).Hours() / hoursPerDay
-	if daysUntilExpiry < expiryWarningDays {
-		logger.Infof("Warning: Certificate expires in %.0f days (%s)\n", daysUntilExpiry, cert.NotAfter)
 	}
 
 	return nil
@@ -318,31 +310,18 @@ func loadCertificatesIntoCaddy(certPath, keyPath, adminURL string) error {
 		},
 	}
 
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal payload: %w", err)
-	}
+	client := resty.New().SetTimeout(10 * time.Second)
+	resp, err := client.R().
+		SetHeader("Content-Type", "application/json").
+		SetBody(payload).
+		Patch(adminURL + "/config/apps/tls")
 
-	req, err := http.NewRequest(http.MethodPatch, adminURL+"/config/apps/tls", bytes.NewBuffer(data))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to load certificates: %w", err)
 	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			logger.Infof("Warning: failed to close response body: %v\n", closeErr)
-		}
-	}()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-
-		return fmt.Errorf("caddy returned error (status %d): %s", resp.StatusCode, string(body))
+	if resp.IsError() {
+		return fmt.Errorf("caddy returned error (status %d): %s", resp.StatusCode(), resp.String())
 	}
 
 	return nil
