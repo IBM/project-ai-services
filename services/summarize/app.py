@@ -422,7 +422,7 @@ async def summarize(request: Request):
         logger.error(f"Got exception while generating summary: {e}")
 
 # Background task for async job processing
-async def process_summarization_job(job_id: str):
+async def process_summarization_job(job_id: str, level):
     """
     Background task to process a summarization job.
     
@@ -433,11 +433,10 @@ async def process_summarization_job(job_id: str):
     Args:
         job_id: UUID of the job to process
     """
-    from pathlib import Path
     import json
     from datetime import datetime, timezone
-    from summarize.db.repository import db_repo
-    from summarize.summ_types import JobStatus, SummarizationType
+    from summarize.db.manager import db_repo
+    from summarize.models import JobStatus, SummarizationType
     from summarize.chunk_utils import (
         split_text_into_chunks,
         estimate_chunk_summary_tokens,
@@ -501,13 +500,7 @@ async def process_summarization_job(job_id: str):
             status=JobStatus.IN_PROGRESS,
             metadata={"document_word_count": input_word_count}
         )
-        
-        # Get job details for level
-        job = db_repo.get_job_by_id(job_id)
-        if not job:
-            raise Exception(f"Job {job_id} not found in database")
-        
-        level = job.level
+
         
         # Step 4: Determine strategy - check if input alone fits in context window
         max_model_len = get_llm_max_model_len()
@@ -515,11 +508,6 @@ async def process_summarization_job(job_id: str):
         
         # Calculate available space for output
         available_output_tokens = max_model_len - input_tokens - prompt_tokens
-        
-        # Always compute target/max tokens (needed for both strategies)
-        target_words, min_words, max_words, max_tokens = compute_target_and_max_tokens(
-            input_tokens, max(available_output_tokens, 1000), level, None  # Use minimum 1000 if negative
-        )
         
         strategy = "direct"  # Initialize strategy variable
         num_chunks = 0  # Initialize for type checking
@@ -532,7 +520,14 @@ async def process_summarization_job(job_id: str):
                 f"available_output={available_output_tokens} (NEGATIVE - using CHUNKED)"
             )
             strategy = "chunked"
+            # Skip computing file-level tokens for chunked strategy - will be calculated later for merge step
+            target_words, min_words, max_words, max_tokens = None, None, None, 0
         else:
+            # Compute target/max tokens for direct strategy
+            target_words, min_words, max_words, max_tokens = compute_target_and_max_tokens(
+                input_tokens, available_output_tokens, level, None
+            )
+            
             total_required_tokens = input_tokens + prompt_tokens + max_tokens
             
             logger.info(
@@ -549,6 +544,8 @@ async def process_summarization_job(job_id: str):
             else:
                 logger.info(f"Using CHUNKED strategy (exceeds context window)")
                 strategy = "chunked"
+                # Reset file-level tokens - will be calculated later for merge step
+                target_words, min_words, max_words, max_tokens = None, None, None, 0
         
         if strategy == "direct":
             
@@ -591,8 +588,37 @@ async def process_summarization_job(job_id: str):
             num_chunks = len(chunks)
             logger.info(f"Split into {num_chunks} chunks")
             
+            # Calculate chunk-level token values
+            # Use actual tokenization of the first chunk to get accurate token count
+            sample_chunk = chunks[0] if chunks else ""
+            chunk_tokens = await asyncio.to_thread(
+                tokenize_with_llm,
+                sample_chunk,
+                llm_endpoint
+            )
+            chunk_input_tokens = len(chunk_tokens)
+            chunk_available_output_tokens = (
+                get_llm_max_model_len()
+                - chunk_input_tokens
+                - settings.summarize.summarization_prompt_token_count
+            )
+            
+            # Compute chunk-level target and max tokens
+            chunk_target_words, chunk_min_words, chunk_max_words, chunk_max_tokens = compute_target_and_max_tokens(
+                chunk_input_tokens,
+                chunk_available_output_tokens,
+                level,
+                None
+            )
+            
+            logger.info(
+                f"Chunk-level tokens: input={chunk_input_tokens}, "
+                f"available_output={chunk_available_output_tokens}, "
+                f"max_tokens={chunk_max_tokens}"
+            )
+            
             # Pre-check: Estimate if combined summaries will fit
-            estimated_chunk_summary_tokens = estimate_chunk_summary_tokens(num_chunks, max_tokens)
+            estimated_chunk_summary_tokens = estimate_chunk_summary_tokens(num_chunks, chunk_max_tokens)
             merge_required_tokens = estimated_chunk_summary_tokens + settings.summarize.summarization_prompt_token_count + max_tokens
             
             if merge_required_tokens > get_llm_max_model_len():
@@ -624,8 +650,8 @@ async def process_summarization_job(job_id: str):
                 nonlocal total_input_tokens, total_output_tokens
                 
                 async with chunk_semaphore:  # Per-job parallelism limit
-                    # Build messages for this chunk
-                    chunk_messages = build_messages(chunk_text, target_words, min_words, max_words, True)
+                    # Build messages for this chunk using chunk-level token values
+                    chunk_messages = build_messages(chunk_text, chunk_target_words, chunk_min_words, chunk_max_words, True)
                     
                     async with concurrency_limiter:  # Global vLLM limit
                         chunk_result, chunk_in_tokens, chunk_out_tokens = await asyncio.to_thread(
@@ -633,7 +659,7 @@ async def process_summarization_job(job_id: str):
                             llm_endpoint=llm_endpoint,
                             messages=chunk_messages,
                             model=llm_model,
-                            max_tokens=max_tokens,
+                            max_tokens=chunk_max_tokens,
                             temperature=settings.summarize.summarization_temperature,
                         )
                     
@@ -675,8 +701,35 @@ async def process_summarization_job(job_id: str):
             # Concatenate chunk summaries
             merged_text = "\n\n".join(chunk_summaries)
             
+            # Calculate merge-specific token values based on the concatenated chunk summaries
+            merge_tokens = await asyncio.to_thread(
+                tokenize_with_llm,
+                merged_text,
+                llm_endpoint
+            )
+            merge_input_tokens = len(merge_tokens)
+            merge_available_output_tokens = (
+                get_llm_max_model_len()
+                - merge_input_tokens
+                - settings.summarize.summarization_prompt_token_count
+            )
+            
+            # Compute merge-specific target and max tokens
+            merge_target_words, merge_min_words, merge_max_words, merge_max_tokens = compute_target_and_max_tokens(
+                merge_input_tokens,
+                merge_available_output_tokens,
+                level,
+                None
+            )
+            
+            logger.info(
+                f"Merge-level tokens: input={merge_input_tokens}, "
+                f"available_output={merge_available_output_tokens}, "
+                f"max_tokens={merge_max_tokens}"
+            )
+            
             # Build merge messages
-            merge_messages = build_merge_messages(merged_text, target_words, min_words, max_words)
+            merge_messages = build_merge_messages(merged_text, merge_target_words, merge_min_words, merge_max_words)
             
             # Final merge call
             async with concurrency_limiter:
@@ -685,7 +738,7 @@ async def process_summarization_job(job_id: str):
                     llm_endpoint=llm_endpoint,
                     messages=merge_messages,
                     model=llm_model,
-                    max_tokens=max_tokens,
+                    max_tokens=merge_max_tokens,
                     temperature=settings.summarize.summarization_temperature,
                 )
             
@@ -752,7 +805,7 @@ async def process_summarization_job(job_id: str):
     finally:
         # Step 7: Clean up staging directory
         try:
-            cleanup_staging_directory(job_id)
+            cleanup_staging_directory(job_id, settings.summarize.staging_dir)
             logger.debug(f"Cleaned up staging for job {job_id}")
         except Exception as cleanup_error:
             logger.warning(f"Failed to cleanup staging for job {job_id}: {cleanup_error}")
@@ -840,7 +893,7 @@ async def create_summarization_job(
             create_job_with_db(job_id,
                              SummarizationType.DIRECT.value,
                              0,
-                             level if level is not None else 'standard',
+                             level,
                              job_name,
                              filename)
 
@@ -856,7 +909,7 @@ async def create_summarization_job(
             )
         
         # Launch background processing (stub for now)
-        background_tasks.add_task(process_summarization_job, job_id)
+        background_tasks.add_task(process_summarization_job, job_id, level)
         
         # Return 202 Accepted with job_id
         return JSONResponse(
