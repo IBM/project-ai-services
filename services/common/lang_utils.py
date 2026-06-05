@@ -13,6 +13,24 @@ language_codes = {
     "German": "DE"
 }
 
+# Mapping from lingua ISO codes to SentenceSplitter language codes
+LINGUA_TO_SENTENCE_SPLITTER = {
+    "English": 'en',
+    "German": 'de'
+}
+
+def to_sentence_splitter_lang(lingua_code: str) -> str:
+    """
+    Convert lingua ISO code to SentenceSplitter language code.
+    
+    Args:
+        lingua_code: Lingua ISO code (e.g., 'EN', 'DE')
+        
+    Returns:
+        SentenceSplitter language code (e.g., 'en', 'de')
+    """
+    return LINGUA_TO_SENTENCE_SPLITTER.get(lingua_code, 'en')
+
 def get_prompt_for_language(lang: str, prompts: dict[str, str]) -> str:
     """
     Get the appropriate prompt template based on language code.

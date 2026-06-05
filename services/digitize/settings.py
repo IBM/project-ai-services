@@ -121,7 +121,7 @@ class DigitizeConfig(BaseSettings):
         description="Maximum tokens for table summarization",
     )
 
-    # Table summary prompt
+    # Table summary prompt (English)
     table_summary_and_classify: str = Field(
         default="""You are an intelligent assistant analyzing tables extracted from documents.
 
@@ -172,7 +172,61 @@ class DigitizeConfig(BaseSettings):
 
                 Table:
                 {content}""",
-        description="Prompt for table summarization",
+        description="Prompt for table summarization (English)",
+    )
+
+    # Table summary prompt (German)
+    table_summary_and_classify_de: str = Field(
+        default="""Sie sind ein intelligenter Assistent, der Tabellen aus Dokumenten analysiert.
+
+                Ihre Aufgaben:
+
+                1. Extrahieren und dokumentieren Sie JEDE Information aus der Tabelle in umfassenden Details:
+                - Listen Sie ALLE Abschnitte, Unterabschnitte und deren Referenznummern auf, falls vorhanden
+                - Fügen Sie JEDE Spezifikation, Funktion, Nummer, Code, Bedingung und Anforderung hinzu
+                - Erwähnen Sie ALLE Elemente, auch wenn sie nebensächlich erscheinen - nichts sollte ausgelassen werden
+                - Verwenden Sie ein strukturiertes Format mit klarer Organisation (nummerierte Listen, Aufzählungspunkte oder detaillierte Absätze)
+                - Seien Sie äußerst gründlich und umfassend - streben Sie maximale Detailtiefe an
+                - Wenn die Tabelle mehrere Zeilen/Spalten hat, beschreiben Sie jede einzelne
+                - Bewahren Sie alle Fachbegriffe, Versionsnummern und spezifischen Details genau wie angegeben
+
+                2. Entscheiden Sie, ob die Tabelle für eine Wissensdatenbank relevant ist:
+                - Relevant: enthält sachliche, instruktive oder erklärende Informationen, die zur Beantwortung von Fragen nützlich sind.
+                - Irrelevant: persönliche Informationen, Haftungsausschlüsse, administrative Hinweise oder unzusammenhängende Kommentare.
+
+                3. Ausgabe im exakten Format unten:
+
+                Summary: <Ihre äußerst detaillierte Zusammenfassung hier - seien Sie ausführlich und umfassend>
+                Decision: <yes oder no>
+
+                Geben Sie KEIN JSON, zusätzliche Kommentare oder anderen Text aus.
+
+                Beispiele:
+
+                Positives Beispiel (relevant):
+                Tabelle:
+                | Prozessor | Kerne | Speicher |
+                |-----------|-------|----------|
+                | Power10   | 16    | 8 TB     |
+
+                Ausgabe:
+                Summary: Die Tabelle präsentiert technische Spezifikationen für den Power10-Prozessor. Die Prozessorkonfiguration umfasst 16 Kerne für parallele Verarbeitungsfähigkeiten. Die Speicherkapazität unterstützt bis zu 8 TB (Terabyte) RAM und bietet erhebliche Speicherressourcen für Unternehmensworkloads und datenintensive Anwendungen.
+                Decision: yes
+
+                Negatives Beispiel (irrelevant):
+                Tabelle:
+                | Erstellt von: | John Smith |
+                |---------------|------------|
+
+                Ausgabe:
+                Summary: Dokument-Metadaten, die angeben, dass es von John Smith erstellt wurde.
+                Decision: no
+
+                Analysieren Sie nun die folgende Tabelle:
+
+                Tabelle:
+                {content}""",
+        description="Prompt für Tabellenzusammenfassung (Deutsch)",
     )
 
     @property

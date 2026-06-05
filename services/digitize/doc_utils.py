@@ -24,7 +24,7 @@ logging.getLogger('docling').setLevel(logging.CRITICAL)
 from common.thread_utils import ContextAwareThreadPoolExecutor
 from common.llm_utils import summarize_and_classify_tables, tokenize_with_llm
 from common.misc_utils import get_logger, text_suffix, table_suffix, text_chunk_suffix, table_chunk_suffix, get_utc_timestamp
-from common.lang_utils import detect_language, setup_language_detector
+from common.lang_utils import detect_language, lang_en, lang_de, get_prompt_for_language, to_sentence_splitter_lang
 from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.models import DocStatus, JobStatus, OutputFormat
 from digitize.settings import settings
@@ -599,7 +599,7 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
 
     return merged_dict
 
-def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
+def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint, document_language='en'):
     table_count = 0
     process_time = 0.0
     filtered_table_dicts = {}
@@ -649,10 +649,19 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint):
     # For DOCX files: create list of None values (same length as other lists for zip())
     table_page_numbers = [merged_table_dict[key]["page_number"] for key in sorted(merged_table_dict)] if not is_docx else [None] * len(merged_table_dict)
 
+    # Select appropriate prompt based on document language (lingua ISO format: 'EN', 'DE', etc.)
+    prompt_templates = {
+        lang_en: settings.digitize.table_summary_and_classify,
+        lang_de: settings.digitize.table_summary_and_classify_de
+    }
+    selected_prompt = get_prompt_for_language(document_language, prompt_templates)
+    
+    logger.debug(f"Using {'German' if document_language == lang_de else 'English'} prompt for table summarization (document language: {document_language})")
+
     # Summarize and classify tables - use markdown directly
     table_summaries, decisions = summarize_and_classify_tables(
         table_markdowns, gen_model, gen_endpoint, pdf_path,
-        prompt_template=settings.digitize.table_summary_and_classify,
+        prompt_template=selected_prompt,
         max_tokens=settings.digitize.table_summary_max_tokens,
     )
 
@@ -674,6 +683,7 @@ def process_converted_document(converted_json_path, pdf_path, out_path, gen_mode
     """
     Process converted document to extract text and tables.
     No caching - always process fresh.
+    Returns detected language along with other results.
     """
     processed_text_json_path = (Path(out_path) / f"{doc_id}{text_suffix}")
     processed_table_json_path = (Path(out_path) / f"{doc_id}{table_suffix}")
@@ -694,14 +704,24 @@ def process_converted_document(converted_json_path, pdf_path, out_path, gen_mode
         page_count, process_time = process_text(converted_doc, pdf_path, processed_text_json_path)
         timings["process_text"] = process_time
 
-        table_count, process_time = process_table(converted_doc, pdf_path, processed_table_json_path, gen_model, gen_endpoint)
+        # Detect document language early using the processed text
+        document_language = 'en'  # Default
+        try:
+            with open(processed_text_json_path, "r") as f:
+                text_data = json.load(f)
+                document_language = detect_document_language(text_data)
+                logger.info(f"Detected document language: {document_language}")
+        except Exception as e:
+            logger.warning(f"Failed to detect document language, using default 'en': {e}")
+
+        table_count, process_time = process_table(converted_doc, pdf_path, processed_table_json_path, gen_model, gen_endpoint, document_language)
         timings["process_tables"] = process_time
 
-        return processed_text_json_path, processed_table_json_path, page_count, table_count, timings
+        return processed_text_json_path, processed_table_json_path, page_count, table_count, timings, document_language
     except Exception as e:
         logger.error(f"Error processing converted document for PDF: {pdf_path}. Details: {e}", exc_info=True)
 
-        return None, None, None, None, None
+        return None, None, None, None, None, None
 
 def convert_document(pdf_path, out_path, file_name):
     """
@@ -842,7 +862,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                 path = process_futures[fut]
                 doc_id = doc_id_dict.get(Path(path).name)
                 try:
-                    txt_json, tab_json, pgs, tabs, timings = fut.result()
+                    txt_json, tab_json, pgs, tabs, timings, document_language = fut.result()
 
                     if not txt_json or not tab_json:
                         if doc_id is not None:
@@ -875,7 +895,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
                     c_future = chunker_executor.submit(
                         chunk_single_file, txt_json, tab_json, out_path,
-                        emb_endpoint, max_tokens, doc_id=doc_id
+                        emb_endpoint, max_tokens, doc_id=doc_id, language=document_language
                     )
                     chunk_futures[c_future] = str(path)
                 except Exception as e:
@@ -1033,7 +1053,7 @@ def count_tokens(text, emb_endpoint):
     return token_len
 
 
-def detect_document_language(data: list) -> str:
+def detect_document_language(data) -> str:
     """
     Detect the language of a document by sampling random blocks.
     
@@ -1041,30 +1061,22 @@ def detect_document_language(data: list) -> str:
         data: List of document blocks, where each block is a dict with a 'text' field
         
     Returns:
-        Language code compatible with SentenceSplitter ('en', 'de', 'it', 'fr')
-        Falls back to 'en' if detection fails or language is not supported
+        Lingua ISO language code ('EN', 'DE', 'IT', 'FR')
+        Falls back to lang_en if detection fails or language is not supported
     """
     # validate input data structure
     if not isinstance(data, list):
-        logger.warning(f"Invalid input: expected list, got {type(data).__name__}, falling back to 'en'")
-        return 'en'
+        logger.warning(f"Invalid input: expected list, got {type(data).__name__}, falling back to '{lang_en}'")
+        return lang_en
     
     if not data:
-        logger.warning("Empty data list provided for language detection, falling back to 'en'")
-        return 'en'
+        logger.warning(f"Empty data list provided for language detection, falling back to '{lang_en}'")
+        return lang_en
     
     # Validate that data contains dicts with 'text' fields
     if not all(isinstance(block, dict) for block in data):
-        logger.warning("Invalid input: data list contains non-dict elements, falling back to 'en'")
-        return 'en'
-    
-    # Mapping from lingua ISO codes to SentenceSplitter language codes
-    lang_map = {
-        'EN': 'en',
-        'DE': 'de',
-        'IT': 'it',
-        'FR': 'fr'
-    }
+        logger.warning(f"Invalid input: data list contains non-dict elements, falling back to '{lang_en}'")
+        return lang_en
 
     try:
         # Sample 3 random blocks from the data
@@ -1091,8 +1103,8 @@ def detect_document_language(data: list) -> str:
                 sampled_blocks.append(block.get("text", ""))
 
         if not sampled_blocks:
-            logger.warning("No text blocks found for language detection, falling back to 'en'")
-            return 'en'
+            logger.warning(f"No text blocks found for language detection, falling back to '{lang_en}'")
+            return lang_en
         
         for block_text in sampled_blocks:
             # Truncate to 500 characters
@@ -1104,22 +1116,19 @@ def detect_document_language(data: list) -> str:
                 detected_languages.append(detected_lang)
         
         if not detected_languages:
-            logger.warning("No languages detected from samples, falling back to 'en'")
-            return 'en'
+            logger.warning(f"No languages detected from samples, falling back to '{lang_en}'")
+            return lang_en
         
-        # Get the most common detected language
+        # Get the most common detected language (returns lingua ISO code like 'EN', 'DE')
         most_common_lang = Counter(detected_languages).most_common(1)[0][0]
         
-        # Map to SentenceSplitter language code
-        sentence_splitter_lang = lang_map.get(most_common_lang, 'en')
+        logger.debug(f"Detected languages: {detected_languages}, using: {most_common_lang}")
         
-        logger.debug(f"Detected languages: {detected_languages}, using: {sentence_splitter_lang}")
-        
-        return sentence_splitter_lang
+        return most_common_lang
         
     except Exception as e:
-        logger.warning(f"Language detection failed: {e}, falling back to 'en'")
-        return 'en'
+        logger.warning(f"Language detection failed: {e}, falling back to '{lang_en}'")
+        return lang_en
 
 
 def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50, language='en'):
@@ -1202,9 +1211,17 @@ def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, language='en'):
     current_chunk["source_nodes"] = []
 
 
-def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
+def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=lang_en):
     """
     Chunk text content from a document into smaller pieces based on token limits.
+    
+    Args:
+        input_path: Path to the text JSON file
+        out_path: Output directory path
+        emb_endpoint: Embedding endpoint for token counting
+        max_tokens: Maximum tokens per chunk
+        doc_id: Document ID
+        language: Pre-detected lingua ISO language code (e.g., 'EN', 'DE')
     """
     t0 = time.time()
     processed_chunk_json_path = (Path(out_path) / f"{doc_id}{text_chunk_suffix}")
@@ -1213,9 +1230,9 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
         with open(input_path, "r") as f:
             data = json.load(f)
 
-            # Detect document language by sampling random blocks
-            detected_language = detect_document_language(data)
-            logger.info(f"Detected language for document '{doc_id}': {detected_language}")
+            # Convert lingua ISO code to SentenceSplitter format
+            sentence_splitter_lang = to_sentence_splitter_lang(language)
+            logger.debug(f"Using pre-detected language '{language}' (SentenceSplitter: '{sentence_splitter_lang}') for chunking document '{doc_id}'")
 
             font_size_levels = collect_header_font_sizes(data)
 
@@ -1259,7 +1276,7 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
                         current_subsubsection = full_title
 
                     # Flush current chunk and update
-                    flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, detected_language)
+                    flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, sentence_splitter_lang)
                     current_chunk["chapter_title"] = current_chapter
                     current_chunk["section_title"] = current_section
                     current_chunk["subsection_title"] = current_subsection
@@ -1288,7 +1305,7 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
                     logger.debug(f'Skipping adding "{label}".')
 
             # Flush any remaining content
-            flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, detected_language)
+            flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, sentence_splitter_lang)
 
         # Save the processed chunks to the output file
         with open(processed_chunk_json_path, "w") as f:
@@ -1296,23 +1313,32 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
 
         elapsed = time.time() - t0
         logger.debug(f"{len(chunks)} text chunks saved to {processed_chunk_json_path} in {elapsed:.2f}s")
-        return processed_chunk_json_path, elapsed, detected_language
+        return processed_chunk_json_path, elapsed
     except Exception as e:
         logger.error(f"Error chunking text from '{input_path}': {e}")
-        return None, None, 'en'
+        return None, None
 
-def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_tokens=512, doc_id=None):
+def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=lang_en):
     """
     Orchestrates chunking of both text and tables for a single document.
+    
+    Args:
+        input_path: Path to the text JSON file
+        table_json_path: Path to the table JSON file
+        out_path: Output directory path
+        emb_endpoint: Embedding endpoint for token counting
+        max_tokens: Maximum tokens per chunk
+        doc_id: Document ID
+        language: Pre-detected lingua ISO language code (e.g., 'EN', 'DE')
     """
     t0 = time.time()
 
     try:
-        # Chunk text content and get detected language
-        text_chunk_json, text_chunk_time, detected_language = chunk_text(input_path, out_path, emb_endpoint, max_tokens, doc_id)
+        # Chunk text content using pre-detected language
+        text_chunk_json, text_chunk_time = chunk_text(input_path, out_path, emb_endpoint, max_tokens, doc_id, language)
 
-        # Chunk tables using the same detected language
-        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id, detected_language)
+        # Chunk tables using the same language
+        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id, language)
 
         total_time = time.time() - t0
         return text_chunk_json, table_chunk_json, total_time
@@ -1320,7 +1346,7 @@ def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_t
         logger.error(f"Error chunking document '{input_path}': {e}")
         return None, None, None
 
-def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language='en'):
+def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=lang_en):
     """
     Chunk table summaries into smaller pieces if they exceed token limits.
     Called internally by chunk_single_file() for sequential processing.
@@ -1331,8 +1357,10 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
         emb_endpoint: Embedding endpoint for token counting
         max_tokens: Maximum tokens per chunk
         doc_id: Document ID
-        language: Language code for sentence splitting (detected from document text)
+        language: Pre-detected lingua ISO language code (e.g., 'EN', 'DE')
     """
+    # Convert lingua ISO code to SentenceSplitter format
+    sentence_splitter_lang = to_sentence_splitter_lang(language)
     t0 = time.time()
     processed_table_chunk_json_path = (Path(out_path) / f"{doc_id}{table_chunk_suffix}")
 
@@ -1357,7 +1385,7 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
                 if summary_token_count > max_tokens:
                     tables_chunked_count += 1
                     # Chunk the summary using the detected language
-                    chunks = split_text_into_token_chunks(summary, emb_endpoint, max_tokens=max_tokens, overlap=50, language=language)
+                    chunks = split_text_into_token_chunks(summary, emb_endpoint, max_tokens=max_tokens, overlap=50, language=sentence_splitter_lang)
 
                     for chunk_part_idx, chunk in enumerate(chunks):
                         # TODO: Consider adding chunking properties ("is_chunked", "chunk_part", "total_parts")
