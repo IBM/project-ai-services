@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -195,6 +196,14 @@ func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime
 			errorMessages = append(errorMessages, secretErrors...)
 		}
 
+		// Delete volumes if keepData is false
+		if !keepData {
+			volumeErrors := s.deleteVolumesFromPods(rt, pods, "service", svc.ID)
+			if len(volumeErrors) > 0 {
+				errorMessages = append(errorMessages, volumeErrors...)
+			}
+		}
+
 		// Delete service pods
 		podErrors := s.deleteServicePods(rt, pods, forceDelete)
 		if len(podErrors) > 0 {
@@ -337,6 +346,50 @@ func (s *DeletionService) deleteInstanceData(instanceID uuid.UUID, instanceType 
 	logger.Infof("Successfully removed %s data at: %s", instanceType, dataPath)
 
 	return nil
+}
+
+// deleteVolumesFromPods extracts volume names from pod labels and deletes them using the runtime client.
+// Volumes are always deleted when keepData=false. This method is only called when keepData=false.
+//
+// Returns a list of error messages for any volumes that failed to delete.
+func (s *DeletionService) deleteVolumesFromPods(rt runtime.Runtime, pods []runtimeTypes.Pod, instanceType string, instanceID uuid.UUID) []string {
+	var errorMessages []string
+	volumesToDelete := make(map[string]bool) // Use map to avoid duplicates
+
+	// Extract volume names from pod labels
+	for _, pod := range pods {
+		if volumeNames, ok := pod.Labels[constants.CatalogVolumeLabel]; ok && volumeNames != "" {
+			// Split comma-separated volume names (in case a pod has multiple volumes)
+			volumes := strings.Split(volumeNames, ",")
+			for _, volumeName := range volumes {
+				volumeName = strings.TrimSpace(volumeName)
+				if volumeName != "" {
+					volumesToDelete[volumeName] = true
+				}
+			}
+		}
+	}
+
+	if len(volumesToDelete) == 0 {
+		logger.Infof("%s %s: no volumes found to delete", instanceType, instanceID)
+
+		return errorMessages
+	}
+
+	logger.Infof("Deleting %d volume(s) for %s %s", len(volumesToDelete), instanceType, instanceID)
+
+	// Delete each unique volume using the runtime client
+	for volumeName := range volumesToDelete {
+		if err := rt.DeleteVolume(volumeName); err != nil {
+			errMsg := fmt.Sprintf("%s %s: failed to delete volume %s: %s", instanceType, instanceID, volumeName, err)
+			errorMessages = append(errorMessages, errMsg)
+			logger.Errorf(errMsg)
+		} else {
+			logger.Infof("Successfully deleted volume: %s", volumeName)
+		}
+	}
+
+	return errorMessages
 }
 
 // deleteSecretsFromPods extracts secret names from pod labels and deletes them.

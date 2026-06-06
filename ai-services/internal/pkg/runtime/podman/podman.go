@@ -18,6 +18,7 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/pods"
 	"github.com/containers/podman/v5/pkg/bindings/secrets"
 	"github.com/containers/podman/v5/pkg/bindings/system"
+	"github.com/containers/podman/v5/pkg/bindings/volumes"
 	"github.com/containers/podman/v5/pkg/domain/entities"
 	"github.com/containers/podman/v5/pkg/specgen"
 	"github.com/project-ai-services/ai-services/internal/pkg/accelerator/spyre"
@@ -385,6 +386,15 @@ func (pc *PodmanClient) DeleteSecret(name string) error {
 	err := secrets.Remove(pc.Context, name)
 	if err != nil {
 		return fmt.Errorf("failed to remove secret: %w", err)
+	}
+
+	return nil
+}
+
+func (pc *PodmanClient) DeleteVolume(name string) error {
+	err := volumes.Remove(pc.Context, name, nil)
+	if err != nil {
+		return fmt.Errorf("failed to remove volume: %w", err)
 	}
 
 	return nil

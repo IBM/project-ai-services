@@ -558,20 +558,16 @@ func generateCaddyfile(baseDir string, values map[string]any) error {
 	return nil
 }
 
-// createBaseDirectories creates the applications directory with SGID and group-writable permissions.
-// Uses 02775 (rwxrwsr-x) which:
-// - 2 (SGID bit): Forces all subdirectories to inherit the parent's group ownership
-// - 775: Owner and group have full access, others have read/execute only
-// This allows the catalog container to delete subdirectories created by other containers.
-// The components subdirectory will be created automatically when needed and inherit these permissions.
+// createBaseDirectories creates the applications directory with standard permissions.
+// The components subdirectory will be created automatically when needed.
 func createBaseDirectories(baseDir string) error {
-	// Create applications directory with SGID + 0775 permissions
+	// Create applications directory with standard 0755 permissions
 	applicationsDir := filepath.Join(baseDir, "applications")
-	if err := os.MkdirAll(applicationsDir, 0o2775); err != nil {
+	if err := os.MkdirAll(applicationsDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create applications directory: %w", err)
 	}
 
-	logger.Infof("Created applications directory with SGID and group-writable permissions (02775) at: %s", applicationsDir)
+	logger.Infof("Created applications directory at: %s", applicationsDir)
 	return nil
 }
 

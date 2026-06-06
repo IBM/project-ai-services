@@ -4,18 +4,10 @@ metadata:
   name: "summarize-db-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
+    ai-services.io/volume: "postgres-summarize-{{ .InstanceSlug }}"
   annotations:
     io.podman.annotations.pids-limit/postgres: "4096"
 spec:
-  initContainers:
-    - name: fix-permissions
-      image: "{{ .Values.postgres.image }}"
-      command: ["sh", "-c", "chown -R 26:26 /var/lib/pgsql"]
-      securityContext:
-        runAsUser: 0
-      volumeMounts:
-        - name: postgres-data
-          mountPath: /var/lib/pgsql
   containers:
     - name: postgres
       image: "{{ .Values.postgres.image }}"
@@ -66,6 +58,5 @@ spec:
 
   volumes:
     - name: postgres-data
-      hostPath:
-        path: "{{ .BaseDir }}/applications/{{ .InstanceSlug }}/volumes/postgres-summarize"
-        type: DirectoryOrCreate
+      persistentVolumeClaim:
+        claimName: "postgres-summarize-{{ .InstanceSlug }}"
