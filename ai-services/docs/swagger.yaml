@@ -112,7 +112,6 @@ definitions:
       pagination:
         $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
     type: object
-<<<<<<< HEAD
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationMemInfo:
     properties:
       total_bytes:
@@ -122,19 +121,6 @@ definitions:
         description: Actually used memory in bytes
         type: integer
     type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationResourcesResponse:
-    properties:
-      accelerators:
-        additionalProperties:
-          items:
-            type: string
-          type: array
-        type: object
-      cpu:
-        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationCPUInfo'
-      memory:
-        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationMemInfo'
-=======
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationPSResponse:
     properties:
       components:
@@ -149,7 +135,19 @@ definitions:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Pod'
         type: array
->>>>>>> 91352e5 (Application ps endpoint)
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationResourcesResponse:
+    properties:
+      accelerators:
+        additionalProperties:
+          items:
+            type: string
+          type: array
+        type: object
+      cpu:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationCPUInfo'
+      memory:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationMemInfo'
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService:
     properties:
@@ -385,8 +383,6 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp:
     properties:
-      id:
-        type: string
       metadata:
         additionalProperties: {}
         type: object
@@ -741,21 +737,11 @@ paths:
       summary: Update application
       tags:
       - Applications
-<<<<<<< HEAD
-  /applications/{id}/resources:
-    get:
-      description: Retrieves used and total allocated CPU (in cores) and memory usage
-        (in bytes), along with the hardware accelerator cards for an application and
-        its services
-      parameters:
-      - description: Application ID
-=======
   /applications/{id}/ps:
     get:
       description: Retrieves the process status and runtime information for an application
       parameters:
       - description: Application ID (UUID)
->>>>>>> 91352e5 (Application ps endpoint)
         in: path
         name: id
         required: true
@@ -766,15 +752,11 @@ paths:
         "200":
           description: OK
           schema:
-<<<<<<< HEAD
-            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationResourcesResponse'
-=======
             $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationPSResponse'
         "400":
           description: Invalid application ID format
           schema:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
->>>>>>> 91352e5 (Application ps endpoint)
         "401":
           description: Unauthorized
           schema:
@@ -789,11 +771,42 @@ paths:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
       security:
       - BearerAuth: []
-<<<<<<< HEAD
-      summary: Get application resources
-=======
       summary: Get application process status
->>>>>>> 91352e5 (Application ps endpoint)
+      tags:
+      - Applications
+  /applications/{id}/resources:
+    get:
+      description: Retrieves used and total allocated CPU (in cores) and memory usage
+        (in bytes), along with the hardware accelerator cards for an application and
+        its services
+      parameters:
+      - description: Application ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationResourcesResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Application not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get application resources
       tags:
       - Applications
   /architectures:

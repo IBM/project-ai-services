@@ -947,6 +947,8 @@ func buildResourcesResponse(totals *resourceTotals) *types.ApplicationResourcesR
 		},
 		Accelerators: accelerators,
 	}
+}
+
 // ApplicationsPs retrieves runtime pod status for an application and its related resources.
 // It loads the application from the database, inspects service pods directly, and then
 // resolves component pods through service dependencies so shared components are returned once.
