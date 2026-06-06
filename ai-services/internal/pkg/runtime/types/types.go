@@ -29,6 +29,7 @@ type Pod struct {
 	ID               string
 	Name             string
 	Status           string
+	Health           string
 	Labels           map[string]string
 	Containers       []Container
 	Created          time.Time

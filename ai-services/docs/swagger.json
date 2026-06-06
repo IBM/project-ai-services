@@ -356,58 +356,6 @@
                 }
             }
         },
-        "/applications/{id}/resources": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Retrieves used and total allocated CPU (in cores) and memory usage (in bytes), along with the hardware accelerator cards for an application and its services",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Applications"
-                ],
-                "summary": "Get application resources",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Application ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationResourcesResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Application not found",
-                        "schema": {
-                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/architectures": {
             "get": {
                 "security": [
@@ -1206,39 +1154,6 @@
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationMemInfo": {
-            "type": "object",
-            "properties": {
-                "total_bytes": {
-                    "description": "Total allocated memory in bytes",
-                    "type": "integer"
-                },
-                "used_bytes": {
-                    "description": "Actually used memory in bytes",
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationResourcesResponse": {
-            "type": "object",
-            "properties": {
-                "accelerators": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    }
-                },
-                "cpu": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationCPUInfo"
-                },
-                "memory": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationMemInfo"
-                }
-            }
-        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService": {
             "type": "object",
             "properties": {
@@ -1494,6 +1409,46 @@
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Pod": {
+            "type": "object",
+            "properties": {
+                "containers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PodContainer"
+                    }
+                },
+                "created": {
+                    "type": "string"
+                },
+                "healthy": {
+                    "type": "boolean"
+                },
+                "pod_id": {
+                    "type": "string"
+                },
+                "pod_name": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Status"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PodContainer": {
+            "type": "object",
+            "properties": {
+                "healthy": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Status"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources": {
             "type": "object",
             "properties": {
@@ -1554,6 +1509,9 @@
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp": {
             "type": "object",
             "properties": {
+                "id": {
+                    "type": "string"
+                },
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
@@ -1602,6 +1560,31 @@
                     "type": "string"
                 }
             }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Status": {
+            "type": "string",
+            "enum": [
+                "waiting",
+                "running",
+                "terminated",
+                "created",
+                "paused",
+                "restarting",
+                "exited",
+                "removing",
+                "dead"
+            ],
+            "x-enum-varnames": [
+                "Waiting",
+                "Running",
+                "Terminated",
+                "Created",
+                "Paused",
+                "Restarting",
+                "Exited",
+                "Removing",
+                "Dead"
+            ]
         },
         "github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo": {
             "type": "object",

@@ -18,6 +18,7 @@ func toPodsList(input any) []types.Pod {
 				Status:     r.Status,
 				Labels:     r.Labels,
 				Containers: toPodContainerList(r.Containers),
+				Created:    r.Created,
 			})
 		}
 

@@ -68,4 +68,43 @@ type ApplicationMemInfo struct {
 	UsedBytes  int64 `json:"used_bytes"`  // Actually used memory in bytes
 }
 
+// ApplicationPSResponse represents the response for pod/container status.
+type ApplicationPSResponse struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Services   []Pod  `json:"services"`
+	Components []Pod  `json:"components"`
+}
+
+type Status string
+
+const (
+	Waiting    Status = "waiting"
+	Running    Status = "running"
+	Terminated Status = "terminated"
+	Created    Status = "created"
+	Paused     Status = "paused"
+	Restarting Status = "restarting"
+	Exited     Status = "exited"
+	Removing   Status = "removing"
+	Dead       Status = "dead"
+)
+
+// Pod represents the details of a pod.
+type Pod struct {
+	PodID      string         `json:"pod_id"`
+	PodName    string         `json:"pod_name"`
+	Status     Status         `json:"status"`
+	Created    string         `json:"created"`
+	Healthy    bool           `json:"healthy"`
+	Containers []PodContainer `json:"containers"`
+}
+
+// PodContainer represents a container in a pod.
+type PodContainer struct {
+	Name    string `json:"name"`
+	Status  Status `json:"status"`
+	Healthy bool   `json:"healthy"`
+}
+
 // Made with Bob

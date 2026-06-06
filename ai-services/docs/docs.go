@@ -1500,6 +1500,46 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Pod": {
+            "type": "object",
+            "properties": {
+                "containers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PodContainer"
+                    }
+                },
+                "created": {
+                    "type": "string"
+                },
+                "healthy": {
+                    "type": "boolean"
+                },
+                "pod_id": {
+                    "type": "string"
+                },
+                "pod_name": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Status"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PodContainer": {
+            "type": "object",
+            "properties": {
+                "healthy": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Status"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources": {
             "type": "object",
             "properties": {
@@ -1560,6 +1600,9 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp": {
             "type": "object",
             "properties": {
+                "id": {
+                    "type": "string"
+                },
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
@@ -1608,6 +1651,31 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Status": {
+            "type": "string",
+            "enum": [
+                "waiting",
+                "running",
+                "terminated",
+                "created",
+                "paused",
+                "restarting",
+                "exited",
+                "removing",
+                "dead"
+            ],
+            "x-enum-varnames": [
+                "Waiting",
+                "Running",
+                "Terminated",
+                "Created",
+                "Paused",
+                "Restarting",
+                "Exited",
+                "Removing",
+                "Dead"
+            ]
         },
         "github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo": {
             "type": "object",
