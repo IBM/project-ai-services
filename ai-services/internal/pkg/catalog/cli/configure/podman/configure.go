@@ -120,6 +120,12 @@ func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, b
 		return nil
 	}
 
+	// Create base directories with proper permissions for data cleanup
+	if err := createBaseDirectories(baseDir); err != nil {
+		s.Fail("failed to create base directories")
+		return fmt.Errorf("failed to create base directories: %w", err)
+	}
+
 	// Prepare deployment with domain suffix computation
 	values, err := prepareCatalogDeployment(deployCtx, tp, podmanURI, authFilePath, passwordHash, baseDir, domainName, sslCertPath, sslKeyPath, argParams, s)
 	if err != nil {
@@ -549,6 +555,23 @@ func generateCaddyfile(baseDir string, values map[string]any) error {
 		return fmt.Errorf("failed to write Caddyfile: %w", err)
 	}
 
+	return nil
+}
+
+// createBaseDirectories creates the applications directory with SGID and group-writable permissions.
+// Uses 02775 (rwxrwsr-x) which:
+// - 2 (SGID bit): Forces all subdirectories to inherit the parent's group ownership
+// - 775: Owner and group have full access, others have read/execute only
+// This allows the catalog container to delete subdirectories created by other containers.
+// The components subdirectory will be created automatically when needed and inherit these permissions.
+func createBaseDirectories(baseDir string) error {
+	// Create applications directory with SGID + 0775 permissions
+	applicationsDir := filepath.Join(baseDir, "applications")
+	if err := os.MkdirAll(applicationsDir, 0o2775); err != nil {
+		return fmt.Errorf("failed to create applications directory: %w", err)
+	}
+
+	logger.Infof("Created applications directory with SGID and group-writable permissions (02775) at: %s", applicationsDir)
 	return nil
 }
 
