@@ -120,12 +120,6 @@ func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, b
 		return nil
 	}
 
-	// Create base directories with proper permissions for data cleanup
-	if err := createBaseDirectories(baseDir); err != nil {
-		s.Fail("failed to create base directories")
-		return fmt.Errorf("failed to create base directories: %w", err)
-	}
-
 	// Prepare deployment with domain suffix computation
 	values, err := prepareCatalogDeployment(deployCtx, tp, podmanURI, authFilePath, passwordHash, baseDir, domainName, sslCertPath, sslKeyPath, argParams, s)
 	if err != nil {
@@ -555,19 +549,6 @@ func generateCaddyfile(baseDir string, values map[string]any) error {
 		return fmt.Errorf("failed to write Caddyfile: %w", err)
 	}
 
-	return nil
-}
-
-// createBaseDirectories creates the applications directory with standard permissions.
-// The components subdirectory will be created automatically when needed.
-func createBaseDirectories(baseDir string) error {
-	// Create applications directory with standard 0755 permissions
-	applicationsDir := filepath.Join(baseDir, "applications")
-	if err := os.MkdirAll(applicationsDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create applications directory: %w", err)
-	}
-
-	logger.Infof("Created applications directory at: %s", applicationsDir)
 	return nil
 }
 
