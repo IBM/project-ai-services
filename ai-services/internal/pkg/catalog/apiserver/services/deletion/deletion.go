@@ -9,6 +9,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -222,6 +223,11 @@ func (s *DeletionService) deletePods(rt runtime.Runtime, pods []runtimeTypes.Pod
 	var podErrors []string
 	for _, pod := range pods {
 		if err := rt.DeletePod(pod.ID, &forceDelete); err != nil {
+			// Ignore "not found" errors - pod already deleted or never existed
+			if utils.IsNotFoundError(err) {
+				logger.Infof("Pod %s already deleted or does not exist", pod.ID)
+				continue
+			}
 			errMsg := fmt.Sprintf("failed to delete pod %s: %s", pod.ID, err)
 			podErrors = append(podErrors, errMsg)
 		}
@@ -328,6 +334,11 @@ func (s *DeletionService) deleteVolumesFromPods(rt runtime.Runtime, pods []runti
 	// Delete each unique volume using the runtime client
 	for volumeName := range volumesToDelete {
 		if err := rt.DeleteVolume(volumeName); err != nil {
+			// Ignore "not found" errors - volume already deleted or never existed
+			if utils.IsNotFoundError(err) {
+				logger.Infof("Volume %s already deleted or does not exist", volumeName)
+				continue
+			}
 			errMsg := fmt.Sprintf("%s %s: failed to delete volume %s: %s", instanceType, instanceID, volumeName, err)
 			errorMessages = append(errorMessages, errMsg)
 			logger.Errorf(errMsg)
@@ -377,6 +388,11 @@ func (s *DeletionService) deleteSecretsFromPods(rt runtime.Runtime, pods []runti
 	// Delete each unique secret
 	for secretName := range secretsToDelete {
 		if err := rt.DeleteSecret(secretName); err != nil {
+			// Ignore "not found" errors - secret already deleted or never existed
+			if utils.IsNotFoundError(err) {
+				logger.Infof("Secret %s already deleted or does not exist", secretName)
+				continue
+			}
 			errMsg := fmt.Sprintf("%s %s: failed to delete secret %s: %s", instanceType, instanceID, secretName, err)
 			errorMessages = append(errorMessages, errMsg)
 			logger.Errorf(errMsg)
