@@ -34,6 +34,7 @@ type ApplicationService struct {
 
 // ServiceComponentResp represents a service component in the get response.
 type ServiceComponentResp struct {
+	ID       string         `json:"id"`
 	Type     string         `json:"type"`
 	Provider string         `json:"provider"`
 	Metadata map[string]any `json:"metadata,omitempty"`

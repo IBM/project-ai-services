@@ -555,6 +555,7 @@ func (s *ApplicationService) loadServiceComponents(ctx context.Context, sd []mod
 
 			// Transform to response object
 			temp := types.ServiceComponentResp{
+				ID:       component.ID.String(),
 				Type:     component.Type,
 				Provider: component.Provider,
 				Metadata: component.Metadata,
