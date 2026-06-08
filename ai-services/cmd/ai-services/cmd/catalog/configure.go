@@ -100,8 +100,15 @@ func runConfigure(argParams map[string]string) error {
 	}
 
 	// Sanitize SSL certificate paths to prevent path traversal attacks
-	cleanCertPath := filepath.Clean(sslCertPath)
-	cleanKeyPath := filepath.Clean(sslKeyPath)
+	// Only clean if paths are provided (filepath.Clean("") returns ".")
+	cleanCertPath := ""
+	cleanKeyPath := ""
+	if sslCertPath != "" {
+		cleanCertPath = filepath.Clean(sslCertPath)
+	}
+	if sslKeyPath != "" {
+		cleanKeyPath = filepath.Clean(sslKeyPath)
+	}
 
 	return configure.Run(configure.ConfigureOptions{
 		AdminPassword: adminPassword,
