@@ -1,5 +1,5 @@
 import { SidePanel } from "@carbon/ibm-products";
-import { Button } from "@carbon/react";
+import { Button, Tag } from "@carbon/react";
 import { Badge } from "@carbon/icons-react";
 import styles from "./ServiceDetailPanel.module.scss";
 
@@ -81,9 +81,9 @@ const ServiceDetailPanel = ({
 
         <div className={styles.tagContainer}>
           {service.tags?.map((tag, index) => (
-            <div key={index} className={styles.tag}>
+            <Tag key={index} type="outline">
               {tag}
-            </div>
+            </Tag>
           ))}
           {service.isCertified && (
             <div className={styles.certifiedTag}>

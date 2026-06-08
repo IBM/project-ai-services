@@ -8,14 +8,14 @@
 .pageHeader {
   background-color: var(--cds-layer-01);
   margin-bottom: 0;
-  border: none !important;
+  border: none !important ;
 
   :global(.c4p--page-header__last-row-buffer) {
-    border-bottom: none !important;
+    border-bottom: none;
   }
 
   :global(.cds--grid) {
-    margin: 0 !important;
+    margin: 0;
   }
 }
 
@@ -29,20 +29,10 @@
   :global(.cds--tabs__nav-item),
   :global(.cds--tabs__nav-link) {
     border-bottom: 2px solid var(--cds-border-subtle-01);
-    box-shadow: none !important;
-    outline: none !important;
-  }
-
-  :global(.cds--tabs__nav-link:focus),
-  :global(.cds--tabs__nav-link:hover),
-  :global(.cds--tabs__nav-item:focus),
-  :global(.cds--tabs__nav-item:hover) {
-    box-shadow: none !important;
-    outline: none !important;
   }
 
   :global(.cds--tabs__nav-item--selected) {
-    border-bottom: 3px solid var(--cds-border-interactive) !important;
+    border-bottom: 3px solid var(--cds-border-interactive);
   }
 }
 
@@ -56,9 +46,17 @@
   grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
   column-gap: spacing.$spacing-05;
   row-gap: spacing.$spacing-05;
-  margin: spacing.$spacing-05 spacing.$spacing-06 0 spacing.$spacing-06;
+  margin: spacing.$spacing-07 spacing.$spacing-06 0 spacing.$spacing-07;
 }
 
-:global(.c4p--page-header) {
-  z-index: 5999 !important;
+.loadingMessage,
+.errorMessage {
+  @include type.type-style("body-long-01");
+  padding: spacing.$spacing-07;
+  margin: spacing.$spacing-05 spacing.$spacing-06;
+  text-align: center;
+}
+
+.errorMessage {
+  color: var(--cds-text-error);
 }

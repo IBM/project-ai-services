@@ -1,5 +1,20 @@
 import type { DataTableHeader } from "@carbon/react";
 
+// API response types
+export interface ApplicationService {
+  type: string;
+  [key: string]: unknown;
+}
+
+export interface ApplicationApiResponse {
+  id: string;
+  name: string;
+  status: "Deploying..." | "Deleting..." | "Error" | "Stopped" | "Running";
+  created_at: string;
+  message?: string;
+  services?: ApplicationService[];
+}
+
 export interface DeployedServicesRow {
   id: string;
   name: string;
@@ -32,70 +47,130 @@ export interface AppState {
   exportToastMessage: string;
   exportToastKind: "success" | "error";
   selectedServices: string[];
+  isLoading: boolean;
+  fetchError: string | null;
 }
 
 export const ACTION_TYPES = {
-  SET_SEARCH: "SET_SEARCH",
-  SET_PAGE: "SET_PAGE",
-  SET_PAGE_SIZE: "SET_PAGE_SIZE",
-  OPEN_DELETE_DIALOG: "OPEN_DELETE_DIALOG",
-  CLOSE_DELETE_DIALOG: "CLOSE_DELETE_DIALOG",
-  SET_CONFIRMED: "SET_CONFIRMED",
-  DELETE_ROW: "DELETE_ROW",
-  SHOW_ERROR: "SHOW_ERROR",
-  HIDE_ERROR: "HIDE_ERROR",
-  SET_IS_DELETING: "SET_IS_DELETING",
-  OPEN_EXPORT_DIALOG: "OPEN_EXPORT_DIALOG",
-  CLOSE_EXPORT_DIALOG: "CLOSE_EXPORT_DIALOG",
-  SET_CSV_FILENAME: "SET_CSV_FILENAME",
-  SET_EXPORT_ERROR: "SET_EXPORT_ERROR",
-  CLEAR_EXPORT_ERROR: "CLEAR_EXPORT_ERROR",
-  SET_SELECTED_ROW_ID: "SET_SELECTED_ROW_ID",
-  TOGGLE_COLUMN_VISIBILITY: "TOGGLE_COLUMN_VISIBILITY",
-  RESET_COLUMN_VISIBILITY: "RESET_COLUMN_VISIBILITY",
-  SHOW_EXPORT_TOAST: "SHOW_EXPORT_TOAST",
-  HIDE_EXPORT_TOAST: "HIDE_EXPORT_TOAST",
-  TOGGLE_SERVICE_FILTER: "TOGGLE_SERVICE_FILTER",
-  RESET_SERVICE_FILTER: "RESET_SERVICE_FILTER",
+  DEPLOYED_SERVICES_SET_SEARCH: "DEPLOYED_SERVICES_SET_SEARCH",
+  DEPLOYED_SERVICES_SET_PAGE: "DEPLOYED_SERVICES_SET_PAGE",
+  DEPLOYED_SERVICES_SET_PAGE_SIZE: "DEPLOYED_SERVICES_SET_PAGE_SIZE",
+  DEPLOYED_SERVICES_OPEN_DELETE_DIALOG: "DEPLOYED_SERVICES_OPEN_DELETE_DIALOG",
+  DEPLOYED_SERVICES_CLOSE_DELETE_DIALOG:
+    "DEPLOYED_SERVICES_CLOSE_DELETE_DIALOG",
+  DEPLOYED_SERVICES_SET_CONFIRMED: "DEPLOYED_SERVICES_SET_CONFIRMED",
+  DEPLOYED_SERVICES_DELETE_ROW: "DEPLOYED_SERVICES_DELETE_ROW",
+  DEPLOYED_SERVICES_SHOW_ERROR: "DEPLOYED_SERVICES_SHOW_ERROR",
+  DEPLOYED_SERVICES_HIDE_ERROR: "DEPLOYED_SERVICES_HIDE_ERROR",
+  DEPLOYED_SERVICES_SET_IS_DELETING: "DEPLOYED_SERVICES_SET_IS_DELETING",
+  DEPLOYED_SERVICES_OPEN_EXPORT_DIALOG: "DEPLOYED_SERVICES_OPEN_EXPORT_DIALOG",
+  DEPLOYED_SERVICES_CLOSE_EXPORT_DIALOG:
+    "DEPLOYED_SERVICES_CLOSE_EXPORT_DIALOG",
+  DEPLOYED_SERVICES_SET_CSV_FILENAME: "DEPLOYED_SERVICES_SET_CSV_FILENAME",
+  DEPLOYED_SERVICES_SET_EXPORT_ERROR: "DEPLOYED_SERVICES_SET_EXPORT_ERROR",
+  DEPLOYED_SERVICES_CLEAR_EXPORT_ERROR: "DEPLOYED_SERVICES_CLEAR_EXPORT_ERROR",
+  DEPLOYED_SERVICES_SET_SELECTED_ROW_ID:
+    "DEPLOYED_SERVICES_SET_SELECTED_ROW_ID",
+  DEPLOYED_SERVICES_TOGGLE_COLUMN_VISIBILITY:
+    "DEPLOYED_SERVICES_TOGGLE_COLUMN_VISIBILITY",
+  DEPLOYED_SERVICES_RESET_COLUMN_VISIBILITY:
+    "DEPLOYED_SERVICES_RESET_COLUMN_VISIBILITY",
+  DEPLOYED_SERVICES_SHOW_EXPORT_TOAST: "DEPLOYED_SERVICES_SHOW_EXPORT_TOAST",
+  DEPLOYED_SERVICES_HIDE_EXPORT_TOAST: "DEPLOYED_SERVICES_HIDE_EXPORT_TOAST",
+  DEPLOYED_SERVICES_TOGGLE_SERVICE_FILTER:
+    "DEPLOYED_SERVICES_TOGGLE_SERVICE_FILTER",
+  DEPLOYED_SERVICES_RESET_SERVICE_FILTER:
+    "DEPLOYED_SERVICES_RESET_SERVICE_FILTER",
+  DEPLOYED_SERVICES_SET_ROWS_DATA: "DEPLOYED_SERVICES_SET_ROWS_DATA",
+  DEPLOYED_SERVICES_UPDATE_ROW_STATUS: "DEPLOYED_SERVICES_UPDATE_ROW_STATUS",
+  DEPLOYED_SERVICES_SET_LOADING: "DEPLOYED_SERVICES_SET_LOADING",
+  DEPLOYED_SERVICES_SET_FETCH_ERROR: "DEPLOYED_SERVICES_SET_FETCH_ERROR",
 } as const;
 
 export type AppAction =
-  | { type: typeof ACTION_TYPES.SET_SEARCH; payload: string }
-  | { type: typeof ACTION_TYPES.SET_PAGE; payload: number }
-  | { type: typeof ACTION_TYPES.SET_PAGE_SIZE; payload: number }
-  | { type: typeof ACTION_TYPES.OPEN_DELETE_DIALOG; payload: string }
-  | { type: typeof ACTION_TYPES.CLOSE_DELETE_DIALOG }
-  | { type: typeof ACTION_TYPES.SET_CONFIRMED; payload: boolean }
-  | { type: typeof ACTION_TYPES.DELETE_ROW; payload: string }
+  | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_SEARCH; payload: string }
+  | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE; payload: number }
   | {
-      type: typeof ACTION_TYPES.SHOW_ERROR;
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE_SIZE;
+      payload: number;
+    }
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_OPEN_DELETE_DIALOG;
+      payload: string;
+    }
+  | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_CLOSE_DELETE_DIALOG }
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_CONFIRMED;
+      payload: boolean;
+    }
+  | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_DELETE_ROW; payload: string }
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SHOW_ERROR;
       payload: { message: string; rowName?: string };
     }
-  | { type: typeof ACTION_TYPES.HIDE_ERROR }
-  | { type: typeof ACTION_TYPES.SET_IS_DELETING; payload: boolean }
-  | { type: typeof ACTION_TYPES.OPEN_EXPORT_DIALOG }
-  | { type: typeof ACTION_TYPES.CLOSE_EXPORT_DIALOG }
-  | { type: typeof ACTION_TYPES.SET_CSV_FILENAME; payload: string }
-  | { type: typeof ACTION_TYPES.SET_EXPORT_ERROR; payload: string }
-  | { type: typeof ACTION_TYPES.CLEAR_EXPORT_ERROR }
-  | { type: typeof ACTION_TYPES.SET_SELECTED_ROW_ID; payload: string | null }
-  | { type: typeof ACTION_TYPES.TOGGLE_COLUMN_VISIBILITY; payload: string }
-  | { type: typeof ACTION_TYPES.RESET_COLUMN_VISIBILITY }
+  | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_HIDE_ERROR }
   | {
-      type: typeof ACTION_TYPES.SHOW_EXPORT_TOAST;
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_IS_DELETING;
+      payload: boolean;
+    }
+  | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_OPEN_EXPORT_DIALOG }
+  | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_CLOSE_EXPORT_DIALOG }
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_CSV_FILENAME;
+      payload: string;
+    }
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_EXPORT_ERROR;
+      payload: string;
+    }
+  | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_CLEAR_EXPORT_ERROR }
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_SELECTED_ROW_ID;
+      payload: string | null;
+    }
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_TOGGLE_COLUMN_VISIBILITY;
+      payload: string;
+    }
+  | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_RESET_COLUMN_VISIBILITY }
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SHOW_EXPORT_TOAST;
       payload: { message: string; kind: "success" | "error" };
     }
-  | { type: typeof ACTION_TYPES.HIDE_EXPORT_TOAST }
-  | { type: typeof ACTION_TYPES.TOGGLE_SERVICE_FILTER; payload: string }
-  | { type: typeof ACTION_TYPES.RESET_SERVICE_FILTER };
+  | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_HIDE_EXPORT_TOAST }
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_TOGGLE_SERVICE_FILTER;
+      payload: string;
+    }
+  | { type: typeof ACTION_TYPES.DEPLOYED_SERVICES_RESET_SERVICE_FILTER }
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_ROWS_DATA;
+      payload: DeployedServicesRow[];
+    }
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_UPDATE_ROW_STATUS;
+      payload: {
+        id: string;
+        status: DeployedServicesRow["status"];
+        message?: string;
+      };
+    }
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_LOADING;
+      payload: boolean;
+    }
+  | {
+      type: typeof ACTION_TYPES.DEPLOYED_SERVICES_SET_FETCH_ERROR;
+      payload: string | null;
+    };
 
-// Table headers
+// Table headers - Messages column moved after Service
 export const HEADERS: DataTableHeader[] = [
   { header: "Deployment name", key: "name" },
   { header: "Status", key: "status" },
   { header: "Uptime", key: "uptime" },
-  { header: "Messages", key: "messages" },
   { header: "Service", key: "service" },
+  { header: "Messages", key: "messages" },
   { header: "", key: "actions" },
 ];
 
@@ -108,64 +183,6 @@ export const STATUS_SORT_ORDER: Record<string, number> = {
   Running: 5,
 };
 
-// Mock data
-export const MOCK_ROWS: DeployedServicesRow[] = [
-  {
-    id: "1",
-    name: "Incident troubleshooting",
-    status: "Error",
-    uptime: "Mar 4, 2026",
-    messages: "Error message goes ...",
-    actions: "actions",
-    service: "Digitize documents",
-  },
-  {
-    id: "2",
-    name: "Process FAQs",
-    status: "Deploying...",
-    uptime: "2 days",
-    messages: "Deploying service",
-    actions: "actions",
-    service: "Summary",
-  },
-  {
-    id: "3",
-    name: "Permissions ops",
-    status: "Running",
-    uptime: "Mar 4, 2026",
-    messages: "",
-    actions: "actions",
-    service: "Find similar item",
-  },
-  {
-    id: "4",
-    name: "Deals tracker",
-    status: "Running",
-    uptime: "2 days",
-    messages: "",
-    actions: "actions",
-    service: "Questions and answers",
-  },
-  {
-    id: "5",
-    name: "Contract analysis agent",
-    status: "Running",
-    uptime: "2 days",
-    messages: "",
-    actions: "actions",
-    service: "Digitize documents",
-  },
-  {
-    id: "6",
-    name: "Case routing",
-    status: "Running",
-    uptime: "2 days",
-    messages: "",
-    actions: "actions",
-    service: "Summary",
-  },
-];
-
 // Initial state
 export const INITIAL_STATE: AppState = {
   search: "",
@@ -173,9 +190,10 @@ export const INITIAL_STATE: AppState = {
   pageSize: 10,
   isDeleteDialogOpen: false,
   isConfirmed: false,
-  rowsData: [...MOCK_ROWS].sort(
-    (a, b) => STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status],
-  ),
+  // rowsData: [...MOCK_ROWS].sort(
+  //   (a, b) => STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status],
+  // ),
+  rowsData: [],
   selectedRowId: null,
   toastOpen: false,
   deleteErrorMessage: "",
@@ -196,41 +214,43 @@ export const INITIAL_STATE: AppState = {
   exportToastMessage: "",
   exportToastKind: "success",
   selectedServices: [],
+  isLoading: true,
+  fetchError: null,
 };
 
 // Reducer
 export const appReducer = (state: AppState, action: AppAction): AppState => {
   switch (action.type) {
-    case ACTION_TYPES.SET_SEARCH:
+    case ACTION_TYPES.DEPLOYED_SERVICES_SET_SEARCH:
       return { ...state, search: action.payload };
-    case ACTION_TYPES.SET_PAGE:
+    case ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE:
       return { ...state, page: action.payload };
-    case ACTION_TYPES.SET_PAGE_SIZE:
+    case ACTION_TYPES.DEPLOYED_SERVICES_SET_PAGE_SIZE:
       return { ...state, pageSize: action.payload };
-    case ACTION_TYPES.OPEN_DELETE_DIALOG:
+    case ACTION_TYPES.DEPLOYED_SERVICES_OPEN_DELETE_DIALOG:
       return {
         ...state,
         selectedRowId: action.payload,
         isDeleteDialogOpen: true,
         toastOpen: false,
       };
-    case ACTION_TYPES.CLOSE_DELETE_DIALOG:
+    case ACTION_TYPES.DEPLOYED_SERVICES_CLOSE_DELETE_DIALOG:
       return {
         ...state,
         isDeleteDialogOpen: false,
         isConfirmed: false,
         selectedRowId: state.hasError ? state.selectedRowId : null,
       };
-    case ACTION_TYPES.SET_CONFIRMED:
+    case ACTION_TYPES.DEPLOYED_SERVICES_SET_CONFIRMED:
       return { ...state, isConfirmed: action.payload };
-    case ACTION_TYPES.DELETE_ROW:
+    case ACTION_TYPES.DEPLOYED_SERVICES_DELETE_ROW:
       return {
         ...state,
         rowsData: state.rowsData.filter((r) => r.id !== action.payload),
         isDeleteDialogOpen: false,
         isConfirmed: false,
       };
-    case ACTION_TYPES.SHOW_ERROR:
+    case ACTION_TYPES.DEPLOYED_SERVICES_SHOW_ERROR:
       return {
         ...state,
         deleteErrorMessage: action.payload.message,
@@ -239,7 +259,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         isDeleting: false,
         hasError: true,
       };
-    case ACTION_TYPES.HIDE_ERROR:
+    case ACTION_TYPES.DEPLOYED_SERVICES_HIDE_ERROR:
       return {
         ...state,
         toastOpen: false,
@@ -247,35 +267,35 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         hasError: false,
         deleteErrorRowName: "",
       };
-    case ACTION_TYPES.SET_IS_DELETING:
+    case ACTION_TYPES.DEPLOYED_SERVICES_SET_IS_DELETING:
       return { ...state, isDeleting: action.payload };
-    case ACTION_TYPES.SET_SELECTED_ROW_ID:
+    case ACTION_TYPES.DEPLOYED_SERVICES_SET_SELECTED_ROW_ID:
       return { ...state, selectedRowId: action.payload };
-    case ACTION_TYPES.OPEN_EXPORT_DIALOG:
+    case ACTION_TYPES.DEPLOYED_SERVICES_OPEN_EXPORT_DIALOG:
       return {
         ...state,
         isExportDialogOpen: true,
         csvFileName: "",
         exportErrorMessage: "",
       };
-    case ACTION_TYPES.CLOSE_EXPORT_DIALOG:
+    case ACTION_TYPES.DEPLOYED_SERVICES_CLOSE_EXPORT_DIALOG:
       return {
         ...state,
         isExportDialogOpen: false,
       };
-    case ACTION_TYPES.SET_CSV_FILENAME:
+    case ACTION_TYPES.DEPLOYED_SERVICES_SET_CSV_FILENAME:
       return { ...state, csvFileName: action.payload };
-    case ACTION_TYPES.SET_EXPORT_ERROR:
+    case ACTION_TYPES.DEPLOYED_SERVICES_SET_EXPORT_ERROR:
       return {
         ...state,
         exportErrorMessage: action.payload,
       };
-    case ACTION_TYPES.CLEAR_EXPORT_ERROR:
+    case ACTION_TYPES.DEPLOYED_SERVICES_CLEAR_EXPORT_ERROR:
       return {
         ...state,
         exportErrorMessage: "",
       };
-    case ACTION_TYPES.TOGGLE_COLUMN_VISIBILITY:
+    case ACTION_TYPES.DEPLOYED_SERVICES_TOGGLE_COLUMN_VISIBILITY:
       return {
         ...state,
         visibleColumns: {
@@ -283,7 +303,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           [action.payload]: !state.visibleColumns[action.payload],
         },
       };
-    case ACTION_TYPES.RESET_COLUMN_VISIBILITY:
+    case ACTION_TYPES.DEPLOYED_SERVICES_RESET_COLUMN_VISIBILITY:
       return {
         ...state,
         visibleColumns: {
@@ -294,19 +314,19 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           service: true,
         },
       };
-    case ACTION_TYPES.SHOW_EXPORT_TOAST:
+    case ACTION_TYPES.DEPLOYED_SERVICES_SHOW_EXPORT_TOAST:
       return {
         ...state,
         exportToastOpen: true,
         exportToastMessage: action.payload.message,
         exportToastKind: action.payload.kind,
       };
-    case ACTION_TYPES.HIDE_EXPORT_TOAST:
+    case ACTION_TYPES.DEPLOYED_SERVICES_HIDE_EXPORT_TOAST:
       return {
         ...state,
         exportToastOpen: false,
       };
-    case ACTION_TYPES.TOGGLE_SERVICE_FILTER:
+    case ACTION_TYPES.DEPLOYED_SERVICES_TOGGLE_SERVICE_FILTER:
       return {
         ...state,
         selectedServices: state.selectedServices.includes(action.payload)
@@ -314,12 +334,43 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           : [...state.selectedServices, action.payload],
         page: 1,
       };
-    case ACTION_TYPES.RESET_SERVICE_FILTER:
+    case ACTION_TYPES.DEPLOYED_SERVICES_RESET_SERVICE_FILTER:
       return {
         ...state,
         selectedServices: [],
         page: 1,
       };
+    case ACTION_TYPES.DEPLOYED_SERVICES_SET_ROWS_DATA:
+      return {
+        ...state,
+        rowsData: action.payload.sort(
+          (a, b) => STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status],
+        ),
+      };
+    case ACTION_TYPES.DEPLOYED_SERVICES_UPDATE_ROW_STATUS:
+      return {
+        ...state,
+        rowsData: state.rowsData
+          .map((r) =>
+            r.id === action.payload.id
+              ? {
+                  ...r,
+                  status: action.payload.status,
+                  messages:
+                    action.payload.message !== undefined
+                      ? action.payload.message
+                      : r.messages,
+                }
+              : r,
+          )
+          .sort(
+            (a, b) => STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status],
+          ),
+      };
+    case ACTION_TYPES.DEPLOYED_SERVICES_SET_LOADING:
+      return { ...state, isLoading: action.payload };
+    case ACTION_TYPES.DEPLOYED_SERVICES_SET_FETCH_ERROR:
+      return { ...state, fetchError: action.payload, isLoading: false };
     default:
       return state;
   }

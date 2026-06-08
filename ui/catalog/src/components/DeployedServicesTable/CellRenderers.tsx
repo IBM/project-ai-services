@@ -65,7 +65,7 @@ export const ActionCell = ({ rowId, dispatch }: CellRendererProps) => (
       isDelete
       onClick={() => {
         dispatch({
-          type: ACTION_TYPES.OPEN_DELETE_DIALOG,
+          type: ACTION_TYPES.DEPLOYED_SERVICES_OPEN_DELETE_DIALOG,
           payload: rowId,
         });
       }}

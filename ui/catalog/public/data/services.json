@@ -1,6 +1,6 @@
 [
   {
-    "id": "1",
+    "id": "digitize",
     "title": "Digitize documents",
     "description": "Converts physical and scanned documents into searchable, editable digital formats; Enables efficient document management, data extraction, and workflow automation at scale.",
     "isCertified": true,
@@ -68,7 +68,7 @@
     }
   },
   {
-    "id": "4",
+    "id": "summarize",
     "title": "Summarize",
     "description": "Condenses long-form content into concise, accurate summaries while preserving key information; Enables efficient document analysis and information extraction at scale.",
     "isCertified": true,
@@ -119,7 +119,7 @@
     }
   },
   {
-    "id": "2",
+    "id": "similarity",
     "title": "Find similar items",
     "description": "Identifies and retrieves items similar to a reference item based on content, attributes, or patterns; Enables efficient recommendation, duplicate detection, and content discovery at scale.",
     "isCertified": true,
@@ -180,7 +180,7 @@
     }
   },
   {
-    "id": "3",
+    "id": "chat",
     "title": "Question and answer",
     "description": "Provides accurate, context-aware responses to user queries; Enables automated customer support, knowledge base interactions, and conversational assistance at scale.",
     "isCertified": true,

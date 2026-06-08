@@ -28,17 +28,6 @@
   margin-bottom: spacing.$spacing-01;
 }
 
-.tag {
-  @include type.type-style("label-01");
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--cds-text-primary);
-  border-radius: 16px;
-  color: var(--cds-text-primary);
-  background-color: transparent;
-  padding: 0 spacing.$spacing-02;
-}
-
 .certifiedTag {
   @include type.type-style("label-01");
   display: inline-flex;

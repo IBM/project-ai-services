@@ -19,7 +19,7 @@ const ServiceCard = ({
   onLearnMore,
 }: ServiceCardProps) => {
   const isPartOfDigitalAssistants =
-    title === "Question and answer" || title === "Find similar items";
+    title === "Question and Answer" || title === "Find Similar Items";
 
   return (
     <div className={styles.cardWrapper}>
