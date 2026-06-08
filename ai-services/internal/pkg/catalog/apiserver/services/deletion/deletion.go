@@ -380,8 +380,7 @@ func (s *DeletionService) deleteSecretsFromPods(rt runtime.Runtime, pods []runti
 	}
 
 	if len(secretsToDelete) == 0 {
-		logger.Infof("%s %s: no secrets found to delete", instanceType, instanceID)
-
+		// no secrets found to delete, just return
 		return errorMessages
 	}
 
