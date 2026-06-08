@@ -64,12 +64,12 @@ func (c *caddyManager) RegisterRoute(route Route) error {
 		return fmt.Errorf("cannot register route: route ID is empty")
 	}
 
-	routeConfig := map[string]interface{}{
+	routeConfig := map[string]any{
 		"@id":   route.ID,
-		"match": []map[string]interface{}{{"host": []string{route.Domain}}},
-		"handle": []map[string]interface{}{{
+		"match": []map[string]any{{"host": []string{route.Domain}}},
+		"handle": []map[string]any{{
 			"handler":   "reverse_proxy",
-			"upstreams": []map[string]interface{}{{"dial": route.Upstream}},
+			"upstreams": []map[string]any{{"dial": route.Upstream}},
 		}},
 		"terminal": route.Terminal,
 	}
@@ -95,7 +95,7 @@ func (c *caddyManager) RegisterRoute(route Route) error {
 }
 
 // Helper to update an existing route via its specific ID URL.
-func (c *caddyManager) updateRoute(idURL string, routeConfig map[string]interface{}) error {
+func (c *caddyManager) updateRoute(idURL string, routeConfig map[string]any) error {
 	resp, err := c.httpClient.R().
 		SetHeader("Content-Type", "application/json").
 		SetBody(routeConfig).
@@ -111,7 +111,7 @@ func (c *caddyManager) updateRoute(idURL string, routeConfig map[string]interfac
 }
 
 // Helper to append a new route to the server's route array.
-func (c *caddyManager) createRoute(routeConfig map[string]interface{}) error {
+func (c *caddyManager) createRoute(routeConfig map[string]any) error {
 	routeURL, err := url.JoinPath(c.adminURL, "config", "apps", "http", "servers", c.serverName, "routes")
 	if err != nil {
 		return err
@@ -133,18 +133,18 @@ func (c *caddyManager) createRoute(routeConfig map[string]interface{}) error {
 
 // extractDomainFromRoute extracts the domain from a Caddy route configuration.
 // Returns the domain and a boolean indicating success.
-func extractDomainFromRoute(rawRoute map[string]interface{}) (string, bool) {
-	matches, ok := rawRoute["match"].([]interface{})
+func extractDomainFromRoute(rawRoute map[string]any) (string, bool) {
+	matches, ok := rawRoute["match"].([]any)
 	if !ok || len(matches) == 0 {
 		return "", false
 	}
 
-	firstMatch, ok := matches[0].(map[string]interface{})
+	firstMatch, ok := matches[0].(map[string]any)
 	if !ok {
 		return "", false
 	}
 
-	hosts, ok := firstMatch["host"].([]interface{})
+	hosts, ok := firstMatch["host"].([]any)
 	if !ok || len(hosts) == 0 {
 		return "", false
 	}
@@ -167,7 +167,7 @@ func (c *caddyManager) GetRegisteredRoutes() ([]Route, error) {
 	}
 
 	// Query Caddy for registered routes
-	var rawRoutes []map[string]interface{}
+	var rawRoutes []map[string]any
 	resp, err := c.httpClient.R().
 		SetResult(&rawRoutes).
 		Get(routesURL)

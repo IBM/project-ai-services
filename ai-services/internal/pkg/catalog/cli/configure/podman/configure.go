@@ -774,11 +774,10 @@ func GetCatalogRouteInfo(rt *podman.PodmanClient, tp templates.Template, appTemp
 
 	// Build route domains map from actual registered routes
 	routeDomains := make(map[string]string)
-	catalogRoutePrefix := catalogconstants.CatalogAppName + "--"
 	for _, route := range registeredRoutes {
 		// Filter catalog routes by checking if route ID starts with catalog app name
 		// Route IDs follow pattern: "appName--podName--subdomain" (e.g., "ai-services--catalog--catalog-ui")
-		if strings.HasPrefix(route.ID, catalogRoutePrefix) {
+		if strings.HasPrefix(route.ID, catalogconstants.CatalogAppName) {
 			parts := strings.Split(route.Domain, ".")
 			if len(parts) > 0 {
 				subdomain := parts[0]
