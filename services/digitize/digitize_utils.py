@@ -112,7 +112,6 @@ def initialize_job_state(job_id: str, operation: str, output_format: OutputForma
         job_id=job_id,
         operation=operation,
         submitted_at=submitted_at,
-        doc_id_dict=doc_id_dict,
         documents_info=documents_info,
         job_name=job_name
     )

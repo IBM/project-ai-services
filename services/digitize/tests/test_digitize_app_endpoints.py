@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, Mock, patch
 import asyncio
 
@@ -8,7 +9,7 @@ from fastapi.testclient import TestClient
 import digitize.app as digitize_app
 import digitize.db_operations as db_ops
 import digitize.db.connection as db_conn
-from digitize.models import JobStatus, OperationType, OutputFormat
+from digitize.models import JobStatus, OperationType, OutputFormat, ImportRequest
 
 
 @pytest.fixture
@@ -83,6 +84,9 @@ class TestRequestIdMiddleware:
 @pytest.mark.unit
 class TestCreateJobs:
     def test_successful_digitization_job_creation(self, digitize_test_client):
+        stage_upload_files_mock = cast(AsyncMock, digitize_app.dg_util.stage_upload_files)
+        initialize_job_state_mock = cast(Mock, digitize_app.dg_util.initialize_job_state)
+
         response = digitize_test_client.post(
             "/v1/jobs?operation=digitization&output_format=json",
             files=[("files", ("sample.pdf", b"%PDF-1.4 test", "application/pdf"))],
@@ -90,8 +94,8 @@ class TestCreateJobs:
 
         assert response.status_code == 202
         assert response.json() == {"job_id": "job-123"}
-        digitize_app.dg_util.stage_upload_files.assert_awaited_once()
-        digitize_app.dg_util.initialize_job_state.assert_called_once_with(
+        stage_upload_files_mock.assert_awaited_once()
+        initialize_job_state_mock.assert_called_once_with(
             "job-123",
             OperationType.DIGITIZATION,
             OutputFormat.JSON,
@@ -139,13 +143,15 @@ class TestCreateJobs:
         assert response.status_code == 415
 
     def test_output_format_and_job_name_parameters(self, digitize_test_client):
+        initialize_job_state_mock = cast(Mock, digitize_app.dg_util.initialize_job_state)
+
         response = digitize_test_client.post(
             "/v1/jobs?operation=digitization&output_format=md&job_name=My+Job",
             files=[("files", ("sample.pdf", b"%PDF-1.4 test", "application/pdf"))],
         )
 
         assert response.status_code == 202
-        digitize_app.dg_util.initialize_job_state.assert_called_with(
+        initialize_job_state_mock.assert_called_with(
             "job-123",
             OperationType.DIGITIZATION,
             OutputFormat.MD,
@@ -263,10 +269,11 @@ class TestDocumentEndpoints:
             status="completed",
             output_format="json"
         )
+        get_document_mock = Mock(return_value=mock_doc)
         monkeypatch.setattr(
             db_ops,
             "get_document",
-            Mock(return_value=mock_doc),
+            get_document_mock,
         )
 
         response = digitize_test_client.get("/v1/documents/doc-1")
@@ -274,8 +281,8 @@ class TestDocumentEndpoints:
 
         assert response.status_code == 200
         assert detailed.status_code == 200
-        assert db_ops.get_document.call_args_list[0][1]["include_details"] is False
-        assert db_ops.get_document.call_args_list[1][1]["include_details"] is True
+        assert get_document_mock.call_args_list[0][1]["include_details"] is False
+        assert get_document_mock.call_args_list[1][1]["include_details"] is True
 
     def test_get_missing_document_returns_404(self, digitize_test_client, monkeypatch):
         # Mock get_document to raise FileNotFoundError which should be caught and converted to 404
@@ -302,6 +309,7 @@ class TestDocumentEndpoints:
 
     def test_delete_document_success(self, digitize_test_client, monkeypatch):
         from digitize.models import DocumentDetailResponse
+        delete_document_files_mock = cast(Mock, digitize_app.dg_util.delete_document_files)
         mock_doc = DocumentDetailResponse(
             id="doc-1",
             job_id="job-1",
@@ -325,7 +333,7 @@ class TestDocumentEndpoints:
 
         assert response.status_code == 204
         fake_vector_store.delete_document_by_id.assert_called_once_with("doc-1")
-        digitize_app.dg_util.delete_document_files.assert_called_once_with("doc-1", output_format="json")
+        delete_document_files_mock.assert_called_once_with("doc-1", output_format="json")
 
     def test_delete_active_document_returns_409(self, digitize_test_client, monkeypatch):
         from digitize.models import DocumentDetailResponse
@@ -362,9 +370,164 @@ class TestDocumentEndpoints:
         assert response.status_code == 409
 
     def test_bulk_delete_success(self, digitize_test_client):
+        reset_db_mock = cast(Mock, digitize_app.reset_db)
+
         response = digitize_test_client.delete("/v1/documents?confirm=true")
 
         assert response.status_code == 204
-        digitize_app.reset_db.assert_called_once()
+        reset_db_mock.assert_called_once()
+
+@pytest.mark.unit
+class TestImportExportEndpoints:
+    def test_import_metadata_success(self, digitize_test_client, monkeypatch):
+        payload = {
+            "data": {
+                "jobs": [
+                    {
+                        "job_id": "job-1",
+                        "operation": "ingestion",
+                        "status": "completed",
+                        "job_name": "Import Job",
+                        "submitted_at": "2024-01-01T00:00:00Z",
+                        "completed_at": "2024-01-01T01:00:00Z",
+                        "stats": {"total_documents": 1, "completed": 1, "failed": 0, "in_progress": 0},
+                        "error": None,
+                    }
+                ],
+                "documents": [
+                    {
+                        "id": "doc-1",
+                        "job_id": "job-1",
+                        "name": "sample.pdf",
+                        "type": "ingestion",
+                        "status": "completed",
+                        "output_format": "json",
+                        "submitted_at": "2024-01-01T00:00:00Z",
+                        "completed_at": "2024-01-01T00:30:00Z",
+                        "error": None,
+                        "metadata": {"pages": 2},
+                    }
+                ],
+            },
+            "validate_only": False,
+        }
+
+        monkeypatch.setattr(digitize_app.dg_util, "has_active_jobs", Mock(return_value=(False, [])))
+        monkeypatch.setattr(
+            db_ops,
+            "import_metadata",
+            Mock(
+                return_value={
+                    "status": "completed",
+                    "summary": {
+                        "jobs": {"total_received": 1, "imported": 1, "skipped": 0, "failed": 0},
+                        "documents": {"total_received": 1, "imported": 1, "skipped": 0, "failed": 0},
+                    },
+                    "duration_seconds": 0.1,
+                    "errors": [],
+                    "warnings": [],
+                }
+            ),
+        )
+
+        response = digitize_test_client.post("/v1/import", json=payload)
+
+        assert response.status_code == 200
+        assert response.json()["summary"]["jobs"]["imported"] == 1
+
+    def test_import_metadata_rejects_when_active_jobs_exist(self, digitize_test_client, monkeypatch):
+        monkeypatch.setattr(digitize_app.dg_util, "has_active_jobs", Mock(return_value=(True, ["job-active"])))
+
+        response = digitize_test_client.post(
+            "/v1/import",
+            json={
+                "data": {
+                    "jobs": [{"job_id": "job-1", "operation": "ingestion", "status": "completed", "submitted_at": "2024-01-01T00:00:00Z", "stats": {}}],
+                    "documents": [],
+                }
+            },
+        )
+
+        assert response.status_code == 409
+        assert "job-active" in response.text
+
+    def test_import_metadata_rejects_too_many_records(self, digitize_test_client, monkeypatch):
+        monkeypatch.setattr(digitize_app.dg_util, "has_active_jobs", Mock(return_value=(False, [])))
+        monkeypatch.setattr(digitize_app, "MAX_IMPORT_RECORDS", 1)
+
+        response = digitize_test_client.post(
+            "/v1/import",
+            json={
+                "data": {
+                    "jobs": [
+                        {"job_id": "job-1", "operation": "ingestion", "status": "completed", "submitted_at": "2024-01-01T00:00:00Z", "stats": {}},
+                        {"job_id": "job-2", "operation": "ingestion", "status": "completed", "submitted_at": "2024-01-01T00:00:00Z", "stats": {}},
+                    ],
+                    "documents": [],
+                }
+            },
+        )
+
+        assert response.status_code == 413
+
+    def test_export_metadata_default_limit(self, digitize_test_client, monkeypatch):
+        export_metadata_mock = Mock(
+            return_value={
+                "status": "completed",
+                "data": {"jobs": [], "documents": []},
+                "summary": {
+                    "jobs": {"total_exported": 0, "completed": 0, "failed": 0},
+                    "documents": {"total_exported": 0, "completed": 0, "failed": 0},
+                },
+                "export_timestamp": "2024-01-01T00:00:00Z",
+                "duration_seconds": 0.1,
+                "pagination": {
+                    "limit": db_ops.IMPORT_EXPORT_DEFAULT_LIMIT,
+                    "offset": 0,
+                    "has_more": False,
+                    "total_records": 0,
+                    "returned_records": 0,
+                },
+            }
+        )
+        monkeypatch.setattr(db_ops, "export_metadata", export_metadata_mock)
+
+        response = digitize_test_client.get("/v1/export")
+
+        assert response.status_code == 200
+        export_metadata_mock.assert_called_once_with(limit=db_ops.IMPORT_EXPORT_DEFAULT_LIMIT, offset=0)
+
+    def test_export_metadata_limit_minus_one(self, digitize_test_client, monkeypatch):
+        export_metadata_mock = Mock(
+            return_value={
+                "status": "completed",
+                "data": {"jobs": [{"job_id": "job-1", "operation": "ingestion", "status": "completed", "submitted_at": "2024-01-01T00:00:00Z", "stats": {}}], "documents": []},
+                "summary": {
+                    "jobs": {"total_exported": 1, "completed": 1, "failed": 0},
+                    "documents": {"total_exported": 0, "completed": 0, "failed": 0},
+                },
+                "export_timestamp": "2024-01-01T00:00:00Z",
+                "duration_seconds": 0.1,
+                "pagination": {
+                    "limit": 1,
+                    "offset": 0,
+                    "has_more": False,
+                    "total_records": 1,
+                    "returned_records": 1,
+                },
+            }
+        )
+        monkeypatch.setattr(db_ops, "export_metadata", export_metadata_mock)
+
+        response = digitize_test_client.get("/v1/export?limit=-1")
+
+        assert response.status_code == 200
+        export_metadata_mock.assert_called_once_with(limit=-1, offset=0)
+
+    def test_export_metadata_invalid_limit_returns_400(self, digitize_test_client):
+        response = digitize_test_client.get("/v1/export?limit=0")
+
+        assert response.status_code == 400
+
 
 # Made with Bob

@@ -25,6 +25,7 @@ from digitize.cleanup import reset_db
 from digitize.ingest import ingest
 from digitize.db_operations import get_status_manager
 from digitize.db.connection import check_db_connection, close_db_connections
+import digitize.db_operations as db_ops
 
 # Semaphores for concurrency limiting
 digitization_semaphore = asyncio.BoundedSemaphore(settings.digitize.digitization_concurrency_limit)
@@ -58,6 +59,8 @@ async def lifespan(app: FastAPI):
             try:
                 from digitize.db.models import Base
                 from digitize.db.connection import engine
+                if engine is None:
+                    raise RuntimeError("Database engine is not initialized")
                 Base.metadata.create_all(bind=engine)
                 logger.info("✅ Database schema initialized")
             except Exception as schema_error:
@@ -261,14 +264,21 @@ async def digitize_document(
     job_name: Optional[str] = Query(None, description="Optional human-readable name for the job")
 ):
     try:
-        # 1. Early exit if no files submitted
+        # 1. Check if import/export is in progress
+        if await db_ops.is_import_export_in_progress():
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                "Cannot create new jobs while import/export operation is in progress"
+            )
+
+        # 2. Early exit if no files submitted
         if not files or len(files) == 0:
             APIError.raise_error(ErrorCode.INVALID_REQUEST, "No files provided. Please submit at least one file.")
 
         if operation == models.OperationType.DIGITIZATION and len(files) > 1:
             APIError.raise_error(ErrorCode.INVALID_REQUEST, "Only 1 file allowed for digitization.")
 
-        # 2. Check for active ingestion jobs BEFORE semaphore check (cross-process coordination)
+        # 3. Check for active ingestion jobs BEFORE semaphore check (cross-process coordination)
         if operation == models.OperationType.INGESTION:
             has_active, active_job_ids = dg_util.has_active_jobs(operation=operation.value)
             if has_active:
@@ -313,6 +323,126 @@ async def digitize_document(
     except Exception as e:
         logger.error(f"Unexpected error in digitize_document: {e}")
         APIError.raise_error("INTERNAL_SERVER_ERROR", str(e))
+
+# ============================================================================
+# Import/Export Configuration
+# ============================================================================
+
+# Import/Export configuration
+MAX_IMPORT_RECORDS = -1  # -1 means no limit, set to positive integer to enforce limit
+
+
+# ============================================================================
+# Import/Export API Endpoints
+# ============================================================================
+
+@app.post(
+    "/v1/import",
+    response_model=models.ImportResponse,
+    responses={400: http_error_responses[400], 409: http_error_responses[409], 413: http_error_responses[413], 500: http_error_responses[500]},
+    tags=["jobs"],
+    summary="Import metadata into PostgreSQL",
+    description="Import job and document metadata into PostgreSQL using the export-compatible JSON payload.",
+    response_description="Import summary with imported, skipped, failed records and warnings"
+)
+async def import_metadata(payload: models.ImportRequest):
+    """Import job and document metadata into PostgreSQL."""
+
+    try:
+        # Try to acquire distributed lock (works across all worker processes)
+        if not await db_ops.acquire_import_export_lock():
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                "Another import/export operation is already in progress. Please wait for it to complete.",
+            )
+
+        try:
+            total_records = len(payload.data.jobs) + len(payload.data.documents)
+            # MAX_IMPORT_RECORDS = -1 means no limit (allow importing all records)
+            if MAX_IMPORT_RECORDS != -1 and total_records > MAX_IMPORT_RECORDS:
+                APIError.raise_error(
+                    ErrorCode.CONTEXT_LIMIT_EXCEEDED,
+                    f"Request contains {total_records} records, maximum allowed is {MAX_IMPORT_RECORDS}",
+                )
+
+            has_active, active_job_ids = dg_util.has_active_jobs()
+            if has_active:
+                APIError.raise_error(
+                    ErrorCode.RESOURCE_LOCKED,
+                    f"Cannot import while jobs are active. Active jobs: {', '.join(active_job_ids)}",
+                )
+
+            return db_ops.import_metadata(payload)
+        finally:
+            # Release distributed lock
+            await db_ops.release_import_export_lock()
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.error(f"Invalid import request: {exc}")
+        APIError.raise_error(ErrorCode.INVALID_REQUEST, str(exc))
+    except Exception as exc:
+        logger.error(f"Failed to import metadata: {exc}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Database connection failed during import")
+
+
+@app.get(
+    "/v1/export",
+    response_model=models.ExportResponse,
+    responses={400: http_error_responses[400], 413: http_error_responses[413], 500: http_error_responses[500]},
+    tags=["jobs"],
+    summary="Export metadata from PostgreSQL",
+    description="Export job and document metadata from PostgreSQL as JSON for backup and restore workflows.",
+    response_description="Exported metadata with summary and pagination details"
+)
+async def export_metadata(
+    limit: int = Query(db_ops.IMPORT_EXPORT_DEFAULT_LIMIT, description="Maximum combined records to export. Use -1 to export all records in one response."),
+    offset: int = Query(0, ge=0, description="Number of combined records to skip for pagination"),
+):
+    """Export job and document metadata from PostgreSQL."""
+    import os
+    pid = os.getpid()
+    logger.warning(f"[PID {pid}] 🔵 Export request received (limit={limit}, offset={offset})")
+
+    try:
+        # Try to acquire distributed lock (works across all worker processes)
+        logger.info(f"[PID {pid}] Trying to acquire lock for export...")
+        if not await db_ops.acquire_import_export_lock():
+            logger.warning(f"[PID {pid}] ❌ Export REJECTED - lock held by another process")
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                "Another import/export operation is already in progress. Please wait for it to complete.",
+            )
+
+        logger.warning(f"[PID {pid}] ✅ Export proceeding with lock acquired")
+        try:
+            if limit < -1 or limit == 0:
+                APIError.raise_error(ErrorCode.INVALID_REQUEST, "limit must be -1 or a positive integer")
+
+            # Check for active jobs before allowing export
+            has_active, active_job_ids = dg_util.has_active_jobs()
+            if has_active:
+                APIError.raise_error(
+                    ErrorCode.RESOURCE_LOCKED,
+                    f"Cannot export while jobs are active. Active jobs: {', '.join(active_job_ids)}",
+                )
+
+            logger.info(f"[PID {pid}] Starting export operation...")
+            result = db_ops.export_metadata(limit=limit, offset=offset)
+            logger.warning(f"[PID {pid}] ✅ Export completed successfully")
+            return result
+        finally:
+            # Release distributed lock
+            await db_ops.release_import_export_lock()
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.error(f"Invalid export request: {exc}")
+        APIError.raise_error(ErrorCode.INVALID_REQUEST, str(exc))
+    except Exception as exc:
+        logger.error(f"Failed to export metadata: {exc}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "Database query failed during export")
+
 
 @app.get(
     "/v1/jobs",
