@@ -630,10 +630,10 @@ async def process_summarization_job(job_id: str, level):
                     f"max_tokens={chunk_max_tokens}"
                 )
             
-            logger.info(
+            logger.debug(
                 f"Total estimated summary tokens from all chunks: {total_estimated_summary_tokens}"
             )
-            
+            logger.debug(f"Chunk token info: {chunk_token_info}")
             # Pre-check: Estimate if combined summaries will fit in merge step
             # Calculate merge max_tokens based on estimated combined summary size
             merge_input_estimate = total_estimated_summary_tokens
@@ -653,7 +653,7 @@ async def process_summarization_job(job_id: str, level):
             
             merge_required_tokens = merge_input_estimate + settings.summarize.summarization_prompt_token_count + merge_max_tokens_estimate
             
-            logger.info(
+            logger.debug(
                 f"Merge pre-check: estimated_input={merge_input_estimate}, "
                 f"estimated_max_tokens={merge_max_tokens_estimate}, "
                 f"total_required={merge_required_tokens}, "
@@ -728,8 +728,8 @@ async def process_summarization_job(job_id: str, level):
                             current_metadata["completed_chunks"] = current_metadata.get("completed_chunks", 0) + 1
                             db_repo.update_job(job_id, metadata=current_metadata)
                     
-                    logger.info(f"Completed chunk {chunk_index + 1}/{num_chunks}")
-                    logger.info(f"Chunk summary: {chunk_summary}")
+                    logger.debug(f"Completed chunk {chunk_index + 1}/{num_chunks}")
+                    logger.debug(f"Chunk summary: {chunk_summary}")
                     return chunk_summary
             
             # Process all chunks in parallel
@@ -771,15 +771,18 @@ async def process_summarization_job(job_id: str, level):
                 None
             )
             
-            logger.info(
+            logger.debug(
                 f"Merge-level tokens: input={merge_input_tokens}, "
                 f"available_output={merge_available_output_tokens}, "
-                f"max_tokens={merge_max_tokens}"
+                f"max_tokens={merge_max_tokens},"
+                f"target_words={merge_target_words}, "
+                f"min_words={merge_min_words}, "
+                f"max_words={merge_max_words}"
             )
             
             # Build merge messages
             merge_messages = build_merge_messages(merged_text, merge_target_words, merge_min_words, merge_max_words)
-            
+            logger.info(f"Merge messages: {merge_messages}")
             # Final merge call
             async with concurrency_limiter:
                 merge_result, merge_in_tokens, merge_out_tokens = await asyncio.to_thread(
