@@ -1560,6 +1560,9 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp": {
             "type": "object",
             "properties": {
+                "id": {
+                    "type": "string"
+                },
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
