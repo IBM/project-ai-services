@@ -280,8 +280,8 @@ func parsePrivateKey(keyData []byte) (interface{}, error) {
 		return rsaKey, nil
 	}
 
-	// Return detailed error if all formats fail
-	return nil, fmt.Errorf("failed to parse private key: tried PKCS8 (%v), SEC1/EC (%v), PKCS1/RSA (%v)", err, ecErr, rsaErr)
+	// Return error listing supported formats
+	return nil, fmt.Errorf("failed to parse private key: supported formats are PKCS#8 (RSA, ECDSA, Ed25519), SEC1 (EC), and PKCS#1 (RSA)")
 }
 
 // matchPublicPrivateKeys verifies public and private keys match using the crypto.Signer interface.
