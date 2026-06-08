@@ -117,7 +117,7 @@ func buildPsFlagValidator() *flagvalidator.FlagValidator {
 
 func processApplication(appName string) error {
 	// Read base URL from environment variable with fallback
-	baseURL := utils.GetEnv("CATALOG_API_BASE_URL", "http://10.48.64.151:8080")
+	baseURL := utils.GetEnv("CATALOG_API_BASE_URL", "")
 
 	token, err := getAccessToken()
 	if err != nil {
@@ -141,7 +141,7 @@ func processApplication(appName string) error {
 // It uses the catalog client to load credentials from the config file.
 func getAccessToken() (string, error) {
 	// Create a new client which loads credentials from config
-	client, err := catalogClient.NewWithLogin("http://10.48.64.151:8080", "admin", "Admin@123")
+	client, err := catalogClient.New()
 	if err != nil {
 		return "", fmt.Errorf("failed to load credentials: %w", err)
 	}
@@ -153,8 +153,6 @@ func getAccessToken() (string, error) {
 // getAppIds retrieves application ID(s) from the catalog API.
 // If appName is empty, returns all application IDs.
 // If appName is provided, returns the ID of the matching application.
-// The base URL is read from the CATALOG_API_BASE_URL environment variable,
-// with a fallback to http://10.9.7.151:8080 if not set.
 func getAppIds(appClient *catalogClient.ApplicationClient, appName string, token string) ([]string, error) {
 	// List all applications
 	resp, err := appClient.ListApplications(nil)
@@ -281,10 +279,6 @@ func getPodStatusFromAPI(pod catalogTypes.Pod) string {
 
 // getContainerNamesFromAPI extracts container names with their status from API response.
 func getContainerNamesFromAPI(pod catalogTypes.Pod) []string {
-	if len(pod.Containers) == 0 {
-		return []string{"none"}
-	}
-
 	containerNames := make([]string, 0, len(pod.Containers))
 	for _, container := range pod.Containers {
 		health := constants.NotReady
