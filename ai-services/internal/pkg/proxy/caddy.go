@@ -131,6 +131,80 @@ func (c *caddyManager) createRoute(routeConfig map[string]interface{}) error {
 	return nil
 }
 
+// extractDomainFromRoute extracts the domain from a Caddy route configuration.
+// Returns the domain and a boolean indicating success.
+func extractDomainFromRoute(rawRoute map[string]interface{}) (string, bool) {
+	matches, ok := rawRoute["match"].([]interface{})
+	if !ok || len(matches) == 0 {
+		return "", false
+	}
+
+	firstMatch, ok := matches[0].(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+
+	hosts, ok := firstMatch["host"].([]interface{})
+	if !ok || len(hosts) == 0 {
+		return "", false
+	}
+
+	domain, ok := hosts[0].(string)
+	if !ok || domain == "" {
+		return "", false
+	}
+
+	return domain, true
+}
+
+// GetRegisteredRoutes retrieves all routes currently registered with Caddy.
+// Only extracts route ID and domain for efficiency.
+func (c *caddyManager) GetRegisteredRoutes() ([]Route, error) {
+	// Build URL to get routes from Caddy config
+	routesURL, err := url.JoinPath(c.adminURL, "config", "apps", "http", "servers", c.serverName, "routes")
+	if err != nil {
+		return nil, fmt.Errorf("failed to build routes URL: %w", err)
+	}
+
+	// Query Caddy for registered routes
+	var rawRoutes []map[string]interface{}
+	resp, err := c.httpClient.R().
+		SetResult(&rawRoutes).
+		Get(routesURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query Caddy routes: %w", err)
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("caddy returned status %d when querying routes", resp.StatusCode())
+	}
+
+	// Parse routes from Caddy response - only extract ID and domain
+	routes := []Route{}
+	for _, rawRoute := range rawRoutes {
+		// Extract route ID
+		routeID, ok := rawRoute["@id"].(string)
+		if !ok || routeID == "" {
+			continue // Skip routes without ID
+		}
+
+		// Extract domain using helper function
+		domain, ok := extractDomainFromRoute(rawRoute)
+		if !ok {
+			continue
+		}
+
+		// Build Route object with only ID and Domain populated
+		route := Route{
+			ID:     routeID,
+			Domain: domain,
+		}
+		routes = append(routes, route)
+	}
+
+	return routes, nil
+}
+
 // RegisterRoutesForAppAndReturn registers routes for an application with Caddy proxy and returns the built routes.
 //
 // Parameters:

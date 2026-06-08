@@ -752,42 +752,33 @@ func getCaddyHTTPSPort(rt *podman.PodmanClient, caddyPodName string) (string, er
 
 // GetCatalogRouteInfo retrieves route domains and HTTPS port for the catalog service.
 func GetCatalogRouteInfo(rt *podman.PodmanClient, tp templates.Template, appTemplateName string, argParams map[string]string) (map[string]string, string, error) {
-	// Extract routes from all templates
-	routeInfos, err := extractAllRoutesFromTemplates(tp, appTemplateName, argParams)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to extract routes from templates: %w", err)
-	}
-
-	if len(routeInfos) == 0 {
-		return nil, "", fmt.Errorf("no templates found with routes annotation")
-	}
-
 	// Find Caddy pod from templates
 	caddyPodName, err := findCaddyPodNameFromTemplates(tp, appTemplateName, argParams)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to find Caddy pod: %w", err)
 	}
 
-	// Get host IP for route domain generation
-	hostIP, err := utils.GetHostIP()
+	// Get Caddy admin URL for querying actual registered routes
+	caddyAdminPort, err := proxy.GetCaddyAdminPort(rt, caddyPodName)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to get host IP: %w", err)
+		return nil, "", fmt.Errorf("failed to get Caddy admin port: %w", err)
+	}
+	caddyAdminURL := fmt.Sprintf("http://localhost:%s", caddyAdminPort)
+
+	// Query actual registered routes from Caddy
+	proxyManager := proxy.NewCaddyManager(caddyAdminURL, constants.CaddyServerName)
+	registeredRoutes, err := proxyManager.GetRegisteredRoutes()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to query Caddy routes: %w", err)
 	}
 
-	// Compute domain suffix (default to nip.io)
-	domainSuffix := fmt.Sprintf("%s.nip.io", hostIP)
-
-	// Build route domains map
+	// Build route domains map from actual registered routes
 	routeDomains := make(map[string]string)
-
-	// Build routes from annotations to get domains
-	for _, info := range routeInfos {
-		routes, err := proxy.BuildRoutesFromAnnotation(info.RoutesAnnotation, domainSuffix, info.PodName)
-		if err != nil {
-			continue // Skip if routes can't be built
-		}
-
-		for _, route := range routes {
+	catalogRoutePrefix := catalogconstants.CatalogAppName + "--"
+	for _, route := range registeredRoutes {
+		// Filter catalog routes by checking if route ID starts with catalog app name
+		// Route IDs follow pattern: "appName--podName--subdomain" (e.g., "ai-services--catalog--catalog-ui")
+		if strings.HasPrefix(route.ID, catalogRoutePrefix) {
 			parts := strings.Split(route.Domain, ".")
 			if len(parts) > 0 {
 				subdomain := parts[0]
