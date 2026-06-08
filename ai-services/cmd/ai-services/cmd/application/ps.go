@@ -117,32 +117,26 @@ func buildPsFlagValidator() *flagvalidator.FlagValidator {
 }
 
 func processApplication(appName string) error {
-	// Read base URL from environment variable with fallback
-	client, err := catalogClient.New()
-	if err != nil {
-		return fmt.Errorf("failed to load credentials: %v", err)
-	}
-
 	// Create application client with server URL and token
-	appClient := catalogClient.NewApplicationClient(client.ServerURL())
+	appClient, err := catalogClient.NewApplicationClient()
 
-	appIds, err := getAppIds(appClient, appName, client.AccessToken())
+	appIDList, err := getAppIDList(appClient, appName)
 	if err != nil {
 		return err
 	}
-	if len(appIds) == 0 {
+	if len(appIDList) == 0 {
 		return fmt.Errorf("no application found with name %s", appName)
 	}
 
-	return render(appClient, appIds, client.AccessToken())
+	return render(appClient, appIDList)
 }
 
-// getAppIds retrieves application ID(s) from the catalog API.
+// getAppIDList retrieves application ID(s) from the catalog API.
 // If appName is empty, returns all application IDs.
 // If appName is provided, returns the ID of the matching application.
-func getAppIds(appClient *catalogClient.ApplicationClient, appName string, token string) ([]string, error) {
+func getAppIDList(appClient *catalogClient.ApplicationClient, appName string) ([]string, error) {
 	// List all applications
-	resp, err := appClient.ListApplications(nil, token)
+	resp, err := appClient.ListApplications(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch applications: %w", err)
 	}
@@ -170,7 +164,7 @@ func getAppIds(appClient *catalogClient.ApplicationClient, appName string, token
 
 // render retrieves and processes the PS information for multiple application IDs.
 // It fetches the process status for each application using the catalog API and prints the results in tabular format.
-func render(appClient *catalogClient.ApplicationClient, appIds []string, token string) error {
+func render(appClient *catalogClient.ApplicationClient, appIDList []string) error {
 	// Create table writer
 	printer := utils.NewTableWriter()
 	defer printer.CloseTableWriter()
@@ -180,9 +174,9 @@ func render(appClient *catalogClient.ApplicationClient, appIds []string, token s
 	setTableHeaders(printer, outputWide)
 
 	// Process each application ID
-	for _, appID := range appIds {
+	for _, appID := range appIDList {
 		// Get PS information for the application
-		psResp, err := appClient.GetApplicationPS(appID, token)
+		psResp, err := appClient.GetApplicationPS(appID)
 		if err != nil {
 			logger.Errorf("Error fetching PS for application %s: %v\n", appID, err)
 

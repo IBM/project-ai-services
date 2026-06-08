@@ -10,16 +10,21 @@ import (
 
 // ApplicationClient provides methods for interacting with the applications API.
 type ApplicationClient struct {
-	serverURL  string
 	httpClient *resty.Client
+	client     *Client
 }
 
 // NewApplicationClient creates a new ApplicationClient with the given server URL and token.
-func NewApplicationClient(serverURL string) *ApplicationClient {
-	return &ApplicationClient{
-		serverURL:  serverURL,
-		httpClient: resty.New().SetBaseURL(serverURL),
+func NewApplicationClient() (*ApplicationClient, error) {
+	client, err := New()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load credentials: %v", err)
 	}
+
+	return &ApplicationClient{
+		httpClient: resty.New().SetBaseURL(client.ServerURL()),
+		client:     client,
+	}, nil
 }
 
 // ListApplicationsParams holds optional query parameters for listing applications.
@@ -39,17 +44,17 @@ type ListApplicationsParams struct {
 //
 // Example:
 //
-//	client := NewApplicationClient("https://localhost:8080", "your-token")
+//	client := NewApplicationClient()
 //	resp, err := client.ListApplications(&ListApplicationsParams{
 //	    Page: 1,
 //	    PageSize: 20,
 //	    DeploymentType: "services",
 //	    CatalogID: "rag",
 //	})
-func (c *ApplicationClient) ListApplications(params *ListApplicationsParams, token string) (*types.ApplicationListResponse, error) {
+func (c *ApplicationClient) ListApplications(params *ListApplicationsParams) (*types.ApplicationListResponse, error) {
 	var result types.ApplicationListResponse
 	req := c.httpClient.R().
-		SetHeader("Authorization", "Bearer "+token).
+		SetHeader("Authorization", "Bearer "+c.client.AccessToken()).
 		SetResult(&result)
 
 	if params != nil {
@@ -81,10 +86,10 @@ func (c *ApplicationClient) ListApplications(params *ListApplicationsParams, tok
 
 // GetApplicationPS retrieves the process status and runtime information for an application.
 // It returns details about pods, containers, and their health status.
-func (c *ApplicationClient) GetApplicationPS(id string, token string) (*types.ApplicationPSResponse, error) {
+func (c *ApplicationClient) GetApplicationPS(id string) (*types.ApplicationPSResponse, error) {
 	var result types.ApplicationPSResponse
 	resp, err := c.httpClient.R().
-		SetHeader("Authorization", "Bearer "+token).
+		SetHeader("Authorization", "Bearer "+c.client.AccessToken()).
 		SetResult(&result).
 		Get(fmt.Sprintf("/api/v1/applications/%s/ps", id))
 	if err != nil {
