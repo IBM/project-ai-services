@@ -453,7 +453,7 @@ class TestImportExportEndpoints:
 
     def test_import_metadata_rejects_too_many_records(self, digitize_test_client, monkeypatch):
         monkeypatch.setattr(digitize_app.dg_util, "has_active_jobs", Mock(return_value=(False, [])))
-        monkeypatch.setattr(db_ops, "MAX_IMPORT_RECORDS", 1)
+        monkeypatch.setattr(digitize_app, "MAX_IMPORT_RECORDS", 1)
 
         response = digitize_test_client.post(
             "/v1/import",

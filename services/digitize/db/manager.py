@@ -28,6 +28,8 @@ class DatabaseManager:
         status: JobStatus = JobStatus.ACCEPTED,
         job_name: Optional[str] = None,
         submitted_at: Optional[datetime] = None,
+        completed_at: Optional[datetime] = None,
+        error: Optional[str] = None,
         stats: Optional[Dict[str, int]] = None
     ) -> Optional[Job]:
         """
@@ -39,6 +41,8 @@ class DatabaseManager:
             status: Initial job status
             job_name: Optional human-readable name
             submitted_at: Submission timestamp (defaults to now)
+            completed_at: Completion timestamp (optional, for import)
+            error: Error message (optional, for import)
             stats: Initial statistics dictionary
 
         Returns:
@@ -52,6 +56,8 @@ class DatabaseManager:
                     operation=operation,
                     status=status.value,
                     submitted_at=submitted_at or datetime.now(timezone.utc),
+                    completed_at=completed_at,
+                    error=error,
                     stats=stats or {
                         "total_documents": 0,
                         "completed": 0,
@@ -249,6 +255,8 @@ class DatabaseManager:
         status: DocStatus,
         output_format: str,
         submitted_at: Optional[datetime] = None,
+        completed_at: Optional[datetime] = None,
+        error: Optional[str] = None,
         job_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Optional[Document]:
@@ -262,6 +270,8 @@ class DatabaseManager:
             status: Initial document status
             output_format: Output format (txt/md/json)
             submitted_at: Submission timestamp (defaults to now)
+            completed_at: Completion timestamp (optional, for import)
+            error: Error message (optional, for import)
             job_id: Associated job ID
             metadata: Additional metadata dictionary
 
@@ -278,6 +288,8 @@ class DatabaseManager:
                     status=status.value,
                     output_format=output_format,
                     submitted_at=submitted_at or datetime.now(timezone.utc),
+                    completed_at=completed_at,
+                    error=error,
                     doc_metadata=metadata or {}
                 )
                 session.add(document)

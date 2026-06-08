@@ -46,7 +46,6 @@ def create_job(
     job_id: str,
     operation: str,
     submitted_at: str,
-    doc_id_dict: dict[str, str],
     documents_info: list[str],
     job_name: Optional[str] = None
 ) -> None:
@@ -57,7 +56,6 @@ def create_job(
         job_id: Unique identifier for the job
         operation: Type of operation (ingestion/digitization)
         submitted_at: ISO timestamp when job was submitted
-        doc_id_dict: Mapping of document names to their IDs
         documents_info: List of document filenames
         job_name: Optional human-readable name for the job
     """
@@ -642,6 +640,8 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             status=JobStatus(job_record.status),
             job_name=job_record.job_name,
             submitted_at=submitted_at,
+            completed_at=completed_at,
+            error=job_record.error,
             stats=job_record.stats,
         )
 
@@ -656,13 +656,6 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
                 )
             )
             continue
-
-        # Update job with completion fields (guaranteed to exist since import blocks on active jobs)
-        db_manager.update_job(
-            job_record.job_id,
-            completed_at=completed_at,
-            error=job_record.error,
-        )
 
         summary.jobs.imported += 1
         importable_job_ids.add(job_record.job_id)
@@ -711,6 +704,8 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             status=DocStatus(document_record.status),
             output_format=document_record.output_format,
             submitted_at=submitted_at,
+            completed_at=completed_at,
+            error=document_record.error,
             job_id=document_record.job_id,
             metadata=document_record.metadata,
         )
@@ -726,13 +721,6 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
                 )
             )
             continue
-
-        # Update document with completion fields (guaranteed to exist since import blocks on active jobs)
-        db_manager.update_document(
-            document_record.id,
-            completed_at=completed_at,
-            error=document_record.error,
-        )
 
         summary.documents.imported += 1
 
