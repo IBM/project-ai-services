@@ -226,6 +226,7 @@ func (s *DeletionService) deletePods(rt runtime.Runtime, pods []runtimeTypes.Pod
 			// Ignore "not found" errors - pod already deleted or never existed
 			if utils.IsNotFoundError(err) {
 				logger.Infof("Pod %s already deleted or does not exist", pod.ID)
+
 				continue
 			}
 			errMsg := fmt.Sprintf("failed to delete pod %s: %s", pod.ID, err)
@@ -337,6 +338,7 @@ func (s *DeletionService) deleteVolumesFromPods(rt runtime.Runtime, pods []runti
 			// Ignore "not found" errors - volume already deleted or never existed
 			if utils.IsNotFoundError(err) {
 				logger.Infof("Volume %s already deleted or does not exist", volumeName)
+
 				continue
 			}
 			errMsg := fmt.Sprintf("%s %s: failed to delete volume %s: %s", instanceType, instanceID, volumeName, err)
@@ -391,6 +393,7 @@ func (s *DeletionService) deleteSecretsFromPods(rt runtime.Runtime, pods []runti
 			// Ignore "not found" errors - secret already deleted or never existed
 			if utils.IsNotFoundError(err) {
 				logger.Infof("Secret %s already deleted or does not exist", secretName)
+
 				continue
 			}
 			errMsg := fmt.Sprintf("%s %s: failed to delete secret %s: %s", instanceType, instanceID, secretName, err)

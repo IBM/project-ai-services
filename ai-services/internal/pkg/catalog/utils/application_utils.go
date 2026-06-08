@@ -83,6 +83,7 @@ func IsNotFoundError(err error) bool {
 		return false
 	}
 	errMsg := err.Error()
+
 	return strings.Contains(errMsg, "no such pod") ||
 		strings.Contains(errMsg, "no pod with name or ID") ||
 		strings.Contains(errMsg, "no such secret") ||
