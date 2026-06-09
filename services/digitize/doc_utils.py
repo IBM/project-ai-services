@@ -1356,7 +1356,6 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
         doc_id: Document ID
         language: Language code for sentence splitting (detected from document text)
     """
-    # Convert lingua ISO code to SentenceSplitter format
     t0 = time.time()
     processed_table_chunk_json_path = (Path(out_path) / f"{doc_id}{table_chunk_suffix}")
 
