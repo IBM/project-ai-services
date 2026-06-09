@@ -2,6 +2,8 @@ package catalog
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	texttemplate "text/template"
 
 	k8syaml "sigs.k8s.io/yaml"
@@ -32,7 +34,10 @@ func extractContainerImages(podSpec *models.PodSpec, imageSet map[string]bool) {
 // CollectImagesFromTemplates extracts images from a set of pre-loaded templates
 // and adds them directly to the provided imageSet map.
 // This is the low-level function that callers use after loading templates themselves.
-func (p *CatalogProvider) CollectImagesFromTemplates(templates map[string]*texttemplate.Template, values map[string]any, imageSet map[string]bool) {
+// Returns an error if any template fails to render or parse.
+func (p *CatalogProvider) CollectImagesFromTemplates(templates map[string]*texttemplate.Template, values map[string]any, imageSet map[string]bool) error {
+	var errorResponses []error
+
 	// Process each template
 	for templateName, tmpl := range templates {
 		// Prepare minimal params for rendering
@@ -48,6 +53,7 @@ func (p *CatalogProvider) CollectImagesFromTemplates(templates map[string]*textt
 		var rendered bytes.Buffer
 		if err := tmpl.Execute(&rendered, initialParams); err != nil {
 			logger.Errorf("Failed to render template %s for image extraction: %v", templateName, err)
+			errorResponses = append(errorResponses, err)
 			continue
 		}
 
@@ -55,10 +61,18 @@ func (p *CatalogProvider) CollectImagesFromTemplates(templates map[string]*textt
 		var podSpec models.PodSpec
 		if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
 			logger.Errorf("Failed to parse rendered template %s: %v", templateName, err)
+			errorResponses = append(errorResponses, err)
 			continue
 		}
 
 		// Extract images from containers directly into the provided set
 		extractContainerImages(&podSpec, imageSet)
 	}
+
+	// Return error if any template failed
+	if len(errorResponses) > 0 {
+		return fmt.Errorf("failed to process %d template(s): %w", len(errorResponses), errors.Join(errorResponses...))
+	}
+
+	return nil
 }

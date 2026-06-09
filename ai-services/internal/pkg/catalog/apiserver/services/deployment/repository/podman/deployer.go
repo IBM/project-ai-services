@@ -232,7 +232,10 @@ func (d *PodmanDeployer) downloadModels(modelSet map[string]bool) error {
 func (d *PodmanDeployer) pullImagesForDeployment(plan *DeploymentPlan) error {
 	logger.Infof("Pulling container images for application '%s'\n", plan.ApplicationName)
 
-	imageSet := d.collectImagesFromPlan(plan)
+	imageSet, err := d.collectImagesFromPlan(plan)
+	if err != nil {
+		return fmt.Errorf("failed to collect images: %w", err)
+	}
 
 	if len(imageSet) == 0 {
 		logger.Infof("No images to pull for application '%s'\n", plan.ApplicationName)
@@ -250,7 +253,7 @@ func (d *PodmanDeployer) pullImagesForDeployment(plan *DeploymentPlan) error {
 }
 
 // collectImagesFromPlan collects all unique container images from the deployment plan.
-func (d *PodmanDeployer) collectImagesFromPlan(plan *DeploymentPlan) map[string]bool {
+func (d *PodmanDeployer) collectImagesFromPlan(plan *DeploymentPlan) (map[string]bool, error) {
 	imageSet := make(map[string]bool)
 
 	// Include tool image which is used for all housekeeping tasks
@@ -258,41 +261,51 @@ func (d *PodmanDeployer) collectImagesFromPlan(plan *DeploymentPlan) map[string]
 
 	// Extract images from component templates
 	for _, comp := range plan.Components {
-		d.extractImagesFromComponent(comp, imageSet)
+		if err := d.extractImagesFromComponent(comp, imageSet); err != nil {
+			return nil, err
+		}
 	}
 
 	// Extract images from service templates
 	for _, svc := range plan.Services {
-		d.extractImagesFromService(svc, imageSet)
+		if err := d.extractImagesFromService(svc, imageSet); err != nil {
+			return nil, err
+		}
 	}
 
-	return imageSet
+	return imageSet, nil
 }
 
 // extractImagesFromComponent extracts container images from a component's templates.
-func (d *PodmanDeployer) extractImagesFromComponent(comp *ComponentPlan, imageSet map[string]bool) {
+func (d *PodmanDeployer) extractImagesFromComponent(comp *ComponentPlan, imageSet map[string]bool) error {
 	// Load component templates
 	templates, err := d.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
 	if err != nil {
-		logger.Errorf("Failed to load component templates for %s/%s: %v\n", comp.ComponentType, comp.ProviderID, err)
-		return
+		return fmt.Errorf("failed to load component templates for %s/%s: %w", comp.ComponentType, comp.ProviderID, err)
 	}
 
 	// Extract images from templates with custom values directly into imageSet
-	d.catalogProvider.CollectImagesFromTemplates(templates, comp.Values, imageSet)
+	if err := d.catalogProvider.CollectImagesFromTemplates(templates, comp.Values, imageSet); err != nil {
+		return fmt.Errorf("failed to extract images from component %s/%s: %w", comp.ComponentType, comp.ProviderID, err)
+	}
+
+	return nil
 }
 
 // extractImagesFromService extracts container images from a service's templates.
-func (d *PodmanDeployer) extractImagesFromService(svc *ServicePlan, imageSet map[string]bool) {
+func (d *PodmanDeployer) extractImagesFromService(svc *ServicePlan, imageSet map[string]bool) error {
 	// Load service templates
 	templates, err := d.catalogProvider.LoadServiceTemplates(svc.CatalogID)
 	if err != nil {
-		logger.Errorf("Failed to load service templates for %s: %v\n", svc.CatalogID, err)
-		return
+		return fmt.Errorf("failed to load service templates for %s: %w", svc.CatalogID, err)
 	}
 
 	// Extract images from templates with custom values directly into imageSet
-	d.catalogProvider.CollectImagesFromTemplates(templates, svc.Values, imageSet)
+	if err := d.catalogProvider.CollectImagesFromTemplates(templates, svc.Values, imageSet); err != nil {
+		return fmt.Errorf("failed to extract images from service %s: %w", svc.CatalogID, err)
+	}
+
+	return nil
 }
 
 // pullImages pulls only missing images from the provided set using the runtime.
