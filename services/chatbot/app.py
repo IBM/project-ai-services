@@ -172,10 +172,10 @@ def limit_concurrency(f):
 def get_stop_words_with_special_tokens(request_stop_words):
     """
     Add common special tokens to stop words to prevent them from appearing in responses.
-    
+
     Args:
         request_stop_words: Stop words from the request (can be None, list, or string)
-    
+
     Returns:
         List of stop words including special tokens
     """
@@ -193,16 +193,16 @@ async def is_auth_required() -> bool:
     Returns True if auth is required, False otherwise.
     """
     global auth_required_cache
-    
+
     # Check cache first
     if auth_required_cache["checked"]:
         return auth_required_cache["required"]
-    
+
     async with auth_cache_lock:
         # Double-check after acquiring lock
         if auth_required_cache["checked"]:
             return auth_required_cache["required"]
-        
+
         try:
             llm_endpoint = llm_model_dict['llm_endpoint']
             # Try to access without API key
@@ -239,15 +239,15 @@ async def is_auth_required() -> bool:
 async def list_models(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
     """List available LLM models. Requires Authorization header with Bearer token if authentication is enabled."""
     logging.debug("List models..")
-    
+
     # Extract API key from credentials
     api_key = credentials.credentials if credentials else None
-    
+
     # Check if auth is required and enforce it
     if await is_auth_required():
         if not api_key:
             APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "API key is required when vLLM authentication is enabled")
-    
+
     try:
         llm_endpoint = llm_model_dict['llm_endpoint']
         return await asyncio.to_thread(query_vllm_models, llm_endpoint, api_key)
@@ -383,7 +383,7 @@ async def locked_stream(stream_g, perf_stat_dict):
 async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> ChatCompletionResponse | StreamingResponse | Response:
     # Extract API key from credentials
     api_key = credentials.credentials if credentials else None
-    
+
     # Check if auth is required and enforce it
     if await is_auth_required():
         if not api_key:
@@ -393,7 +393,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
                 return StreamingResponse(stream_auth_error(), media_type="text/event-stream", status_code=401)
             APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, message)
-    
+
     if not req.messages:
         APIError.raise_error(ErrorCode.EMPTY_INPUT, "messages can't be empty")
 
@@ -457,9 +457,16 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
             max_tokens = get_max_tokens_map().get(query_lang, settings.llm.english.max_tokens)
 
         rephrased_query = current_query
+<<<<<<< HEAD
         
         # Process conversation history and rephrase query for supported conversational languages
         if previous_messages:
+=======
+
+        # Process conversation history and rephrase query for English language
+        if previous_messages and lang == "EN":
+            # Truncate history for query rephrasing with 1000 token budget
+>>>>>>> 7198368 (Integrate timing_info params included as part of similarity search API response in chatbot)
             truncated_history_for_rephrasing = await asyncio.to_thread(
                 truncate_history_by_tokens,
                 previous_messages,
@@ -487,7 +494,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
             settings.chatbot.num_chunks_post_reranker,
             vectorstore=vectorstore
         )
-        
+
         if not docs:
             message = NO_DOCUMENTS_FOUND_MESSAGES.get(query_lang, NO_DOCUMENTS_FOUND_MESSAGES["EN"])
             if req.stream:
@@ -495,7 +502,8 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
                 return StreamingResponse(stream_docs_not_found(), media_type="text/event-stream")
             return ChatCompletionResponse(
-                choices=[ChatChoice(message=ChatMessage(content=message))]
+                choices=[ChatChoice(message=ChatMessage(content=message))],
+                perf_stat_dict=perf_stat_dict
             )
 
         if concurrency_limiter.locked():
@@ -509,7 +517,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
 
         try:
             stop_words = get_stop_words_with_special_tokens(req.stop)
-            
+
             if req.stream:
                 vllm_stream = await asyncio.to_thread(
                     query_vllm_stream,
@@ -564,8 +572,11 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                         if isinstance(message_dict, dict):
                             message_content = message_dict.get("content", "")
                             choices.append(ChatChoice(message=ChatMessage(content=message_content)))
-                
-                response_data = ChatCompletionResponse(choices=choices)
+
+                response_data = ChatCompletionResponse(
+                    choices=choices,
+                    perf_stat_dict=perf_stat_dict
+                )
                 # Add rephrased query as a custom header if available
                 if rephrased_query and rephrased_query != current_query:
                     return Response(

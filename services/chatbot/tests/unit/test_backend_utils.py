@@ -31,6 +31,7 @@ class TestSearchOnly:
             "results": []
         }
         mock_response.raise_for_status = Mock()
+        mock_response.headers = {}
         mock_post = Mock(return_value=mock_response)
         monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
 
@@ -66,6 +67,12 @@ class TestSearchOnly:
         mock_response = Mock()
         mock_response.json.return_value = {"score_type": "relevance", "results": [doc]}
         mock_response.raise_for_status = Mock()
+        # Mock response headers with timing information
+        mock_response.headers = {
+            "X-Retrieve-Time": "0.123",
+            "X-Rerank-Time": "0.045",
+            "X-Total-Time": "0.168"
+        }
         mock_post = Mock(return_value=mock_response)
         monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
 
@@ -77,6 +84,13 @@ class TestSearchOnly:
 
         assert "similarity_api_time" in perf_stat_dict
         assert perf_stat_dict["similarity_api_time"] >= 0
+        # Verify timing metrics from headers are included
+        assert "similarity_retrieve_time" in perf_stat_dict
+        assert perf_stat_dict["similarity_retrieve_time"] == 0.123
+        assert "similarity_rerank_time" in perf_stat_dict
+        assert perf_stat_dict["similarity_rerank_time"] == 0.045
+        assert "similarity_total_time" in perf_stat_dict
+        assert perf_stat_dict["similarity_total_time"] == 0.168
 
     def test_applies_top_r_cutoff(self, monkeypatch):
         """search_only must truncate to top_r documents after retrieval."""
@@ -89,6 +103,7 @@ class TestSearchOnly:
         mock_response = Mock()
         mock_response.json.return_value = {"score_type": "relevance", "results": docs}
         mock_response.raise_for_status = Mock()
+        mock_response.headers = {}
         mock_post = Mock(return_value=mock_response)
         monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
 
@@ -114,6 +129,7 @@ class TestSearchOnly:
         mock_response = Mock()
         mock_response.json.return_value = {"score_type": "relevance", "results": docs}
         mock_response.raise_for_status = Mock()
+        mock_response.headers = {}
         mock_post = Mock(return_value=mock_response)
         monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
 
