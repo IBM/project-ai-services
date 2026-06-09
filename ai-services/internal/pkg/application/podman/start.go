@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
+	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	cliutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -13,21 +15,21 @@ import (
 
 // Start starts a stopped application.
 func (p *PodmanApplication) Start(opts appTypes.StartOptions) error {
-	var filter map[string][]string
 	var pods []types.Pod
-	// if experimental mode is enabled, we should not be filtering based on label,
-	// as the application label is not set as per new catalog structure.
-	// so we list all pods and then filter based on pod names.
+	var err error
+	// if experimental flag is set, get pods from applications-ps
 	if !opts.Experimental {
-		filter = map[string][]string{
-			"label": {fmt.Sprintf("ai-services.io/application=%s", opts.Name)},
+		pods, err = p.fetchPodsFromRuntime(opts.Name)
+		if err != nil {
+			return err
+		}
+	} else {
+		pods, err = p.getPodsFromApplicationsPS(opts.Name)
+		if err != nil {
+			return err
 		}
 	}
 
-	pods, err := p.fetchPodsFromRuntime(filter)
-	if err != nil {
-		return err
-	}
 	if len(pods) == 0 {
 		logger.Infof("No pods found with given application: %s\n", opts.Name)
 
@@ -35,7 +37,7 @@ func (p *PodmanApplication) Start(opts appTypes.StartOptions) error {
 	}
 
 	// Filter pods based on provided pod names or annotation
-	podsToStart, err := p.fetchPodsToStart(pods, opts.PodNames, opts.Experimental)
+	podsToStart, err := p.fetchPodsToStart(pods, opts.PodNames)
 	if err != nil {
 		return err
 	}
@@ -48,9 +50,49 @@ func (p *PodmanApplication) Start(opts appTypes.StartOptions) error {
 	return p.confirmAndStartPods(podsToStart, opts.AutoYes, opts.SkipLogs)
 }
 
+func (p *PodmanApplication) getPodsFromApplicationsPS(appName string) ([]types.Pod, error) {
+	var pods []types.Pod //nolint: prealloc
+	appClient, err := catalogClient.NewApplicationClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create application client: %w", err)
+	}
+
+	app, err := cliutils.GetAppByName(appClient, appName)
+	if err != nil {
+		return nil, err
+	}
+
+	psResp, err := appClient.GetApplicationPS(app.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch application: %w", err)
+	}
+
+	// add components to the list of pods
+	for _, resp := range psResp.Components {
+		pod := types.Pod{
+			ID:   resp.PodName,
+			Name: resp.PodName,
+		}
+		pods = append(pods, pod)
+	}
+
+	// add services to the list of pods
+	for _, resp := range psResp.Services {
+		pod := types.Pod{
+			ID:   resp.PodName,
+			Name: resp.PodName,
+		}
+		pods = append(pods, pod)
+	}
+
+	return pods, nil
+}
+
 // Start implementation helper methods.
-func (p *PodmanApplication) fetchPodsFromRuntime(filter map[string][]string) ([]types.Pod, error) {
-	pods, err := p.runtime.ListPods(filter)
+func (p *PodmanApplication) fetchPodsFromRuntime(appName string) ([]types.Pod, error) {
+	pods, err := p.runtime.ListPods(map[string][]string{
+		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -58,19 +100,12 @@ func (p *PodmanApplication) fetchPodsFromRuntime(filter map[string][]string) ([]
 	return pods, nil
 }
 
-func (p *PodmanApplication) fetchPodsToStart(pods []types.Pod, podNames []string, experimental bool) ([]types.Pod, error) {
+func (p *PodmanApplication) fetchPodsToStart(pods []types.Pod, podNames []string) ([]types.Pod, error) {
 	if len(podNames) > 0 {
 		return p.filterPodsByNameForStart(pods, podNames)
 	}
-
-	// not filtering based on annotations if experimental mode is enabled,
-	// to avoid starting of all pods, since we are listing all of them.
-	if !experimental {
-		// No pod names provided, start pods based on annotation
-		return p.filterPodsByAnnotationForStart(pods)
-	}
-
-	return nil, fmt.Errorf("no matching pods found")
+	// No pod names provided, start pods based on annotation
+	return p.filterPodsByAnnotationForStart(pods)
 }
 
 func (p *PodmanApplication) confirmAndStartPods(podsToStart []types.Pod, autoYes, skipLogs bool) error {

@@ -52,11 +52,6 @@ Note: Supported for podman runtime only.
 		// When experimentalLogs is true and runtime is podman, validate application name using catalog API
 		// For openshift runtime, always use the older/stable code path regardless of experimental flag
 		if experimentalStart && rt == types.RuntimeTypePodman {
-			// users need to specify at least one pod to start, using --pod flag in experimental mode
-			// as we cannot start all pods like we used to for legacy mode
-			if len(startPodNames) == 0 {
-				return fmt.Errorf("must specify at least one pod to start using --pod flag")
-			}
 			appClient, err := catalogClient.NewApplicationClient()
 			if err != nil {
 				return fmt.Errorf("failed to create application client: %w", err)
