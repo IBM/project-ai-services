@@ -265,7 +265,7 @@ func prepareCatalogDeployment(deployCtx *catalogDeploymentContext, tp templates.
 	}
 
 	// Generate and write Caddyfile before deploying
-	if err := generateCaddyfile(baseDir, values); err != nil {
+	if err := generateCaddyfile(baseDir); err != nil {
 		s.Fail("failed to generate Caddyfile")
 
 		return nil, fmt.Errorf("failed to generate Caddyfile: %w", err)
@@ -514,7 +514,7 @@ func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 }
 
 // generateCaddyfile copies the static Caddyfile to the caddy directory.
-func generateCaddyfile(baseDir string, values map[string]any) error {
+func generateCaddyfile(baseDir string) error {
 	// Read the Caddyfile template
 	caddyfileContent, err := assets.CatalogFS.ReadFile("catalog/podman/Caddyfile.tmpl")
 	if err != nil {
@@ -528,7 +528,7 @@ func generateCaddyfile(baseDir string, values map[string]any) error {
 	}
 
 	// Prepare template data with the server name constant
-	templateData := map[string]interface{}{
+	templateData := map[string]any{
 		"CaddyServerName": constants.CaddyServerName,
 	}
 
@@ -758,33 +758,58 @@ func GetCatalogRouteInfo(rt *podman.PodmanClient, tp templates.Template, appTemp
 		return nil, "", fmt.Errorf("failed to find Caddy pod: %w", err)
 	}
 
-	// Get Caddy admin URL for querying actual registered routes
+	// Get Caddy admin URL for querying specific routes
 	caddyAdminPort, err := proxy.GetCaddyAdminPort(rt, caddyPodName)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get Caddy admin port: %w", err)
 	}
 	caddyAdminURL := fmt.Sprintf("http://localhost:%s", caddyAdminPort)
 
-	// Query actual registered routes from Caddy
-	proxyManager := proxy.NewCaddyManager(caddyAdminURL, constants.CaddyServerName)
-	registeredRoutes, err := proxyManager.GetRegisteredRoutes()
+	// Extract routes from all templates (same as during registration)
+	routeInfos, err := extractAllRoutesFromTemplates(tp, appTemplateName, argParams)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to query Caddy routes: %w", err)
+		return nil, "", fmt.Errorf("failed to extract routes from templates: %w", err)
 	}
 
-	// Build route domains map from actual registered routes
+	// Create proxy manager
+	proxyManager := proxy.NewCaddyManager(caddyAdminURL, constants.CaddyServerName)
+
+	// Build route domains map by querying Caddy for each route
 	routeDomains := make(map[string]string)
-	for _, route := range registeredRoutes {
-		// Filter catalog routes by checking if route ID starts with catalog app name
-		// Route IDs follow pattern: "appName--podName--subdomain" (e.g., "ai-services--catalog--catalog-ui")
-		if strings.HasPrefix(route.ID, catalogconstants.CatalogAppName) {
-			parts := strings.Split(route.Domain, ".")
-			if len(parts) > 0 {
-				subdomain := parts[0]
-				sanitizedSubdomain := strings.ReplaceAll(subdomain, "-", "_")
-				varName := strings.ToUpper(fmt.Sprintf("%s_DOMAIN", sanitizedSubdomain))
-				routeDomains[varName] = route.Domain
+	for _, info := range routeInfos {
+		// Parse routes annotation directly to extract subdomains
+		// Format: "port:subdomain:type, port:subdomain:type, ..."
+		// Example: "8081:catalog-ui:ui, 8080:catalog-api:api"
+		for _, routeEntry := range strings.Split(info.RoutesAnnotation, ",") {
+			routeEntry = strings.TrimSpace(routeEntry)
+			if routeEntry == "" {
+				continue
 			}
+
+			// Split by colon to get subdomain (second part)
+			parts := strings.Split(routeEntry, ":")
+			if len(parts) != 3 {
+				logger.Warningf("Invalid route format '%s' in pod %s, expected 'port:subdomain:type'", routeEntry, info.PodName)
+				continue
+			}
+
+			subdomain := strings.TrimSpace(parts[1])
+			if subdomain == "" {
+				continue
+			}
+
+			// Query Caddy for this route (route ID is just the subdomain)
+			actualRoute, err := proxyManager.GetRouteByID(subdomain)
+			if err != nil {
+				// Log warning but continue - route might not exist yet
+				logger.Warningf("Failed to query route %s from Caddy: %v", subdomain, err)
+				continue
+			}
+
+			// Create variable name from subdomain
+			sanitizedSubdomain := strings.ReplaceAll(subdomain, "-", "_")
+			varName := strings.ToUpper(fmt.Sprintf("%s_DOMAIN", sanitizedSubdomain))
+			routeDomains[varName] = actualRoute.Domain
 		}
 	}
 
