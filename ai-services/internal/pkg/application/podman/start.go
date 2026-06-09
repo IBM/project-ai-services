@@ -13,7 +13,18 @@ import (
 
 // Start starts a stopped application.
 func (p *PodmanApplication) Start(opts appTypes.StartOptions) error {
-	pods, err := p.fetchPodsFromRuntime(opts.Name)
+	var filter map[string][]string
+	var pods []types.Pod
+	// if experimental mode is enabled, we should not be filtering based on label,
+	// as the application label is not set as per new catalog structure.
+	// so we list all pods and then filter based on pod names.
+	if !opts.Experimental {
+		filter = map[string][]string{
+			"label": {fmt.Sprintf("ai-services.io/application=%s", opts.Name)},
+		}
+	}
+
+	pods, err := p.fetchPodsFromRuntime(filter)
 	if err != nil {
 		return err
 	}
@@ -24,7 +35,7 @@ func (p *PodmanApplication) Start(opts appTypes.StartOptions) error {
 	}
 
 	// Filter pods based on provided pod names or annotation
-	podsToStart, err := p.fetchPodsToStart(pods, opts.PodNames)
+	podsToStart, err := p.fetchPodsToStart(pods, opts.PodNames, opts.Experimental)
 	if err != nil {
 		return err
 	}
@@ -38,10 +49,8 @@ func (p *PodmanApplication) Start(opts appTypes.StartOptions) error {
 }
 
 // Start implementation helper methods.
-func (p *PodmanApplication) fetchPodsFromRuntime(appName string) ([]types.Pod, error) {
-	pods, err := p.runtime.ListPods(map[string][]string{
-		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
-	})
+func (p *PodmanApplication) fetchPodsFromRuntime(filter map[string][]string) ([]types.Pod, error) {
+	pods, err := p.runtime.ListPods(filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -49,12 +58,19 @@ func (p *PodmanApplication) fetchPodsFromRuntime(appName string) ([]types.Pod, e
 	return pods, nil
 }
 
-func (p *PodmanApplication) fetchPodsToStart(pods []types.Pod, podNames []string) ([]types.Pod, error) {
+func (p *PodmanApplication) fetchPodsToStart(pods []types.Pod, podNames []string, experimental bool) ([]types.Pod, error) {
 	if len(podNames) > 0 {
 		return p.filterPodsByNameForStart(pods, podNames)
 	}
-	// No pod names provided, start pods based on annotation
-	return p.filterPodsByAnnotationForStart(pods)
+
+	// not filtering based on annotations if experimental mode is enabled,
+	// to avoid starting of all pods, since we are listing all of them.
+	if !experimental {
+		// No pod names provided, start pods based on annotation
+		return p.filterPodsByAnnotationForStart(pods)
+	}
+
+	return nil, fmt.Errorf("no matching pods found")
 }
 
 func (p *PodmanApplication) confirmAndStartPods(podsToStart []types.Pod, autoYes, skipLogs bool) error {
