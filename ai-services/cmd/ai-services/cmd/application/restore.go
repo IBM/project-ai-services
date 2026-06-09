@@ -34,15 +34,19 @@ Flags:
 
 Supported targets:
   - opensearch: Restore OpenSearch indices and data (Podman only)
-  - digitize:   Not yet implemented
+  - digitize:   Restore digitize metadata (jobs and documents) (Podman only)
 
 Note:
-  - OpenSearch restore is currently only supported for Podman runtime
+  - Restore is currently only supported for Podman runtime
   - OpenSearch password is automatically retrieved from the application's secret
+  - Digitize restore uses the Import API to restore job and document metadata
 
 Examples:
   # Restore OpenSearch data with Podman
   ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime podman
+
+  # Restore digitize metadata with Podman
+  ai-services application restore myapp --target digitize --filename backup.tar.gz --runtime podman
 `,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
