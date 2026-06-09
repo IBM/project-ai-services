@@ -322,15 +322,44 @@ def process_text(converted_doc, pdf_path, out_path):
 
     # Initialize TocHeaders to get the Table of Contents (TOC)
     t0 = time.time()
+    
+    # Check file type
+    file_ext = Path(pdf_path).suffix.lower()
+    is_docx = file_ext == '.docx'
+    
     toc_headers = None
     try:
         toc_headers, page_count = get_toc(pdf_path)
     except Exception as e:
         logger.debug(f"No TOC found or failed to load TOC: {e}")
 
+    # For DOCX files, get page mapping, font sizes, and heading hierarchy
+    docx_page_map = None
+    docx_font_sizes = None
+    docx_heading_map = None  # Maps text to heading level from DOCX
+    if is_docx:
+        try:
+            from digitize.docx_utils import create_docx_page_mapping, get_docx_header_font_sizes, assign_page_numbers_to_docx_content
+            docx_page_map = create_docx_page_mapping(pdf_path)
+            docx_font_sizes = get_docx_header_font_sizes(pdf_path)
+            
+            # Create heading level map from DOCX
+            content_with_pages, _ = assign_page_numbers_to_docx_content(pdf_path)
+            docx_heading_map = {}
+            for text, page, style_info in content_with_pages:
+                if style_info.get('is_heading') and style_info.get('heading_level'):
+                    docx_heading_map[text.strip()] = style_info['heading_level']
+            
+            logger.debug(f"DOCX page mapping created with {len(docx_page_map)} entries, {len(docx_heading_map)} headings")
+        except Exception as e:
+            logger.warning(f"Failed to create DOCX page mapping: {e}")
+            docx_page_map = {}
+            docx_font_sizes = {}
+            docx_heading_map = {}
+
     # Load pdf pages one time when TOC headers not found for retrieving the font size of header texts
     pdf_pages = None
-    if not toc_headers:
+    if not toc_headers and not is_docx:
         pdf_pages = load_pdf_pages(pdf_path)
         page_count = len(pdf_pages)
 
@@ -353,12 +382,44 @@ def process_text(converted_doc, pdf_path, out_path):
 
             # Handle empty prov list (e.g., for DOCX files)
             if not prov_list:
-                # For DOCX or files without provenance, use None for page number
+                # For DOCX files, try to get page number and heading level from mapping
+                page_no = None
+                font_size = None
+                header_text = text_obj.text
+                
+                if is_docx and docx_page_map:
+                    text_content = text_obj.text.strip()
+                    if text_content in docx_page_map:
+                        page_no, style_info = docx_page_map[text_content]
+                        font_size = style_info.get('font_size')
+                        
+                        # Check if we have TOC for this header
+                        if toc_headers:
+                            header_prefix = get_matching_header_lvl(toc_headers, text_content)
+                            if header_prefix:
+                                # Use TOC level
+                                header_text = f"{header_prefix} {text_content}"
+                                last_header_level = len(header_prefix.strip())
+                                logger.debug(f"DOCX header '{text_content[:50]}...' matched TOC level {last_header_level}")
+                            else:
+                                # No TOC match, use previous level + 1
+                                new_header_level = last_header_level + 1
+                                header_text = f"{'#' * new_header_level} {text_content}"
+                                logger.debug(f"DOCX header '{text_content[:50]}...' assigned level {new_header_level}")
+                        elif style_info.get('is_heading') and style_info.get('heading_level'):
+                            # Use DOCX heading level directly
+                            heading_level = style_info['heading_level']
+                            header_text = f"{'#' * heading_level} {text_content}"
+                            last_header_level = heading_level
+                            logger.debug(f"DOCX header '{text_content[:50]}...' using DOCX heading level {heading_level}")
+                        
+                        logger.debug(f"DOCX header '{text_content[:50]}...' mapped to page {page_no}")
+                
                 structured_output.append({
                     "label": label,
-                    "text": text_obj.text,
-                    "page": None,
-                    "font_size": None
+                    "text": header_text,
+                    "page": page_no,
+                    "font_size": round(font_size, 2) if font_size else None
                 })
                 continue
 
@@ -386,8 +447,11 @@ def process_text(converted_doc, pdf_path, out_path):
                             "font_size": None,  # Font size isn't necessary if TOC matches
                         })
                 else:
-                    # Only try font size extraction if we have pdf_pages (PDF files only)
+                    # Try font size extraction
+                    font_size = None
+                    
                     if pdf_pages:
+                        # PDF font size extraction
                         matches = find_text_font_size(pdf_pages, text_obj.text, page_no - 1)
                         if len(matches):
                             font_size = 0
@@ -395,25 +459,30 @@ def process_text(converted_doc, pdf_path, out_path):
                             for match in matches:
                                 font_size += match["font_size"] if match["match_score"] == 100 else 0
                                 count += 1 if match["match_score"] == 100 else 0
-                            font_size = font_size / count if count else None
+                            font_size = font_size_sum / count if count else None
+                    elif is_docx and docx_page_map:
+                        # DOCX font size from mapping
+                        text_content = text_obj.text.strip()
+                        if text_content in docx_page_map:
+                            _, style_info = docx_page_map[text_content]
+                            font_size = style_info.get('font_size')
 
-                            structured_output.append({
-                                "label": label,
-                                "text": text_obj.text,
-                                "page": page_no,
-                                "font_size": round(font_size, 2) if font_size else None
-                            })
-                    else:
-                        # No pdf_pages available (DOCX), just add without font size
-                        structured_output.append({
-                            "label": label,
-                            "text": text_obj.text,
-                            "page": page_no,
-                            "font_size": None
-                        })
+                    structured_output.append({
+                        "label": label,
+                        "text": text_obj.text,
+                        "page": page_no,
+                        "font_size": round(font_size, 2) if font_size else None
+                    })
         else:
             # For non-header elements, safely get page number
             page_no = text_obj.prov[0].page_no if text_obj.prov else None
+            
+            # For DOCX files without provenance, try to get page from mapping
+            if page_no is None and is_docx and docx_page_map:
+                text_content = text_obj.text.strip()
+                if text_content in docx_page_map:
+                    page_no, _ = docx_page_map[text_content]
+            
             structured_output.append({
                 "label": label,
                 "text": text_obj.text,
