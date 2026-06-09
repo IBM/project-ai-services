@@ -9,7 +9,9 @@
           "type": "string",
           "title": "System Prompt",
           "description": "Custom initial system prompt for conversational RAG. Leave empty to use default.",
-          "default": ""
+          "default": "",
+          "minLength": 10,
+          "maxLength": 5000
         }
       }
     }

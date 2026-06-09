@@ -325,9 +325,8 @@ func (s *DeletionService) deleteVolumesFromPods(rt runtime.Runtime, pods []runti
 	}
 
 	if len(volumesToDelete) == 0 {
-		logger.Infof("%s %s: no volumes found to delete", instanceType, instanceID)
-
-		return errorMessages
+		// Just return if there are no volumes to delete
+		return nil
 	}
 
 	logger.Infof("Deleting %d volume(s) for %s %s", len(volumesToDelete), instanceType, instanceID)
