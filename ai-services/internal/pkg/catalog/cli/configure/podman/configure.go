@@ -35,7 +35,6 @@ const (
 	kindSecret            = "Secret"
 	caddyCertsDirName     = "certs"
 	caddyContainerDataDir = "/data/caddy"
-	routeFormatParts      = 3 // Expected number of parts in route format: "port:subdomain:type"
 )
 
 // catalogDeploymentContext holds cached values during catalog deployment to avoid redundant lookups.
@@ -755,22 +754,15 @@ func getCaddyHTTPSPort(rt *podman.PodmanClient, caddyPodName string) (string, er
 // Route format: "port:subdomain:type"
 // Returns empty string if the entry is invalid.
 func parseRouteEntry(routeEntry, podName string) string {
-	routeEntry = strings.TrimSpace(routeEntry)
-	if routeEntry == "" {
-		return ""
-	}
-
-	// Split by colon to get subdomain (second part)
-	parts := strings.Split(routeEntry, ":")
-	if len(parts) != routeFormatParts {
-		logger.Warningf("Invalid route format '%s' in pod %s, expected 'port:subdomain:type'", routeEntry, podName)
+	// Use shared helper from proxy package
+	parts, err := proxy.ParseRouteEntry(routeEntry)
+	if err != nil {
+		logger.Warningf("Invalid route format '%s' in pod %s: %v", routeEntry, podName, err)
 
 		return ""
 	}
 
-	subdomain := strings.TrimSpace(parts[1])
-
-	return subdomain
+	return parts.Subdomain
 }
 
 // processRouteInfo processes route information and populates the routeDomains map.

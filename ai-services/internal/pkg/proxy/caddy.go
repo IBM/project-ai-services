@@ -132,29 +132,29 @@ func (c *caddyManager) createRoute(routeConfig map[string]any) error {
 }
 
 // extractDomainFromRoute extracts the domain from a Caddy route configuration.
-// Returns the domain and a boolean indicating success.
-func extractDomainFromRoute(rawRoute map[string]any) (string, bool) {
+// Returns the domain or an error if extraction fails.
+func extractDomainFromRoute(rawRoute map[string]any) (string, error) {
 	matches, ok := rawRoute["match"].([]any)
 	if !ok || len(matches) == 0 {
-		return "", false
+		return "", errors.New("missing or empty 'match' field in route")
 	}
 
 	firstMatch, ok := matches[0].(map[string]any)
 	if !ok {
-		return "", false
+		return "", errors.New("invalid match format in route")
 	}
 
 	hosts, ok := firstMatch["host"].([]any)
 	if !ok || len(hosts) == 0 {
-		return "", false
+		return "", errors.New("missing or empty 'host' field in route")
 	}
 
 	domain, ok := hosts[0].(string)
 	if !ok || domain == "" {
-		return "", false
+		return "", errors.New("invalid or empty domain in route")
 	}
 
-	return domain, true
+	return domain, nil
 }
 
 // GetRouteByID retrieves a specific route by its ID from Caddy.
@@ -183,9 +183,9 @@ func (c *caddyManager) GetRouteByID(routeID string) (*Route, error) {
 	}
 
 	// Extract domain using helper function
-	domain, ok := extractDomainFromRoute(rawRoute)
-	if !ok {
-		return nil, fmt.Errorf("failed to extract domain from route %s", routeID)
+	domain, err := extractDomainFromRoute(rawRoute)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract domain from route %s: %w", routeID, err)
 	}
 
 	// Build Route object with ID and Domain
