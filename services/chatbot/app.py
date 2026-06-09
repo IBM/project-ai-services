@@ -16,7 +16,7 @@ from starlette.concurrency import iterate_in_threadpool
 from lingua import Language
 
 from common.misc_utils import set_log_level
-from common.lang_utils import setup_language_detector, detect_language, language_codes, get_max_tokens_map
+from common.lang_utils import setup_language_detector, detect_language, LanguageCodes, get_max_tokens_map
 
 from chatbot.settings import settings
 from chatbot.conversation_utils import get_conversation_context, truncate_history_by_tokens
@@ -407,12 +407,12 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         query_lang = detect_language(current_query)
         
         # Fallback to English if unsupported language detected
-        if query_lang not in language_codes.values():
+        if query_lang not in [LanguageCodes.ENGLISH, LanguageCodes.GERMAN]:
             logging.debug(
                 f"Unsupported language detected ({query_lang}). "
                 "Falling back to English."
             )
-            query_lang = language_codes["English"]
+            query_lang = LanguageCodes.ENGLISH
         
         logging.debug(f"Detected language for current message: {query_lang}")
         
@@ -421,7 +421,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
             f"Language detection failed: {e}. "
             "Falling back to English."
         )
-        query_lang = language_codes["English"]
+        query_lang = LanguageCodes.ENGLISH
 
     # Ensure vectorstore is initialized on first request
     if vectorstore is None:

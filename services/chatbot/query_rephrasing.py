@@ -10,7 +10,7 @@ from typing import List, Dict, Optional
 from common.misc_utils import get_logger
 from common.retry_utils import retry_on_transient_error
 from common.llm_utils import tokenize_with_llm, get_vllm_headers
-from common.lang_utils import detect_language, language_codes
+from common.lang_utils import detect_language, LanguageCodes
 import common.misc_utils as misc_utils
 
 logger = get_logger("query_rephrasing")
@@ -19,8 +19,8 @@ logger = get_logger("query_rephrasing")
 def _get_query_rephrasing_language_config(lang: str, settings):
     """Return query rephrasing language config with English fallback."""
     language_config_map = {
-        language_codes["English"]: settings.query_rephrasing.english,
-        language_codes["German"]: settings.query_rephrasing.german,
+        LanguageCodes.ENGLISH: settings.query_rephrasing.english,
+        LanguageCodes.GERMAN: settings.query_rephrasing.german,
     }
     return language_config_map.get(lang, settings.query_rephrasing.english)
 
@@ -72,7 +72,7 @@ def calculate_dynamic_max_response_tokens(
         return base_max_response_tokens
 
 
-def format_messages_for_rephrasing(messages: List[Dict[str, str]], lang: str = language_codes["English"]) -> str:
+def format_messages_for_rephrasing(messages: List[Dict[str, str]], lang: str = LanguageCodes.ENGLISH) -> str:
     """
     Format conversation messages into a readable string for rephrasing context.
     
@@ -85,7 +85,7 @@ def format_messages_for_rephrasing(messages: List[Dict[str, str]], lang: str = l
                  - 'role': One of 'user', 'assistant', 'system', or 'unknown'
                  - 'content': The message content string
         lang: Language code for role labels (default: English).
-              Supported values: language_codes["English"], language_codes["German"]
+              Supported values: LanguageCodes.ENGLISH, LanguageCodes.GERMAN
     
     Returns:
         Formatted conversation history string with localized role labels.
@@ -98,7 +98,7 @@ def format_messages_for_rephrasing(messages: List[Dict[str, str]], lang: str = l
         ... ]
         >>> format_messages_for_rephrasing(messages)
         'User: What is Spyre?\\nAssistant: Spyre is an AI accelerator...'
-        >>> format_messages_for_rephrasing(messages, lang=language_codes["German"])
+        >>> format_messages_for_rephrasing(messages, lang=LanguageCodes.GERMAN)
         'Benutzer: What is Spyre?\\nAssistent: Spyre is an AI accelerator...'
     """
     if not messages:
@@ -128,7 +128,7 @@ def call_llm_for_rephrasing(
     temperature: float = 0.0,
     timeout: float = 5.0,
     api_key: str | None = None,
-    lang: str = language_codes["English"]
+    lang: str = LanguageCodes.ENGLISH
 ) -> str:
     """
     Call LLM to rephrase a query.
@@ -245,7 +245,7 @@ async def rephrase_query_with_context(
     # Use provided lang or detect if not provided
     detected_lang = lang if lang is not None else detect_language(current_query)
     
-    if detected_lang not in language_codes.values():
+    if detected_lang not in [LanguageCodes.ENGLISH, LanguageCodes.GERMAN]:
         logger.debug("Query rephrasing skipped: unsupported language detected")
         return current_query
 
