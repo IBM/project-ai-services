@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestProcessTemplates_Success tests successful template processing
+// TestProcessTemplates_Success tests successful template processing.
 func TestProcessTemplates_Success(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -46,6 +46,7 @@ spec:
 
 	processor := func(templateName string, podSpec *models.PodSpec) error {
 		processedTemplates[templateName] = podSpec
+
 		return nil
 	}
 
@@ -64,7 +65,7 @@ spec:
 	assert.Equal(t, "busybox:latest", podSpec.Spec.InitContainers[0].Image)
 }
 
-// TestProcessTemplates_MultipleTemplates tests processing multiple templates
+// TestProcessTemplates_MultipleTemplates tests processing multiple templates.
 func TestProcessTemplates_MultipleTemplates(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -104,6 +105,7 @@ spec:
 	processedCount := 0
 	processor := func(templateName string, podSpec *models.PodSpec) error {
 		processedCount++
+
 		return nil
 	}
 
@@ -112,7 +114,7 @@ spec:
 	assert.Equal(t, 2, processedCount)
 }
 
-// TestProcessTemplates_RenderError tests handling of template rendering errors
+// TestProcessTemplates_RenderError tests handling of template rendering errors.
 func TestProcessTemplates_RenderError(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -140,7 +142,7 @@ metadata:
 	assert.Contains(t, err.Error(), "failed to process")
 }
 
-// TestProcessTemplates_ParseError tests handling of YAML parsing errors
+// TestProcessTemplates_ParseError tests handling of YAML parsing errors.
 func TestProcessTemplates_ParseError(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -165,7 +167,7 @@ this is not valid yaml: [[[
 	assert.Contains(t, err.Error(), "failed to process")
 }
 
-// TestProcessTemplates_ProcessorError tests handling of processor callback errors
+// TestProcessTemplates_ProcessorError tests handling of processor callback errors.
 func TestProcessTemplates_ProcessorError(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -198,7 +200,7 @@ spec:
 	assert.ErrorIs(t, err, expectedError)
 }
 
-// TestProcessTemplates_MixedErrors tests handling when some templates fail and some succeed
+// TestProcessTemplates_MixedErrors tests handling when some templates fail and some succeed.
 func TestProcessTemplates_MixedErrors(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -231,6 +233,7 @@ this is invalid yaml
 	processedCount := 0
 	processor := func(templateName string, podSpec *models.PodSpec) error {
 		processedCount++
+
 		return nil
 	}
 
@@ -241,7 +244,7 @@ this is invalid yaml
 	assert.Equal(t, 1, processedCount)
 }
 
-// TestCollectImagesFromTemplates_Success tests successful image collection
+// TestCollectImagesFromTemplates_Success tests successful image collection.
 func TestCollectImagesFromTemplates_Success(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -280,7 +283,7 @@ spec:
 	assert.True(t, imageSet["alpine:3.14"])
 }
 
-// TestCollectImagesFromTemplates_EmptyImages tests handling of pods without images
+// TestCollectImagesFromTemplates_EmptyImages tests handling of pods without images.
 func TestCollectImagesFromTemplates_EmptyImages(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -307,7 +310,7 @@ spec:
 	assert.Empty(t, imageSet)
 }
 
-// TestCollectImagesFromTemplates_Deduplication tests that duplicate images are deduplicated
+// TestCollectImagesFromTemplates_Deduplication tests that duplicate images are deduplicated.
 func TestCollectImagesFromTemplates_Deduplication(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -354,7 +357,7 @@ spec:
 	assert.True(t, imageSet["nginx:latest"])
 }
 
-// TestCollectImagesFromTemplates_WithValues tests image collection with template values
+// TestCollectImagesFromTemplates_WithValues tests image collection with template values.
 func TestCollectImagesFromTemplates_WithValues(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -394,7 +397,7 @@ spec:
 	assert.True(t, imageSet["myinit:v2.0.0"])
 }
 
-// TestCollectImagesFromTemplates_Error tests error handling in image collection
+// TestCollectImagesFromTemplates_Error tests error handling in image collection.
 func TestCollectImagesFromTemplates_Error(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -419,7 +422,7 @@ invalid yaml content [[[
 
 // Made with Bob
 
-// TestCollectSpyreCardsFromTemplates_WithRealTemplates tests Spyre card collection using real templates from assets
+// TestCollectSpyreCardsFromTemplates_WithRealTemplates tests Spyre card collection using real templates from assets.
 func TestCollectSpyreCardsFromTemplates_WithRealTemplates(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -485,7 +488,7 @@ spec:
 	assert.Equal(t, 5, totalCards)
 }
 
-// TestCollectSpyreCardsFromTemplates_NoSpyreCards tests when templates have no Spyre card annotations
+// TestCollectSpyreCardsFromTemplates_NoSpyreCards tests when templates have no Spyre card annotations.
 func TestCollectSpyreCardsFromTemplates_NoSpyreCards(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -518,7 +521,7 @@ spec:
 	assert.Equal(t, 0, totalCards)
 }
 
-// TestCollectSpyreCardsFromTemplates_MultipleContainers tests multiple containers with different Spyre card counts
+// TestCollectSpyreCardsFromTemplates_MultipleContainers tests multiple containers with different Spyre card counts.
 func TestCollectSpyreCardsFromTemplates_MultipleContainers(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -556,7 +559,7 @@ spec:
 	assert.Equal(t, 6, totalCards)
 }
 
-// TestCollectSpyreCardsFromTemplates_InvalidAnnotationValue tests error handling for invalid annotation values
+// TestCollectSpyreCardsFromTemplates_InvalidAnnotationValue tests error handling for invalid annotation values.
 func TestCollectSpyreCardsFromTemplates_InvalidAnnotationValue(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -589,7 +592,7 @@ spec:
 	assert.Equal(t, 0, totalCards)
 }
 
-// TestCollectSpyreCardsFromTemplates_MixedTemplates tests a mix of templates with and without Spyre cards
+// TestCollectSpyreCardsFromTemplates_MixedTemplates tests a mix of templates with and without Spyre cards.
 func TestCollectSpyreCardsFromTemplates_MixedTemplates(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -654,7 +657,7 @@ spec:
 	assert.Equal(t, 6, totalCards)
 }
 
-// TestCollectSpyreCardsFromTemplates_TemplateRenderError tests error handling when template rendering fails
+// TestCollectSpyreCardsFromTemplates_TemplateRenderError tests error handling when template rendering fails.
 func TestCollectSpyreCardsFromTemplates_TemplateRenderError(t *testing.T) {
 	provider := &CatalogProvider{}
 
@@ -688,9 +691,17 @@ spec:
 	assert.Equal(t, 0, totalCards)
 }
 
-// TestFetchSpyreCardsFromPodAnnotations tests the helper function directly
-func TestFetchSpyreCardsFromPodAnnotations(t *testing.T) {
-	tests := []struct {
+// getSpyreCardTestCases returns test cases for Spyre card annotation parsing.
+//
+//nolint:funlen // Test data structure is intentionally long for comprehensive coverage
+func getSpyreCardTestCases() []struct {
+	name                 string
+	annotations          map[string]string
+	expectedTotal        int
+	expectedContainerMap map[string]int
+	expectError          bool
+} {
+	return []struct {
 		name                 string
 		annotations          map[string]string
 		expectedTotal        int
@@ -751,6 +762,11 @@ func TestFetchSpyreCardsFromPodAnnotations(t *testing.T) {
 			expectError: false,
 		},
 	}
+}
+
+// TestFetchSpyreCardsFromPodAnnotations tests the helper function directly.
+func TestFetchSpyreCardsFromPodAnnotations(t *testing.T) {
+	tests := getSpyreCardTestCases()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

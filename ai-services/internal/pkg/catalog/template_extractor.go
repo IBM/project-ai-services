@@ -48,6 +48,7 @@ func (p *CatalogProvider) ProcessTemplates(
 		if err := tmpl.Execute(&rendered, initialParams); err != nil {
 			logger.Errorf("Failed to render template %s: %v", templateName, err)
 			errorResponses = append(errorResponses, err)
+
 			continue
 		}
 
@@ -56,6 +57,7 @@ func (p *CatalogProvider) ProcessTemplates(
 		if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
 			logger.Errorf("Failed to parse rendered template %s: %v", templateName, err)
 			errorResponses = append(errorResponses, err)
+
 			continue
 		}
 
