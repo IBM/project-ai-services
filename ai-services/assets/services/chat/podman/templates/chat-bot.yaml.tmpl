@@ -74,10 +74,6 @@ spec:
           value: "{{ .Values.llm.maxModelLen }}"
         - name: LLM_MAX_BATCH_SIZE
           value: "{{ .Values.llm.maxBatchSize }}"
-        - name: RERANKER_ENDPOINT
-          value: "http://{{ .Values.reranker.host }}:{{ .Values.reranker.port }}"
-        - name: RERANKER_MODEL
-          value: "{{ .Values.reranker.model }}"
         - name: OPENSEARCH_HOST
           value: "{{ .Values.vector_store.host }}"
         - name: OPENSEARCH_PORT

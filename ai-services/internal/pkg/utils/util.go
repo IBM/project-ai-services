@@ -3,6 +3,7 @@ package utils
 import (
 	"archive/tar"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
@@ -13,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
@@ -635,4 +637,20 @@ func extractTarEntry(tr *tar.Reader, header *tar.Header, destDir string) error {
 	}
 
 	return nil
+}
+
+// ErrorResponse represents an error response.
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+// ParseErrorResponse attempts to parse the error response from the API.
+// It returns the error message if successfully parsed, otherwise returns the raw response body.
+func ParseErrorResponse(resp *resty.Response) string {
+	var errResp ErrorResponse
+	if err := json.Unmarshal(resp.Body(), &errResp); err == nil && errResp.Error != "" {
+		return errResp.Error
+	}
+
+	return resp.String()
 }
