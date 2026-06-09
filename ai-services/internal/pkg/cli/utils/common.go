@@ -97,3 +97,18 @@ func getContainerNamesFromAPI(pod catalogTypes.Pod) []string {
 
 	return containerNames
 }
+
+func ValidateApplicationName(appName string) error {
+	appClient, err := catalogClient.NewApplicationClient()
+	if err != nil {
+		return fmt.Errorf("failed to create application client: %w", err)
+	}
+
+	// Fetch specific application by name
+	_, err = GetAppByName(appClient, appName)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
