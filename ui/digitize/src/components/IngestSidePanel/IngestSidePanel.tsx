@@ -249,7 +249,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
         <div className={styles.formGroup}>
           <strong className={styles.fileUploaderLabel}>Upload files</strong>
           <p className={styles.fileUploaderDescription}>
-            Supported file type is .pdf only.
+            Supported file types are .pdf and .docx.
             <br /><br />
             Supported languages are English and German.
             <br /><br />
@@ -259,7 +259,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
             labelText="Upload"
             buttonKind="tertiary"
             size="md"
-            accept={['.pdf']}
+            accept={['.pdf', '.docx']}
             multiple
             onChange={handleFileAdd}
             disableLabelChanges
