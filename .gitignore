@@ -7,3 +7,5 @@ nohup.out
 env
 venv
 vendor
+.claude/
+.vscode/
