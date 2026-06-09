@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -14,11 +15,16 @@ type ApplicationClient struct {
 	client     *Client
 }
 
+// ErrorResponse represents an error response.
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
 // NewApplicationClient creates a new ApplicationClient with the given server URL and token.
 func NewApplicationClient() (*ApplicationClient, error) {
 	client, err := New()
 	if err != nil {
-		return nil, fmt.Errorf("failed to load credentials: %v", err)
+		return nil, fmt.Errorf("failed to initialize client: %w", err)
 	}
 
 	return &ApplicationClient{
@@ -78,7 +84,7 @@ func (c *ApplicationClient) ListApplications(params *ListApplicationsParams) (*t
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("list applications: server returned HTTP %d", resp.StatusCode())
+		return nil, fmt.Errorf("list applications: server returned HTTP %d: %s", resp.StatusCode(), parseErrorResponse(resp))
 	}
 
 	return &result, nil
@@ -97,10 +103,21 @@ func (c *ApplicationClient) GetApplicationPS(id string) (*types.ApplicationPSRes
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("get application ps: server returned HTTP %d", resp.StatusCode())
+		return nil, fmt.Errorf("get application ps: server returned HTTP %d: %s", resp.StatusCode(), parseErrorResponse(resp))
 	}
 
 	return &result, nil
+}
+
+// parseErrorResponse attempts to parse the error response from the API.
+// It returns the error message if successfully parsed, otherwise returns the raw response body.
+func parseErrorResponse(resp *resty.Response) string {
+	var errResp ErrorResponse
+	if err := json.Unmarshal(resp.Body(), &errResp); err == nil && errResp.Error != "" {
+		return errResp.Error
+	}
+
+	return resp.String()
 }
 
 // Made with Bob
