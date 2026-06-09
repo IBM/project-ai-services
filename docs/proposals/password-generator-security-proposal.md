@@ -323,7 +323,6 @@ The implementation is production-ready and suitable for generating passwords for
 ---
 
 **References:**
-- NIST SP 800-63B: Digital Identity Guidelines
-- OWASP Password Storage Cheat Sheet
-- Go crypto/rand documentation
-- Fisher-Yates shuffle algorithm (Knuth, TAOCP Vol 2)
+- [NIST SP 800-90A: Recommendation for Random Number Generation](https://csrc.nist.gov/pubs/sp/800/90/a/r1/final) - Standards for cryptographically secure random number generation
+- [Go crypto/rand Package Documentation](https://pkg.go.dev/crypto/rand) - Cryptographically secure random number generation
+- [Fisher-Yates Shuffle Algorithm](https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle) - Unbiased shuffling algorithm
