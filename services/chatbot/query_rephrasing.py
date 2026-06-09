@@ -95,21 +95,14 @@ def format_messages_for_rephrasing(messages: List[Dict[str, str]], lang: str = l
     if not messages:
         return ""
 
-    role_labels = {
-        language_codes["German"]: {
-            "user": "Benutzer",
-            "assistant": "Assistent",
-            "system": "System",
-            "unknown": "Unbekannt",
-        },
-        language_codes["English"]: {
-            "user": "User",
-            "assistant": "Assistant",
-            "system": "System",
-            "unknown": "Unknown",
-        },
-    }
-    labels = role_labels.get(lang, role_labels[language_codes["English"]])
+    # Get role labels from settings
+    from chatbot.settings import settings
+    
+    match lang:
+        case _ if lang == language_codes["German"]:
+            labels = settings.query_rephrasing.german.role_labels
+        case _:
+            labels = settings.query_rephrasing.english.role_labels
 
     formatted_lines = []
     for msg in messages:
@@ -129,7 +122,8 @@ def call_llm_for_rephrasing(
     max_tokens: int = 100,
     temperature: float = 0.0,
     timeout: float = 5.0,
-    api_key: str | None = None
+    api_key: str | None = None,
+    lang: str = language_codes["English"]
 ) -> str:
     """
     Call LLM to rephrase a query.
@@ -142,6 +136,7 @@ def call_llm_for_rephrasing(
         temperature: Temperature for generation (0.0 = deterministic)
         timeout: Request timeout in seconds
         api_key: Optional API key for vLLM authentication
+        lang: Language code for stop sequences (default: English)
     
     Returns:
         Rephrased query string
@@ -153,6 +148,15 @@ def call_llm_for_rephrasing(
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
     
+    # Get stop sequences from settings based on language
+    from chatbot.settings import settings
+    
+    match lang:
+        case _ if lang == language_codes["German"]:
+            stop_sequences = settings.query_rephrasing.german.stop_sequences
+        case _:
+            stop_sequences = settings.query_rephrasing.english.stop_sequences
+    
     payload = {
         "model": llm_model,
         "messages": [
@@ -160,7 +164,7 @@ def call_llm_for_rephrasing(
         ],
         "temperature": temperature,
         "max_tokens": max_tokens,
-        "stop": ["\n\n", "Question:", "Current Question:", "Frage:", "Aktuelle Frage:"],
+        "stop": stop_sequences,
         "stream": False,
     }
     
@@ -294,7 +298,8 @@ async def rephrase_query_with_context(
             max_tokens=dynamic_max_response_tokens,
             temperature=settings.query_rephrasing.temperature,
             timeout=settings.query_rephrasing.timeout_seconds,
-            api_key=api_key
+            api_key=api_key,
+            lang=detected_lang
         )
         
         # Calculate latency

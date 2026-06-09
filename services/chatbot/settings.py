@@ -37,6 +37,21 @@ class QueryRephrasingConfig(BaseSettings):
             ),
             description="English prompt template for query rephrasing with placeholders: {conversation_history}, {current_query}"
         )
+        
+        role_labels: dict[str, str] = Field(
+            default={
+                "user": "User",
+                "assistant": "Assistant",
+                "system": "System",
+                "unknown": "Unknown",
+            },
+            description="English role labels for conversation message formatting"
+        )
+        
+        stop_sequences: list[str] = Field(
+            default=["\n\n", "Question:", "Current Question:"],
+            description="English stop sequences for LLM query rephrasing"
+        )
     
     class GermanConfig(BaseSettings):
         """German-specific query rephrasing settings."""
@@ -57,6 +72,21 @@ class QueryRephrasingConfig(BaseSettings):
                 "Umformulierte Suchanfrage:"
             ),
             description="German prompt template for query rephrasing with placeholders: {conversation_history}, {current_query}"
+        )
+        
+        role_labels: dict[str, str] = Field(
+            default={
+                "user": "Benutzer",
+                "assistant": "Assistent",
+                "system": "System",
+                "unknown": "Unbekannt",
+            },
+            description="German role labels for conversation message formatting"
+        )
+        
+        stop_sequences: list[str] = Field(
+            default=["\n\n", "Frage:", "Aktuelle Frage:"],
+            description="German stop sequences for LLM query rephrasing"
         )
         
     timeout_seconds: float = Field(
