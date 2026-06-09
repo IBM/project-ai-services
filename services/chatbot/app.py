@@ -16,6 +16,8 @@ from starlette.concurrency import iterate_in_threadpool
 from lingua import Language
 
 from common.misc_utils import set_log_level
+from common.lang_utils import setup_language_detector, detect_language, language_codes, get_max_tokens_map
+
 from chatbot.settings import settings
 from chatbot.conversation_utils import get_conversation_context, truncate_history_by_tokens
 from chatbot.query_rephrasing import rephrase_query_with_context
@@ -24,7 +26,6 @@ set_log_level(settings.common.app.log_level)
 
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 import common.db_utils as db
-from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
 from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
 from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models, tokenize_with_llm
 from common.perf_utils import perf_registry
@@ -48,6 +49,12 @@ vectorstore_lock = asyncio.Lock()
 emb_model_dict = {}
 llm_model_dict = {}
 reranker_model_dict = {}
+
+# Language-specific messages
+NO_DOCUMENTS_FOUND_MESSAGES = {
+    "EN": "No documents found in the knowledge base for this query.",
+    "DE": "Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden."
+}
 
 # Cache for auth requirement check
 auth_required_cache = {"checked": False, "required": False}
@@ -340,6 +347,27 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
     if not current_query or not current_query.strip():
         APIError.raise_error(ErrorCode.EMPTY_INPUT, "Query cannot be empty")
 
+    # Detect language from current query (stateless - detect on every message)
+    try:
+        query_lang = detect_language(current_query)
+        
+        # Fallback to English if unsupported language detected
+        if query_lang not in language_codes.values():
+            logging.debug(
+                f"Unsupported language detected ({query_lang}). "
+                "Falling back to English."
+            )
+            query_lang = language_codes["English"]
+        
+        logging.debug(f"Detected language for current message: {query_lang}")
+        
+    except Exception as e:
+        logging.warning(
+            f"Language detection failed: {e}. "
+            "Falling back to English."
+        )
+        query_lang = language_codes["English"]
+
     # Ensure vectorstore is initialized on first request
     if vectorstore is None:
         await ensure_vectorstore_initialized()
@@ -367,25 +395,22 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                 return StreamingResponse(stream_query_length_error(), media_type="text/event-stream")
             APIError.raise_error(ErrorCode.INVALID_PARAMETER, error_msg)
 
-        lang = detect_language(current_query)
-
         max_tokens = req.max_tokens
-        # giving priority to max_tokens passed in the request, otherwise according to detected language of query
+        # giving priority to max_tokens passed in the request, otherwise according to query language
         if not max_tokens:
-            max_tokens = max_tokens_map.get(lang, settings.llm.max_tokens)
+            max_tokens = get_max_tokens_map().get(query_lang, settings.llm.english.max_tokens)
 
         rephrased_query = current_query
         
-        # Process conversation history and rephrase query for English language
-        if previous_messages and lang == "EN":
-            # Truncate history for query rephrasing with 1000 token budget
+        # Process conversation history and rephrase query for supported conversational languages
+        if previous_messages:
             truncated_history_for_rephrasing = await asyncio.to_thread(
                 truncate_history_by_tokens,
                 previous_messages,
                 settings.query_rephrasing.history_token_budget,
                 lambda text: tokenize_with_llm(text, llm_endpoint)
             )
-            
+
             if truncated_history_for_rephrasing:
                 rephrased_query = await rephrase_query_with_context(
                     current_query=current_query,
@@ -393,7 +418,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     llm_endpoint=llm_endpoint,
                     llm_model=llm_model,
                     api_key=api_key,
-                    lang=lang,
+                    lang=query_lang,
                 )
 
         docs, perf_stat_dict = await asyncio.to_thread(
@@ -408,9 +433,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         )
         
         if not docs:
-            message = "No documents found in the knowledge base for this query."
-            if lang == lang_de:
-                message = "Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden."
+            message = NO_DOCUMENTS_FOUND_MESSAGES.get(query_lang, NO_DOCUMENTS_FOUND_MESSAGES["EN"])
             if req.stream:
                 async def stream_docs_not_found():
                     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
@@ -442,7 +465,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     max_tokens,
                     req.temperature,
                     perf_stat_dict,
-                    lang,
+                    query_lang,
                     api_key,
                     previous_messages,
                     rephrased_query,
@@ -464,7 +487,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                 max_tokens,
                 req.temperature,
                 perf_stat_dict,
-                lang,
+                query_lang,
                 api_key,
                 previous_messages,
                 rephrased_query,
