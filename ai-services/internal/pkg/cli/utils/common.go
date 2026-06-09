@@ -74,9 +74,7 @@ func renderApplicationPS(appClient *catalogClient.ApplicationClient, outputWide 
 		// Get PS information for the application
 		psResp, err := appClient.GetApplicationPS(app.ID)
 		if err != nil {
-			logger.Errorf("Error fetching PS for application %s: %v\n", app.ID, err)
-
-			continue
+			return fmt.Errorf("failed to fetch application: %w", err)
 		}
 
 		// Process services pods
