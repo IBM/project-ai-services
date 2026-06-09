@@ -5,7 +5,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.openapi.docs import get_swagger_ui_html
 
 from common.misc_utils import set_log_level
@@ -119,7 +119,7 @@ def swagger_root():
     ),
     response_description="Documents ranked by descending score, with score_type indicating the scoring method used."
 )
-async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchResponse:
+async def similarity_search(req: SimilaritySearchRequest, response: Response) -> SimilaritySearchResponse:
     if not req.query or not req.query.strip():
         APIError.raise_error(ErrorCode.EMPTY_INPUT, "query is required")
 
@@ -145,7 +145,7 @@ async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchRes
         reranker_model = reranker_model_dict.get("reranker_model") if req.rerank else None
         reranker_endpoint = reranker_model_dict.get("reranker_endpoint") if req.rerank else None
 
-        docs, scores, score_type = await asyncio.to_thread(
+        docs, scores, score_type, perf_stat_dict = await asyncio.to_thread(
             perform_similarity_search,
             req.query,
             emb_model,
@@ -176,7 +176,17 @@ async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchRes
         for doc, score in zip(docs, scores)
     ]
 
-    return SimilaritySearchResponse(score_type=score_type, results=results)
+    # Add timing information to response headers
+    response.headers["X-Retrieve-Time"] = str(perf_stat_dict.get("retrieve_time", 0.0))
+    if "rerank_time" in perf_stat_dict:
+        response.headers["X-Rerank-Time"] = str(perf_stat_dict["rerank_time"])
+    total_time = sum(v for v in perf_stat_dict.values() if v is not None)
+    response.headers["X-Total-Time"] = str(total_time)
+
+    return SimilaritySearchResponse(
+        score_type=score_type,
+        results=results
+    )
 
 
 @app.get(
