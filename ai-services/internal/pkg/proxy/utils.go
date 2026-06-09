@@ -69,8 +69,9 @@ func BuildRoutesFromAnnotation(routesAnnotation, domainSuffix, podName string) (
 
 		// Build route - use pod name as upstream since containers are in the same pod
 		// Domain is simply: subdomain.domainSuffix
+		// Route ID uses just the subdomain since subdomains are already globally unique
 		route := Route{
-			ID:       fmt.Sprintf("%s--%s", podName, subdomain),
+			ID:       subdomain,
 			Domain:   fmt.Sprintf("%s.%s", subdomain, domainSuffix),
 			Upstream: fmt.Sprintf("%s:%s", podName, port),
 			Terminal: true,
