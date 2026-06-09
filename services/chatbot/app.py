@@ -348,24 +348,24 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
 
     # Detect language from current query (stateless - detect on every message)
     try:
-        session_lang = detect_language(current_query)
+        query_lang = detect_language(current_query)
         
         # Fallback to English if unsupported language detected
-        if session_lang not in language_codes.values():
+        if query_lang not in language_codes.values():
             logging.debug(
-                f"Unsupported language detected ({session_lang}). "
+                f"Unsupported language detected ({query_lang}). "
                 "Falling back to English."
             )
-            session_lang = language_codes["English"]
+            query_lang = language_codes["English"]
         
-        logging.debug(f"Detected language for current message: {session_lang}")
+        logging.debug(f"Detected language for current message: {query_lang}")
         
     except Exception as e:
         logging.warning(
             f"Language detection failed: {e}. "
             "Falling back to English."
         )
-        session_lang = language_codes["English"]
+        query_lang = language_codes["English"]
 
     # Ensure vectorstore is initialized on first request
     if vectorstore is None:
@@ -395,9 +395,9 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
             APIError.raise_error(ErrorCode.INVALID_PARAMETER, error_msg)
 
         max_tokens = req.max_tokens
-        # giving priority to max_tokens passed in the request, otherwise according to session language
+        # giving priority to max_tokens passed in the request, otherwise according to query language
         if not max_tokens:
-            max_tokens = max_tokens_map.get(session_lang, settings.llm.english.max_tokens)
+            max_tokens = max_tokens_map.get(query_lang, settings.llm.english.max_tokens)
 
         rephrased_query = current_query
         
@@ -417,7 +417,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     llm_endpoint=llm_endpoint,
                     llm_model=llm_model,
                     api_key=api_key,
-                    lang=session_lang,
+                    lang=query_lang,
                 )
 
         docs, perf_stat_dict = await asyncio.to_thread(
@@ -432,7 +432,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         )
         
         if not docs:
-            message = NO_DOCUMENTS_FOUND_MESSAGES.get(session_lang, NO_DOCUMENTS_FOUND_MESSAGES["EN"])
+            message = NO_DOCUMENTS_FOUND_MESSAGES.get(query_lang, NO_DOCUMENTS_FOUND_MESSAGES["EN"])
             if req.stream:
                 async def stream_docs_not_found():
                     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
@@ -464,7 +464,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     max_tokens,
                     req.temperature,
                     perf_stat_dict,
-                    session_lang,
+                    query_lang,
                     api_key,
                     previous_messages,
                     rephrased_query,
@@ -486,7 +486,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                 max_tokens,
                 req.temperature,
                 perf_stat_dict,
-                session_lang,
+                query_lang,
                 api_key,
                 previous_messages,
                 rephrased_query,
