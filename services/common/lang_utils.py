@@ -28,10 +28,19 @@ def get_prompt_for_language(lang: str, prompts: dict[str, str]) -> str:
     # Use the prompts dictionary passed as parameter
     return prompts.get(lang, prompts.get(language_codes["English"], ""))
 
-max_tokens_map = {
-    language_codes["English"]: settings.llm.english.max_tokens,
-    language_codes["German"]: settings.llm.german.max_tokens
-}
+def get_max_tokens_map() -> dict[str, int]:
+    """
+    Get the max tokens map for different languages.
+    Lazily imports from chatbot settings to avoid circular dependencies.
+    
+    Returns:
+        Dictionary mapping language codes to max tokens
+    """
+    from chatbot.settings import settings as chatbot_settings
+    return {
+        language_codes["English"]: chatbot_settings.llm.english.max_tokens,
+        language_codes["German"]: chatbot_settings.llm.german.max_tokens
+    }
 
 def setup_language_detector(languages: list[Language]):
     """Call once at app startup, before serving requests."""

@@ -24,7 +24,7 @@ set_log_level(settings.common.app.log_level)
 
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 import common.db_utils as db
-from common.lang_utils import setup_language_detector, detect_language, language_codes, max_tokens_map
+from common.lang_utils import setup_language_detector, detect_language, language_codes, get_max_tokens_map
 from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
 from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models, tokenize_with_llm
 from common.perf_utils import perf_registry
@@ -397,7 +397,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         max_tokens = req.max_tokens
         # giving priority to max_tokens passed in the request, otherwise according to query language
         if not max_tokens:
-            max_tokens = max_tokens_map.get(query_lang, settings.llm.english.max_tokens)
+            max_tokens = get_max_tokens_map().get(query_lang, settings.llm.english.max_tokens)
 
         rephrased_query = current_query
         
