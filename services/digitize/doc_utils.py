@@ -1222,7 +1222,7 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, 
         emb_endpoint: Embedding endpoint for token counting
         max_tokens: Maximum tokens per chunk
         doc_id: Document ID
-        language: Pre-detected lingua ISO language code (e.g., 'EN', 'DE')
+        language: Language code for sentence splitting (detected from document text)
     """
     t0 = time.time()
     processed_chunk_json_path = (Path(out_path) / f"{doc_id}{text_chunk_suffix}")
@@ -1326,7 +1326,7 @@ def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_t
         emb_endpoint: Embedding endpoint for token counting
         max_tokens: Maximum tokens per chunk
         doc_id: Document ID
-        language: Pre-detected lingua ISO language code (e.g., 'EN', 'DE')
+        language: Language code for sentence splitting (detected from document text)
     """
     t0 = time.time()
 
@@ -1354,7 +1354,7 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
         emb_endpoint: Embedding endpoint for token counting
         max_tokens: Maximum tokens per chunk
         doc_id: Document ID
-        language: Pre-detected lingua ISO language code (e.g., 'EN', 'DE')
+        language: Language code for sentence splitting (detected from document text)
     """
     # Convert lingua ISO code to SentenceSplitter format
     t0 = time.time()
