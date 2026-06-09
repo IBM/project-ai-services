@@ -137,7 +137,7 @@ class TestLifespan:
             async with lifespan(mock_app):
                 pass
             
-            # Verify all functions were called (vectorstore is NOT initialized in lifespan, it's lazy-loaded)
+            # Verify all functions were called in correct order (vectorstore is NOT initialized in lifespan, it's lazy-loaded)
             assert call_order == ['models', 'language', 'session']
             mock_init_models.assert_called_once()
             mock_init_vectorstore.assert_not_called()  # Vectorstore is lazy-loaded on first request
@@ -165,6 +165,7 @@ class TestLifespan:
             
             # Verify language detector was set up with English and German
             mock_setup_lang.assert_called_once()
+            # Get the first positional argument (list of languages)
             call_args = mock_setup_lang.call_args[0][0]
             assert Language.ENGLISH in call_args
             assert Language.GERMAN in call_args

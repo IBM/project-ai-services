@@ -185,10 +185,10 @@ class TestSystemPromptValidator:
         )
         
         assert config.english.system_prompt == custom_prompt
-        # validate_prompt_with_llm is called twice: once for English, once for German defaults
-        assert mock_validate.call_count == 2
-        # create_llm_session is called twice: once for English validator, once for German validator
-        assert mock_create_session.call_count == 2
+        # validate_prompt_with_llm is called once in model_post_init for the custom prompt
+        assert mock_validate.call_count == 1
+        # create_llm_session is called once in model_post_init
+        assert mock_create_session.call_count == 1
     
     @patch('chatbot.settings.create_llm_session')
     @patch('chatbot.settings.misc_utils.SESSION', None)
@@ -197,7 +197,7 @@ class TestSystemPromptValidator:
     def test_validate_system_prompt_llm_validation_fail(
         self, mock_validate, mock_detect_lang, mock_create_session
     ):
-        """Test system_prompt is applied even when LLM validation fails (validation happens in validator, not model_post_init)."""
+        """Test system_prompt falls back to default when LLM validation fails."""
         from chatbot.settings import RAGConfig
         from chatbot.prompt_validator import ValidationResult, PromptValidationResponse
         
@@ -212,11 +212,11 @@ class TestSystemPromptValidator:
             llm_validate_custom_system_prompt=True
         )
         
-        # model_post_init applies the prompt, validation happens in field validators
-        # The prompt is applied to English config via model_post_init
-        assert config.english.system_prompt == custom_prompt
-        # validate_prompt_with_llm is called twice: once for English, once for German defaults
-        assert mock_validate.call_count == 2
+        # When validation fails, model_post_init returns early and doesn't apply the custom prompt
+        # So English config should still have the default prompt
+        assert config.english.system_prompt == RAGConfig.EnglishConfig.DEFAULT_SYSTEM_PROMPT
+        # validate_prompt_with_llm is called once in model_post_init
+        assert mock_validate.call_count == 1
     
     @patch('chatbot.settings.create_llm_session')
     @patch('chatbot.settings.misc_utils.SESSION', None)
@@ -225,7 +225,7 @@ class TestSystemPromptValidator:
     def test_validate_system_prompt_llm_validation_injection(
         self, mock_validate, mock_detect_lang, mock_create_session
     ):
-        """Test system_prompt is applied even when injection is detected (validation happens in validator, not model_post_init)."""
+        """Test system_prompt falls back to default when injection is detected."""
         from chatbot.settings import RAGConfig
         from chatbot.prompt_validator import ValidationResult, PromptValidationResponse
         
@@ -240,11 +240,11 @@ class TestSystemPromptValidator:
             llm_validate_custom_system_prompt=True
         )
         
-        # model_post_init applies the prompt, validation happens in field validators
-        # The prompt is applied to English config via model_post_init
-        assert config.english.system_prompt == custom_prompt
-        # validate_prompt_with_llm is called twice: once for English, once for German defaults
-        assert mock_validate.call_count == 2
+        # When injection is detected, model_post_init returns early and doesn't apply the custom prompt
+        # So English config should still have the default prompt
+        assert config.english.system_prompt == RAGConfig.EnglishConfig.DEFAULT_SYSTEM_PROMPT
+        # validate_prompt_with_llm is called once in model_post_init
+        assert mock_validate.call_count == 1
     
     @patch('chatbot.settings.misc_utils.SESSION', None)
     @patch('common.lang_utils.detect_language')
