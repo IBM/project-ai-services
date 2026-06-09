@@ -16,6 +16,10 @@ from starlette.concurrency import iterate_in_threadpool
 from lingua import Language
 
 from common.misc_utils import set_log_level
+from common.lang_utils import setup_language_detector, detect_language, language_codes, get_max_tokens_map
+
+setup_language_detector([Language.ENGLISH, Language.GERMAN])
+
 from chatbot.settings import settings
 from chatbot.conversation_utils import get_conversation_context, truncate_history_by_tokens
 from chatbot.query_rephrasing import rephrase_query_with_context
@@ -24,7 +28,6 @@ set_log_level(settings.common.app.log_level)
 
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 import common.db_utils as db
-from common.lang_utils import setup_language_detector, detect_language, language_codes, get_max_tokens_map
 from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
 from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models, tokenize_with_llm
 from common.perf_utils import perf_registry
@@ -92,7 +95,6 @@ async def lifespan(app):
     filtered_paths = ['/health']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     initialize_models()
-    setup_language_detector([Language.ENGLISH, Language.GERMAN])
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
     yield
     stderr_monitor.stop()
