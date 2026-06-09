@@ -21,10 +21,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/httpclient"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimePodman "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 const (
@@ -424,7 +424,7 @@ func createAndStartSidecar(ctx context.Context, sidecarName, podID string) (stri
 			Pod:     podID,
 		},
 		ContainerStorageConfig: specgen.ContainerStorageConfig{
-			Image: constants.SidecarImage,
+			Image: vars.ToolImage,
 		},
 		ContainerHealthCheckConfig: specgen.ContainerHealthCheckConfig{
 			// Set HealthConfig to nil to disable health checks

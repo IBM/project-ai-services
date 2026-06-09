@@ -21,11 +21,6 @@ const (
 	FilePerm = 0644
 )
 
-// Restore operation constants.
-const (
-	SidecarImage = "registry.access.redhat.com/ubi9/ubi-minimal:9.8"
-)
-
 const (
 	PercentageDivisor = 100.0
 )
