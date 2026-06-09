@@ -272,73 +272,27 @@ func (d *PodmanDeployer) collectImagesFromPlan(plan *DeploymentPlan) map[string]
 // extractImagesFromComponent extracts container images from a component's templates.
 func (d *PodmanDeployer) extractImagesFromComponent(comp *ComponentPlan, imageSet map[string]bool) {
 	// Load component templates
-	tmpls, err := d.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
+	templates, err := d.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
 	if err != nil {
 		logger.Errorf("Failed to load component templates for %s/%s: %v\n", comp.ComponentType, comp.ProviderID, err)
-
 		return
 	}
 
-	// Extract images from each template
-	for templateName, tmpl := range tmpls {
-		d.extractImagesFromTemplate(tmpl, templateName, comp.Values, imageSet)
-	}
+	// Extract images from templates with custom values directly into imageSet
+	d.catalogProvider.CollectImagesFromTemplates(templates, comp.Values, imageSet)
 }
 
 // extractImagesFromService extracts container images from a service's templates.
 func (d *PodmanDeployer) extractImagesFromService(svc *ServicePlan, imageSet map[string]bool) {
 	// Load service templates
-	tmpls, err := d.catalogProvider.LoadServiceTemplates(svc.CatalogID)
+	templates, err := d.catalogProvider.LoadServiceTemplates(svc.CatalogID)
 	if err != nil {
 		logger.Errorf("Failed to load service templates for %s: %v\n", svc.CatalogID, err)
-
 		return
 	}
 
-	// Extract images from each template
-	for templateName, tmpl := range tmpls {
-		d.extractImagesFromTemplate(tmpl, templateName, svc.Values, imageSet)
-	}
-}
-
-// extractImagesFromTemplate renders a template and extracts container images from it.
-func (d *PodmanDeployer) extractImagesFromTemplate(
-	tmpl *template.Template,
-	templateName string,
-	values map[string]any,
-	imageSet map[string]bool,
-) {
-	// Prepare minimal params for rendering
-	initialParams := map[string]any{
-		"InstanceSlug": "image-extraction",
-		"TemplateID":   uuid.New(),
-		"BaseDir":      utils.GetBaseDir(),
-		"Values":       values,
-		"env":          map[string]map[string]string{},
-	}
-
-	// Render the template
-	var rendered bytes.Buffer
-	if err := tmpl.Execute(&rendered, initialParams); err != nil {
-		logger.Errorf("Failed to render template %s for image extraction: %v\n", templateName, err)
-
-		return
-	}
-
-	// Parse the rendered template
-	var podSpec podmodels.PodSpec
-	if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
-		logger.Errorf("Failed to parse rendered template %s: %v\n", templateName, err)
-
-		return
-	}
-
-	// Extract images from containers
-	for _, container := range podSpec.Spec.Containers {
-		if container.Image != "" {
-			imageSet[container.Image] = true
-		}
-	}
+	// Extract images from templates with custom values directly into imageSet
+	d.catalogProvider.CollectImagesFromTemplates(templates, svc.Values, imageSet)
 }
 
 // pullImages pulls only missing images from the provided set using the runtime.
