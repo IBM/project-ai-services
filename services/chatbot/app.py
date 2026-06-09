@@ -53,7 +53,9 @@ reranker_model_dict = {}
 # Language-specific messages
 NO_DOCUMENTS_FOUND_MESSAGES = {
     "EN": "No documents found in the knowledge base for this query.",
-    "DE": "Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden."
+    "DE": "Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden.",
+    "IT": "Nessun documento trovato nella base di conoscenza per questa richiesta.",
+    "FR": "Aucun document trouvé dans la base de connaissances pour cette requête.",
 }
 
 # Cache for auth requirement check
@@ -93,7 +95,7 @@ async def lifespan(app):
     filtered_paths = ['/health']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     initialize_models()
-    setup_language_detector([Language.ENGLISH, Language.GERMAN])
+    setup_language_detector([Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH])
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
     yield
     stderr_monitor.stop()

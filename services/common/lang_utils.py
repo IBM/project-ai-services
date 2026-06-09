@@ -33,19 +33,19 @@ class LanguageCodes:
         """Get list of supported language codes.
         
         Returns:
-            List of supported language codes (e.g., ['EN', 'DE'])
+            List of supported language codes (e.g., ['EN', 'DE', 'IT', 'FR'])
         """
-        return [cls.ENGLISH, cls.GERMAN]
+        return [cls.ENGLISH, cls.GERMAN, cls.ITALIAN, cls.FRENCH]
     
 def to_sentence_splitter_lang(lingua_code: str) -> str:
     """
     Convert lingua ISO code to SentenceSplitter language code.
     
     Args:
-        lingua_code: Lingua ISO code (e.g., 'EN', 'DE')
+        lingua_code: Lingua ISO code (e.g., 'EN', 'DE', 'IT', 'FR')
         
     Returns:
-        SentenceSplitter language code (e.g., 'en', 'de')
+        SentenceSplitter language code (e.g., 'en', 'de', 'it', 'fr')
     """
     return LanguageCodes._TO_SENTENCE_SPLITTER.get(lingua_code, 'en')
 
@@ -75,7 +75,9 @@ def get_max_tokens_map() -> dict[str, int]:
     from chatbot.settings import settings as chatbot_settings
     return {
         LanguageCodes.ENGLISH: chatbot_settings.llm.english.max_tokens,
-        LanguageCodes.GERMAN: chatbot_settings.llm.german.max_tokens
+        LanguageCodes.GERMAN: chatbot_settings.llm.german.max_tokens,
+        LanguageCodes.ITALIAN: chatbot_settings.llm.italian.max_tokens,
+        LanguageCodes.FRENCH: chatbot_settings.llm.french.max_tokens,
     }
 
 def setup_language_detector(languages: list[Language]):
