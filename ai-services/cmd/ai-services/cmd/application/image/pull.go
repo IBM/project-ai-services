@@ -32,6 +32,7 @@ func pull(template string) error {
 
 	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypeOpenShift {
 		logger.Warningln("Not supported for openshift runtime")
+
 		return nil
 	}
 
@@ -62,6 +63,7 @@ func pullCatalogImages(templateID string) error {
 
 	if len(images) == 0 {
 		logger.Infoln("No images to pull")
+
 		return nil
 	}
 
@@ -78,5 +80,6 @@ func pullCatalogImages(templateID string) error {
 	}
 
 	logger.Infof("Successfully pulled all images for template '%s'\n", templateID)
+
 	return nil
 }

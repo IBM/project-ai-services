@@ -31,19 +31,21 @@ func (p *CatalogProvider) GetCatalogImages(templateID string) ([]string, error) 
 		if err := p.collectArchitectureImages(arch.Services, allImages); err != nil {
 			return nil, err
 		}
-	} else {
-		// Try to load as service
-		service, err := p.LoadService(templateID)
-		if err == nil {
-			if err := p.collectServiceWithDependencies(templateID, service.Dependencies, allImages); err != nil {
-				return nil, err
-			}
-		} else {
-			return nil, fmt.Errorf("template '%s' not found as service or architecture", templateID)
-		}
+
+		return utils.ExtractMapKeys(allImages), nil
 	}
 
-	return utils.ExtractMapKeys(allImages), nil
+	// Try to load as service
+	service, err := p.LoadService(templateID)
+	if err == nil {
+		if err := p.collectServiceWithDependencies(templateID, service.Dependencies, allImages); err != nil {
+			return nil, err
+		}
+
+		return utils.ExtractMapKeys(allImages), nil
+	}
+
+	return nil, fmt.Errorf("template '%s' not found as service or architecture", templateID)
 }
 
 // addCatalogInfrastructureImages adds images from the catalog service templates.
@@ -65,7 +67,10 @@ func (p *CatalogProvider) addCatalogInfrastructureImages(allImages map[string]bo
 	}
 
 	// Collect images from catalog templates
-	p.CollectImagesFromTemplates(catalogTemplates, values, allImages)
+	if err := p.CollectImagesFromTemplates(catalogTemplates, values, allImages); err != nil {
+		return fmt.Errorf("failed to collect images from catalog templates: %w", err)
+	}
+
 	return nil
 }
 
@@ -109,7 +114,10 @@ func (p *CatalogProvider) addServiceImages(serviceID string, allImages map[strin
 		return fmt.Errorf("failed to load service templates: %w", err)
 	}
 
-	p.CollectImagesFromTemplates(templates, values, allImages)
+	if err := p.CollectImagesFromTemplates(templates, values, allImages); err != nil {
+		return fmt.Errorf("failed to collect images from service templates: %w", err)
+	}
+
 	return nil
 }
 
@@ -172,7 +180,10 @@ func (p *CatalogProvider) addComponentImages(componentType, componentID string, 
 		return fmt.Errorf("failed to load component templates: %w", err)
 	}
 
-	p.CollectImagesFromTemplates(templates, values, allImages)
+	if err := p.CollectImagesFromTemplates(templates, values, allImages); err != nil {
+		return fmt.Errorf("failed to collect images from component templates: %w", err)
+	}
+
 	return nil
 }
 

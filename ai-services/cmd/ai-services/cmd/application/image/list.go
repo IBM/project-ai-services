@@ -31,6 +31,7 @@ func list(templateName string) error {
 
 	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypeOpenShift {
 		logger.Warningln("Not supported for openshift runtime")
+
 		return nil
 	}
 
@@ -59,6 +60,7 @@ func listCatalogImages(templateID string) error {
 
 	if len(images) == 0 {
 		logger.Infoln("No images found")
+
 		return nil
 	}
 
