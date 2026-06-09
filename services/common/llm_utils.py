@@ -6,7 +6,6 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
-from common.lang_utils import get_prompt_for_language, lang_en, lang_de
 from common.misc_utils import get_logger, resolve_model_max_len
 from common.settings import settings
 from common.retry_utils import retry_on_transient_error
@@ -182,117 +181,86 @@ def query_vllm_payload(
 
     logger.debug(f"Original Context: {context}")
 
-    # Conversational RAG mode with message history (for English language)
-    # For non-English languages, use legacy prompts without conversation history
-    if lang == "EN":
-        # Conversational RAG mode with message history
-        question_token_count = len(tokenize_with_llm(question, llm_endpoint))
-        context_tokens = tokenize_with_llm(context, llm_endpoint)
-        context_token_count = len(context_tokens)
+    question_token_count = len(tokenize_with_llm(question, llm_endpoint))
+    context_tokens = tokenize_with_llm(context, llm_endpoint)
+    context_token_count = len(context_tokens)
 
-        llm_max_model_len = resolve_model_max_len(
-            llm_endpoint,
-            llm_model,
-            settings.llm.max_model_len,
-            api_key,
+    llm_max_model_len = resolve_model_max_len(
+        llm_endpoint,
+        llm_model,
+        settings.llm.max_model_len,
+        api_key,
+    )
+
+    # Calculate budget for context first (prioritize context over history)
+    budget_for_context = llm_max_model_len - (
+        chatbot_settings.chatbot.initial_system_token_overhead +
+        chatbot_settings.chatbot.rag_system_token_overhead +
+        question_token_count +
+        max_new_tokens
+    )
+    budget_for_context = max(0, budget_for_context)
+    # Check if context fits within budget
+    if context_token_count <= budget_for_context:
+        # Context fits completely, use remaining budget for history
+        remaining_budget_for_history = budget_for_context - context_token_count
+        # Cap history budget at configured limit or remaining budget, whichever is smaller
+        history_budget = min(chatbot_settings.chatbot.history_token_budget, remaining_budget_for_history)
+        logger.debug(
+            f"Context fits completely ({context_token_count} tokens). "
+            f"History budget: {history_budget} tokens"
         )
-
-        # Calculate budget for context first (prioritize context over history)
-        budget_for_context = llm_max_model_len - (
-            chatbot_settings.chatbot.initial_system_token_overhead +
-            chatbot_settings.chatbot.rag_system_token_overhead +
-            question_token_count +
-            max_new_tokens  # Reserve space for model's response
-        )
-        budget_for_context = max(0, budget_for_context)
-
-        # Check if context fits within budget
-        if context_token_count <= budget_for_context:
-            # Context fits completely, use remaining budget for history
-            remaining_budget_for_history = budget_for_context - context_token_count
-            # Cap history budget at configured limit or remaining budget, whichever is smaller
-            history_budget = min(chatbot_settings.chatbot.history_token_budget, remaining_budget_for_history)
-            logger.debug(f"Context fits completely ({context_token_count} tokens). History budget: {history_budget} tokens")
-        else:
-            # Context exceeds budget, truncate context and no history
-            context = truncate_text_to_token_limit(context, budget_for_context, llm_endpoint, tokens=context_tokens)
-            history_budget = 0
-            previous_messages = None
-            logger.debug(f"Context truncated from {context_token_count} to {budget_for_context} tokens. No history included.")
-
-        logger.debug(f"Truncated Context: {context}")
-
-        message_array = [
-            {
-                "role": "system",
-                "content": chatbot_settings.chatbot.system_prompt,
-            }
-        ]
-
-        if previous_messages and history_budget > 0:
-            # Truncate previous messages to fit within history budget using shared utility
-            truncated_messages = truncate_history_by_tokens(
-                previous_messages,
-                history_budget,
-                lambda text: tokenize_with_llm(text, llm_endpoint)
-            )
-            
-            if truncated_messages:
-                message_array.extend(truncated_messages)
-
-        final_system_content = chatbot_settings.chatbot.query_system_prompt.format(
-            context=context,
-            rephrased_query=rephrased_query or question,
-        )
-        message_array.append({
-            "role": "system",
-            "content": final_system_content,
-        })
-        message_array.append({
-            "role": "user",
-            "content": question,
-        })
-
-        logger.debug(f"Message array length: {len(message_array)}")
-        logger.debug(f"History messages: {len(previous_messages) if previous_messages else 0}")
     else:
-        # Non-English languages: use simple prompt template without conversation history
-        # Dynamic chunk truncation: truncates the context if it doesn't fit in the sequence length
-        question_token_count = len(tokenize_with_llm(question, llm_endpoint))
-        llm_max_model_len = resolve_model_max_len(
-            llm_endpoint,
-            llm_model,
-            settings.llm.max_model_len,
-            api_key,
+        context = truncate_text_to_token_limit(context, budget_for_context, llm_endpoint, tokens=context_tokens)
+        history_budget = 0
+        previous_messages = None
+        logger.debug(
+            f"Context truncated from {context_token_count} to {budget_for_context} tokens. "
+            "No history included."
         )
-        remaining_tokens = llm_max_model_len - (
-            chatbot_settings.chatbot.prompt_template_token_count +
-            question_token_count +
-            max_new_tokens  # Reserve space for model's response
-        )
-        remaining_tokens = max(0, remaining_tokens)
-        
-        context = truncate_text_to_token_limit(context, remaining_tokens, llm_endpoint)
-        logger.debug(f"Truncated Context: {context}")
 
-        # Get the appropriate prompt template based on language and format it
-        prompt_template = get_prompt_for_language(
-            lang,
-            {
-                lang_en: chatbot_settings.chatbot.legacy_query_vllm_stream_en_prompt,
-                lang_de: chatbot_settings.chatbot.query_vllm_stream_de_prompt
-            }
-        )
-        prompt = prompt_template.format(context=context, question=question)
-        
-        message_array = [
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        ]
+    logger.debug(f"Truncated Context: {context}")
 
-        logger.debug(f"Using legacy prompt mode for non-English language: {lang}")
+    match lang:
+        case "DE":
+            system_prompt = chatbot_settings.chatbot.german.system_prompt
+            query_system_prompt = chatbot_settings.chatbot.german.query_system_prompt
+        case _:
+            system_prompt = chatbot_settings.chatbot.english.system_prompt
+            query_system_prompt = chatbot_settings.chatbot.english.query_system_prompt
+
+    message_array = [
+        {
+            "role": "system",
+            "content": system_prompt,
+        }
+    ]
+
+    if previous_messages and history_budget > 0:
+        truncated_messages = truncate_history_by_tokens(
+            previous_messages,
+            history_budget,
+            lambda text: tokenize_with_llm(text, llm_endpoint)
+        )
+
+        if truncated_messages:
+            message_array.extend(truncated_messages)
+
+    final_system_content = query_system_prompt.format(
+        context=context,
+        rephrased_query=rephrased_query or question,
+    )
+    message_array.append({
+        "role": "system",
+        "content": final_system_content,
+    })
+    message_array.append({
+        "role": "user",
+        "content": question,
+    })
+
+    logger.debug(f"Message array length: {len(message_array)}")
+    logger.debug(f"History messages: {len(previous_messages) if previous_messages else 0}")
 
     headers = get_vllm_headers(api_key)
     payload = {
