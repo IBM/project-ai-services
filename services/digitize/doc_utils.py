@@ -599,7 +599,7 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
 
     return merged_dict
 
-def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint, document_language='en'):
+def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint, document_language=lang_en):
     table_count = 0
     process_time = 0.0
     filtered_table_dicts = {}
@@ -705,14 +705,14 @@ def process_converted_document(converted_json_path, pdf_path, out_path, gen_mode
         timings["process_text"] = process_time
 
         # Detect document language early using the processed text
-        document_language = 'en'  # Default
+        document_language = lang_en  # Default
         try:
             with open(processed_text_json_path, "r") as f:
                 text_data = json.load(f)
                 document_language = detect_document_language(text_data)
                 logger.info(f"Detected document language: {document_language}")
         except Exception as e:
-            logger.warning(f"Failed to detect document language, using default 'en': {e}")
+            logger.warning(f"Failed to detect document language, using default {lang_en}: {e}")
 
         table_count, process_time = process_table(converted_doc, pdf_path, processed_table_json_path, gen_model, gen_endpoint, document_language)
         timings["process_tables"] = process_time
@@ -788,7 +788,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
     def _run_batch(batch_paths, convert_worker, max_worker, doc_id_dict, indexing_callback=None):
         batch_stats = {}
-
+        document_language = lang_en
         if not batch_paths:
             return batch_stats
 
@@ -941,7 +941,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         if indexing_callback:
                             try:
                                 # Create chunks for immediate indexing
-                                doc_chunks = merge_chunked_documents(text_chunk_json, table_chunk_json, path)
+                                doc_chunks = merge_chunked_documents(text_chunk_json, table_chunk_json, path, language=document_language)
                                 # Inject doc_id into chunks
                                 for chunk in doc_chunks:
                                     chunk["doc_id"] = doc_id
@@ -1132,7 +1132,7 @@ def detect_document_language(data) -> str:
         return default_lang
 
 
-def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50, language='en'):
+def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50, language=lang_en):
     """
     Split text into token-based chunks using sentence boundaries.
     
@@ -1180,7 +1180,7 @@ def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50,
     return chunks
 
 
-def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, language='en'):
+def flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, language=lang_en):
     content = current_chunk["content"].strip()
     if not content:
         return
@@ -1423,7 +1423,7 @@ def count_chunks(in_txt_f, in_tab_f):
     return txt_count + tab_count
 
 
-def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
+def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn, language=lang_en):
     """
     Merge pre-chunked text and table documents into final chunk list.
     Both inputs are already chunked to fit embedding limits.
@@ -1459,7 +1459,7 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
                 "filename": orig_fn,
                 "type": "text",
                 "source": meta_info,
-                "language": "en",
+                "language": language,
                 "page_number": page_number,
                 "chunk_index": txt_idx,
                 "created_at": created_at
@@ -1494,7 +1494,7 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
                 "type": "table",
                 "source": caption,
                 "page_number": page_number,
-                "language": "en",
+                "language": language,
                 "chunk_index": txt_count + tab_idx,
                 "created_at": created_at
             })
