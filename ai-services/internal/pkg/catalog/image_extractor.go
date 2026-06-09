@@ -79,12 +79,12 @@ func (p *CatalogProvider) collectArchitectureImages(services []types.ServiceRefe
 	for _, svcRef := range services {
 		service, err := p.LoadService(svcRef.ID)
 		if err != nil {
-			continue
+			return fmt.Errorf("failed to load service %s: %w", svcRef.ID, err)
 		}
 
 		// Reuse collectServiceWithDependencies to collect both service and component images
 		if err := p.collectServiceWithDependencies(svcRef.ID, service.Dependencies, allImages); err != nil {
-			logger.Errorf("Failed to collect images for service %s: %v", svcRef.ID, err)
+			return fmt.Errorf("failed to collect images for service %s: %w", svcRef.ID, err)
 		}
 	}
 
@@ -161,7 +161,7 @@ func (p *CatalogProvider) collectComponentsByType(componentType string, componen
 		}
 
 		if err := p.addComponentImages(comp.ComponentType, comp.ID, allImages); err != nil {
-			logger.Errorf("Failed to collect images for component %s/%s: %v", comp.ComponentType, comp.ID, err)
+			return fmt.Errorf("failed to collect images for component %s/%s: %w", comp.ComponentType, comp.ID, err)
 		}
 	}
 
