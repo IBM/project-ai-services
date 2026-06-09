@@ -3,15 +3,27 @@ package catalog
 import (
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/assets"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // GetCatalogImages collects all unique images from a service or architecture template.
 // This is the main entry point for catalog-based image collection from CLI or API.
 func (p *CatalogProvider) GetCatalogImages(templateID string) ([]string, error) {
 	allImages := make(map[string]bool)
+
+	// Include catalog asset images (tool image used for housekeeping tasks)
+	allImages[vars.ToolImage] = true
+
+	// Include catalog infrastructure images (catalog service itself)
+	if err := p.addCatalogInfrastructureImages(allImages); err != nil {
+		logger.Errorf("Failed to collect catalog infrastructure images: %v", err)
+	}
 
 	// Try to load as architecture first
 	arch, err := p.LoadArchitecture(templateID)
@@ -32,6 +44,29 @@ func (p *CatalogProvider) GetCatalogImages(templateID string) ([]string, error) 
 	}
 
 	return utils.ExtractMapKeys(allImages), nil
+}
+
+// addCatalogInfrastructureImages adds images from the catalog service templates.
+func (p *CatalogProvider) addCatalogInfrastructureImages(allImages map[string]bool) error {
+	// Use the embed template provider to load catalog templates and values
+	// Similar to loadCatalogTemplates() in configure.go
+	tp := templates.NewEmbedTemplateProvider(&assets.CatalogFS, "")
+
+	// Load catalog values (no overrides needed for image collection)
+	values, err := tp.LoadValues(constants.CatalogAppTemplate, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to load catalog values: %w", err)
+	}
+
+	// Load catalog templates
+	catalogTemplates, err := tp.LoadAllTemplates(constants.CatalogAppTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to load catalog templates: %w", err)
+	}
+
+	// Collect images from catalog templates
+	p.CollectImagesFromTemplates(catalogTemplates, values, allImages)
+	return nil
 }
 
 // collectArchitectureImages collects all images for all services in an architecture.

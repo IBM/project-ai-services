@@ -22,6 +22,8 @@ const (
 const (
 	// CatalogAppName represents the catalog name.
 	CatalogAppName = "ai-services"
+	// CatalogAppTemplate represents the catalog template name used for loading catalog infrastructure templates.
+	CatalogAppTemplate = "catalog"
 	// CatalogSecretLabel represents the catalog secret name associated with Catalog Pod.
 	CatalogSecretLabel = "ai-services.io/secret"
 	// CatalogSecretSkipLabel represents if catalog secret associated with pod should be skipped while deletion.
