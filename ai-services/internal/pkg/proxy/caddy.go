@@ -5,11 +5,16 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
+
+// ErrRouteNotFound is returned when a route is not found in Caddy.
+var ErrRouteNotFound = errors.New("route not found")
 
 // caddyManager implements ProxyManager interface for Caddy.
 type caddyManager struct {
@@ -195,6 +200,34 @@ func (c *caddyManager) GetRouteByID(routeID string) (*Route, error) {
 	}, nil
 }
 
+// UnregisterRoute removes a route from Caddy by its ID.
+// Returns ErrRouteNotFound if the route doesn't exist (404), nil if successfully deleted (200).
+func (c *caddyManager) UnregisterRoute(routeID string) error {
+	if routeID == "" {
+		return fmt.Errorf("route ID cannot be empty")
+	}
+
+	idURL, err := url.JoinPath(c.adminURL, "id", routeID)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.R().Delete(idURL)
+	if err != nil {
+		return fmt.Errorf("failed to unregister route: %w", err)
+	}
+
+	// Handle different status codes
+	switch resp.StatusCode() {
+	case http.StatusOK:
+		return nil // Successfully deleted
+	case http.StatusNotFound:
+		return ErrRouteNotFound // Route doesn't exist
+	default:
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode(), resp.String())
+	}
+}
+
 // RegisterRoutesForAppAndReturn registers routes for an application with Caddy proxy and returns the built routes.
 //
 // Parameters:
@@ -249,6 +282,82 @@ func RegisterRoutesForAppAndReturn(
 	}
 
 	return routes, nil
+}
+
+// UnregisterRoutesFromEndpoints unregisters Caddy routes by reconstructing route IDs from endpoints.
+// Uses a map to collect unique route IDs before unregistering (similar to volume/secret deletion pattern).
+//
+// Parameters:
+//   - proxyManager: ProxyManager instance for route operations (reuse to avoid creating multiple instances)
+//   - endpoints: List of endpoint objects containing URLs (e.g., [{"type":"ui", "url":"https://digitize-ui-abc123.example.com:443"}])
+//   - instanceType: Type of instance (e.g., "service" or "component")
+//   - instanceID: ID of the service or component
+//
+// Returns:
+//   - error: nil if all routes were unregistered successfully, error otherwise
+func UnregisterRoutesFromEndpoints(
+	proxyManager ProxyManager,
+	endpoints []map[string]any,
+	instanceType string,
+	instanceID string,
+) error {
+	if len(endpoints) == 0 {
+		return nil
+	}
+
+	// Collect unique route IDs from endpoints (similar to volume/secret deletion pattern)
+	routesToUnregister := make(map[string]bool)
+
+	for _, endpoint := range endpoints {
+		urlStr, ok := endpoint["url"].(string)
+		if !ok {
+			continue
+		}
+
+		// Extract subdomain from URL (e.g., "digitize-ui-abc123" from "https://digitize-ui-abc123.example.com:443")
+		parsedURL, err := url.Parse(urlStr)
+		if err != nil {
+			logger.Warningf("Failed to parse endpoint URL %s: %v", urlStr, err)
+
+			continue
+		}
+
+		// Get the first part of the hostname (subdomain)
+		hostname := parsedURL.Hostname()
+		parts := strings.Split(hostname, ".")
+		if len(parts) == 0 {
+			logger.Warningf("Invalid hostname format in URL %s: no subdomain found", urlStr)
+
+			continue
+		}
+
+		// Reconstruct route ID to match registration format: {subdomain}
+		routeID := parts[0]
+		if routeID != "" {
+			routesToUnregister[routeID] = true
+		}
+	}
+
+	if len(routesToUnregister) == 0 {
+		logger.Infof("%s %s: no routes found to unregister", instanceType, instanceID)
+
+		return nil
+	}
+
+	logger.Infof("Unregistering %d route(s) for %s %s", len(routesToUnregister), instanceType, instanceID)
+
+	// Unregister each unique route
+	for routeID := range routesToUnregister {
+		if err := proxyManager.UnregisterRoute(routeID); err == nil {
+			logger.Infof("%s %s: Successfully unregistered route: %s", instanceType, instanceID, routeID)
+		} else if errors.Is(err, ErrRouteNotFound) {
+			logger.Infof("%s %s: Route not configured for %s (skipped)", instanceType, instanceID, routeID)
+		} else {
+			logger.Warningf("%s %s: Error unregistering route %s: %v", instanceType, instanceID, routeID, err)
+		}
+	}
+
+	return nil
 }
 
 // Made with Bob
