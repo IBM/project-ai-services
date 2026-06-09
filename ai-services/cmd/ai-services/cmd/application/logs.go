@@ -81,7 +81,7 @@ func init() {
 }
 
 func initLogsCommonFlags() {
-	logsCmd.Flags().BoolVar(&experimentalLogs, "experimental", false, "Include experimental application templates")
+	logsCmd.Flags().BoolVar(&experimentalLogs, "experimental", false, "Include experimental application logs")
 	logsCmd.Flags().StringVar(&podName, appFlags.Logs.Pod, "", "Pod name to show logs from (required)")
 	logsCmd.Flags().StringVar(&containerNameOrID, appFlags.Logs.Container, "", "Container logs to show logs from (Optional)")
 	_ = logsCmd.MarkFlagRequired(appFlags.Logs.Pod)
