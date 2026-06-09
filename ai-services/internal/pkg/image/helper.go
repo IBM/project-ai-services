@@ -9,8 +9,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-// pullImageFromRegistry pulls the required images from registry.
-func pullImageFromRegistry(runtime runtime.Runtime, images []string) error {
+// PullImageFromRegistry pulls the required images from registry with retry logic.
+func PullImageFromRegistry(runtime runtime.Runtime, images []string) error {
 	for _, image := range images {
 		logger.Infoln("Downloading image: " + image + "...")
 		if err := utils.Retry(vars.RetryCount, vars.RetryInterval, nil, func() error {
@@ -23,8 +23,8 @@ func pullImageFromRegistry(runtime runtime.Runtime, images []string) error {
 	return nil
 }
 
-// fetchImagesNotFound returns list of images which are not present locally.
-func fetchImagesNotFound(runtime runtime.Runtime, reqImages []string) ([]string, error) {
+// FetchImagesNotFound returns list of images which are not present locally.
+func FetchImagesNotFound(runtime runtime.Runtime, reqImages []string) ([]string, error) {
 	notfoundImages := make([]string, 0, len(reqImages))
 
 	// Verify the images existing locally
