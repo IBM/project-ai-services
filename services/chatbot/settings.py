@@ -403,6 +403,9 @@ class RAGConfig(BaseSettings):
         default_prompt = cls.EnglishConfig.DEFAULT_SYSTEM_PROMPT
         system_prompt = v.system_prompt
         
+        if system_prompt == default_prompt:
+            return v
+        
         # Basic validation: check if prompt is not empty and has reasonable length
         v_stripped = system_prompt.strip()
         if len(v_stripped) == 0:
@@ -488,6 +491,9 @@ class RAGConfig(BaseSettings):
         """Validate German system_prompt with language detection, warning fallback and LLM validation."""
         default_prompt = cls.GermanConfig.DEFAULT_SYSTEM_PROMPT
         system_prompt = v.system_prompt
+        
+        if system_prompt == default_prompt:
+            return v
         
         # Basic validation: check if prompt is not empty and has reasonable length
         v_stripped = system_prompt.strip()
