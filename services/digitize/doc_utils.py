@@ -1061,22 +1061,23 @@ def detect_document_language(data) -> str:
         data: List of document blocks, where each block is a dict with a 'text' field
         
     Returns:
-        Lingua ISO language code ('EN', 'DE', 'IT', 'FR')
-        Falls back to lang_en if detection fails or language is not supported
+        Language code compatible with SentenceSplitter ('en', 'de', 'it', 'fr')
+        Falls back to 'en' if detection fails or language is not supported
     """
+    default_lang = to_sentence_splitter_lang(lang_en)
     # validate input data structure
     if not isinstance(data, list):
-        logger.warning(f"Invalid input: expected list, got {type(data).__name__}, falling back to '{lang_en}'")
-        return lang_en
+        logger.warning(f"Invalid input: expected list, got {type(data).__name__}, falling back to '{default_lang}'")
+        return default_lang
     
     if not data:
-        logger.warning(f"Empty data list provided for language detection, falling back to '{lang_en}'")
-        return lang_en
+        logger.warning(f"Empty data list provided for language detection, falling back to '{default_lang}'")
+        return default_lang
     
     # Validate that data contains dicts with 'text' fields
     if not all(isinstance(block, dict) for block in data):
-        logger.warning(f"Invalid input: data list contains non-dict elements, falling back to '{lang_en}'")
-        return lang_en
+        logger.warning(f"Invalid input: data list contains non-dict elements, falling back to '{default_lang}'")
+        return default_lang
 
     try:
         # Sample 3 random blocks from the data
@@ -1103,8 +1104,8 @@ def detect_document_language(data) -> str:
                 sampled_blocks.append(block.get("text", ""))
 
         if not sampled_blocks:
-            logger.warning(f"No text blocks found for language detection, falling back to '{lang_en}'")
-            return lang_en
+            logger.warning(f"No text blocks found for language detection, falling back to '{default_lang}'")
+            return default_lang
         
         for block_text in sampled_blocks:
             # Truncate to 500 characters
@@ -1116,19 +1117,19 @@ def detect_document_language(data) -> str:
                 detected_languages.append(detected_lang)
         
         if not detected_languages:
-            logger.warning(f"No languages detected from samples, falling back to '{lang_en}'")
-            return lang_en
+            logger.warning(f"No languages detected from samples, falling back to '{default_lang}'")
+            return default_lang
         
         # Get the most common detected language (returns lingua ISO code like 'EN', 'DE')
         most_common_lang = Counter(detected_languages).most_common(1)[0][0]
+        supported_lang = to_sentence_splitter_lang(most_common_lang)
+        logger.debug(f"Detected languages: {detected_languages}, using: {supported_lang}")
         
-        logger.debug(f"Detected languages: {detected_languages}, using: {most_common_lang}")
-        
-        return most_common_lang
+        return supported_lang
         
     except Exception as e:
-        logger.warning(f"Language detection failed: {e}, falling back to '{lang_en}'")
-        return lang_en
+        logger.warning(f"Language detection failed: {e}, falling back to '{default_lang}'")
+        return default_lang
 
 
 def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50, language='en'):
@@ -1230,10 +1231,6 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, 
         with open(input_path, "r") as f:
             data = json.load(f)
 
-            # Convert lingua ISO code to SentenceSplitter format
-            sentence_splitter_lang = to_sentence_splitter_lang(language)
-            logger.debug(f"Using pre-detected language '{language}' (SentenceSplitter: '{sentence_splitter_lang}') for chunking document '{doc_id}'")
-
             font_size_levels = collect_header_font_sizes(data)
 
             chunks = []
@@ -1276,7 +1273,7 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, 
                         current_subsubsection = full_title
 
                     # Flush current chunk and update
-                    flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, sentence_splitter_lang)
+                    flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, language)
                     current_chunk["chapter_title"] = current_chapter
                     current_chunk["section_title"] = current_section
                     current_chunk["subsection_title"] = current_subsection
@@ -1305,7 +1302,7 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, 
                     logger.debug(f'Skipping adding "{label}".')
 
             # Flush any remaining content
-            flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, sentence_splitter_lang)
+            flush_chunk(current_chunk, chunks, emb_endpoint, max_tokens, language)
 
         # Save the processed chunks to the output file
         with open(processed_chunk_json_path, "w") as f:
@@ -1360,7 +1357,6 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
         language: Pre-detected lingua ISO language code (e.g., 'EN', 'DE')
     """
     # Convert lingua ISO code to SentenceSplitter format
-    sentence_splitter_lang = to_sentence_splitter_lang(language)
     t0 = time.time()
     processed_table_chunk_json_path = (Path(out_path) / f"{doc_id}{table_chunk_suffix}")
 
@@ -1385,7 +1381,7 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
                 if summary_token_count > max_tokens:
                     tables_chunked_count += 1
                     # Chunk the summary using the detected language
-                    chunks = split_text_into_token_chunks(summary, emb_endpoint, max_tokens=max_tokens, overlap=50, language=sentence_splitter_lang)
+                    chunks = split_text_into_token_chunks(summary, emb_endpoint, max_tokens=max_tokens, overlap=50, language=language)
 
                     for chunk_part_idx, chunk in enumerate(chunks):
                         # TODO: Consider adding chunking properties ("is_chunked", "chunk_part", "total_parts")
