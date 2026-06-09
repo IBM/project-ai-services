@@ -35,6 +35,7 @@ const (
 	kindSecret            = "Secret"
 	caddyCertsDirName     = "certs"
 	caddyContainerDataDir = "/data/caddy"
+	routeFormatParts      = 3 // Expected number of parts in route format: "port:subdomain:type"
 )
 
 // catalogDeploymentContext holds cached values during catalog deployment to avoid redundant lookups.
@@ -750,6 +751,55 @@ func getCaddyHTTPSPort(rt *podman.PodmanClient, caddyPodName string) (string, er
 	return "", fmt.Errorf("HTTPS port mapping not found in pod ports")
 }
 
+// parseRouteEntry parses a single route entry and returns the subdomain.
+// Route format: "port:subdomain:type"
+// Returns empty string if the entry is invalid.
+func parseRouteEntry(routeEntry, podName string) string {
+	routeEntry = strings.TrimSpace(routeEntry)
+	if routeEntry == "" {
+		return ""
+	}
+
+	// Split by colon to get subdomain (second part)
+	parts := strings.Split(routeEntry, ":")
+	if len(parts) != routeFormatParts {
+		logger.Warningf("Invalid route format '%s' in pod %s, expected 'port:subdomain:type'", routeEntry, podName)
+
+		return ""
+	}
+
+	subdomain := strings.TrimSpace(parts[1])
+
+	return subdomain
+}
+
+// processRouteInfo processes route information and populates the routeDomains map.
+func processRouteInfo(info TemplateRouteInfo, proxyManager proxy.ProxyManager, routeDomains map[string]string) {
+	// Parse routes annotation directly to extract subdomains
+	// Format: "port:subdomain:type, port:subdomain:type, ..."
+	// Example: "8081:catalog-ui:ui, 8080:catalog-api:api"
+	for _, routeEntry := range strings.Split(info.RoutesAnnotation, ",") {
+		subdomain := parseRouteEntry(routeEntry, info.PodName)
+		if subdomain == "" {
+			continue
+		}
+
+		// Query Caddy for this route (route ID is just the subdomain)
+		actualRoute, err := proxyManager.GetRouteByID(subdomain)
+		if err != nil {
+			// Log warning but continue - route might not exist yet
+			logger.Warningf("Failed to query route %s from Caddy: %v", subdomain, err)
+
+			continue
+		}
+
+		// Create variable name from subdomain
+		sanitizedSubdomain := strings.ReplaceAll(subdomain, "-", "_")
+		varName := strings.ToUpper(fmt.Sprintf("%s_DOMAIN", sanitizedSubdomain))
+		routeDomains[varName] = actualRoute.Domain
+	}
+}
+
 // GetCatalogRouteInfo retrieves route domains and HTTPS port for the catalog service.
 func GetCatalogRouteInfo(rt *podman.PodmanClient, tp templates.Template, appTemplateName string, argParams map[string]string) (map[string]string, string, error) {
 	// Find Caddy pod from templates
@@ -777,40 +827,7 @@ func GetCatalogRouteInfo(rt *podman.PodmanClient, tp templates.Template, appTemp
 	// Build route domains map by querying Caddy for each route
 	routeDomains := make(map[string]string)
 	for _, info := range routeInfos {
-		// Parse routes annotation directly to extract subdomains
-		// Format: "port:subdomain:type, port:subdomain:type, ..."
-		// Example: "8081:catalog-ui:ui, 8080:catalog-api:api"
-		for _, routeEntry := range strings.Split(info.RoutesAnnotation, ",") {
-			routeEntry = strings.TrimSpace(routeEntry)
-			if routeEntry == "" {
-				continue
-			}
-
-			// Split by colon to get subdomain (second part)
-			parts := strings.Split(routeEntry, ":")
-			if len(parts) != 3 {
-				logger.Warningf("Invalid route format '%s' in pod %s, expected 'port:subdomain:type'", routeEntry, info.PodName)
-				continue
-			}
-
-			subdomain := strings.TrimSpace(parts[1])
-			if subdomain == "" {
-				continue
-			}
-
-			// Query Caddy for this route (route ID is just the subdomain)
-			actualRoute, err := proxyManager.GetRouteByID(subdomain)
-			if err != nil {
-				// Log warning but continue - route might not exist yet
-				logger.Warningf("Failed to query route %s from Caddy: %v", subdomain, err)
-				continue
-			}
-
-			// Create variable name from subdomain
-			sanitizedSubdomain := strings.ReplaceAll(subdomain, "-", "_")
-			varName := strings.ToUpper(fmt.Sprintf("%s_DOMAIN", sanitizedSubdomain))
-			routeDomains[varName] = actualRoute.Domain
-		}
+		processRouteInfo(info, proxyManager, routeDomains)
 	}
 
 	// Get Caddy HTTPS port
