@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"regexp"
 	"strconv"
 	texttemplate "text/template"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // PodSpecProcessor is a callback function that processes a rendered pod spec.
@@ -144,10 +144,8 @@ func fetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[
 	var spyreCards int
 	spyreCardContainerMap := map[string]int{}
 
-	spyreCardAnnotationRegex := regexp.MustCompile(`^ai-services\.io\/([A-Za-z0-9][-A-Za-z0-9_.]*)--spyre-cards$`)
-
 	isSpyreCardAnnotation := func(annotation string) (string, bool) {
-		matches := spyreCardAnnotationRegex.FindStringSubmatch(annotation)
+		matches := vars.SpyreCardAnnotationRegex.FindStringSubmatch(annotation)
 		if matches == nil {
 			return "", false
 		}

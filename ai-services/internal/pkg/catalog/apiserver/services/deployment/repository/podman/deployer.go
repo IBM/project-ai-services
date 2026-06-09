@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -1044,10 +1043,8 @@ func (d *PodmanDeployer) fetchSpyreCardsFromPodAnnotations(annotations map[strin
 	var spyreCards int
 	spyreCardContainerMap := map[string]int{}
 
-	spyreCardAnnotationRegex := regexp.MustCompile(`^ai-services\.io\/([A-Za-z0-9][-A-Za-z0-9_.]*)--spyre-cards$`)
-
 	isSpyreCardAnnotation := func(annotation string) (string, bool) {
-		matches := spyreCardAnnotationRegex.FindStringSubmatch(annotation)
+		matches := vars.SpyreCardAnnotationRegex.FindStringSubmatch(annotation)
 		if matches == nil {
 			return "", false
 		}
