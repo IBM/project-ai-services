@@ -1,6 +1,6 @@
 module github.com/project-ai-services/ai-services
 
-go 1.25.9
+go 1.25.11
 
 require (
 	github.com/charmbracelet/bubbles v0.21.0
