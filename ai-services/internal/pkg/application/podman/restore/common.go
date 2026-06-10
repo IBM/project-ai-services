@@ -48,12 +48,10 @@ func locateBackupDirectory(tempDir string) (string, error) {
 	backupDirNew := filepath.Join(tempDir, "opensearch_backup")
 
 	if _, err := os.Stat(backupDirOld); err == nil {
-
 		return backupDirOld, nil
 	}
 
 	if _, err := os.Stat(backupDirNew); err == nil {
-
 		return backupDirNew, nil
 	}
 
@@ -75,7 +73,7 @@ func formatBackupNotFoundError(tempDir string) error {
 	}
 
 	if len(extractedDirs) > 0 {
-		return fmt.Errorf("backup directory not found in archive.")
+		return fmt.Errorf("backup directory not found in archive")
 	}
 
 	return fmt.Errorf("backup directory not found in archive")
