@@ -113,6 +113,7 @@ Examples:
 			}
 			if !confirmRestore {
 				logger.Infoln("Restore cancelled")
+
 				return nil
 			}
 		}
