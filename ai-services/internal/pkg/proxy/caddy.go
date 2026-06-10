@@ -346,15 +346,24 @@ func UnregisterRoutesFromEndpoints(
 
 	logger.Infof("Unregistering %d route(s) for %s %s", len(routesToUnregister), instanceType, instanceID)
 
-	// Unregister each unique route
+	// Unregister each unique route and track failures
+	var failedRoutes []string
 	for routeID := range routesToUnregister {
 		if err := proxyManager.UnregisterRoute(routeID); err == nil {
 			logger.Infof("%s %s: Successfully unregistered route: %s", instanceType, instanceID, routeID)
 		} else if errors.Is(err, ErrRouteNotFound) {
-			logger.Infof("%s %s: Route not configured for %s (skipped)", instanceType, instanceID, routeID)
+			// Idempotent: route already unregistered is considered success
+			logger.Infof("%s %s: Route not configured for %s (already unregistered)", instanceType, instanceID, routeID)
 		} else {
-			logger.Warningf("%s %s: Error unregistering route %s: %v", instanceType, instanceID, routeID, err)
+			// Real error: track for return
+			logger.Errorf("%s %s: Error unregistering route %s: %v", instanceType, instanceID, routeID, err)
+			failedRoutes = append(failedRoutes, routeID)
 		}
+	}
+
+	// Return error if any routes failed to unregister
+	if len(failedRoutes) > 0 {
+		return fmt.Errorf("failed to unregister %d route(s): %v", len(failedRoutes), failedRoutes)
 	}
 
 	return nil

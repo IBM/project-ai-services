@@ -173,6 +173,28 @@ func (s *DeletionService) isComponentOrphaned(ctx context.Context, componentID u
 	return true
 }
 
+// unregisterServiceRoutes performs best-effort route cleanup for a service.
+// Updates DB status if route unregistration fails, but does not block deletion.
+func (s *DeletionService) unregisterServiceRoutes(ctx context.Context, proxyManager proxy.ProxyManager, svc models.Service) error {
+	if len(svc.Endpoints) == 0 || proxyManager == nil {
+		return nil
+	}
+
+	if err := proxy.UnregisterRoutesFromEndpoints(
+		proxyManager,
+		svc.Endpoints,
+		"service",
+		svc.ID.String(),
+	); err != nil {
+		// Update DB status with route cleanup failure
+		_ = s.serviceRepo.UpdateStatus(ctx, svc.ID, models.ServiceStatusError,
+			fmt.Sprintf("route unregistration failed: %v", err))
+		return err
+	}
+
+	return nil
+}
+
 // deleteServices deletes all services (pods + DB records) and returns any error messages.
 //
 //nolint:cyclop // Function complexity is acceptable for deletion orchestration
@@ -193,17 +215,8 @@ func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime
 			continue
 		}
 
-		// Cleanup Caddy routes before deleting pods
-		if len(svc.Endpoints) > 0 && proxyManager != nil {
-			if err := proxy.UnregisterRoutesFromEndpoints(
-				proxyManager,
-				svc.Endpoints,
-				"service",
-				svc.ID.String(),
-			); err != nil {
-				logger.Warningf("service %s: Failed to unregister routes: %v", svc.ID, err)
-			}
-		}
+		// Best-effort route cleanup before deleting pods (non-blocking)
+		_ = s.unregisterServiceRoutes(ctx, proxyManager, svc)
 
 		// Delete service secrets
 		secretErrors := s.deleteSecretsFromPods(rt, pods, keepData, "service", svc.ID)
@@ -272,16 +285,6 @@ func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runti
 	forceDelete := true
 
 	for _, componentID := range componentIDs {
-		// Get component from DB to access endpoints
-		component, err := s.componentRepo.GetByID(ctx, componentID)
-		if err != nil {
-			errMsg := fmt.Sprintf("component %s: failed to get from DB: %s", componentID, err)
-			errorMessages = append(errorMessages, errMsg)
-			logger.Errorf(errMsg)
-
-			continue
-		}
-
 		// List component pods
 		pods, err := rt.ListPods(map[string][]string{
 			"label": {fmt.Sprintf("ai-services.io/template=%s", componentID)},
@@ -292,18 +295,6 @@ func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runti
 			_ = s.componentRepo.UpdateStatus(ctx, componentID, models.ComponentStatusError, fmt.Sprintf("failed to list pods: %s", err))
 
 			continue
-		}
-
-		// Cleanup Caddy routes before deleting pods
-		if len(component.Endpoints) > 0 && proxyManager != nil {
-			if err := proxy.UnregisterRoutesFromEndpoints(
-				proxyManager,
-				component.Endpoints,
-				"component",
-				componentID.String(),
-			); err != nil {
-				logger.Warningf("component %s: Failed to unregister routes: %v", componentID, err)
-			}
 		}
 
 		// Delete component secrets
