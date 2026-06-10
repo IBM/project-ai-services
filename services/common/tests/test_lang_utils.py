@@ -11,15 +11,82 @@ from lingua import Language
 
 @pytest.mark.unit
 class TestLanguageCodes:
-    """Tests for language codes mapping."""
+    """Tests for LanguageCodes class."""
     
     def test_language_codes_defined(self):
-        """Test language codes are correctly defined."""
-        from common.lang_utils import language_codes
+        """Test language codes are correctly defined as class attributes."""
+        from common.lang_utils import LanguageCodes
         
-        assert language_codes["English"] == "EN"
-        assert language_codes["German"] == "DE"
-        assert len(language_codes) == 2
+        assert LanguageCodes.ENGLISH == "EN"
+        assert LanguageCodes.GERMAN == "DE"
+    
+    def test_language_codes_are_strings(self):
+        """Test that language codes are string types."""
+        from common.lang_utils import LanguageCodes
+        
+        assert isinstance(LanguageCodes.ENGLISH, str)
+        assert isinstance(LanguageCodes.GERMAN, str)
+    
+    def test_to_sentence_splitter_english(self):
+        """Test conversion of English code to sentence splitter format."""
+        from common.lang_utils import to_sentence_splitter_lang, LanguageCodes
+        
+        result = to_sentence_splitter_lang(LanguageCodes.ENGLISH)
+        assert result == "en"
+    
+    def test_to_sentence_splitter_german(self):
+        """Test conversion of German code to sentence splitter format."""
+        from common.lang_utils import to_sentence_splitter_lang, LanguageCodes
+        
+        result = to_sentence_splitter_lang(LanguageCodes.GERMAN)
+        assert result == "de"
+    
+    def test_to_sentence_splitter_with_string_literal(self):
+        """Test conversion works with string literals."""
+        from common.lang_utils import to_sentence_splitter_lang
+        
+        assert to_sentence_splitter_lang("EN") == "en"
+        assert to_sentence_splitter_lang("DE") == "de"
+    
+    def test_to_sentence_splitter_unsupported_language(self):
+        """Test fallback to English for unsupported language codes."""
+        from common.lang_utils import to_sentence_splitter_lang
+        
+        result = to_sentence_splitter_lang("ES")  # Spanish not supported
+        assert result == "en"  # Should fallback to English
+    
+    def test_to_sentence_splitter_empty_string(self):
+        """Test handling of empty string."""
+        from common.lang_utils import to_sentence_splitter_lang
+        
+        result = to_sentence_splitter_lang("")
+        assert result == "en"  # Should fallback to English
+    
+    def test_sentence_splitter_mapping_uses_class_variables(self):
+        """Test that internal mapping uses class variables (no duplication)."""
+        from common.lang_utils import LanguageCodes
+        
+        # Verify the mapping dictionary keys match the class attributes
+        assert LanguageCodes.ENGLISH in LanguageCodes._TO_SENTENCE_SPLITTER
+        assert LanguageCodes.GERMAN in LanguageCodes._TO_SENTENCE_SPLITTER
+        
+        # Verify the values are lowercase versions
+        assert LanguageCodes._TO_SENTENCE_SPLITTER[LanguageCodes.ENGLISH] == "en"
+        assert LanguageCodes._TO_SENTENCE_SPLITTER[LanguageCodes.GERMAN] == "de"
+    
+    def test_language_codes_immutable(self):
+        """Test that language codes maintain their values (not accidentally modified)."""
+        from common.lang_utils import LanguageCodes
+        
+        # Store original values
+        original_english = LanguageCodes.ENGLISH
+        original_german = LanguageCodes.GERMAN
+        
+        # Verify they haven't changed
+        assert LanguageCodes.ENGLISH == original_english
+        assert LanguageCodes.GERMAN == original_german
+        assert LanguageCodes.ENGLISH == "EN"
+        assert LanguageCodes.GERMAN == "DE"
 
 
 @pytest.mark.unit
@@ -28,35 +95,35 @@ class TestGetPromptForLanguage:
     
     def test_get_english_prompt(self):
         """Test returns English prompt for EN language code."""
-        from common.lang_utils import get_prompt_for_language, language_codes
+        from common.lang_utils import get_prompt_for_language, LanguageCodes
         
         prompts = {
-            language_codes["English"]: "English prompt template",
-            language_codes["German"]: "German prompt template"
+            LanguageCodes.ENGLISH: "English prompt template",
+            LanguageCodes.GERMAN: "German prompt template"
         }
         
-        result = get_prompt_for_language(language_codes["English"], prompts)
+        result = get_prompt_for_language(LanguageCodes.ENGLISH, prompts)
         assert result == "English prompt template"
     
     def test_get_german_prompt(self):
         """Test returns German prompt for DE language code."""
-        from common.lang_utils import get_prompt_for_language, language_codes
+        from common.lang_utils import get_prompt_for_language, LanguageCodes
         
         prompts = {
-            language_codes["English"]: "English prompt template",
-            language_codes["German"]: "German prompt template"
+            LanguageCodes.ENGLISH: "English prompt template",
+            LanguageCodes.GERMAN: "German prompt template"
         }
         
-        result = get_prompt_for_language(language_codes["German"], prompts)
+        result = get_prompt_for_language(LanguageCodes.GERMAN, prompts)
         assert result == "German prompt template"
     
     def test_fallback_to_english_for_unsupported_language(self):
         """Test falls back to English for unsupported language codes."""
-        from common.lang_utils import get_prompt_for_language, language_codes
+        from common.lang_utils import get_prompt_for_language, LanguageCodes
         
         prompts = {
-            language_codes["English"]: "English prompt template",
-            language_codes["German"]: "German prompt template"
+            LanguageCodes.ENGLISH: "English prompt template",
+            LanguageCodes.GERMAN: "German prompt template"
         }
         
         result = get_prompt_for_language("FR", prompts)
@@ -82,35 +149,33 @@ class TestGetPromptForLanguage:
 class TestGetMaxTokensMap:
     """Tests for get_max_tokens_map function."""
     
-    @patch('common.lang_utils.language_codes', {"English": "EN", "German": "DE"})
     def test_get_max_tokens_map_returns_dict(self):
         """Test returns dictionary with language codes and max tokens."""
-        from common.lang_utils import get_max_tokens_map
+        from common.lang_utils import get_max_tokens_map, LanguageCodes
         
         # Mock chatbot settings
-        with patch('common.lang_utils.chatbot_settings') as mock_settings:
+        with patch('chatbot.settings.settings') as mock_settings:
             mock_settings.llm.english.max_tokens = 500
             mock_settings.llm.german.max_tokens = 700
             
             result = get_max_tokens_map()
             
             assert isinstance(result, dict)
-            assert result["EN"] == 500
-            assert result["DE"] == 700
+            assert result[LanguageCodes.ENGLISH] == 500
+            assert result[LanguageCodes.GERMAN] == 700
     
-    @patch('common.lang_utils.language_codes', {"English": "EN", "German": "DE"})
     def test_get_max_tokens_map_different_values(self):
         """Test returns correct max tokens for different languages."""
-        from common.lang_utils import get_max_tokens_map
+        from common.lang_utils import get_max_tokens_map, LanguageCodes
         
-        with patch('common.lang_utils.chatbot_settings') as mock_settings:
+        with patch('chatbot.settings.settings') as mock_settings:
             mock_settings.llm.english.max_tokens = 1000
             mock_settings.llm.german.max_tokens = 1200
             
             result = get_max_tokens_map()
             
-            assert result["EN"] == 1000
-            assert result["DE"] == 1200
+            assert result[LanguageCodes.ENGLISH] == 1000
+            assert result[LanguageCodes.GERMAN] == 1200
 
 
 @pytest.mark.unit
@@ -155,7 +220,7 @@ class TestDetectLanguage:
     
     def test_detect_english_text(self):
         """Test detects English text correctly."""
-        from common.lang_utils import detect_language, setup_language_detector, language_codes
+        from common.lang_utils import detect_language, setup_language_detector, LanguageCodes
         
         # Setup detector
         setup_language_detector([Language.ENGLISH, Language.GERMAN])
@@ -163,11 +228,11 @@ class TestDetectLanguage:
         text = "This is a test in English language for detection."
         result = detect_language(text, min_confidence=0.7)
         
-        assert result == language_codes["English"]
+        assert result == LanguageCodes.ENGLISH
     
     def test_detect_german_text(self):
         """Test detects German text correctly."""
-        from common.lang_utils import detect_language, setup_language_detector, language_codes
+        from common.lang_utils import detect_language, setup_language_detector, LanguageCodes
         
         # Setup detector
         setup_language_detector([Language.ENGLISH, Language.GERMAN])
@@ -175,11 +240,11 @@ class TestDetectLanguage:
         text = "Dies ist ein Test in deutscher Sprache zur Erkennung."
         result = detect_language(text, min_confidence=0.7)
         
-        assert result == language_codes["German"]
+        assert result == LanguageCodes.GERMAN
     
     def test_detect_language_low_confidence_fallback(self):
         """Test falls back to English when confidence is too low."""
-        from common.lang_utils import detect_language, setup_language_detector, language_codes
+        from common.lang_utils import detect_language, setup_language_detector, LanguageCodes
         
         # Setup detector
         setup_language_detector([Language.ENGLISH, Language.GERMAN])
@@ -189,11 +254,11 @@ class TestDetectLanguage:
         result = detect_language(text, min_confidence=0.99)  # Very high threshold
         
         # Should fallback to English
-        assert result == language_codes["English"]
+        assert result == LanguageCodes.ENGLISH
     
     def test_detect_language_without_setup_returns_english(self):
         """Test returns English when detector not initialized."""
-        from common.lang_utils import detect_language, language_codes
+        from common.lang_utils import detect_language, LanguageCodes
         import common.lang_utils as lang_utils
         
         # Reset detector
@@ -202,7 +267,7 @@ class TestDetectLanguage:
         text = "Any text"
         result = detect_language(text)
         
-        assert result == language_codes["English"]
+        assert result == LanguageCodes.ENGLISH
     
     def test_detect_language_custom_min_confidence(self):
         """Test respects custom min_confidence parameter."""
@@ -223,7 +288,7 @@ class TestDetectLanguage:
     
     def test_detect_language_empty_text(self):
         """Test handles empty text gracefully."""
-        from common.lang_utils import detect_language, setup_language_detector, language_codes
+        from common.lang_utils import detect_language, setup_language_detector, LanguageCodes
         
         # Setup detector
         setup_language_detector([Language.ENGLISH, Language.GERMAN])
@@ -231,7 +296,7 @@ class TestDetectLanguage:
         result = detect_language("", min_confidence=0.7)
         
         # Should fallback to English
-        assert result == language_codes["English"]
+        assert result == LanguageCodes.ENGLISH
     
     def test_detect_language_mixed_language_text(self):
         """Test handles mixed language text."""
@@ -258,7 +323,7 @@ class TestLanguageUtilsIntegration:
             setup_language_detector,
             detect_language,
             get_prompt_for_language,
-            language_codes
+            LanguageCodes
         )
         
         # Setup
@@ -267,12 +332,12 @@ class TestLanguageUtilsIntegration:
         # Detect English
         english_text = "What is artificial intelligence?"
         detected_lang = detect_language(english_text)
-        assert detected_lang == language_codes["English"]
+        assert detected_lang == LanguageCodes.ENGLISH
         
         # Get appropriate prompt
         prompts = {
-            language_codes["English"]: "English prompt",
-            language_codes["German"]: "German prompt"
+            LanguageCodes.ENGLISH: "English prompt",
+            LanguageCodes.GERMAN: "German prompt"
         }
         prompt = get_prompt_for_language(detected_lang, prompts)
         assert prompt == "English prompt"
@@ -283,7 +348,7 @@ class TestLanguageUtilsIntegration:
             setup_language_detector,
             detect_language,
             get_prompt_for_language,
-            language_codes
+            LanguageCodes
         )
         
         # Setup
@@ -292,12 +357,12 @@ class TestLanguageUtilsIntegration:
         # Detect German
         german_text = "Was ist künstliche Intelligenz?"
         detected_lang = detect_language(german_text)
-        assert detected_lang == language_codes["German"]
+        assert detected_lang == LanguageCodes.GERMAN
         
         # Get appropriate prompt
         prompts = {
-            language_codes["English"]: "English prompt",
-            language_codes["German"]: "German prompt"
+            LanguageCodes.ENGLISH: "English prompt",
+            LanguageCodes.GERMAN: "German prompt"
         }
         prompt = get_prompt_for_language(detected_lang, prompts)
         assert prompt == "German prompt"
@@ -308,13 +373,13 @@ class TestLanguageUtilsIntegration:
             setup_language_detector,
             detect_language,
             get_max_tokens_map,
-            language_codes
+            LanguageCodes
         )
         
         # Setup
         setup_language_detector([Language.ENGLISH, Language.GERMAN])
         
-        with patch('common.lang_utils.chatbot_settings') as mock_settings:
+        with patch('chatbot.settings.settings') as mock_settings:
             mock_settings.llm.english.max_tokens = 500
             mock_settings.llm.german.max_tokens = 700
             

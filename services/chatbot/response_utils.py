@@ -17,18 +17,99 @@ class Document(BaseModel):
 
 
 class Message(BaseModel):
-    """Chat message"""
-    role: str = Field(default="user", description="The role of the message author")
+    """Chat message in conversation"""
+    role: str = Field(
+        default="user",
+        description="The role of the message author. Typically 'user' for user messages and 'assistant' for AI responses in conversation history."
+    )
     content: str = Field(..., description="The content of the message")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "role": "user",
+                    "content": "What is machine learning?"
+                },
+                {
+                    "role": "assistant",
+                    "content": "Machine learning is a subset of AI that enables systems to learn from data."
+                }
+            ]
+        }
+    }
 
 
 class ChatCompletionRequest(BaseModel):
-    """Request model for chat completion"""
-    messages: list[Message] = Field(..., description="List of messages in the conversation")
+    """Request model for chat completion with conversational support"""
+    messages: list[Message] = Field(
+        ...,
+        description="List of messages in the conversation. Supports both single-turn (one message) and multi-turn (conversation history) interactions. The last message is treated as the current query."
+    )
     max_tokens: int = Field(default=settings.llm.english.max_tokens, description="Maximum number of tokens to generate")
     temperature: float = Field(default=settings.llm.temperature, description="Sampling temperature (0.0 to 2.0)")
     stop: Optional[list[str]] = Field(default=None, description="Stop sequences for generation")
     stream: bool = Field(default=False, description="Whether to stream the response")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "summary": "Single-turn query",
+                    "description": "Simple query without conversation history",
+                    "value": {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": "What is artificial intelligence?"
+                            }
+                        ],
+                        "max_tokens": 512,
+                        "temperature": 0.7,
+                        "stream": False
+                    }
+                },
+                {
+                    "summary": "Multi-turn conversation",
+                    "description": "Query with conversation history for context-aware responses",
+                    "value": {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": "What is machine learning?"
+                            },
+                            {
+                                "role": "assistant",
+                                "content": "Machine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed."
+                            },
+                            {
+                                "role": "user",
+                                "content": "Can you give me some examples?"
+                            }
+                        ],
+                        "max_tokens": 512,
+                        "temperature": 0.7,
+                        "stream": False
+                    }
+                },
+                {
+                    "summary": "Streaming response",
+                    "description": "Request with streaming enabled for real-time token generation",
+                    "value": {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": "Explain neural networks in simple terms"
+                            }
+                        ],
+                        "max_tokens": 512,
+                        "temperature": 0.7,
+                        "stream": True
+                    }
+                }
+            ]
+        }
+    }
 
 
 class ChatMessage(BaseModel):

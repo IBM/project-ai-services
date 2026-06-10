@@ -102,27 +102,30 @@ class DigitizeConfig(BaseSettings):
         description="Content sample size for chunk ID generation",
     )
 
-    # LLM classification prompt
-    llm_classify_prompt: str = Field(
-        default=(
-            "You are an intelligent assistant helping to curate a knowledge base for a Retrieval-Augmented Generation (RAG) system.\n"
-            "Your task is to decide whether the following text should be included in the knowledge corpus. Respond only with \"yes\" or \"no\".\n\n"
-            "Respond \"yes\" if the text contains factual, instructional, or explanatory information that could help answer general user questions on any topic.\n"
-            "Respond \"no\" if the text contains personal, administrative, or irrelevant content, such as names, acknowledgements, contact info, disclaimers, legal notices, or unrelated commentary.\n\n"
-            "Text: {text}\n\nAnswer:"
-        ),
-        description="Prompt for LLM-based text classification",
-    )
+    @property
+    def staging_dir(self) -> Path:
+        """Directory for staging files."""
+        return self.cache_dir / "staging"
 
-    # Table processing
-    table_summary_max_tokens: int = Field(
-        default=1024,
-        ge=0,
-        description="Maximum tokens for table summarization",
-    )
+    @property
+    def digitized_docs_dir(self) -> Path:
+        """Directory for digitized documents."""
+        return self.cache_dir / "digitized"
 
-    # Table summary prompt
-    table_summary_and_classify: str = Field(
+
+class TableSummaryConfig(BaseSettings):
+    """Table summarization configuration."""
+
+    class EnglishConfig(BaseSettings):
+        """English-specific table summarization settings."""
+        
+        max_tokens: int = Field(
+            default=1024,
+            ge=0,
+            description="Maximum tokens for table summarization (English)",
+        )
+        
+        prompt: str = Field(
         default="""You are an intelligent assistant analyzing tables extracted from documents.
 
                 Your tasks:
@@ -172,18 +175,74 @@ class DigitizeConfig(BaseSettings):
 
                 Table:
                 {content}""",
-        description="Prompt for table summarization",
-    )
+            description="Prompt for table summarization (English)",
+        )
+    
+    class GermanConfig(BaseSettings):
+        """German-specific table summarization settings."""
+        
+        max_tokens: int = Field(
+            default=1536,
+            ge=0,
+            description="Maximum tokens for table summarization (German) - adjusted for German to English token ratio (~1.5x)",
+        )
+        
+        prompt: str = Field(
+        default="""Sie sind ein intelligenter Assistent, der Tabellen aus Dokumenten analysiert.
 
-    @property
-    def staging_dir(self) -> Path:
-        """Directory for staging files."""
-        return self.cache_dir / "staging"
+                Ihre Aufgaben:
 
-    @property
-    def digitized_docs_dir(self) -> Path:
-        """Directory for digitized documents."""
-        return self.cache_dir / "digitized"
+                1. Extrahieren und dokumentieren Sie JEDE Information aus der Tabelle in umfassenden Details:
+                - Listen Sie ALLE Abschnitte, Unterabschnitte und deren Referenznummern auf, falls vorhanden
+                - Fügen Sie JEDE Spezifikation, Funktion, Nummer, Code, Bedingung und Anforderung hinzu
+                - Erwähnen Sie ALLE Elemente, auch wenn sie nebensächlich erscheinen - nichts sollte ausgelassen werden
+                - Verwenden Sie ein strukturiertes Format mit klarer Organisation (nummerierte Listen, Aufzählungspunkte oder detaillierte Absätze)
+                - Seien Sie äußerst gründlich und umfassend - streben Sie maximale Detailtiefe an
+                - Wenn die Tabelle mehrere Zeilen/Spalten hat, beschreiben Sie jede einzelne
+                - Bewahren Sie alle Fachbegriffe, Versionsnummern und spezifischen Details genau wie angegeben
+
+                2. Entscheiden Sie, ob die Tabelle für eine Wissensdatenbank relevant ist:
+                - Relevant: enthält sachliche, instruktive oder erklärende Informationen, die zur Beantwortung von Fragen nützlich sind.
+                - Irrelevant: persönliche Informationen, Haftungsausschlüsse, administrative Hinweise oder unzusammenhängende Kommentare.
+
+                3. Ausgabe im exakten Format unten:
+
+                Summary: <Ihre äußerst detaillierte Zusammenfassung hier - seien Sie ausführlich und umfassend>
+                Decision: <yes oder no>
+
+                Geben Sie KEIN JSON, zusätzliche Kommentare oder anderen Text aus.
+
+                Beispiele:
+
+                Positives Beispiel (relevant):
+                Tabelle:
+                | Prozessor | Kerne | Speicher |
+                |-----------|-------|----------|
+                | Power10   | 16    | 8 TB     |
+
+                Ausgabe:
+                Summary: Die Tabelle präsentiert technische Spezifikationen für den Power10-Prozessor. Die Prozessorkonfiguration umfasst 16 Kerne für parallele Verarbeitungsfähigkeiten. Die Speicherkapazität unterstützt bis zu 8 TB (Terabyte) RAM und bietet erhebliche Speicherressourcen für Unternehmensworkloads und datenintensive Anwendungen.
+                Decision: yes
+
+                Negatives Beispiel (irrelevant):
+                Tabelle:
+                | Erstellt von: | John Smith |
+                |---------------|------------|
+
+                Ausgabe:
+                Summary: Dokument-Metadaten, die angeben, dass es von John Smith erstellt wurde.
+                Decision: no
+
+                Analysieren Sie nun die folgende Tabelle:
+
+                Tabelle:
+                {content}""",
+            description="Prompt für Tabellenzusammenfassung (Deutsch)",
+        )
+    
+    # Language-specific configurations
+    english: EnglishConfig = Field(default_factory=EnglishConfig)
+    german: GermanConfig = Field(default_factory=GermanConfig)
 
 
 class DatabaseConfig(BaseSettings):
@@ -219,6 +278,7 @@ class DatabaseConfig(BaseSettings):
 class Settings(BaseSettings):
     common: CommonSettings = Field(default_factory=CommonSettings)
     digitize: DigitizeConfig = Field(default_factory=DigitizeConfig)
+    table_summary: TableSummaryConfig = Field(default_factory=TableSummaryConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
 # Global settings instance
