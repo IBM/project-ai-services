@@ -7,7 +7,8 @@ ENV PYTHONPATH=/opt/services
 COPY common /opt/services/common
 COPY summarize/ .
 
-RUN source /var/venv/bin/activate && pip install -r requirements.txt && pip cache purge
+# Uncomment when you have summarize specific requirements.txt
+# RUN source /var/venv/bin/activate && pip install -r requirements.txt && pip cache purge
 
 CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", \
      "--host", "0.0.0.0", "--port", "6000", \

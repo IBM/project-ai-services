@@ -140,6 +140,51 @@ class SummarizationConfig(BaseSettings):
         default_factory=SummarizationLevelsConfig,
         description="Configuration for different summarization abstraction levels",
     )
+    
+    # Chunking configuration for large documents
+    chunk_parallelism: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description="Maximum number of chunks to process in parallel per job",
+    )
+    
+    chunk_overlap_sentences: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description="Number of sentences to overlap between consecutive chunks",
+    )
+    
+    # Merge prompts for chunked summarization
+    merge_system_prompt: str = Field(
+        default=(
+            "You are a summarization assistant. You are given a series of summaries, each covering a consecutive section of the same document. "
+            "Your task is to combine them into a single, unified summary. Output ONLY the summary.\n\n"
+            "Do not add questions, explanations, headings, code, or any other text."
+        ),
+        description="System prompt for merging chunk summaries",
+    )
+    
+    merge_user_prompt: str = Field(
+        default=(
+            "The following are summaries of consecutive sections from a single document.\n"
+            "Combine them into one unified summary in {target_words} words, with an allowed variance of ±50 words.\n"
+            "Preserve the key points from all sections. Remove redundancy and ensure the summary reads as a single coherent text, not as a list of section summaries.\n\n"
+            "CRITICAL INSTRUCTIONS:\n"
+            "1. Your summary MUST approach {target_words} words - do NOT stop early\n"
+            "2. Use the FULL available space by including:\n"
+            "   - All key findings and main points\n"
+            "   - Supporting details and context\n"
+            "   - Relevant data and statistics\n"
+            "   - Implications and significance\n"
+            "3. Preserve ALL numerical data EXACTLY\n"
+            "4. A summary under {min_words} words is considered incomplete\n\n"
+            "Section summaries:\n{merged_chunk_summaries}\n\n"
+            "Unified summary:"
+        ),
+        description="User prompt for merging chunk summaries with target length",
+    )
 
     @field_validator('summarization_coefficient')
     @classmethod
