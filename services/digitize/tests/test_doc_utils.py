@@ -338,4 +338,80 @@ class TestDetectDocumentLanguage:
         assert result == "EN"
 
 
+class TestProcessTableLanguageSelection:
+    """Tests for language-specific table summarize/classify selection."""
+
+    @patch("digitize.doc_utils.summarize_and_classify_tables")
+    @patch("digitize.doc_utils.merge_consecutive_tables")
+    @patch("digitize.doc_utils.os.path.splitext")
+    def test_process_table_uses_italian_prompt_and_max_tokens(
+        self, mock_splitext, mock_merge_tables, mock_summarize_and_classify
+    ):
+        from digitize.doc_utils import process_table
+        from common.lang_utils import LanguageCodes
+        from digitize.settings import settings
+
+        mock_splitext.return_value = ("sample", ".pdf")
+        mock_merge_tables.return_value = {
+            0: {
+                "markdown": "| Colonna | Valore |\n|---|---|\n| CPU | Power10 |",
+                "caption": "Specifiche",
+                "page_number": 1,
+            }
+        }
+        mock_summarize_and_classify.return_value = (["Riassunto"], [True])
+
+        converted_doc = Mock()
+        converted_doc.tables = [Mock()]
+
+        process_table(
+            converted_doc=converted_doc,
+            pdf_path="sample.pdf",
+            out_path="/tmp/out.json",
+            gen_model="test-model",
+            gen_endpoint="http://llm",
+            document_language=LanguageCodes.ITALIAN,
+        )
+
+        _, kwargs = mock_summarize_and_classify.call_args
+        assert kwargs["prompt_template"] == settings.table_summary.italian.prompt
+        assert kwargs["max_tokens"] == settings.table_summary.italian.max_tokens
+
+    @patch("digitize.doc_utils.summarize_and_classify_tables")
+    @patch("digitize.doc_utils.merge_consecutive_tables")
+    @patch("digitize.doc_utils.os.path.splitext")
+    def test_process_table_uses_french_prompt_and_max_tokens(
+        self, mock_splitext, mock_merge_tables, mock_summarize_and_classify
+    ):
+        from digitize.doc_utils import process_table
+        from common.lang_utils import LanguageCodes
+        from digitize.settings import settings
+
+        mock_splitext.return_value = ("sample", ".pdf")
+        mock_merge_tables.return_value = {
+            0: {
+                "markdown": "| Colonne | Valeur |\n|---|---|\n| CPU | Power10 |",
+                "caption": "Spécifications",
+                "page_number": 1,
+            }
+        }
+        mock_summarize_and_classify.return_value = (["Résumé"], [True])
+
+        converted_doc = Mock()
+        converted_doc.tables = [Mock()]
+
+        process_table(
+            converted_doc=converted_doc,
+            pdf_path="sample.pdf",
+            out_path="/tmp/out.json",
+            gen_model="test-model",
+            gen_endpoint="http://llm",
+            document_language=LanguageCodes.FRENCH,
+        )
+
+        _, kwargs = mock_summarize_and_classify.call_args
+        assert kwargs["prompt_template"] == settings.table_summary.french.prompt
+        assert kwargs["max_tokens"] == settings.table_summary.french.max_tokens
+
+
 # Made with Bob
