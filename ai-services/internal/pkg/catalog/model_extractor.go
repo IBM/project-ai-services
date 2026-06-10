@@ -90,6 +90,7 @@ func (p *CatalogProvider) collectComponentsByTypeModels(componentType string, co
 			if strings.EqualFold(comp.ID, excludedID) {
 				logger.Infof("Skipping model extraction for excluded component: %s/%s\n", comp.ComponentType, comp.ID, logger.VerbosityLevelDebug)
 				excluded = true
+
 				break
 			}
 		}
@@ -117,6 +118,7 @@ func (p *CatalogProvider) addComponentModels(componentType, componentID string, 
 	// If schema is empty, skip this component
 	if len(schema) == 0 {
 		logger.Infof("No schema found for component %s/%s, skipping model extraction\n", componentType, componentID, logger.VerbosityLevelDebug)
+
 		return nil
 	}
 
@@ -146,20 +148,26 @@ func extractModelsFromSchema(schema map[string]any, modelSet map[string]bool) {
 			continue
 		}
 
-		// Check for oneOf array with const values
-		if oneOf, ok := propMap["oneOf"].([]any); ok {
-			for _, option := range oneOf {
-				if optMap, ok := option.(map[string]any); ok {
-					if constVal, ok := optMap["const"].(string); ok && constVal != "" {
-						modelSet[constVal] = true
-					}
+		// Extract models from oneOf and default fields
+		extractModelsFromProperty(propMap, modelSet)
+	}
+}
+
+// extractModelsFromProperty extracts model values from a property's oneOf array and default field.
+func extractModelsFromProperty(propMap map[string]any, modelSet map[string]bool) {
+	// Check for oneOf array with const values
+	if oneOf, ok := propMap["oneOf"].([]any); ok {
+		for _, option := range oneOf {
+			if optMap, ok := option.(map[string]any); ok {
+				if constVal, ok := optMap["const"].(string); ok && constVal != "" {
+					modelSet[constVal] = true
 				}
 			}
 		}
+	}
 
-		// Also check for default value
-		if defaultVal, ok := propMap["default"].(string); ok && defaultVal != "" {
-			modelSet[defaultVal] = true
-		}
+	// Also check for default value
+	if defaultVal, ok := propMap["default"].(string); ok && defaultVal != "" {
+		modelSet[defaultVal] = true
 	}
 }
