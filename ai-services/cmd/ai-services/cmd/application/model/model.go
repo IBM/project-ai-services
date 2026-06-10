@@ -47,14 +47,14 @@ func models(template string) ([]string, error) {
 }
 
 // getCatalogModels is a helper that creates a catalog provider and collects models.
-// excludeComponents is a variadic parameter that allows excluding specific components by ID.
-func getCatalogModels(templateID string, excludeComponents ...string) ([]string, error) {
+// excludeComponentProviders is a variadic parameter that allows excluding specific component provider by ID.
+func getCatalogModels(templateID string, excludeComponentProviders ...string) ([]string, error) {
 	provider, err := catalog.NewCatalogProvider()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
 	}
 
-	models, err := provider.GetCatalogModels(templateID, excludeComponents...)
+	models, err := provider.GetCatalogModels(templateID, excludeComponentProviders...)
 	if err != nil {
 		return nil, err
 	}
