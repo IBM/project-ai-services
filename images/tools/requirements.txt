@@ -16,7 +16,7 @@ mdurl==0.1.2
 packaging==26.0
 pip==23.2.1
 Pygments==2.20.0
-PyYAML==6.0.3+ppc64le1
+PyYAML==6.0.3
 rich==14.3.3
 shellingham==1.5.4
 tqdm==4.67.3
