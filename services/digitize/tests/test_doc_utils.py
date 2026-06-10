@@ -25,7 +25,7 @@ class TestDetectDocumentLanguage:
             mock_detect.return_value = "EN"
             result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
         assert mock_detect.called
 
     def test_detect_language_with_valid_german_data(self):
@@ -40,7 +40,7 @@ class TestDetectDocumentLanguage:
             mock_detect.return_value = "DE"
             result = detect_document_language(data)
         
-        assert result == "de"
+        assert result == "DE"
 
     def test_detect_language_with_valid_french_data(self):
         """Test language detection with valid French text blocks."""
@@ -53,7 +53,7 @@ class TestDetectDocumentLanguage:
             mock_detect.return_value = "FR"
             result = detect_document_language(data)
         
-        assert result == "fr"
+        assert result == "FR"
 
     def test_detect_language_with_valid_italian_data(self):
         """Test language detection with valid Italian text blocks."""
@@ -66,7 +66,7 @@ class TestDetectDocumentLanguage:
             mock_detect.return_value = "IT"
             result = detect_document_language(data)
         
-        assert result == "it"
+        assert result == "IT"
 
     def test_detect_language_with_unsupported_language_falls_back_to_english(self):
         """Test that unsupported languages fall back to English."""
@@ -79,7 +79,7 @@ class TestDetectDocumentLanguage:
             mock_detect.return_value = "ES"  # Spanish not in lang_map
             result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
 
     def test_detect_language_with_long_text_samples_blocks(self):
         """Test that long text samples random blocks."""
@@ -98,7 +98,7 @@ class TestDetectDocumentLanguage:
                 
                 result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
         # Should call randint to sample blocks
         assert mock_randint.call_count >= 3
 
@@ -115,7 +115,7 @@ class TestDetectDocumentLanguage:
             mock_detect.side_effect = ["EN", "EN", "DE"]
             result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
 
     def test_detect_language_with_empty_list_returns_english(self):
         """Test that empty data list returns English."""
@@ -124,7 +124,7 @@ class TestDetectDocumentLanguage:
         with patch("digitize.doc_utils.logger") as mock_logger:
             result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
         mock_logger.warning.assert_called_once()
         assert "Empty data list" in mock_logger.warning.call_args[0][0]
 
@@ -135,7 +135,7 @@ class TestDetectDocumentLanguage:
         with patch("digitize.doc_utils.logger") as mock_logger:
             result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
         mock_logger.warning.assert_called_once()
         assert "expected list" in mock_logger.warning.call_args[0][0]
 
@@ -146,7 +146,7 @@ class TestDetectDocumentLanguage:
         with patch("digitize.doc_utils.logger") as mock_logger:
             result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
         mock_logger.warning.assert_called_once()
         assert "non-dict elements" in mock_logger.warning.call_args[0][0]
 
@@ -162,7 +162,7 @@ class TestDetectDocumentLanguage:
         with patch("digitize.doc_utils.logger") as mock_logger:
             result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
         mock_logger.warning.assert_called_once()
         assert "No text blocks found" in mock_logger.warning.call_args[0][0]
 
@@ -178,7 +178,7 @@ class TestDetectDocumentLanguage:
             mock_detect.return_value = "EN"
             result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
 
     def test_detect_language_with_exception_in_try_block_returns_english(self):
         """Test that exceptions during detection fall back to English."""
@@ -196,7 +196,7 @@ class TestDetectDocumentLanguage:
                     mock_randint.side_effect = Exception("Sampling failed")
                     result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
         mock_logger.warning.assert_called_once()
         assert "Language detection failed" in mock_logger.warning.call_args[0][0]
 
@@ -217,7 +217,7 @@ class TestDetectDocumentLanguage:
                 
                 result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
         # Should call detect_language for each sampled block
         assert mock_detect.call_count >= 1
 
@@ -237,7 +237,7 @@ class TestDetectDocumentLanguage:
                 
                 result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
         # Should sample the 2 available blocks
         assert mock_randint.call_count >= 2
 
@@ -254,7 +254,7 @@ class TestDetectDocumentLanguage:
             mock_detect.return_value = "EN"
             result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
         # Should only process the 2 valid blocks
 
     def test_detect_language_logs_detected_languages_when_sampling(self):
@@ -271,7 +271,7 @@ class TestDetectDocumentLanguage:
                 mock_detect.return_value = "EN"
                 result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
         # Should log debug message with detected languages when sampling
         assert mock_logger.debug.call_count >= 0  # May or may not be called depending on text length
 
@@ -287,7 +287,7 @@ class TestDetectDocumentLanguage:
             mock_detect.return_value = "EN"
             result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
 
     def test_detect_language_with_integer_in_text_field(self):
         """Test that non-string values in text field are handled."""
@@ -301,7 +301,7 @@ class TestDetectDocumentLanguage:
             mock_detect.return_value = "EN"
             result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
 
     def test_detect_language_with_mixed_valid_and_invalid_blocks(self):
         """Test handling of mixed valid and invalid blocks."""
@@ -318,7 +318,7 @@ class TestDetectDocumentLanguage:
             mock_detect.return_value = "EN"
             result = detect_document_language(data)
         
-        assert result == "en"
+        assert result == "EN"
         # Should only process the 2 valid text blocks
 
     def test_detect_language_returns_most_common_from_counter(self):
@@ -335,7 +335,7 @@ class TestDetectDocumentLanguage:
             result = detect_document_language(data)
         
         # EN appears twice, should be selected
-        assert result == "en"
+        assert result == "EN"
 
 
 # Made with Bob

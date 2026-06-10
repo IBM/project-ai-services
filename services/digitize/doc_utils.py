@@ -1069,8 +1069,8 @@ def detect_document_language(data) -> str:
         data: List of document blocks, where each block is a dict with a 'text' field
         
     Returns:
-        Language code compatible with SentenceSplitter ('en', 'de', 'it', 'fr')
-        Falls back to 'en' if detection fails or language is not supported
+        Lingua ISO 639-1 language code in uppercase format ('EN', 'DE', 'IT', 'FR')
+        Falls back to 'EN' if detection fails or language is not supported
     """
     default_lang = LanguageCodes.ENGLISH
     # validate input data structure
@@ -1131,6 +1131,13 @@ def detect_document_language(data) -> str:
         # Get the most common detected language (returns lingua ISO code like 'EN', 'DE')
         most_common_lang = Counter(detected_languages).most_common(1)[0][0]
         logger.debug(f"Detected languages: {detected_languages}, using: {most_common_lang}")
+        
+        # Check if the detected language is supported
+        # Use the keys from _TO_SENTENCE_SPLITTER mapping which contains all supported languages
+        supported_langs = list(LanguageCodes._TO_SENTENCE_SPLITTER.keys())
+        if most_common_lang not in supported_langs:
+            logger.warning(f"Detected language '{most_common_lang}' is not supported, falling back to '{default_lang}'")
+            return default_lang
         
         return most_common_lang
         
