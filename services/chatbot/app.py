@@ -457,16 +457,9 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
             max_tokens = get_max_tokens_map().get(query_lang, settings.llm.english.max_tokens)
 
         rephrased_query = current_query
-<<<<<<< HEAD
         
         # Process conversation history and rephrase query for supported conversational languages
         if previous_messages:
-=======
-
-        # Process conversation history and rephrase query for English language
-        if previous_messages and lang == "EN":
-            # Truncate history for query rephrasing with 1000 token budget
->>>>>>> 7198368 (Integrate timing_info params included as part of similarity search API response in chatbot)
             truncated_history_for_rephrasing = await asyncio.to_thread(
                 truncate_history_by_tokens,
                 previous_messages,
@@ -502,8 +495,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
                 return StreamingResponse(stream_docs_not_found(), media_type="text/event-stream")
             return ChatCompletionResponse(
-                choices=[ChatChoice(message=ChatMessage(content=message))],
-                perf_stat_dict=perf_stat_dict
+                choices=[ChatChoice(message=ChatMessage(content=message))]
             )
 
         if concurrency_limiter.locked():
@@ -574,8 +566,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                             choices.append(ChatChoice(message=ChatMessage(content=message_content)))
 
                 response_data = ChatCompletionResponse(
-                    choices=choices,
-                    perf_stat_dict=perf_stat_dict
+                    choices=choices
                 )
                 # Add rephrased query as a custom header if available
                 if rephrased_query and rephrased_query != current_query:

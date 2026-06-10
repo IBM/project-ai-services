@@ -115,9 +115,16 @@ def swagger_root():
         "| `false` (default) | Low |\n"
         "| `true` | Medium |\n\n"
         "**`top_k`** defaults to `NUM_CHUNKS_POST_SEARCH` "
-        f"(currently {settings.similarity.num_chunks_post_search}) if not provided."
+        f"(currently {settings.similarity.num_chunks_post_search}) if not provided.\n\n"
+        "## Performance Timing Headers\n\n"
+        "The response includes timing information in custom headers:\n\n"
+        "- **`X-Retrieve-Time`**: Time taken for document retrieval (seconds)\n"
+        "- **`X-Rerank-Time`**: Time taken for reranking (seconds, only if rerank=true)\n"
+        "- **`X-Total-Time`**: Total processing time (seconds)\n\n"
+        "These headers enable cross-service performance monitoring and can be used by clients "
+        "to track and optimize search performance."
     ),
-    response_description="Documents ranked by descending score, with score_type indicating the scoring method used."
+    response_description="Documents ranked by descending score, with score_type indicating the scoring method used. Timing information available in response headers."
 )
 async def similarity_search(req: SimilaritySearchRequest, response: Response) -> SimilaritySearchResponse:
     if not req.query or not req.query.strip():

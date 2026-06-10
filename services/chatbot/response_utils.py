@@ -125,7 +125,6 @@ class ChatChoice(BaseModel):
 class ChatCompletionResponse(BaseModel):
     """Non-streaming chat completion response"""
     choices: list[ChatChoice] = Field(..., description="List of completion choices")
-    perf_stat_dict: Optional[dict] = Field(None, description="Performance timing metrics")
 
     model_config = {
         "json_schema_extra": {
@@ -136,14 +135,7 @@ class ChatCompletionResponse(BaseModel):
                             "content": "Based on the retrieved documents, artificial intelligence..."
                         }
                     }
-                ],
-                "perf_stat_dict": {
-                    "similarity_retrieve_time": 0.123,
-                    "similarity_rerank_time": 0.045,
-                    "similarity_total_time": 0.168,
-                    "llm_time": 1.234,
-                    "total_time": 1.450
-                }
+                ]
             }
         }
     }
