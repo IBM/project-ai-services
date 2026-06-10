@@ -37,18 +37,6 @@ class LanguageCodes:
         """
         return [cls.ENGLISH, cls.GERMAN]
     
-    @classmethod
-    def to_sentence_splitter(cls, lang_code: str) -> str:
-        """Convert language code to SentenceSplitter format.
-        
-        Args:
-            lang_code: Language code (e.g., 'EN', 'DE', 'IT', 'FR')
-            
-        Returns:
-            SentenceSplitter language code (e.g., 'en', 'de', 'it', 'fr')
-        """
-        return cls._TO_SENTENCE_SPLITTER.get(lang_code, 'en')
-
 def to_sentence_splitter_lang(lingua_code: str) -> str:
     """
     Convert lingua ISO code to SentenceSplitter language code.
@@ -59,7 +47,7 @@ def to_sentence_splitter_lang(lingua_code: str) -> str:
     Returns:
         SentenceSplitter language code (e.g., 'en', 'de')
     """
-    return LanguageCodes.to_sentence_splitter(lingua_code)
+    return LanguageCodes._TO_SENTENCE_SPLITTER.get(lingua_code, 'en')
 
 def get_prompt_for_language(lang: str, prompts: dict[str, str]) -> str:
     """

@@ -29,37 +29,37 @@ class TestLanguageCodes:
     
     def test_to_sentence_splitter_english(self):
         """Test conversion of English code to sentence splitter format."""
-        from common.lang_utils import LanguageCodes
+        from common.lang_utils import to_sentence_splitter_lang, LanguageCodes
         
-        result = LanguageCodes.to_sentence_splitter(LanguageCodes.ENGLISH)
+        result = to_sentence_splitter_lang(LanguageCodes.ENGLISH)
         assert result == "en"
     
     def test_to_sentence_splitter_german(self):
         """Test conversion of German code to sentence splitter format."""
-        from common.lang_utils import LanguageCodes
+        from common.lang_utils import to_sentence_splitter_lang, LanguageCodes
         
-        result = LanguageCodes.to_sentence_splitter(LanguageCodes.GERMAN)
+        result = to_sentence_splitter_lang(LanguageCodes.GERMAN)
         assert result == "de"
     
     def test_to_sentence_splitter_with_string_literal(self):
         """Test conversion works with string literals."""
-        from common.lang_utils import LanguageCodes
+        from common.lang_utils import to_sentence_splitter_lang
         
-        assert LanguageCodes.to_sentence_splitter("EN") == "en"
-        assert LanguageCodes.to_sentence_splitter("DE") == "de"
+        assert to_sentence_splitter_lang("EN") == "en"
+        assert to_sentence_splitter_lang("DE") == "de"
     
     def test_to_sentence_splitter_unsupported_language(self):
         """Test fallback to English for unsupported language codes."""
-        from common.lang_utils import LanguageCodes
+        from common.lang_utils import to_sentence_splitter_lang
         
-        result = LanguageCodes.to_sentence_splitter("ES")  # Spanish not supported
+        result = to_sentence_splitter_lang("ES")  # Spanish not supported
         assert result == "en"  # Should fallback to English
     
     def test_to_sentence_splitter_empty_string(self):
         """Test handling of empty string."""
-        from common.lang_utils import LanguageCodes
+        from common.lang_utils import to_sentence_splitter_lang
         
-        result = LanguageCodes.to_sentence_splitter("")
+        result = to_sentence_splitter_lang("")
         assert result == "en"  # Should fallback to English
     
     def test_sentence_splitter_mapping_uses_class_variables(self):
