@@ -69,7 +69,7 @@ class TestListJobsEndpoint:
     
     def test_list_jobs_empty(self, summarize_test_client):
         """Test listing jobs when none exist."""
-        with patch("summarize.app.db_repo.get_all_jobs") as mock_get_all:
+        with patch("summarize.db.manager.db_repo.get_all_jobs") as mock_get_all:
             mock_get_all.return_value = ([], 0)
             
             response = summarize_test_client.get("/v1/summarize/jobs")
@@ -83,7 +83,7 @@ class TestListJobsEndpoint:
     
     def test_list_jobs_with_pagination(self, summarize_test_client, mock_job):
         """Test listing jobs with custom pagination."""
-        with patch("summarize.app.db_repo.get_all_jobs") as mock_get_all:
+        with patch("summarize.db.manager.db_repo.get_all_jobs") as mock_get_all:
             mock_get_all.return_value = ([mock_job], 1)
             
             response = summarize_test_client.get("/v1/summarize/jobs?limit=10&offset=5")
@@ -97,7 +97,7 @@ class TestListJobsEndpoint:
     
     def test_list_jobs_with_status_filter(self, summarize_test_client, mock_job):
         """Test filtering jobs by status."""
-        with patch("summarize.app.db_repo.get_all_jobs") as mock_get_all:
+        with patch("summarize.db.manager.db_repo.get_all_jobs") as mock_get_all:
             mock_get_all.return_value = ([mock_job], 1)
             
             response = summarize_test_client.get("/v1/summarize/jobs?status=completed")
@@ -109,7 +109,7 @@ class TestListJobsEndpoint:
     
     def test_list_jobs_latest_flag(self, summarize_test_client, mock_job):
         """Test getting only the latest job."""
-        with patch("summarize.app.db_repo.get_all_jobs") as mock_get_all:
+        with patch("summarize.db.manager.db_repo.get_all_jobs") as mock_get_all:
             mock_get_all.return_value = ([mock_job], 1)
             
             response = summarize_test_client.get("/v1/summarize/jobs?latest=true")
@@ -150,7 +150,7 @@ class TestGetJobDetailsEndpoint:
     
     def test_get_job_details_success(self, summarize_test_client, mock_job):
         """Test getting details of an existing job."""
-        with patch("summarize.app.db_repo.get_job_by_id") as mock_get_job:
+        with patch("summarize.db.manager.db_repo.get_job_by_id") as mock_get_job:
             mock_get_job.return_value = mock_job
             
             response = summarize_test_client.get("/v1/summarize/jobs/test-job-123")
@@ -165,7 +165,7 @@ class TestGetJobDetailsEndpoint:
     
     def test_get_job_not_found(self, summarize_test_client):
         """Test getting a non-existent job returns 404."""
-        with patch("summarize.app.db_repo.get_job_by_id") as mock_get_job:
+        with patch("summarize.db.manager.db_repo.get_job_by_id") as mock_get_job:
             mock_get_job.return_value = None
             
             response = summarize_test_client.get("/v1/summarize/jobs/nonexistent-job")
@@ -180,7 +180,7 @@ class TestGetJobResultEndpoint:
     
     def test_get_result_completed_job(self, summarize_test_client, mock_job, mock_result_data):
         """Test getting result for a completed job."""
-        with patch("summarize.app.db_repo.get_job_by_id") as mock_get_job, \
+        with patch("summarize.db.manager.db_repo.get_job_by_id") as mock_get_job, \
              patch("summarize.app.read_result_file") as mock_read_result:
             mock_get_job.return_value = mock_job
             mock_read_result.return_value = mock_result_data
@@ -196,7 +196,7 @@ class TestGetJobResultEndpoint:
     
     def test_get_result_job_not_found(self, summarize_test_client):
         """Test getting result for non-existent job returns 404."""
-        with patch("summarize.app.db_repo.get_job_by_id") as mock_get_job:
+        with patch("summarize.db.manager.db_repo.get_job_by_id") as mock_get_job:
             mock_get_job.return_value = None
             
             response = summarize_test_client.get("/v1/summarize/jobs/nonexistent/result")
@@ -207,7 +207,7 @@ class TestGetJobResultEndpoint:
         """Test getting result for in-progress job returns 202."""
         mock_job.status = "in_progress"
         
-        with patch("summarize.app.db_repo.get_job_by_id") as mock_get_job:
+        with patch("summarize.db.manager.db_repo.get_job_by_id") as mock_get_job:
             mock_get_job.return_value = mock_job
             
             response = summarize_test_client.get("/v1/summarize/jobs/test-job-123/result")
@@ -220,7 +220,7 @@ class TestGetJobResultEndpoint:
         """Test getting result for accepted job returns 202."""
         mock_job.status = "accepted"
         
-        with patch("summarize.app.db_repo.get_job_by_id") as mock_get_job:
+        with patch("summarize.db.manager.db_repo.get_job_by_id") as mock_get_job:
             mock_get_job.return_value = mock_job
             
             response = summarize_test_client.get("/v1/summarize/jobs/test-job-123/result")
@@ -232,7 +232,7 @@ class TestGetJobResultEndpoint:
         mock_job.status = "failed"
         mock_job.error = "Processing failed"
         
-        with patch("summarize.app.db_repo.get_job_by_id") as mock_get_job:
+        with patch("summarize.db.manager.db_repo.get_job_by_id") as mock_get_job:
             mock_get_job.return_value = mock_job
             
             response = summarize_test_client.get("/v1/summarize/jobs/test-job-123/result")
@@ -242,7 +242,7 @@ class TestGetJobResultEndpoint:
     
     def test_get_result_missing_file(self, summarize_test_client, mock_job):
         """Test when result file is missing for completed job."""
-        with patch("summarize.app.db_repo.get_job_by_id") as mock_get_job, \
+        with patch("summarize.db.manager.db_repo.get_job_by_id") as mock_get_job, \
              patch("summarize.app.read_result_file") as mock_read_result:
             mock_get_job.return_value = mock_job
             mock_read_result.return_value = None
@@ -259,9 +259,9 @@ class TestDeleteJobEndpoint:
     
     def test_delete_completed_job(self, summarize_test_client, mock_job):
         """Test deleting a completed job."""
-        with patch("summarize.app.db_repo.get_job_by_id") as mock_get_job, \
+        with patch("summarize.db.manager.db_repo.get_job_by_id") as mock_get_job, \
              patch("summarize.app.delete_job_files") as mock_delete_files, \
-             patch("summarize.app.db_repo.delete_job") as mock_delete_job:
+             patch("summarize.db.manager.db_repo.delete_job") as mock_delete_job:
             mock_get_job.return_value = mock_job
             mock_delete_job.return_value = True
             
@@ -275,9 +275,9 @@ class TestDeleteJobEndpoint:
         """Test deleting a failed job."""
         mock_job.status = "failed"
         
-        with patch("summarize.app.db_repo.get_job_by_id") as mock_get_job, \
+        with patch("summarize.db.manager.db_repo.get_job_by_id") as mock_get_job, \
              patch("summarize.app.delete_job_files") as mock_delete_files, \
-             patch("summarize.app.db_repo.delete_job") as mock_delete_job:
+             patch("summarize.db.manager.db_repo.delete_job") as mock_delete_job:
             mock_get_job.return_value = mock_job
             mock_delete_job.return_value = True
             
@@ -287,7 +287,7 @@ class TestDeleteJobEndpoint:
     
     def test_delete_job_not_found(self, summarize_test_client):
         """Test deleting a non-existent job returns 404."""
-        with patch("summarize.app.db_repo.get_job_by_id") as mock_get_job:
+        with patch("summarize.db.manager.db_repo.get_job_by_id") as mock_get_job:
             mock_get_job.return_value = None
             
             response = summarize_test_client.delete("/v1/summarize/jobs/nonexistent")
@@ -298,7 +298,7 @@ class TestDeleteJobEndpoint:
         """Test deleting an in-progress job returns 409."""
         mock_job.status = "in_progress"
         
-        with patch("summarize.app.db_repo.get_job_by_id") as mock_get_job:
+        with patch("summarize.db.manager.db_repo.get_job_by_id") as mock_get_job:
             mock_get_job.return_value = mock_job
             
             response = summarize_test_client.delete("/v1/summarize/jobs/test-job-123")
@@ -310,7 +310,7 @@ class TestDeleteJobEndpoint:
         """Test deleting an accepted job returns 409."""
         mock_job.status = "accepted"
         
-        with patch("summarize.app.db_repo.get_job_by_id") as mock_get_job:
+        with patch("summarize.db.manager.db_repo.get_job_by_id") as mock_get_job:
             mock_get_job.return_value = mock_job
             
             response = summarize_test_client.delete("/v1/summarize/jobs/test-job-123")
@@ -324,9 +324,9 @@ class TestBulkDeleteJobsEndpoint:
     
     def test_bulk_delete_with_confirm(self, summarize_test_client):
         """Test bulk delete with confirm=true."""
-        with patch("summarize.app.db_repo.get_active_jobs") as mock_get_active, \
+        with patch("summarize.db.manager.db_repo.get_active_jobs") as mock_get_active, \
              patch("summarize.app.delete_all_job_files") as mock_delete_files, \
-             patch("summarize.app.db_repo.delete_all_jobs") as mock_delete_all:
+             patch("summarize.db.manager.db_repo.delete_all_jobs") as mock_delete_all:
             mock_get_active.return_value = []
             mock_delete_all.return_value = True
             
@@ -353,7 +353,7 @@ class TestBulkDeleteJobsEndpoint:
         """Test bulk delete with active jobs returns 409."""
         mock_job.status = "in_progress"
         
-        with patch("summarize.app.db_repo.get_active_jobs") as mock_get_active:
+        with patch("summarize.db.manager.db_repo.get_active_jobs") as mock_get_active:
             mock_get_active.return_value = [mock_job]
             
             response = summarize_test_client.delete("/v1/summarize/jobs?confirm=true")
@@ -363,9 +363,9 @@ class TestBulkDeleteJobsEndpoint:
     
     def test_bulk_delete_database_failure(self, summarize_test_client):
         """Test bulk delete when database deletion fails."""
-        with patch("summarize.app.db_repo.get_active_jobs") as mock_get_active, \
+        with patch("summarize.db.manager.db_repo.get_active_jobs") as mock_get_active, \
              patch("summarize.app.delete_all_job_files") as mock_delete_files, \
-             patch("summarize.app.db_repo.delete_all_jobs") as mock_delete_all:
+             patch("summarize.db.manager.db_repo.delete_all_jobs") as mock_delete_all:
             mock_get_active.return_value = []
             mock_delete_all.return_value = False
             
