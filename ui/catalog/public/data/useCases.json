@@ -66,7 +66,7 @@
       "featuredArticle": {
         "company": "MIDRANGE",
         "title": "AI-Powered Search Enhances Conference Experiences on IBM i",
-        "imagePath": "https://assets.ibm.com/is/image/ibm/adobestock_259078609?$original$&fmt=png-alpha&bfc=off",
+        "imagePath": "images/midrange.webp",
         "articleUrl": "https://www.ibm.com/downloads/documents/us-en/16ddd5a53eb94e4e",
         "description": "MIDRANGE (ITP Verlag GmbH) Outcomes worked with IBM to implement an AI-powered search solution for its POW3R Conference using large language models (LLMs), opensource AI technologies, and IBM Granite Vision models. The solution enables attendees to quickly search and locate relevant content across hundreds of conference presentations, creating a smarter and more valuable conference experience."
       }
@@ -86,7 +86,7 @@
       "featuredArticle": {
         "company": "Portolan",
         "title": "Portolan Modernizes Financial Software with AI Search on IBM Power",
-        "imagePath": "https://assets.ibm.com/is/image/ibm/06e2f56c8e3ab188-Edited?$original$&fmt=png-alpha&bfc=off",
+        "imagePath": "images/portolan.webp",
         "articleUrl": "https://www.ibm.com/downloads/documents/us-en/1550f7e8f4d0d263"
       }
     },
@@ -170,7 +170,7 @@
       "featuredArticle": {
         "company": "Hans Geis",
         "title": "Hans Geis Speeds Up Order Processing by 5X with AI on IBM i and Power",
-        "imagePath": "https://assets.ibm.com/is/image/ibm/2021_SpencerLowell_WorkingWorld_11?$original$&fmt=png-alpha&bfc=off",
+        "imagePath": "images/hansGeis.webp",
         "articleUrl": "https://www.ibm.com/downloads/documents/us-en/1443d5dc5ecf4367.",
         "description": "Global logistics provider and IBM Power client Hans Geis has followed the \"Deep process integration\" reference architecture with the \"Extract and tag information\" AI service within their order processing pipeline for incoming quote requests. Their end customers raise thousands of quote requests daily to ask Hans Geis and their competitors for transportation services of cargo they need to get shipped. In this competitive market, answering to requests quickly matters because logistic companies that respond timely are more likely to win an order.\n\nIn a joint project, Hans Geis and IBM have integrated the \"Extract and tag\" AI service into Hans Geis' ERP system running on IBM i, automating the order processing pipeline for quote requests. In their staging system, Hans Geis has measured a speed-up of 5x for their order processing process and an individual employee productivity gain of 80%."
       }
@@ -209,7 +209,7 @@
       "featuredArticle": {
         "company": "Edsvard Hallbarhet AB",
         "title": "From contract headache to strategic asset: How Edsvard makes sense of unstructured real estate data with IBM Cloud and watsonx.data",
-        "imagePath": "https://assets.ibm.com/is/image/ibm/202410_thomasprior_nyc_cityscape_0003?$original$&fmt=png-alpha&bfc=off",
+        "imagePath": "images/edsvard.webp",
         "articleUrl": "https://www.ibm.com/new/product-blog/how-edsvard-makes-sense-of-unstructured-real-estate-data-with-ibm-cloud-and-watsonx-data"
       },
       "partnerStories": [
@@ -239,7 +239,7 @@
       "featuredArticle": {
         "company": "BECOM Electronics GmbH",
         "title": "AI on IBM i Optimizes Production Planning",
-        "imagePath": "https://assets.ibm.com/is/image/ibm/202502_ibm_z-inside_ibm_tp_day_01_0619?$original$&fmt=png-alpha&bfc=off",
+        "imagePath": "images/becom.webp",
         "articleUrl": "https://www.ibm.com/downloads/documents/us-en/15db45f02d520e7a"
       }
     }

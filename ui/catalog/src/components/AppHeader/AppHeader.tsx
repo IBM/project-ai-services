@@ -12,7 +12,8 @@ import { User, Logout } from "@carbon/icons-react";
 import styles from "./AppHeader.module.scss";
 import { useReducer, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { logout } from "@/services/auth";
+import { logout, getUserInfo } from "@/services/auth";
+import { useAuthStore } from "@/store/auth.store";
 
 type AppHeaderProps =
   | {
@@ -64,6 +65,7 @@ const AppHeader = (props: AppHeaderProps) => {
   const panelRef = useRef<HTMLDivElement>(null);
   const userIconRef = useRef<HTMLButtonElement | null>(null);
   const navigate = useNavigate();
+  const userInfo = useAuthStore((state) => state.userInfo);
 
   const handleLogout = async () => {
     try {
@@ -75,6 +77,15 @@ const AppHeader = (props: AppHeaderProps) => {
       navigate("/logout", { replace: true });
     }
   };
+
+  // Fetch user info on mount if not already loaded
+  useEffect(() => {
+    if (!minimal && !userInfo) {
+      getUserInfo().catch((err) => {
+        console.error("Failed to fetch user info:", err);
+      });
+    }
+  }, [minimal, userInfo]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -138,7 +149,7 @@ const AppHeader = (props: AppHeaderProps) => {
                 <div>
                   <div className={styles.userprofile}>
                     <div>
-                      <strong>Admin</strong>
+                      <strong>{userInfo?.name || "User"}</strong>
                     </div>
                     <div className={styles.usercircle}>
                       <User size={16} />
@@ -163,8 +174,7 @@ const AppHeader = (props: AppHeaderProps) => {
                   size="sm"
                   primaryButtonText="Log out"
                   secondaryButtonText="Cancel"
-                  modalHeading="Are you sure you want to log out of IBM AI
-                    Foundation for Power?"
+                  modalHeading="Are you sure you want to log out of IBM AI Foundation for Power?"
                   onRequestClose={() => {
                     dispatch({ type: "CLOSE_LOGOUT_MODAL" });
                   }}

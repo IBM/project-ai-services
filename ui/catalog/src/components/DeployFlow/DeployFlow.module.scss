@@ -1,0 +1,330 @@
+@use "@carbon/react/scss/spacing" as *;
+@use "@carbon/react/scss/theme" as *;
+@use "@carbon/react/scss/type" as *;
+@use "@carbon/react/scss/breakpoint" as *;
+@use "@carbon/colors" as *;
+
+// Add spacing around Tearsheet: 48px top (for header), 32px left/right
+:global(.c4p--tearsheet.customTearsheet) {
+  padding-top: $spacing-09; // 48px
+}
+
+:global(.c4p--tearsheet.customTearsheet .c4p--tearsheet__container) {
+  inline-size: calc(100% - 2 * #{$spacing-07}) !important; // 32px each side
+  max-block-size: calc(
+    100% - #{$spacing-07}
+  ) !important; // Account for top padding
+}
+
+.influencerContent {
+  padding: $spacing-07 $spacing-07;
+}
+
+.stepContent {
+  padding: $spacing-06 $spacing-07;
+}
+
+.stepHeader {
+  margin-bottom: $spacing-06;
+}
+
+.stepTitle {
+  @include type-style("heading-03");
+  margin: 0 0 $spacing-08 0;
+}
+
+.sectionTitle {
+  @include type-style("heading-compact-02");
+  margin-bottom: $spacing-05;
+}
+
+.formGrid {
+  row-gap: $spacing-07;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.formField {
+  max-width: 50%;
+}
+
+.labelWithInfo {
+  display: flex;
+  align-items: center;
+  gap: $spacing-03;
+  margin-bottom: $spacing-03;
+
+  :global(.cds--toggletip-button) {
+    padding: 0;
+    min-height: auto;
+    display: flex;
+    align-items: center;
+
+    svg {
+      fill: $icon-secondary;
+    }
+  }
+}
+
+.textInputLabel {
+  @include type-style("label-01");
+  color: $text-secondary;
+  margin: 0;
+  display: inline-block;
+}
+
+.resourceGrid {
+  display: flex;
+  gap: $spacing-05;
+  flex-wrap: wrap;
+}
+
+.resourceItem {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-08;
+  min-height: 120px;
+  background-color: transparent;
+  border: 1px solid $border-subtle;
+  flex: 1;
+  min-width: 200px;
+}
+
+.resourceLabel {
+  @include type-style("body-compact-01");
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.resourceValue {
+  @include type-style("heading-04");
+
+  .unit {
+    @include type-style("heading-01");
+  }
+}
+
+.green {
+  fill: $support-success;
+  color: $support-success;
+}
+
+.warning {
+  fill: $support-warning;
+  color: $support-warning;
+}
+
+.resourceLoading {
+  padding: $spacing-05 0;
+}
+
+.resourceTotal {
+  @include type-style("label-01");
+  color: $text-secondary;
+  margin-top: $spacing-03;
+}
+
+.required {
+  font-weight: 600;
+}
+
+.serviceConfigCard {
+  margin-bottom: $spacing-05;
+  position: relative;
+
+  // Style the ProductiveCard description
+  :global(.c4p--card__description) {
+    @include type-style("body-compact-01");
+    margin: $spacing-05 0;
+  }
+}
+
+.cardEditAction {
+  position: absolute;
+  top: $spacing-05;
+  right: $spacing-05;
+  z-index: 1;
+}
+
+.cardActions {
+  display: flex;
+  gap: $spacing-03;
+  justify-content: flex-end;
+  margin-bottom: $spacing-05;
+  padding-top: $spacing-03;
+}
+
+.serviceConfigContent {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-05;
+}
+
+.serviceConfigItem {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: $spacing-05;
+}
+
+.serviceConfigItemLabel {
+  @include type-style("body-short-01");
+  color: $text-secondary;
+  min-width: 200px;
+  flex-shrink: 0;
+}
+
+.serviceConfigItemValue {
+  @include type-style("body-short-01");
+  color: $text-primary;
+  flex: 1;
+  word-break: break-word;
+}
+
+.serviceConfigField {
+  width: 100%;
+}
+
+.serviceConfigFieldRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $spacing-05;
+  width: 100%;
+
+  // White background for dropdowns and text inputs in edit mode
+  :global {
+    .cds--dropdown,
+    .cds--list-box,
+    .cds--list-box__field {
+      background-color: $field-02 !important;
+      border-bottom: 1px solid $border-strong !important;
+    }
+
+    .cds--text-input,
+    .cds--text-input__field-wrapper input {
+      background-color: $field-02 !important;
+    }
+  }
+}
+
+.readonlyField {
+  :global {
+    .cds--text-input,
+    .cds--text-input__field-wrapper input {
+      background-color: transparent !important;
+      cursor: not-allowed;
+    }
+  }
+}
+
+.serviceConfigFieldSingle {
+  grid-column: 1 / 2; // Only takes left column, right side empty
+}
+
+.cloudCredentialsSection {
+  margin-top: $spacing-06;
+  padding-top: $spacing-06;
+  border-top: 1px solid $border-subtle;
+}
+
+.cloudCredentialsTitle {
+  @include type-style("heading-compact-01");
+  margin-bottom: $spacing-05;
+}
+
+.systemPromptSection {
+  grid-column: 1 / -1; // Span full width of grid
+}
+
+.apiKeyValue {
+  font-family: "IBM Plex Mono", monospace;
+  margin-right: $spacing-03;
+}
+
+.apiKeyToggle {
+  min-height: auto;
+  padding: 0;
+  margin-left: $spacing-02;
+  vertical-align: middle;
+
+  svg {
+    vertical-align: middle;
+  }
+}
+
+.systemPromptTextArea {
+  margin-top: $spacing-05;
+
+  :global(.cds--text-area) {
+    background-color: $field-02 !important;
+  }
+}
+
+.formSection {
+  margin-bottom: $spacing-07;
+}
+
+.loadingContainer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+}
+
+.errorContainer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+  color: $text-error;
+
+  p {
+    @include type-style("body-compact-01");
+  }
+}
+
+.customToast {
+  position: fixed;
+  top: $spacing-10;
+  right: $spacing-07;
+  z-index: 10000;
+}
+
+// ============================================================================
+// RESPONSIVE STYLES
+// Carbon Tearsheet does not provide default responsive behavior
+// ============================================================================
+
+@include breakpoint-down(lg) {
+  .formField {
+    max-width: 100%;
+  }
+
+  .serviceConfigFieldRow {
+    grid-template-columns: 1fr;
+  }
+
+  .serviceConfigFieldSingle {
+    grid-column: 1 / -1;
+  }
+}
+
+@include breakpoint-down(md) {
+  :global(.c4p--tearsheet.customTearsheet) {
+    padding-top: $spacing-09 !important;
+  }
+
+  :global(.c4p--tearsheet.customTearsheet .c4p--tearsheet__influencer) {
+    display: none;
+  }
+
+  :global(.c4p--tearsheet.customTearsheet .c4p--tearsheet__content) {
+    width: 100%;
+  }
+
+  :global(.c4p--tearsheet.customTearsheet .c4p--tearsheet__container) {
+    inline-size: calc(100% - 2 * #{$spacing-07}) !important;
+    max-block-size: calc(100% - #{$spacing-11}) !important;
+  }
+}
