@@ -10,6 +10,7 @@ import random
 os.environ['GRPC_VERBOSITY'] = 'ERROR'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
+import sentence_splitter
 from tqdm import tqdm
 from pathlib import Path
 from docling_core.types.doc.document import DoclingDocument
@@ -1071,7 +1072,7 @@ def detect_document_language(data) -> str:
         Language code compatible with SentenceSplitter ('en', 'de', 'it', 'fr')
         Falls back to 'en' if detection fails or language is not supported
     """
-    default_lang = to_sentence_splitter_lang(LanguageCodes.ENGLISH)
+    default_lang = LanguageCodes.ENGLISH
     # validate input data structure
     if not isinstance(data, list):
         logger.warning(f"Invalid input: expected list, got {type(data).__name__}, falling back to '{default_lang}'")
@@ -1129,10 +1130,9 @@ def detect_document_language(data) -> str:
         
         # Get the most common detected language (returns lingua ISO code like 'EN', 'DE')
         most_common_lang = Counter(detected_languages).most_common(1)[0][0]
-        supported_lang = to_sentence_splitter_lang(most_common_lang)
-        logger.debug(f"Detected languages: {detected_languages}, using: {supported_lang}")
+        logger.debug(f"Detected languages: {detected_languages}, using: {most_common_lang}")
         
-        return supported_lang
+        return most_common_lang
         
     except Exception as e:
         logger.warning(f"Language detection failed: {e}, falling back to '{default_lang}'")
@@ -1338,11 +1338,12 @@ def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_t
     t0 = time.time()
 
     try:
+        sentence_splitter_lang = to_sentence_splitter_lang(language)
         # Chunk text content using pre-detected language
-        text_chunk_json, text_chunk_time = chunk_text(input_path, out_path, emb_endpoint, max_tokens, doc_id, language)
+        text_chunk_json, text_chunk_time = chunk_text(input_path, out_path, emb_endpoint, max_tokens, doc_id, sentence_splitter_lang)
 
         # Chunk tables using the same language
-        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id, language)
+        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id, sentence_splitter_lang)
 
         total_time = time.time() - t0
         return text_chunk_json, table_chunk_json, total_time
