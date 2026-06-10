@@ -30,7 +30,7 @@ func (p *CatalogProvider) GetCatalogModels(templateID string, excludeComponents 
 	service, err := p.LoadService(templateID)
 	if err == nil {
 		// Only collect component models (services don't have models in schemas)
-		if err := p.collectComponentsModels(service.Dependencies, allModels, nil, excludeComponents); err != nil {
+		if err := p.collectComponentsModels(service.Dependencies, allModels, excludeComponents); err != nil {
 			return nil, err
 		}
 
@@ -49,7 +49,7 @@ func (p *CatalogProvider) collectArchitectureModels(services []types.ServiceRefe
 		}
 
 		// Collect component models from service dependencies
-		if err := p.collectComponentsModels(service.Dependencies, allModels, nil, excludeComponents); err != nil {
+		if err := p.collectComponentsModels(service.Dependencies, allModels, excludeComponents); err != nil {
 			return fmt.Errorf("failed to collect models for service %s: %w", svcRef.ID, err)
 		}
 	}
@@ -58,8 +58,7 @@ func (p *CatalogProvider) collectArchitectureModels(services []types.ServiceRefe
 }
 
 // collectComponentsModels collects models for components based on dependencies.
-// If displayedComponents map is provided, it will track and skip duplicates.
-func (p *CatalogProvider) collectComponentsModels(dependencies []types.DependencyReference, allModels map[string]bool, displayedComponents map[string]bool, excludeComponents []string) error {
+func (p *CatalogProvider) collectComponentsModels(dependencies []types.DependencyReference, allModels map[string]bool, excludeComponents []string) error {
 	if len(dependencies) == 0 {
 		return nil
 	}
@@ -70,7 +69,7 @@ func (p *CatalogProvider) collectComponentsModels(dependencies []types.Dependenc
 	}
 
 	for _, dep := range dependencies {
-		if err := p.collectComponentsByTypeModels(dep.ID, components, allModels, displayedComponents, excludeComponents); err != nil {
+		if err := p.collectComponentsByTypeModels(dep.ID, components, allModels, excludeComponents); err != nil {
 			return err
 		}
 	}
@@ -79,7 +78,7 @@ func (p *CatalogProvider) collectComponentsModels(dependencies []types.Dependenc
 }
 
 // collectComponentsByTypeModels collects models for all components of a specific type.
-func (p *CatalogProvider) collectComponentsByTypeModels(componentType string, components []types.Component, allModels map[string]bool, displayedComponents map[string]bool, excludeComponents []string) error {
+func (p *CatalogProvider) collectComponentsByTypeModels(componentType string, components []types.Component, allModels map[string]bool, excludeComponents []string) error {
 	for _, comp := range components {
 		if comp.ComponentType != componentType {
 			continue
@@ -96,17 +95,6 @@ func (p *CatalogProvider) collectComponentsByTypeModels(componentType string, co
 		}
 		if excluded {
 			continue
-		}
-
-		componentKey := fmt.Sprintf("%s.%s", comp.ComponentType, comp.ID)
-
-		// Skip if already processed (only when tracking duplicates)
-		if displayedComponents != nil && displayedComponents[componentKey] {
-			continue
-		}
-
-		if displayedComponents != nil {
-			displayedComponents[componentKey] = true
 		}
 
 		if err := p.addComponentModels(comp.ComponentType, comp.ID, allModels); err != nil {
