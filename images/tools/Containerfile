@@ -50,7 +50,7 @@ COPY --from=tools_builder /opt/venv /opt/venv
 COPY --from=servicereport_builder /rpms/ /tmp/rpms/
 
 RUN microdnf update ${DNF_FLAGS} -y && \
-  microdnf install ${DNF_FLAGS} -y python3.12 && \
+  microdnf install ${DNF_FLAGS} -y python3.12 jq && \
   ARCH=$(uname -m) && \
   if [ "$ARCH" = "ppc64le" ]; then \
   echo "Installing ServiceReport for ppc64le..." && \

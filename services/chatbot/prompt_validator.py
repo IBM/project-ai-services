@@ -11,7 +11,7 @@ from enum import Enum
 from common.misc_utils import get_logger
 from common.settings import settings
 from common.llm_utils import get_vllm_headers
-from common.lang_utils import language_codes
+from common.lang_utils import LanguageCodes
 import common.misc_utils as misc_utils
 
 logger = get_logger("prompt_validator")
@@ -157,8 +157,8 @@ class GermanConstants:
 
 
 LANGUAGE_CONSTANTS = {
-    language_codes["English"]: EnglishConstants,
-    language_codes["German"]: GermanConstants,
+    LanguageCodes.ENGLISH: EnglishConstants,
+    LanguageCodes.GERMAN: GermanConstants,
 }
 
 

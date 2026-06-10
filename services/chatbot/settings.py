@@ -341,17 +341,17 @@ class RAGConfig(BaseSettings):
         # Handle custom system_prompt
         if self.system_prompt:
             try:
-                from common.lang_utils import detect_language, language_codes
+                from common.lang_utils import detect_language, LanguageCodes
                 
                 detected_lang = detect_language(self.system_prompt, min_confidence=0.7)
                 
                 # Fallback to English if unsupported language
-                if detected_lang not in language_codes.values():
+                if detected_lang not in LanguageCodes.supported_languages():
                     logger.warning(
                         f"Custom system_prompt detected as unsupported language ({detected_lang}). "
                         "Falling back to English."
                     )
-                    detected_lang = language_codes["English"]
+                    detected_lang = LanguageCodes.ENGLISH
                 
                 logger.info(f"Custom system_prompt detected as: {detected_lang}")
                 
@@ -384,7 +384,7 @@ class RAGConfig(BaseSettings):
                     except Exception as e:
                         logger.warning(f"Error during LLM validation: {e}. Proceeding with basic validation only.")
 
-                if detected_lang == language_codes["German"]:
+                if detected_lang == LanguageCodes.GERMAN:
                     self.german.system_prompt = self.system_prompt
                     logger.info("Applied custom system_prompt to German config")
                 else:

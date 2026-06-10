@@ -134,7 +134,13 @@ Examples:
 		}
 
 		// Execute restore using the application interface
-		return app.Restore(ctx, opts)
+		if err := app.Restore(ctx, opts); err != nil {
+			return fmt.Errorf("failed to restore %s for application %s: %w", restoreTarget, applicationName, err)
+		}
+
+		logger.Infof("✓ Restore completed successfully for application %s\n", applicationName, 0)
+
+		return nil
 	},
 }
 
