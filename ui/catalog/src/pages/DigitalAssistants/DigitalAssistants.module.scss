@@ -23,6 +23,7 @@
       text-align: right;
     }
 
+    // Sticky actions column (last column) on the right
     :global(th:last-child) {
       position: sticky;
       right: 0;
@@ -41,23 +42,62 @@
       z-index: 2;
       padding-right: spacing.$spacing-03;
       padding-left: 0;
+      background-color: theme.$layer;
       box-shadow: calc(-1 * spacing.$spacing-01) 0 spacing.$spacing-02
         var(--cds-shadow);
     }
 
+    // Sticky expand header column (first column) on the left
     :global(th:first-child) {
       position: sticky;
       left: 0;
       z-index: 1;
+      min-width: spacing.$spacing-09;
+      max-width: spacing.$spacing-09;
       background-color: theme.$layer-accent;
-      box-shadow: spacing.$spacing-01 0 spacing.$spacing-02 var(--cds-shadow);
+      box-shadow: none; // Remove shadow to eliminate gap
     }
 
     :global(td:first-child) {
       position: sticky;
       left: 0;
       z-index: 2;
+      min-width: spacing.$spacing-09;
+      max-width: spacing.$spacing-09;
+      background-color: theme.$layer;
+      box-shadow: none; // Remove shadow to eliminate gap
+    }
+
+    // Sticky name column (second column) on the left, positioned after expand header
+    :global(th:nth-child(2)) {
+      position: sticky;
+      left: spacing.$spacing-09; // Position exactly after the expand header column
+      z-index: 1;
+      background-color: theme.$layer-accent;
       box-shadow: spacing.$spacing-01 0 spacing.$spacing-02 var(--cds-shadow);
+    }
+
+    :global(td:nth-child(2)) {
+      position: sticky;
+      left: spacing.$spacing-09; // Position exactly after the expand header column
+      z-index: 2;
+      background-color: theme.$layer;
+      box-shadow: spacing.$spacing-01 0 spacing.$spacing-02 var(--cds-shadow);
+    }
+
+    // Hover state for sticky columns
+    :global(tr:hover) {
+      :global(td:first-child),
+      :global(td:nth-child(2)) {
+        background-color: theme.$layer-hover;
+      }
+    }
+
+    // Hover state for actions column
+    :global(tr:hover) {
+      :global(td:last-child) {
+        background-color: theme.$layer-hover;
+      }
     }
   }
 }
@@ -138,6 +178,11 @@
 .messageIconError {
   flex-shrink: 0;
   color: theme.$support-error;
+}
+
+.messageIconSuccess {
+  flex-shrink: 0;
+  color: theme.$support-success;
 }
 
 .messageIconInfo {
@@ -241,7 +286,7 @@
 
 .sideBySideGrid {
   display: flex;
-  gap: 1rem;
+  gap: spacing.$spacing-05;
 
   @include breakpoint-down("md") {
     flex-direction: column;
@@ -295,8 +340,8 @@
   flex-shrink: 0;
   align-self: stretch;
 
-  // Hide image on screens smaller than 900px (between md and lg breakpoints)
-  @media (max-width: 899px) {
+  // Hide image on smaller screens
+  @include breakpoint-down("md") {
     display: none;
   }
 }

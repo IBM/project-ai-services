@@ -2,6 +2,16 @@ export const AUTH_ENDPOINTS = {
   LOGIN: "/auth/login",
   LOGOUT: "/auth/logout",
   REFRESH: "/auth/refresh",
+  ME: "/auth/me",
+};
+
+export const DIGITAL_ASSISTANTS_ENDPOINTS = {
+  DEPLOY_OPTIONS: "/architectures/rag/deploy-options",
+  PROVIDER_PARAMS: (componentType: string, providerId: string) =>
+    `/components/${componentType}/providers/${providerId}/params`,
+  APPLICATIONS: "/applications",
+  APPLICATION_BY_ID: (id: string) => `/applications/${id}`,
+  RESOURCES: "/resources",
 };
 
 export const SERVICE_ENDPOINTS = {

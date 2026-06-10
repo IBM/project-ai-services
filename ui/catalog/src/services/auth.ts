@@ -1,7 +1,7 @@
 import { api } from "@/api/axios";
 import { AUTH_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import { useAuthStore } from "@/store/auth.store";
-import type { LoginRequest, LoginResponse } from "@/types/auth";
+import type { LoginRequest, LoginResponse, UserInfo } from "@/types/auth";
 
 export const login = async (payload: LoginRequest): Promise<LoginResponse> => {
   const response = await api.post(AUTH_ENDPOINTS.LOGIN, payload);
@@ -20,6 +20,18 @@ export const logout = async () => {
     },
   });
   useAuthStore.getState().clearTokens();
+  useAuthStore.getState().clearUserInfo();
+};
+
+export const getUserInfo = async (): Promise<UserInfo> => {
+  const response = await api.get(AUTH_ENDPOINTS.ME);
+  const userInfo: UserInfo = {
+    id: response.data.id,
+    username: response.data.username,
+    name: response.data.name,
+  };
+  useAuthStore.getState().setUserInfo(userInfo);
+  return userInfo;
 };
 
 export const refreshAccessToken = async () => {
