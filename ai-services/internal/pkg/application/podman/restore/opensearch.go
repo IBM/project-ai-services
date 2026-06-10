@@ -253,10 +253,6 @@ func prepareSidecarAndRestore(ctx context.Context, containerID, backupDir string
 		return fmt.Errorf("failed to get OpenSearch password: %w", err)
 	}
 
-	if err := installJQInSidecar(ctx, containerID); err != nil {
-		return err
-	}
-
 	backupOSDir, containerBackupPath, err := determineBackupPaths(backupDir)
 	if err != nil {
 		return err
@@ -273,39 +269,6 @@ func prepareSidecarAndRestore(ctx context.Context, containerID, backupDir string
 	logger.Infof("OpenSearch import completed!\n", 0)
 
 	return nil
-}
-
-// installJQInSidecar installs jq in the sidecar container with retry logic.
-func installJQInSidecar(ctx context.Context, containerID string) error {
-	logger.Infof("Installing jq in sidecar...\n", 0)
-
-	installScript := `
-# Create cache directory with proper permissions
-mkdir -p /var/cache/yum/metadata 2>/dev/null || true
-chmod -R 777 /var/cache/yum 2>/dev/null || true
-
-# Clean and install (jq for JSON processing)
-microdnf clean all 2>&1
-microdnf install -y --nodocs --setopt=install_weak_deps=0 jq 2>&1
-`
-
-	maxRetries := 3
-	for i := 0; i < maxRetries; i++ {
-		if i > 0 {
-			logger.Infof("Retrying installation (attempt %d/%d)...\n", i+1, maxRetries, 0)
-			time.Sleep(time.Duration(i*retryBackoffMultiplier) * time.Second)
-		}
-
-		if err := execInContainer(ctx, containerID, []string{"sh", "-c", installScript}); err == nil {
-			logger.Infof("Successfully installed jq\n", 0)
-
-			return nil
-		}
-
-		logger.Warningf("Installation attempt %d failed\n", i+1)
-	}
-
-	return fmt.Errorf("failed to install jq after %d retries", maxRetries)
 }
 
 // determineBackupPaths determines the backup directory paths based on format.

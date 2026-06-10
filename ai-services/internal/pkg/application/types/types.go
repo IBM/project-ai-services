@@ -74,6 +74,7 @@ type RestoreOptions struct {
 	Name       string
 	Target     string // opensearch, digitize, etc.
 	BackupFile string
+	AutoYes    bool
 }
 
 // ApplicationInfo represents information about a deployed application.
