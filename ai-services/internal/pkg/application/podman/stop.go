@@ -13,20 +13,9 @@ import (
 
 // Stop stops a running application.
 func (p *PodmanApplication) Stop(opts appTypes.StopOptions) error {
-	var pods []types.Pod
-	var err error
-	if !opts.Experimental {
-		pods, err = p.runtime.ListPods(map[string][]string{
-			"label": {fmt.Sprintf("ai-services.io/application=%s", opts.Name)},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to list pods: %w", err)
-		}
-	} else {
-		pods, err = cliutils.GetPodsFromApplicationsPS(opts.Name)
-		if err != nil {
-			return err
-		}
+	pods, err := p.listApplicationPods(opts)
+	if err != nil {
+		return err
 	}
 
 	if len(pods) == 0 {
@@ -69,6 +58,22 @@ func (p *PodmanApplication) Stop(opts appTypes.StopOptions) error {
 	logger.Infof("Proceeding to stop pods...\n")
 
 	return p.stopPods(podsToStop)
+}
+
+// listApplicationPods retrieves pods for the given application.
+func (p *PodmanApplication) listApplicationPods(opts appTypes.StopOptions) ([]types.Pod, error) {
+	if !opts.Experimental {
+		pods, err := p.runtime.ListPods(map[string][]string{
+			"label": {fmt.Sprintf("ai-services.io/application=%s", opts.Name)},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to list pods: %w", err)
+		}
+
+		return pods, nil
+	}
+
+	return cliutils.GetPodsFromApplicationsPS(opts.Name)
 }
 
 func (p *PodmanApplication) fetchPodsToStop(pods []types.Pod, podNames []string, appName string) ([]types.Pod, error) {
