@@ -95,12 +95,12 @@ func (img *Images) Run(policy ImagePullPolicy) error {
 func (img *Images) always(images []string) error {
 	logger.Infoln("Downloading container images required for application template " + img.AppTemplate + ":")
 
-	return pullImageFromRegistry(img.Runtime, images)
+	return PullImageFromRegistry(img.Runtime, images)
 }
 
 // IfNotPresent pulls only the missing images for a given app template.
 func (img *Images) IfNotPresent(images []string) error {
-	notFoundImages, err := fetchImagesNotFound(img.Runtime, images)
+	notFoundImages, err := FetchImagesNotFound(img.Runtime, images)
 	if err != nil {
 		return err
 	}
@@ -111,13 +111,13 @@ func (img *Images) IfNotPresent(images []string) error {
 		return nil
 	}
 
-	return pullImageFromRegistry(img.Runtime, notFoundImages)
+	return PullImageFromRegistry(img.Runtime, notFoundImages)
 }
 
 // never -> never pulls any image.
 // It checks whether all the images for given appTemplate is present locally, if not then raises an error.
 func (img *Images) never(images []string) error {
-	notFoundImages, err := fetchImagesNotFound(img.Runtime, images)
+	notFoundImages, err := FetchImagesNotFound(img.Runtime, images)
 	if err != nil {
 		return err
 	}
