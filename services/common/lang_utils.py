@@ -29,6 +29,15 @@ class LanguageCodes:
     }
     
     @classmethod
+    def supported_languages(cls) -> list[str]:
+        """Get list of supported language codes.
+        
+        Returns:
+            List of supported language codes (e.g., ['EN', 'DE'])
+        """
+        return [cls.ENGLISH, cls.GERMAN]
+    
+    @classmethod
     def to_sentence_splitter(cls, lang_code: str) -> str:
         """Convert language code to SentenceSplitter format.
         

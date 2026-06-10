@@ -102,27 +102,28 @@ class DigitizeConfig(BaseSettings):
         description="Content sample size for chunk ID generation",
     )
 
-    # LLM classification prompt
-    llm_classify_prompt: str = Field(
-        default=(
-            "You are an intelligent assistant helping to curate a knowledge base for a Retrieval-Augmented Generation (RAG) system.\n"
-            "Your task is to decide whether the following text should be included in the knowledge corpus. Respond only with \"yes\" or \"no\".\n\n"
-            "Respond \"yes\" if the text contains factual, instructional, or explanatory information that could help answer general user questions on any topic.\n"
-            "Respond \"no\" if the text contains personal, administrative, or irrelevant content, such as names, acknowledgements, contact info, disclaimers, legal notices, or unrelated commentary.\n\n"
-            "Text: {text}\n\nAnswer:"
-        ),
-        description="Prompt for LLM-based text classification",
-    )
+    @property
+    def staging_dir(self) -> Path:
+        """Directory for staging files."""
+        return self.cache_dir / "staging"
 
-    # Table processing
-    table_summary_max_tokens: int = Field(
+    @property
+    def digitized_docs_dir(self) -> Path:
+        """Directory for digitized documents."""
+        return self.cache_dir / "digitized"
+
+
+class TableSummaryConfig(BaseSettings):
+    """Table summarization configuration."""
+
+    max_tokens: int = Field(
         default=1024,
         ge=0,
         description="Maximum tokens for table summarization",
     )
 
     # Table summary prompt (English)
-    table_summary_and_classify: str = Field(
+    prompt_en: str = Field(
         default="""You are an intelligent assistant analyzing tables extracted from documents.
 
                 Your tasks:
@@ -176,7 +177,7 @@ class DigitizeConfig(BaseSettings):
     )
 
     # Table summary prompt (German)
-    table_summary_and_classify_de: str = Field(
+    prompt_de: str = Field(
         default="""Sie sind ein intelligenter Assistent, der Tabellen aus Dokumenten analysiert.
 
                 Ihre Aufgaben:
@@ -229,16 +230,6 @@ class DigitizeConfig(BaseSettings):
         description="Prompt für Tabellenzusammenfassung (Deutsch)",
     )
 
-    @property
-    def staging_dir(self) -> Path:
-        """Directory for staging files."""
-        return self.cache_dir / "staging"
-
-    @property
-    def digitized_docs_dir(self) -> Path:
-        """Directory for digitized documents."""
-        return self.cache_dir / "digitized"
-
 
 class DatabaseConfig(BaseSettings):
     """Database connection pool configuration."""
@@ -273,6 +264,7 @@ class DatabaseConfig(BaseSettings):
 class Settings(BaseSettings):
     common: CommonSettings = Field(default_factory=CommonSettings)
     digitize: DigitizeConfig = Field(default_factory=DigitizeConfig)
+    table_summary: TableSummaryConfig = Field(default_factory=TableSummaryConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
 # Global settings instance

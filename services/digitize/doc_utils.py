@@ -651,8 +651,8 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint, do
 
     # Select appropriate prompt based on document language (lingua ISO format: 'EN', 'DE', etc.)
     prompt_templates = {
-        LanguageCodes.ENGLISH: settings.digitize.table_summary_and_classify,
-        LanguageCodes.GERMAN: settings.digitize.table_summary_and_classify_de
+        LanguageCodes.ENGLISH: settings.table_summary.prompt_en,
+        LanguageCodes.GERMAN: settings.table_summary.prompt_de
     }
     selected_prompt = get_prompt_for_language(document_language, prompt_templates)
     
@@ -662,7 +662,7 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint, do
     table_summaries, decisions = summarize_and_classify_tables(
         table_markdowns, gen_model, gen_endpoint, pdf_path,
         prompt_template=selected_prompt,
-        max_tokens=settings.digitize.table_summary_max_tokens,
+        max_tokens=settings.table_summary.max_tokens,
     )
 
     filtered_table_dicts = {

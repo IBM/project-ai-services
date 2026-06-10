@@ -346,7 +346,7 @@ class RAGConfig(BaseSettings):
                 detected_lang = detect_language(self.system_prompt, min_confidence=0.7)
                 
                 # Fallback to English if unsupported language
-                if detected_lang not in [LanguageCodes.ENGLISH, LanguageCodes.GERMAN]:
+                if detected_lang not in LanguageCodes.supported_languages():
                     logger.warning(
                         f"Custom system_prompt detected as unsupported language ({detected_lang}). "
                         "Falling back to English."

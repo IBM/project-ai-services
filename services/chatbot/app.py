@@ -407,7 +407,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
         query_lang = detect_language(current_query)
         
         # Fallback to English if unsupported language detected
-        if query_lang not in [LanguageCodes.ENGLISH, LanguageCodes.GERMAN]:
+        if query_lang not in LanguageCodes.supported_languages():
             logging.debug(
                 f"Unsupported language detected ({query_lang}). "
                 "Falling back to English."
