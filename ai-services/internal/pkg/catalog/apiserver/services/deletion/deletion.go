@@ -216,8 +216,12 @@ func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime
 			continue
 		}
 
-		// Best-effort route cleanup before deleting pods (non-blocking)
-		_ = s.unregisterServiceRoutes(ctx, proxyManager, svc)
+		// Cleanup Caddy routes before deleting pods (blocks deletion on failure)
+		if err := s.unregisterServiceRoutes(ctx, proxyManager, svc); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("service %s: %s", svc.ID, err))
+
+			continue
+		}
 
 		// Delete service secrets
 		secretErrors := s.deleteSecretsFromPods(rt, pods, keepData, "service", svc.ID)

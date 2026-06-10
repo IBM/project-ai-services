@@ -331,6 +331,7 @@ func extractRouteIDsFromEndpoints(endpoints []map[string]any) map[string]bool {
 		parsedURL, err := url.Parse(urlStr)
 		if err != nil {
 			logger.Warningf("Failed to parse endpoint URL %s: %v", urlStr, err)
+
 			continue
 		}
 
@@ -338,6 +339,7 @@ func extractRouteIDsFromEndpoints(endpoints []map[string]any) map[string]bool {
 		parts := strings.Split(hostname, ".")
 		if len(parts) == 0 {
 			logger.Warningf("Invalid hostname format in URL %s: no subdomain found", urlStr)
+
 			continue
 		}
 
