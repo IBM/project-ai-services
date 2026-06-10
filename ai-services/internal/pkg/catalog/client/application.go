@@ -9,13 +9,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
-// API route constants for application endpoints
+// API route constants for application endpoints.
 const (
-	// ListApplicationsRoute is the endpoint for listing all applications
+	// ListApplicationsRoute is the endpoint for listing all applications.
 	ListApplicationsRoute = "/api/v1/applications"
-	// GetApplicationPSRoute is the endpoint for getting application process status
+	// GetApplicationPSRoute is the endpoint for getting application process status.
 	GetApplicationPSRoute = "/api/v1/applications/%s/ps"
-	// DeleteApplicationRoute is the endpoint for deleting an application
+	// DeleteApplicationRoute is the endpoint for deleting an application.
 	DeleteApplicationRoute = "/api/v1/applications/%s"
 )
 
