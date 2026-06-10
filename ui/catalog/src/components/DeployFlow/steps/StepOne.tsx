@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   TextInput,
   Dropdown,
@@ -10,6 +11,8 @@ import {
 import { Information } from "@carbon/icons-react";
 import styles from "../DeployFlow.module.scss";
 import type { StepProps } from "../types";
+import { useBatchProviderParams } from "@/hooks/useProviderParams";
+
 export const StepOne: React.FC<StepProps> = ({
   title,
   formData,
@@ -18,6 +21,7 @@ export const StepOne: React.FC<StepProps> = ({
   showNameError = false,
 }) => {
   const isNameValid = !!formData.name.trim();
+
   // Extract version options from API response
   const versionOptions = [
     { id: deployOptions.version, text: deployOptions.version },
@@ -27,11 +31,61 @@ export const StepOne: React.FC<StepProps> = ({
   const embeddingComponent = deployOptions.global_components.find(
     (c) => c.type === "embedding",
   );
-  const embeddingModelOptions =
-    embeddingComponent?.providers.map((provider) => ({
-      id: provider.id,
-      text: provider.name,
-    })) || [];
+
+  // Get all embedding provider IDs
+  const embeddingProviderIds = useMemo(
+    () => embeddingComponent?.providers.map((p) => p.id) || [],
+    [embeddingComponent],
+  );
+
+  // Fetch embedding params for all providers (cached)
+  const { paramsMap: embeddingParamsMap } = useBatchProviderParams(
+    "embedding",
+    embeddingProviderIds,
+  );
+
+  // Extract embedding model names from cached params using useMemo
+  const embeddingModelNames = useMemo(() => {
+    const modelNamesMap: Record<string, string> = {};
+
+    for (const [providerId, params] of Object.entries(embeddingParamsMap)) {
+      if (
+        params &&
+        typeof params === "object" &&
+        "properties" in params &&
+        params.properties &&
+        typeof params.properties === "object"
+      ) {
+        const properties = params.properties as Record<
+          string,
+          { default?: unknown; oneOf?: Array<{ title?: string }> }
+        >;
+        // Try to get the title from oneOf if available
+        const modelTitle = properties.model?.oneOf?.[0]?.title;
+        const defaultModel = properties.model?.default;
+
+        if (modelTitle && typeof modelTitle === "string") {
+          modelNamesMap[providerId] = modelTitle;
+        } else if (defaultModel && typeof defaultModel === "string") {
+          // Fallback to default model path, extract just the model name
+          const modelName = defaultModel.split("/").pop() || defaultModel;
+          modelNamesMap[providerId] = modelName;
+        }
+      }
+    }
+
+    return modelNamesMap;
+  }, [embeddingParamsMap]);
+
+  // Create embedding model options with model names
+  const embeddingModelOptions = useMemo(
+    () =>
+      embeddingComponent?.providers.map((provider) => ({
+        id: provider.id,
+        text: embeddingModelNames[provider.id] || provider.name,
+      })) || [],
+    [embeddingComponent, embeddingModelNames],
+  );
 
   // Extract vector store options from global_components
   const vectorStoreComponent = deployOptions.global_components.find(
@@ -56,7 +110,6 @@ export const StepOne: React.FC<StepProps> = ({
               <TextInput
                 id="assistant-name"
                 labelText="Name"
-                placeholder="Digital assistant (copy)"
                 value={formData.name}
                 invalid={showNameError && !isNameValid}
                 invalidText="Name is required"

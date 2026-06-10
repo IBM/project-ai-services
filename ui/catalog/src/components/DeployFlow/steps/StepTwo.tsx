@@ -25,6 +25,7 @@ const INITIAL_STATE: StepTwoState = {
   tempConfig: null,
   showApiKey: {},
   llmModelNames: {},
+  embeddingModelNames: {},
 };
 
 // Reducer function
@@ -54,6 +55,8 @@ const stepTwoReducer = (
       };
     case "SET_LLM_MODEL_NAMES":
       return { ...state, llmModelNames: action.payload };
+    case "SET_EMBEDDING_MODEL_NAMES":
+      return { ...state, embeddingModelNames: action.payload };
     case "RESET_EDITING":
       return {
         ...state,
@@ -303,8 +306,73 @@ export const StepTwo: React.FC<StepProps> = ({
     [deployOptions.services],
   );
 
-  // Get embedding model options from services
-  const embeddingModelOptions = getComponentProviders("chat", "embedding");
+  // Get all embedding provider IDs
+  const embeddingProviders = useMemo(
+    () => getComponentProviders("chat", "embedding"),
+    [getComponentProviders],
+  );
+  const embeddingProviderIds = useMemo(
+    () => embeddingProviders.map((p) => p.id),
+    [embeddingProviders],
+  );
+
+  // Fetch embedding params for all providers (cached)
+  const { paramsMap: embeddingParamsMap } = useBatchProviderParams(
+    "embedding",
+    embeddingProviderIds,
+  );
+
+  // Extract embedding model names from cached params
+  useEffect(() => {
+    const modelNamesMap: Record<string, string> = {};
+
+    for (const [providerId, params] of Object.entries(embeddingParamsMap)) {
+      if (
+        params &&
+        typeof params === "object" &&
+        "properties" in params &&
+        params.properties &&
+        typeof params.properties === "object"
+      ) {
+        const properties = params.properties as Record<
+          string,
+          { default?: unknown; oneOf?: Array<{ title?: string }> }
+        >;
+        const defaultModel = properties.model?.default;
+        // Try to get the title from oneOf if available
+        const modelTitle = properties.model?.oneOf?.[0]?.title;
+        if (modelTitle && typeof modelTitle === "string") {
+          modelNamesMap[providerId] = modelTitle;
+        } else if (defaultModel && typeof defaultModel === "string") {
+          // Fallback to default model path, extract just the model name
+          const modelName = defaultModel.split("/").pop() || defaultModel;
+          modelNamesMap[providerId] = modelName;
+        }
+      }
+    }
+
+    if (Object.keys(modelNamesMap).length > 0) {
+      const hasChanges = Object.keys(modelNamesMap).some(
+        (key) => state.embeddingModelNames[key] !== modelNamesMap[key],
+      );
+
+      if (hasChanges || Object.keys(state.embeddingModelNames).length === 0) {
+        dispatch({
+          type: "SET_EMBEDDING_MODEL_NAMES",
+          payload: modelNamesMap,
+        });
+      }
+    }
+  }, [embeddingParamsMap, state.embeddingModelNames]);
+
+  // Get embedding model options with model names
+  const embeddingModelOptions = useMemo(() => {
+    const providers = getComponentProviders("chat", "embedding");
+    return providers.map((provider) => ({
+      id: provider.id,
+      text: state.embeddingModelNames[provider.id] || provider.text,
+    }));
+  }, [state.embeddingModelNames, getComponentProviders]);
 
   // Get reranker model options from services
   const rerankerModelOptions = getComponentProviders("chat", "reranker");

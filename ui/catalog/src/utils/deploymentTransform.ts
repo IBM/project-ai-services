@@ -124,15 +124,29 @@ async function buildEmbeddingComponent(
 }
 
 /**
- * Builds a reranker component with schema defaults
+ * Builds a reranker component with schema defaults and VLLM API key
  */
 async function buildRerankerComponent(
   rerankerModel: string,
   serviceDefinition: Service | undefined,
   deployOptions: DeployOptionsResponse,
   schemaPromise: Promise<Record<string, unknown>>,
+  serviceConfig: ServiceConfig,
 ): Promise<DeploymentComponent> {
   const schemaParams = await schemaPromise;
+
+  // Prepare user-provided values
+  const userValues: Record<string, unknown> = {};
+
+  // VLLM API key for reranker providers (provider-specific)
+  if (rerankerModel === "vllm-cpu" && serviceConfig.vllmCpuApiKey) {
+    userValues.apiKey = serviceConfig.vllmCpuApiKey;
+  } else if (rerankerModel === "vllm-spyre" && serviceConfig.vllmSpyreApiKey) {
+    userValues.apiKey = serviceConfig.vllmSpyreApiKey;
+  }
+
+  // Merge schema defaults with user values
+  const params = mergeParamsWithUserValues(schemaParams, userValues);
 
   return {
     component_type: "reranker",
@@ -143,9 +157,7 @@ async function buildRerankerComponent(
       serviceDefinition,
       deployOptions,
     ),
-    ...(Object.keys(schemaParams).length > 0 && {
-      params: schemaParams,
-    }),
+    ...(Object.keys(params).length > 0 && { params }),
   };
 }
 
@@ -190,6 +202,14 @@ async function buildLLMComponent(
     userValues.watsonxUrl = serviceConfig.watsonxApiEndpoint;
   if (serviceConfig.watsonxApiKey)
     userValues.watsonxApiKey = serviceConfig.watsonxApiKey;
+
+  // VLLM API key for LLM providers (provider-specific)
+  if (llmProviderId === "vllm-cpu" && serviceConfig.vllmCpuApiKey) {
+    userValues.apiKey = serviceConfig.vllmCpuApiKey;
+  } else if (llmProviderId === "vllm-spyre" && serviceConfig.vllmSpyreApiKey) {
+    userValues.apiKey = serviceConfig.vllmSpyreApiKey;
+  }
+
   if (
     includeSystemPrompt &&
     serviceConfig.editSystemPrompt &&
@@ -395,6 +415,7 @@ export async function transformToDeploymentPayload(
               serviceDefinition,
               deployOptions,
               getSchemaPromise("reranker", serviceConfig.rerankerModel),
+              serviceConfig,
             ),
           );
         }
@@ -446,6 +467,7 @@ export async function transformToDeploymentPayload(
               serviceDefinition,
               deployOptions,
               getSchemaPromise("reranker", serviceConfig.rerankerModel),
+              serviceConfig,
             ),
           );
         }
@@ -493,6 +515,7 @@ export async function transformToDeploymentPayload(
               serviceDefinition,
               deployOptions,
               getSchemaPromise("reranker", serviceConfig.rerankerModel),
+              serviceConfig,
             ),
           );
         }

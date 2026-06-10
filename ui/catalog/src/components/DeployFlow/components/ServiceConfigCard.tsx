@@ -1,13 +1,14 @@
 import { Fragment } from "react";
 import { Button, Dropdown, TextInput } from "@carbon/react";
 import { ProductiveCard } from "@carbon/ibm-products";
-import { Edit, Checkmark, View, ViewOff } from "@carbon/icons-react";
+import { Checkmark, Edit, View, ViewOff } from "@carbon/icons-react";
 import styles from "../DeployFlow.module.scss";
 import type { ServiceConfig } from "../types";
 import type { ServiceConfigField } from "../types/StepTwo.types";
 import { getDisplayName } from "../utils/StepTwo.utils";
 import { CloudCredentialsSection } from "./CloudCredentialsSection";
 import { SystemPromptSection } from "./SystemPromptSection";
+import { VllmCredentialsSection } from "./VllmCredentialsSection";
 
 interface ServiceConfigCardProps {
   serviceName: string;
@@ -62,15 +63,15 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
         </div>
       )}
       {isEditing && (
-        <div className={styles.cardActions}>
+        <div className={styles.cardEditAction}>
           <Button kind="ghost" size="sm" onClick={onCancel}>
             Cancel
           </Button>
           <Button
-            kind="primary"
+            kind="tertiary"
             size="sm"
-            renderIcon={Checkmark}
             onClick={onApply}
+            renderIcon={Checkmark}
           >
             Apply
           </Button>
@@ -128,6 +129,59 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                   <span className={styles.serviceConfigItemValue}>
                     <span className={styles.apiKeyValue}>
                       {showApiKey ? config.watsonxApiKey : "•".repeat(20)}
+                    </span>
+                    <Button
+                      kind="ghost"
+                      size="sm"
+                      hasIconOnly
+                      renderIcon={showApiKey ? ViewOff : View}
+                      iconDescription={
+                        showApiKey ? "Hide API key" : "Show API key"
+                      }
+                      onClick={onToggleApiKey}
+                      className={styles.apiKeyToggle}
+                    />
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+          {/* Show VLLM API keys if vllm provider is selected */}
+          {(config.inferenceMethod?.includes("vllm") ||
+            config.rerankerModel?.includes("vllm") ||
+            config.embeddingModel?.includes("vllm")) && (
+            <>
+              {config.vllmCpuApiKey && (
+                <div className={styles.serviceConfigItem}>
+                  <span className={styles.serviceConfigItemLabel}>
+                    vLLM CPU API key
+                  </span>
+                  <span className={styles.serviceConfigItemValue}>
+                    <span className={styles.apiKeyValue}>
+                      {showApiKey ? config.vllmCpuApiKey : "•".repeat(20)}
+                    </span>
+                    <Button
+                      kind="ghost"
+                      size="sm"
+                      hasIconOnly
+                      renderIcon={showApiKey ? ViewOff : View}
+                      iconDescription={
+                        showApiKey ? "Hide API key" : "Show API key"
+                      }
+                      onClick={onToggleApiKey}
+                      className={styles.apiKeyToggle}
+                    />
+                  </span>
+                </div>
+              )}
+              {config.vllmSpyreApiKey && (
+                <div className={styles.serviceConfigItem}>
+                  <span className={styles.serviceConfigItemLabel}>
+                    vLLM Spyre API key
+                  </span>
+                  <span className={styles.serviceConfigItemValue}>
+                    <span className={styles.apiKeyValue}>
+                      {showApiKey ? config.vllmSpyreApiKey : "•".repeat(20)}
                     </span>
                     <Button
                       kind="ghost"
@@ -222,6 +276,13 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
             currentConfig={currentConfig}
             updateTempConfig={onUpdateConfig}
             hasValidationError={hasWatsonxValidationError}
+          />
+
+          {/* VLLM credentials section - show when any vllm provider is selected */}
+          <VllmCredentialsSection
+            serviceName={serviceName}
+            currentConfig={currentConfig}
+            updateTempConfig={onUpdateConfig}
           />
         </>
       )}

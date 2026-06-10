@@ -17,6 +17,7 @@ export interface StepTwoState {
   tempConfig: ServiceConfig | null;
   showApiKey: Record<string, boolean>;
   llmModelNames: Record<string, string>;
+  embeddingModelNames: Record<string, string>;
 }
 
 // Action types for StepTwo reducer
@@ -26,6 +27,7 @@ export type StepTwoAction =
   | { type: "UPDATE_TEMP_CONFIG"; payload: Partial<ServiceConfig> }
   | { type: "TOGGLE_SHOW_API_KEY"; payload: string }
   | { type: "SET_LLM_MODEL_NAMES"; payload: Record<string, string> }
+  | { type: "SET_EMBEDDING_MODEL_NAMES"; payload: Record<string, string> }
   | { type: "RESET_EDITING" };
 
 // Field configuration for service config cards
