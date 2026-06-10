@@ -5,14 +5,18 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
+	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
 
 var (
-	skipLogs      bool
-	startPodNames []string
-	autoYes       bool
+	skipLogs          bool
+	startPodNames     []string
+	autoYes           bool
+	experimentalStart bool
 )
 
 var startCmd = &cobra.Command{
@@ -45,6 +49,18 @@ Note: Supported for podman runtime only.
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
 
+		// When experimentalStart is true and runtime is podman, validate application name using catalog API
+		// For openshift runtime, always use the older/stable code path regardless of experimental flag
+		if experimentalStart && rt == types.RuntimeTypePodman {
+			appClient, err := catalogClient.NewApplicationClient()
+			if err != nil {
+				return fmt.Errorf("failed to create application client: %w", err)
+			}
+			if _, err := utils.GetAppByName(appClient, applicationName); err != nil {
+				return err
+			}
+		}
+
 		// Create application instance using factory
 		factory := application.NewFactory(rt)
 		app, err := factory.Create(applicationName)
@@ -54,10 +70,11 @@ Note: Supported for podman runtime only.
 
 		// start application with options
 		opts := appTypes.StartOptions{
-			Name:     applicationName,
-			PodNames: startPodNames,
-			AutoYes:  autoYes,
-			SkipLogs: skipLogs,
+			Name:         applicationName,
+			PodNames:     startPodNames,
+			AutoYes:      autoYes,
+			SkipLogs:     skipLogs,
+			Experimental: experimentalStart,
 		}
 
 		return app.Start(opts)
@@ -65,6 +82,7 @@ Note: Supported for podman runtime only.
 }
 
 func init() {
+	startCmd.Flags().BoolVar(&experimentalStart, "experimental", false, "Include experimental application start")
 	startCmd.Flags().StringSlice("pod", []string{}, "Specific pod name(s) to start (optional)\nCan be specified multiple times: --pod pod1 --pod pod2\nOr comma-separated: --pod pod1,pod2")
 	startCmd.Flags().BoolVar(&skipLogs, "skip-logs", false, "Skip displaying logs after starting the pod")
 	startCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Automatically accept all confirmation prompts (default=false)")
