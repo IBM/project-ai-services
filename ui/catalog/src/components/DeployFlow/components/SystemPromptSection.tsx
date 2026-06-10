@@ -35,9 +35,11 @@ export const SystemPromptSection: React.FC<SystemPromptSectionProps> = ({
         <div className={styles.systemPromptTextArea}>
           <TextArea
             id={`${serviceName}-systemPromptText`}
-            labelText="Prompt text"
-            placeholder="You are a helpful, conversational AI assistant. Engage naturally with users across multiple turns of conversation. Provide clear, accurate, and contextually relevant responses. Reference previous exchanges when appropriate to maintain conversation flow."
-            value={currentConfig?.systemPromptText || ""}
+            labelText="Prompt text (English only)"
+            value={
+              currentConfig?.systemPromptText ||
+              "You are a helpful, conversational AI assistant. Engage naturally with users across multiple turns of conversation. Provide clear, accurate, and contextually relevant responses. Reference previous exchanges when appropriate to maintain conversation flow."
+            }
             invalid={
               hasValidationError && !currentConfig?.systemPromptText?.trim()
             }
@@ -50,7 +52,6 @@ export const SystemPromptSection: React.FC<SystemPromptSectionProps> = ({
             rows={4}
             maxCount={2500}
             enableCounter
-            helperText="Prompt text must be in English"
           />
         </div>
       )}

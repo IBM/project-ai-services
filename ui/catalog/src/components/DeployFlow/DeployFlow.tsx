@@ -21,7 +21,7 @@ import { useDeployOptions } from "@/hooks/useDeployOptions";
 import styles from "./DeployFlow.module.scss";
 
 const INITIAL_FORM_DATA: DeployFormData = {
-  name: "",
+  name: "Digital assistant (copy)",
   version: "",
   embeddingModel: "",
   vectorStore: "",

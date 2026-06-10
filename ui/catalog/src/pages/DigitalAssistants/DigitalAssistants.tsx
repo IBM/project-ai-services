@@ -418,38 +418,26 @@ const DigitalAssistantsPage = () => {
                               </TableToolbarContent>
                             </TableToolbar>
 
-                            {noApplications ? (
-                              <NoDataEmptyState
-                                title="Start by adding a digital assistant"
-                                subtitle="To deploy a digital assistant using a template, click Deploy."
-                                className={styles.noDataContent}
-                              />
-                            ) : noSearchResults ? (
-                              <NoDataEmptyState
-                                title="No data"
-                                subtitle="Try adjusting your search or filter."
-                                className={styles.noDataContent}
-                              />
-                            ) : (
-                              <Table {...getTableProps()}>
-                                <TableHead>
-                                  <TableRow>
-                                    <TableExpandHeader
-                                      {...getExpandHeaderProps()}
-                                    />
-                                    {headers.map((header) => {
-                                      const { key, ...rest } = getHeaderProps({
-                                        header,
-                                      });
+                            <Table {...getTableProps()}>
+                              <TableHead>
+                                <TableRow>
+                                  <TableExpandHeader
+                                    {...getExpandHeaderProps()}
+                                  />
+                                  {headers.map((header) => {
+                                    const { key, ...rest } = getHeaderProps({
+                                      header,
+                                    });
 
-                                      return (
-                                        <TableHeader key={key} {...rest}>
-                                          {header.header}
-                                        </TableHeader>
-                                      );
-                                    })}
-                                  </TableRow>
-                                </TableHead>
+                                    return (
+                                      <TableHeader key={key} {...rest}>
+                                        {header.header}
+                                      </TableHeader>
+                                    );
+                                  })}
+                                </TableRow>
+                              </TableHead>
+                              {!noApplications && !noSearchResults && (
                                 <TableBody>
                                   {rows.map((row) => {
                                     const { key: rowKey, ...rowProps } =
@@ -513,7 +501,21 @@ const DigitalAssistantsPage = () => {
                                     );
                                   })}
                                 </TableBody>
-                              </Table>
+                              )}
+                            </Table>
+                            {noApplications && (
+                              <NoDataEmptyState
+                                title="Start by adding a digital assistant"
+                                subtitle="To deploy a digital assistant using a template, click Deploy."
+                                className={styles.noDataContent}
+                              />
+                            )}
+                            {noSearchResults && (
+                              <NoDataEmptyState
+                                title="No data"
+                                subtitle="Try adjusting your search or filter."
+                                className={styles.noDataContent}
+                              />
                             )}
                           </TableContainer>
 

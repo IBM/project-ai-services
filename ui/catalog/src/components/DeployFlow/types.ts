@@ -83,6 +83,10 @@ export interface ServiceConfig {
   watsonxProjectId?: string;
   watsonxApiEndpoint?: string;
   watsonxApiKey?: string;
+  // VLLM API keys (optional - for authentication)
+  // Single key shared across all VLLM components (LLM, Reranker, Embedding) for same provider
+  vllmCpuApiKey?: string;
+  vllmSpyreApiKey?: string;
   // System prompt for Q&A
   editSystemPrompt?: boolean;
   systemPromptText?: string;
