@@ -10,7 +10,6 @@ import random
 os.environ['GRPC_VERBOSITY'] = 'ERROR'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-import sentence_splitter
 from tqdm import tqdm
 from pathlib import Path
 from docling_core.types.doc.document import DoclingDocument
