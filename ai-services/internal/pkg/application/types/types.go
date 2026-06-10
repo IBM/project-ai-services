@@ -39,10 +39,11 @@ type DeleteOptions struct {
 
 // StartOptions contains parameters for starting an application.
 type StartOptions struct {
-	Name     string
-	PodNames []string
-	SkipLogs bool
-	AutoYes  bool
+	Name         string
+	PodNames     []string
+	SkipLogs     bool
+	AutoYes      bool
+	Experimental bool
 }
 
 // StopOptions contains parameters for stopping an application.
