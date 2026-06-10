@@ -10,10 +10,12 @@ type ApplicationListResponse struct {
 type Application struct {
 	ID             string               `json:"id"`
 	Name           string               `json:"name"`
+	CatalogID      string               `json:"catalog_id"`
 	DeploymentType string               `json:"deployment_type"`
 	Type           string               `json:"type"`
 	Status         string               `json:"status"`
 	Message        string               `json:"message"`
+	Version        string               `json:"version"`
 	Services       []ApplicationService `json:"services,omitempty"`
 	CreatedAt      string               `json:"created_at"`
 	UpdatedAt      string               `json:"updated_at"`
