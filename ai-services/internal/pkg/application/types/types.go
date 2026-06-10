@@ -79,6 +79,13 @@ type RestoreOptions struct {
 	AutoYes    bool
 }
 
+// BackupOptions contains parameters for backing up application data.
+type BackupOptions struct {
+	Name       string
+	Target     string // opensearch, digitize, etc.
+	BackupFile string
+}
+
 // ApplicationInfo represents information about a deployed application.
 type ApplicationInfo struct {
 	Name         string
