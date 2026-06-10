@@ -30,3 +30,50 @@ func GetAppByName(appClient *catalogClient.ApplicationClient, appName string) (*
 
 	return nil, fmt.Errorf("application with name '%s' not found", appName)
 }
+
+// GetAppDetailsWithComponents retrieves full application details including services and components.
+// It first finds the app by name, then fetches full details by ID.
+func GetAppDetailsWithComponents(appName string) (*types.Application, error) {
+	appClient, err := catalogClient.NewApplicationClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create application client: %w", err)
+	}
+
+	// First, find the application by name to get its ID
+	app, err := GetAppByName(appClient, appName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Then fetch full details including services and components
+	appDetails, err := appClient.GetApplication(app.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application details: %w", err)
+	}
+
+	return appDetails, nil
+}
+
+// GetComponentID extracts the component ID for the specified target from application details.
+func GetComponentID(appDetails *types.Application, target string) (string, error) {
+	// Map target names to component provider names
+	targetToProvider := map[string]string{
+		"opensearch": "opensearch",
+	}
+
+	providerName, ok := targetToProvider[target]
+	if !ok {
+		return "", fmt.Errorf("unknown target: %s", target)
+	}
+
+	// Search through services and their components
+	for _, service := range appDetails.Services {
+		for _, component := range service.Component {
+			if component.Provider == providerName {
+				return component.ID, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("component with provider '%s' not found for target '%s'", providerName, target)
+}

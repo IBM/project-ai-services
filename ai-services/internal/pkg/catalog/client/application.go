@@ -73,6 +73,25 @@ func (c *ApplicationClient) ListApplications(params *ListApplicationsParams) (*t
 	return &result, nil
 }
 
+// GetApplication retrieves full details for a specific application by ID.
+// This includes services, components, and all configuration details.
+func (c *ApplicationClient) GetApplication(id string) (*types.Application, error) {
+	var result types.Application
+	resp, err := c.httpClient.R().
+		SetHeader("Authorization", "Bearer "+c.client.AccessToken()).
+		SetResult(&result).
+		Get(fmt.Sprintf("/api/v1/applications/%s", id))
+	if err != nil {
+		return nil, fmt.Errorf("get application: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("get application: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return &result, nil
+}
+
 // GetApplicationPS retrieves the process status and runtime information for an application.
 // It returns details about pods, containers, and their health status.
 func (c *ApplicationClient) GetApplicationPS(id string) (*types.ApplicationPSResponse, error) {

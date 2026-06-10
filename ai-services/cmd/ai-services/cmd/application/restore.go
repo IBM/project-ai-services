@@ -12,6 +12,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -38,7 +39,6 @@ Supported targets:
 
 Note:
   - OpenSearch restore is currently only supported for Podman runtime
-  - OpenSearch password is automatically retrieved from the application's secret
 
 Examples:
   # Restore OpenSearch data with Podman
@@ -86,7 +86,7 @@ Examples:
 		logger.Infof("Runtime: %s\n", rt, 0)
 
 		// Check if OpenShift runtime is being used
-		if rt == "openshift" {
+		if rt == types.RuntimeTypeOpenShift {
 			return fmt.Errorf("restore is not yet supported for OpenShift runtime")
 		}
 
