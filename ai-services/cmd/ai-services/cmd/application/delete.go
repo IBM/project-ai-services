@@ -8,15 +8,20 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
+	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	appFlags "github.com/project-ai-services/ai-services/internal/pkg/cli/constants/application"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
+	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 var (
-	skipCleanup   bool
-	deleteTimeout time.Duration
+	skipCleanup        bool
+	deleteTimeout      time.Duration
+	experimentalDelete bool
 )
 
 var deleteCmd = &cobra.Command{
@@ -35,8 +40,11 @@ Arguments
 		}
 
 		appName := args[0]
+		if !experimentalDelete {
+			return utils.VerifyAppName(appName)
+		}
 
-		return utils.VerifyAppName(appName)
+		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		applicationName := args[0]
@@ -45,6 +53,12 @@ Arguments
 		cmd.SilenceUsage = true
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
+
+		// When experimentalDelete is true and runtime is podman, validate application name using catalog API
+		// For openshift runtime, always use the older/stable code path regardless of experimental flag
+		if experimentalDelete && rt == types.RuntimeTypePodman {
+			return deleteApplication(applicationName)
+		}
 
 		// Create application instance using factory
 		factory := application.NewFactory(rt)
@@ -73,6 +87,7 @@ func init() {
 func initDeleteCommonFlags() {
 	deleteCmd.Flags().BoolVar(&skipCleanup, appFlags.Delete.SkipCleanup, false, "Skip deleting application data (default=false)")
 	deleteCmd.Flags().BoolVarP(&autoYes, appFlags.Delete.AutoYes, "y", false, "Automatically accept all confirmation prompts (default=false)")
+	deleteCmd.Flags().BoolVar(&experimentalDelete, "experimental", false, "Include experimental application delete")
 }
 
 func initDeleteOpenShiftFlags() {
@@ -101,4 +116,28 @@ func buildDeleteFlagValidator() *flagvalidator.FlagValidator {
 		AddOpenShiftFlag(appFlags.Delete.Timeout, nil)
 
 	return builder.Build()
+}
+
+func deleteApplication(appName string) error {
+	appClient, err := catalogClient.NewApplicationClient()
+	if err != nil {
+		return fmt.Errorf("failed to create application client: %w", err)
+	}
+	app, err := cliUtils.GetAppByName(appClient, appName)
+	if err != nil {
+		return err
+	}
+
+	deleteParams := catalogClient.DeleteApplicationParams{
+		SkipCleanup: skipCleanup,
+		AutoYes:     autoYes,
+	}
+
+	if err := appClient.DeleteApplication(app.ID, &deleteParams); err != nil {
+		return fmt.Errorf("failed to delete application: %w", err)
+	}
+
+	logger.Infof("Application %s deleted successfully.", appName)
+
+	return nil
 }

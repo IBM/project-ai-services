@@ -92,4 +92,39 @@ func (c *ApplicationClient) GetApplicationPS(id string) (*types.ApplicationPSRes
 	return &result, nil
 }
 
+// DeleteApplication deletes an application by its ID.
+// It removes the application and all its associated resources.
+// Supports optional parameters via the params argument.
+//
+// Example:
+//
+//	client := NewApplicationClient()
+//	err := client.DeleteApplication("rag", &DeleteApplicationParams{
+//	    SkipCleanup: true,
+//	})
+func (c *ApplicationClient) DeleteApplication(id string, params *DeleteApplicationParams) error {
+	req := c.httpClient.R().
+		SetHeader("Authorization", "Bearer "+c.client.AccessToken())
+
+	if params != nil {
+		if params.SkipCleanup {
+			req.SetQueryParam("skip_cleanup", "true")
+		}
+		if params.AutoYes {
+			req.SetQueryParam("auto_yes", "true")
+		}
+	}
+
+	resp, err := req.Delete(fmt.Sprintf("/api/v1/applications/%s", id))
+	if err != nil {
+		return fmt.Errorf("delete application: %w", err)
+	}
+
+	if resp.IsError() {
+		return fmt.Errorf("delete application: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return nil
+}
+
 // Made with Bob

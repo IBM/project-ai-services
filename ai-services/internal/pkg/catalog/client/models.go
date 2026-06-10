@@ -11,3 +11,11 @@ type ListApplicationsParams struct {
 	// CatalogID filters by catalog ID (e.g., 'rag', 'chat', 'digitize', 'summarize')
 	CatalogID string
 }
+
+// DeleteApplicationParams holds optional query parameters for deleting applications.
+type DeleteApplicationParams struct {
+	// SkipCleanup skips deleting application data when true. Default: false
+	SkipCleanup bool
+	// AutoYes automatically answers 'yes' to prompts when true. Default: false
+	AutoYes bool
+}
