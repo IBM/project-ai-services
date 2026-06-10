@@ -247,7 +247,8 @@ func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(comp *ComponentPla
 	}
 
 	// Use the catalog provider's CollectSpyreCardsFromTemplates function
-	totalSpyreCards, err := p.catalogProvider.CollectSpyreCardsFromTemplates(tmpls, comp.Params)
+	// Use comp.Values instead of comp.Params to include defaults from values.yaml
+	totalSpyreCards, err := p.catalogProvider.CollectSpyreCardsFromTemplates(tmpls, comp.Values)
 	if err != nil {
 		return 0, fmt.Errorf("failed to collect Spyre cards from templates: %w", err)
 	}
