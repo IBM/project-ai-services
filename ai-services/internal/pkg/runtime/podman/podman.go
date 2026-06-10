@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -597,4 +598,141 @@ func collectSpyreCards(containerInspect *define.InspectContainerData, spyreCards
 			}
 		}
 	}
+}
+
+// ExecInContainer executes a command in a container using podman exec command.
+// Note: Using exec.Command instead of SDK because the SDK's exec API is complex
+// and requires handlers.ExecCreateConfig which is not easily accessible.
+func (pc *PodmanClient) ExecInContainer(containerID string, cmd []string) error {
+	// Build podman exec command
+	args := []string{"exec", containerID}
+	args = append(args, cmd...)
+
+	execCmd := exec.CommandContext(pc.Context, "podman", args...)
+	output, err := execCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("command failed: %w, output: %s", err, string(output))
+	}
+
+	return nil
+}
+
+// ExecInContainerWithOutput executes a command in a container and returns the output.
+func (pc *PodmanClient) ExecInContainerWithOutput(containerID string, cmd []string) (string, error) {
+	// Build podman exec command
+	args := []string{"exec", containerID}
+	args = append(args, cmd...)
+
+	execCmd := exec.CommandContext(pc.Context, "podman", args...)
+	output, err := execCmd.CombinedOutput()
+	if err != nil {
+		return string(output), fmt.Errorf("command failed: %w, output: %s", err, string(output))
+	}
+
+	return string(output), nil
+}
+
+// ExecInContainerWithEnv executes a command in a container with environment variables.
+// This is used to pass sensitive data like passwords without exposing them in process lists.
+// Environment variables are set inline in the shell command to avoid exposure.
+func (pc *PodmanClient) ExecInContainerWithEnv(containerID string, env map[string]string, script string) error {
+	// Build environment variable assignments for the shell
+	envVars := make([]string, 0, len(env))
+	for key, value := range env {
+		// Use single quotes to prevent shell expansion, escape any single quotes in the value
+		escapedValue := strings.ReplaceAll(value, "'", "'\\''")
+		envVars = append(envVars, fmt.Sprintf("%s='%s'", key, escapedValue))
+	}
+
+	// Combine env vars with the script
+	fullScript := strings.Join(envVars, " ") + " " + script
+
+	return pc.ExecInContainer(containerID, []string{"sh", "-c", fullScript})
+}
+
+// CopyDirToContainer copies a directory to a container using podman cp command.
+// Note: Using exec.Command instead of SDK because the SDK's copy API requires
+// tar archive handling which is complex.
+func (pc *PodmanClient) CopyDirToContainer(containerID, srcDir, destDir string) error {
+	// Verify source directory exists
+	if _, err := os.Stat(srcDir); os.IsNotExist(err) {
+		return fmt.Errorf("source directory does not exist: %s", srcDir)
+	}
+
+	// Use podman cp command to copy directory
+	// Format: podman cp <src>/. <container>:<dest>
+	// The "/." ensures we copy the contents of the directory, not the directory itself
+	cpCmd := exec.CommandContext(pc.Context, "podman", "cp", srcDir+"/.", fmt.Sprintf("%s:%s", containerID, destDir))
+	output, err := cpCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to copy directory: %w, output: %s", err, string(output))
+	}
+
+	return nil
+}
+
+// CreateSidecarContainer creates a sidecar container in the specified pod.
+// Returns the container ID of the created sidecar.
+func (pc *PodmanClient) CreateSidecarContainer(podID, sidecarName, image string, command []string) (string, error) {
+	s := &specgen.SpecGenerator{
+		ContainerBasicConfig: specgen.ContainerBasicConfig{
+			Name:    sidecarName,
+			Remove:  utils.BoolPtr(true), // Auto-remove container when stopped
+			Command: command,
+			Pod:     podID,
+		},
+		ContainerStorageConfig: specgen.ContainerStorageConfig{
+			Image: image,
+		},
+		ContainerHealthCheckConfig: specgen.ContainerHealthCheckConfig{
+			// Set HealthConfig to nil to disable health checks
+			HealthConfig: nil,
+			// Set HealthLogDestination to /tmp to satisfy directory requirement
+			HealthLogDestination: "/tmp",
+		},
+	}
+
+	createResponse, err := containers.CreateWithSpec(pc.Context, s, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create sidecar container: %w", err)
+	}
+
+	containerID := createResponse.ID
+	if err := containers.Start(pc.Context, containerID, nil); err != nil {
+		return "", fmt.Errorf("failed to start sidecar container: %w", err)
+	}
+
+	return containerID, nil
+}
+
+// StopContainer stops a container by ID.
+func (pc *PodmanClient) StopContainer(containerID string) error {
+	return containers.Stop(pc.Context, containerID, nil)
+}
+
+// SidecarExecutor is a function type that performs operations using a sidecar container.
+type SidecarExecutor func(ctx context.Context, containerID string) error
+
+// ManageSidecarLifecycle manages the complete lifecycle of a sidecar container.
+// It creates the sidecar, executes the provided function, and ensures cleanup.
+func (pc *PodmanClient) ManageSidecarLifecycle(podID, sidecarName, image string, command []string, executor SidecarExecutor) error {
+	// Create and start sidecar container
+	containerID, err := pc.CreateSidecarContainer(podID, sidecarName, image, command)
+	if err != nil {
+		return fmt.Errorf("failed to create and start sidecar: %w", err)
+	}
+
+	// Ensure cleanup happens
+	defer func() {
+		logger.Infof("Cleaning up sidecar container...\n", 0)
+		stopErr := pc.StopContainer(containerID)
+		if stopErr != nil {
+			logger.Warningf("Failed to stop sidecar container %s: %v\n", containerID, stopErr)
+		}
+		// Note: Container has Remove=true, so it will be auto-removed when stopped
+		logger.Infof("Sidecar container cleanup completed\n", 0)
+	}()
+
+	// Execute the provided function with the sidecar
+	return executor(pc.Context, containerID)
 }
