@@ -166,7 +166,7 @@ class DatabaseManager:
             status: Optional[JobStatus] = None,
             completed_at: Optional[datetime] = None,
             error: Optional[str] = None,
-            metadata : Optional[Dict[str, int]] = None
+            metadata : Optional[Dict[str, Any]] = None
     ) -> bool:
         """
         Update job fields in the database.
