@@ -189,6 +189,7 @@ func (s *DeletionService) unregisterServiceRoutes(ctx context.Context, proxyMana
 		// Update DB status with route cleanup failure
 		_ = s.serviceRepo.UpdateStatus(ctx, svc.ID, models.ServiceStatusError,
 			fmt.Sprintf("route unregistration failed: %v", err))
+
 		return err
 	}
 

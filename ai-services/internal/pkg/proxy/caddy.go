@@ -305,38 +305,7 @@ func UnregisterRoutesFromEndpoints(
 		return nil
 	}
 
-	// Collect unique route IDs from endpoints (similar to volume/secret deletion pattern)
-	routesToUnregister := make(map[string]bool)
-
-	for _, endpoint := range endpoints {
-		urlStr, ok := endpoint["url"].(string)
-		if !ok {
-			continue
-		}
-
-		// Extract subdomain from URL (e.g., "digitize-ui-abc123" from "https://digitize-ui-abc123.example.com:443")
-		parsedURL, err := url.Parse(urlStr)
-		if err != nil {
-			logger.Warningf("Failed to parse endpoint URL %s: %v", urlStr, err)
-
-			continue
-		}
-
-		// Get the first part of the hostname (subdomain)
-		hostname := parsedURL.Hostname()
-		parts := strings.Split(hostname, ".")
-		if len(parts) == 0 {
-			logger.Warningf("Invalid hostname format in URL %s: no subdomain found", urlStr)
-
-			continue
-		}
-
-		// Reconstruct route ID to match registration format: {subdomain}
-		routeID := parts[0]
-		if routeID != "" {
-			routesToUnregister[routeID] = true
-		}
-	}
+	routesToUnregister := extractRouteIDsFromEndpoints(endpoints)
 
 	if len(routesToUnregister) == 0 {
 		logger.Infof("%s %s: no routes found to unregister", instanceType, instanceID)
@@ -346,22 +315,56 @@ func UnregisterRoutesFromEndpoints(
 
 	logger.Infof("Unregistering %d route(s) for %s %s", len(routesToUnregister), instanceType, instanceID)
 
-	// Unregister each unique route and track failures
+	return unregisterRoutes(proxyManager, routesToUnregister, instanceType, instanceID)
+}
+
+// extractRouteIDsFromEndpoints extracts unique route IDs from endpoints.
+func extractRouteIDsFromEndpoints(endpoints []map[string]any) map[string]bool {
+	routesToUnregister := make(map[string]bool)
+
+	for _, endpoint := range endpoints {
+		urlStr, ok := endpoint["url"].(string)
+		if !ok {
+			continue
+		}
+
+		parsedURL, err := url.Parse(urlStr)
+		if err != nil {
+			logger.Warningf("Failed to parse endpoint URL %s: %v", urlStr, err)
+			continue
+		}
+
+		hostname := parsedURL.Hostname()
+		parts := strings.Split(hostname, ".")
+		if len(parts) == 0 {
+			logger.Warningf("Invalid hostname format in URL %s: no subdomain found", urlStr)
+			continue
+		}
+
+		routeID := parts[0]
+		if routeID != "" {
+			routesToUnregister[routeID] = true
+		}
+	}
+
+	return routesToUnregister
+}
+
+// unregisterRoutes unregisters routes and returns error if any fail.
+func unregisterRoutes(proxyManager ProxyManager, routeIDs map[string]bool, instanceType, instanceID string) error {
 	var failedRoutes []string
-	for routeID := range routesToUnregister {
+
+	for routeID := range routeIDs {
 		if err := proxyManager.UnregisterRoute(routeID); err == nil {
 			logger.Infof("%s %s: Successfully unregistered route: %s", instanceType, instanceID, routeID)
 		} else if errors.Is(err, ErrRouteNotFound) {
-			// Idempotent: route already unregistered is considered success
 			logger.Infof("%s %s: Route not configured for %s (already unregistered)", instanceType, instanceID, routeID)
 		} else {
-			// Real error: track for return
 			logger.Errorf("%s %s: Error unregistering route %s: %v", instanceType, instanceID, routeID, err)
 			failedRoutes = append(failedRoutes, routeID)
 		}
 	}
 
-	// Return error if any routes failed to unregister
 	if len(failedRoutes) > 0 {
 		return fmt.Errorf("failed to unregister %d route(s): %v", len(failedRoutes), failedRoutes)
 	}
