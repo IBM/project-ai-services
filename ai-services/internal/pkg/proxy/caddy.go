@@ -11,6 +11,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // ErrRouteNotFound is returned when a route is not found in Caddy.
@@ -43,6 +44,16 @@ func NewCaddyManager(adminURL, serverName string) ProxyManager {
 		adminURL:   adminURL,
 		serverName: serverName,
 	}
+}
+
+// GetCaddyProxyManager retrieves the Caddy admin URL from environment and creates a ProxyManager.
+func GetCaddyProxyManager(serverName string) (ProxyManager, error) {
+	adminURL := utils.GetEnv("CADDY_ADMIN_URL", "")
+	if adminURL == "" {
+		return nil, fmt.Errorf("CADDY_ADMIN_URL environment variable not set")
+	}
+
+	return NewCaddyManager(adminURL, serverName), nil
 }
 
 // HealthCheck verifies Caddy is running and accessible.

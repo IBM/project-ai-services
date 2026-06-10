@@ -15,7 +15,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -61,21 +60,20 @@ func (s *DeletionService) PerformDeletion(ctx context.Context, appID uuid.UUID, 
 		return
 	}
 
-	// Get Caddy admin URL from environment variable for container-to-container communication
-	adminURL := utils.GetEnv("CADDY_ADMIN_URL", "")
-	var proxyManager proxy.ProxyManager
-	if adminURL == "" {
-		logger.Warningf("CADDY_ADMIN_URL not set, skipping route cleanup for application %s", appID)
-	} else {
-		// Create proxy manager once and reuse for all services and components
-		proxyManager = proxy.NewCaddyManager(adminURL, constants.CaddyServerName)
+	// Get Caddy proxy manager - fail if CADDY_ADMIN_URL not set
+	proxyManager, err := proxy.GetCaddyProxyManager(constants.CaddyServerName)
+	if err != nil {
+		logger.Errorf("failed to get Caddy proxy manager for app %s: %s", appID, err)
+		_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, fmt.Sprintf("failed to get Caddy proxy manager: %s", err))
+
+		return
 	}
 
 	// Delete services and track errors
 	errorMessages := s.deleteServices(ctx, rt, services, keepData, proxyManager)
 
 	// Delete orphaned components and track errors
-	componentErrors := s.deleteOrphanedComponents(ctx, rt, orphanedComponents, keepData, proxyManager)
+	componentErrors := s.deleteOrphanedComponents(ctx, rt, orphanedComponents, keepData)
 	errorMessages = append(errorMessages, componentErrors...)
 
 	// Check if any errors occurred during deletion
@@ -285,7 +283,7 @@ func (s *DeletionService) deletePods(rt runtime.Runtime, pods []runtimeTypes.Pod
 // deleteOrphanedComponents deletes orphaned components (pods + DB records) and returns any error messages.
 //
 //nolint:cyclop // Function complexity is acceptable for deletion orchestration
-func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runtime.Runtime, componentIDs []uuid.UUID, keepData bool, proxyManager proxy.ProxyManager) []string {
+func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runtime.Runtime, componentIDs []uuid.UUID, keepData bool) []string {
 	var errorMessages []string
 	forceDelete := true
 
