@@ -3,12 +3,13 @@ package image
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
-	"github.com/spf13/cobra"
 )
 
 var pullCmd = &cobra.Command{
@@ -25,8 +26,11 @@ var pullCmd = &cobra.Command{
 }
 
 func pull(template string) error {
+	if experimentalImages && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+		return pullCatalogImages(templateName)
+	}
+
 	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypeOpenShift {
-		// Since we do not have templates in OpenShift marking it as unsupported for now
 		logger.Warningln("Not supported for openshift runtime")
 
 		return nil
@@ -46,11 +50,36 @@ func pull(template string) error {
 		return fmt.Errorf("failed to connect to podman: %w", err)
 	}
 
-	for _, image := range images {
-		if err := runtimeClient.PullImage(image); err != nil {
-			return fmt.Errorf("failed to pull the image: %w", err)
-		}
+	// Use shared helper function with retry logic
+	return image.PullImageFromRegistry(runtimeClient, images)
+}
+
+// pullCatalogImages pulls container images for services or architectures from the catalog.
+func pullCatalogImages(templateID string) error {
+	images, err := getCatalogImages(templateID)
+	if err != nil {
+		return err
 	}
+
+	if len(images) == 0 {
+		logger.Infoln("No images to pull")
+
+		return nil
+	}
+
+	// Pull all images
+	logger.Infof("Downloading %d images for template '%s'...\n", len(images), templateID)
+	runtimeClient, err := podman.NewPodmanClient()
+	if err != nil {
+		return fmt.Errorf("failed to connect to podman: %w", err)
+	}
+
+	// Use shared helper function with retry logic
+	if err := image.PullImageFromRegistry(runtimeClient, images); err != nil {
+		return err
+	}
+
+	logger.Infof("Successfully pulled all images for template '%s'\n", templateID)
 
 	return nil
 }

@@ -373,7 +373,15 @@ class TestRephraseQueryWithContext:
         
         # Mock settings
         mock_settings = Mock()
-        mock_settings.query_rephrasing.rephrase_prompt_template = "History: {conversation_history}\nQuery: {current_query}\nRephrased:"
+        mock_english_config = Mock()
+        mock_english_config.rephrase_prompt_template = "History: {conversation_history}\nQuery: {current_query}\nRephrased:"
+        mock_english_config.role_labels = {"user": "User", "assistant": "Assistant", "system": "System", "unknown": "Unknown"}
+        mock_english_config.stop_sequences = ["\n\n", "Question:", "Current Question:"]
+        mock_german_config = Mock()
+        mock_german_config.role_labels = {"user": "Benutzer", "assistant": "Assistent", "system": "System", "unknown": "Unbekannt"}
+        mock_german_config.stop_sequences = ["\n\n", "Frage:", "Aktuelle Frage:"]
+        mock_settings.query_rephrasing.english = mock_english_config
+        mock_settings.query_rephrasing.german = mock_german_config
         mock_settings.query_rephrasing.max_response_tokens = 100
         mock_settings.query_rephrasing.max_response_tokens_multiplier = 1.5
         mock_settings.query_rephrasing.temperature = 0.0
@@ -416,7 +424,15 @@ class TestRephraseQueryWithContext:
         
         # Mock settings
         mock_settings = Mock()
-        mock_settings.query_rephrasing.rephrase_prompt_template = "History: {conversation_history}\nQuery: {current_query}\nRephrased:"
+        mock_english_config = Mock()
+        mock_english_config.rephrase_prompt_template = "History: {conversation_history}\nQuery: {current_query}\nRephrased:"
+        mock_english_config.role_labels = {"user": "User", "assistant": "Assistant", "system": "System", "unknown": "Unknown"}
+        mock_english_config.stop_sequences = ["\n\n", "Question:", "Current Question:"]
+        mock_german_config = Mock()
+        mock_german_config.role_labels = {"user": "Benutzer", "assistant": "Assistent", "system": "System", "unknown": "Unbekannt"}
+        mock_german_config.stop_sequences = ["\n\n", "Frage:", "Aktuelle Frage:"]
+        mock_settings.query_rephrasing.english = mock_english_config
+        mock_settings.query_rephrasing.german = mock_german_config
         mock_settings.query_rephrasing.max_response_tokens = 100
         mock_settings.query_rephrasing.max_response_tokens_multiplier = 1.5
         mock_settings.query_rephrasing.temperature = 0.0
@@ -456,7 +472,15 @@ class TestRephraseQueryWithContext:
         
         # Mock settings
         mock_settings = Mock()
-        mock_settings.query_rephrasing.rephrase_prompt_template = "History: {conversation_history}\nQuery: {current_query}\nRephrased:"
+        mock_english_config = Mock()
+        mock_english_config.rephrase_prompt_template = "History: {conversation_history}\nQuery: {current_query}\nRephrased:"
+        mock_english_config.role_labels = {"user": "User", "assistant": "Assistant", "system": "System", "unknown": "Unknown"}
+        mock_english_config.stop_sequences = ["\n\n", "Question:", "Current Question:"]
+        mock_german_config = Mock()
+        mock_german_config.role_labels = {"user": "Benutzer", "assistant": "Assistent", "system": "System", "unknown": "Unbekannt"}
+        mock_german_config.stop_sequences = ["\n\n", "Frage:", "Aktuelle Frage:"]
+        mock_settings.query_rephrasing.english = mock_english_config
+        mock_settings.query_rephrasing.german = mock_german_config
         mock_settings.query_rephrasing.max_response_tokens = 100
         mock_settings.query_rephrasing.max_response_tokens_multiplier = 1.5
         mock_settings.query_rephrasing.temperature = 0.0
@@ -490,7 +514,15 @@ class TestRephraseQueryWithContext:
         
         # Mock settings
         mock_settings = Mock()
-        mock_settings.query_rephrasing.rephrase_prompt_template = "History: {conversation_history}\nQuery: {current_query}\nRephrased:"
+        mock_english_config = Mock()
+        mock_english_config.rephrase_prompt_template = "History: {conversation_history}\nQuery: {current_query}\nRephrased:"
+        mock_english_config.role_labels = {"user": "User", "assistant": "Assistant", "system": "System", "unknown": "Unknown"}
+        mock_english_config.stop_sequences = ["\n\n", "Question:", "Current Question:"]
+        mock_german_config = Mock()
+        mock_german_config.role_labels = {"user": "Benutzer", "assistant": "Assistent", "system": "System", "unknown": "Unbekannt"}
+        mock_german_config.stop_sequences = ["\n\n", "Frage:", "Aktuelle Frage:"]
+        mock_settings.query_rephrasing.english = mock_english_config
+        mock_settings.query_rephrasing.german = mock_german_config
         mock_settings.query_rephrasing.max_response_tokens = 100
         mock_settings.query_rephrasing.max_response_tokens_multiplier = 1.5
         mock_settings.query_rephrasing.temperature = 0.0

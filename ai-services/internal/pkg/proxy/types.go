@@ -7,6 +7,9 @@ type ProxyManager interface {
 
 	// HealthCheck verifies the proxy is available and responding
 	HealthCheck() error
+
+	// GetRouteByID retrieves a specific route by its ID from the proxy
+	GetRouteByID(routeID string) (*Route, error)
 }
 
 // Route represents a reverse proxy route configuration.

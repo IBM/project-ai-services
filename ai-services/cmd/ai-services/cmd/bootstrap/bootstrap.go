@@ -3,9 +3,11 @@ package bootstrap
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -21,69 +23,85 @@ var (
 
 // BootstrapCmd represents the bootstrap command.
 func BootstrapCmd() *cobra.Command {
+	var skipChecks []string
 	bootstrapCmd := &cobra.Command{
-		Use:     "bootstrap",
-		Short:   "Initializes AI Services infrastructure",
-		Long:    bootstrapDescription(),
-		Example: bootstrapExample(),
-		Args:    cobra.NoArgs,
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			cmd.SilenceUsage = true
-			// Initialize runtime factory based on flag
-			rt := types.RuntimeType(runtimeType)
-			if !rt.Valid() {
-				return fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift'). Please specify runtime using --runtime flag", runtimeType)
-			}
-
-			vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-			logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
-
-			// Check if podman runtime is being used on unsupported platform
-			return utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType())
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cmd.SilenceUsage = true
-
-			rt := vars.RuntimeFactory.GetRuntimeType()
-			// Create bootstrap instance based on runtime
-			factory := bootstrap.NewBootstrapFactory(rt)
-			bootstrapInstance, err := factory.Create()
-			if err != nil {
-				return fmt.Errorf("failed to create bootstrap instance: %w", err)
-			}
-
-			if configureErr := bootstrapInstance.Configure(); configureErr != nil {
-				return fmt.Errorf("failed to run bootstrap configure: %w", configureErr)
-			}
-
-			if err := factory.Validate(nil); err != nil {
-				return fmt.Errorf("failed to run bootstrap validate: %w", err)
-			}
-
-			if rt == types.RuntimeTypePodman {
-				logger.Infoln("LPAR bootstrapped successfully")
-				logger.Infoln("----------------------------------------------------------------------------")
-				// Only show re-login message if running via sudo (non-root user)
-				if os.Getenv("SUDO_USER") != "" {
-					style := lipgloss.NewStyle().Foreground(lipgloss.Color("#32BD27"))
-					message := style.Render("Re-login to the shell to reflect necessary permissions assigned to vfio cards")
-					logger.Infoln(message)
-				}
-			}
-
-			return nil
-		},
+		Use:               "bootstrap",
+		Short:             "Initializes AI Services infrastructure",
+		Long:              bootstrapDescription(),
+		Example:           bootstrapExample(),
+		Args:              cobra.NoArgs,
+		PersistentPreRunE: bootstrapPersistentPreRunE,
+		RunE:              bootstrapRunE(&skipChecks),
 	}
 
+	skipCheckDesc := BuildSkipFlagDescription()
 	// Add runtime flag as required
 	bootstrapCmd.PersistentFlags().StringVar(&runtimeType, "runtime", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
 	_ = bootstrapCmd.MarkPersistentFlagRequired("runtime")
+	bootstrapCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
 
 	// subcommands
 	bootstrapCmd.AddCommand(validateCmd())
 	bootstrapCmd.AddCommand(configureCmd())
 
 	return bootstrapCmd
+}
+
+func bootstrapPersistentPreRunE(cmd *cobra.Command, args []string) error {
+	cmd.SilenceUsage = true
+	// Initialize runtime factory based on flag
+	rt := types.RuntimeType(runtimeType)
+	if !rt.Valid() {
+		return fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift'). Please specify runtime using --runtime flag", runtimeType)
+	}
+
+	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
+	logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
+
+	// Check if podman runtime is being used on unsupported platform
+	return utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType())
+}
+
+func bootstrapRunE(skipChecks *[]string) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
+
+		skip := helpers.ParseSkipChecks(*skipChecks)
+		if len(skip) > 0 {
+			logger.Warningln("Skipping validation checks: " + strings.Join(*skipChecks, ", "))
+		}
+
+		rt := vars.RuntimeFactory.GetRuntimeType()
+		// Create bootstrap instance based on runtime
+		factory := bootstrap.NewBootstrapFactory(rt)
+		bootstrapInstance, err := factory.Create()
+		if err != nil {
+			return fmt.Errorf("failed to create bootstrap instance: %w", err)
+		}
+
+		if configureErr := bootstrapInstance.Configure(); configureErr != nil {
+			return fmt.Errorf("failed to run bootstrap configure: %w", configureErr)
+		}
+
+		if err := factory.Validate(skip); err != nil {
+			logger.Infof("Please refer to troubleshooting guide for more information: %s", troubleshootingGuide)
+
+			return fmt.Errorf("failed to run bootstrap validate: %w", err)
+		}
+
+		if rt == types.RuntimeTypePodman {
+			logger.Infoln("LPAR bootstrapped successfully")
+			logger.Infoln("----------------------------------------------------------------------------")
+			// Only show re-login message if running via sudo (non-root user)
+			if os.Getenv("SUDO_USER") != "" {
+				style := lipgloss.NewStyle().Foreground(lipgloss.Color("#32BD27"))
+				message := style.Render("Re-login to the shell to reflect necessary permissions assigned to vfio cards")
+				logger.Infoln(message)
+			}
+		}
+
+		return nil
+	}
 }
 
 func bootstrapExample() string {

@@ -265,7 +265,7 @@ func prepareCatalogDeployment(deployCtx *catalogDeploymentContext, tp templates.
 	}
 
 	// Generate and write Caddyfile before deploying
-	if err := generateCaddyfile(baseDir, values); err != nil {
+	if err := generateCaddyfile(baseDir); err != nil {
 		s.Fail("failed to generate Caddyfile")
 
 		return nil, fmt.Errorf("failed to generate Caddyfile: %w", err)
@@ -514,7 +514,7 @@ func executePodTemplate(rt *podman.PodmanClient, tp templates.Template, tmpls ma
 }
 
 // generateCaddyfile copies the static Caddyfile to the caddy directory.
-func generateCaddyfile(baseDir string, values map[string]any) error {
+func generateCaddyfile(baseDir string) error {
 	// Read the Caddyfile template
 	caddyfileContent, err := assets.CatalogFS.ReadFile("catalog/podman/Caddyfile.tmpl")
 	if err != nil {
@@ -528,7 +528,7 @@ func generateCaddyfile(baseDir string, values map[string]any) error {
 	}
 
 	// Prepare template data with the server name constant
-	templateData := map[string]interface{}{
+	templateData := map[string]any{
 		"CaddyServerName": constants.CaddyServerName,
 	}
 
@@ -750,52 +750,76 @@ func getCaddyHTTPSPort(rt *podman.PodmanClient, caddyPodName string) (string, er
 	return "", fmt.Errorf("HTTPS port mapping not found in pod ports")
 }
 
+// parseRouteEntry parses a single route entry and returns the subdomain.
+// Route format: "port:subdomain:type"
+// Returns empty string if the entry is invalid.
+func parseRouteEntry(routeEntry, podName string) string {
+	// Use shared helper from proxy package
+	parts, err := proxy.ParseRouteEntry(routeEntry)
+	if err != nil {
+		logger.Warningf("Invalid route format '%s' in pod %s: %v", routeEntry, podName, err)
+
+		return ""
+	}
+
+	return parts.Subdomain
+}
+
+// processRouteInfo processes route information and populates the routeDomains map.
+func processRouteInfo(info TemplateRouteInfo, proxyManager proxy.ProxyManager, routeDomains map[string]string) {
+	// Parse routes annotation directly to extract subdomains
+	// Format: "port:subdomain:type, port:subdomain:type, ..."
+	// Example: "8081:catalog-ui:ui, 8080:catalog-api:api"
+	for _, routeEntry := range strings.Split(info.RoutesAnnotation, ",") {
+		subdomain := parseRouteEntry(routeEntry, info.PodName)
+		if subdomain == "" {
+			continue
+		}
+
+		// Query Caddy for this route (route ID is just the subdomain)
+		actualRoute, err := proxyManager.GetRouteByID(subdomain)
+		if err != nil {
+			// Log warning but continue - route might not exist yet
+			logger.Warningf("Failed to query route %s from Caddy: %v", subdomain, err)
+
+			continue
+		}
+
+		// Create variable name from subdomain
+		sanitizedSubdomain := strings.ReplaceAll(subdomain, "-", "_")
+		varName := strings.ToUpper(fmt.Sprintf("%s_DOMAIN", sanitizedSubdomain))
+		routeDomains[varName] = actualRoute.Domain
+	}
+}
+
 // GetCatalogRouteInfo retrieves route domains and HTTPS port for the catalog service.
 func GetCatalogRouteInfo(rt *podman.PodmanClient, tp templates.Template, appTemplateName string, argParams map[string]string) (map[string]string, string, error) {
-	// Extract routes from all templates
-	routeInfos, err := extractAllRoutesFromTemplates(tp, appTemplateName, argParams)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to extract routes from templates: %w", err)
-	}
-
-	if len(routeInfos) == 0 {
-		return nil, "", fmt.Errorf("no templates found with routes annotation")
-	}
-
 	// Find Caddy pod from templates
 	caddyPodName, err := findCaddyPodNameFromTemplates(tp, appTemplateName, argParams)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to find Caddy pod: %w", err)
 	}
 
-	// Get host IP for route domain generation
-	hostIP, err := utils.GetHostIP()
+	// Get Caddy admin URL for querying specific routes
+	caddyAdminPort, err := proxy.GetCaddyAdminPort(rt, caddyPodName)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to get host IP: %w", err)
+		return nil, "", fmt.Errorf("failed to get Caddy admin port: %w", err)
+	}
+	caddyAdminURL := fmt.Sprintf("http://localhost:%s", caddyAdminPort)
+
+	// Extract routes from all templates (same as during registration)
+	routeInfos, err := extractAllRoutesFromTemplates(tp, appTemplateName, argParams)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to extract routes from templates: %w", err)
 	}
 
-	// Compute domain suffix (default to nip.io)
-	domainSuffix := fmt.Sprintf("%s.nip.io", hostIP)
+	// Create proxy manager
+	proxyManager := proxy.NewCaddyManager(caddyAdminURL, constants.CaddyServerName)
 
-	// Build route domains map
+	// Build route domains map by querying Caddy for each route
 	routeDomains := make(map[string]string)
-
-	// Build routes from annotations to get domains
 	for _, info := range routeInfos {
-		routes, err := proxy.BuildRoutesFromAnnotation(info.RoutesAnnotation, domainSuffix, info.PodName)
-		if err != nil {
-			continue // Skip if routes can't be built
-		}
-
-		for _, route := range routes {
-			parts := strings.Split(route.Domain, ".")
-			if len(parts) > 0 {
-				subdomain := parts[0]
-				sanitizedSubdomain := strings.ReplaceAll(subdomain, "-", "_")
-				varName := strings.ToUpper(fmt.Sprintf("%s_DOMAIN", sanitizedSubdomain))
-				routeDomains[varName] = route.Domain
-			}
-		}
+		processRouteInfo(info, proxyManager, routeDomains)
 	}
 
 	// Get Caddy HTTPS port
