@@ -1,7 +1,7 @@
 # Component identification
 type: component
 id: vllm-cpu
-name: "vLLM CPU Embeddings"
+name: "AI Inference on CPU"
 description: "Deploy embedding models on vLLM inference engine (CPU-only)"
 
 # Component type this provider belongs to

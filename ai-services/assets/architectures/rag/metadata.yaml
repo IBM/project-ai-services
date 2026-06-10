@@ -31,10 +31,68 @@ services:
     version: ">=1.0.0"
     optional: true
 
-# Links
-links:
-  demo: "https://example.com/demo/rag"
-  code: "https://github.com/project-ai-services/spyre-rag"
-  documentation: "https://docs.example.com/rag"
+about:
+  - title: "Services"
+    values:
+      - "Question and Answer"
+      - "Digitize Documents"
+      - "Find Similar Items"
+      - "Summarize"
+
+  - title: "Use case domains"
+    sections:
+      - title: "Agriculture"
+        values:
+          - "Agriculture assistant"
+      - title: "Banking"
+        values:
+          - "Analyst assistant"
+          - "Financial documents assistant"
+          - "Open account agent"
+      - title: "Enterprise resource planning"
+        values:
+          - "BI assistant"
+          - "Invoice matching assistant"
+          - "Order processing assistant"
+      - title: "Insurance"
+        values:
+          - "Claims & policy management agent"
+      - title: "IT operations"
+        values:
+          - "Invoice matching assistant"
+      - title: "Public sector"
+        values:
+          - "Private documents assistant"
+          - "Product sales assistant"
+      - title: "Professional services"
+        values:
+          - "Conference slide search"
+      - title: "Real estate"
+        values:
+          - "Real estate assistant"
+
+  - title: "Minimum resource allocation"
+    values:
+      - title: "Required cores"
+        value: "15 - 20"
+      - title: "Required memory"
+        value: "256 - 300GB"
+      - title: "Required Spyre cards"
+        value: "4 cards"
+
+  - title: "Code and architecture"
+    sections:
+      - title: "Source code"
+        ctaLabel: "View source code"
+        url: "https://github.com/IBM/project-ai-services"
+      - image:
+          source: "images/ragArchDiagram.webp"
+
+  - title: "Demos and prototypes"
+    sections:
+      - title: "Retrieval-Augmented Generation (RAG)"
+        description: "Discover the architecture behind this pre-built digital assistant"
+        ctaLabel: "Watch"
+        url: "https://github.com/user-attachments/assets/958980a7-f653-4474-84a7-28d657b5f7d1"
 
 # Made with Bob

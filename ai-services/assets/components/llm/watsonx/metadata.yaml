@@ -1,7 +1,7 @@
 # Component identification
 type: component
 id: watsonx
-name: "Watsonx Instruct"
+name: "IBM watsonx.ai on IBM Cloud"
 description: "Deploy llm models using watsonx"
 
 # Component type this provider belongs to
