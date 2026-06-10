@@ -8,7 +8,7 @@ from typing import Optional
 import uvicorn
 from fastapi import FastAPI, Request, UploadFile, File, Form, BackgroundTasks
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 from starlette.concurrency import iterate_in_threadpool
 
 from common.misc_utils import set_log_level, get_logger
@@ -1270,7 +1270,7 @@ async def delete_job(job_id: str):
             )
         
         logger.info(f"Deleted job {job_id}")
-        return JSONResponse(status_code=204, content=None)
+        return Response(status_code=204)
         
     except SummarizeException as se:
         raise se
@@ -1338,7 +1338,7 @@ async def bulk_delete_jobs(confirm: Optional[bool] = None):
             )
         
         logger.info("Bulk deleted all jobs")
-        return JSONResponse(status_code=204, content=None)
+        return Response(status_code=204)
         
     except SummarizeException as se:
         raise se
