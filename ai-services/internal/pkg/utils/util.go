@@ -43,7 +43,7 @@ func FlattenArray[T comparable](arr [][]T) []T {
 	for _, row := range arr {
 		totalLen += len(row)
 	}
-	
+
 	// Preallocate slice with exact capacity
 	flatArr := make([]T, 0, totalLen)
 
