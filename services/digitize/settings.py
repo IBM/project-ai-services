@@ -116,14 +116,16 @@ class DigitizeConfig(BaseSettings):
 class TableSummaryConfig(BaseSettings):
     """Table summarization configuration."""
 
-    max_tokens: int = Field(
-        default=1024,
-        ge=0,
-        description="Maximum tokens for table summarization",
-    )
-
-    # Table summary prompt (English)
-    prompt_en: str = Field(
+    class EnglishConfig(BaseSettings):
+        """English-specific table summarization settings."""
+        
+        max_tokens: int = Field(
+            default=1024,
+            ge=0,
+            description="Maximum tokens for table summarization (English)",
+        )
+        
+        prompt: str = Field(
         default="""You are an intelligent assistant analyzing tables extracted from documents.
 
                 Your tasks:
@@ -173,11 +175,19 @@ class TableSummaryConfig(BaseSettings):
 
                 Table:
                 {content}""",
-        description="Prompt for table summarization (English)",
-    )
-
-    # Table summary prompt (German)
-    prompt_de: str = Field(
+            description="Prompt for table summarization (English)",
+        )
+    
+    class GermanConfig(BaseSettings):
+        """German-specific table summarization settings."""
+        
+        max_tokens: int = Field(
+            default=1536,
+            ge=0,
+            description="Maximum tokens for table summarization (German) - adjusted for German to English token ratio (~1.5x)",
+        )
+        
+        prompt: str = Field(
         default="""Sie sind ein intelligenter Assistent, der Tabellen aus Dokumenten analysiert.
 
                 Ihre Aufgaben:
@@ -227,8 +237,12 @@ class TableSummaryConfig(BaseSettings):
 
                 Tabelle:
                 {content}""",
-        description="Prompt für Tabellenzusammenfassung (Deutsch)",
-    )
+            description="Prompt für Tabellenzusammenfassung (Deutsch)",
+        )
+    
+    # Language-specific configurations
+    english: EnglishConfig = Field(default_factory=EnglishConfig)
+    german: GermanConfig = Field(default_factory=GermanConfig)
 
 
 class DatabaseConfig(BaseSettings):

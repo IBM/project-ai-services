@@ -649,20 +649,27 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint, do
     # For DOCX files: create list of None values (same length as other lists for zip())
     table_page_numbers = [merged_table_dict[key]["page_number"] for key in sorted(merged_table_dict)] if not is_docx else [None] * len(merged_table_dict)
 
-    # Select appropriate prompt based on document language (lingua ISO format: 'EN', 'DE', etc.)
+    # Select appropriate prompt and max_tokens based on document language (lingua ISO format: 'EN', 'DE', etc.)
     prompt_templates = {
-        LanguageCodes.ENGLISH: settings.table_summary.prompt_en,
-        LanguageCodes.GERMAN: settings.table_summary.prompt_de
+        LanguageCodes.ENGLISH: settings.table_summary.english.prompt,
+        LanguageCodes.GERMAN: settings.table_summary.german.prompt
     }
     selected_prompt = get_prompt_for_language(document_language, prompt_templates)
     
-    logger.debug(f"Using {'German' if document_language == LanguageCodes.GERMAN else 'English'} prompt for table summarization (document language: {document_language})")
+    # Select appropriate max_tokens based on document language
+    max_tokens_config = {
+        LanguageCodes.ENGLISH: settings.table_summary.english.max_tokens,
+        LanguageCodes.GERMAN: settings.table_summary.german.max_tokens
+    }
+    selected_max_tokens = max_tokens_config.get(document_language, settings.table_summary.english.max_tokens)
+    
+    logger.debug(f"Using {'German' if document_language == LanguageCodes.GERMAN else 'English'} prompt and max_tokens ({selected_max_tokens}) for table summarization (document language: {document_language})")
 
     # Summarize and classify tables - use markdown directly
     table_summaries, decisions = summarize_and_classify_tables(
         table_markdowns, gen_model, gen_endpoint, pdf_path,
         prompt_template=selected_prompt,
-        max_tokens=settings.table_summary.max_tokens,
+        max_tokens=selected_max_tokens,
     )
 
     filtered_table_dicts = {
