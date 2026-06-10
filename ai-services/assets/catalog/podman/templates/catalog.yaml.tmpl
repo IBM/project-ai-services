@@ -95,6 +95,10 @@ spec:
       args:
         - "/usr/bin/ai-services catalog apiserver --port=8080 --admin-username=admin --admin-password-hash=${ADMIN_PASSWORD} --runtime={{ .Values.backend.runtime }}"
       env:
+        - name: AI_SERVICES_LOG_LEVEL
+          value: "info"
+        - name: AI_SERVICES_LOG_FORMAT
+          value: "service"
         - name: CONTAINER_HOST
           value: "unix://{{ .Values.backend.podman.uri }}"
         - name: REGISTRY_AUTH_FILE
