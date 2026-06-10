@@ -284,7 +284,6 @@ def mock_search_only(monkeypatch, sample_documents, sample_perf_metrics):
     # Add similarity service timing metrics to perf_metrics
     perf_metrics_with_similarity = {
         **sample_perf_metrics,
-        "similarity_api_time": 0.18,
         "similarity_retrieve_time": 0.12,
         "similarity_rerank_time": 0.05,
         "similarity_total_time": 0.17

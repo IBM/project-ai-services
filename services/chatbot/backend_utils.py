@@ -34,7 +34,6 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
     # Call similarity service API
     similarity_url = settings.chatbot.similarity_service_url
 
-    start_time = time.time()
     try:
         response = requests.post(
             f"{similarity_url}/v1/similarity-search",
@@ -47,7 +46,6 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
             timeout=30
         )
         response.raise_for_status()
-        perf_stat_dict["similarity_api_time"] = time.time() - start_time
 
         # Extract timing information from response headers
         if "X-Retrieve-Time" in response.headers:
@@ -59,7 +57,6 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
 
         logger.info(
             f"Similarity service timing - "
-            f"API call: {perf_stat_dict['similarity_api_time']:.3f}s, "
             f"Retrieve: {perf_stat_dict.get('similarity_retrieve_time', 0):.3f}s, "
             f"Rerank: {perf_stat_dict.get('similarity_rerank_time', 0):.3f}s, "
             f"Total: {perf_stat_dict.get('similarity_total_time', 0):.3f}s"

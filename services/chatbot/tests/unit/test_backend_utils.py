@@ -57,8 +57,8 @@ class TestSearchOnly:
         assert json_payload["top_k"] == 10
         assert json_payload["rerank"] is True
 
-    def test_returns_perf_stat_dict_with_api_timing(self, monkeypatch):
-        """search_only must return perf_stat_dict with API call timing."""
+    def test_returns_perf_stat_dict_with_timing_from_headers(self, monkeypatch):
+        """search_only must return perf_stat_dict with timing from similarity service headers."""
         from chatbot import backend_utils
 
         self._patch_settings(monkeypatch, threshold=0.0)
@@ -82,8 +82,6 @@ class TestSearchOnly:
             top_k=10, top_r=5, vectorstore=Mock(),
         )
 
-        assert "similarity_api_time" in perf_stat_dict
-        assert perf_stat_dict["similarity_api_time"] >= 0
         # Verify timing metrics from headers are included
         assert "similarity_retrieve_time" in perf_stat_dict
         assert perf_stat_dict["similarity_retrieve_time"] == 0.123
