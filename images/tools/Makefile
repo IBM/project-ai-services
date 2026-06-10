@@ -1,6 +1,6 @@
 REGISTRY?=icr.io/ai-services-private
 IMAGE=tools
-TAG?=0.8
+TAG?=0.9
 SR_COMMIT=2a57a3a4b14d23981b4add77670bcea90cf69d77
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
