@@ -948,7 +948,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
                         if indexing_callback:
                             try:
                                 # Create chunks for immediate indexing
-                                doc_chunks = merge_chunked_documents(text_chunk_json, table_chunk_json, path, language=document_language)
+                                doc_chunks = merge_chunked_documents(text_chunk_json, table_chunk_json, path)
                                 # Inject doc_id into chunks
                                 for chunk in doc_chunks:
                                     chunk["doc_id"] = doc_id
@@ -1429,7 +1429,7 @@ def count_chunks(in_txt_f, in_tab_f):
     return txt_count + tab_count
 
 
-def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn, language=LanguageCodes.ENGLISH):
+def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
     """
     Merge pre-chunked text and table documents into final chunk list.
     Both inputs are already chunked to fit embedding limits.
@@ -1465,7 +1465,7 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn, language=La
                 "filename": orig_fn,
                 "type": "text",
                 "source": meta_info,
-                "language": language,
+                "language": "en",
                 "page_number": page_number,
                 "chunk_index": txt_idx,
                 "created_at": created_at
@@ -1500,7 +1500,7 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn, language=La
                 "type": "table",
                 "source": caption,
                 "page_number": page_number,
-                "language": language,
+                "language": "en",
                 "chunk_index": txt_count + tab_idx,
                 "created_at": created_at
             })
