@@ -1017,7 +1017,7 @@ func (s *ApplicationService) collectServicePods(
 		pod, err := loadApplicationPod(rt, service.ID.String())
 		if err != nil {
 			// Log error but continue with other services (fault-tolerant)
-			logger.Errorf("Failed to load service pod: %w", err)
+			logger.Errorf("Failed to load service pod: %v", err)
 
 			continue
 		}
@@ -1066,7 +1066,7 @@ func (s *ApplicationService) collectComponentPods(
 			// Load component pod from runtime
 			componentPod, err := loadApplicationPod(rt, componentID)
 			if err != nil {
-				logger.Errorf("Failed to load component pod: %w", err)
+				logger.Errorf("Failed to load component pod: %v", err)
 
 				continue
 			}

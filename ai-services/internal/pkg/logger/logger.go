@@ -11,34 +11,43 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// Log levels following standard production hierarchy
+// Log levels following standard production hierarchy.
 const (
-	// Verbosity levels for klog
-	VerbosityLevelDebug   = 2
-	VerbosityLevelInfo    = 0
+	// VerbosityLevelDebug is the klog verbosity level for debug logs (2).
+	VerbosityLevelDebug = 2
+	// VerbosityLevelInfo is the klog verbosity level for info logs (0).
+	VerbosityLevelInfo = 0
+	// VerbosityLevelWarning is the klog verbosity level for warning logs (0).
 	VerbosityLevelWarning = 0
-	VerbosityLevelError   = 0
+	// VerbosityLevelError is the klog verbosity level for error logs (0).
+	VerbosityLevelError = 0
 
-	// Standard Severity Levels
+	// LogLevelDebug is the string constant for debug severity level.
 	LogLevelDebug = "debug"
-	LogLevelInfo  = "info"
-	LogLevelWarn  = "warning"
+	// LogLevelInfo is the string constant for info severity level.
+	LogLevelInfo = "info"
+	// LogLevelWarn is the string constant for warning severity level.
+	LogLevelWarn = "warning"
+	// LogLevelError is the string constant for error severity level.
 	LogLevelError = "error"
 
-	// Env Log Variables
-	EnvLogLevel  = "AI_SERVICES_LOG_LEVEL"  // e.g., "info", "debug"
-	EnvLogFormat = "AI_SERVICES_LOG_FORMAT" // e.g., "cli", "service"
+	// EnvLogLevel is the environment variable name for log severity level (e.g., "info", "debug").
+	EnvLogLevel = "AI_SERVICES_LOG_LEVEL"
+	// EnvLogFormat is the environment variable name for log format (e.g., "cli", "service").
+	EnvLogFormat = "AI_SERVICES_LOG_FORMAT"
 
-	// Log level indicators for output formatting
-	LogLevelInfoIndicator    = "I"
+	// LogLevelInfoIndicator is the output indicator for info level logs ("I").
+	LogLevelInfoIndicator = "I"
+	// LogLevelWarningIndicator is the output indicator for warning level logs ("W").
 	LogLevelWarningIndicator = "W"
-	LogLevelErrorIndicator   = "E"
+	// LogLevelErrorIndicator is the output indicator for error level logs ("E").
+	LogLevelErrorIndicator = "E"
 )
 
-// Global state to track whether we are in a service context
+// Global state to track whether we are in a service context.
 var isServiceEnv bool
 
-// Init initializes the logger with appropriate settings based on environment
+// Init initializes the logger with appropriate settings based on environment.
 func Init() {
 	klog.InitFlags(flag.CommandLine)
 	_ = flag.CommandLine.Set("alsologtostderr", "true")
@@ -79,7 +88,7 @@ func Init() {
 	}
 }
 
-// getCallerContext generates absolute paths and timestamps if service mode is active
+// getCallerContext generates absolute paths and timestamps if service mode is active.
 func getCallerContext(skipDepth int, severity string) string {
 	if !isServiceEnv {
 		return ""
@@ -108,24 +117,42 @@ func Flush() {
 
 func Warningln(msg string) {
 	ctx := getCallerContext(1, LogLevelWarningIndicator)
-	klog.WarningDepth(1, ctx, msg)
+	if ctx == "" {
+		// CLI mode: add WARNING prefix
+		klog.WarningDepth(1, "WARNING: ", msg)
+	} else {
+		klog.WarningDepth(1, ctx, msg)
+	}
 }
 
-func Warningf(msg string, args ...any) {
+func Warningf(format string, args ...any) {
 	ctx := getCallerContext(1, LogLevelWarningIndicator)
-	formattedMsg := fmt.Sprintf(msg, args...)
-	klog.WarningDepth(1, ctx+formattedMsg)
+	if ctx == "" {
+		// CLI mode: add WARNING prefix
+		klog.WarningDepth(1, "WARNING: "+fmt.Sprintf(format, args...))
+	} else {
+		klog.WarningDepth(1, ctx+fmt.Sprintf(format, args...))
+	}
 }
 
 func Errorln(msg string) {
 	ctx := getCallerContext(1, LogLevelErrorIndicator)
-	klog.ErrorDepth(1, ctx, msg)
+	if ctx == "" {
+		// CLI mode: add ERROR prefix
+		klog.ErrorDepth(1, "ERROR: ", msg)
+	} else {
+		klog.ErrorDepth(1, ctx, msg)
+	}
 }
 
-func Errorf(msg string, args ...any) {
+func Errorf(format string, args ...any) {
 	ctx := getCallerContext(1, LogLevelErrorIndicator)
-	formattedMsg := fmt.Sprintf(msg, args...)
-	klog.ErrorDepth(1, ctx+formattedMsg)
+	if ctx == "" {
+		// CLI mode: add ERROR prefix
+		klog.ErrorDepth(1, "ERROR: "+fmt.Sprintf(format, args...))
+	} else {
+		klog.ErrorDepth(1, ctx+fmt.Sprintf(format, args...))
+	}
 }
 
 func Infoln(msg string, verbose ...int) {
@@ -137,7 +164,7 @@ func Infoln(msg string, verbose ...int) {
 	klog.V(klog.Level(v)).InfoDepth(1, ctx, msg)
 }
 
-func Infof(msg string, args ...any) {
+func Infof(format string, args ...any) {
 	v := 0
 	// Extract trailing verbosity argument safely to preserve backward compatibility
 	if len(args) > 0 {
@@ -147,6 +174,5 @@ func Infof(msg string, args ...any) {
 		}
 	}
 	ctx := getCallerContext(1, LogLevelInfoIndicator)
-	formattedMsg := fmt.Sprintf(msg, args...)
-	klog.V(klog.Level(v)).InfoDepth(1, ctx+formattedMsg)
+	klog.V(klog.Level(v)).InfoDepth(1, ctx+fmt.Sprintf(format, args...))
 }
