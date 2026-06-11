@@ -87,8 +87,9 @@ func (p *PodmanApplication) restoreDigitize(ctx context.Context, appDetails *cat
 
 	logger.Infof("Digitize API URL: %s\n", digitizeURL, 0)
 
-	// Call Import API
-	if err := restore.CallDigitizeImportAPI(digitizeURL, importPayload); err != nil {
+	// Create digitize restore client and call Import API
+	client := restore.NewDigitizeRestoreClient(digitizeURL)
+	if err := client.CallImportAPI(importPayload); err != nil {
 		return err
 	}
 

@@ -29,17 +29,16 @@ Arguments:
   [name] : Application name (required)
 
 Flags:
-  --target   : Target to backup (opensearch) (required)
+  --target   : Target to backup (opensearch, digitize) (required)
   --filename : Path to save the backup tar.gz file (optional)
                If not specified, a filename will be auto-generated with timestamp
 
 Supported targets:
   - opensearch: Backup OpenSearch indices and data (Podman only)
+  - digitize:   Backup digitize metadata (jobs and documents) (Podman only)
 
 Note:
   - Backup is currently only supported for Podman runtime
-  - OpenSearch password is automatically retrieved from the application's secret
-  - Digitize backup is not yet supported
 
 Examples:
   # Backup OpenSearch data with Podman (auto-generated filename)
@@ -53,7 +52,7 @@ Examples:
 		target := backupTarget
 
 		// Validate target
-		validTargets := []string{"opensearch"}
+		validTargets := []string{"opensearch", "digitize"}
 		isValid := false
 		for _, t := range validTargets {
 			if target == t {
@@ -129,7 +128,7 @@ Examples:
 }
 
 func init() {
-	backupCmd.Flags().StringVar(&backupTarget, "target", "", "Target to backup (opensearch) (required)")
+	backupCmd.Flags().StringVar(&backupTarget, "target", "", "Target to backup (opensearch, digitize) (required)")
 	backupCmd.Flags().StringVar(&backupFilename, "filename", "", "Path to save the backup tar.gz file (optional, auto-generated if not specified)")
 
 	_ = backupCmd.MarkFlagRequired("target")
