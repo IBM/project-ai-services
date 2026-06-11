@@ -31,7 +31,7 @@ jobs:
         run: |
           # Set PYTHONPATH to include services directory for common module imports
           export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-          pytest digitize/tests/ chatbot/tests/ summarize/tests/ similarity/tests/ \
+          pytest common/tests/ digitize/tests/ chatbot/tests/ summarize/tests/ similarity/tests/ \
             --cov=. \
             --cov-report=html:htmlcov \
             --cov-report=term-missing \
