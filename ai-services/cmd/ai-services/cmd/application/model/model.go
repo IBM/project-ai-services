@@ -5,26 +5,31 @@ import (
 	"slices"
 
 	"github.com/project-ai-services/ai-services/assets"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/spf13/cobra"
 )
 
-var ModelCmd = &cobra.Command{
-	Use:   "model",
-	Short: "Manage application models",
-	Long:  ``,
-	Args:  cobra.MaximumNArgs(0),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return cmd.Help()
-	},
-}
+var (
+	ModelCmd = &cobra.Command{
+		Use:   "model",
+		Short: "Manage application models",
+		Long:  ``,
+		Args:  cobra.MaximumNArgs(0),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
 
-var hiddenTemplates bool
+	hiddenTemplates    bool
+	experimentalModels bool
+)
 
 func init() {
 	ModelCmd.AddCommand(listCmd)
 	ModelCmd.AddCommand(downloadCmd)
+	ModelCmd.PersistentFlags().BoolVar(&experimentalModels, "experimental", false, "Use experimental catalog-based model listing")
 }
 
 func models(template string) ([]string, error) {
@@ -39,4 +44,20 @@ func models(template string) ([]string, error) {
 	}
 
 	return helpers.ListModels(template, "")
+}
+
+// getCatalogModels is a helper that creates a catalog provider and collects models.
+// excludeComponentProviders is a variadic parameter that allows excluding specific component provider by ID.
+func getCatalogModels(templateID string, excludeComponentProviders ...string) ([]string, error) {
+	provider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
+	}
+
+	models, err := provider.GetCatalogModels(templateID, excludeComponentProviders...)
+	if err != nil {
+		return nil, err
+	}
+
+	return models, nil
 }
