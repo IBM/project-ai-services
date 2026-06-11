@@ -100,7 +100,7 @@ func Init() {
 	case LogLevelInfo:
 		fallthrough
 	default:
-		_ = flag.CommandLine.Set("v", "2") // Setting this to 2 to ensure backward compatibility for cli
+		_ = flag.CommandLine.Set("v", "0")
 		activeMinLevel = LevelRankInfo
 	}
 }
@@ -116,7 +116,7 @@ func getCallerContext(skipDepth int, severity string) string {
 	}
 
 	// Use standard klog MMDD format matching production specs
-	timestamp := time.Now().Format("0102 15:04:05.000000")
+	timestamp := time.Now().UTC().Format("0102 15:04:05.000000")
 
 	// Standardized output shape: "I0610 19:31:44.190447 /path/to/file.go:200] "
 	return fmt.Sprintf("%s%s %s:%d] ", severity, timestamp, file, line)
