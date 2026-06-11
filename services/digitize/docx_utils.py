@@ -80,6 +80,9 @@ def get_docx_toc(docx_path: str) -> Dict[str, int]:
         
         if toc:
             logger.info(f"DOCX {docx_path}: extracted {len(toc)} TOC entries from combined extraction")
+
+            logger.debug(f" extracted toc is {toc}")
+
             return toc
         
         # Fallback 1: Try formal TOC styles
@@ -88,6 +91,9 @@ def get_docx_toc(docx_path: str) -> Dict[str, int]:
         
         if toc:
             logger.info(f"DOCX {docx_path}: extracted {len(toc)} TOC entries from TOC styles")
+
+            logger.debug(f" extracted toc is {toc}")
+
             return toc
         
         # Fallback 2: Try Heading styles
@@ -264,32 +270,7 @@ def extract_toc_combined(docx_path: str) -> Dict[str, int]:
                                     table_count += 1
         
         logger.debug(f"Extracted {table_count} entries from Table Paragraph style")
-        
-        # Method 2: Extract from paragraphs (List Paragraph style)
-        list_count = 0
-        for para in doc.paragraphs:
-            if para.style and para.style.name == 'List Paragraph':
-                text = para.text.strip()
-                if text:
-                    # Skip header
-                    if text.lower() in ['contents', 'table of contents']:
-                        continue
-                    
-                    # Remove page numbers
-                    text_clean = re.sub(r'\s+\d+$', '', text).strip()
-                    # Remove trailing dots/leader characters (e.g., "Chapter 1. . . . ." -> "Chapter 1")
-                    # Pattern matches dots with spaces between them: ". . . . ." or "....."
-                    text_clean = re.sub(r'[\.\s]+$', '', text_clean).strip()
-                    
-                    if text_clean and text_clean not in toc:  # Avoid duplicates
-                        # Skip standalone numbers (likely page numbers or section markers)
-                        if re.match(r'^\d+$', text_clean):
-                            continue
-                        level = _infer_toc_level_from_text(text_clean)
-                        toc[text_clean] = level
-                        list_count += 1
-        
-        logger.debug(f"Extracted {list_count} entries from List Paragraph style")
+
         logger.info(f"Total unique TOC entries extracted: {len(toc)}")
 
         logger.debug(f"Extracted tocs : {toc}")
