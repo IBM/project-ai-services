@@ -1,5 +1,5 @@
 IMAGE=summarize-service
-TAG?=v0.0.7
+TAG?=v0.0.8
 
 run:
 	PORT=$${PORT:-6000} /var/venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port $$PORT
