@@ -98,7 +98,12 @@ async def lifespan(app):
     logger.info("Ensuring cache directories exist...")
     ensure_directories()
 
-    # TODO: Scan for orphan jobs and mark them as failed
+    # Scan for zombie jobs and mark them as failed
+    logger.info("Running zombie job recovery scan...")
+    from summarize.job_utils import recover_zombie_jobs
+    recovered = recover_zombie_jobs()
+    if recovered > 0:
+        logger.warning(f"Recovered {recovered} zombie job(s) from previous session")
     
     yield
 
