@@ -1,25 +1,25 @@
 pods:
-  - name: "{{ if .AppName }}{{ .AppName }}--chat-bot{{ else }}{{ .chat }}{{ end }}"
+  - name: "{{ if .AppName }}{{ .AppName }}--chat-bot{{ else }}{{ .chatBotPod }}{{ end }}"
     format: "index .Ports \"3000/tcp\" 0"
     default: ""
     alias: UI_PORT
 
-  - name: "{{ if .AppName }}{{ .AppName }}--chat-bot{{ else }}{{ .chat }}{{ end }}"
+  - name: "{{ if .AppName }}{{ .AppName }}--chat-bot{{ else }}{{ .chatBotPod }}{{ end }}"
     format: "index .Ports \"5000/tcp\" 0"
     default: ""
     alias: BACKEND_PORT
 
-  - name: "{{ if .AppName }}{{ .AppName }}--digitize{{ else }}{{ .digitize }}{{ end }}"
+  - name: "{{ if .AppName }}{{ .AppName }}--digitize{{ else }}{{ .digitizePod }}{{ end }}"
     format: "index .Ports \"4000/tcp\" 0"
     default: ""
     alias: DIGITIZE_API_PORT
 
-  - name: "{{ if .AppName }}{{ .AppName }}--digitize{{ else }}{{ .digitize }}{{ end }}"
+  - name: "{{ if .AppName }}{{ .AppName }}--digitize{{ else }}{{ .digitizePod }}{{ end }}"
     format: "index .Ports \"4001/tcp\" 0"
     default: ""
     alias: DIGITIZE_UI_PORT
 
-  - name: "{{ if .AppName }}{{ .AppName }}--summarize-api{{ .summarize }}{{ end }}"
+  - name: "{{ if .AppName }}{{ .AppName }}--summarize-api{{ .summarizePod }}{{ end }}"
     format: "index .Ports \"6000/tcp\" 0"
     default: ""
     alias: SUMMARIZE_API_PORT
