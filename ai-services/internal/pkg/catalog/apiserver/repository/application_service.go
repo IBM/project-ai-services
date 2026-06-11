@@ -539,6 +539,7 @@ func (s *ApplicationService) loadApplicationServices(ctx context.Context, servic
 			Type:      service.CatalogID,
 			Endpoints: service.Endpoints,
 			Version:   service.Version,
+			Status:    string(service.Status),
 			CreatedAt: service.CreatedAt.Format(constants.RFC3339WithTimezone),
 			UpdatedAt: service.UpdatedAt.Format(constants.RFC3339WithTimezone),
 		}

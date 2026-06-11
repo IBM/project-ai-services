@@ -5,6 +5,7 @@ package httpclient
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -66,8 +67,10 @@ type HTTPClient struct {
 // New creates a new HTTPClient targeting the given server URL.
 func New(serverURL string) *HTTPClient {
 	return &HTTPClient{
-		serverURL:  serverURL,
-		httpClient: &http.Client{Timeout: defaultTimeout},
+		serverURL: serverURL,
+		httpClient: &http.Client{Timeout: defaultTimeout, Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}},
 	}
 }
 
