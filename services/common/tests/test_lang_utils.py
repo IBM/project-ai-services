@@ -191,18 +191,18 @@ class TestGetMaxTokensMap:
         
         # Mock chatbot settings
         with patch('chatbot.settings.settings') as mock_settings:
-            mock_settings.llm.english.max_tokens = 500
-            mock_settings.llm.german.max_tokens = 700
-            mock_settings.llm.italian.max_tokens = 700
-            mock_settings.llm.french.max_tokens = 700
+            mock_settings.llm.english.max_tokens = 512
+            mock_settings.llm.german.max_tokens = 768
+            mock_settings.llm.italian.max_tokens = 669
+            mock_settings.llm.french.max_tokens = 630
             
             result = get_max_tokens_map()
             
             assert isinstance(result, dict)
-            assert result[LanguageCodes.ENGLISH] == 500
-            assert result[LanguageCodes.GERMAN] == 700
-            assert result[LanguageCodes.ITALIAN] == 700
-            assert result[LanguageCodes.FRENCH] == 700
+            assert result[LanguageCodes.ENGLISH] == 512
+            assert result[LanguageCodes.GERMAN] == 768
+            assert result[LanguageCodes.ITALIAN] == 669
+            assert result[LanguageCodes.FRENCH] == 630
     
     def test_get_max_tokens_map_different_values(self):
         """Test returns correct max tokens for different languages."""
@@ -424,8 +424,8 @@ class TestLanguageUtilsIntegration:
         setup_language_detector([Language.ENGLISH, Language.GERMAN])
         
         with patch('chatbot.settings.settings') as mock_settings:
-            mock_settings.llm.english.max_tokens = 500
-            mock_settings.llm.german.max_tokens = 700
+            mock_settings.llm.english.max_tokens = 512
+            mock_settings.llm.german.max_tokens = 768
             
             # Detect language
             text = "This is English"
@@ -433,8 +433,8 @@ class TestLanguageUtilsIntegration:
             
             # Get max tokens for detected language
             max_tokens_map = get_max_tokens_map()
-            max_tokens = max_tokens_map.get(detected_lang, 500)
+            max_tokens = max_tokens_map.get(detected_lang, 512)
             
-            assert max_tokens == 500  # English max tokens
+            assert max_tokens == 512  # English max tokens
 
 # Made with Bob

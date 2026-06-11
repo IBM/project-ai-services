@@ -237,7 +237,7 @@ class LLMConfig(BaseSettings):
         """German-specific LLM settings."""
         
         max_tokens: int = Field(
-            default=700,
+            default=768,
             gt=0,
             description="Maximum tokens for LLM generation (German)",
         )
@@ -247,15 +247,15 @@ class LLMConfig(BaseSettings):
         def validate_max_tokens(cls, v):
             """Validate max_tokens with warning fallback."""
             if not (isinstance(v, int) and v > 0):
-                logger.warning("Setting max_tokens_de to default '700' as it is missing or malformed in the settings")
-                return 700
+                logger.warning("Setting max_tokens_de to default '768' as it is missing or malformed in the settings")
+                return 768
             return v
 
     class ItalianConfig(BaseSettings):
         """Italian-specific LLM settings."""
 
         max_tokens: int = Field(
-            default=700,
+            default=669,
             gt=0,
             description="Maximum tokens for LLM generation (Italian)",
         )
@@ -265,15 +265,15 @@ class LLMConfig(BaseSettings):
         def validate_max_tokens(cls, v):
             """Validate max_tokens with warning fallback."""
             if not (isinstance(v, int) and v > 0):
-                logger.warning("Setting max_tokens_it to default '700' as it is missing or malformed in the settings")
-                return 700
+                logger.warning("Setting max_tokens_it to default '669' as it is missing or malformed in the settings")
+                return 669
             return v
 
     class FrenchConfig(BaseSettings):
         """French-specific LLM settings."""
 
         max_tokens: int = Field(
-            default=700,
+            default=630,
             gt=0,
             description="Maximum tokens for LLM generation (French)",
         )
@@ -283,8 +283,8 @@ class LLMConfig(BaseSettings):
         def validate_max_tokens(cls, v):
             """Validate max_tokens with warning fallback."""
             if not (isinstance(v, int) and v > 0):
-                logger.warning("Setting max_tokens_fr to default '700' as it is missing or malformed in the settings")
-                return 700
+                logger.warning("Setting max_tokens_fr to default '630' as it is missing or malformed in the settings")
+                return 630
             return v
 
     temperature: float = Field(
