@@ -3,7 +3,7 @@ Unit tests for digitize.doc_utils module.
 """
 
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, MagicMock, patch
 from collections import Counter
 
 from digitize.doc_utils import detect_document_language
@@ -336,6 +336,302 @@ class TestDetectDocumentLanguage:
         
         # EN appears twice, should be selected
         assert result == "EN"
+
+
+class TestProcessTableLanguageSelection:
+    """Tests for language-specific table summarize/classify selection."""
+
+    @patch("digitize.doc_utils.summarize_and_classify_tables")
+    @patch("digitize.doc_utils.merge_consecutive_tables")
+    @patch("digitize.doc_utils.os.path.splitext")
+    @patch("digitize.doc_utils.settings")
+    def test_process_table_uses_italian_prompt_and_max_tokens(
+        self, mock_settings, mock_splitext, mock_merge_tables, mock_summarize_and_classify
+    ):
+        from digitize.doc_utils import process_table
+        from common.lang_utils import LanguageCodes
+        from pathlib import Path
+
+        # Mock the settings structure with proper nested Mock objects
+        mock_italian = Mock()
+        mock_italian.prompt = "Italian prompt template"
+        mock_italian.max_tokens = 1339
+        
+        mock_english = Mock()
+        mock_english.prompt = "English prompt template"
+        mock_english.max_tokens = 1024
+        
+        mock_german = Mock()
+        mock_german.prompt = "German prompt template"
+        mock_german.max_tokens = 1536
+        
+        mock_french = Mock()
+        mock_french.prompt = "French prompt template"
+        mock_french.max_tokens = 1260
+        
+        # Create a MagicMock that supports both attribute and subscript access
+        mock_table_summary = MagicMock()
+        mock_table_summary.italian = mock_italian
+        mock_table_summary.english = mock_english
+        mock_table_summary.german = mock_german
+        mock_table_summary.french = mock_french
+        
+        mock_settings.table_summary = mock_table_summary
+
+        mock_splitext.return_value = ("sample", ".pdf")
+        mock_merge_tables.return_value = {
+            0: {
+                "markdown": "| Colonna | Valore |\n|---|---|\n| CPU | Power10 |",
+                "caption": "Specifiche",
+                "page_number": 1,
+            }
+        }
+        mock_summarize_and_classify.return_value = (["Riassunto"], [True])
+
+        # Create a properly mocked table with prov attribute
+        mock_table = Mock()
+        mock_prov = Mock()
+        mock_prov.page_no = 1
+        mock_table.prov = [mock_prov]
+        mock_table.export_to_markdown.return_value = "| Colonna | Valore |\n|---|---|\n| CPU | Power10 |"
+        mock_table.caption_text.return_value = "Specifiche"
+        
+        converted_doc = Mock()
+        converted_doc.tables = [mock_table]
+        
+        # Mock Path.write_text
+        with patch.object(Path, 'write_text'):
+            process_table(
+                converted_doc=converted_doc,
+                pdf_path="sample.pdf",
+                out_path=Path("/tmp/out.json"),
+                gen_model="test-model",
+                gen_endpoint="http://llm",
+                document_language=LanguageCodes.ITALIAN,
+            )
+
+        _, kwargs = mock_summarize_and_classify.call_args
+        assert kwargs["prompt_template"] == "Italian prompt template"
+        assert kwargs["max_tokens"] == 1339
+    @patch("digitize.doc_utils.summarize_and_classify_tables")
+    @patch("digitize.doc_utils.merge_consecutive_tables")
+    @patch("digitize.doc_utils.os.path.splitext")
+    @patch("digitize.doc_utils.settings")
+    def test_process_table_uses_english_prompt_and_max_tokens(
+        self, mock_settings, mock_splitext, mock_merge_tables, mock_summarize_and_classify
+    ):
+        from digitize.doc_utils import process_table
+        from common.lang_utils import LanguageCodes
+        from pathlib import Path
+
+        # Mock the settings structure with proper nested Mock objects
+        mock_english = Mock()
+        mock_english.prompt = "English prompt template"
+        mock_english.max_tokens = 1024
+        
+        mock_german = Mock()
+        mock_german.prompt = "German prompt template"
+        mock_german.max_tokens = 1536
+        
+        mock_italian = Mock()
+        mock_italian.prompt = "Italian prompt template"
+        mock_italian.max_tokens = 1339
+        
+        mock_french = Mock()
+        mock_french.prompt = "French prompt template"
+        mock_french.max_tokens = 1260
+        
+        # Create a MagicMock that supports both attribute and subscript access
+        mock_table_summary = MagicMock()
+        mock_table_summary.english = mock_english
+        mock_table_summary.german = mock_german
+        mock_table_summary.italian = mock_italian
+        mock_table_summary.french = mock_french
+        
+        mock_settings.table_summary = mock_table_summary
+
+        mock_splitext.return_value = ("sample", ".pdf")
+        mock_merge_tables.return_value = {
+            0: {
+                "markdown": "| Column | Value |\n|---|---|\n| CPU | Power10 |",
+                "caption": "Specifications",
+                "page_number": 1,
+            }
+        }
+        mock_summarize_and_classify.return_value = (["Summary"], [True])
+
+        # Create a properly mocked table with prov attribute
+        mock_table = Mock()
+        mock_prov = Mock()
+        mock_prov.page_no = 1
+        mock_table.prov = [mock_prov]
+        mock_table.export_to_markdown.return_value = "| Column | Value |\n|---|---|\n| CPU | Power10 |"
+        mock_table.caption_text.return_value = "Specifications"
+        
+        converted_doc = Mock()
+        converted_doc.tables = [mock_table]
+
+        # Mock Path.write_text
+        with patch.object(Path, 'write_text'):
+            process_table(
+                converted_doc=converted_doc,
+                pdf_path="sample.pdf",
+                out_path=Path("/tmp/out.json"),
+                gen_model="test-model",
+                gen_endpoint="http://llm",
+                document_language=LanguageCodes.ENGLISH,
+            )
+
+        _, kwargs = mock_summarize_and_classify.call_args
+        assert kwargs["prompt_template"] == "English prompt template"
+        assert kwargs["max_tokens"] == 1024
+
+    @patch("digitize.doc_utils.summarize_and_classify_tables")
+    @patch("digitize.doc_utils.merge_consecutive_tables")
+    @patch("digitize.doc_utils.os.path.splitext")
+    @patch("digitize.doc_utils.settings")
+    def test_process_table_uses_german_prompt_and_max_tokens(
+        self, mock_settings, mock_splitext, mock_merge_tables, mock_summarize_and_classify
+    ):
+        from digitize.doc_utils import process_table
+        from common.lang_utils import LanguageCodes
+        from pathlib import Path
+
+        # Mock the settings structure with proper nested Mock objects
+        mock_german = Mock()
+        mock_german.prompt = "German prompt template"
+        mock_german.max_tokens = 1536
+        
+        mock_english = Mock()
+        mock_english.prompt = "English prompt template"
+        mock_english.max_tokens = 1024
+        
+        mock_italian = Mock()
+        mock_italian.prompt = "Italian prompt template"
+        mock_italian.max_tokens = 1339
+        
+        mock_french = Mock()
+        mock_french.prompt = "French prompt template"
+        mock_french.max_tokens = 1260
+        
+        # Create a MagicMock that supports both attribute and subscript access
+        mock_table_summary = MagicMock()
+        mock_table_summary.german = mock_german
+        mock_table_summary.english = mock_english
+        mock_table_summary.italian = mock_italian
+        mock_table_summary.french = mock_french
+        
+        mock_settings.table_summary = mock_table_summary
+
+        mock_splitext.return_value = ("sample", ".pdf")
+        mock_merge_tables.return_value = {
+            0: {
+                "markdown": "| Spalte | Wert |\n|---|---|\n| CPU | Power10 |",
+                "caption": "Spezifikationen",
+                "page_number": 1,
+            }
+        }
+        mock_summarize_and_classify.return_value = (["Zusammenfassung"], [True])
+
+        # Create a properly mocked table with prov attribute
+        mock_table = Mock()
+        mock_prov = Mock()
+        mock_prov.page_no = 1
+        mock_table.prov = [mock_prov]
+        mock_table.export_to_markdown.return_value = "| Spalte | Wert |\n|---|---|\n| CPU | Power10 |"
+        mock_table.caption_text.return_value = "Spezifikationen"
+        
+        converted_doc = Mock()
+        converted_doc.tables = [mock_table]
+
+        # Mock Path.write_text
+        with patch.object(Path, 'write_text'):
+            process_table(
+                converted_doc=converted_doc,
+                pdf_path="sample.pdf",
+                out_path=Path("/tmp/out.json"),
+                gen_model="test-model",
+                gen_endpoint="http://llm",
+                document_language=LanguageCodes.GERMAN,
+            )
+
+        _, kwargs = mock_summarize_and_classify.call_args
+        assert kwargs["prompt_template"] == "German prompt template"
+        assert kwargs["max_tokens"] == 1536
+
+
+    @patch("digitize.doc_utils.summarize_and_classify_tables")
+    @patch("digitize.doc_utils.merge_consecutive_tables")
+    @patch("digitize.doc_utils.os.path.splitext")
+    @patch("digitize.doc_utils.settings")
+    def test_process_table_uses_french_prompt_and_max_tokens(
+        self, mock_settings, mock_splitext, mock_merge_tables, mock_summarize_and_classify
+    ):
+        from digitize.doc_utils import process_table
+        from common.lang_utils import LanguageCodes
+        from pathlib import Path
+
+        # Mock the settings structure with proper nested Mock objects
+        mock_french = Mock()
+        mock_french.prompt = "French prompt template"
+        mock_french.max_tokens = 1260
+        
+        mock_english = Mock()
+        mock_english.prompt = "English prompt template"
+        mock_english.max_tokens = 1024
+        
+        mock_german = Mock()
+        mock_german.prompt = "German prompt template"
+        mock_german.max_tokens = 1536
+        
+        mock_italian = Mock()
+        mock_italian.prompt = "Italian prompt template"
+        mock_italian.max_tokens = 1339
+        
+        # Create a MagicMock that supports both attribute and subscript access
+        mock_table_summary = MagicMock()
+        mock_table_summary.french = mock_french
+        mock_table_summary.english = mock_english
+        mock_table_summary.german = mock_german
+        mock_table_summary.italian = mock_italian
+        
+        mock_settings.table_summary = mock_table_summary
+
+        mock_splitext.return_value = ("sample", ".pdf")
+        mock_merge_tables.return_value = {
+            0: {
+                "markdown": "| Colonne | Valeur |\n|---|---|\n| CPU | Power10 |",
+                "caption": "Spécifications",
+                "page_number": 1,
+            }
+        }
+        mock_summarize_and_classify.return_value = (["Résumé"], [True])
+
+        # Create a properly mocked table with prov attribute
+        mock_table = Mock()
+        mock_prov = Mock()
+        mock_prov.page_no = 1
+        mock_table.prov = [mock_prov]
+        mock_table.export_to_markdown.return_value = "| Colonne | Valeur |\n|---|---|\n| CPU | Power10 |"
+        mock_table.caption_text.return_value = "Spécifications"
+        
+        converted_doc = Mock()
+        converted_doc.tables = [mock_table]
+
+        # Mock Path.write_text
+        with patch.object(Path, 'write_text'):
+            process_table(
+                converted_doc=converted_doc,
+                pdf_path="sample.pdf",
+                out_path=Path("/tmp/out.json"),
+                gen_model="test-model",
+                gen_endpoint="http://llm",
+                document_language=LanguageCodes.FRENCH,
+            )
+
+        _, kwargs = mock_summarize_and_classify.call_args
+        assert kwargs["prompt_template"] == "French prompt template"
+        assert kwargs["max_tokens"] == 1260
 
 
 # Made with Bob

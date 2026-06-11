@@ -12,6 +12,18 @@ from common.settings import Settings as CommonSettings
 
 logger = get_logger("settings")
 
+# Initialize language detector early for settings validation
+def _ensure_language_detector_initialized():
+    """Initialize language detector if not already done."""
+    from common.lang_utils import setup_language_detector, _language_detector
+    from lingua import Language
+    
+    if _language_detector is None:
+        logger.debug("Initializing language detector for settings validation")
+        setup_language_detector([Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH])
+
+_ensure_language_detector_initialized()
+
 class QueryRephrasingConfig(BaseSettings):
     """Query rephrasing configuration for conversational RAG."""
     
@@ -88,6 +100,78 @@ class QueryRephrasingConfig(BaseSettings):
             default=["\n\n", "Frage:", "Aktuelle Frage:"],
             description="German stop sequences for LLM query rephrasing"
         )
+
+    class ItalianConfig(BaseSettings):
+        """Italian-specific query rephrasing settings."""
+
+        rephrase_prompt_template: str = Field(
+            default=(
+                "Dato lo storico della conversazione e la domanda attuale, crea una query autonoma per la ricerca semantica.\n\n"
+                "Istruzioni:\n"
+                "1. Se la domanda attuale è già autonoma e chiara, restituiscila ESATTAMENTE così com'è\n"
+                "2. Se la domanda fa riferimento al contesto precedente (usa pronomi come 'esso', 'questa', 'quello', 'loro'), sostituiscili con sostantivi specifici ricavati dallo storico della conversazione\n"
+                "3. Unisci il contesto solo se la domanda attuale è chiaramente una domanda di follow-up che richiede informazioni precedenti\n"
+                "4. Rimuovi espressioni conversazionali superflue (ad es. 'Puoi dirmi', 'Inoltre', 'Grazie', 'Per favore')\n"
+                "5. Mantieni la query concisa e focalizzata sull'intento di ricerca principale\n"
+                "6. Se lo storico della conversazione è irrilevante per la domanda attuale, ignoralo\n"
+                "7. Restituisci SOLO la query riformulata, senza spiegazioni o testo aggiuntivo\n\n"
+                "Storico della conversazione:\n{conversation_history}\n\n"
+                "Domanda attuale: {current_query}\n\n"
+                "Query riformulata:"
+            ),
+            description="Italian prompt template for query rephrasing with placeholders: {conversation_history}, {current_query}"
+        )
+
+        role_labels: dict[str, str] = Field(
+            default={
+                "user": "Utente",
+                "assistant": "Assistente",
+                "system": "Sistema",
+                "unknown": "Sconosciuto",
+            },
+            description="Italian role labels for conversation message formatting"
+        )
+
+        stop_sequences: list[str] = Field(
+            default=["\n\n", "Domanda:", "Domanda attuale:"],
+            description="Italian stop sequences for LLM query rephrasing"
+        )
+
+    class FrenchConfig(BaseSettings):
+        """French-specific query rephrasing settings."""
+
+        rephrase_prompt_template: str = Field(
+            default=(
+                "Étant donné l'historique de la conversation et la question actuelle, créez une requête autonome pour la recherche sémantique.\n\n"
+                "Instructions:\n"
+                "1. Si la question actuelle est déjà autonome et claire, retournez-la EXACTEMENT telle quelle (préservez la formulation originale)\n"
+                "2. Si la question fait référence au contexte précédent (utilise des pronoms comme 'il', 'cela', 'ce', 'ils'), remplacez-les par des noms spécifiques tirés de l'historique de la conversation\n"
+                "3. Ne fusionnez le contexte que si la question actuelle est clairement une question de suivi qui nécessite des informations précédentes\n"
+                "4. Supprimez les mots de remplissage conversationnels (par ex. 'Pouvez-vous me dire', 'Aussi', 'Merci', 'S'il vous plaît')\n"
+                "5. Gardez la requête concise et concentrée sur l'intention de recherche principale\n"
+                "6. Si l'historique de la conversation n'est pas pertinent pour la question actuelle, ignorez-le\n"
+                "7. Retournez UNIQUEMENT la requête reformulée, sans explication ni texte supplémentaire\n\n"
+                "Historique de la conversation:\n{conversation_history}\n\n"
+                "Question actuelle: {current_query}\n\n"
+                "Requête reformulée:"
+            ),
+            description="French prompt template for query rephrasing with placeholders: {conversation_history}, {current_query}"
+        )
+
+        role_labels: dict[str, str] = Field(
+            default={
+                "user": "Utilisateur",
+                "assistant": "Assistant",
+                "system": "Système",
+                "unknown": "Inconnu",
+            },
+            description="French role labels for conversation message formatting"
+        )
+
+        stop_sequences: list[str] = Field(
+            default=["\n\n", "Question:", "Question actuelle:"],
+            description="French stop sequences for LLM query rephrasing"
+        )
         
     timeout_seconds: float = Field(
         default=5.0,
@@ -125,9 +209,18 @@ class QueryRephrasingConfig(BaseSettings):
     # Language-specific configurations
     english: EnglishConfig = Field(default_factory=EnglishConfig)
     german: GermanConfig = Field(default_factory=GermanConfig)
+    italian: ItalianConfig = Field(default_factory=ItalianConfig)
+    french: FrenchConfig = Field(default_factory=FrenchConfig)
 
 class LLMConfig(BaseSettings):
-    """Chatbot-specific LLM generation settings."""
+    """Chatbot-specific LLM generation settings.
+    
+    Token Ratios: English:French:Italian:German = 1 : 1.2305 : 1.3066 : 1.5
+    
+    These ratios account for the fact that different languages require different numbers
+    of tokens to express the same semantic content, ensuring fair token allocation across
+    all supported languages.
+    """
     
     class EnglishConfig(BaseSettings):
         """English-specific LLM settings."""
@@ -151,7 +244,7 @@ class LLMConfig(BaseSettings):
         """German-specific LLM settings."""
         
         max_tokens: int = Field(
-            default=700,
+            default=768,
             gt=0,
             description="Maximum tokens for LLM generation (German)",
         )
@@ -161,8 +254,44 @@ class LLMConfig(BaseSettings):
         def validate_max_tokens(cls, v):
             """Validate max_tokens with warning fallback."""
             if not (isinstance(v, int) and v > 0):
-                logger.warning("Setting max_tokens_de to default '700' as it is missing or malformed in the settings")
-                return 700
+                logger.warning("Setting max_tokens_de to default '768' as it is missing or malformed in the settings")
+                return 768
+            return v
+
+    class ItalianConfig(BaseSettings):
+        """Italian-specific LLM settings."""
+
+        max_tokens: int = Field(
+            default=669,
+            gt=0,
+            description="Maximum tokens for LLM generation (Italian)",
+        )
+
+        @field_validator('max_tokens')
+        @classmethod
+        def validate_max_tokens(cls, v):
+            """Validate max_tokens with warning fallback."""
+            if not (isinstance(v, int) and v > 0):
+                logger.warning("Setting max_tokens_it to default '669' as it is missing or malformed in the settings")
+                return 669
+            return v
+
+    class FrenchConfig(BaseSettings):
+        """French-specific LLM settings."""
+
+        max_tokens: int = Field(
+            default=630,
+            gt=0,
+            description="Maximum tokens for LLM generation (French)",
+        )
+
+        @field_validator('max_tokens')
+        @classmethod
+        def validate_max_tokens(cls, v):
+            """Validate max_tokens with warning fallback."""
+            if not (isinstance(v, int) and v > 0):
+                logger.warning("Setting max_tokens_fr to default '630' as it is missing or malformed in the settings")
+                return 630
             return v
 
     temperature: float = Field(
@@ -175,6 +304,8 @@ class LLMConfig(BaseSettings):
     # Language-specific configurations
     english: EnglishConfig = Field(default_factory=EnglishConfig)
     german: GermanConfig = Field(default_factory=GermanConfig)
+    italian: ItalianConfig = Field(default_factory=ItalianConfig)
+    french: FrenchConfig = Field(default_factory=FrenchConfig)
 
     @field_validator('temperature')
     @classmethod
@@ -318,9 +449,75 @@ class RAGConfig(BaseSettings):
         description="Enable/disable LLM-based validation for custom system prompts"
     )
     
+    class ItalianConfig(BaseSettings):
+        """Italian-specific RAG settings."""
+
+        DEFAULT_SYSTEM_PROMPT: ClassVar[str] = (
+            "Sei un assistente IA utile e conversazionale. "
+            "La lingua della conversazione è fissata per l'intera sessione in base al primo messaggio dell'utente. "
+            "Rispondi sempre e solo in questa lingua di sessione, anche se i messaggi successivi mescolano più lingue. "
+            "Fornisci risposte chiare, accurate e pertinenti al contesto. "
+            "Fai riferimento agli scambi precedenti quando opportuno per mantenere il flusso della conversazione. "
+            "Rispondi solo alla domanda specifica posta. Non aggiungere formule conversazionali di riempimento, "
+            "non offrire assistenza aggiuntiva, non suggerire passaggi successivi e non porre domande di follow-up alla fine della risposta. "
+            "Concludi la risposta immediatamente una volta che la domanda ha ricevuto risposta."
+        )
+
+        system_prompt: str = Field(
+            default=DEFAULT_SYSTEM_PROMPT,
+            description="Italian conversational system prompt for session-based behavior",
+        )
+
+        query_system_prompt: str = Field(
+            default=(
+                "Lingua della sessione: Italiano\n\n"
+                "Contesto recuperato:\n{context}\n\n"
+                "Query riformulata:\n{rephrased_query}\n\n"
+                "Istruzioni: Rispondi alla domanda attuale dell'utente in base al contesto recuperato sopra. "
+                "Mantieni un flusso conversazionale naturale e fai riferimento ai messaggi precedenti quando sono rilevanti. "
+                "Rispondi esclusivamente in italiano, perché la lingua della sessione è stata fissata in base al primo messaggio dell'utente. "
+                "Se il contesto recuperato non contiene informazioni sufficienti, dichiaralo chiaramente."
+            ),
+            description="Italian conversational RAG system prompt template with context and search query",
+        )
+
+    class FrenchConfig(BaseSettings):
+        """French-specific RAG settings."""
+
+        DEFAULT_SYSTEM_PROMPT: ClassVar[str] = (
+            "Vous êtes un assistant IA utile et conversationnel. "
+            "La langue de conversation est fixée pour toute la session en fonction du premier message de l'utilisateur. "
+            "Répondez toujours et uniquement dans cette langue de session, même si les messages ultérieurs mélangent plusieurs langues. "
+            "Fournissez des réponses claires, précises et pertinentes au contexte. "
+            "Faites référence aux échanges précédents lorsque cela est approprié pour maintenir le flux de conversation. "
+            "Répondez uniquement à la question spécifique posée. N'ajoutez pas de formules conversationnelles de remplissage, "
+            "n'offrez pas d'assistance supplémentaire, ne suggérez pas d'étapes suivantes et ne posez pas de questions de suivi à la fin de votre réponse. "
+            "Terminez votre réponse immédiatement une fois que la question a reçu une réponse."
+        )
+
+        system_prompt: str = Field(
+            default=DEFAULT_SYSTEM_PROMPT,
+            description="French conversational system prompt for session-based behavior",
+        )
+
+        query_system_prompt: str = Field(
+            default=(
+                "Langue de session: Français\n\n"
+                "Contexte récupéré:\n{context}\n\n"
+                "Requête reformulée:\n{rephrased_query}\n\n"
+                "Instructions: Répondez à la question actuelle de l'utilisateur en vous basant sur le contexte récupéré ci-dessus. "
+                "Maintenez un flux conversationnel naturel et faites référence aux messages précédents lorsqu'ils sont pertinents. "
+                "Répondez exclusivement en français, car la langue de session a été fixée en fonction du premier message de l'utilisateur. "
+                "Si le contexte récupéré ne contient pas suffisamment d'informations, indiquez-le clairement."
+            ),
+            description="French conversational RAG system prompt template with context and search query",
+        )
+
     # Language-specific configurations
     english: EnglishConfig = Field(default_factory=EnglishConfig)
     german: GermanConfig = Field(default_factory=GermanConfig)
+    italian: ItalianConfig = Field(default_factory=ItalianConfig)
+    french: FrenchConfig = Field(default_factory=FrenchConfig)
     
     # Single env vars that get applied based on language detection
     system_prompt: str = Field(
@@ -387,6 +584,12 @@ class RAGConfig(BaseSettings):
                 if detected_lang == LanguageCodes.GERMAN:
                     self.german.system_prompt = self.system_prompt
                     logger.info("Applied custom system_prompt to German config")
+                elif detected_lang == LanguageCodes.ITALIAN:
+                    self.italian.system_prompt = self.system_prompt
+                    logger.info("Applied custom system_prompt to Italian config")
+                elif detected_lang == LanguageCodes.FRENCH:
+                    self.french.system_prompt = self.system_prompt
+                    logger.info("Applied custom system_prompt to French config")
                 else:
                     self.english.system_prompt = self.system_prompt
                     logger.info("Applied custom system_prompt to English config")

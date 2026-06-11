@@ -311,7 +311,23 @@ class TestLLMConfigValidators:
         
         config = LLMConfig()
         # max_tokens for German is now nested under german config
-        assert config.german.max_tokens == 700  # default
+        assert config.german.max_tokens == 768  # default (proportional: 512 * 1536/1024)
+    
+    def test_validate_max_tokens_it_valid(self):
+        """Test max_tokens validator with valid value for Italian."""
+        from chatbot.settings import LLMConfig
+        
+        config = LLMConfig()
+        # max_tokens for Italian is now nested under italian config
+        assert config.italian.max_tokens == 669  # default (proportional: 512 * 1339/1024)
+    
+    def test_validate_max_tokens_fr_valid(self):
+        """Test max_tokens validator with valid value for French."""
+        from chatbot.settings import LLMConfig
+        
+        config = LLMConfig()
+        # max_tokens for French is now nested under french config
+        assert config.french.max_tokens == 630  # default (proportional: 512 * 1260/1024)
     
     def test_validate_temperature_valid(self):
         """Test temperature validator with valid value."""

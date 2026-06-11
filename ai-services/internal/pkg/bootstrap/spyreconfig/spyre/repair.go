@@ -41,7 +41,8 @@ type RepairResult struct {
 
 // Repair attempts to fix all failed Spyre checks.
 func Repair(checks []check.CheckResult) []RepairResult {
-	var results []RepairResult
+	const checkResultsLen = 11
+	results := make([]RepairResult, 0, checkResultsLen)
 
 	// Create a map for easy lookup.
 	checkMap := make(map[string]check.CheckResult)
@@ -249,10 +250,10 @@ func fixUdevRule(checkMap map[string]check.CheckResult) RepairResult {
 		return RepairResult{CheckName: checkName, Status: StatusFailedToFix, Message: "Invalid check type"}
 	}
 
-	expectedRules := []string{
-		`SUBSYSTEM=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`,
-		`KERNEL=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`,
-	}
+	const expectedRuleCount = 2
+	expectedRules := make([]string, 0, expectedRuleCount)
+	expectedRules = append(expectedRules, `SUBSYSTEM=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`)
+	expectedRules = append(expectedRules, `KERNEL=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`)
 
 	// Read existing file if it exists.
 	var updatedLines []string
