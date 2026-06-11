@@ -284,8 +284,7 @@ def mock_search_only(monkeypatch, sample_documents):
     # Return perf_metrics with timing
     perf_metrics = {
         "retrieve_time": 0.12,
-        "rerank_time": 0.05,
-        "total_time": 0.17
+        "rerank_time": 0.05
     }
     mock = Mock(return_value=(sample_documents, perf_metrics))
     monkeypatch.setattr("chatbot.app.search_only", mock)

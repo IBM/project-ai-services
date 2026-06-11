@@ -1,6 +1,6 @@
 import time
 import requests
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, get_request_id
 from common.validation_utils import validate_query_length as _validate_query_length
 from chatbot.settings import settings
 
@@ -52,14 +52,12 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
             perf_stat_dict["retrieve_time"] = float(response.headers["X-Retrieve-Time"])
         if "X-Rerank-Time" in response.headers:
             perf_stat_dict["rerank_time"] = float(response.headers["X-Rerank-Time"])
-        if "X-Total-Time" in response.headers:
-            perf_stat_dict["total_time"] = float(response.headers["X-Total-Time"])
 
+        request_id = get_request_id()
         logger.info(
-            f"Similarity service timing - "
+            f"[{request_id}] Similarity service timing - "
             f"Retrieve: {perf_stat_dict.get('retrieve_time', 0):.3f}s, "
-            f"Rerank: {perf_stat_dict.get('rerank_time', 0):.3f}s, "
-            f"Total: {perf_stat_dict.get('total_time', 0):.3f}s"
+            f"Rerank: {perf_stat_dict.get('rerank_time', 0):.3f}s"
         )
 
         result = response.json()

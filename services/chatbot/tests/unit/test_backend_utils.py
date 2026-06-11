@@ -70,8 +70,7 @@ class TestSearchOnly:
         # Mock response headers with timing information
         mock_response.headers = {
             "X-Retrieve-Time": "0.123",
-            "X-Rerank-Time": "0.045",
-            "X-Total-Time": "0.168"
+            "X-Rerank-Time": "0.045"
         }
         mock_post = Mock(return_value=mock_response)
         monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
@@ -87,8 +86,6 @@ class TestSearchOnly:
         assert perf_stat_dict["retrieve_time"] == 0.123
         assert "rerank_time" in perf_stat_dict
         assert perf_stat_dict["rerank_time"] == 0.045
-        assert "total_time" in perf_stat_dict
-        assert perf_stat_dict["total_time"] == 0.168
 
     def test_applies_top_r_cutoff(self, monkeypatch):
         """search_only must truncate to top_r documents after retrieval."""
