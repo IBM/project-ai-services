@@ -26,21 +26,41 @@ class PaginationInfo(BaseModel):
     limit: int
     offset: int
 
-class JobsListResponse(BaseModel):
-    pagination: PaginationInfo
-    data: List[dict]
 
 class JobCreatedResponse(BaseModel):
     """Response model for job creation."""
     job_id: str
 
- 
+
+class DocumentInfo(BaseModel):
+    """Document information in job detail response."""
+    name: str
+    status: str
+
+
+class JobDetailResponse(BaseModel):
+    """Response model for single job detail."""
+    job_id: str
+    job_name: Optional[str] = None
+    status: JobStatus
+    submitted_at: str
+    completed_at: Optional[str] = None
+    document: DocumentInfo
+    error: Optional[str] = None
+    metadata: Optional[dict] = None
+
+
+class JobResultResponse(BaseModel):
+    """Response model for job result."""
+    data: dict  # {"summary": str, "original_length": int, "summary_length": int}
+    meta: dict  # {"model": str, "processing_time_ms": int, "input_type": str, "strategy": str}
+    usage: dict  # {"input_tokens": int, "output_tokens": int, "total_tokens": int}
 
 
 class JobMetadata(BaseModel):
     """Metadata for chunked summarization in a job."""
     model_config = ConfigDict(use_enum_values=True)
-    
+
     total_chunks: int = Field(default=0, ge=0, description="Total number of chunks")
     completed_chunks: int = Field(default=0, ge=0, description="Number of completed summarized chunks")
     failed_chunks: int = Field(default=0, ge=0, description="Number of failed summarized chunks")
@@ -52,7 +72,7 @@ class JobState(BaseModel):
     Represents the overall state of a job. Job tracks overall progress and statistics.
     """
     model_config = ConfigDict(use_enum_values=True)
-    
+
     job_id: str
     job_name: Optional[str] = None
     status: JobStatus
@@ -98,3 +118,8 @@ class JobState(BaseModel):
             Dictionary representation of the job state
         """
         return self.model_dump()
+
+
+class JobsListResponse(BaseModel):
+    pagination: PaginationInfo
+    data: List[JobState]
