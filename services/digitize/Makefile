@@ -1,5 +1,5 @@
 IMAGE=digitize-service
-TAG?=v0.0.17
+TAG?=v0.0.18
 
 run:
 	PORT=$${PORT:-4000} /var/venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port $$PORT

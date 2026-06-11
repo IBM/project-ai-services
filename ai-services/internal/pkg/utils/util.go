@@ -41,7 +41,14 @@ func BoolPtr(v bool) *bool {
 
 // FlattenArray takes a 2D slice and returns a 1D slice with all values.
 func FlattenArray[T comparable](arr [][]T) []T {
-	flatArr := []T{}
+	// Calculate total capacity needed
+	totalLen := 0
+	for _, row := range arr {
+		totalLen += len(row)
+	}
+
+	// Preallocate slice with exact capacity
+	flatArr := make([]T, 0, totalLen)
 
 	for _, row := range arr {
 		flatArr = append(flatArr, row...)
