@@ -91,24 +91,23 @@ func renderApplicationInfo(appName string) error {
 
 	logger.Infoln("Info:")
 	logger.Infoln("-------")
+	logger.Infoln("Day N: ")
 
 	for _, service := range application.Services {
 		params := map[string]string{}
 		params["STATUS"] = strings.ToLower(service.Status)
 
-		//fmt.Println(service.Endpoints)
 		for _, endpoint := range service.Endpoints {
-			urlType, ok := endpoint["type"].(string)
+			urlType, urlTypeOk := endpoint["type"].(string)
 			url, urlOk := endpoint["url"].(string)
-			if ok && urlOk {
+			if urlTypeOk && urlOk {
 				params[strings.ToUpper(urlType)+"_URL"] = url
 			}
 		}
 
 		err = printInfo(tp, params, service.Type)
 		if err != nil {
-			logger.Errorf(err.Error())
-			return err
+			return fmt.Errorf("failed to load application info: %w", err)
 		}
 	}
 
@@ -116,7 +115,6 @@ func renderApplicationInfo(appName string) error {
 }
 
 func printInfo(tp templates.Template, params map[string]string, appTemplate string) error {
-	//fmt.Println(params)
 	tmpls, err := tp.LoadMdFiles(appTemplate)
 	if err != nil {
 		return nil
