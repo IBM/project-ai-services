@@ -271,8 +271,7 @@ func dataDeletion(dataPath string) error {
 // deleteVolumes removes the specified volumes.
 func deleteVolumes(rt *podman.PodmanClient, volumeNames []string) error {
 	if len(volumeNames) == 0 {
-		logger.Infoln("No volumes to delete")
-
+		// Just return if there are no volumes to delete.
 		return nil
 	}
 
