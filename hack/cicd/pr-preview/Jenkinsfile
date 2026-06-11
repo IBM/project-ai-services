@@ -37,6 +37,7 @@ pipeline {
     // Prevent concurrent builds to ensure only one deployment at a time
     options {
         disableConcurrentBuilds()
+        withBuildUser()
     }
 
     parameters {
