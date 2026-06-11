@@ -272,6 +272,7 @@ func dataDeletion(dataPath string) error {
 func deleteVolumes(rt *podman.PodmanClient, volumeNames []string) error {
 	if len(volumeNames) == 0 {
 		logger.Infoln("No volumes to delete")
+
 		return nil
 	}
 
@@ -285,10 +286,12 @@ func deleteVolumes(rt *podman.PodmanClient, volumeNames []string) error {
 			// Ignore "not found" errors - volume already deleted or never existed
 			if catalogUtils.IsNotFoundError(err) {
 				logger.Infof("Volume %s already deleted or does not exist\n", volumeName)
+
 				continue
 			}
 
 			errors = append(errors, fmt.Sprintf("volume %s: %v", volumeName, err))
+
 			continue
 		}
 
