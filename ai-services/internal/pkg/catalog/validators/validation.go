@@ -169,10 +169,39 @@ func (v *ApplicationValidator) validateServiceComponents(components []apimodels.
 	return nil
 }
 
+// validateComponentsMatchDependencies validates that all components in the request
+// are supported by the service (i.e., match the service's dependencies).
+func (v *ApplicationValidator) validateComponentsMatchDependencies(
+	components []apimodels.Component,
+	catalogService *types.Service,
+) error {
+	// Build a map of supported component types from service dependencies
+	supportedComponents := make(map[string]bool)
+	for _, dep := range catalogService.Dependencies {
+		supportedComponents[dep.ID] = true
+	}
+
+	// Check each component in the request
+	for _, component := range components {
+		if !supportedComponents[component.ComponentType] {
+			return &ValidationError{
+				Code: http.StatusBadRequest,
+				Message: fmt.Sprintf(
+					"Component type '%s' is not supported by service '%s'",
+					component.ComponentType,
+					catalogService.ID,
+				),
+			}
+		}
+	}
+
+	return nil
+}
+
 // validateServiceCore performs core validation for a service (existence, version, params, components).
 func (v *ApplicationValidator) validateServiceCore(service apimodels.Service) error {
 	// Verify service exists in catalog
-	_, err := v.provider.LoadService(service.CatalogID)
+	catalogService, err := v.provider.LoadService(service.CatalogID)
 	if err != nil {
 		return &ValidationError{
 			Code:    http.StatusNotFound,
@@ -187,6 +216,11 @@ func (v *ApplicationValidator) validateServiceCore(service apimodels.Service) er
 
 	// Validate service-level parameters
 	if err := v.ValidateServiceParams(service.CatalogID, service.Params); err != nil {
+		return err
+	}
+
+	// Validate that components match service dependencies
+	if err := v.validateComponentsMatchDependencies(service.Components, catalogService); err != nil {
 		return err
 	}
 
