@@ -12,5 +12,5 @@ plex-sans-devanagari
 plex-sans-hebrew
 plex-sans-arabic
 
-The following component is separately licensed under the CNRI-python license
+The following component is separately licensed under the Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0) and CNRI-python (https://docs.python.org/3/license.html#cnri-license-agreement-for-python-1-6-1) license:
 regex
