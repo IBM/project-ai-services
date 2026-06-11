@@ -49,17 +49,17 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
 
         # Extract timing information from response headers
         if "X-Retrieve-Time" in response.headers:
-            perf_stat_dict["similarity_retrieve_time"] = float(response.headers["X-Retrieve-Time"])
+            perf_stat_dict["retrieve_time"] = float(response.headers["X-Retrieve-Time"])
         if "X-Rerank-Time" in response.headers:
-            perf_stat_dict["similarity_rerank_time"] = float(response.headers["X-Rerank-Time"])
+            perf_stat_dict["rerank_time"] = float(response.headers["X-Rerank-Time"])
         if "X-Total-Time" in response.headers:
-            perf_stat_dict["similarity_total_time"] = float(response.headers["X-Total-Time"])
+            perf_stat_dict["total_time"] = float(response.headers["X-Total-Time"])
 
         logger.info(
             f"Similarity service timing - "
-            f"Retrieve: {perf_stat_dict.get('similarity_retrieve_time', 0):.3f}s, "
-            f"Rerank: {perf_stat_dict.get('similarity_rerank_time', 0):.3f}s, "
-            f"Total: {perf_stat_dict.get('similarity_total_time', 0):.3f}s"
+            f"Retrieve: {perf_stat_dict.get('retrieve_time', 0):.3f}s, "
+            f"Rerank: {perf_stat_dict.get('rerank_time', 0):.3f}s, "
+            f"Total: {perf_stat_dict.get('total_time', 0):.3f}s"
         )
 
         result = response.json()

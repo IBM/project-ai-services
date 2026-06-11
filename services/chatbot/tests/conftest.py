@@ -281,11 +281,11 @@ def test_client(monkeypatch, mock_settings, mock_vectorstore, mock_model_dicts):
 @pytest.fixture
 def mock_search_only(monkeypatch, sample_documents):
     """Mock search_only function."""
-    # Return perf_metrics with similarity timing
+    # Return perf_metrics with timing
     perf_metrics = {
-        "similarity_retrieve_time": 0.12,
-        "similarity_rerank_time": 0.05,
-        "similarity_total_time": 0.17
+        "retrieve_time": 0.12,
+        "rerank_time": 0.05,
+        "total_time": 0.17
     }
     mock = Mock(return_value=(sample_documents, perf_metrics))
     monkeypatch.setattr("chatbot.app.search_only", mock)

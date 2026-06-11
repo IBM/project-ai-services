@@ -124,7 +124,7 @@ def swagger_root():
         "These headers enable cross-service performance monitoring and can be used by clients "
         "to track and optimize search performance."
     ),
-    response_description="Documents ranked by descending score, with score_type indicating the scoring method used. Timing information available in response headers."
+    response_description="Documents ranked by descending score, with score_type indicating the scoring method used. Performance metrics available in response headers."
 )
 async def similarity_search(req: SimilaritySearchRequest, response: Response) -> SimilaritySearchResponse:
     if not req.query or not req.query.strip():

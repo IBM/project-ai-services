@@ -83,12 +83,12 @@ class TestSearchOnly:
         )
 
         # Verify timing metrics from headers are included
-        assert "similarity_retrieve_time" in perf_stat_dict
-        assert perf_stat_dict["similarity_retrieve_time"] == 0.123
-        assert "similarity_rerank_time" in perf_stat_dict
-        assert perf_stat_dict["similarity_rerank_time"] == 0.045
-        assert "similarity_total_time" in perf_stat_dict
-        assert perf_stat_dict["similarity_total_time"] == 0.168
+        assert "retrieve_time" in perf_stat_dict
+        assert perf_stat_dict["retrieve_time"] == 0.123
+        assert "rerank_time" in perf_stat_dict
+        assert perf_stat_dict["rerank_time"] == 0.045
+        assert "total_time" in perf_stat_dict
+        assert perf_stat_dict["total_time"] == 0.168
 
     def test_applies_top_r_cutoff(self, monkeypatch):
         """search_only must truncate to top_r documents after retrieval."""
