@@ -253,7 +253,7 @@ func fixUdevRule(checkMap map[string]check.CheckResult) RepairResult {
 	const expectedRuleCount = 2
 	expectedRules := make([]string, 0, expectedRuleCount)
 	expectedRules = append(expectedRules, `SUBSYSTEM=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`)
-	expectedRules = append(expectedRules, `KERNEL=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`) 
+	expectedRules = append(expectedRules, `KERNEL=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`)
 
 	// Read existing file if it exists.
 	var updatedLines []string
