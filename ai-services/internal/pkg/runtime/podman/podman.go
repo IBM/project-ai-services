@@ -31,7 +31,8 @@ import (
 )
 
 const (
-	logChannelBufferSize = 50
+	logChannelBufferSize      = 50
+	execCommandFixedArgsCount = 2 // "exec" and containerID
 )
 
 type PodmanClient struct {
@@ -605,7 +606,8 @@ func collectSpyreCards(containerInspect *define.InspectContainerData, spyreCards
 // and requires handlers.ExecCreateConfig which is not easily accessible.
 func (pc *PodmanClient) ExecInContainer(containerID string, cmd []string) error {
 	// Build podman exec command
-	args := []string{"exec", containerID}
+	args := make([]string, 0, execCommandFixedArgsCount+len(cmd))
+	args = append(args, "exec", containerID)
 	args = append(args, cmd...)
 
 	execCmd := exec.CommandContext(pc.Context, "podman", args...)
@@ -620,7 +622,8 @@ func (pc *PodmanClient) ExecInContainer(containerID string, cmd []string) error 
 // ExecInContainerWithOutput executes a command in a container and returns the output.
 func (pc *PodmanClient) ExecInContainerWithOutput(containerID string, cmd []string) (string, error) {
 	// Build podman exec command
-	args := []string{"exec", containerID}
+	args := make([]string, 0, execCommandFixedArgsCount+len(cmd))
+	args = append(args, "exec", containerID)
 	args = append(args, cmd...)
 
 	execCmd := exec.CommandContext(pc.Context, "podman", args...)
