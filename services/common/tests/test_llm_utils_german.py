@@ -141,7 +141,7 @@ class TestQueryVLLMPayloadGermanSupport:
             max_new_tokens=500,
             temperature=0.7,
             stream=False,
-            lang="FR",  # French - not supported
+            lang="ES",  # Spanish - not supported, should fallback to English
             previous_messages=[],
             rephrased_query="Test query"
         )
