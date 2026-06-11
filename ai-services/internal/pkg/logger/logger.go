@@ -30,6 +30,11 @@ const (
 	// EnvLogFormat is the environment variable name for log format (e.g., "cli", "service").
 	EnvLogFormat = "AI_SERVICES_LOG_FORMAT"
 
+	// LogFormatCLI is the string constant for CLI format mode.
+	LogFormatCLI = "cli"
+	// LogFormatService is the string constant for service format mode.
+	LogFormatService = "service"
+
 	// LogLevelInfoIndicator is the output indicator for info level logs ("I").
 	LogLevelInfoIndicator = "I"
 	// LogLevelWarningIndicator is the output indicator for warning level logs ("W").
@@ -59,12 +64,12 @@ func Init() {
 	_ = flag.CommandLine.Set("alsologtostderr", "true")
 	_ = flag.CommandLine.Set("skip_log_backtrace_at", ":0")
 
-	// 1. Resolve Log Format (Defaults to "cli" for terminal users)
+	// 1. Resolve Log Format (Defaults to CLI for terminal users)
 	logFormat := os.Getenv(EnvLogFormat)
 	if logFormat == "" {
-		logFormat = "cli"
+		logFormat = LogFormatCLI
 	}
-	isServiceEnv = logFormat == "service"
+	isServiceEnv = logFormat == LogFormatService
 
 	// 2. Resolve Log Severity Level (Defaults to "info")
 	logLevel := os.Getenv(EnvLogLevel)
@@ -73,7 +78,7 @@ func Init() {
 	}
 
 	// 3. Apply Format Configuration
-	if logFormat == "cli" {
+	if logFormat == LogFormatCLI {
 		_ = flag.CommandLine.Set("skip_headers", "true")
 		_ = flag.CommandLine.Set("skip_log_headers", "true")
 	} else {
@@ -95,7 +100,7 @@ func Init() {
 	case LogLevelInfo:
 		fallthrough
 	default:
-		_ = flag.CommandLine.Set("v", "0")
+		_ = flag.CommandLine.Set("v", "2") // Setting this to 2 to ensure backward compatibility for cli
 		activeMinLevel = LevelRankInfo
 	}
 }
@@ -148,7 +153,7 @@ func Warningf(format string, args ...any) {
 	if ctx == "" {
 		klog.WarningDepth(1, "WARNING: ", formattedMsg)
 	} else {
-		klog.WarningDepth(1, ctx, formattedMsg) // FIXED: Comma separation ensures clean payload tracking
+		klog.WarningDepth(1, ctx, formattedMsg)
 	}
 }
 
@@ -167,11 +172,12 @@ func Errorf(format string, args ...any) {
 	if ctx == "" {
 		klog.ErrorDepth(1, "ERROR: ", formattedMsg)
 	} else {
-		klog.ErrorDepth(1, ctx, formattedMsg) // FIXED: Separated context metadata from message body
+		klog.ErrorDepth(1, ctx, formattedMsg)
 	}
 }
 
 func Infoln(msg string, verbose ...int) {
+	// 1. Drop logs early if the environment is explicitly set to warning or error
 	if activeMinLevel > LevelRankInfo {
 		return
 	}
@@ -181,21 +187,18 @@ func Infoln(msg string, verbose ...int) {
 		v = verbose[0]
 	}
 
-	// Guard check: Suppress custom debug logs if system level is locked to info
-	if v > 0 && activeMinLevel == LevelRankInfo {
-		return
-	}
-
 	ctx := getCallerContext(1, LogLevelInfoIndicator)
 	klog.V(klog.Level(v)).InfoDepth(1, ctx, msg)
 }
 
 func Infof(format string, args ...any) {
+	// 1. Drop logs early if the environment is explicitly set to warning or error
 	if activeMinLevel > LevelRankInfo {
 		return
 	}
 
 	v := 0
+	// 2. Extract trailing verbosity argument safely to preserve backward compatibility
 	if len(args) > 0 {
 		if verbosity, ok := args[len(args)-1].(int); ok {
 			v = verbosity
@@ -203,12 +206,7 @@ func Infof(format string, args ...any) {
 		}
 	}
 
-	// Guard check: Suppress custom debug logs if system level is locked to info
-	if v > 0 && activeMinLevel == LevelRankInfo {
-		return
-	}
-
 	ctx := getCallerContext(1, LogLevelInfoIndicator)
 	formattedMsg := fmt.Sprintf(format, args...)
-	klog.V(klog.Level(v)).InfoDepth(1, ctx, formattedMsg) // FIXED: Passing clean params instead of string concat
+	klog.V(klog.Level(v)).InfoDepth(1, ctx, formattedMsg)
 }
