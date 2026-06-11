@@ -1,6 +1,7 @@
 import { api } from "@/api/axios";
 import { DIGITAL_ASSISTANTS_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import type {
+  ArchitectureSummary,
   DeployOptionsResponse,
   ApplicationListResponse,
   Application,
@@ -12,10 +13,20 @@ import type {
 import type { DeploymentPayload } from "@/utils/deploymentTransform";
 import type { DigitalAssistantRow } from "@/pages/DigitalAssistants/types";
 
+// Architectures API - Fetch available architectures
+export async function fetchArchitectures(): Promise<ArchitectureSummary[]> {
+  const response = await api.get<ArchitectureSummary[]>(
+    DIGITAL_ASSISTANTS_ENDPOINTS.LIST_ARCHITECTURES,
+  );
+  return response.data;
+}
+
 // Deploy Options API - Fetch deployment configuration options
-export async function fetchDeployOptions(): Promise<DeployOptionsResponse> {
+export async function fetchDeployOptions(
+  architectureId: string,
+): Promise<DeployOptionsResponse> {
   const response = await api.get<DeployOptionsResponse>(
-    DIGITAL_ASSISTANTS_ENDPOINTS.DEPLOY_OPTIONS,
+    DIGITAL_ASSISTANTS_ENDPOINTS.DEPLOY_OPTIONS(architectureId),
   );
   return response.data;
 }
@@ -61,7 +72,6 @@ export async function fetchApplications(
     {
       params: {
         deployment_type: "architectures",
-        catalog_id: "rag",
         ...params,
       },
     },
@@ -104,17 +114,31 @@ export function calculateUptime(createdAt: string): string {
   const created = new Date(createdAt);
   const now = new Date();
   const diffMs = now.getTime() - created.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "1 day";
-  if (diffDays < 7) return `${diffDays} days`;
+  // Calculate time components
+  const totalSeconds = Math.floor(diffMs / 1000);
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const totalHours = Math.floor(totalMinutes / 60);
+  const totalDays = Math.floor(totalHours / 24);
 
-  return created.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  // Extract remaining components
+  const minutes = totalMinutes % 60;
+  const hours = totalHours % 24;
+
+  // Format based on duration
+  if (totalDays > 0) {
+    // Show days + hours (e.g., "3d 4hr")
+    return hours > 0 ? `${totalDays}d ${hours}hr` : `${totalDays}d`;
+  } else if (totalHours > 0) {
+    // Show hours + minutes (e.g., "2hr 10min")
+    return minutes > 0 ? `${totalHours}hr ${minutes}min` : `${totalHours}hr`;
+  } else if (totalMinutes > 0) {
+    // Show minutes only (e.g., "5min")
+    return `${totalMinutes}min`;
+  } else {
+    // Show seconds for very recent deployments (e.g., "45sec")
+    return totalSeconds > 0 ? `${totalSeconds}sec` : "Just now";
+  }
 }
 
 export function transformApplicationToRow(
@@ -125,7 +149,7 @@ export function transformApplicationToRow(
     name: app.name,
     status: app.status as DigitalAssistantRow["status"],
     uptime: calculateUptime(app.created_at),
-    messages: app.message || "",
+    messages: app.status === "Running" ? "" : app.message || "",
     actions: "actions",
     children: app.services.map((service) => ({
       id: service.id,

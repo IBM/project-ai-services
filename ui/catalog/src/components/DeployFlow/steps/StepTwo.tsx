@@ -11,8 +11,9 @@ import {
 } from "../utils/StepTwo.utils";
 import { ResourceRequirements } from "../components/ResourceRequirements";
 import { ServiceConfigCard } from "../components/ServiceConfigCard";
-import { useResources } from "@/hooks/useResources";
+import { fetchResources } from "@/api/digitalAssistants";
 import { useBatchProviderParams } from "@/hooks/useProviderParams";
+import type { ResourcesResponse } from "@/types/digitalAssistants";
 import type {
   ResourceItem,
   StepTwoState,
@@ -79,12 +80,24 @@ export const StepTwo: React.FC<StepProps> = ({
   const [state, dispatch] = useReducer(stepTwoReducer, INITIAL_STATE);
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Use cached resources from Zustand store
-  const {
-    resources,
-    isLoading: resourcesLoading,
-    error: resourcesError,
-  } = useResources();
+  // Fetch resources directly without caching
+  const [resources, setResources] = useState<ResourcesResponse | null>(null);
+  const [resourcesLoading, setResourcesLoading] = useState<boolean>(true);
+  const [resourcesError, setResourcesError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchResources()
+      .then((data) => {
+        setResources(data);
+        setResourcesLoading(false);
+      })
+      .catch((err) => {
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to load resources";
+        setResourcesError(errorMessage);
+        setResourcesLoading(false);
+      });
+  }, []);
 
   // Calculate required resources based on selected services and providers
   const calculateRequiredResources = useMemo(() => {
@@ -193,7 +206,6 @@ export const StepTwo: React.FC<StepProps> = ({
       label: "Processors",
       required: calculateRequiredResources.cpu.toString(),
       available: Math.floor(resources.cpu.available_cores).toString(),
-      total: resources.cpu.total_cores.toString(),
       unit: "Cores",
       type: "cpu",
     });
@@ -203,7 +215,6 @@ export const StepTwo: React.FC<StepProps> = ({
       label: "Memory",
       required: calculateRequiredResources.memory.toString(),
       available: bytesToGB(resources.memory.available_bytes).toString(),
-      total: bytesToGB(resources.memory.total_bytes).toString(),
       unit: "GB",
       type: "memory",
     });
@@ -226,7 +237,6 @@ export const StepTwo: React.FC<StepProps> = ({
           label: acceleratorLabel,
           required: requiredCount.toString(),
           available: acceleratorData.available.toString(),
-          total: acceleratorData.total.toString(),
           unit: "Cards",
           type: "accelerator",
           acceleratorType: acceleratorKey,
@@ -238,7 +248,6 @@ export const StepTwo: React.FC<StepProps> = ({
         label: "Accelerators",
         required: totalRequired.toString(),
         available: "0",
-        total: "0",
         unit: "Cards",
         type: "accelerator",
       });
@@ -250,7 +259,6 @@ export const StepTwo: React.FC<StepProps> = ({
         label: "Disk storage",
         required: calculateRequiredResources.storage.toString(),
         available: "N/A",
-        total: "N/A",
         unit: "GB",
         type: "storage",
       });

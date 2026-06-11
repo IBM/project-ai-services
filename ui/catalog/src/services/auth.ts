@@ -1,6 +1,8 @@
 import { api } from "@/api/axios";
 import { AUTH_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import { useAuthStore } from "@/store/auth.store";
+import { useDeployStore } from "@/store/deploy.store";
+import { fetchArchitectures } from "@/api/digitalAssistants";
 import type { LoginRequest, LoginResponse, UserInfo } from "@/types/auth";
 
 export const login = async (payload: LoginRequest): Promise<LoginResponse> => {
@@ -8,6 +10,22 @@ export const login = async (payload: LoginRequest): Promise<LoginResponse> => {
   const accessToken = response.data.access_token;
   const refreshToken = response.data.refresh_token;
   useAuthStore.getState().setTokens(accessToken, refreshToken);
+
+  // Fetch architectures only if not already in persisted store
+  const deployStore = useDeployStore.getState();
+  if (deployStore.architectures.length === 0) {
+    try {
+      deployStore.setArchitecturesLoading(true);
+      const architectures = await fetchArchitectures();
+      deployStore.setArchitectures(architectures);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Failed to fetch architectures";
+      deployStore.setArchitecturesError(errorMessage);
+    }
+  }
 
   return response.data;
 };
@@ -19,8 +37,14 @@ export const logout = async () => {
       "X-Refresh-Token": refreshToken,
     },
   });
+
+  // Clear auth store state
   useAuthStore.getState().clearTokens();
   useAuthStore.getState().clearUserInfo();
+
+  // Clear deploy store state
+  useDeployStore.getState().clearArchitectures();
+  useDeployStore.getState().clearDeployOptions();
 };
 
 export const getUserInfo = async (): Promise<UserInfo> => {

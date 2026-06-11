@@ -1,4 +1,5 @@
 import React, { useReducer, useEffect } from "react";
+import { useDeployStore } from "@/store/deploy.store";
 import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
 import {
   DataTable,
@@ -93,14 +94,24 @@ const renderCell = ({
 const DigitalAssistantsPage = () => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
+  // Get catalog_id from deploy options in store
+  const deployOptions = useDeployStore((state) => state.deployOptions);
+  const catalogId = deployOptions?.id;
+
   // Fetch applications from API
   const loadApplications = async () => {
+    // Don't fetch if we don't have a catalog_id yet
+    if (!catalogId) {
+      return;
+    }
+
     dispatch({ type: ACTION_TYPES.FETCH_APPLICATIONS_START });
 
     try {
       const response = await fetchApplications({
         page: state.page,
         page_size: state.pageSize,
+        catalog_id: catalogId,
       });
 
       const rows = response.data.map(transformApplicationToRow);
@@ -122,11 +133,11 @@ const DigitalAssistantsPage = () => {
     }
   };
 
-  // Load applications on mount and when page/pageSize changes
+  // Load applications on mount and when page/pageSize/catalogId changes
   useEffect(() => {
     loadApplications();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.page, state.pageSize]);
+  }, [state.page, state.pageSize, catalogId]);
 
   const handleDeploySubmit = () => {
     loadApplications();

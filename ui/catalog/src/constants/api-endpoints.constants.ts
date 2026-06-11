@@ -6,7 +6,9 @@ export const AUTH_ENDPOINTS = {
 };
 
 export const DIGITAL_ASSISTANTS_ENDPOINTS = {
-  DEPLOY_OPTIONS: "/architectures/rag/deploy-options",
+  LIST_ARCHITECTURES: "/architectures",
+  DEPLOY_OPTIONS: (architectureId: string) =>
+    `/architectures/${architectureId}/deploy-options`,
   PROVIDER_PARAMS: (componentType: string, providerId: string) =>
     `/components/${componentType}/providers/${providerId}/params`,
   APPLICATIONS: "/applications",

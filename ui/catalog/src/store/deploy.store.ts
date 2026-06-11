@@ -1,5 +1,7 @@
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 import type {
+  ArchitectureSummary,
   DeployOptionsResponse,
   ResourcesResponse,
 } from "@/types/digitalAssistants";
@@ -10,32 +12,46 @@ interface ProviderParamsCache {
 }
 
 interface DeployState {
-  // Deploy options cache
+  // Architectures - persisted (configuration data)
+  architectures: ArchitectureSummary[];
+  selectedArchitectureId: string | null;
+  architecturesLoading: boolean;
+  architecturesError: string | null;
+
+  // Deploy options - persisted (configuration data)
   deployOptions: DeployOptionsResponse | null;
   deployOptionsLoading: boolean;
   deployOptionsError: string | null;
-  deployOptionsFetchedAt: number | null;
 
-  // Resources cache
+  // Resources cache - not persisted (dynamic data)
   resources: ResourcesResponse | null;
   resourcesLoading: boolean;
   resourcesError: string | null;
   resourcesFetchedAt: number | null;
 
-  // Provider params cache - keyed by "componentType:providerId"
+  // Provider params cache - not persisted (dynamic data)
   providerParams: Record<string, ProviderParamsCache>;
 
-  // Actions
+  // Architecture actions
+  setArchitectures: (data: ArchitectureSummary[]) => void;
+  setSelectedArchitectureId: (id: string | null) => void;
+  setArchitecturesLoading: (loading: boolean) => void;
+  setArchitecturesError: (error: string | null) => void;
+  clearArchitectures: () => void;
+
+  // Deploy options actions
   setDeployOptions: (data: DeployOptionsResponse) => void;
   setDeployOptionsLoading: (loading: boolean) => void;
   setDeployOptionsError: (error: string | null) => void;
   clearDeployOptions: () => void;
 
+  // Resources actions
   setResources: (data: ResourcesResponse) => void;
   setResourcesLoading: (loading: boolean) => void;
   setResourcesError: (error: string | null) => void;
   clearResources: () => void;
 
+  // Provider params actions
   setProviderParams: (
     componentType: string,
     providerId: string,
@@ -48,117 +64,152 @@ interface DeployState {
   isProviderParamsStale: (componentType: string, providerId: string) => boolean;
   clearProviderParams: () => void;
 
-  // Check if cache is stale (older than 5 minutes)
-  isDeployOptionsStale: () => boolean;
+  // Check if cache is stale (older than 5 minutes) - only for resources
   isResourcesStale: () => boolean;
 }
 
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
-export const useDeployStore = create<DeployState>((set, get) => ({
-  // Deploy options state
-  deployOptions: null,
-  deployOptionsLoading: false,
-  deployOptionsError: null,
-  deployOptionsFetchedAt: null,
+export const useDeployStore = create<DeployState>()(
+  persist(
+    (set, get) => ({
+      // Architectures state
+      architectures: [],
+      selectedArchitectureId: null,
+      architecturesLoading: false,
+      architecturesError: null,
 
-  // Resources state
-  resources: null,
-  resourcesLoading: false,
-  resourcesError: null,
-  resourcesFetchedAt: null,
-
-  // Provider params state
-  providerParams: {},
-
-  // Deploy options actions
-  setDeployOptions: (data) =>
-    set({
-      deployOptions: data,
-      deployOptionsError: null,
-      deployOptionsFetchedAt: Date.now(),
-      deployOptionsLoading: false,
-    }),
-
-  setDeployOptionsLoading: (loading) => set({ deployOptionsLoading: loading }),
-
-  setDeployOptionsError: (error) =>
-    set({ deployOptionsError: error, deployOptionsLoading: false }),
-
-  clearDeployOptions: () =>
-    set({
+      // Deploy options state
       deployOptions: null,
+      deployOptionsLoading: false,
       deployOptionsError: null,
-      deployOptionsFetchedAt: null,
-    }),
 
-  // Resources actions
-  setResources: (data) =>
-    set({
-      resources: data,
-      resourcesError: null,
-      resourcesFetchedAt: Date.now(),
-      resourcesLoading: false,
-    }),
-
-  setResourcesLoading: (loading) => set({ resourcesLoading: loading }),
-
-  setResourcesError: (error) =>
-    set({ resourcesError: error, resourcesLoading: false }),
-
-  clearResources: () =>
-    set({
+      // Resources state
       resources: null,
+      resourcesLoading: false,
       resourcesError: null,
       resourcesFetchedAt: null,
-    }),
 
-  // Provider params actions
-  setProviderParams: (componentType, providerId, data) => {
-    const key = `${componentType}:${providerId}`;
-    set((state) => ({
-      providerParams: {
-        ...state.providerParams,
-        [key]: {
-          data,
-          fetchedAt: Date.now(),
-        },
+      // Provider params state
+      providerParams: {},
+
+      // Architectures actions
+      setArchitectures: (data) =>
+        set({
+          architectures: data,
+          selectedArchitectureId: data.length > 0 ? data[0].id : null,
+          architecturesError: null,
+          architecturesLoading: false,
+        }),
+
+      setSelectedArchitectureId: (id) => set({ selectedArchitectureId: id }),
+
+      setArchitecturesLoading: (loading) =>
+        set({ architecturesLoading: loading }),
+
+      setArchitecturesError: (error) =>
+        set({ architecturesError: error, architecturesLoading: false }),
+
+      clearArchitectures: () =>
+        set({
+          architectures: [],
+          selectedArchitectureId: null,
+          architecturesError: null,
+        }),
+
+      // Deploy options actions
+      setDeployOptions: (data) =>
+        set({
+          deployOptions: data,
+          deployOptionsError: null,
+          deployOptionsLoading: false,
+        }),
+
+      setDeployOptionsLoading: (loading) =>
+        set({ deployOptionsLoading: loading }),
+
+      setDeployOptionsError: (error) =>
+        set({ deployOptionsError: error, deployOptionsLoading: false }),
+
+      clearDeployOptions: () =>
+        set({
+          deployOptions: null,
+          deployOptionsError: null,
+        }),
+
+      // Resources actions
+      setResources: (data) =>
+        set({
+          resources: data,
+          resourcesError: null,
+          resourcesFetchedAt: Date.now(),
+          resourcesLoading: false,
+        }),
+
+      setResourcesLoading: (loading) => set({ resourcesLoading: loading }),
+
+      setResourcesError: (error) =>
+        set({ resourcesError: error, resourcesLoading: false }),
+
+      clearResources: () =>
+        set({
+          resources: null,
+          resourcesError: null,
+          resourcesFetchedAt: null,
+        }),
+
+      // Provider params actions
+      setProviderParams: (componentType, providerId, data) => {
+        const key = `${componentType}:${providerId}`;
+        set((state) => ({
+          providerParams: {
+            ...state.providerParams,
+            [key]: {
+              data,
+              fetchedAt: Date.now(),
+            },
+          },
+        }));
       },
-    }));
-  },
 
-  getProviderParams: (componentType, providerId) => {
-    const key = `${componentType}:${providerId}`;
-    const cached = get().providerParams[key];
-    if (!cached) return null;
+      getProviderParams: (componentType, providerId) => {
+        const key = `${componentType}:${providerId}`;
+        const cached = get().providerParams[key];
+        if (!cached) return null;
 
-    // Check if stale
-    if (Date.now() - cached.fetchedAt > CACHE_DURATION) {
-      return null;
-    }
+        // Check if stale
+        if (Date.now() - cached.fetchedAt > CACHE_DURATION) {
+          return null;
+        }
 
-    return cached.data;
-  },
+        return cached.data;
+      },
 
-  isProviderParamsStale: (componentType, providerId) => {
-    const key = `${componentType}:${providerId}`;
-    const cached = get().providerParams[key];
-    if (!cached) return true;
-    return Date.now() - cached.fetchedAt > CACHE_DURATION;
-  },
+      isProviderParamsStale: (componentType, providerId) => {
+        const key = `${componentType}:${providerId}`;
+        const cached = get().providerParams[key];
+        if (!cached) return true;
+        return Date.now() - cached.fetchedAt > CACHE_DURATION;
+      },
 
-  clearProviderParams: () => set({ providerParams: {} }),
+      clearProviderParams: () => set({ providerParams: {} }),
 
-  // Cache staleness checks
-  isDeployOptionsStale: () => {
-    const { deployOptionsFetchedAt } = get();
-    if (!deployOptionsFetchedAt) return true;
-    return Date.now() - deployOptionsFetchedAt > CACHE_DURATION;
-  },
-
-  isResourcesStale: () => {
-    const { resourcesFetchedAt } = get();
-    if (!resourcesFetchedAt) return true;
-    return Date.now() - resourcesFetchedAt > CACHE_DURATION;
-  },
-}));
+      // Cache staleness check - only for resources (5 minutes)
+      isResourcesStale: () => {
+        const { resourcesFetchedAt } = get();
+        if (!resourcesFetchedAt) return true;
+        return Date.now() - resourcesFetchedAt > CACHE_DURATION;
+      },
+    }),
+    {
+      name: "deploy-storage",
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        // Only persist architectures and deployOptions
+        architectures: state.architectures,
+        selectedArchitectureId: state.selectedArchitectureId,
+        deployOptions: state.deployOptions,
+      }),
+    },
+  ),
+);
