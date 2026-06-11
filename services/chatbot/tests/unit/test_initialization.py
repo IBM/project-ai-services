@@ -101,7 +101,6 @@ class TestLifespan:
         # Create mocks
         mock_init_models = Mock()
         mock_init_vectorstore = Mock()
-        mock_setup_lang = Mock()
         mock_create_session = Mock()
         
         # Track call order
@@ -115,17 +114,12 @@ class TestLifespan:
             call_order.append('vectorstore')
             mock_init_vectorstore()
         
-        def track_setup_lang(langs):
-            call_order.append('language')
-            mock_setup_lang(langs)
-        
         def track_create_session(pool_maxsize):
             call_order.append('session')
             mock_create_session(pool_maxsize)
         
         with patch('chatbot.app.initialize_models', track_init_models), \
              patch('chatbot.app.initialize_vectorstore', track_init_vectorstore), \
-             patch('chatbot.app.setup_language_detector', track_setup_lang), \
              patch('chatbot.app.create_llm_session', track_create_session):
             
             from chatbot.app import lifespan
@@ -137,45 +131,29 @@ class TestLifespan:
             async with lifespan(mock_app):
                 pass
             
-            # Verify all functions were called in correct order (vectorstore is NOT initialized in lifespan, it's lazy-loaded)
-            assert call_order == ['models', 'language', 'session']
+            # Verify all functions were called in correct order
+            # Note: vectorstore is NOT initialized in lifespan, it's lazy-loaded on first request
+            # Note: language detector is initialized in settings module, not in lifespan
+            assert call_order == ['models', 'session']
             mock_init_models.assert_called_once()
             mock_init_vectorstore.assert_not_called()  # Vectorstore is lazy-loaded on first request
-            mock_setup_lang.assert_called_once()
-            # Pool size comes from settings.common.llm.llm_max_batch_size
+            # Pool size comes from settings.common.llm.max_batch_size
             mock_create_session.assert_called_once()
     
     async def test_lifespan_language_detector_setup(self, monkeypatch):
-        """Test language detector is set up with correct languages"""
+        """Test language detector is initialized in settings module (not in lifespan)"""
         from lingua import Language
+        from common.lang_utils import _language_detector
         
-        mock_setup_lang = Mock()
-        
-        with patch('chatbot.app.initialize_models'), \
-             patch('chatbot.app.initialize_vectorstore'), \
-             patch('chatbot.app.setup_language_detector', mock_setup_lang), \
-             patch('chatbot.app.create_llm_session'):
-            
-            from chatbot.app import lifespan
-            
-            mock_app = Mock()
-            
-            async with lifespan(mock_app):
-                pass
-            
-            # Verify language detector was set up with English and German
-            mock_setup_lang.assert_called_once()
-            # Get the first positional argument (list of languages)
-            call_args = mock_setup_lang.call_args[0][0]
-            assert Language.ENGLISH in call_args
-            assert Language.GERMAN in call_args
+        # Language detector should already be initialized by settings module
+        # This test verifies it's available (initialized in settings, not lifespan)
+        assert _language_detector is not None, "Language detector should be initialized by settings module"
     
     async def test_lifespan_llm_session_pool_size(self, monkeypatch):
         """Test LLM session is created with correct pool size from settings"""
         mock_create_session = Mock()
         
         with patch('chatbot.app.initialize_models'), \
-             patch('chatbot.app.setup_language_detector'), \
              patch('chatbot.app.create_llm_session', mock_create_session):
             
             from chatbot.app import lifespan
@@ -215,7 +193,6 @@ class TestLifespan:
         
         with patch('chatbot.app.initialize_models', mock_init), \
              patch('chatbot.app.initialize_vectorstore'), \
-             patch('chatbot.app.setup_language_detector'), \
              patch('chatbot.app.create_llm_session'):
             
             from chatbot.app import lifespan

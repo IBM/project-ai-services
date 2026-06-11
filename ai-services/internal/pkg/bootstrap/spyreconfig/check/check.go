@@ -77,7 +77,7 @@ func (cc *ConfigCheck) String() string {
 		if !status {
 			configStatus = "MISSING"
 		}
-		sb.WriteString(fmt.Sprintf("  - %s: %s\n", name, configStatus))
+		fmt.Fprintf(&sb, "  - %s: %s\n", name, configStatus)
 	}
 
 	return sb.String()
@@ -136,12 +136,12 @@ func (cfc *ConfigurationFileCheck) String() string {
 		if !attr.Status {
 			attrStatus = "MISSING/INCORRECT"
 		}
-		sb.WriteString(fmt.Sprintf("  - %s: %s", attr.Key, attrStatus))
+		fmt.Fprintf(&sb, "  - %s: %s", attr.Key, attrStatus)
 		if attr.ExpectedValue != "" {
-			sb.WriteString(fmt.Sprintf(" (Expected: %s)", attr.ExpectedValue))
+			fmt.Fprintf(&sb, " (Expected: %s)", attr.ExpectedValue)
 		}
 		if attr.CurrentValue != "" {
-			sb.WriteString(fmt.Sprintf(" (Current: %s)", attr.CurrentValue))
+			fmt.Fprintf(&sb, " (Current: %s)", attr.CurrentValue)
 		}
 		sb.WriteString("\n")
 	}

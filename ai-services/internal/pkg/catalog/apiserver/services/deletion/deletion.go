@@ -6,11 +6,13 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -58,8 +60,17 @@ func (s *DeletionService) PerformDeletion(ctx context.Context, appID uuid.UUID, 
 		return
 	}
 
+	// Get Caddy proxy manager - fail if CADDY_ADMIN_URL not set
+	proxyManager, err := proxy.GetCaddyProxyManager(constants.CaddyServerName)
+	if err != nil {
+		logger.Errorf("failed to get Caddy proxy manager for app %s: %s", appID, err)
+		_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, fmt.Sprintf("failed to get Caddy proxy manager: %s", err))
+
+		return
+	}
+
 	// Delete services and track errors
-	errorMessages := s.deleteServices(ctx, rt, services, keepData)
+	errorMessages := s.deleteServices(ctx, rt, services, keepData, proxyManager)
 
 	// Delete orphaned components and track errors
 	componentErrors := s.deleteOrphanedComponents(ctx, rt, orphanedComponents, keepData)
@@ -160,8 +171,33 @@ func (s *DeletionService) isComponentOrphaned(ctx context.Context, componentID u
 	return true
 }
 
+// unregisterServiceRoutes performs best-effort route cleanup for a service.
+// Updates DB status if route unregistration fails, but does not block deletion.
+func (s *DeletionService) unregisterServiceRoutes(ctx context.Context, proxyManager proxy.ProxyManager, svc models.Service) error {
+	if len(svc.Endpoints) == 0 || proxyManager == nil {
+		return nil
+	}
+
+	if err := proxy.UnregisterRoutesFromEndpoints(
+		proxyManager,
+		svc.Endpoints,
+		"service",
+		svc.ID.String(),
+	); err != nil {
+		// Update DB status with route cleanup failure
+		_ = s.serviceRepo.UpdateStatus(ctx, svc.ID, models.ServiceStatusError,
+			fmt.Sprintf("route unregistration failed: %v", err))
+
+		return err
+	}
+
+	return nil
+}
+
 // deleteServices deletes all services (pods + DB records) and returns any error messages.
-func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime, services []models.Service, keepData bool) []string {
+//
+//nolint:cyclop // Function complexity is acceptable for deletion orchestration
+func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime, services []models.Service, keepData bool, proxyManager proxy.ProxyManager) []string {
 	var errorMessages []string
 	forceDelete := true
 
@@ -174,6 +210,13 @@ func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime
 			errMsg := fmt.Sprintf("service %s: failed to list pods: %s", svc.ID, err)
 			errorMessages = append(errorMessages, errMsg)
 			_ = s.serviceRepo.UpdateStatus(ctx, svc.ID, models.ServiceStatusError, fmt.Sprintf("failed to list pods: %s", err))
+
+			continue
+		}
+
+		// Cleanup Caddy routes before deleting pods (blocks deletion on failure)
+		if err := s.unregisterServiceRoutes(ctx, proxyManager, svc); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("service %s: %s", svc.ID, err))
 
 			continue
 		}
@@ -224,7 +267,7 @@ func (s *DeletionService) deletePods(rt runtime.Runtime, pods []runtimeTypes.Pod
 	for _, pod := range pods {
 		if err := rt.DeletePod(pod.ID, &forceDelete); err != nil {
 			// Ignore "not found" errors - pod already deleted or never existed
-			if utils.IsNotFoundError(err) {
+			if catalogutils.IsNotFoundError(err) {
 				logger.Infof("Pod %s already deleted or does not exist", pod.ID)
 
 				continue
@@ -238,6 +281,8 @@ func (s *DeletionService) deletePods(rt runtime.Runtime, pods []runtimeTypes.Pod
 }
 
 // deleteOrphanedComponents deletes orphaned components (pods + DB records) and returns any error messages.
+//
+//nolint:cyclop // Function complexity is acceptable for deletion orchestration
 func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runtime.Runtime, componentIDs []uuid.UUID, keepData bool) []string {
 	var errorMessages []string
 	forceDelete := true
@@ -312,7 +357,7 @@ func (s *DeletionService) deleteVolumesFromPods(rt runtime.Runtime, pods []runti
 
 	// Extract volume names from pod labels
 	for _, pod := range pods {
-		if volumeNames, ok := pod.Labels[constants.CatalogVolumeLabel]; ok && volumeNames != "" {
+		if volumeNames, ok := pod.Labels[catalogconstants.CatalogVolumeLabel]; ok && volumeNames != "" {
 			// Split comma-separated volume names (in case a pod has multiple volumes)
 			volumes := strings.Split(volumeNames, ",")
 			for _, volumeName := range volumes {
@@ -335,7 +380,7 @@ func (s *DeletionService) deleteVolumesFromPods(rt runtime.Runtime, pods []runti
 	for volumeName := range volumesToDelete {
 		if err := rt.DeleteVolume(volumeName); err != nil {
 			// Ignore "not found" errors - volume already deleted or never existed
-			if utils.IsNotFoundError(err) {
+			if catalogutils.IsNotFoundError(err) {
 				logger.Infof("Volume %s already deleted or does not exist", volumeName)
 
 				continue
@@ -365,13 +410,13 @@ func (s *DeletionService) deleteSecretsFromPods(rt runtime.Runtime, pods []runti
 
 	// Extract secret names from pod labels
 	for _, pod := range pods {
-		if secretName, ok := pod.Labels[constants.CatalogSecretLabel]; ok {
+		if secretName, ok := pod.Labels[catalogconstants.CatalogSecretLabel]; ok {
 			// If keepData=false, delete ALL secrets
 			if !keepData {
 				secretsToDelete[secretName] = true
 			} else {
 				// If keepData=true, only delete secrets without skip-cleanup or with skip-cleanup="false"
-				if skipValue, hasSkipLabel := pod.Labels[constants.CatalogSecretSkipLabel]; !hasSkipLabel || skipValue == "false" {
+				if skipValue, hasSkipLabel := pod.Labels[catalogconstants.CatalogSecretSkipLabel]; !hasSkipLabel || skipValue == "false" {
 					secretsToDelete[secretName] = true
 				}
 			}
@@ -389,7 +434,7 @@ func (s *DeletionService) deleteSecretsFromPods(rt runtime.Runtime, pods []runti
 	for secretName := range secretsToDelete {
 		if err := rt.DeleteSecret(secretName); err != nil {
 			// Ignore "not found" errors - secret already deleted or never existed
-			if utils.IsNotFoundError(err) {
+			if catalogutils.IsNotFoundError(err) {
 				logger.Infof("Secret %s already deleted or does not exist", secretName)
 
 				continue

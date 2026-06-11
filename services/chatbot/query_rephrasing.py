@@ -21,6 +21,8 @@ def _get_query_rephrasing_language_config(lang: str, settings):
     language_config_map = {
         LanguageCodes.ENGLISH: settings.query_rephrasing.english,
         LanguageCodes.GERMAN: settings.query_rephrasing.german,
+        LanguageCodes.ITALIAN: settings.query_rephrasing.italian,
+        LanguageCodes.FRENCH: settings.query_rephrasing.french,
     }
     return language_config_map.get(lang, settings.query_rephrasing.english)
 
@@ -77,7 +79,7 @@ def format_messages_for_rephrasing(messages: List[Dict[str, str]], lang: str = L
     Format conversation messages into a readable string for rephrasing context.
     
     Converts a list of conversation messages into a formatted string with localized
-    role labels based on the specified language. Supports English and German.
+    role labels based on the specified language. Supports English, German, and Italian.
     
     Args:
         messages: List of message dicts with 'role' and 'content' keys
@@ -85,7 +87,7 @@ def format_messages_for_rephrasing(messages: List[Dict[str, str]], lang: str = L
                  - 'role': One of 'user', 'assistant', 'system', or 'unknown'
                  - 'content': The message content string
         lang: Language code for role labels (default: English).
-              Supported values: LanguageCodes.ENGLISH, LanguageCodes.GERMAN
+              Supported values: LanguageCodes.ENGLISH, LanguageCodes.GERMAN, LanguageCodes.ITALIAN, LanguageCodes.FRENCH
     
     Returns:
         Formatted conversation history string with localized role labels.
