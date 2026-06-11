@@ -92,15 +92,15 @@ func (c *catalogDeploymentContext) getCaddyHostAdminURL(rt *podman.PodmanClient,
 }
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
-func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, baseDir string, argParams map[string]string, domainName string, sslCertPath, sslKeyPath string, httpsPort int) error {
+func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, baseDir string, domainName string, sslCertPath, sslKeyPath string, httpsPort int) error {
 	s := spinner.New("Deploying catalog service...")
 	s.Start(ctx)
 
 	// Initialize deployment context for caching
 	deployCtx := &catalogDeploymentContext{}
 
-	// Initialize and validate
-	rt, tp, appMetadata, tmpls, argParams, err := initializeCatalogDeployment(argParams, httpsPort, s)
+	// Initialize and validate - argParams is created internally
+	rt, tp, appMetadata, tmpls, argParams, err := initializeCatalogDeployment(httpsPort, s)
 	if err != nil {
 		return err
 	}
@@ -143,7 +143,8 @@ func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, b
 }
 
 // initializeCatalogDeployment handles initialization and validation steps.
-func initializeCatalogDeployment(argParams map[string]string, httpsPort int, s *spinner.Spinner) (
+// Creates and returns argParams map internally for use throughout deployment.
+func initializeCatalogDeployment(httpsPort int, s *spinner.Spinner) (
 	*podman.PodmanClient,
 	templates.Template,
 	*templates.AppMetadata,
@@ -167,10 +168,8 @@ func initializeCatalogDeployment(argParams map[string]string, httpsPort int, s *
 		return nil, nil, nil, nil, nil, fmt.Errorf("failed to load catalog templates: %w", err)
 	}
 
-	// Set httpsPort in argParams
-	if argParams == nil {
-		argParams = make(map[string]string)
-	}
+	// Create argParams map for internal use
+	argParams := make(map[string]string)
 	argParams["caddy.httpsPort"] = fmt.Sprintf("%d", httpsPort)
 
 	return rt, tp, appMetadata, tmpls, argParams, nil

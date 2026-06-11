@@ -35,11 +35,6 @@ const defaultHTTPSPort = 443
 
 // NewConfigureCmd creates a new configure command for the catalog service.
 func NewConfigureCmd() *cobra.Command {
-	var (
-		rawArgParams []string
-		argParams    map[string]string
-	)
-
 	cmd := &cobra.Command{
 		Use:   "configure",
 		Short: "Configure the catalog service with initial configuration",
@@ -49,29 +44,26 @@ Examples:
 	 # Configure catalog service for podman
 	 ai-services catalog configure --runtime podman
 
-	 # Configure with custom UI port
-	 ai-services catalog configure --runtime podman --params ui.port=8081`,
+	 # Configure with custom HTTPS port
+	 ai-services catalog configure --runtime podman --https-port 8443`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
-			var err error
-			argParams, err = validateConfigureFlags(rawArgParams)
-
-			return err
+			return validateConfigureFlags()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Prompt for admin password
-			return runConfigure(argParams)
+			return runConfigure()
 		},
 	}
 
-	configureConfigureFlags(cmd, &rawArgParams)
+	configureConfigureFlags(cmd)
 
 	return cmd
 }
 
 // runConfigure executes the catalog configuration process.
-func runConfigure(argParams map[string]string) error {
+func runConfigure() error {
 	// Prompt for admin password
 	adminPassword, err := promptForPassword()
 	if err != nil {
@@ -114,7 +106,6 @@ func runConfigure(argParams map[string]string) error {
 		AdminPassword: adminPassword,
 		Runtime:       vars.RuntimeFactory.GetRuntimeType(),
 		BaseDir:       aiServicesDir,
-		ArgParams:     argParams,
 		DomainName:    domainName,
 		SSLCertPath:   cleanCertPath,
 		SSLKeyPath:    cleanKeyPath,
@@ -123,11 +114,11 @@ func runConfigure(argParams map[string]string) error {
 }
 
 // validateConfigureFlags validates the configure command flags and initializes runtime.
-func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
+func validateConfigureFlags() error {
 	// Initialize runtime factory based on flag
 	rt := types.RuntimeType(runtimeType)
 	if !rt.Valid() {
-		return nil, fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift'). Please specify runtime using --runtime flag", runtimeType)
+		return fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift'). Please specify runtime using --runtime flag", runtimeType)
 	}
 
 	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
@@ -135,30 +126,20 @@ func validateConfigureFlags(rawArgParams []string) (map[string]string, error) {
 
 	// Check if podman runtime is being used on unsupported platform
 	if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
-		return nil, err
+		return err
 	}
 
 	// Validate SSL flags
 	if err := validateSSLFlags(); err != nil {
-		return nil, err
+		return err
 	}
 
 	// Validate HTTPS port range
 	if httpsPort < 1 || httpsPort > 65535 {
-		return nil, fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
+		return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
 	}
 
-	// Parse params if provided
-	var argParams map[string]string
-	if len(rawArgParams) > 0 {
-		var err error
-		argParams, err = utils.ParseKeyValues(rawArgParams)
-		if err != nil {
-			return nil, fmt.Errorf("invalid params format: %w", err)
-		}
-	}
-
-	return argParams, nil
+	return nil
 }
 
 // validateSSLFlags validates SSL certificate and key flags.
@@ -215,7 +196,7 @@ func validateSSLCertificates() error {
 }
 
 // configureConfigureFlags configures the flags for the configure command.
-func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
+func configureConfigureFlags(cmd *cobra.Command) {
 	// Add runtime flag as required
 	cmd.Flags().StringVarP(&runtimeType, "runtime", "r", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
 	_ = cmd.MarkFlagRequired("runtime")
@@ -236,19 +217,6 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 		defaultHTTPSPort,
 		"Custom HTTPS port to expose the service endpoints externally (podman runtime only).\n"+
 			"Example: --https-port 8443\n",
-	)
-
-	cmd.Flags().StringSliceVar(
-		rawArgParams,
-		"params",
-		[]string{},
-		"Inline parameters to configure the catalog service.\n\n"+
-			"Format:\n"+
-			"- Comma-separated key=value pairs\n"+
-			"- Example: --params ui.port=8081,backend.port=8080\n\n"+
-			"Available parameters:\n"+
-			"- ui.port: Port for the catalog UI (default: random available port)\n"+
-			"- backend.port: Port for the catalog backend API (default: random available port)\n",
 	)
 
 	// SSL/TLS certificate configuration flags
