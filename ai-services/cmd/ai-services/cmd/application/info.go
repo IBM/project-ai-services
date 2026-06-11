@@ -71,8 +71,10 @@ func renderApplicationInfo(appName string) error {
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			logger.Warningf("Application: '%s' does not exist", appName)
+
 			return nil
 		}
+
 		return err
 	}
 
@@ -93,7 +95,7 @@ func renderApplicationInfo(appName string) error {
 	for _, service := range application.Services {
 		params := map[string]string{}
 		params["STATUS"] = strings.ToLower(service.Status)
-		
+
 		//fmt.Println(service.Endpoints)
 		for _, endpoint := range service.Endpoints {
 			urlType, ok := endpoint["type"].(string)
@@ -109,6 +111,7 @@ func renderApplicationInfo(appName string) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -128,7 +131,8 @@ func printInfo(tp templates.Template, params map[string]string, appTemplate stri
 		return fmt.Errorf("failed to execute info.md: %w", err)
 	}
 	value := rendered.String()
-	value = strings.Replace(value, "Day N:\n", "", -1)
-	logger.Infoln(value)
+	value = strings.ReplaceAll(value, "Day N:\n", "")
+	logger.Infof(value)
+
 	return nil
 }

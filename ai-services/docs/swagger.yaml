@@ -73,6 +73,8 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application:
     properties:
+      catalog_id:
+        type: string
       created_at:
         type: string
       deployment_type:
@@ -92,6 +94,8 @@ definitions:
       type:
         type: string
       updated_at:
+        type: string
+      version:
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationCPUInfo:
