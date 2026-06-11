@@ -81,62 +81,45 @@ def get_matching_header_lvl(toc, title, threshold=80):
             return "#" * toc[toc_title]
     return ""
 
-def get_toc(file):
+def get_pdf_toc(pdf_file):
     """
-    Extract table of contents from a document file (PDF or DOCX).
+    Extract table of contents from a PDF file using bookmarks/outlines.
     
-    For PDF files: Extracts TOC from PDF bookmarks/outlines
-    For DOCX files: Extracts TOC from heading styles
-    
+    Args:
+        pdf_file: Path to the PDF file
+        
     Returns:
         Tuple of (toc_dict, page_count) where toc_dict maps heading text to level
     """
-    from pathlib import Path
-    from digitize.docx_utils import get_docx_toc, estimate_docx_page_count
-    
-    # Check file type
-    file_ext = Path(file).suffix.lower()
-    
-    if file_ext == '.docx':
-        # Use DOCX utility functions
-        toc = get_docx_toc(file)
-        page_count = estimate_docx_page_count(file)
-        return toc, page_count
-    
-    elif file_ext == '.pdf':
-        # Original PDF TOC extraction logic
-        toc = {}
-        page_count = 0
-        parser = None
-        with open(file, "rb") as fp:
-            try:
-                parser = PDFParser(fp)
-                document = PDFDocument(parser)
+    toc = {}
+    page_count = 0
+    parser = None
+    with open(pdf_file, "rb") as fp:
+        try:
+            parser = PDFParser(fp)
+            document = PDFDocument(parser)
 
-                outlines = list(document.get_outlines())
-                if not outlines:
-                    logger.debug("No outlines found.")
-
-                for (level, title, _, _, _) in outlines:
-                    toc[title] = level
-                page_count = len(list(PDFPage.create_pages(document)))
-
-            except PDFNoOutlines:
+            outlines = list(document.get_outlines())
+            if not outlines:
                 logger.debug("No outlines found.")
-            except PDFSyntaxError:
-                logger.debug("Corrupted PDF or non-PDF file.")
-            finally:
-                if parser is not None:
-                    try:
-                        parser.close()
-                    except Exception:
-                        pass  # nothing to do
-                    
-        return toc, page_count
-    
-    else:
-        logger.warning(f"Unsupported file type for TOC extraction: {file_ext}")
-        return {}, 0
+
+            for (level, title, _, _, _) in outlines:
+                toc[title] = level
+            page_count = len(list(PDFPage.create_pages(document)))
+
+        except PDFNoOutlines:
+            logger.debug("No outlines found.")
+        except PDFSyntaxError:
+            logger.debug("Corrupted PDF or non-PDF file.")
+        finally:
+            if parser is not None:
+                try:
+                    parser.close()
+                except Exception:
+                    pass  # nothing to do
+                
+    return toc, page_count
+
 
 def load_pdf_pages(pdf_path):
     """
