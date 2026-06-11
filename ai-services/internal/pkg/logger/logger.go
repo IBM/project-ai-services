@@ -15,12 +15,6 @@ import (
 const (
 	// VerbosityLevelDebug is the klog verbosity level for debug logs (2).
 	VerbosityLevelDebug = 2
-	// VerbosityLevelInfo is the klog verbosity level for info logs (0).
-	VerbosityLevelInfo = 0
-	// VerbosityLevelWarning is the klog verbosity level for warning logs (0).
-	VerbosityLevelWarning = 0
-	// VerbosityLevelError is the klog verbosity level for error logs (0).
-	VerbosityLevelError = 0
 
 	// LogLevelDebug is the string constant for debug severity level.
 	LogLevelDebug = "debug"
@@ -42,10 +36,22 @@ const (
 	LogLevelWarningIndicator = "W"
 	// LogLevelErrorIndicator is the output indicator for error level logs ("E").
 	LogLevelErrorIndicator = "E"
+
+	// LevelRankDebug is the numeric rank for debug severity level (0).
+	LevelRankDebug = iota
+	// LevelRankInfo is the numeric rank for info severity level (1).
+	LevelRankInfo
+	// LevelRankWarn is the numeric rank for warning severity level (2).
+	LevelRankWarn
+	// LevelRankError is the numeric rank for error severity level (3).
+	LevelRankError
 )
 
 // Global state to track whether we are in a service context.
 var isServiceEnv bool
+
+// activeMinLevel tracks the active numeric severity level for filtering.
+var activeMinLevel int
 
 // Init initializes the logger with appropriate settings based on environment.
 func Init() {
@@ -75,16 +81,22 @@ func Init() {
 		_ = flag.CommandLine.Set("logtostderr", "true")
 	}
 
-	// 4. Apply Severity Thresholds
+	// 4. Apply Severity Thresholds and set active minimum level
 	switch logLevel {
 	case LogLevelDebug:
 		_ = flag.CommandLine.Set("v", "2")
-	case LogLevelInfo:
-		_ = flag.CommandLine.Set("v", "0")
+		activeMinLevel = LevelRankDebug
 	case LogLevelWarn:
-		_ = flag.CommandLine.Set("stderrthreshold", "WARNING")
+		_ = flag.CommandLine.Set("v", "0")
+		activeMinLevel = LevelRankWarn
 	case LogLevelError:
-		_ = flag.CommandLine.Set("stderrthreshold", "ERROR")
+		_ = flag.CommandLine.Set("v", "0")
+		activeMinLevel = LevelRankError
+	case LogLevelInfo:
+		fallthrough
+	default:
+		_ = flag.CommandLine.Set("v", "0")
+		activeMinLevel = LevelRankInfo
 	}
 }
 
@@ -98,7 +110,7 @@ func getCallerContext(skipDepth int, severity string) string {
 		return ""
 	}
 
-	// Use standard klog MMDD format or standardized ISO-8601 timestamps
+	// Use standard klog MMDD format matching production specs
 	timestamp := time.Now().Format("0102 15:04:05.000000")
 
 	// Standardized output shape: "I0610 19:31:44.190447 /path/to/file.go:200] "
@@ -116,9 +128,11 @@ func Flush() {
 }
 
 func Warningln(msg string) {
+	if activeMinLevel > LevelRankWarn {
+		return
+	}
 	ctx := getCallerContext(1, LogLevelWarningIndicator)
 	if ctx == "" {
-		// CLI mode: add WARNING prefix
 		klog.WarningDepth(1, "WARNING: ", msg)
 	} else {
 		klog.WarningDepth(1, ctx, msg)
@@ -126,19 +140,21 @@ func Warningln(msg string) {
 }
 
 func Warningf(format string, args ...any) {
+	if activeMinLevel > LevelRankWarn {
+		return
+	}
 	ctx := getCallerContext(1, LogLevelWarningIndicator)
+	formattedMsg := fmt.Sprintf(format, args...)
 	if ctx == "" {
-		// CLI mode: add WARNING prefix
-		klog.WarningDepth(1, "WARNING: "+fmt.Sprintf(format, args...))
+		klog.WarningDepth(1, "WARNING: ", formattedMsg)
 	} else {
-		klog.WarningDepth(1, ctx+fmt.Sprintf(format, args...))
+		klog.WarningDepth(1, ctx, formattedMsg) // FIXED: Comma separation ensures clean payload tracking
 	}
 }
 
 func Errorln(msg string) {
 	ctx := getCallerContext(1, LogLevelErrorIndicator)
 	if ctx == "" {
-		// CLI mode: add ERROR prefix
 		klog.ErrorDepth(1, "ERROR: ", msg)
 	} else {
 		klog.ErrorDepth(1, ctx, msg)
@@ -147,32 +163,52 @@ func Errorln(msg string) {
 
 func Errorf(format string, args ...any) {
 	ctx := getCallerContext(1, LogLevelErrorIndicator)
+	formattedMsg := fmt.Sprintf(format, args...)
 	if ctx == "" {
-		// CLI mode: add ERROR prefix
-		klog.ErrorDepth(1, "ERROR: "+fmt.Sprintf(format, args...))
+		klog.ErrorDepth(1, "ERROR: ", formattedMsg)
 	} else {
-		klog.ErrorDepth(1, ctx+fmt.Sprintf(format, args...))
+		klog.ErrorDepth(1, ctx, formattedMsg) // FIXED: Separated context metadata from message body
 	}
 }
 
 func Infoln(msg string, verbose ...int) {
+	if activeMinLevel > LevelRankInfo {
+		return
+	}
+
 	v := 0
 	if len(verbose) > 0 {
 		v = verbose[0]
 	}
+
+	// Guard check: Suppress custom debug logs if system level is locked to info
+	if v > 0 && activeMinLevel == LevelRankInfo {
+		return
+	}
+
 	ctx := getCallerContext(1, LogLevelInfoIndicator)
 	klog.V(klog.Level(v)).InfoDepth(1, ctx, msg)
 }
 
 func Infof(format string, args ...any) {
+	if activeMinLevel > LevelRankInfo {
+		return
+	}
+
 	v := 0
-	// Extract trailing verbosity argument safely to preserve backward compatibility
 	if len(args) > 0 {
 		if verbosity, ok := args[len(args)-1].(int); ok {
 			v = verbosity
 			args = args[:len(args)-1]
 		}
 	}
+
+	// Guard check: Suppress custom debug logs if system level is locked to info
+	if v > 0 && activeMinLevel == LevelRankInfo {
+		return
+	}
+
 	ctx := getCallerContext(1, LogLevelInfoIndicator)
-	klog.V(klog.Level(v)).InfoDepth(1, ctx+fmt.Sprintf(format, args...))
+	formattedMsg := fmt.Sprintf(format, args...)
+	klog.V(klog.Level(v)).InfoDepth(1, ctx, formattedMsg) // FIXED: Passing clean params instead of string concat
 }
