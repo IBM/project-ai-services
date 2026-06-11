@@ -56,6 +56,9 @@ Examples:
 		target := restoreTarget
 		filename := restoreFilename
 
+		// Once precheck passes, silence usage for any later internal errors
+		cmd.SilenceUsage = true
+
 		// Validate target
 		validTargets := []string{"opensearch", "digitize"}
 		isValid := false
@@ -85,9 +88,6 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		applicationName := args[0]
 		ctx := context.Background()
-
-		// Once precheck passes, silence usage for any later internal errors
-		cmd.SilenceUsage = true
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
 		logger.Infof("Runtime: %s\n", rt, 0)
