@@ -225,6 +225,12 @@ def query_vllm_payload(
         case "DE":
             system_prompt = chatbot_settings.chatbot.german.system_prompt
             query_system_prompt = chatbot_settings.chatbot.german.query_system_prompt
+        case "IT":
+            system_prompt = chatbot_settings.chatbot.italian.system_prompt
+            query_system_prompt = chatbot_settings.chatbot.italian.query_system_prompt
+        case "FR":
+            system_prompt = chatbot_settings.chatbot.french.system_prompt
+            query_system_prompt = chatbot_settings.chatbot.french.query_system_prompt
         case _:
             system_prompt = chatbot_settings.chatbot.english.system_prompt
             query_system_prompt = chatbot_settings.chatbot.english.query_system_prompt

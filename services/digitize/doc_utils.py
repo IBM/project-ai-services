@@ -652,18 +652,25 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint, do
     # Select appropriate prompt and max_tokens based on document language (lingua ISO format: 'EN', 'DE', etc.)
     prompt_templates = {
         LanguageCodes.ENGLISH: settings.table_summary.english.prompt,
-        LanguageCodes.GERMAN: settings.table_summary.german.prompt
+        LanguageCodes.GERMAN: settings.table_summary.german.prompt,
+        LanguageCodes.ITALIAN: settings.table_summary.italian.prompt,
+        LanguageCodes.FRENCH: settings.table_summary.french.prompt,
     }
     selected_prompt = get_prompt_for_language(document_language, prompt_templates)
     
     # Select appropriate max_tokens based on document language
     max_tokens_config = {
         LanguageCodes.ENGLISH: settings.table_summary.english.max_tokens,
-        LanguageCodes.GERMAN: settings.table_summary.german.max_tokens
+        LanguageCodes.GERMAN: settings.table_summary.german.max_tokens,
+        LanguageCodes.ITALIAN: settings.table_summary.italian.max_tokens,
+        LanguageCodes.FRENCH: settings.table_summary.french.max_tokens,
     }
     selected_max_tokens = max_tokens_config.get(document_language, settings.table_summary.english.max_tokens)
     
-    logger.debug(f"Using {'German' if document_language == LanguageCodes.GERMAN else 'English'} prompt and max_tokens ({selected_max_tokens}) for table summarization (document language: {document_language})")
+    logger.debug(
+        f"Using language {document_language} prompt and max_tokens ({selected_max_tokens}) "
+        f"for table summarization"
+    )
 
     # Summarize and classify tables - use markdown directly
     table_summaries, decisions = summarize_and_classify_tables(

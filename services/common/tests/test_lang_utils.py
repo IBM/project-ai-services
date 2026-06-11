@@ -19,6 +19,8 @@ class TestLanguageCodes:
         
         assert LanguageCodes.ENGLISH == "EN"
         assert LanguageCodes.GERMAN == "DE"
+        assert LanguageCodes.ITALIAN == "IT"
+        assert LanguageCodes.FRENCH == "FR"
     
     def test_language_codes_are_strings(self):
         """Test that language codes are string types."""
@@ -26,6 +28,8 @@ class TestLanguageCodes:
         
         assert isinstance(LanguageCodes.ENGLISH, str)
         assert isinstance(LanguageCodes.GERMAN, str)
+        assert isinstance(LanguageCodes.ITALIAN, str)
+        assert isinstance(LanguageCodes.FRENCH, str)
     
     def test_to_sentence_splitter_english(self):
         """Test conversion of English code to sentence splitter format."""
@@ -41,12 +45,28 @@ class TestLanguageCodes:
         result = to_sentence_splitter_lang(LanguageCodes.GERMAN)
         assert result == "de"
     
+    def test_to_sentence_splitter_italian(self):
+        """Test conversion of Italian code to sentence splitter format."""
+        from common.lang_utils import to_sentence_splitter_lang, LanguageCodes
+        
+        result = to_sentence_splitter_lang(LanguageCodes.ITALIAN)
+        assert result == "it"
+    
+    def test_to_sentence_splitter_french(self):
+        """Test conversion of French code to sentence splitter format."""
+        from common.lang_utils import to_sentence_splitter_lang, LanguageCodes
+        
+        result = to_sentence_splitter_lang(LanguageCodes.FRENCH)
+        assert result == "fr"
+    
     def test_to_sentence_splitter_with_string_literal(self):
         """Test conversion works with string literals."""
         from common.lang_utils import to_sentence_splitter_lang
         
         assert to_sentence_splitter_lang("EN") == "en"
         assert to_sentence_splitter_lang("DE") == "de"
+        assert to_sentence_splitter_lang("IT") == "it"
+        assert to_sentence_splitter_lang("FR") == "fr"
     
     def test_to_sentence_splitter_unsupported_language(self):
         """Test fallback to English for unsupported language codes."""
@@ -69,10 +89,14 @@ class TestLanguageCodes:
         # Verify the mapping dictionary keys match the class attributes
         assert LanguageCodes.ENGLISH in LanguageCodes._TO_SENTENCE_SPLITTER
         assert LanguageCodes.GERMAN in LanguageCodes._TO_SENTENCE_SPLITTER
+        assert LanguageCodes.ITALIAN in LanguageCodes._TO_SENTENCE_SPLITTER
+        assert LanguageCodes.FRENCH in LanguageCodes._TO_SENTENCE_SPLITTER
         
         # Verify the values are lowercase versions
         assert LanguageCodes._TO_SENTENCE_SPLITTER[LanguageCodes.ENGLISH] == "en"
         assert LanguageCodes._TO_SENTENCE_SPLITTER[LanguageCodes.GERMAN] == "de"
+        assert LanguageCodes._TO_SENTENCE_SPLITTER[LanguageCodes.ITALIAN] == "it"
+        assert LanguageCodes._TO_SENTENCE_SPLITTER[LanguageCodes.FRENCH] == "fr"
     
     def test_language_codes_immutable(self):
         """Test that language codes maintain their values (not accidentally modified)."""
@@ -81,12 +105,18 @@ class TestLanguageCodes:
         # Store original values
         original_english = LanguageCodes.ENGLISH
         original_german = LanguageCodes.GERMAN
+        original_italian = LanguageCodes.ITALIAN
+        original_french = LanguageCodes.FRENCH
         
         # Verify they haven't changed
         assert LanguageCodes.ENGLISH == original_english
         assert LanguageCodes.GERMAN == original_german
+        assert LanguageCodes.ITALIAN == original_italian
+        assert LanguageCodes.FRENCH == original_french
         assert LanguageCodes.ENGLISH == "EN"
         assert LanguageCodes.GERMAN == "DE"
+        assert LanguageCodes.ITALIAN == "IT"
+        assert LanguageCodes.FRENCH == "FR"
 
 
 @pytest.mark.unit
@@ -99,7 +129,9 @@ class TestGetPromptForLanguage:
         
         prompts = {
             LanguageCodes.ENGLISH: "English prompt template",
-            LanguageCodes.GERMAN: "German prompt template"
+            LanguageCodes.GERMAN: "German prompt template",
+            LanguageCodes.ITALIAN: "Italian prompt template",
+            LanguageCodes.FRENCH: "French prompt template"
         }
         
         result = get_prompt_for_language(LanguageCodes.ENGLISH, prompts)
@@ -111,7 +143,9 @@ class TestGetPromptForLanguage:
         
         prompts = {
             LanguageCodes.ENGLISH: "English prompt template",
-            LanguageCodes.GERMAN: "German prompt template"
+            LanguageCodes.GERMAN: "German prompt template",
+            LanguageCodes.ITALIAN: "Italian prompt template",
+            LanguageCodes.FRENCH: "French prompt template"
         }
         
         result = get_prompt_for_language(LanguageCodes.GERMAN, prompts)
@@ -123,10 +157,12 @@ class TestGetPromptForLanguage:
         
         prompts = {
             LanguageCodes.ENGLISH: "English prompt template",
-            LanguageCodes.GERMAN: "German prompt template"
+            LanguageCodes.GERMAN: "German prompt template",
+            LanguageCodes.ITALIAN: "Italian prompt template",
+            LanguageCodes.FRENCH: "French prompt template"
         }
         
-        result = get_prompt_for_language("FR", prompts)
+        result = get_prompt_for_language("ES", prompts)
         assert result == "English prompt template"
     
     def test_returns_empty_string_when_no_prompts(self):
@@ -155,14 +191,18 @@ class TestGetMaxTokensMap:
         
         # Mock chatbot settings
         with patch('chatbot.settings.settings') as mock_settings:
-            mock_settings.llm.english.max_tokens = 500
-            mock_settings.llm.german.max_tokens = 700
+            mock_settings.llm.english.max_tokens = 512
+            mock_settings.llm.german.max_tokens = 768
+            mock_settings.llm.italian.max_tokens = 669
+            mock_settings.llm.french.max_tokens = 630
             
             result = get_max_tokens_map()
             
             assert isinstance(result, dict)
-            assert result[LanguageCodes.ENGLISH] == 500
-            assert result[LanguageCodes.GERMAN] == 700
+            assert result[LanguageCodes.ENGLISH] == 512
+            assert result[LanguageCodes.GERMAN] == 768
+            assert result[LanguageCodes.ITALIAN] == 669
+            assert result[LanguageCodes.FRENCH] == 630
     
     def test_get_max_tokens_map_different_values(self):
         """Test returns correct max tokens for different languages."""
@@ -171,11 +211,15 @@ class TestGetMaxTokensMap:
         with patch('chatbot.settings.settings') as mock_settings:
             mock_settings.llm.english.max_tokens = 1000
             mock_settings.llm.german.max_tokens = 1200
+            mock_settings.llm.italian.max_tokens = 900
+            mock_settings.llm.french.max_tokens = 800
             
             result = get_max_tokens_map()
             
             assert result[LanguageCodes.ENGLISH] == 1000
             assert result[LanguageCodes.GERMAN] == 1200
+            assert result[LanguageCodes.ITALIAN] == 900
+            assert result[LanguageCodes.FRENCH] == 800
 
 
 @pytest.mark.unit
@@ -380,8 +424,8 @@ class TestLanguageUtilsIntegration:
         setup_language_detector([Language.ENGLISH, Language.GERMAN])
         
         with patch('chatbot.settings.settings') as mock_settings:
-            mock_settings.llm.english.max_tokens = 500
-            mock_settings.llm.german.max_tokens = 700
+            mock_settings.llm.english.max_tokens = 512
+            mock_settings.llm.german.max_tokens = 768
             
             # Detect language
             text = "This is English"
@@ -389,8 +433,8 @@ class TestLanguageUtilsIntegration:
             
             # Get max tokens for detected language
             max_tokens_map = get_max_tokens_map()
-            max_tokens = max_tokens_map.get(detected_lang, 500)
+            max_tokens = max_tokens_map.get(detected_lang, 512)
             
-            assert max_tokens == 500  # English max tokens
+            assert max_tokens == 512  # English max tokens
 
 # Made with Bob
