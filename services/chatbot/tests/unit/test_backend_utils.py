@@ -31,6 +31,7 @@ class TestSearchOnly:
             "results": []
         }
         mock_response.raise_for_status = Mock()
+        mock_response.headers = {}
         mock_post = Mock(return_value=mock_response)
         monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
 
@@ -56,8 +57,8 @@ class TestSearchOnly:
         assert json_payload["top_k"] == 10
         assert json_payload["rerank"] is True
 
-    def test_returns_perf_stat_dict_with_api_timing(self, monkeypatch):
-        """search_only must return perf_stat_dict with API call timing."""
+    def test_returns_perf_stat_dict_with_timing_from_headers(self, monkeypatch):
+        """search_only must return perf_stat_dict with timing from similarity service headers."""
         from chatbot import backend_utils
 
         self._patch_settings(monkeypatch, threshold=0.0)
@@ -66,6 +67,11 @@ class TestSearchOnly:
         mock_response = Mock()
         mock_response.json.return_value = {"score_type": "relevance", "results": [doc]}
         mock_response.raise_for_status = Mock()
+        # Mock response headers with timing information
+        mock_response.headers = {
+            "X-Retrieve-Time": "0.123",
+            "X-Rerank-Time": "0.045"
+        }
         mock_post = Mock(return_value=mock_response)
         monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
 
@@ -75,8 +81,11 @@ class TestSearchOnly:
             top_k=10, top_r=5, vectorstore=Mock(),
         )
 
-        assert "similarity_api_time" in perf_stat_dict
-        assert perf_stat_dict["similarity_api_time"] >= 0
+        # Verify timing metrics from headers are included
+        assert "retrieve_time" in perf_stat_dict
+        assert perf_stat_dict["retrieve_time"] == 0.123
+        assert "rerank_time" in perf_stat_dict
+        assert perf_stat_dict["rerank_time"] == 0.045
 
     def test_applies_top_r_cutoff(self, monkeypatch):
         """search_only must truncate to top_r documents after retrieval."""
@@ -89,6 +98,7 @@ class TestSearchOnly:
         mock_response = Mock()
         mock_response.json.return_value = {"score_type": "relevance", "results": docs}
         mock_response.raise_for_status = Mock()
+        mock_response.headers = {}
         mock_post = Mock(return_value=mock_response)
         monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
 
@@ -114,6 +124,7 @@ class TestSearchOnly:
         mock_response = Mock()
         mock_response.json.return_value = {"score_type": "relevance", "results": docs}
         mock_response.raise_for_status = Mock()
+        mock_response.headers = {}
         mock_post = Mock(return_value=mock_response)
         monkeypatch.setattr("chatbot.backend_utils.requests.post", mock_post)
 

@@ -646,6 +646,22 @@ func extractTarEntry(tr *tar.Reader, header *tar.Header, destDir string) error {
 	return nil
 }
 
+// ErrorResponse represents an error response.
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+// ParseErrorResponse attempts to parse the error response from the API.
+// It returns the error message if successfully parsed, otherwise returns the raw response body.
+func ParseErrorResponse(resp *resty.Response) string {
+	var errResp ErrorResponse
+	if err := json.Unmarshal(resp.Body(), &errResp); err == nil && errResp.Error != "" {
+		return errResp.Error
+	}
+
+	return resp.String()
+}
+
 // GetNumericValFromMap safely extracts a numeric value from a map as an integer, returning 0 if not found or not a number.
 // Handles both int and float64 types from JSON unmarshaling.
 func GetNumericValFromMap(m map[string]interface{}, key string) int {
@@ -661,20 +677,4 @@ func GetNumericValFromMap(m map[string]interface{}, key string) int {
 	}
 
 	return 0
-}
-
-// ErrorResponse represents an error response.
-type ErrorResponse struct {
-	Error string `json:"error"`
-}
-
-// ParseErrorResponse attempts to parse the error response from the API.
-// It returns the error message if successfully parsed, otherwise returns the raw response body.
-func ParseErrorResponse(resp *resty.Response) string {
-	var errResp ErrorResponse
-	if err := json.Unmarshal(resp.Body(), &errResp); err == nil && errResp.Error != "" {
-		return errResp.Error
-	}
-
-	return resp.String()
 }

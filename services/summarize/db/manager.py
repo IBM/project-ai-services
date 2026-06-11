@@ -276,6 +276,28 @@ class DatabaseManager:
             logger.error(f"Unexpected error retrieving active jobs: {e}", exc_info=True)
             return []
 
+    @staticmethod
+    def delete_all_jobs() -> bool:
+        """
+        Delete all jobs from the database.
+        Used for bulk cleanup operations.
+        
+        Returns:
+            True if deletion successful, False otherwise
+        """
+        try:
+            with get_db_session() as session:
+                stmt = delete(SummarizeJob)
+                result = session.execute(stmt)
+                logger.info(f"Deleted {result.rowcount} jobs from database")
+                return True
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting all jobs: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error deleting all jobs: {e}", exc_info=True)
+            return False
+
 
 # Singleton instance for easy access
 db_repo = DatabaseManager()

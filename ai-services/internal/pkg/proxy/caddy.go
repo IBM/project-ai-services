@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -47,13 +48,13 @@ func NewCaddyManager(adminURL, serverName string) ProxyManager {
 }
 
 // GetCaddyProxyManager retrieves the Caddy admin URL from environment and creates a ProxyManager.
-func GetCaddyProxyManager(serverName string) (ProxyManager, error) {
+func GetCaddyProxyManager() (ProxyManager, error) {
 	adminURL := utils.GetEnv("CADDY_ADMIN_URL", "")
 	if adminURL == "" {
 		return nil, fmt.Errorf("CADDY_ADMIN_URL environment variable not set")
 	}
 
-	return NewCaddyManager(adminURL, serverName), nil
+	return NewCaddyManager(adminURL, constants.CaddyServerName), nil
 }
 
 // HealthCheck verifies Caddy is running and accessible.
@@ -244,9 +245,8 @@ func (c *caddyManager) UnregisterRoute(routeID string) error {
 // Parameters:
 //   - rt: Runtime interface for interacting with pods
 //   - appName: Name of the application (e.g., "ai-services" for catalog)
-//   - serverName: Caddy server name (e.g., "ai_services")
+//   - proxyManager: ProxyManager instance for route operations (reuse to avoid creating multiple instances)
 //   - routesAnnotation: Routes annotation value in format "port:subdomain,port:subdomain,..."
-//   - adminURL: Caddy admin API URL (e.g., "http://localhost:37249" or "http://ai-services--caddy:2019")
 //   - domainSuffix: Pre-computed domain suffix (e.g., "example.com" or "192.168.1.100.nip.io")
 //   - servicePodName: Name of the service pod for upstream configuration
 //
@@ -256,16 +256,12 @@ func (c *caddyManager) UnregisterRoute(routeID string) error {
 func RegisterRoutesForAppAndReturn(
 	rt runtime.Runtime,
 	appName string,
-	serverName string,
+	proxyManager ProxyManager,
 	routesAnnotation string,
-	adminURL string,
 	domainSuffix string,
 	servicePodName string,
 ) ([]Route, error) {
-	// Step 1: Create proxy manager with the provided admin URL
-	proxyManager := NewCaddyManager(adminURL, serverName)
-
-	// Step 2: Perform health check on Caddy
+	// Step 1: Perform health check on Caddy
 	if err := proxyManager.HealthCheck(); err != nil {
 		return nil, fmt.Errorf(
 			"caddy health check failed, routes not registered: %w",
@@ -273,13 +269,13 @@ func RegisterRoutesForAppAndReturn(
 		)
 	}
 
-	// Step 3: Build routes from the annotation string using service pod name for upstreams
+	// Step 2: Build routes from the annotation string using service pod name for upstreams
 	routes, err := BuildRoutesFromAnnotation(routesAnnotation, domainSuffix, servicePodName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build routes: %w", err)
 	}
 
-	// Step 4: Register each route with Caddy
+	// Step 3: Register each route with Caddy
 	var registrationErrors []error
 	for _, route := range routes {
 		if err := proxyManager.RegisterRoute(route); err != nil {

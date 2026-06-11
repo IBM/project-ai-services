@@ -1121,7 +1121,7 @@ func (d *PodmanDeployer) getEnvParamsForComponent(podSpec *podmodels.PodSpec, pl
 func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *DeploymentPlan) error {
 	logger.Infof("Registering routes for application '%s'\n", plan.ApplicationName)
 
-	adminURL, domainSuffix, httpsPort, err := d.getCaddyConfiguration()
+	domainSuffix, httpsPort, proxyManager, err := d.getCaddyConfiguration()
 	if err != nil {
 		return err
 	}
@@ -1133,7 +1133,7 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 			continue
 		}
 
-		if err := d.registerServiceRoutes(ctx, svc, adminURL, domainSuffix, httpsPort, &registrationErrors); err != nil {
+		if err := d.registerServiceRoutes(ctx, svc, proxyManager, domainSuffix, httpsPort, &registrationErrors); err != nil {
 			registrationErrors = append(registrationErrors, err)
 		}
 	}
@@ -1147,30 +1147,31 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 	return nil
 }
 
-// getCaddyConfiguration retrieves Caddy admin URL and host IP from environment variables.
-func (d *PodmanDeployer) getCaddyConfiguration() (string, string, string, error) {
-	adminURL := utils.GetEnv("CADDY_ADMIN_URL", "")
-	if adminURL == "" {
-		return "", "", "", fmt.Errorf("CADDY_ADMIN_URL environment variable not set")
-	}
-
+// getCaddyConfiguration retrieves Caddy configuration and creates a ProxyManager.
+func (d *PodmanDeployer) getCaddyConfiguration() (string, string, proxy.ProxyManager, error) {
 	// Get domain suffix from env var (set during catalog configure)
 	// This is pre-computed: certDomain OR customDomain OR hostIP.nip.io
 	domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
 	if domainSuffix == "" {
-		return "", "", "", fmt.Errorf("DOMAIN_SUFFIX environment variable not set")
+		return "", "", nil, fmt.Errorf("DOMAIN_SUFFIX environment variable not set")
 	}
 
 	httpsPort := utils.GetEnv("CADDY_HTTPS_PORT", catalogconstants.DefaultHTTPSPort)
 
-	return adminURL, domainSuffix, httpsPort, nil
+	// Get Caddy proxy manager - fails if CADDY_ADMIN_URL not set
+	proxyManager, err := proxy.GetCaddyProxyManager()
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	return domainSuffix, httpsPort, proxyManager, nil
 }
 
 // registerServiceRoutes registers routes for a single service and updates its endpoints in the database.
 func (d *PodmanDeployer) registerServiceRoutes(
 	ctx context.Context,
 	svc *ServicePlan,
-	adminURL string,
+	proxyManager proxy.ProxyManager,
 	domainSuffix string,
 	httpsPort string,
 	registrationErrors *[]error,
@@ -1182,9 +1183,8 @@ func (d *PodmanDeployer) registerServiceRoutes(
 		registeredRoutes, err := proxy.RegisterRoutesForAppAndReturn(
 			d.runtime,
 			catalogconstants.CatalogAppName,
-			constants.CaddyServerName,
+			proxyManager,
 			routesAnnotation,
-			adminURL,
 			domainSuffix,
 			podName,
 		)

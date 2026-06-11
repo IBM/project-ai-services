@@ -10,7 +10,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -61,7 +60,7 @@ func (s *DeletionService) PerformDeletion(ctx context.Context, appID uuid.UUID, 
 	}
 
 	// Get Caddy proxy manager - fail if CADDY_ADMIN_URL not set
-	proxyManager, err := proxy.GetCaddyProxyManager(constants.CaddyServerName)
+	proxyManager, err := proxy.GetCaddyProxyManager()
 	if err != nil {
 		logger.Errorf("failed to get Caddy proxy manager for app %s: %s", appID, err)
 		_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, fmt.Sprintf("failed to get Caddy proxy manager: %s", err))

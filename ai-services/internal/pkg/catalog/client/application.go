@@ -9,6 +9,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
+// API route constants for application endpoints.
+const (
+	listApplicationsRoute = "/api/v1/applications"
+	getApplicationPSRoute = "/api/v1/applications/%s/ps"
+	getApplicationRoute   = "/api/v1/applications/%s"
+)
+
 // ApplicationClient provides methods for interacting with the applications API.
 type ApplicationClient struct {
 	httpClient *resty.Client
@@ -61,7 +68,7 @@ func (c *ApplicationClient) ListApplications(params *ListApplicationsParams) (*t
 		}
 	}
 
-	resp, err := req.Get("/api/v1/applications")
+	resp, err := req.Get(listApplicationsRoute)
 	if err != nil {
 		return nil, fmt.Errorf("list applications: %w", err)
 	}
@@ -99,13 +106,63 @@ func (c *ApplicationClient) GetApplicationPS(id string) (*types.ApplicationPSRes
 	resp, err := c.httpClient.R().
 		SetHeader("Authorization", "Bearer "+c.client.AccessToken()).
 		SetResult(&result).
-		Get(fmt.Sprintf("/api/v1/applications/%s/ps", id))
+		Get(fmt.Sprintf(getApplicationPSRoute, id))
 	if err != nil {
 		return nil, fmt.Errorf("get application ps: %w", err)
 	}
 
 	if resp.IsError() {
 		return nil, fmt.Errorf("get application ps: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return &result, nil
+}
+
+// DeleteApplication deletes an application by its ID.
+// It removes the application and all its associated resources.
+// Supports optional parameters via the params argument.
+//
+// Example:
+//
+//	client := NewApplicationClient()
+//	err := client.DeleteApplication("rag", &DeleteApplicationParams{
+//	    KeepData: true,
+//	})
+func (c *ApplicationClient) DeleteApplication(id string, params *DeleteApplicationParams) error {
+	req := c.httpClient.R().
+		SetHeader("Authorization", "Bearer "+c.client.AccessToken())
+
+	if params != nil {
+		if params.KeepData {
+			req.SetQueryParam("keep_data", "true")
+		}
+	}
+
+	resp, err := req.Delete(fmt.Sprintf(getApplicationRoute, id))
+	if err != nil {
+		return fmt.Errorf("delete application: %w", err)
+	}
+
+	if resp.IsError() {
+		return fmt.Errorf("delete application: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return nil
+}
+
+// GetApplication retrieves full details for a specific application by ID.
+func (c *ApplicationClient) GetApplication(id string) (*types.Application, error) {
+	var result types.Application
+	resp, err := c.httpClient.R().
+		SetHeader("Authorization", "Bearer "+c.client.AccessToken()).
+		SetResult(&result).
+		Get(fmt.Sprintf(getApplicationRoute, id))
+	if err != nil {
+		return nil, fmt.Errorf("get application: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("get application: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
 	}
 
 	return &result, nil
