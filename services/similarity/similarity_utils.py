@@ -38,7 +38,13 @@ class SimilaritySearchResult(BaseModel):
 
 
 class SimilaritySearchResponse(BaseModel):
-    """Response from POST /v1/similarity-search"""
+    """Response from POST /v1/similarity-search
+
+    Note: Timing information is provided in response headers:
+    - X-Retrieve-Time: Time spent retrieving documents (seconds)
+    - X-Rerank-Time: Time spent reranking (seconds, only present if reranking was used)
+    - X-Total-Time: Total processing time (seconds)
+    """
     score_type: str = Field(
         ...,
         description="'cosine' for dense-only results, 'relevance' when reranked"
@@ -87,19 +93,29 @@ def perform_similarity_search(
     mode: str,
     reranker_model: Optional[str] = None,
     reranker_endpoint: Optional[str] = None,
-    return_timings: bool = False,
 ):
     """
     Run vector similarity search using the specified mode, with optional Cohere reranking.
 
-    Returns (return_timings=False):
-        docs       - list of document dicts (page_content, filename, type, source, chunk_id)
-        scores     - parallel list of float scores
-        score_type - "cosine", "bm25", "hybrid", or "relevance" (when reranked)
+    Args:
+        query: Natural language search query
+        emb_model: Embedding model name
+        emb_endpoint: Embedding model endpoint URL
+        emb_max_model_len: Maximum token length for embedding model
+        vectorstore: Vector store instance
+        top_k: Number of results to return
+        rerank: Whether to apply reranking
+        mode: Search mode (dense/sparse/hybrid)
+        reranker_model: Reranker model name (required if rerank=True)
+        reranker_endpoint: Reranker endpoint URL (required if rerank=True)
 
-    Returns (return_timings=True):
-        docs, scores, score_type, perf_stat_dict
-        where perf_stat_dict contains "retrieve_time" and, when rerank=True, "rerank_time".
+    Returns:
+        tuple: (docs, scores, score_type, perf_stat_dict)
+
+        - docs: list of document dicts (page_content, filename, type, source, chunk_id)
+        - scores: parallel list of float scores
+        - score_type: "cosine", "bm25", "hybrid", or "relevance" (when reranked)
+        - perf_stat_dict: dict with "retrieve_time" and optionally "rerank_time"
     """
     perf_stat_dict: dict = {}
 
@@ -132,6 +148,4 @@ def perform_similarity_search(
         scores = [s for _, s in reranked]
         score_type = "relevance"
 
-    if return_timings:
-        return docs, scores, score_type, perf_stat_dict
-    return docs, scores, score_type
+    return docs, scores, score_type, perf_stat_dict
