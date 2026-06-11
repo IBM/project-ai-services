@@ -153,15 +153,15 @@
     },
     {
       "id": "9",
-      "title": "Order processing assistant (coming soon)",
-      "description": "Streamlines order processing by automatically extracting relevant information and populating the correct ERP forms.",
+      "title": "Order processing assistant",
+      "description": "(coming soon) Streamlines order processing by automatically extracting relevant information and populating the correct ERP forms.",
       "creator": "IBM",
       "domain": "Enterprise Resource Planning",
       "architectures": [
-        "Extract information"
+        "Extract information (coming soon...)"
       ],
       "assets": [
-        "Extract information"
+        "Extract information (coming soon...)"
       ],
       "demo": "https://mediacenter.ibm.com/media/IBM+Spyre+for+Power%3A+Turn-key+AI/1_etcvyc6u",
       "demoTitle": "IBM Spyre Accelerator: Turn-key solution for AI enterprise workloads",
@@ -201,10 +201,10 @@
       "creator": "IBM",
       "domain": "Real estate",
       "architectures": [
-        "XXXXXXXXXXX"
+        "Digital assistant"
       ],
       "assets": [
-        "XXXXXXXXXXX"
+        "Digital assistant"
       ],
       "featuredArticle": {
         "company": "Edsvard Hallbarhet AB",
@@ -227,14 +227,14 @@
     {
       "id": "12",
       "title": "Production planning",
-      "description": "Reduce volatility, optimize batch sizes, and better coordinate materials and manufacturing capacity across the entire production chain.",
+      "description": "(Coming soon...) Reduce volatility, optimize batch sizes, and better coordinate materials and manufacturing capacity across the entire production chain.",
       "creator": "IBM",
       "domain": "Manufacturing",
       "architectures": [
-        "Forecasting"
+        "Forecasting (coming soon...)"
       ],
       "assets": [
-        "Forecasting"
+        "Forecasting (coming soon...)"
       ],
       "featuredArticle": {
         "company": "BECOM Electronics GmbH",

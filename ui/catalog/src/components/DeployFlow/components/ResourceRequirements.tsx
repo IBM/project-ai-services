@@ -95,11 +95,6 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
                     <span className={styles.unit}> {resource.unit}</span>
                   )}
                 </p>
-                {resource.total !== "N/A" && (
-                  <p className={styles.resourceTotal}>
-                    Total: {resource.total} {resource.unit}
-                  </p>
-                )}
               </Tile>
             );
           })}

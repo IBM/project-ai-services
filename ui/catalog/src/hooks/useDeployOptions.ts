@@ -2,18 +2,17 @@ import { useEffect, useRef } from "react";
 import { useDeployStore } from "@/store/deploy.store";
 import { fetchDeployOptions } from "@/api/digitalAssistants";
 
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-
 /**
  * Custom hook to fetch and cache deploy options
- * Uses Zustand store to cache data and avoid redundant API calls
+ * Uses Zustand store to cache data (no time-based expiration)
+ * Deploy options are static catalog metadata that only change when architecture definitions are updated
  */
 export const useDeployOptions = () => {
   const {
+    selectedArchitectureId,
     deployOptions,
     deployOptionsLoading,
     deployOptionsError,
-    deployOptionsFetchedAt,
     setDeployOptions,
     setDeployOptionsLoading,
     setDeployOptionsError,
@@ -27,22 +26,19 @@ export const useDeployOptions = () => {
     !deployOptions && !deployOptionsError && !deployOptionsLoading;
 
   useEffect(() => {
-    // Check if cache is stale
-    const isStale = deployOptionsFetchedAt
-      ? Date.now() - deployOptionsFetchedAt > CACHE_DURATION
-      : true;
+    // Don't fetch if we don't have an architecture ID yet
+    if (!selectedArchitectureId) {
+      return;
+    }
 
-    // Only fetch if we don't have data or if cache is stale, and we haven't already started fetching
-    if (
-      (!deployOptions || isStale) &&
-      !hasFetched.current &&
-      !deployOptionsLoading
-    ) {
+    // Only fetch if we don't have data and we haven't already started fetching
+    // No time-based expiration - deployOptions are static catalog metadata
+    if (!deployOptions && !hasFetched.current && !deployOptionsLoading) {
       hasFetched.current = true;
       setDeployOptionsLoading(true);
       setDeployOptionsError(null);
 
-      fetchDeployOptions()
+      fetchDeployOptions(selectedArchitectureId)
         .then((data) => {
           setDeployOptions(data);
         })
@@ -58,8 +54,8 @@ export const useDeployOptions = () => {
         });
     }
   }, [
+    selectedArchitectureId,
     deployOptions,
-    deployOptionsFetchedAt,
     deployOptionsLoading,
     setDeployOptions,
     setDeployOptionsLoading,

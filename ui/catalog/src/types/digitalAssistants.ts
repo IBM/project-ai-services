@@ -1,3 +1,12 @@
+// Architecture Types - Used for listing available architectures
+export interface ArchitectureSummary {
+  id: string;
+  name: string;
+  description: string;
+  certified_by: string;
+  services: string[];
+}
+
 // Deploy Options Types - Used for fetching deployment configuration
 export interface Provider {
   id: string;
