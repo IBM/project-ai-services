@@ -13,9 +13,9 @@ class TestQueryVLLMPayloadGermanSupport:
     """Tests for German language support in query_vllm_payload function."""
     
     @patch('common.llm_utils.resolve_model_max_len')
-    @patch('common.llm_utils.chatbot_settings')
+    @patch('chatbot.settings.settings')
     @patch('common.llm_utils.tokenize_with_llm')
-    @patch('common.llm_utils.truncate_history_by_tokens')
+    @patch('chatbot.conversation_utils.truncate_history_by_tokens')
     def test_uses_german_system_prompt_for_de_language(
         self, mock_truncate, mock_tokenize, mock_settings, mock_resolve_len
     ):
@@ -40,7 +40,7 @@ class TestQueryVLLMPayloadGermanSupport:
         mock_resolve_len.return_value = 4096
         
         # Call with German language
-        result = query_vllm_payload(
+        headers, payload = query_vllm_payload(
             question="Test query",
             documents=[{"page_content": "Test context"}],
             llm_endpoint="http://test",
@@ -55,7 +55,7 @@ class TestQueryVLLMPayloadGermanSupport:
         )
         
         # Verify German system prompt is used
-        messages = result["messages"]
+        messages = payload["messages"]
         assert len(messages) >= 2
         assert messages[0]["role"] == "system"
         assert messages[0]["content"] == "Sie sind ein hilfreicher Assistent."
@@ -64,9 +64,9 @@ class TestQueryVLLMPayloadGermanSupport:
         assert any("Sitzungssprache: Deutsch" in msg["content"] for msg in messages if msg["role"] == "system")
     
     @patch('common.llm_utils.resolve_model_max_len')
-    @patch('common.llm_utils.chatbot_settings')
+    @patch('chatbot.settings.settings')
     @patch('common.llm_utils.tokenize_with_llm')
-    @patch('common.llm_utils.truncate_history_by_tokens')
+    @patch('chatbot.conversation_utils.truncate_history_by_tokens')
     def test_uses_english_system_prompt_for_en_language(
         self, mock_truncate, mock_tokenize, mock_settings, mock_resolve_len
     ):
@@ -87,7 +87,7 @@ class TestQueryVLLMPayloadGermanSupport:
         mock_resolve_len.return_value = 4096
         
         # Call with English language
-        result = query_vllm_payload(
+        headers, payload = query_vllm_payload(
             question="Test query",
             documents=[{"page_content": "Test context"}],
             llm_endpoint="http://test",
@@ -102,7 +102,7 @@ class TestQueryVLLMPayloadGermanSupport:
         )
         
         # Verify English system prompt is used
-        messages = result["messages"]
+        messages = payload["messages"]
         assert messages[0]["role"] == "system"
         assert messages[0]["content"] == "You are a helpful assistant."
         
@@ -110,9 +110,9 @@ class TestQueryVLLMPayloadGermanSupport:
         assert any("Session language: English" in msg["content"] for msg in messages if msg["role"] == "system")
     
     @patch('common.llm_utils.resolve_model_max_len')
-    @patch('common.llm_utils.chatbot_settings')
+    @patch('chatbot.settings.settings')
     @patch('common.llm_utils.tokenize_with_llm')
-    @patch('common.llm_utils.truncate_history_by_tokens')
+    @patch('chatbot.conversation_utils.truncate_history_by_tokens')
     def test_fallback_to_english_for_unsupported_language(
         self, mock_truncate, mock_tokenize, mock_settings, mock_resolve_len
     ):
@@ -132,7 +132,7 @@ class TestQueryVLLMPayloadGermanSupport:
         mock_resolve_len.return_value = 4096
         
         # Call with unsupported language
-        result = query_vllm_payload(
+        headers, payload = query_vllm_payload(
             question="Test query",
             documents=[{"page_content": "Test context"}],
             llm_endpoint="http://test",
@@ -141,20 +141,20 @@ class TestQueryVLLMPayloadGermanSupport:
             max_new_tokens=500,
             temperature=0.7,
             stream=False,
-            lang="FR",  # French - not supported
+            lang="ES",  # Spanish - not supported, should fallback to English
             previous_messages=[],
             rephrased_query="Test query"
         )
         
         # Should fallback to English
-        messages = result["messages"]
+        messages = payload["messages"]
         assert messages[0]["role"] == "system"
         assert messages[0]["content"] == "You are a helpful assistant."
     
     @patch('common.llm_utils.resolve_model_max_len')
-    @patch('common.llm_utils.chatbot_settings')
+    @patch('chatbot.settings.settings')
     @patch('common.llm_utils.tokenize_with_llm')
-    @patch('common.llm_utils.truncate_history_by_tokens')
+    @patch('chatbot.conversation_utils.truncate_history_by_tokens')
     def test_german_query_system_prompt_formatting(
         self, mock_truncate, mock_tokenize, mock_settings, mock_resolve_len
     ):
@@ -180,7 +180,7 @@ class TestQueryVLLMPayloadGermanSupport:
         test_query = "Was ist die Antwort?"
         
         # Call with German language
-        result = query_vllm_payload(
+        headers, payload = query_vllm_payload(
             question=test_query,
             documents=[{"page_content": test_context}],
             llm_endpoint="http://test",
@@ -195,7 +195,7 @@ class TestQueryVLLMPayloadGermanSupport:
         )
         
         # Find the query system message
-        messages = result["messages"]
+        messages = payload["messages"]
         query_system_msg = None
         for msg in messages:
             if msg["role"] == "system" and "Sitzungssprache: Deutsch" in msg["content"]:
@@ -209,9 +209,9 @@ class TestQueryVLLMPayloadGermanSupport:
         assert "Suchanfrage:" in query_system_msg["content"]
     
     @patch('common.llm_utils.resolve_model_max_len')
-    @patch('common.llm_utils.chatbot_settings')
+    @patch('chatbot.settings.settings')
     @patch('common.llm_utils.tokenize_with_llm')
-    @patch('common.llm_utils.truncate_history_by_tokens')
+    @patch('chatbot.conversation_utils.truncate_history_by_tokens')
     def test_german_with_conversation_history(
         self, mock_truncate, mock_tokenize, mock_settings, mock_resolve_len
     ):
@@ -236,7 +236,7 @@ class TestQueryVLLMPayloadGermanSupport:
         mock_resolve_len.return_value = 4096
         
         # Call with German language and history
-        result = query_vllm_payload(
+        headers, payload = query_vllm_payload(
             question="Erzähl mir mehr",
             documents=[{"page_content": "Test context"}],
             llm_endpoint="http://test",
@@ -251,7 +251,7 @@ class TestQueryVLLMPayloadGermanSupport:
         )
         
         # Verify history is included
-        messages = result["messages"]
+        messages = payload["messages"]
         assert len(messages) >= 4  # system, history (2), query system, user
         
         # Find history messages
@@ -265,9 +265,9 @@ class TestLanguageSwitchingInQueryVLLMPayload:
     """Tests for language switching behavior in query_vllm_payload."""
     
     @patch('common.llm_utils.resolve_model_max_len')
-    @patch('common.llm_utils.chatbot_settings')
+    @patch('chatbot.settings.settings')
     @patch('common.llm_utils.tokenize_with_llm')
-    @patch('common.llm_utils.truncate_history_by_tokens')
+    @patch('chatbot.conversation_utils.truncate_history_by_tokens')
     def test_consistent_language_across_calls(
         self, mock_truncate, mock_tokenize, mock_settings, mock_resolve_len
     ):
@@ -286,7 +286,7 @@ class TestLanguageSwitchingInQueryVLLMPayload:
         mock_resolve_len.return_value = 4096
         
         # Multiple calls with German
-        result1 = query_vllm_payload(
+        headers1, payload1 = query_vllm_payload(
             question="Query 1",
             documents=[{"page_content": "Context 1"}],
             llm_endpoint="http://test",
@@ -300,7 +300,7 @@ class TestLanguageSwitchingInQueryVLLMPayload:
             rephrased_query="Query 1"
         )
         
-        result2 = query_vllm_payload(
+        headers2, payload2 = query_vllm_payload(
             question="Query 2",
             documents=[{"page_content": "Context 2"}],
             llm_endpoint="http://test",
@@ -315,8 +315,8 @@ class TestLanguageSwitchingInQueryVLLMPayload:
         )
         
         # Both should use German system prompt
-        assert result1["messages"][0]["content"] == result2["messages"][0]["content"]
-        assert "Sie sind ein hilfreicher Assistent" in result1["messages"][0]["content"]
-        assert "Sie sind ein hilfreicher Assistent" in result2["messages"][0]["content"]
+        assert payload1["messages"][0]["content"] == payload2["messages"][0]["content"]
+        assert "Sie sind ein hilfreicher Assistent" in payload1["messages"][0]["content"]
+        assert "Sie sind ein hilfreicher Assistent" in payload2["messages"][0]["content"]
 
 # Made with Bob
