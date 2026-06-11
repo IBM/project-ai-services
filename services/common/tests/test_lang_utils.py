@@ -21,7 +21,7 @@ class TestLanguageCodes:
         assert LanguageCodes.GERMAN == "DE"
         assert LanguageCodes.ITALIAN == "IT"
         assert LanguageCodes.FRENCH == "FR"
-    
+
     def test_language_codes_are_strings(self):
         """Test that language codes are string types."""
         from common.lang_utils import LanguageCodes
@@ -30,7 +30,7 @@ class TestLanguageCodes:
         assert isinstance(LanguageCodes.GERMAN, str)
         assert isinstance(LanguageCodes.ITALIAN, str)
         assert isinstance(LanguageCodes.FRENCH, str)
-    
+
     def test_to_sentence_splitter_english(self):
         """Test conversion of English code to sentence splitter format."""
         from common.lang_utils import to_sentence_splitter_lang, LanguageCodes
@@ -44,21 +44,21 @@ class TestLanguageCodes:
         
         result = to_sentence_splitter_lang(LanguageCodes.GERMAN)
         assert result == "de"
-    
+
     def test_to_sentence_splitter_italian(self):
         """Test conversion of Italian code to sentence splitter format."""
         from common.lang_utils import to_sentence_splitter_lang, LanguageCodes
-        
+
         result = to_sentence_splitter_lang(LanguageCodes.ITALIAN)
         assert result == "it"
-    
+
     def test_to_sentence_splitter_french(self):
         """Test conversion of French code to sentence splitter format."""
         from common.lang_utils import to_sentence_splitter_lang, LanguageCodes
-        
+
         result = to_sentence_splitter_lang(LanguageCodes.FRENCH)
         assert result == "fr"
-    
+
     def test_to_sentence_splitter_with_string_literal(self):
         """Test conversion works with string literals."""
         from common.lang_utils import to_sentence_splitter_lang
@@ -67,7 +67,7 @@ class TestLanguageCodes:
         assert to_sentence_splitter_lang("DE") == "de"
         assert to_sentence_splitter_lang("IT") == "it"
         assert to_sentence_splitter_lang("FR") == "fr"
-    
+
     def test_to_sentence_splitter_unsupported_language(self):
         """Test fallback to English for unsupported language codes."""
         from common.lang_utils import to_sentence_splitter_lang
@@ -91,13 +91,13 @@ class TestLanguageCodes:
         assert LanguageCodes.GERMAN in LanguageCodes._TO_SENTENCE_SPLITTER
         assert LanguageCodes.ITALIAN in LanguageCodes._TO_SENTENCE_SPLITTER
         assert LanguageCodes.FRENCH in LanguageCodes._TO_SENTENCE_SPLITTER
-        
+
         # Verify the values are lowercase versions
         assert LanguageCodes._TO_SENTENCE_SPLITTER[LanguageCodes.ENGLISH] == "en"
         assert LanguageCodes._TO_SENTENCE_SPLITTER[LanguageCodes.GERMAN] == "de"
         assert LanguageCodes._TO_SENTENCE_SPLITTER[LanguageCodes.ITALIAN] == "it"
         assert LanguageCodes._TO_SENTENCE_SPLITTER[LanguageCodes.FRENCH] == "fr"
-    
+
     def test_language_codes_immutable(self):
         """Test that language codes maintain their values (not accidentally modified)."""
         from common.lang_utils import LanguageCodes
@@ -107,7 +107,7 @@ class TestLanguageCodes:
         original_german = LanguageCodes.GERMAN
         original_italian = LanguageCodes.ITALIAN
         original_french = LanguageCodes.FRENCH
-        
+
         # Verify they haven't changed
         assert LanguageCodes.ENGLISH == original_english
         assert LanguageCodes.GERMAN == original_german
@@ -213,7 +213,7 @@ class TestGetMaxTokensMap:
             mock_settings.llm.german.max_tokens = 1200
             mock_settings.llm.italian.max_tokens = 900
             mock_settings.llm.french.max_tokens = 800
-            
+
             result = get_max_tokens_map()
             
             assert result[LanguageCodes.ENGLISH] == 1000
