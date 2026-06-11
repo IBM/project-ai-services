@@ -213,7 +213,14 @@ class QueryRephrasingConfig(BaseSettings):
     french: FrenchConfig = Field(default_factory=FrenchConfig)
 
 class LLMConfig(BaseSettings):
-    """Chatbot-specific LLM generation settings."""
+    """Chatbot-specific LLM generation settings.
+    
+    Token Ratios: English:French:Italian:German = 1 : 1.2305 : 1.3066 : 1.5
+    
+    These ratios account for the fact that different languages require different numbers
+    of tokens to express the same semantic content, ensuring fair token allocation across
+    all supported languages.
+    """
     
     class EnglishConfig(BaseSettings):
         """English-specific LLM settings."""
