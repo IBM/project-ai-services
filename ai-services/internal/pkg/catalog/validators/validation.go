@@ -160,6 +160,11 @@ func (v *ApplicationValidator) ValidateComponentParams(componentType, providerID
 
 // validateServiceComponents validates all components in a service.
 func (v *ApplicationValidator) validateServiceComponents(components []apimodels.Component) error {
+	// Check for duplicate components (same component_type + provider_id combination)
+	if err := v.validateNoDuplicateComponents(components); err != nil {
+		return err
+	}
+
 	for _, component := range components {
 		if err := v.ValidateSingleComponent(component); err != nil {
 			return err
@@ -169,10 +174,64 @@ func (v *ApplicationValidator) validateServiceComponents(components []apimodels.
 	return nil
 }
 
+// validateNoDuplicateComponents ensures no duplicate component type exists in the array.
+func (v *ApplicationValidator) validateNoDuplicateComponents(components []apimodels.Component) error {
+	seen := make(map[string]bool)
+
+	for _, component := range components {
+		// Create unique key based on component type only
+		componentKey := component.ComponentType
+
+		if seen[componentKey] {
+			return &ValidationError{
+				Code: http.StatusBadRequest,
+				Message: fmt.Sprintf(
+					"Duplicate component found: component type '%s' appears multiple times. "+
+						"Each component type must be unique within a service",
+					component.ComponentType,
+				),
+			}
+		}
+
+		seen[componentKey] = true
+	}
+
+	return nil
+}
+
+// validateComponentsMatchDependencies validates that all components in the request
+// are supported by the service (i.e., match the service's dependencies).
+func (v *ApplicationValidator) validateComponentsMatchDependencies(
+	components []apimodels.Component,
+	catalogService *types.Service,
+) error {
+	// Build a map of supported component types from service dependencies
+	supportedComponents := make(map[string]bool)
+	for _, dep := range catalogService.Dependencies {
+		supportedComponents[dep.ID] = true
+	}
+
+	// Check each component in the request
+	for _, component := range components {
+		if !supportedComponents[component.ComponentType] {
+			return &ValidationError{
+				Code: http.StatusBadRequest,
+				Message: fmt.Sprintf(
+					"Component type '%s' is not supported by service '%s'",
+					component.ComponentType,
+					catalogService.ID,
+				),
+			}
+		}
+	}
+
+	return nil
+}
+
 // validateServiceCore performs core validation for a service (existence, version, params, components).
 func (v *ApplicationValidator) validateServiceCore(service apimodels.Service) error {
 	// Verify service exists in catalog
-	_, err := v.provider.LoadService(service.CatalogID)
+	catalogService, err := v.provider.LoadService(service.CatalogID)
 	if err != nil {
 		return &ValidationError{
 			Code:    http.StatusNotFound,
@@ -187,6 +246,11 @@ func (v *ApplicationValidator) validateServiceCore(service apimodels.Service) er
 
 	// Validate service-level parameters
 	if err := v.ValidateServiceParams(service.CatalogID, service.Params); err != nil {
+		return err
+	}
+
+	// Validate that components match service dependencies
+	if err := v.validateComponentsMatchDependencies(service.Components, catalogService); err != nil {
 		return err
 	}
 
