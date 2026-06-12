@@ -1,0 +1,454 @@
+@use "@carbon/react/scss/spacing" as *;
+@use "@carbon/react/scss/theme" as *;
+@use "@carbon/react/scss/type" as *;
+
+.deploymentDetails {
+  min-height: 100vh;
+  background-color: $layer;
+}
+
+.headerGrid {
+  row-gap: 0;
+  background-color: $layer;
+  padding-top: $spacing-06;
+}
+
+.pageHeader {
+  padding: 0 0 $spacing-03 0;
+}
+
+.pageTitle {
+  @include type-style("heading-05");
+  margin-top: $spacing-03;
+  margin-bottom: 0;
+  color: $text-primary;
+}
+
+.statusGrid {
+  row-gap: 0;
+  background-color: $layer;
+  padding-bottom: $spacing-05;
+  border-bottom: 1px solid $border-subtle;
+  margin-bottom: $spacing-06;
+}
+
+.statusRow {
+  display: flex;
+  gap: $spacing-03;
+  align-items: center;
+}
+
+.breadcrumbDivider {
+  border: none;
+  border-bottom: 1px solid $border-subtle;
+  margin: 0;
+}
+
+.mainGrid {
+  row-gap: 0;
+  padding-left: 0 !important;
+  margin-left: 0 !important;
+}
+
+.sidebarColumn {
+  position: sticky;
+  top: -32px;
+  height: calc(100vh - 200px);
+  padding: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  margin: 0 !important;
+  margin-left: 0 !important;
+}
+
+.sideNav {
+  height: 100%;
+  width: 100%;
+  position: relative;
+  padding: 0 !important;
+  margin: 0 !important;
+  margin-left: 0 !important;
+
+  :global(.cds--side-nav__items) {
+    // padding-left: 0 !important;
+    padding: 0;
+    margin-left: 0 !important;
+  }
+
+  :global(.cds--side-nav) {
+    padding-left: 0 !important;
+    margin-left: 0 !important;
+  }
+
+  :global(.cds--side-nav__navigation) {
+    padding-left: 0 !important;
+    margin-left: 0 !important;
+  }
+
+  @media (max-width: 671px) {
+    position: relative;
+  }
+}
+
+.contentColumn {
+  padding-top: $spacing-05;
+  padding-bottom: $spacing-09;
+}
+
+.detailsGrid {
+  margin-top: $spacing-05;
+  row-gap: 0;
+}
+
+.detailsCard {
+  width: 100%;
+}
+
+.detailsCard :global(.c4p--card__title) {
+  font-family: var(--cds-heading-03-font-family);
+  font-size: var(--cds-heading-03-font-size);
+  font-weight: var(--cds-heading-03-font-weight);
+  line-height: var(--cds-heading-03-line-height);
+}
+
+.detailsContent {
+  padding: $spacing-05 0;
+}
+
+.detailRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: $spacing-03 0;
+  border-bottom: 1px solid $border-subtle;
+}
+
+.detailLabel {
+  @include type-style("label-01");
+  color: $text-secondary;
+}
+
+.detailValue {
+  @include type-style("body-short-01");
+  color: $text-primary;
+}
+
+.certifiedBadge {
+  // display: flex;
+  // align-items: center;
+  // gap: $spacing-02;
+  // margin-top: $spacing-05;
+  color: $text-primary;
+
+  svg {
+    fill: $support-success;
+  }
+
+  span {
+    @include type-style("label-01");
+  }
+}
+
+.resourcesGrid {
+  margin-top: $spacing-05;
+  row-gap: 0;
+}
+
+.sectionTitle {
+  @include type-style("heading-03");
+  margin-bottom: $spacing-05;
+}
+
+.cardsGrid {
+  margin-top: $spacing-05;
+  row-gap: $spacing-05;
+}
+
+.resourceCard :global(.c4p--card__title) {
+  @include type-style("heading-compact-01");
+  width: 100%;
+  height: 100%;
+}
+
+.resourceContent {
+  padding: $spacing-05 0;
+}
+
+.resourcesInnerGrid {
+  margin: 0;
+  padding: 0;
+  row-gap: $spacing-07;
+}
+
+.resourceColumn {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.resourceItem {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+}
+
+.resourceName {
+  @include type-style("heading-03");
+  margin: 0 0 $spacing-03 0;
+  color: $text-primary;
+}
+
+.progressBar {
+  margin-bottom: $spacing-03;
+}
+
+// Color for yellow warning state (80-89%)
+.progressBar
+  :global(.cds--progress-bar--active)
+  :global(.cds--progress-bar__bar) {
+  background-color: $support-warning !important;
+}
+
+// Color for red error state (90%+)
+.progressBar
+  :global(.cds--progress-bar--error)
+  :global(.cds--progress-bar__bar) {
+  background-color: $support-error !important;
+}
+
+// Color for green success state (<80%)
+.progressBar
+  :global(.cds--progress-bar--finished)
+  :global(.cds--progress-bar__bar) {
+  background-color: $support-success !important;
+}
+
+.resourceStats {
+  display: flex;
+  justify-content: space-between;
+  // flex-direction: column;
+  width: 100%;
+  gap: $spacing-02;
+}
+
+.usedValue {
+  @include type-style("label-01");
+  color: $text-secondary;
+}
+
+.allocatedValue {
+  @include type-style("label-01");
+  color: $text-secondary;
+}
+
+.actionsGrid {
+  margin-top: $spacing-09;
+  row-gap: 0;
+}
+
+.actionButtons {
+  display: flex;
+  gap: $spacing-03;
+  justify-content: flex-start;
+}
+
+.placeholderContent {
+  padding: $spacing-07;
+  text-align: center;
+  color: $text-secondary;
+
+  p {
+    @include type-style("body-long-01");
+  }
+}
+
+.servicesGrid {
+  margin-top: $spacing-05;
+  row-gap: $spacing-05;
+}
+
+.servicesTitle {
+  @include type-style("heading-03");
+  margin: 0 0 $spacing-05 0;
+  color: $text-primary;
+}
+
+.serviceCard {
+  width: 100%;
+}
+
+.serviceCard :global(.c4p--card__title) {
+  @include type-style("heading-compact-01");
+  margin-bottom: $spacing-03;
+}
+
+.serviceCard :global(.c4p--card__description) {
+  @include type-style("body-compact-01");
+  margin-bottom: $spacing-03;
+}
+
+.serviceDescription {
+  @include type-style("body-compact-01");
+  color: $text-secondary;
+  margin: 0 0 $spacing-06 0;
+}
+
+.integrationEndpointGrid {
+  margin: 0;
+  padding: 0;
+  row-gap: 0;
+}
+
+.integrationEndpointLeftColumn {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-05;
+  margin-left: calc(-1 * $spacing-05);
+}
+
+.integrationEndpointRightColumn {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+}
+
+.integrationEndpointField {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: $spacing-05;
+}
+
+.integrationEndpointDetailLabel {
+  @include type-style("caption-01");
+  color: $text-secondary;
+  flex-shrink: 0;
+  min-width: 180px;
+}
+
+.integrationEndpointDetailValue {
+  @include type-style("body-01");
+  color: $text-primary;
+  text-align: left;
+  word-break: break-word;
+  flex: 1;
+
+  a {
+    color: $link-primary;
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+      color: $link-primary-hover;
+    }
+
+    &:visited {
+      color: $link-visited;
+    }
+  }
+}
+
+.serviceDetails {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-05;
+}
+
+.serviceDetailRow {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: $spacing-05;
+}
+
+.serviceDetailLabel {
+  @include type-style("caption-01");
+  color: $text-secondary;
+  flex-shrink: 0;
+  min-width: 180px;
+}
+
+.serviceDetailValue {
+  @include type-style("body-01");
+  color: $text-primary;
+  text-align: left;
+  word-break: break-word;
+  flex: 1;
+}
+
+.intergationEndpointList {
+  list-style-type: disc;
+  padding-left: $spacing-06;
+
+  :global(.cds--list__item) {
+    list-style-type: disc;
+  }
+}
+
+// Responsive adjustments
+@media (max-width: 671px) {
+  .sidebarColumn {
+    position: relative;
+    height: auto;
+  }
+
+  .sideNav {
+    position: relative;
+    max-width: 100%;
+  }
+
+  .actionButtons {
+    flex-direction: column;
+
+    button {
+      width: 100%;
+    }
+  }
+}
+
+.labelColor :global(.cds--text-input),
+:global(.cds--list-box) {
+  background-color: var(--cds-layer-02);
+}
+
+.progressSuccess :global(.cds--progress-bar__bar) {
+  background-color: var(--cds-support-success) !important;
+}
+
+.progressWarning :global(.cds--progress-bar__bar) {
+  background-color: var(--cds-support-warning) !important;
+}
+
+.progressDanger :global(.cds--progress-bar__bar) {
+  background-color: var(--cds-support-error) !important;
+}
+
+.progressSuccess :global(.cds--progress-bar__track),
+.progressWarning :global(.cds--progress-bar__track),
+.progressDanger :global(.cds--progress-bar__track) {
+  background-color: #c6c6c6;
+}
+
+// Status tag styling to match CellRenderers
+.statusTagError {
+  :global(svg) {
+    fill: $support-error;
+  }
+}
+
+.statusTagSuccess {
+  :global(svg) {
+    fill: $support-success;
+  }
+}
+
+.statusTagInfo {
+  :global(svg) {
+    fill: $support-info;
+  }
+}
+
+.statusTagSecondary {
+  :global(svg) {
+    fill: $text-secondary;
+  }
+}

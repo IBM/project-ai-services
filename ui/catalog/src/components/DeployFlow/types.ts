@@ -59,37 +59,36 @@ export type DeployFlowAction =
     }
   | { type: typeof ACTION_TYPES.RESET_STATE };
 
+/**
+ * Component configuration for a provider
+ * Contains provider ID and dynamic parameters from schema
+ */
+export interface ComponentConfig {
+  providerId: string;
+  params: Record<string, unknown>;
+}
+
+/**
+ * Service configuration
+ * Dynamic structure based on API response
+ */
+export interface ServiceConfig {
+  enabled: boolean;
+  version: string;
+  components: Record<string, ComponentConfig>; // e.g., { llm: {...}, embedding: {...} }
+  params: Record<string, unknown>; // Service-level params from schema
+  inferenceBackend?: string; // Selected LLM provider ID for services with LLM component
+}
+
+/**
+ * Deploy form data
+ * Completely dynamic structure driven by API
+ */
 export interface DeployFormData {
   name: string;
   version: string;
-  embeddingModel: string;
-  vectorStore: string;
-  services: {
-    digitizeDocuments: ServiceConfig;
-    findSimilarItems: ServiceConfig;
-    questionAndAnswer: ServiceConfig;
-    summarization: ServiceConfig;
-  };
-}
-
-export interface ServiceConfig {
-  enabled: boolean;
-  serviceVersion?: string;
-  embeddingModel?: string;
-  rerankerModel?: string;
-  llm?: string;
-  inferenceMethod?: string;
-  // Cloud credentials for watsonx
-  watsonxProjectId?: string;
-  watsonxApiEndpoint?: string;
-  watsonxApiKey?: string;
-  // VLLM API keys (optional - for authentication)
-  // Single key shared across all VLLM components (LLM, Reranker, Embedding) for same provider
-  vllmCpuApiKey?: string;
-  vllmSpyreApiKey?: string;
-  // System prompt for Q&A
-  editSystemPrompt?: boolean;
-  systemPromptText?: string;
+  globalComponents: Record<string, ComponentConfig>; // e.g., { embedding: {...}, vector_store: {...} }
+  services: Record<string, ServiceConfig>; // e.g., { digitize: {...}, chat: {...} }
 }
 
 export interface StepProps {

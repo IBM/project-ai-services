@@ -1,16 +1,7 @@
-import { useMemo } from "react";
-import {
-  TextInput,
-  Dropdown,
-  Grid,
-  Column,
-  Toggletip,
-  ToggletipButton,
-  ToggletipContent,
-} from "@carbon/react";
-import { Information } from "@carbon/icons-react";
+import { useMemo, useEffect } from "react";
+import { TextInput, Dropdown, Grid, Column } from "@carbon/react";
 import styles from "../DeployFlow.module.scss";
-import type { StepProps } from "../types";
+import type { StepProps, ComponentConfig } from "../types";
 import { useBatchProviderParams } from "@/hooks/useProviderParams";
 
 export const StepOne: React.FC<StepProps> = ({
@@ -22,80 +13,157 @@ export const StepOne: React.FC<StepProps> = ({
 }) => {
   const isNameValid = !!formData.name.trim();
 
-  // Extract version options from API response
   const versionOptions = [
     { id: deployOptions.version, text: deployOptions.version },
   ];
 
-  // Extract embedding model options from global_components
-  const embeddingComponent = deployOptions.global_components.find(
-    (c) => c.type === "embedding",
+  // Collect provider IDs for batch parameter fetching
+  const providerIdsByType = useMemo(() => {
+    const result: Record<string, string[]> = {};
+    deployOptions.global_components.forEach((component) => {
+      result[component.type] = component.providers.map((p) => p.id);
+    });
+    return result;
+  }, [deployOptions.global_components]);
+
+  // Dynamically fetch provider parameters for all component types
+  const componentTypes = Object.keys(providerIdsByType);
+  const providerParamsHooks = componentTypes.reduce(
+    (acc, type) => {
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      acc[type] = useBatchProviderParams(type, providerIdsByType[type] || []);
+      return acc;
+    },
+    {} as Record<string, ReturnType<typeof useBatchProviderParams>>,
   );
 
-  // Get all embedding provider IDs
-  const embeddingProviderIds = useMemo(
-    () => embeddingComponent?.providers.map((p) => p.id) || [],
-    [embeddingComponent],
+  const providerParamsByType = useMemo(
+    () => providerParamsHooks,
+    [providerParamsHooks],
   );
 
-  // Fetch embedding params for all providers (cached)
-  const { paramsMap: embeddingParamsMap } = useBatchProviderParams(
-    "embedding",
-    embeddingProviderIds,
-  );
+  // Extract model names from provider schemas for display
+  const modelNames = useMemo(() => {
+    const newModelNames: Record<string, string> = {};
 
-  // Extract embedding model names from cached params using useMemo
-  const embeddingModelNames = useMemo(() => {
-    const modelNamesMap: Record<string, string> = {};
+    Object.entries(providerParamsByType).forEach(([_componentType, data]) => {
+      const paramsMap = data.paramsMap || {};
 
-    for (const [providerId, params] of Object.entries(embeddingParamsMap)) {
-      if (
-        params &&
-        typeof params === "object" &&
-        "properties" in params &&
-        params.properties &&
-        typeof params.properties === "object"
-      ) {
-        const properties = params.properties as Record<
+      Object.entries(paramsMap).forEach(([providerId, params]) => {
+        const properties = params?.properties as Record<
           string,
           { default?: unknown; oneOf?: Array<{ title?: string }> }
         >;
-        // Try to get the title from oneOf if available
-        const modelTitle = properties.model?.oneOf?.[0]?.title;
-        const defaultModel = properties.model?.default;
+
+        const modelTitle = properties?.model?.oneOf?.[0]?.title;
+        const defaultModel = properties?.model?.default;
 
         if (modelTitle && typeof modelTitle === "string") {
-          modelNamesMap[providerId] = modelTitle;
+          newModelNames[providerId] = modelTitle;
         } else if (defaultModel && typeof defaultModel === "string") {
-          // Fallback to default model path, extract just the model name
           const modelName = defaultModel.split("/").pop() || defaultModel;
-          modelNamesMap[providerId] = modelName;
+          newModelNames[providerId] = modelName;
         }
-      }
+      });
+    });
+
+    return newModelNames;
+  }, [providerParamsByType]);
+
+  // Initialize default model parameters when provider params are loaded
+  useEffect(() => {
+    if (Object.keys(providerParamsByType).length === 0) return;
+
+    const updates: Record<string, ComponentConfig> = {};
+    let hasUpdates = false;
+
+    Object.entries(formData.globalComponents).forEach(
+      ([componentType, config]) => {
+        if (config.params?.model) return;
+
+        const paramsMap = providerParamsByType[componentType]?.paramsMap || {};
+        const cachedParams = paramsMap[config.providerId];
+        const properties = cachedParams?.properties as Record<
+          string,
+          { default?: unknown }
+        >;
+
+        if (properties?.model?.default) {
+          updates[componentType] = {
+            ...config,
+            params: {
+              ...config.params,
+              model: properties.model.default,
+            },
+          };
+          hasUpdates = true;
+        }
+      },
+    );
+
+    if (hasUpdates) {
+      onChange({
+        globalComponents: {
+          ...formData.globalComponents,
+          ...updates,
+        },
+      });
+    }
+  }, [providerParamsByType, formData.globalComponents, onChange]);
+
+  // Build component data with deduplicated provider options
+  const globalComponentsData = useMemo(() => {
+    return deployOptions.global_components.map((component) => {
+      const uniqueDisplayNames = new Set<string>();
+      const providerOptions: Array<{ id: string; text: string }> = [];
+
+      component.providers.forEach((provider) => {
+        const displayName = modelNames[provider.id] || provider.name;
+        if (!uniqueDisplayNames.has(displayName)) {
+          uniqueDisplayNames.add(displayName);
+          providerOptions.push({
+            id: provider.id,
+            text: displayName,
+          });
+        }
+      });
+
+      const selectedProviderId =
+        formData.globalComponents[component.type]?.providerId || "";
+
+      return {
+        type: component.type,
+        name: component.name,
+        providerOptions,
+        selectedProviderId,
+      };
+    });
+  }, [deployOptions.global_components, formData.globalComponents, modelNames]);
+
+  const handleProviderChange = (componentType: string, providerId: string) => {
+    // Extract default model from provider schema
+    const paramsMap = providerParamsByType[componentType]?.paramsMap || {};
+    const cachedParams = paramsMap[providerId];
+    const properties = cachedParams?.properties as Record<
+      string,
+      { default?: unknown }
+    >;
+    const modelParam: Record<string, unknown> = {};
+
+    if (properties?.model?.default) {
+      modelParam.model = properties.model.default;
     }
 
-    return modelNamesMap;
-  }, [embeddingParamsMap]);
-
-  // Create embedding model options with model names
-  const embeddingModelOptions = useMemo(
-    () =>
-      embeddingComponent?.providers.map((provider) => ({
-        id: provider.id,
-        text: embeddingModelNames[provider.id] || provider.name,
-      })) || [],
-    [embeddingComponent, embeddingModelNames],
-  );
-
-  // Extract vector store options from global_components
-  const vectorStoreComponent = deployOptions.global_components.find(
-    (c) => c.type === "vector_store",
-  );
-  const vectorStoreOptions =
-    vectorStoreComponent?.providers.map((provider) => ({
-      id: provider.id,
-      text: provider.name,
-    })) || [];
+    onChange({
+      globalComponents: {
+        ...formData.globalComponents,
+        [componentType]: {
+          providerId,
+          params: modelParam,
+        },
+      },
+    });
+  };
 
   return (
     <>
@@ -138,60 +206,27 @@ export const StepOne: React.FC<StepProps> = ({
             </div>
           </Column>
 
-          <Column sm={4} md={8} lg={16}>
-            <div className={styles.formField}>
-              <Dropdown
-                id="embedding-model"
-                titleText={
-                  <div className={styles.labelWithInfo}>
-                    <span>Embedding model</span>
-                    <Toggletip align="top">
-                      <ToggletipButton label="Additional information">
-                        <Information />
-                      </ToggletipButton>
-                      <ToggletipContent>
-                        <p>
-                          For data recognition and categorization during
-                          document digitization
-                        </p>
-                      </ToggletipContent>
-                    </Toggletip>
-                  </div>
-                }
-                label="Select embedding model"
-                items={embeddingModelOptions}
-                itemToString={(item) => (item ? item.text : "")}
-                selectedItem={
-                  embeddingModelOptions.find(
-                    (m) => m.id === formData.embeddingModel,
-                  ) || null
-                }
-                onChange={({ selectedItem }) =>
-                  onChange({ embeddingModel: selectedItem?.id || "" })
-                }
-              />
-            </div>
-          </Column>
-
-          <Column sm={4} md={8} lg={16}>
-            <div className={styles.formField}>
-              <Dropdown
-                id="vector-store"
-                titleText="Vector store"
-                label="Select vector store"
-                items={vectorStoreOptions}
-                itemToString={(item) => (item ? item.text : "")}
-                selectedItem={
-                  vectorStoreOptions.find(
-                    (v) => v.id === formData.vectorStore,
-                  ) || null
-                }
-                onChange={({ selectedItem }) =>
-                  onChange({ vectorStore: selectedItem?.id || "" })
-                }
-              />
-            </div>
-          </Column>
+          {globalComponentsData.map((component) => (
+            <Column key={component.type} sm={4} md={8} lg={16}>
+              <div className={styles.formField}>
+                <Dropdown
+                  id={`${component.type}-provider`}
+                  titleText={component.name}
+                  label={`Select ${component.name.toLowerCase()}`}
+                  items={component.providerOptions}
+                  itemToString={(item) => (item ? item.text : "")}
+                  selectedItem={
+                    component.providerOptions.find(
+                      (p) => p.id === component.selectedProviderId,
+                    ) || null
+                  }
+                  onChange={({ selectedItem }) =>
+                    handleProviderChange(component.type, selectedItem?.id || "")
+                  }
+                />
+              </div>
+            </Column>
+          ))}
         </Grid>
       </div>
     </>

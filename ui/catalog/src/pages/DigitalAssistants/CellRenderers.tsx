@@ -80,8 +80,30 @@ export const ActionCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
   );
 };
 
-export const NameCell = ({ value }: CellRendererProps) => (
-  <Link href="#">{String(value)}</Link>
+export const NameCell = ({
+  value,
+  rowId,
+  dispatch,
+  rowData,
+}: CellRendererProps) => (
+  <Link
+    href="#"
+    onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
+      e.preventDefault();
+      dispatch({
+        type: ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS,
+        payload: {
+          id: rowId,
+          name: String(value),
+          status: rowData?.status || "Unknown",
+          type: "Digital assistant",
+          resources: [],
+        },
+      });
+    }}
+  >
+    {String(value)}
+  </Link>
 );
 
 export const StatusCell = ({ value }: CellRendererProps) => {

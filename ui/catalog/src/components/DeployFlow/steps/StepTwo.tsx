@@ -1,19 +1,18 @@
-import { useReducer, useMemo, useEffect, useCallback, useState } from "react";
+import { useReducer, useMemo, useEffect, useState } from "react";
 import styles from "../DeployFlow.module.scss";
-import type { StepProps, ServiceConfig } from "../types";
+import type { StepProps, ServiceConfig, ComponentConfig } from "../types";
 import {
-  getServiceKey,
-  getServiceIdFromKey,
   getAcceleratorLabel,
   getResourceStatus,
   bytesToGB,
-  SHARED_BY_MODEL_PROVIDERS,
 } from "../utils/StepTwo.utils";
 import { ResourceRequirements } from "../components/ResourceRequirements";
 import { ServiceConfigCard } from "../components/ServiceConfigCard";
 import { fetchResources } from "@/api/digitalAssistants";
 import { useBatchProviderParams } from "@/hooks/useProviderParams";
-import type { ResourcesResponse } from "@/types/digitalAssistants";
+import { getResourceSharingKey } from "@/utils/resourceSharing";
+import { useDeployStore } from "@/store/deploy.store";
+import type { ResourcesResponse, Component } from "@/types/digitalAssistants";
 import type {
   ResourceItem,
   StepTwoState,
@@ -24,9 +23,7 @@ import type {
 const INITIAL_STATE: StepTwoState = {
   editingService: null,
   tempConfig: null,
-  showApiKey: {},
-  llmModelNames: {},
-  embeddingModelNames: {},
+  modelNamesByComponent: {},
 };
 
 // Reducer function
@@ -46,18 +43,14 @@ const stepTwoReducer = (
           ? { ...state.tempConfig, ...action.payload }
           : null,
       };
-    case "TOGGLE_SHOW_API_KEY":
+    case "SET_MODEL_NAMES":
       return {
         ...state,
-        showApiKey: {
-          ...state.showApiKey,
-          [action.payload]: !state.showApiKey[action.payload],
+        modelNamesByComponent: {
+          ...state.modelNamesByComponent,
+          [action.payload.componentType]: action.payload.modelNames,
         },
       };
-    case "SET_LLM_MODEL_NAMES":
-      return { ...state, llmModelNames: action.payload };
-    case "SET_EMBEDDING_MODEL_NAMES":
-      return { ...state, embeddingModelNames: action.payload };
     case "RESET_EDITING":
       return {
         ...state,
@@ -79,6 +72,9 @@ export const StepTwo: React.FC<StepProps> = ({
 }) => {
   const [state, dispatch] = useReducer(stepTwoReducer, INITIAL_STATE);
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Get service description helper from store
+  const { getServiceDescription } = useDeployStore();
 
   // Fetch resources directly without caching
   const [resources, setResources] = useState<ResourcesResponse | null>(null);
@@ -111,30 +107,72 @@ export const StepTwo: React.FC<StepProps> = ({
       }
     > = {};
 
-    Object.entries(formData.services).forEach(([serviceKey, serviceConfig]) => {
+    // First, add global components (shared across all services)
+    // Note: Global components get their resources from service-specific component definitions
+    deployOptions.global_components.forEach((globalComponent) => {
+      const globalConfig = formData.globalComponents[globalComponent.type];
+      if (!globalConfig?.providerId) return;
+
+      // Find the first service that has this component type to get resource info
+      let resourceProvider = null;
+      for (const service of deployOptions.services) {
+        const serviceComponent = service.components.find(
+          (c) => c.type === globalComponent.type,
+        );
+        if (serviceComponent) {
+          resourceProvider = serviceComponent.providers.find(
+            (p) => p.id === globalConfig.providerId,
+          );
+          if (resourceProvider?.resources) {
+            break;
+          }
+        }
+      }
+
+      if (!resourceProvider?.resources) return;
+
+      // Global components are shared across all services, use provider+model as key
+      const uniqueKey = getResourceSharingKey(
+        "global", // Use "global" as serviceId for global components
+        globalComponent.type,
+        globalConfig.providerId,
+        globalConfig.params || {},
+      );
+
+      if (!uniqueProviders[uniqueKey]) {
+        uniqueProviders[uniqueKey] = {
+          cpu: resourceProvider.resources.cpu || 0,
+          memory: resourceProvider.resources.memory || 0,
+          storage: resourceProvider.resources.storage || 0,
+          accelerators: { ...(resourceProvider.resources.accelerators || {}) },
+        };
+      }
+    });
+
+    // Then, iterate through all services for service-specific components
+    Object.entries(formData.services).forEach(([serviceId, serviceConfig]) => {
       if (!serviceConfig.enabled) return;
 
-      const serviceId = getServiceIdFromKey(
-        serviceKey as keyof typeof formData.services,
-      );
       const service = deployOptions.services.find((s) => s.id === serviceId);
-
       if (!service) return;
 
+      // Iterate through all components in the service
       service.components.forEach((component) => {
-        let selectedProviderId: string | undefined;
-        let selectedModelId: string | undefined;
+        // Check if this is a global component (already counted above)
+        const isGlobalComponent = deployOptions.global_components.some(
+          (gc) => gc.type === component.type,
+        );
 
-        if (component.type === "embedding") {
-          selectedProviderId = serviceConfig.embeddingModel;
-          selectedModelId = serviceConfig.embeddingModel;
-        } else if (component.type === "reranker") {
-          selectedProviderId = serviceConfig.rerankerModel;
-          selectedModelId = serviceConfig.rerankerModel;
-        } else if (component.type === "llm") {
-          selectedProviderId =
-            serviceConfig.inferenceMethod || serviceConfig.llm;
-          selectedModelId = serviceConfig.llm;
+        // Skip global components as they're already counted
+        if (isGlobalComponent) return;
+
+        const componentConfig = serviceConfig.components[component.type];
+        if (!componentConfig) return;
+
+        // For components that support inference backend, use it if available
+        let selectedProviderId = componentConfig.providerId;
+        if (serviceConfig.inferenceBackend) {
+          selectedProviderId = serviceConfig.inferenceBackend;
         }
 
         if (!selectedProviderId) return;
@@ -145,16 +183,17 @@ export const StepTwo: React.FC<StepProps> = ({
 
         if (!provider?.resources) return;
 
-        // Deduplication logic:
-        // - For SHARED_BY_MODEL_PROVIDERS (vllm-cpu, vllm-spyre, watsonx):
-        //   Same provider + same model = shared instance across services
-        //   Use provider+model as unique key to deduplicate ALL resources
-        // - For other providers:
-        //   Each service component gets its own instance
-        //   Use service+provider+component to ensure no deduplication
-        const uniqueKey = SHARED_BY_MODEL_PROVIDERS.has(selectedProviderId)
-          ? `${selectedProviderId}-${selectedModelId || "default"}`
-          : `${serviceKey}-${selectedProviderId}-${component.type}`;
+        // Use dynamic resource sharing logic
+        // Always use component-level params (which contains the model parameter)
+        // This ensures proper resource sharing based on the model being used
+        const paramsForSharing = componentConfig.params || {};
+
+        const uniqueKey = getResourceSharingKey(
+          serviceId,
+          component.type,
+          selectedProviderId,
+          paramsForSharing,
+        );
 
         if (!uniqueProviders[uniqueKey]) {
           uniqueProviders[uniqueKey] = {
@@ -191,7 +230,12 @@ export const StepTwo: React.FC<StepProps> = ({
       accelerators: totalAccelerators,
       storage: storageGB,
     };
-  }, [formData, deployOptions.services]);
+  }, [
+    formData.services,
+    formData.globalComponents,
+    deployOptions.services,
+    deployOptions.global_components,
+  ]);
 
   // Format resources for display
   const resourceRequirements = useMemo((): ResourceItem[] => {
@@ -288,241 +332,177 @@ export const StepTwo: React.FC<StepProps> = ({
   ]);
 
   // Extract service version options from API response
-  const serviceVersionOptions = [
-    { id: deployOptions.version, text: deployOptions.version },
-  ];
+  const serviceVersionOptions = useMemo(
+    () => [{ id: deployOptions.version, text: deployOptions.version }],
+    [deployOptions.version],
+  );
 
-  // Helper function to get component providers by type from a service
-  const getComponentProviders = useCallback(
-    (
-      serviceId: string,
-      componentType: string,
-    ): Array<{ id: string; text: string }> => {
-      const service = deployOptions.services.find((s) => s.id === serviceId);
-      if (!service) return [];
+  // Get all provider IDs for batch fetching params
+  const allProviderIds = useMemo(() => {
+    const providersByType: Record<string, Set<string>> = {};
 
-      const component = service.components.find(
-        (c) => c.type === componentType,
-      );
-      return (
-        component?.providers.map((provider) => ({
-          id: provider.id,
-          text: provider.name,
-        })) || []
-      );
+    deployOptions.services.forEach((service) => {
+      service.components.forEach((component) => {
+        if (!providersByType[component.type]) {
+          providersByType[component.type] = new Set();
+        }
+        component.providers.forEach((provider) => {
+          providersByType[component.type].add(provider.id);
+        });
+      });
+    });
+
+    // Convert Sets to arrays
+    const result: Record<string, string[]> = {};
+    Object.entries(providersByType).forEach(([type, ids]) => {
+      result[type] = Array.from(ids);
+    });
+
+    return result;
+  }, [deployOptions.services]);
+
+  // Dynamically fetch provider parameters for all component types
+  const componentTypes = Object.keys(allProviderIds);
+  const providerParamsHooks = componentTypes.reduce(
+    (acc, type) => {
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      acc[type] = useBatchProviderParams(type, allProviderIds[type] || []);
+      return acc;
     },
-    [deployOptions.services],
+    {} as Record<string, ReturnType<typeof useBatchProviderParams>>,
   );
 
-  // Get all embedding provider IDs
-  const embeddingProviders = useMemo(
-    () => getComponentProviders("chat", "embedding"),
-    [getComponentProviders],
-  );
-  const embeddingProviderIds = useMemo(
-    () => embeddingProviders.map((p) => p.id),
-    [embeddingProviders],
+  const providerParamsByType = useMemo(
+    () => providerParamsHooks,
+    [providerParamsHooks],
   );
 
-  // Fetch embedding params for all providers (cached)
-  const { paramsMap: embeddingParamsMap } = useBatchProviderParams(
-    "embedding",
-    embeddingProviderIds,
-  );
-
-  // Extract embedding model names from cached params
+  // Extract model names from params for display - DYNAMIC for all component types
   useEffect(() => {
-    const modelNamesMap: Record<string, string> = {};
+    // Iterate through all component types dynamically
+    Object.entries(providerParamsByType).forEach(([componentType, data]) => {
+      const paramsMap = data.paramsMap || {};
+      const modelNamesMap: Record<string, string> = {};
 
-    for (const [providerId, params] of Object.entries(embeddingParamsMap)) {
-      if (
-        params &&
-        typeof params === "object" &&
-        "properties" in params &&
-        params.properties &&
-        typeof params.properties === "object"
-      ) {
-        const properties = params.properties as Record<
+      // Extract model names for this component type
+      for (const [providerId, params] of Object.entries(paramsMap)) {
+        const properties = params?.properties as Record<
           string,
           { default?: unknown; oneOf?: Array<{ title?: string }> }
         >;
-        const defaultModel = properties.model?.default;
-        // Try to get the title from oneOf if available
-        const modelTitle = properties.model?.oneOf?.[0]?.title;
+
+        const modelTitle = properties?.model?.oneOf?.[0]?.title;
+        const defaultModel = properties?.model?.default;
+
         if (modelTitle && typeof modelTitle === "string") {
           modelNamesMap[providerId] = modelTitle;
         } else if (defaultModel && typeof defaultModel === "string") {
-          // Fallback to default model path, extract just the model name
-          const modelName = defaultModel.split("/").pop() || defaultModel;
+          const modelName =
+            componentType === "embedding"
+              ? defaultModel.split("/").pop() || defaultModel
+              : defaultModel;
           modelNamesMap[providerId] = modelName;
         }
       }
-    }
 
-    if (Object.keys(modelNamesMap).length > 0) {
-      const hasChanges = Object.keys(modelNamesMap).some(
-        (key) => state.embeddingModelNames[key] !== modelNamesMap[key],
+      // Only dispatch if we have model names and they've changed
+      if (Object.keys(modelNamesMap).length > 0) {
+        const existingNames = state.modelNamesByComponent[componentType] || {};
+        const hasChanges = Object.keys(modelNamesMap).some(
+          (key) => existingNames[key] !== modelNamesMap[key],
+        );
+
+        if (hasChanges || Object.keys(existingNames).length === 0) {
+          dispatch({
+            type: "SET_MODEL_NAMES",
+            payload: { componentType, modelNames: modelNamesMap },
+          });
+        }
+      }
+    });
+  }, [providerParamsByType, state.modelNamesByComponent]);
+
+  // Populate model parameters for default providers once params are loaded
+  useEffect(() => {
+    if (Object.keys(providerParamsByType).length === 0) return;
+
+    const serviceUpdates: Record<string, ServiceConfig> = {};
+    let hasUpdates = false;
+
+    // Check each service
+    Object.entries(formData.services).forEach(([serviceId, serviceConfig]) => {
+      const componentUpdates: Record<string, ComponentConfig> = {};
+      let hasComponentUpdates = false;
+
+      // Check each component in the service
+      Object.entries(serviceConfig.components).forEach(
+        ([componentType, config]) => {
+          // Skip if already has model parameter
+          if (config.params?.model) return;
+
+          const paramsMap =
+            providerParamsByType[componentType]?.paramsMap || {};
+          const cachedParams = paramsMap[config.providerId];
+          const properties = cachedParams?.properties as Record<
+            string,
+            { default?: unknown }
+          >;
+
+          if (properties?.model?.default) {
+            componentUpdates[componentType] = {
+              ...config,
+              params: {
+                ...config.params,
+                model: properties.model.default,
+              },
+            };
+            hasComponentUpdates = true;
+          }
+        },
       );
 
-      if (hasChanges || Object.keys(state.embeddingModelNames).length === 0) {
-        dispatch({
-          type: "SET_EMBEDDING_MODEL_NAMES",
-          payload: modelNamesMap,
-        });
-      }
-    }
-  }, [embeddingParamsMap, state.embeddingModelNames]);
-
-  // Get embedding model options with model names
-  const embeddingModelOptions = useMemo(() => {
-    const providers = getComponentProviders("chat", "embedding");
-    return providers.map((provider) => ({
-      id: provider.id,
-      text: state.embeddingModelNames[provider.id] || provider.text,
-    }));
-  }, [state.embeddingModelNames, getComponentProviders]);
-
-  // Get reranker model options from services
-  const rerankerModelOptions = getComponentProviders("chat", "reranker");
-
-  // Get LLM options from services with model names (deduplicated)
-  const llmOptions = useMemo(() => {
-    const providers = getComponentProviders("chat", "llm");
-    const seenModels = new Set<string>();
-    const uniqueOptions: Array<{ id: string; text: string }> = [];
-
-    providers.forEach((provider) => {
-      const modelName = state.llmModelNames[provider.id] || provider.text;
-
-      // Only add if we haven't seen this model name before
-      if (!seenModels.has(modelName)) {
-        seenModels.add(modelName);
-        uniqueOptions.push({
-          id: provider.id,
-          text: modelName,
-        });
+      // If this service has component updates, add to service updates
+      if (hasComponentUpdates) {
+        serviceUpdates[serviceId] = {
+          ...serviceConfig,
+          components: {
+            ...serviceConfig.components,
+            ...componentUpdates,
+          },
+        };
+        hasUpdates = true;
       }
     });
 
-    return uniqueOptions;
-  }, [state.llmModelNames, getComponentProviders]);
-
-  // Get inference method options from API
-  const inferenceMethodOptions = getComponentProviders("chat", "llm").map(
-    (provider) => ({
-      id: provider.id,
-      text: provider.text,
-    }),
-  );
-
-  // Get all LLM provider IDs
-  const llmProviders = useMemo(
-    () => getComponentProviders("chat", "llm"),
-    [getComponentProviders],
-  );
-  const llmProviderIds = useMemo(
-    () => llmProviders.map((p) => p.id),
-    [llmProviders],
-  );
-
-  // Fetch LLM params for all providers (cached)
-  const { paramsMap } = useBatchProviderParams("llm", llmProviderIds);
-
-  // Extract model names from cached params
-  useEffect(() => {
-    const modelNamesMap: Record<string, string> = {};
-
-    for (const [providerId, params] of Object.entries(paramsMap)) {
-      // Check if params has the expected structure
-      if (
-        params &&
-        typeof params === "object" &&
-        "properties" in params &&
-        params.properties &&
-        typeof params.properties === "object"
-      ) {
-        const properties = params.properties as Record<
-          string,
-          { default?: unknown }
-        >;
-        const defaultModel = properties.model?.default;
-        if (defaultModel && typeof defaultModel === "string") {
-          modelNamesMap[providerId] = defaultModel;
-        }
-      }
+    // Apply updates if any
+    if (hasUpdates) {
+      onChange({
+        services: {
+          ...formData.services,
+          ...serviceUpdates,
+        },
+      });
     }
+  }, [providerParamsByType, formData.services, onChange]);
 
-    // Only dispatch if we have new model names and they differ from current state
-    if (Object.keys(modelNamesMap).length > 0) {
-      const hasChanges = Object.keys(modelNamesMap).some(
-        (key) => state.llmModelNames[key] !== modelNamesMap[key],
-      );
-
-      if (hasChanges || Object.keys(state.llmModelNames).length === 0) {
-        dispatch({ type: "SET_LLM_MODEL_NAMES", payload: modelNamesMap });
-      }
-    }
-  }, [paramsMap, state.llmModelNames]);
-
-  // Get vector store options from global_components
-  const vectorStoreComponent = deployOptions.global_components?.find(
-    (c) => c.type === "vector_store",
-  );
-  const vectorStoreOptions =
-    vectorStoreComponent?.providers.map((provider) => ({
-      id: provider.id,
-      text: provider.name,
-    })) || [];
-
-  const handleEdit = (serviceName: string) => {
-    const serviceKey = getServiceKey(serviceName);
-    const config =
-      formData.services[serviceKey as keyof typeof formData.services];
+  const handleEdit = (serviceId: string) => {
+    const config = formData.services[serviceId];
     setValidationError(null);
     dispatch({ type: "SET_TEMP_CONFIG", payload: { ...config } });
-    dispatch({ type: "SET_EDITING_SERVICE", payload: serviceName });
+    dispatch({ type: "SET_EDITING_SERVICE", payload: serviceId });
     onEditingChange?.(true);
   };
 
-  const handleApply = (serviceName: string) => {
+  const handleApply = (serviceId: string) => {
     if (!state.tempConfig) {
       return;
     }
 
-    const requiresWatsonxCredentials =
-      state.tempConfig.inferenceMethod === "watsonx";
-    const missingWatsonxFields = [
-      !state.tempConfig.watsonxProjectId?.trim() ? "Project ID" : null,
-      !state.tempConfig.watsonxApiEndpoint?.trim() ? "API endpoint" : null,
-      !state.tempConfig.watsonxApiKey?.trim() ? "API key" : null,
-    ].filter(Boolean) as string[];
-
-    const requiresPrompt =
-      serviceName === "Question and answer" &&
-      state.tempConfig.editSystemPrompt;
-    const isPromptMissing =
-      requiresPrompt && !state.tempConfig.systemPromptText?.trim();
-
-    if (requiresWatsonxCredentials && missingWatsonxFields.length > 0) {
-      setValidationError(
-        `Provide required watsonx fields: ${missingWatsonxFields.join(", ")}.`,
-      );
-      return;
-    }
-
-    if (isPromptMissing) {
-      setValidationError(
-        "Prompt text is required when system prompt is enabled.",
-      );
-      return;
-    }
-
     setValidationError(null);
-    const serviceKey = getServiceKey(serviceName);
     onChange({
       services: {
         ...formData.services,
-        [serviceKey]: state.tempConfig,
+        [serviceId]: state.tempConfig,
       },
     });
     dispatch({ type: "RESET_EDITING" });
@@ -543,6 +523,7 @@ export const StepTwo: React.FC<StepProps> = ({
   };
 
   const renderServiceConfig = (
+    serviceId: string,
     serviceName: string,
     config: ServiceConfig,
     description: string,
@@ -553,18 +534,11 @@ export const StepTwo: React.FC<StepProps> = ({
       readonly?: boolean;
       globalValue?: string;
     }>,
+    llmComponent: Component | null,
+    rerankerComponent: Component | null,
   ) => {
-    const isEditing = state.editingService === serviceName;
+    const isEditing = state.editingService === serviceId;
     const currentConfig = isEditing ? state.tempConfig : config;
-    const hasWatsonxValidationError =
-      isEditing &&
-      currentConfig?.inferenceMethod === "watsonx" &&
-      !!validationError;
-    const hasPromptValidationError =
-      isEditing &&
-      serviceName === "Question and answer" &&
-      !!currentConfig?.editSystemPrompt &&
-      !!validationError;
 
     return (
       <ServiceConfigCard
@@ -574,19 +548,189 @@ export const StepTwo: React.FC<StepProps> = ({
         fields={fields}
         isEditing={isEditing}
         currentConfig={currentConfig}
-        showApiKey={state.showApiKey[serviceName] || false}
-        hasWatsonxValidationError={hasWatsonxValidationError}
-        hasPromptValidationError={hasPromptValidationError}
-        onEdit={() => handleEdit(serviceName)}
-        onApply={() => handleApply(serviceName)}
+        providerParamsByType={providerParamsByType}
+        llmComponent={llmComponent}
+        rerankerComponent={rerankerComponent}
+        onEdit={() => handleEdit(serviceId)}
+        onApply={() => handleApply(serviceId)}
         onCancel={handleCancel}
         onUpdateConfig={updateTempConfig}
-        onToggleApiKey={() =>
-          dispatch({ type: "TOGGLE_SHOW_API_KEY", payload: serviceName })
-        }
       />
     );
   };
+
+  // Build service configurations dynamically from API
+  const serviceConfigurations = useMemo(() => {
+    return deployOptions.services.map((service) => {
+      const serviceConfig = formData.services[service.id];
+      if (!serviceConfig) return null;
+
+      // Build fields dynamically from service components
+      const fields: Array<{
+        key: keyof ServiceConfig;
+        label: string;
+        options: Array<{ id: string; text: string }>;
+        readonly?: boolean;
+        globalValue?: string;
+      }> = [];
+
+      // Always add service version first
+      fields.push({
+        key: "version" as keyof ServiceConfig,
+        label: "Service version",
+        options: serviceVersionOptions,
+      });
+
+      // Track components that need Inference Backend field (LLM, reranker, etc.)
+      let llmComponent: Component | null = null;
+      let rerankerComponent: Component | null = null;
+
+      // Add component fields dynamically
+      service.components.forEach((component) => {
+        // Track components that may need inference backend (first one wins)
+        if (!llmComponent && component.type === "llm") {
+          llmComponent = component as Component;
+        }
+        if (!rerankerComponent && component.type === "reranker") {
+          rerankerComponent = component as Component;
+        }
+
+        // Build provider options using Set-based deduplication with model names
+        const componentModelNames = state.modelNamesByComponent[component.type];
+        const providers: Array<{ id: string; text: string }> = [];
+        const uniqueDisplayNames = new Set<string>();
+
+        component.providers.forEach((provider) => {
+          const displayName =
+            componentModelNames?.[provider.id] || provider.name;
+          // Only add if this display name hasn't been seen before
+          if (!uniqueDisplayNames.has(displayName)) {
+            uniqueDisplayNames.add(displayName);
+            providers.push({
+              id: provider.id,
+              text: displayName,
+            });
+          }
+        });
+
+        // Check if this component is a global component (shared across services)
+        const isGlobalComponent = deployOptions.global_components.some(
+          (gc) => gc.type === component.type,
+        );
+
+        fields.push({
+          key: component.type as keyof ServiceConfig,
+          label: component.name,
+          options: providers,
+          readonly: isGlobalComponent,
+          globalValue: isGlobalComponent
+            ? formData.globalComponents[component.type]?.providerId
+            : undefined,
+        });
+      });
+
+      // Add Inference Backend field if service has LLM component
+      if (llmComponent) {
+        // Get the currently selected LLM model
+        const selectedLlmModel = serviceConfig.components?.llm?.params?.model;
+
+        // Get LLM provider params to check which providers support the selected model
+        const llmParamsMap = providerParamsByType["llm"]?.paramsMap || {};
+
+        // Filter providers that support the same model as the selected LLM
+        const inferenceBackendOptions = (llmComponent as Component).providers
+          .filter((provider) => {
+            // If no LLM model selected yet, show all providers
+            if (!selectedLlmModel) return true;
+
+            // Get this provider's schema
+            const providerSchema = llmParamsMap[provider.id];
+            if (!providerSchema || !providerSchema.properties) return false;
+
+            const properties = providerSchema.properties as Record<
+              string,
+              { default?: unknown }
+            >;
+            const providerDefaultModel = properties.model?.default;
+
+            // Check if this provider's default model matches the selected model
+            return providerDefaultModel === selectedLlmModel;
+          })
+          .map((provider) => ({
+            id: provider.id,
+            text: provider.name, // Use provider name, not model name
+          }));
+
+        fields.push({
+          key: "inferenceBackend" as keyof ServiceConfig,
+          label: "Inference backend",
+          options: inferenceBackendOptions,
+        });
+      }
+
+      // Add Inference Backend field if service has reranker component
+      if (rerankerComponent) {
+        // Get the currently selected reranker model
+        const selectedRerankerModel =
+          serviceConfig.components?.reranker?.params?.model;
+
+        // Get reranker provider params to check which providers support the selected model
+        const rerankerParamsMap =
+          providerParamsByType["reranker"]?.paramsMap || {};
+
+        // Filter providers that support the same model as the selected reranker
+        const inferenceBackendOptions = (
+          rerankerComponent as Component
+        ).providers
+          .filter((provider) => {
+            // If no reranker model selected yet, show all providers
+            if (!selectedRerankerModel) return true;
+
+            // Get this provider's schema
+            const providerSchema = rerankerParamsMap[provider.id];
+            if (!providerSchema || !providerSchema.properties) return false;
+
+            const properties = providerSchema.properties as Record<
+              string,
+              { default?: unknown }
+            >;
+            const providerDefaultModel = properties.model?.default;
+
+            // Check if this provider's default model matches the selected model
+            return providerDefaultModel === selectedRerankerModel;
+          })
+          .map((provider) => ({
+            id: provider.id,
+            text: provider.name, // Use provider name, not model name
+          }));
+
+        fields.push({
+          key: "inferenceBackend" as keyof ServiceConfig,
+          label: "Inference backend",
+          options: inferenceBackendOptions,
+        });
+      }
+
+      return {
+        serviceId: service.id,
+        serviceName: service.name,
+        description: getServiceDescription(service.id),
+        config: serviceConfig,
+        fields,
+        llmComponent: llmComponent as Component | null,
+        rerankerComponent: rerankerComponent as Component | null,
+      };
+    });
+  }, [
+    deployOptions.services,
+    deployOptions.global_components,
+    formData.services,
+    formData.globalComponents,
+    serviceVersionOptions,
+    state.modelNamesByComponent,
+    getServiceDescription,
+    providerParamsByType,
+  ]);
 
   return (
     <>
@@ -608,155 +752,25 @@ export const StepTwo: React.FC<StepProps> = ({
         resourceData={!!resources}
       />
 
-      {/* Service Configurations */}
+      {/* Service Configurations - Rendered Dynamically */}
       <div className={styles.formSection}>
-        {/* Digitize documents */}
-        {renderServiceConfig(
-          "Digitize documents",
-          formData.services.digitizeDocuments,
-          "Transforms documents such as manuals, invoices, and more into digitized and ingested texts.",
-          [
-            {
-              key: "serviceVersion",
-              label: "Service version",
-              options: serviceVersionOptions,
-            },
-            {
-              key: "embeddingModel",
-              label: "Embedding model",
-              options: embeddingModelOptions,
-              readonly: true,
-              globalValue: formData.embeddingModel,
-            },
-            {
-              key: "vectorStore" as keyof ServiceConfig,
-              label: "Vector store",
-              options: vectorStoreOptions,
-              readonly: true,
-              globalValue: formData.vectorStore,
-            },
-            {
-              key: "rerankerModel",
-              label: "Reranker model",
-              options: rerankerModelOptions,
-            },
-            {
-              key: "llm",
-              label: "Large Language Model (LLM)",
-              options: llmOptions,
-            },
-            {
-              key: "inferenceMethod",
-              label: "Inference Backend",
-              options: inferenceMethodOptions,
-            },
-          ],
-        )}
+        {serviceConfigurations.map((serviceConfig) => {
+          if (!serviceConfig) return null;
 
-        {/* Find similar items */}
-        {renderServiceConfig(
-          "Find similar items",
-          formData.services.findSimilarItems,
-          "Fetches similar items from the system's knowledge management for a given input item.",
-          [
-            {
-              key: "serviceVersion",
-              label: "Service version",
-              options: serviceVersionOptions,
-            },
-            {
-              key: "embeddingModel",
-              label: "Embedding model",
-              options: embeddingModelOptions,
-              readonly: true,
-              globalValue: formData.embeddingModel,
-            },
-            {
-              key: "vectorStore" as keyof ServiceConfig,
-              label: "Vector store",
-              options: vectorStoreOptions,
-              readonly: true,
-              globalValue: formData.vectorStore,
-            },
-            {
-              key: "rerankerModel",
-              label: "Reranker model",
-              options: rerankerModelOptions,
-            },
-            {
-              key: "inferenceMethod",
-              label: "Inference Backend",
-              options: inferenceMethodOptions,
-            },
-          ],
-        )}
-
-        {/* Question and answer */}
-        {renderServiceConfig(
-          "Question and answer",
-          formData.services.questionAndAnswer,
-          "Answers questions in natural language by sourcing general & domain-specific knowledge.",
-          [
-            {
-              key: "serviceVersion",
-              label: "Service version",
-              options: serviceVersionOptions,
-            },
-            {
-              key: "embeddingModel",
-              label: "Embedding model",
-              options: embeddingModelOptions,
-              readonly: true,
-              globalValue: formData.embeddingModel,
-            },
-            {
-              key: "vectorStore" as keyof ServiceConfig,
-              label: "Vector store",
-              options: vectorStoreOptions,
-              readonly: true,
-              globalValue: formData.vectorStore,
-            },
-            {
-              key: "rerankerModel",
-              label: "Reranker model",
-              options: rerankerModelOptions,
-            },
-            {
-              key: "llm",
-              label: "Large Language Model (LLM)",
-              options: llmOptions,
-            },
-            {
-              key: "inferenceMethod",
-              label: "Inference Backend",
-              options: inferenceMethodOptions,
-            },
-          ],
-        )}
-
-        {/* Summarization */}
-        {renderServiceConfig(
-          "Summarization",
-          formData.services.summarization,
-          "Consolidates long input texts into a brief statement or account of the main points.",
-          [
-            {
-              key: "serviceVersion",
-              label: "Service version",
-              options: serviceVersionOptions,
-            },
-            {
-              key: "llm",
-              label: "Large Language Model (LLM)",
-              options: llmOptions,
-            },
-            {
-              key: "inferenceMethod",
-              label: "Inference Backend",
-              options: inferenceMethodOptions,
-            },
-          ],
-        )}
+          return (
+            <div key={serviceConfig.serviceId}>
+              {renderServiceConfig(
+                serviceConfig.serviceId,
+                serviceConfig.serviceName,
+                serviceConfig.config,
+                serviceConfig.description,
+                serviceConfig.fields,
+                serviceConfig.llmComponent,
+                serviceConfig.rerankerComponent,
+              )}
+            </div>
+          );
+        })}
       </div>
     </>
   );

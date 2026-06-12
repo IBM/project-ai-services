@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   ArchitectureSummary,
+  ServiceSummary,
+  ArchitectureDetailsResponse,
   DeployOptionsResponse,
   ResourcesResponse,
 } from "@/types/digitalAssistants";
@@ -17,6 +19,16 @@ interface DeployState {
   selectedArchitectureId: string | null;
   architecturesLoading: boolean;
   architecturesError: string | null;
+
+  // Services - persisted (configuration data with descriptions)
+  serviceSummaries: ServiceSummary[];
+  serviceSummariesLoading: boolean;
+  serviceSummariesError: string | null;
+
+  // Architecture details - persisted (configuration data)
+  architectureDetails: ArchitectureDetailsResponse | null;
+  architectureDetailsLoading: boolean;
+  architectureDetailsError: string | null;
 
   // Deploy options - persisted (configuration data)
   deployOptions: DeployOptionsResponse | null;
@@ -38,6 +50,19 @@ interface DeployState {
   setArchitecturesLoading: (loading: boolean) => void;
   setArchitecturesError: (error: string | null) => void;
   clearArchitectures: () => void;
+
+  // Service summaries actions
+  setServiceSummaries: (data: ServiceSummary[]) => void;
+  setServiceSummariesLoading: (loading: boolean) => void;
+  setServiceSummariesError: (error: string | null) => void;
+  getServiceDescription: (serviceId: string) => string;
+  clearServiceSummaries: () => void;
+
+  // Architecture details actions
+  setArchitectureDetails: (data: ArchitectureDetailsResponse) => void;
+  setArchitectureDetailsLoading: (loading: boolean) => void;
+  setArchitectureDetailsError: (error: string | null) => void;
+  clearArchitectureDetails: () => void;
 
   // Deploy options actions
   setDeployOptions: (data: DeployOptionsResponse) => void;
@@ -79,6 +104,16 @@ export const useDeployStore = create<DeployState>()(
       architecturesLoading: false,
       architecturesError: null,
 
+      // Service summaries state
+      serviceSummaries: [],
+      serviceSummariesLoading: false,
+      serviceSummariesError: null,
+
+      // Architecture details state
+      architectureDetails: null,
+      architectureDetailsLoading: false,
+      architectureDetailsError: null,
+
       // Deploy options state
       deployOptions: null,
       deployOptionsLoading: false,
@@ -115,6 +150,54 @@ export const useDeployStore = create<DeployState>()(
           architectures: [],
           selectedArchitectureId: null,
           architecturesError: null,
+        }),
+
+      // Service summaries actions
+      setServiceSummaries: (data) =>
+        set({
+          serviceSummaries: data,
+          serviceSummariesError: null,
+          serviceSummariesLoading: false,
+        }),
+
+      setServiceSummariesLoading: (loading) =>
+        set({ serviceSummariesLoading: loading }),
+
+      setServiceSummariesError: (error) =>
+        set({ serviceSummariesError: error, serviceSummariesLoading: false }),
+
+      getServiceDescription: (serviceId) => {
+        const service = get().serviceSummaries.find((s) => s.id === serviceId);
+        return service?.description || "";
+      },
+
+      clearServiceSummaries: () =>
+        set({
+          serviceSummaries: [],
+          serviceSummariesError: null,
+        }),
+
+      // Architecture details actions
+      setArchitectureDetails: (data) =>
+        set({
+          architectureDetails: data,
+          architectureDetailsError: null,
+          architectureDetailsLoading: false,
+        }),
+
+      setArchitectureDetailsLoading: (loading) =>
+        set({ architectureDetailsLoading: loading }),
+
+      setArchitectureDetailsError: (error) =>
+        set({
+          architectureDetailsError: error,
+          architectureDetailsLoading: false,
+        }),
+
+      clearArchitectureDetails: () =>
+        set({
+          architectureDetails: null,
+          architectureDetailsError: null,
         }),
 
       // Deploy options actions
@@ -205,9 +288,11 @@ export const useDeployStore = create<DeployState>()(
       name: "deploy-storage",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        // Only persist architectures and deployOptions
+        // Only persist architectures, serviceSummaries, architectureDetails, and deployOptions
         architectures: state.architectures,
         selectedArchitectureId: state.selectedArchitectureId,
+        serviceSummaries: state.serviceSummaries,
+        architectureDetails: state.architectureDetails,
         deployOptions: state.deployOptions,
       }),
     },

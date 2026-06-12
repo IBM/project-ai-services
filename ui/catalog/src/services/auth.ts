@@ -44,6 +44,8 @@ export const logout = async () => {
 
   // Clear deploy store state
   useDeployStore.getState().clearArchitectures();
+  useDeployStore.getState().clearServiceSummaries();
+  useDeployStore.getState().clearArchitectureDetails();
   useDeployStore.getState().clearDeployOptions();
 };
 

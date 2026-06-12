@@ -46,6 +46,16 @@
 
 .formField {
   max-width: 50%;
+
+  // Make dropdowns match text input background and border (light gray with underline)
+  :global {
+    .cds--dropdown,
+    .cds--list-box,
+    .cds--list-box__field {
+      background-color: $field-01 !important;
+      border-bottom: 1px solid $border-strong !important;
+    }
+  }
 }
 
 .labelWithInfo {
@@ -328,5 +338,21 @@
   :global(.c4p--tearsheet.customTearsheet .c4p--tearsheet__container) {
     inline-size: calc(100% - 2 * #{$spacing-07}) !important;
     max-block-size: calc(100% - #{$spacing-11}) !important;
+  }
+}
+
+.dynamicSchemaFields {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+  margin-top: 1rem;
+
+  > * {
+    min-width: 0; // Prevent grid blowout
+  }
+
+  // Full width for textareas
+  :global(.cds--text-area__wrapper) {
+    grid-column: 1 / -1;
   }
 }
