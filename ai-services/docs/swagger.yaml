@@ -177,7 +177,6 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture:
     properties:
-      about: {}
       certified_by:
         type: string
       description:
@@ -362,7 +361,6 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service:
     properties:
-      about: {}
       architectures:
         items:
           type: string
