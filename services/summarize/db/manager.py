@@ -267,6 +267,9 @@ class DatabaseManager:
                     stmt = stmt.where(SummarizeJob.job_type == job_type)
 
                 jobs = list(session.scalars(stmt).all())
+                # Expunge all jobs from session to prevent DetachedInstanceError
+                for job in jobs:
+                    session.expunge(job)
                 logger.debug(f"Retrieved {len(jobs)} active jobs")
                 return jobs
         except SQLAlchemyError as e:
