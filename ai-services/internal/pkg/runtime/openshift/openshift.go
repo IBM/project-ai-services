@@ -436,6 +436,12 @@ func (kc *OpenshiftClient) DeleteSecret(name string) error {
 	return nil
 }
 
+func (kc *OpenshiftClient) SecretExists(nameOrID string) (bool, error) {
+	logger.Warningln("Not implemented")
+
+	return false, nil
+}
+
 func (kc *OpenshiftClient) DeleteVolume(name string) error {
 	logger.Warningln("Not implemented")
 

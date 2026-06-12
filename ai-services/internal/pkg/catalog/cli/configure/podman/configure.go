@@ -26,15 +26,17 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 const (
-	catalogAppTemplate    = "catalog"
-	dirPerm               = 0o755
-	filePerm              = 0o644
-	kindSecret            = "Secret"
-	caddyCertsDirName     = "certs"
-	caddyContainerDataDir = "/data/caddy"
+	catalogAppTemplate        = "catalog"
+	dirPerm                   = 0o755
+	filePerm                  = 0o644
+	kindSecret                = "Secret"
+	caddyCertsDirName         = "certs"
+	caddyContainerDataDir     = "/data/caddy"
+	defaultPasswordIterations = 100000
 )
 
 // catalogDeploymentContext holds cached values during catalog deployment to avoid redundant lookups.
@@ -92,7 +94,7 @@ func (c *catalogDeploymentContext) getCaddyHostAdminURL(rt *podman.PodmanClient,
 }
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
-func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, baseDir string, domainName string, sslCertPath, sslKeyPath string, httpsPort int) error {
+func DeployCatalog(ctx context.Context, baseDir string, domainName string, sslCertPath, sslKeyPath string, httpsPort int) error {
 	s := spinner.New("Deploying catalog service...")
 	s.Start(ctx)
 
@@ -121,7 +123,7 @@ func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, b
 	}
 
 	// Prepare deployment with domain suffix computation
-	values, err := prepareCatalogDeployment(deployCtx, tp, podmanURI, authFilePath, passwordHash, baseDir, domainName, sslCertPath, sslKeyPath, argParams, s)
+	values, err := prepareCatalogDeployment(deployCtx, tp, baseDir, domainName, sslCertPath, sslKeyPath, argParams, s)
 	if err != nil {
 		return err
 	}
@@ -226,7 +228,7 @@ func extractCertDomainIfProvided(sslCertPath, sslKeyPath string, s *spinner.Spin
 }
 
 // prepareCatalogDeployment prepares all necessary data for deployment including domain suffix computation.
-func prepareCatalogDeployment(deployCtx *catalogDeploymentContext, tp templates.Template, podmanURI, authFilePath, passwordHash, baseDir, domainName, sslCertPath, sslKeyPath string, argParams map[string]string, s *spinner.Spinner) (map[string]any, error) {
+func prepareCatalogDeployment(deployCtx *catalogDeploymentContext, tp templates.Template, baseDir, domainName, sslCertPath, sslKeyPath string, argParams map[string]string, s *spinner.Spinner) (map[string]any, error) {
 	// Extract domain from certificate if provided
 	certDomain, err := extractCertDomainIfProvided(sslCertPath, sslKeyPath, s)
 	if err != nil {
@@ -256,7 +258,7 @@ func prepareCatalogDeployment(deployCtx *catalogDeploymentContext, tp templates.
 	deployCtx.caddyContainerAdminURL = fmt.Sprintf("http://%s:2019", caddyPodName)
 
 	// Prepare values with configure-specific configuration
-	values, err := prepareCatalogValues(tp, podmanURI, authFilePath, passwordHash, argParams)
+	values, err := prepareCatalogValues(tp, argParams)
 	if err != nil {
 		s.Fail("failed to load values")
 
@@ -371,7 +373,7 @@ func loadCatalogTemplates(s *spinner.Spinner) (templates.Template, *templates.Ap
 }
 
 // prepareCatalogValues prepares the values map with configure-specific configuration.
-func prepareCatalogValues(tp templates.Template, podmanURI, authFilePath, passwordHash string, argParams map[string]string) (map[string]any, error) {
+func prepareCatalogValues(tp templates.Template, argParams map[string]string) (map[string]any, error) {
 	if argParams == nil {
 		argParams = make(map[string]string)
 	}
@@ -383,6 +385,11 @@ func prepareCatalogValues(tp templates.Template, podmanURI, authFilePath, passwo
 	}
 
 	// Read and encode auth file content for secret
+	authFilePath, err := helpers.GetAuthFilePath()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get auth file path: %w", err)
+	}
+
 	authFileContent, err := os.ReadFile(authFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read auth file from %s: %w", authFilePath, err)
@@ -391,12 +398,30 @@ func prepareCatalogValues(tp templates.Template, podmanURI, authFilePath, passwo
 	// Base64 encode the auth file content for Kubernetes secret
 	authFileBase64 := base64.StdEncoding.EncodeToString(authFileContent)
 
+	// Determine Podman URI
+	podmanURI, err := utils.ResolvePodmanURI()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate podman uri: %w", err)
+	}
+
 	// Strip unix:// prefix from podmanURI for hostPath volume mount
 	// The CONTAINER_HOST env var needs the full URI, but the hostPath needs just the file path
 	podmanSocketPath := strings.TrimPrefix(podmanURI, "unix://")
 
-	// Set configure-specific values
-	argParams["backend.adminPasswordHash"] = passwordHash
+	// Get the admin password from the user if secret is not credated
+	adminPassword, err := collectPassword()
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect admin password: %w", err)
+	}
+	if adminPassword != "" {
+		passwordHash, err := helpers.HashPasswordPBKDF2(adminPassword, defaultPasswordIterations)
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash password: %w", err)
+		}
+		argParams["backend.adminPasswordHash"] = passwordHash
+	}
+
+	// Set configure-specific value
 	argParams["backend.runtime"] = "podman"
 	argParams["backend.podman.authFileContent"] = authFileBase64
 	argParams["backend.podman.uri"] = podmanSocketPath
@@ -831,6 +856,29 @@ func GetCatalogRouteInfo(rt *podman.PodmanClient, tp templates.Template, appTemp
 	}
 
 	return routeDomains, httpsPort, nil
+}
+
+func collectPassword() (string, error) {
+	rt, err := vars.RuntimeFactory.Create("")
+	if err != nil {
+		return "", fmt.Errorf("failed to create runtime: %w", err)
+	}
+
+	secretExists, err := rt.SecretExists(catalogconstants.CatalogSecretName)
+	if err != nil {
+		return "", fmt.Errorf("failed to check existing secrets: %w", err)
+	}
+
+	var adminPassword string
+	// Prompt for admin password if secret doesn't exist or reset password flag is set
+	if !secretExists {
+		adminPassword, err = helpers.PromptForPassword()
+		if err != nil {
+			return "", fmt.Errorf("failed to read admin password: %w", err)
+		}
+	}
+
+	return adminPassword, nil
 }
 
 // Made with Bob

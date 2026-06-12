@@ -44,6 +44,7 @@ type Container struct {
 	Status                 string
 	Health                 string
 	Annotations            map[string]string
+	Env                    map[string]string
 	HealthcheckStartPeriod time.Duration
 }
 

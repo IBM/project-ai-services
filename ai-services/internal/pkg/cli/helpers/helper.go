@@ -1,9 +1,17 @@
 package helpers
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
+	"os"
 	"strings"
+	"syscall"
 	"time"
+
+	"golang.org/x/crypto/pbkdf2"
+	"golang.org/x/term"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/accelerator/spyre"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -173,4 +181,61 @@ func existingSecrets(runtime runtime.Runtime, secretNames []string) ([]string, e
 	}
 
 	return secretsToSkip, nil
+}
+
+// PromptForPassword prompts the user to enter a password securely.
+func PromptForPassword() (string, error) {
+	fmt.Print("Enter admin password: ")
+	passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println() // Print newline after password input
+	if err != nil {
+		return "", err
+	}
+
+	password := string(passwordBytes)
+	if password == "" {
+		return "", fmt.Errorf("password cannot be empty")
+	}
+
+	// Prompt for confirmation
+	fmt.Print("Confirm admin password: ")
+	confirmBytes, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println() // Print newline after password input
+	if err != nil {
+		return "", err
+	}
+
+	confirm := string(confirmBytes)
+	if password != confirm {
+		return "", fmt.Errorf("passwords do not match")
+	}
+
+	return password, nil
+}
+
+// HashPasswordPBKDF2 generates a PBKDF2 hash of the password with a random salt.
+func HashPasswordPBKDF2(password string, iteration int) (string, error) {
+	salt := make([]byte, constants.Pbkdf2SaltLen)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+
+	hash := pbkdf2.Key([]byte(password), salt, iteration, constants.Pbkdf2KeyLen, sha256.New)
+
+	// Format: iterations.salt.hash (base64 encoded)
+	encoded := fmt.Sprintf("%d.%s.%s",
+		iteration,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(hash))
+
+	return encoded, nil
+}
+
+// GetAuthFilePath determines the auth.json file path.
+func GetAuthFilePath() (string, error) {
+	if os.Geteuid() == 0 {
+		return "/run/user/0/containers/auth.json", nil
+	}
+
+	return fmt.Sprintf("/run/user/%d/containers/auth.json", os.Getuid()), nil
 }
