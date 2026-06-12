@@ -21,7 +21,7 @@ if level != "":
 set_log_level(log_level)
 
 import common.db_utils as db
-from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session
+from common.misc_utils import get_embedding_endpoint, get_reranker_endpoint, set_request_id, create_llm_session
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from common.validation_utils import validate_query_length as _validate_query_length
 from similarity.settings import settings
@@ -39,9 +39,8 @@ reranker_model_dict: dict = {}
 
 def _initialize_models():
     global emb_model_dict, reranker_model_dict
-    # get_model_endpoints() also returns llm_model_dict, which we discard —
-    # similarity search has no LLM dependency.
-    emb_model_dict, _, reranker_model_dict = get_model_endpoints()
+    emb_model_dict = get_embedding_endpoint()
+    reranker_model_dict = get_reranker_endpoint()
 
 
 def _initialize_vectorstore():
@@ -51,9 +50,9 @@ def _initialize_vectorstore():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _initialize_models()
-    _initialize_vectorstore()
     create_llm_session(pool_maxsize=10)
+    _initialize_models()
+    await asyncio.to_thread(_initialize_vectorstore)
     yield
 
 tags_metadata = [
@@ -208,3 +207,4 @@ async def health():
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "7000"))
     uvicorn.run(app, host="0.0.0.0", port=port)
+

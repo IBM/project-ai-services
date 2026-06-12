@@ -29,7 +29,7 @@ from summarize.models import (
 set_log_level(settings.common.app.log_level)
 
 from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream, tokenize_with_llm
-from common.misc_utils import get_model_endpoints, set_request_id, configure_uvicorn_logging, create_llm_session
+from common.misc_utils import get_llm_endpoint, set_request_id, configure_uvicorn_logging, create_llm_session
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 
 from common.error_utils import http_error_responses
@@ -69,8 +69,8 @@ concurrency_limiter = asyncio.BoundedSemaphore(settings.common.llm.max_batch_siz
 async def lifespan(app):
     filtered_paths = ['/health']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
-    initialize_models()
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
+    initialize_models()
     
     # Check database connection and initialize schema (required for operation)
     try:
@@ -175,7 +175,7 @@ async def summarize_exception_handler(request: Request, exc: SummarizeException)
 
 def initialize_models():
     global llm_model_dict
-    _, llm_model_dict,_  = get_model_endpoints()
+    llm_model_dict = get_llm_endpoint()
 
 async def locked_stream(stream_g):
     """Wrap a vLLM SSE generator, releasing the concurrency semaphore when the stream ends."""
