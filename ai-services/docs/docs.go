@@ -1368,6 +1368,7 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture": {
             "type": "object",
             "properties": {
+                "about": {},
                 "certified_by": {
                     "type": "string"
                 },
@@ -1648,6 +1649,7 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service": {
             "type": "object",
             "properties": {
+                "about": {},
                 "architectures": {
                     "type": "array",
                     "items": {

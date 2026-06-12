@@ -8,21 +8,11 @@ metadata:
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/secret: "catalog-db-secret"
     ai-services.io/secret-skip-cleanup: "true"
+    ai-services.io/volume: "postgres-catalog"
+    ai-services.io/volume-skip-cleanup: "true"
+  annotations:
+    io.podman.annotations.pids-limit/postgresql: "4096"
 spec:
-  initContainers:
-  - name: fix-permissions
-    image: "{{ .Values.db.image }}"
-    command:
-    - /bin/sh
-    - -c
-    - |
-      chown -R 26:0 /var/lib/pgsql
-      chmod -R g=u /var/lib/pgsql
-    volumeMounts:
-    - name: postgres-data
-      mountPath: /var/lib/pgsql
-    securityContext:
-      runAsUser: 0
   containers:
   - name: postgresql
     image: "{{ .Values.db.image }}"
@@ -41,9 +31,12 @@ spec:
       value: "{{ .Values.db.database }}"
     - name: PGDATA
       value: "/var/lib/pgsql/data"
+    securityContext:
+      runAsUser: 26
+      fsGroup: 26
     volumeMounts:
     - name: postgres-data
-      mountPath: /var/lib/pgsql
+      mountPath: /var/lib/pgsql:z
     livenessProbe:
       exec:
         command:
@@ -54,6 +47,16 @@ spec:
       periodSeconds: 10
       timeoutSeconds: 5
       failureThreshold: 3
+    readinessProbe:
+      exec:
+        command:
+        - /bin/sh
+        - -c
+        - pg_isready -U {{ .Values.db.user }} -d {{ .Values.db.database }}
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
     resources:
       requests:
         memory: "{{ .Values.db.resources.requests.memory }}"
@@ -61,6 +64,5 @@ spec:
         memory: "{{ .Values.db.resources.limits.memory }}"
   volumes:
   - name: postgres-data
-    hostPath:
-      path: "{{ .BaseDir }}/db"
-      type: DirectoryOrCreate
+    persistentVolumeClaim:
+      claimName: "postgres-catalog"
