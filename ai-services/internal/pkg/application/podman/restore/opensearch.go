@@ -15,7 +15,6 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -41,7 +40,7 @@ func RestoreOpenSearch(ctx context.Context, templateID, backupFile string) error
 	logger.Infof("Pod ID: %s\n", podID, 0)
 
 	// Extract and locate backup directory
-	backupDir, cleanup, err := extractAndLocateBackup(backupFile)
+	backupDir, cleanup, err := ExtractAndLocateBackup(backupFile)
 	if err != nil {
 		return err
 	}
@@ -64,78 +63,6 @@ func findContainerAndPod(ctx context.Context, templateID string) (string, string
 	}
 
 	return containerName, podID, nil
-}
-
-// extractAndLocateBackup extracts the backup archive and locates the backup directory.
-func extractAndLocateBackup(backupFile string) (string, func(), error) {
-	logger.Infof("Extracting backup archive...\n", 0)
-
-	tempDir, err := os.MkdirTemp("", "opensearch-restore-*")
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to create temp directory: %w", err)
-	}
-
-	cleanup := func() {
-		if err := os.RemoveAll(tempDir); err != nil {
-			logger.Errorf("Failed to cleanup temp directory %s: %v\n", tempDir, err)
-		}
-	}
-
-	if err := utils.ExtractTarGz(backupFile, tempDir); err != nil {
-		cleanup()
-
-		return "", nil, fmt.Errorf("failed to extract backup: %w", err)
-	}
-
-	backupDir, err := locateBackupDirectory(tempDir)
-	if err != nil {
-		cleanup()
-
-		return "", nil, err
-	}
-
-	return backupDir, cleanup, nil
-}
-
-// locateBackupDirectory determines the backup directory path supporting both formats.
-func locateBackupDirectory(tempDir string) (string, error) {
-	backupDirOld := filepath.Join(tempDir, "backup")
-	backupDirNew := filepath.Join(tempDir, "opensearch_backup")
-
-	if _, err := os.Stat(backupDirOld); err == nil {
-		logger.Infof("Using backup format: backup/opensearch/\n", 0)
-
-		return backupDirOld, nil
-	}
-
-	if _, err := os.Stat(backupDirNew); err == nil {
-		logger.Infof("Using backup format: opensearch_backup/\n", 0)
-
-		return backupDirNew, nil
-	}
-
-	return "", formatBackupNotFoundError(tempDir)
-}
-
-// formatBackupNotFoundError creates a detailed error message for missing backup directory.
-func formatBackupNotFoundError(tempDir string) error {
-	entries, listErr := os.ReadDir(tempDir)
-	if listErr != nil {
-		return fmt.Errorf("backup directory not found in archive")
-	}
-
-	var extractedDirs []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			extractedDirs = append(extractedDirs, entry.Name())
-		}
-	}
-
-	if len(extractedDirs) > 0 {
-		return fmt.Errorf("backup directory not found in archive. Expected 'backup/' or 'opensearch_backup/' but found: %v", extractedDirs)
-	}
-
-	return fmt.Errorf("backup directory not found in archive")
 }
 
 // findOpenSearchContainer finds the OpenSearch container for the given template ID using Podman SDK.

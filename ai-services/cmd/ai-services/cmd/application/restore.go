@@ -37,8 +37,8 @@ Flags:
 	 -y, --yes  : Automatically accept confirmation prompt (default=false)
 
 Supported targets:
-	 - opensearch: Restore OpenSearch indices and data (Podman only)
-	 - digitize:   Not yet implemented
+  - opensearch: Restore OpenSearch indices and data (Podman only)
+  - digitize:   Restore digitize metadata (jobs and documents) (Podman only)
 
 Note:
 	 - OpenSearch restore is currently only supported for Podman runtime

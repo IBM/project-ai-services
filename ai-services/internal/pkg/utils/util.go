@@ -661,3 +661,20 @@ func ParseErrorResponse(resp *resty.Response) string {
 
 	return resp.String()
 }
+
+// GetNumericValFromMap safely extracts a numeric value from a map as an integer, returning 0 if not found or not a number.
+// Handles both int and float64 types from JSON unmarshaling.
+func GetNumericValFromMap(m map[string]interface{}, key string) int {
+	if val, ok := m[key]; ok {
+		switch v := val.(type) {
+		case int:
+			return v
+		case float64:
+			return int(v)
+		case int64:
+			return int(v)
+		}
+	}
+
+	return 0
+}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
+	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimePodman "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
@@ -25,13 +26,6 @@ func (p *PodmanApplication) Restore(ctx context.Context, opts types.RestoreOptio
 	}
 	logger.Infof("Application ID: %s\n", appDetails.ID, 0)
 
-	// Get component ID for the target using existing utility
-	componentID, err := cliUtils.GetComponentID(appDetails, opts.Target)
-	if err != nil {
-		return fmt.Errorf("failed to get component ID: %w", err)
-	}
-	logger.Infof("Component ID: %s\n", componentID, 0)
-
 	// Get absolute path to backup file
 	absFilename, err := filepath.Abs(opts.BackupFile)
 	if err != nil {
@@ -41,9 +35,16 @@ func (p *PodmanApplication) Restore(ctx context.Context, opts types.RestoreOptio
 	// Execute restore based on target
 	switch opts.Target {
 	case "opensearch":
+		// Get component ID for opensearch
+		componentID, err := cliUtils.GetComponentID(appDetails, opts.Target)
+		if err != nil {
+			return fmt.Errorf("failed to get component ID: %w", err)
+		}
+		logger.Infof("Component ID: %s\n", componentID, 0)
+
 		return p.restoreOpenSearch(ctx, componentID, absFilename)
 	case "digitize":
-		return fmt.Errorf("restore for target 'digitize' is not yet implemented")
+		return p.restoreDigitize(ctx, appDetails, absFilename)
 	default:
 		return fmt.Errorf("unsupported target: %s", opts.Target)
 	}
@@ -71,4 +72,38 @@ func (p *PodmanApplication) getPodmanContext() (context.Context, error) {
 	return podmanClient.Context, nil
 }
 
-// Made with Bob
+// restoreDigitize restores digitize metadata using the Import API.
+func (p *PodmanApplication) restoreDigitize(ctx context.Context, appDetails *catalogTypes.Application, backupFile string) error {
+	logger.Infof("Restoring digitize metadata\n", 0)
+	logger.Infof("Digitize Import (API-based Approach)\n", 0)
+
+	// Extract and locate backup directory
+	backupDir, cleanup, err := restore.ExtractAndLocateBackup(backupFile)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	// Construct metadata from cache files
+	importPayload, err := restore.ConstructMetadataFromCache(backupDir)
+	if err != nil {
+		return err
+	}
+
+	// Get digitize service API URL from application details
+	digitizeURL, err := restore.GetDigitizeAPIURL(appDetails)
+	if err != nil {
+		return err
+	}
+
+	logger.Infof("Digitize API URL: %s\n", digitizeURL, 0)
+
+	// Call Import API
+	if err := restore.CallDigitizeImportAPI(digitizeURL, importPayload); err != nil {
+		return err
+	}
+
+	logger.Infof("✓ Digitize metadata restore completed successfully\n", 0)
+
+	return nil
+}
