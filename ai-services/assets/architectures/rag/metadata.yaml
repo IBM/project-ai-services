@@ -1,7 +1,7 @@
 # Architecture identification
 id: rag
 name: "Digital Assistant"
-description: "Enable digital assistants using Retrieval-Augmented Generation (RAG), including AI services that query a managed knowledge base to answer questions from custom documents and data."
+description: "Production-ready tools that help users complete tasks and access information through conversation or commands. Assistants integrate multiple services for complex use cases and support retrieval-augmented generation (RAG)."
 version: "1.0.0"
 type: architecture
 
