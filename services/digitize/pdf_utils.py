@@ -44,7 +44,7 @@ def get_document_page_count(file_path: str) -> int:
     Get page count for a document file (PDF or DOCX).
 
     For PDF files, returns actual page count.
-    For DOCX files, returns 0 (DOCX doesn't have fixed pages).
+    For DOCX files, returns estimated page count based on content.
 
     Args:
         file_path: Path to the document file
@@ -53,6 +53,7 @@ def get_document_page_count(file_path: str) -> int:
         Page count (int), or 0 if unable to determine
     """
     from pathlib import Path
+    from digitize.docx_utils import estimate_docx_page_count
 
     try:
         file_ext = Path(file_path).suffix.lower()
@@ -61,11 +62,8 @@ def get_document_page_count(file_path: str) -> int:
             return get_pdf_page_count(file_path)
 
         elif file_ext == '.docx':
-            # DOCX files don't have fixed pages like PDFs
-            # Page count depends on rendering (font, margins, etc.)
-            # Return 0 to indicate "not applicable"
-            logger.debug(f"DOCX file {file_path}: page count not applicable, returning 0")
-            return 0
+            # Use DOCX utility to estimate page count
+            return estimate_docx_page_count(file_path)
 
         else:
             logger.warning(f"Unknown file extension {file_ext} for {file_path}")
@@ -83,19 +81,8 @@ def get_matching_header_lvl(toc, title, threshold=80):
             return "#" * toc[toc_title]
     return ""
 
+
 def get_toc(file):
-    """
-    Extract table of contents from a PDF file.
-    Returns empty TOC and 0 page count for non-PDF files (e.g., DOCX).
-    """
-    from pathlib import Path
-    
-    # Check if file is actually a PDF
-    file_ext = Path(file).suffix.lower()
-    if file_ext != '.pdf':
-        logger.debug(f"Skipping TOC extraction for non-PDF file: {file}")
-        return {}, 0
-    
     toc = {}
     page_count = 0
     parser = None
@@ -122,7 +109,9 @@ def get_toc(file):
                     parser.close()
                 except Exception:
                     pass  # nothing to do
+                
     return toc, page_count
+
 
 def load_pdf_pages(pdf_path):
     """
