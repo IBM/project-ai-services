@@ -495,10 +495,10 @@ fi
 // bulkIndexDocuments performs bulk indexing of documents in batches to avoid 413 errors.
 func bulkIndexDocuments(ctx context.Context, containerID, osHost, osPassword, backupDir, indexName string) error {
 	// Use environment variable for password and validate HTTP response
-	// Process documents in batches of 100 to avoid request size limits (413 errors)
+	// Process documents in batches of 1000 to balance speed and request size limits
 	bulkScript := fmt.Sprintf(`
-# Batch size for bulk indexing (adjust based on document size)
-BATCH_SIZE=100
+# Batch size for bulk indexing (increased for faster processing)
+BATCH_SIZE=1000
 DATA_FILE="%s/%s_data.json"
 INDEX_NAME="%s"
 OS_HOST="%s"
