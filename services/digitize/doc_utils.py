@@ -394,17 +394,6 @@ def process_text_docx(converted_doc, docx_path, out_path):
 
 
 def process_text(converted_doc, pdf_path, out_path):
-    """
-    Process text content from document files (PDF or DOCX).
-    For DOCX files, routes to separate processing function.
-    For PDF files, uses original implementation below.
-    """
-    # Check file type and route DOCX to separate function
-    file_ext = Path(pdf_path).suffix.lower()
-    if file_ext == '.docx':
-        return process_text_docx(converted_doc, pdf_path, out_path)
-    
-    # Original PDF processing implementation below
     page_count = 0
     process_time = 0.0
 
@@ -465,8 +454,6 @@ def process_text(converted_doc, pdf_path, out_path):
                         })
                 else:
                     # Try font size extraction
-                    font_size = None
-                    
                     if pdf_pages:
                         # PDF font size extraction
                         matches = find_text_font_size(pdf_pages, text_obj.text, page_no - 1)
@@ -478,12 +465,12 @@ def process_text(converted_doc, pdf_path, out_path):
                                 count += 1 if match["match_score"] == 100 else 0
                             font_size = font_size / count if count else None
 
-                    structured_output.append({
-                        "label": label,
-                        "text": text_obj.text,
-                        "page": page_no,
-                        "font_size": round(font_size, 2) if font_size else None
-                    })
+                            structured_output.append({
+                                "label": label,
+                                "text": text_obj.text,
+                                "page": page_no,
+                                "font_size": round(font_size, 2) if font_size else None
+                            })
         else:
             # For non-header elements, safely get page number
             page_no = text_obj.prov[0].page_no if text_obj.prov else None
@@ -789,7 +776,12 @@ def process_converted_document(converted_json_path, pdf_path, out_path, gen_mode
         if not converted_doc:
             raise Exception(f"failed to load converted json into Docling Document")
 
-        page_count, process_time = process_text(converted_doc, pdf_path, processed_text_json_path)
+        # Check file type and route to appropriate processing function
+        file_ext = Path(pdf_path).suffix.lower()
+        if file_ext == '.docx':
+            page_count, process_time = process_text_docx(converted_doc, pdf_path, processed_text_json_path)
+        else:
+            page_count, process_time = process_text(converted_doc, pdf_path, processed_text_json_path)
         timings["process_text"] = process_time
 
         # Detect document language early using the processed text
