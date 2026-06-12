@@ -65,7 +65,7 @@ instruct:
 
 embedding:
   # @hidden
-  image: icr.io/ppc64le-oss/vllm-ppc64le:0.9.1
+  image: icr.io/ppc64le-oss/vllm-ppc64le:0.19.1
   model:
     # @hidden
     name: ibm-granite/granite-embedding-278m-multilingual

@@ -84,6 +84,13 @@ spec:
         failureThreshold: 3
     - name: backend
       image: "{{ .Values.backend.image }}"
+      securityContext:
+        seLinuxOptions:
+          {{- if eq .Values.backend.podman.uri "/run/podman/podman.sock" }}
+          type: ai_services_root.process
+          {{- else }}
+          type: ai_services_nonroot.process
+          {{- end }}
       command: ["/bin/sh", "-c"]
       args:
         - "/usr/bin/ai-services catalog apiserver --port=8080 --admin-username=admin --admin-password-hash=${ADMIN_PASSWORD} --runtime={{ .Values.backend.runtime }}"
