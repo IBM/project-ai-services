@@ -1,5 +1,11 @@
 package types
 
+import (
+	"encoding/json"
+
+	"gopkg.in/yaml.v3"
+)
+
 // Architecture represents a complete AI solution template.
 type Architecture struct {
 	ID               string               `yaml:"id" json:"id"`
@@ -12,7 +18,25 @@ type Architecture struct {
 	GlobalComponents []ComponentReference `yaml:"global_components,omitempty" json:"global_components,omitempty"`
 	Services         []ServiceReference   `yaml:"services" json:"services"`
 	Links            *ArchitectureLinks   `yaml:"links,omitempty" json:"links,omitempty"`
-	About            any                  `yaml:"about,omitempty" json:"about,omitempty"`
+	About            yaml.Node            `yaml:"about,omitempty" json:"-"`
+}
+
+// MarshalJSON implements custom JSON marshaling for Architecture to properly handle yaml.Node.
+func (a Architecture) MarshalJSON() ([]byte, error) {
+	type Alias Architecture
+	aux := &struct {
+		About interface{} `json:"about,omitempty"`
+		*Alias
+	}{
+		Alias: (*Alias)(&a),
+	}
+
+	// Convert yaml.Node to interface{} preserving order
+	if a.About.Kind != 0 {
+		aux.About = yamlNodeToInterface(&a.About)
+	}
+
+	return json.Marshal(aux)
 }
 
 // ArchitectureSummary represents an architecture for list API responses.
@@ -66,7 +90,25 @@ type Service struct {
 	Architectures []string              `yaml:"architectures" json:"architectures"`
 	Dependencies  []DependencyReference `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
 	Standalone    bool                  `yaml:"standalone,omitempty" json:"standalone,omitempty"`
-	About         any                   `yaml:"about,omitempty" json:"about,omitempty"`
+	About         yaml.Node             `yaml:"about,omitempty" json:"-"`
+}
+
+// MarshalJSON implements custom JSON marshaling for Service to properly handle yaml.Node.
+func (s Service) MarshalJSON() ([]byte, error) {
+	type Alias Service
+	aux := &struct {
+		About interface{} `json:"about,omitempty"`
+		*Alias
+	}{
+		Alias: (*Alias)(&s),
+	}
+
+	// Convert yaml.Node to interface{} preserving order
+	if s.About.Kind != 0 {
+		aux.About = yamlNodeToInterface(&s.About)
+	}
+
+	return json.Marshal(aux)
 }
 
 // ServiceSummary represents a service for list API responses.
@@ -138,6 +180,103 @@ type DeployOptionsArchitecture struct {
 	Version          string                   `json:"version,omitempty"`
 	GlobalComponents []DeployOptionsComponent `json:"global_components"`
 	Services         []DeployOptionsService   `json:"services"`
+}
+
+// OrderedMap represents a map that preserves insertion order for JSON marshaling.
+type OrderedMap []OrderedMapEntry
+
+// OrderedMapEntry represents a single key-value pair in an ordered map.
+type OrderedMapEntry struct {
+	Key   string      `json:"-"`
+	Value interface{} `json:"-"`
+}
+
+// MarshalJSON implements custom JSON marshaling for OrderedMap to preserve key order.
+func (om OrderedMap) MarshalJSON() ([]byte, error) {
+	// Build a map in the order of entries
+	result := make(map[string]interface{}, len(om))
+	keys := make([]string, 0, len(om))
+
+	for _, entry := range om {
+		result[entry.Key] = entry.Value
+		keys = append(keys, entry.Key)
+	}
+
+	// Use json.Marshal with a custom encoder that respects order
+	// Since Go 1.12+, json.Marshal preserves map key order for small maps
+	// For guaranteed order, we build JSON manually
+	if len(om) == 0 {
+		return []byte("{}"), nil
+	}
+
+	jsonBytes := []byte("{")
+	for i, entry := range om {
+		if i > 0 {
+			jsonBytes = append(jsonBytes, ',')
+		}
+
+		keyJSON, err := json.Marshal(entry.Key)
+		if err != nil {
+			return nil, err
+		}
+		jsonBytes = append(jsonBytes, keyJSON...)
+		jsonBytes = append(jsonBytes, ':')
+
+		valueJSON, err := json.Marshal(entry.Value)
+		if err != nil {
+			return nil, err
+		}
+		jsonBytes = append(jsonBytes, valueJSON...)
+	}
+	jsonBytes = append(jsonBytes, '}')
+
+	return jsonBytes, nil
+}
+
+// yamlNodeToInterface converts a yaml.Node to a native Go interface{} while preserving order.
+// This is used for JSON marshaling to maintain the order of fields in YAML arrays and maps.
+func yamlNodeToInterface(node *yaml.Node) interface{} {
+	if node == nil {
+		return nil
+	}
+
+	switch node.Kind {
+	case yaml.DocumentNode:
+		// Document nodes wrap the actual content
+		if len(node.Content) > 0 {
+			return yamlNodeToInterface(node.Content[0])
+		}
+		return nil
+
+	case yaml.SequenceNode:
+		// Array/slice - preserve order
+		result := make([]interface{}, 0, len(node.Content))
+		for _, item := range node.Content {
+			result = append(result, yamlNodeToInterface(item))
+		}
+		return result
+
+	case yaml.MappingNode:
+		// Map - preserve key order using OrderedMap
+		result := make(OrderedMap, 0, len(node.Content)/2)
+		for i := 0; i < len(node.Content); i += 2 {
+			key := node.Content[i].Value
+			value := yamlNodeToInterface(node.Content[i+1])
+			result = append(result, OrderedMapEntry{Key: key, Value: value})
+		}
+		return result
+
+	case yaml.ScalarNode:
+		// Scalar value
+		return node.Value
+
+	case yaml.AliasNode:
+		// Alias to another node
+		return yamlNodeToInterface(node.Alias)
+
+	default:
+		return nil
+	}
 }
 
 // Made with Bob
