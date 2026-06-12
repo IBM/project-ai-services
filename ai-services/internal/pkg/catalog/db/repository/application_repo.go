@@ -293,7 +293,7 @@ func collectApplication(rows pgx.Rows) (*models.Application, error) {
 	}
 
 	if app == nil {
-		return nil, pgx.ErrNoRows
+		return nil, nil
 	}
 
 	return app, nil
@@ -382,13 +382,9 @@ func (r *applicationRepo) UpdateDeploymentName(ctx context.Context, id uuid.UUID
 		WHERE id = $2
 	`
 
-	result, err := r.pool.Exec(ctx, query, name, id)
+	_, err := r.pool.Exec(ctx, query, name, id)
 	if err != nil {
 		return fmt.Errorf("failed to update application name: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return pgx.ErrNoRows
 	}
 
 	return nil
@@ -402,13 +398,9 @@ func (r *applicationRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status
 		WHERE id = $3
 	`
 
-	result, err := r.pool.Exec(ctx, query, status, sql.NullString{String: message, Valid: message != ""}, id)
+	_, err := r.pool.Exec(ctx, query, status, sql.NullString{String: message, Valid: message != ""}, id)
 	if err != nil {
 		return fmt.Errorf("failed to update application status: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return pgx.ErrNoRows
 	}
 
 	return nil
@@ -419,13 +411,9 @@ func (r *applicationRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status
 func (r *applicationRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM applications WHERE id = $1`
 
-	result, err := r.pool.Exec(ctx, query, id)
+	_, err := r.pool.Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete application: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return pgx.ErrNoRows
 	}
 
 	return nil
