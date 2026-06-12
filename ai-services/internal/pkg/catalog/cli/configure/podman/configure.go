@@ -3,9 +3,12 @@ package podman
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +16,7 @@ import (
 	"sync"
 	"text/template"
 
+	"github.com/containers/podman/v5/pkg/bindings/containers"
 	"github.com/project-ai-services/ai-services/assets"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -35,7 +39,12 @@ const (
 	kindSecret            = "Secret"
 	caddyCertsDirName     = "certs"
 	caddyContainerDataDir = "/data/caddy"
+	domainSuffixEnvVar    = "DOMAIN_SUFFIX"
+	httpsPortEnvVar       = "CADDY_HTTPS_PORT"
 )
+
+// ErrCertificatesAlreadyLoaded is a sentinel error indicating certificates are already loaded and should be skipped.
+var ErrCertificatesAlreadyLoaded = errors.New("certificates already loaded")
 
 // catalogDeploymentContext holds cached values during catalog deployment to avoid redundant lookups.
 type catalogDeploymentContext struct {
@@ -92,15 +101,21 @@ func (c *catalogDeploymentContext) getCaddyHostAdminURL(rt *podman.PodmanClient,
 }
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
-func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, baseDir string, argParams map[string]string, domainName string, sslCertPath, sslKeyPath string, httpsPort int) error {
+func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, baseDir string, argParams map[string]string, domainName string, sslCertPath, sslKeyPath string, httpsPort int, resetCert bool) error {
 	s := spinner.New("Deploying catalog service...")
 	s.Start(ctx)
 
 	// Initialize deployment context for caching
 	deployCtx := &catalogDeploymentContext{}
 
-	// Initialize and validate
+	// Initialize and validate (don't set HTTPS port yet for reconfigure case)
 	rt, tp, appMetadata, tmpls, argParams, err := initializeCatalogDeployment(argParams, httpsPort, s)
+	if err != nil {
+		return err
+	}
+
+	// Extract certificate domain early (needed for both fresh deploy and reconfigure)
+	certDomain, err := extractCertDomainIfProvided(sslCertPath, sslKeyPath, s)
 	if err != nil {
 		return err
 	}
@@ -113,20 +128,35 @@ func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, b
 		return fmt.Errorf("failed to check existing resources: %w", err)
 	}
 
-	if isDeployed {
-		s.Stop("Catalog service already deployed")
-		logger.Infof("Catalog pod already exists: %v\n", existingResources)
-
-		return nil
+	if !isDeployed {
+		// Fresh deployment path
+		return handleFreshDeployment(deployCtx, rt, tp, appMetadata, tmpls, podmanURI, authFilePath, passwordHash, baseDir, domainName, certDomain, sslCertPath, sslKeyPath, argParams, existingResources, s, resetCert)
 	}
 
-	// Prepare deployment with domain suffix computation
-	values, err := prepareCatalogDeployment(deployCtx, tp, podmanURI, authFilePath, passwordHash, baseDir, domainName, sslCertPath, sslKeyPath, argParams, s)
+	// Reconfigure path - pass the httpsPort parameter to handle default vs user-provided
+	return handleReconfigure(deployCtx, rt, tp, baseDir, certDomain, domainName, sslCertPath, sslKeyPath, argParams, httpsPort, s, resetCert)
+}
+
+// handleFreshDeployment handles the fresh deployment path for catalog service.
+func handleFreshDeployment(
+	deployCtx *catalogDeploymentContext,
+	rt *podman.PodmanClient,
+	tp templates.Template,
+	appMetadata *templates.AppMetadata,
+	tmpls map[string]*template.Template,
+	podmanURI, authFilePath, passwordHash, baseDir, domainName, certDomain, sslCertPath, sslKeyPath string,
+	argParams map[string]string,
+	existingResources []string,
+	s *spinner.Spinner,
+	resetCert bool,
+) error {
+	// Prepare deployment configuration
+	values, err := prepareCatalogDeployment(deployCtx, tp, podmanURI, authFilePath, passwordHash, baseDir, domainName, certDomain, argParams, s)
 	if err != nil {
 		return err
 	}
 
-	// Execute pod templates (using cached values from context)
+	// Execute pod templates
 	if err := executePodLayers(rt, tp, tmpls, appMetadata, values, baseDir, deployCtx.caddyContainerAdminURL, deployCtx.domainSuffix, argParams, s, existingResources); err != nil {
 		return err
 	}
@@ -134,12 +164,35 @@ func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, b
 	s.Stop("Catalog service deployed successfully")
 	logger.Infoln("-------")
 
-	// Load SSL certificates if provided
-	if err := loadSSLCertificatesIfProvided(deployCtx, rt, tp, baseDir, sslCertPath, sslKeyPath, argParams); err != nil {
+	// Handle post-deployment operations (cert loading and route registration)
+	return handlePostDeployment(deployCtx, rt, tp, baseDir, sslCertPath, sslKeyPath, argParams, false, resetCert)
+}
+
+// handleReconfigure handles the reconfigure path for catalog service.
+func handleReconfigure(
+	deployCtx *catalogDeploymentContext,
+	rt *podman.PodmanClient,
+	tp templates.Template,
+	baseDir, certDomain, domainName, sslCertPath, sslKeyPath string,
+	argParams map[string]string,
+	httpsPort int,
+	s *spinner.Spinner,
+	resetCert bool,
+) error {
+	s.Stop("Catalog service already deployed, validating configuration...")
+
+	// Validate reconfigure parameters and get existing domain
+	// Pass httpsPort to determine if user provided it or if it's the default
+	existingDomain, err := validateReconfigureParameters(rt, certDomain, domainName, argParams, httpsPort)
+	if err != nil {
 		return err
 	}
 
-	return handlePostDeployment(deployCtx, rt, tp, argParams)
+	// Use existing domain for operations
+	deployCtx.domainSuffix = existingDomain
+
+	// Handle post-deployment operations (cert loading and route registration)
+	return handlePostDeployment(deployCtx, rt, tp, baseDir, sslCertPath, sslKeyPath, argParams, true, resetCert)
 }
 
 // initializeCatalogDeployment handles initialization and validation steps.
@@ -176,12 +229,17 @@ func initializeCatalogDeployment(argParams map[string]string, httpsPort int, s *
 	return rt, tp, appMetadata, tmpls, argParams, nil
 }
 
-// handlePostDeployment handles route registration and next steps display after catalog deployment.
-func handlePostDeployment(deployCtx *catalogDeploymentContext, rt *podman.PodmanClient, tp templates.Template, argParams map[string]string) error {
+// handlePostDeployment handles certificate loading, route registration and next steps display after catalog deployment.
+func handlePostDeployment(deployCtx *catalogDeploymentContext, rt *podman.PodmanClient, tp templates.Template, baseDir, sslCertPath, sslKeyPath string, argParams map[string]string, isReconfigure bool, resetCert bool) error {
 	// Get Caddy admin URL from cache (will fetch and cache if not already cached)
 	adminURL, err := deployCtx.getCaddyHostAdminURL(rt, tp, catalogAppTemplate, argParams)
 	if err != nil {
 		return fmt.Errorf("failed to get Caddy admin URL: %w", err)
+	}
+
+	// Load SSL certificates if provided (allow cert updates during reconfigure only with --reset-cert)
+	if err := loadSSLCertificatesIfProvided(deployCtx, rt, tp, baseDir, sslCertPath, sslKeyPath, argParams, isReconfigure, resetCert); err != nil {
+		return fmt.Errorf("failed to load SSL certificates: %w", err)
 	}
 
 	// Get Caddy pod name from cache
@@ -227,13 +285,7 @@ func extractCertDomainIfProvided(sslCertPath, sslKeyPath string, s *spinner.Spin
 }
 
 // prepareCatalogDeployment prepares all necessary data for deployment including domain suffix computation.
-func prepareCatalogDeployment(deployCtx *catalogDeploymentContext, tp templates.Template, podmanURI, authFilePath, passwordHash, baseDir, domainName, sslCertPath, sslKeyPath string, argParams map[string]string, s *spinner.Spinner) (map[string]any, error) {
-	// Extract domain from certificate if provided
-	certDomain, err := extractCertDomainIfProvided(sslCertPath, sslKeyPath, s)
-	if err != nil {
-		return nil, err
-	}
-
+func prepareCatalogDeployment(deployCtx *catalogDeploymentContext, tp templates.Template, podmanURI, authFilePath, passwordHash, baseDir, domainName, certDomain string, argParams map[string]string, s *spinner.Spinner) (map[string]any, error) {
 	// Compute domain suffix using priority: certDomain > customDomain > hostIP.nip.io
 	domainSuffix, err := computeDomainSuffix(certDomain, domainName)
 	if err != nil {
@@ -275,24 +327,44 @@ func prepareCatalogDeployment(deployCtx *catalogDeploymentContext, tp templates.
 }
 
 // loadSSLCertificatesIfProvided stages user-provided certificates for the Caddy pod and updates TLS config via Admin API.
-func loadSSLCertificatesIfProvided(deployCtx *catalogDeploymentContext, rt *podman.PodmanClient, tp templates.Template, baseDir, sslCertPath, sslKeyPath string, argParams map[string]string) error {
+// During reconfigure, it validates certificate changes and blocks unauthorized updates unless --reset-cert is provided.
+func loadSSLCertificatesIfProvided(deployCtx *catalogDeploymentContext, rt *podman.PodmanClient, tp templates.Template, baseDir, sslCertPath, sslKeyPath string, argParams map[string]string, isReconfigure bool, resetCert bool) error {
 	if sslCertPath == "" || sslKeyPath == "" {
 		return nil
 	}
 
+	// Define staged certificate paths
+	stagedCertPath := filepath.Join(baseDir, "common", "caddy", caddyCertsDirName, "tls.crt")
+	stagedKeyPath := filepath.Join(baseDir, "common", "caddy", caddyCertsDirName, "tls.key")
+
+	// Handle reconfigure scenario
+	if isReconfigure && !resetCert {
+		// Only validate if --reset-cert is NOT provided
+		if err := validateCertificateUpdate(sslCertPath, sslKeyPath, stagedCertPath, stagedKeyPath); err != nil {
+			// Check if this is the special "already loaded" error
+			if errors.Is(err, ErrCertificatesAlreadyLoaded) {
+				return nil // Skip loading, not an actual error
+			}
+			return err
+		}
+	}
+
+	// Fresh deployment: proceed with certificate loading
 	// Get Caddy admin URL from cache (will fetch and cache if not already cached)
 	adminURL, err := deployCtx.getCaddyHostAdminURL(rt, tp, catalogAppTemplate, argParams)
 	if err != nil {
 		return fmt.Errorf("failed to get Caddy admin URL: %w", err)
 	}
 
+	logger.Infof("Loading certificates\n")
+
 	if err := stageCertificatesForCaddy(baseDir, sslCertPath, sslKeyPath); err != nil {
 		return fmt.Errorf("failed to stage certificates for Caddy: %w", err)
 	}
 
 	if err := utils.LoadUserCertificates(
-		filepath.Join(baseDir, "common", "caddy", caddyCertsDirName, "tls.crt"),
-		filepath.Join(baseDir, "common", "caddy", caddyCertsDirName, "tls.key"),
+		stagedCertPath,
+		stagedKeyPath,
 		filepath.Join(caddyContainerDataDir, caddyCertsDirName, "tls.crt"),
 		filepath.Join(caddyContainerDataDir, caddyCertsDirName, "tls.key"),
 		adminURL,
@@ -832,6 +904,168 @@ func GetCatalogRouteInfo(rt *podman.PodmanClient, tp templates.Template, appTemp
 	}
 
 	return routeDomains, httpsPort, nil
+}
+
+// validateReconfigureParameters validates that domain and HTTPS port haven't changed during reconfigure.
+// Returns the existing domain if validation passes, or an error if validation fails.
+func validateReconfigureParameters(rt *podman.PodmanClient, certDomain, domainName string, argParams map[string]string, userProvidedHTTPSPort int) (string, error) {
+	// Get existing configuration from catalog-backend pod
+	existingDomain, existingHTTPSPort, err := getExistingConfigFromCatalogBackend(rt)
+	if err != nil {
+		return "", fmt.Errorf("failed to get existing configuration from catalog-backend: %w", err)
+	}
+
+	// Compute new domain suffix
+	newDomain, err := computeDomainSuffix(certDomain, domainName)
+	if err != nil {
+		return "", fmt.Errorf("failed to compute domain suffix: %w", err)
+	}
+
+	// Validate domain matches
+	if existingDomain != newDomain {
+		return "", fmt.Errorf("domain change not allowed during reconfigure: existing=%s, new=%s. Please delete the catalog deployment and reconfigure fresh to change domain", existingDomain, newDomain)
+	}
+
+	// Handle HTTPS port validation
+	if existingHTTPSPort != "" {
+		// Existing deployment has HTTPS port configured
+		// Check if user explicitly provided a different port
+		userProvidedPortStr := fmt.Sprintf("%d", userProvidedHTTPSPort)
+
+		if userProvidedHTTPSPort > 0 && existingHTTPSPort != userProvidedPortStr {
+			return "", fmt.Errorf("HTTPS port change not allowed during reconfigure: existing=%s, new=%s. Catalog is already configured with HTTPS port %s", existingHTTPSPort, userProvidedPortStr, existingHTTPSPort)
+		}
+	}
+
+	return existingDomain, nil
+}
+
+// getExistingConfigFromCatalogBackend retrieves the domain and HTTPS port from the catalog-backend container.
+// These values are used to validate that configuration hasn't changed during reconfigure operations.
+func getExistingConfigFromCatalogBackend(rt *podman.PodmanClient) (domain string, httpsPort string, err error) {
+	// Construct the catalog-backend container name dynamically
+	// Pattern: {AppName}--catalog-backend (e.g., "ai-services--catalog-backend")
+	// This follows the Podman naming convention: {podName}-{containerName}
+	catalogBackendContainerName := fmt.Sprintf("%s--catalog-backend", catalogconstants.CatalogAppName)
+
+	// Inspect the catalog-backend container
+	stats, err := containers.Inspect(rt.Context, catalogBackendContainerName, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to inspect catalog-backend container '%s': %w", catalogBackendContainerName, err)
+	}
+
+	if stats == nil || stats.Config == nil || stats.Config.Env == nil {
+		return "", "", fmt.Errorf("invalid container stats when inspecting catalog-backend container")
+	}
+
+	// Extract DOMAIN_SUFFIX and HTTPS_PORT from environment variables
+	for _, envVar := range stats.Config.Env {
+		// Environment variables are in format "KEY=VALUE"
+		parts := strings.SplitN(envVar, "=", 2)
+		if len(parts) == 2 {
+			switch parts[0] {
+			case domainSuffixEnvVar:
+				domain = parts[1]
+			case httpsPortEnvVar:
+				httpsPort = parts[1]
+			}
+		}
+	}
+
+	if domain == "" {
+		return "", "", fmt.Errorf("DOMAIN_SUFFIX environment variable not found in catalog-backend container")
+	}
+
+	// HTTPS port is optional - older deployments may not have it
+	// If not found, it will be handled gracefully by the caller
+	return domain, httpsPort, nil
+}
+
+// validateCertificateUpdate validates certificate changes during reconfigure.
+// Returns an error if validation fails or if certificates should be skipped (with special error).
+// Returns nil if certificates can proceed with loading.
+func validateCertificateUpdate(newCertPath, newKeyPath, stagedCertPath, stagedKeyPath string) error {
+	// Check if staged certificates exist from previous successful deployment
+	_, certErr := os.Stat(stagedCertPath)
+	_, keyErr := os.Stat(stagedKeyPath)
+
+	if os.IsNotExist(certErr) || os.IsNotExist(keyErr) {
+		// No staged certificates found - either:
+		// 1. Previous deployment used auto-generated certs, OR
+		// 2. Previous custom cert deployment failed during staging
+		// In both cases, allow cert loading since domain is already validated
+		logger.Infof("No existing custom certificates found, loading new certificates\n")
+		return nil
+	}
+
+	// Staged certificates exist - compare content
+	needsUpdate, err := certificatesNeedUpdate(newCertPath, newKeyPath, stagedCertPath, stagedKeyPath)
+	if err != nil {
+		return fmt.Errorf("failed to check certificate status: %w", err)
+	}
+
+	if !needsUpdate {
+		// Certificates are identical - return special error to signal skip
+		return ErrCertificatesAlreadyLoaded
+	}
+
+	// Certificates differ - block update
+	return fmt.Errorf("certificate content change not allowed during reconfigure. Please reset cert")
+}
+
+// certificatesNeedUpdate checks if new certificates differ from existing staged certificates.
+// Returns true if certificates need to be updated, false if they are identical.
+func certificatesNeedUpdate(newCertPath, newKeyPath, stagedCertPath, stagedKeyPath string) (bool, error) {
+	// Check if staged certificates exist
+	if _, err := os.Stat(stagedCertPath); os.IsNotExist(err) {
+		// No existing certificates, need to load new ones
+		return true, nil
+	}
+	if _, err := os.Stat(stagedKeyPath); os.IsNotExist(err) {
+		// No existing key, need to load new ones
+		return true, nil
+	}
+
+	// Compare certificate hashes
+	newCertHash, err := computeFileHash(newCertPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to compute hash for new certificate: %w", err)
+	}
+
+	stagedCertHash, err := computeFileHash(stagedCertPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to compute hash for staged certificate: %w", err)
+	}
+
+	// Compare key hashes
+	newKeyHash, err := computeFileHash(newKeyPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to compute hash for new key: %w", err)
+	}
+
+	stagedKeyHash, err := computeFileHash(stagedKeyPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to compute hash for staged key: %w", err)
+	}
+
+	// If either cert or key differs, need update
+	return newCertHash != stagedCertHash || newKeyHash != stagedKeyHash, nil
+}
+
+// computeFileHash computes SHA256 hash of a file.
+func computeFileHash(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", fmt.Errorf("failed to compute hash: %w", err)
+	}
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // Made with Bob
