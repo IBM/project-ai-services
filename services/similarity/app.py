@@ -51,7 +51,7 @@ def _initialize_vectorstore():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_llm_session(pool_maxsize=10)
-    await asyncio.to_thread(_initialize_models)
+    _initialize_models()
     await asyncio.to_thread(_initialize_vectorstore)
     yield
 

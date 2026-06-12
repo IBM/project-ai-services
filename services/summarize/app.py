@@ -69,8 +69,8 @@ concurrency_limiter = asyncio.BoundedSemaphore(settings.common.llm.max_batch_siz
 async def lifespan(app):
     filtered_paths = ['/health']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
-    initialize_models()
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
+    initialize_models()
     
     # Check database connection and initialize schema (required for operation)
     try:
