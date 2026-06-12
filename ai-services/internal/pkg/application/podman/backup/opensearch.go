@@ -234,6 +234,9 @@ func exportIndexData(pc *podman.PodmanClient, containerID, osHost, osPassword, b
 
 // buildScrollExportScript builds the shell script for exporting data using scroll API with environment variables.
 func buildScrollExportScript(osHost, osPassword, backupDir, indexName string) string {
+	escapedPassword := strings.ReplaceAll(osPassword, "'", "'\\''")
+	scrollLoop := buildScrollLoopSection(osHost, backupDir, indexName)
+
 	return fmt.Sprintf(`
 		OS_PASSWORD='%s'
 		export OS_PASSWORD
@@ -249,7 +252,20 @@ func buildScrollExportScript(osHost, osPassword, backupDir, indexName string) st
 		
 		jq '.hits.hits' /tmp/scroll_init.json > %s/%s_data.json
 		
-		# Continue scrolling until no more hits (with max iterations protection)
+		%s
+		
+		# Clear scroll (ignore errors)
+		if [ -n "$SCROLL_ID" ] && [ "$SCROLL_ID" != "null" ]; then
+			curl -s -k -u "admin:${OS_PASSWORD}" "https://%s/_search/scroll" -X DELETE -H 'Content-Type: application/json' -d "{\"scroll_id\":\"$SCROLL_ID\"}" > /dev/null 2>&1 || true
+		fi
+		
+		exit 0
+	`, escapedPassword, backupDir, indexName, scrollLoop, osHost)
+}
+
+// buildScrollLoopSection builds the scroll loop section of the export script.
+func buildScrollLoopSection(osHost, backupDir, indexName string) string {
+	return fmt.Sprintf(`# Continue scrolling until no more hits (with max iterations protection)
 		MAX_ITERATIONS=1000
 		ITERATION=0
 		
@@ -288,15 +304,7 @@ func buildScrollExportScript(osHost, osPassword, backupDir, indexName string) st
 			if [ -z "$SCROLL_ID" ] || [ "$SCROLL_ID" = "null" ]; then
 				break
 			fi
-		done
-		
-		# Clear scroll (ignore errors)
-		if [ -n "$SCROLL_ID" ] && [ "$SCROLL_ID" != "null" ]; then
-			curl -s -k -u "admin:${OS_PASSWORD}" "https://%s/_search/scroll" -X DELETE -H 'Content-Type: application/json' -d "{\"scroll_id\":\"$SCROLL_ID\"}" > /dev/null 2>&1 || true
-		fi
-		
-		exit 0
-	`, strings.ReplaceAll(osPassword, "'", "'\\''"), backupDir, indexName, osHost, backupDir, indexName, backupDir, indexName, osHost)
+		done`, osHost, backupDir, indexName, backupDir, indexName)
 }
 
 // countDocuments counts and logs the number of documents in the backup.
