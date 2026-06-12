@@ -52,7 +52,7 @@ postgres:
 
 instruct:
   # @hidden
-  image: icr.io/ppc64le-oss/vllm-ppc64le:0.18.0
+  image: icr.io/ppc64le-oss/vllm-ppc64le:0.19.1
   # @description API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication.
   apiKey: ""
   model:
@@ -67,7 +67,7 @@ instruct:
 
 embedding:
   # @hidden
-  image: icr.io/ppc64le-oss/vllm-ppc64le:0.18.0
+  image: icr.io/ppc64le-oss/vllm-ppc64le:0.19.1
   model:
     # @hidden
     name: ibm-granite/granite-embedding-278m-multilingual
@@ -76,7 +76,7 @@ embedding:
 
 reranker:
   # @hidden
-  image: icr.io/ppc64le-oss/vllm-ppc64le:0.18.0
+  image: icr.io/ppc64le-oss/vllm-ppc64le:0.19.1
   model:
     # @hidden
     name: BAAI/bge-reranker-v2-m3
