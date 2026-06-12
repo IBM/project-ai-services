@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
@@ -147,6 +148,85 @@ func (c *ApplicationClient) GetApplication(id string) (*types.Application, error
 	}
 
 	return &result, nil
+}
+
+// CreateApplication creates a new application deployment via catalog API.
+// It accepts a CreateApplicationRequest with catalog ID, name, services, and components configuration.
+func (c *ApplicationClient) CreateApplication(req *models.CreateApplicationRequest) (*models.CreateApplicationResponse, error) {
+	var result models.CreateApplicationResponse
+	resp, err := c.httpClient.R().
+		SetHeader("Authorization", "Bearer "+c.client.AccessToken()).
+		SetHeader("Content-Type", "application/json").
+		SetBody(req).
+		SetResult(&result).
+		Post("/api/v1/applications")
+
+	if err != nil {
+		return nil, fmt.Errorf("create application: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("create application: server returned HTTP %d: %s",
+			resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return &result, nil
+}
+
+// GetServiceDeployOptions retrieves deploy options for a specific service.
+// It returns available providers and dependency rules for the service and its components.
+func (c *ApplicationClient) GetServiceDeployOptions(serviceID string) (*types.DeployOptionsService, error) {
+	var result types.DeployOptionsService
+	resp, err := c.httpClient.R().
+		SetHeader("Authorization", "Bearer "+c.client.AccessToken()).
+		SetResult(&result).
+		Get(fmt.Sprintf("/api/v1/services/%s/deploy-options", serviceID))
+	if err != nil {
+		return nil, fmt.Errorf("get service deploy options: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("get service deploy options: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return &result, nil
+}
+
+// GetArchitectureDeployOptions retrieves deploy options for an architecture.
+// It returns available providers and dependency rules for all services in the architecture.
+func (c *ApplicationClient) GetArchitectureDeployOptions(architectureID string) (*types.DeployOptionsArchitecture, error) {
+	var result types.DeployOptionsArchitecture
+	resp, err := c.httpClient.R().
+		SetHeader("Authorization", "Bearer "+c.client.AccessToken()).
+		SetResult(&result).
+		Get(fmt.Sprintf("/api/v1/architectures/%s/deploy-options", architectureID))
+	if err != nil {
+		return nil, fmt.Errorf("get architecture deploy options: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("get architecture deploy options: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return &result, nil
+}
+
+// GetComponentProviderParams retrieves the parameter schema for a specific component provider.
+func (c *ApplicationClient) GetComponentProviderParams(componentType, providerID string) (map[string]any, error) {
+	var result map[string]any
+	resp, err := c.httpClient.R().
+		SetHeader("Authorization", "Bearer "+c.client.AccessToken()).
+		SetResult(&result).
+		Get(fmt.Sprintf("/api/v1/components/%s/providers/%s/params", componentType, providerID))
+	if err != nil {
+		return nil, fmt.Errorf("get component provider params: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("get component provider params: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+	}
+
+	return result, nil
 }
 
 // Made with Bob
