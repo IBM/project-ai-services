@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion"
@@ -228,26 +228,24 @@ func ValidatePaginationParams(page, pageSize int) (int, int, error) {
 func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID, userID, newName string) (*types.Application, error) {
 	app, err := s.appRepo.GetByID(ctx, id)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrApplicationNotFound
-		}
-
 		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, ErrApplicationNotFound
 	}
 	if app.CreatedBy != userID {
 		return nil, ErrUnauthorized
 	}
 	err = s.appRepo.UpdateDeploymentName(ctx, id, newName)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrApplicationNotFound
-		}
-
 		return nil, fmt.Errorf("failed to update application name: %w", err)
 	}
 	updatedApp, err := s.appRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch updated application %w", err)
+	}
+	if updatedApp == nil {
+		return nil, ErrApplicationNotFound
 	}
 
 	appData, err := s.buildApplication(*updatedApp)
@@ -264,8 +262,15 @@ func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID
 func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest) (*apimodels.CreateApplicationResponse, error) {
 	// Phase 1: Validate request and check for duplicate application name
 	existingApp, err := s.appRepo.GetByName(ctx, req.Name)
-	if err == nil && existingApp != nil {
-		return nil, fmt.Errorf("application with name '%s' already exists", req.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for existing application: %w", err)
+	}
+	if existingApp != nil {
+		// Application with this name already exists - return conflict error
+		return nil, &ValidationError{
+			Code:    http.StatusConflict,
+			Message: fmt.Sprintf("application with name '%s' already exists", req.Name),
+		}
 	}
 
 	// Phase 2: Validate request payload
@@ -483,11 +488,10 @@ func (s *ApplicationService) GetApplicationByID(ctx context.Context, id uuid.UUI
 	// Fetch application from database
 	app, err := s.appRepo.GetByID(ctx, id)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrApplicationNotFound
-		}
-
 		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, ErrApplicationNotFound
 	}
 	// Build complete response with services and components
 	return s.buildGetApplicationResponse(ctx, app)
@@ -565,6 +569,9 @@ func (s *ApplicationService) loadServiceComponents(ctx context.Context, sd []mod
 			if err != nil {
 				return nil, fmt.Errorf("failed to get component: %w", err)
 			}
+			if component == nil {
+				continue
+			}
 
 			// Transform to response object
 			temp := types.ServiceComponentResp{
@@ -591,11 +598,10 @@ type DeleteApplicationResponse struct {
 func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool) (*DeleteApplicationResponse, error) {
 	app, err := s.appRepo.GetByID(ctx, id)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, fmt.Errorf("not found: application does not exist")
-		}
-
-		return nil, fmt.Errorf("not found: %w", err)
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, fmt.Errorf("not found: application does not exist")
 	}
 
 	if app.CreatedBy != user {
@@ -695,7 +701,10 @@ func (s *ApplicationService) GetApplicationResources(ctx context.Context, id uui
 	// Fetch application from database
 	app, err := s.appRepo.GetByID(ctx, id)
 	if err != nil {
-		return nil, handleGetApplicationError(err)
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, ErrApplicationNotFound
 	}
 
 	// Create runtime client
@@ -718,15 +727,6 @@ func (s *ApplicationService) GetApplicationResources(ctx context.Context, id uui
 
 	// Build and return response
 	return buildResourcesResponse(resourceTotals), nil
-}
-
-// handleGetApplicationError handles errors from GetByID.
-func handleGetApplicationError(err error) error {
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrApplicationNotFound
-	}
-
-	return fmt.Errorf("failed to get application: %w", err)
 }
 
 // resourceTotals holds aggregated resource information.
@@ -967,11 +967,10 @@ func buildResourcesResponse(totals *resourceTotals) *types.ApplicationResourcesR
 func (s *ApplicationService) ApplicationsPs(ctx context.Context, appID uuid.UUID) (*types.ApplicationPSResponse, error) {
 	app, err := s.appRepo.GetByID(ctx, appID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrApplicationNotFound
-		}
-
 		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+	if app == nil {
+		return nil, ErrApplicationNotFound
 	}
 
 	// Initialize runtime client for pod operations

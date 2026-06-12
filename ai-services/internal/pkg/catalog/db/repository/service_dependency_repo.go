@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 )
@@ -58,13 +57,9 @@ func (r *serviceDependencyRepo) RemoveDependency(ctx context.Context, serviceID,
 		WHERE service_id = $1 AND dependency_id = $2
 	`
 
-	result, err := r.pool.Exec(ctx, query, serviceID, dependencyID)
+	_, err := r.pool.Exec(ctx, query, serviceID, dependencyID)
 	if err != nil {
 		return fmt.Errorf("failed to remove service dependency: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return pgx.ErrNoRows
 	}
 
 	return nil
