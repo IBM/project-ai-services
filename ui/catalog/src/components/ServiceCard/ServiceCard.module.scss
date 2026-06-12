@@ -1,0 +1,117 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/type";
+@use "@carbon/react/scss/theme";
+
+.cardWrapper {
+  padding: 0;
+  margin: 0;
+  width: 100%;
+}
+
+.productiveCard {
+  height: 100%;
+  border: none;
+  padding-top: spacing.$spacing-05;
+  padding-left: spacing.$spacing-05;
+  padding-right: spacing.$spacing-05;
+  padding-bottom: spacing.$spacing-05;
+
+  :global(.c4p--card__header) {
+    padding: 0;
+  }
+
+  :global(.c4p--card__body) {
+    padding: 0;
+  }
+
+  :global(.c4p--card__footer) {
+    border: none;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  :global(.c4p--card__footer button:first-child) {
+    background-color: var(--cds-button-primary);
+    color: var(--cds-text-on-color);
+    border: none;
+    width: fit-content;
+    height: auto;
+    box-shadow: none;
+  }
+
+  :global(.c4p--card__footer button:last-child) {
+    background-color: transparent;
+    color: var(--cds-text-primary);
+    border: none;
+    box-shadow: none;
+
+    &:hover {
+      background-color: transparent;
+    }
+
+    &:active {
+      background-color: transparent;
+    }
+  }
+}
+
+.description {
+  @include type.type-style("body-compact-01");
+  color: var(--cds-text-primary);
+  margin-top: spacing.$spacing-07;
+  margin-bottom: spacing.$spacing-10;
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: spacing.$spacing-04;
+}
+
+.headerTitleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-02;
+  flex: 1;
+}
+
+.cardTitle {
+  @include type.type-style("heading-03");
+}
+
+.certifiedBadge {
+  @include type.type-style("label-01");
+  display: inline-flex;
+  align-items: center;
+  gap: spacing.$spacing-02;
+  margin-bottom: 0;
+}
+
+.badgeIcon {
+  color: var(--cds-support-success);
+  min-width: spacing.$spacing-05;
+}
+
+.badgeName {
+  color: var(--cds-text-secondary);
+}
+
+.digitalAssistantCard {
+  position: relative;
+
+  :global(.c4p--card__footer button:first-child) {
+    @include type.type-style("label-01");
+    background-color: transparent;
+    color: var(--cds-text-secondary);
+    border: none;
+    box-shadow: none;
+    padding-left: 0;
+    padding-right: 0;
+    display: flex;
+    align-items: center;
+    gap: spacing.$spacing-10;
+  }
+}
