@@ -638,25 +638,29 @@ func extractServiceParams(serviceID string, components []catalogTypes.DeployOpti
 
 // extractComponentParamsForService extracts parameters for a specific component type from argParams.
 // Supports provider-specific params:
-// - Global: {componentType}.{providerID}.{param} (e.g., llm.vllm-cpu.model)
-// - Service-specific: {serviceID}.{componentType}.{providerID}.{param} (e.g., chat.llm.vllm-cpu.model)
+// - Provider only: {componentType}.{providerID} (e.g., llm.vllm-cpu) - selects provider with defaults
+// - Provider with params: {componentType}.{providerID}.{param} (e.g., llm.vllm-cpu.model)
+// - Service-specific: {serviceID}.{componentType}.{providerID}[.{param}] (e.g., chat.llm.vllm-cpu or chat.llm.vllm-cpu.model)
 // Returns a map with provider as key and params as value
 func extractComponentParamsForService(serviceID string, componentType string, allParams map[string]string) map[string]map[string]string {
 	providerParams := make(map[string]map[string]string)
 
-	// Extract global component params: {componentType}.{providerID}.{param}
+	// Extract global component params: {componentType}.{providerID}[.{param}]
 	globalPrefix := componentType + "."
 	for key, value := range allParams {
 		if after, ok := strings.CutPrefix(key, globalPrefix); ok {
-			// Split to get providerID and param
+			// Split to get providerID and optional param
 			parts := strings.SplitN(after, ".", 2)
-			if len(parts) == 2 {
+			if len(parts) >= 1 {
 				providerID := parts[0]
-				paramName := parts[1]
 				if providerParams[providerID] == nil {
 					providerParams[providerID] = make(map[string]string)
 				}
-				providerParams[providerID][paramName] = value
+				// If there's a param name, add it; otherwise just mark provider as selected
+				if len(parts) == 2 {
+					paramName := parts[1]
+					providerParams[providerID][paramName] = value
+				}
 			}
 		}
 	}
@@ -665,15 +669,18 @@ func extractComponentParamsForService(serviceID string, componentType string, al
 	servicePrefix := serviceID + "." + componentType + "."
 	for key, value := range allParams {
 		if after, ok := strings.CutPrefix(key, servicePrefix); ok {
-			// Split to get providerID and param
+			// Split to get providerID and optional param
 			parts := strings.SplitN(after, ".", 2)
-			if len(parts) == 2 {
+			if len(parts) >= 1 {
 				providerID := parts[0]
-				paramName := parts[1]
 				if providerParams[providerID] == nil {
 					providerParams[providerID] = make(map[string]string)
 				}
-				providerParams[providerID][paramName] = value
+				// If there's a param name, add it; otherwise just mark provider as selected
+				if len(parts) == 2 {
+					paramName := parts[1]
+					providerParams[providerID][paramName] = value
+				}
 			}
 		}
 	}
