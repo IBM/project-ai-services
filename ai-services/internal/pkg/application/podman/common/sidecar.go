@@ -18,7 +18,8 @@ import (
 )
 
 const (
-	secretKeyValueParts = 2
+	secretKeyValueParts    = 2
+	podmanExecPrefixLength = 2 // "exec" and containerID
 )
 
 // FindContainerAndPod finds the container and its pod ID using the template ID.
@@ -120,7 +121,7 @@ func CreateAndStartSidecar(ctx context.Context, sidecarName, podID string) (stri
 // ExecInContainer executes a command in a container using podman exec command.
 func ExecInContainer(ctx context.Context, containerID string, cmd []string) error {
 	// Build podman exec command with preallocated capacity
-	args := make([]string, 0, 2+len(cmd))
+	args := make([]string, 0, podmanExecPrefixLength+len(cmd))
 	args = append(args, "exec", containerID)
 	args = append(args, cmd...)
 
