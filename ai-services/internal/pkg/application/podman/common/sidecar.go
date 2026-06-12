@@ -119,8 +119,9 @@ func CreateAndStartSidecar(ctx context.Context, sidecarName, podID string) (stri
 
 // ExecInContainer executes a command in a container using podman exec command.
 func ExecInContainer(ctx context.Context, containerID string, cmd []string) error {
-	// Build podman exec command
-	args := []string{"exec", containerID}
+	// Build podman exec command with preallocated capacity
+	args := make([]string, 0, 2+len(cmd))
+	args = append(args, "exec", containerID)
 	args = append(args, cmd...)
 
 	execCmd := exec.CommandContext(ctx, "podman", args...)
