@@ -78,7 +78,6 @@ const AppHeader = (props: AppHeaderProps) => {
     }
   };
 
-  // Fetch user info on mount if not already loaded
   useEffect(() => {
     if (!minimal && !userInfo) {
       getUserInfo().catch((err) => {

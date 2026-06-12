@@ -7,12 +7,13 @@ export const AUTH_ENDPOINTS = {
 
 export const DIGITAL_ASSISTANTS_ENDPOINTS = {
   LIST_ARCHITECTURES: "/architectures",
+  LIST_SERVICES: "/services",
+  ARCHITECTURE_DETAILS: (architectureId: string) =>
+    `/architectures/${architectureId}`,
   DEPLOY_OPTIONS: (architectureId: string) =>
     `/architectures/${architectureId}/deploy-options`,
   PROVIDER_PARAMS: (componentType: string, providerId: string) =>
     `/components/${componentType}/providers/${providerId}/params`,
-  APPLICATIONS: "/applications",
-  APPLICATION_BY_ID: (id: string) => `/applications/${id}`,
   RESOURCES: "/resources",
 };
 
@@ -24,4 +25,6 @@ export const APPLICATION_ENDPOINTS = {
   GET_APPLICATIONS: "/applications",
   GET_DEPLOYED_SERVICES: "/applications?deployment_type=services",
   DELETE_APPLICATION: (id: string) => `/applications/${id}`,
+  GET_APPLICATION_DETAILS: (id: string) => `/applications/${id}`,
+  GET_APPLICATION_RESOURCES: (id: string) => `/applications/${id}/resources`,
 };

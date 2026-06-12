@@ -1,5 +1,8 @@
 import type { DataTableHeader } from "@carbon/react";
-import type { PaginationMetadata } from "@/types/digitalAssistants";
+import type {
+  PaginationMetadata,
+  DeploymentDetails,
+} from "@/types/digitalAssistants";
 
 export interface DigitalAssistantRow {
   id: string;
@@ -36,6 +39,9 @@ export interface AppState {
   fetchError: string | null;
   pagination: PaginationMetadata | null;
   totalItems: number;
+  // DeploymentDetails state
+  selectedDeployment: DeploymentDetails | null;
+  showDeploymentDetails: boolean;
 }
 
 export const ACTION_TYPES = {
@@ -64,6 +70,9 @@ export const ACTION_TYPES = {
   FETCH_APPLICATIONS_START: "FETCH_APPLICATIONS_START",
   FETCH_APPLICATIONS_SUCCESS: "FETCH_APPLICATIONS_SUCCESS",
   FETCH_APPLICATIONS_ERROR: "FETCH_APPLICATIONS_ERROR",
+  // DeploymentDetails actions
+  SHOW_DEPLOYMENT_DETAILS: "SHOW_DEPLOYMENT_DETAILS",
+  HIDE_DEPLOYMENT_DETAILS: "HIDE_DEPLOYMENT_DETAILS",
 } as const;
 
 export type AppAction =
@@ -102,7 +111,12 @@ export type AppAction =
         pagination: PaginationMetadata;
       };
     }
-  | { type: typeof ACTION_TYPES.FETCH_APPLICATIONS_ERROR; payload: string };
+  | { type: typeof ACTION_TYPES.FETCH_APPLICATIONS_ERROR; payload: string }
+  | {
+      type: typeof ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS;
+      payload: DeploymentDetails;
+    }
+  | { type: typeof ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS };
 
 // Table headers
 export const HEADERS: DataTableHeader[] = [
@@ -143,6 +157,8 @@ export const INITIAL_STATE: AppState = {
   fetchError: null,
   pagination: null,
   totalItems: 0,
+  selectedDeployment: null,
+  showDeploymentDetails: false,
 };
 
 // Reducer
@@ -273,6 +289,18 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         ...state,
         isLoadingApplications: false,
         fetchError: action.payload,
+      };
+    case ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS:
+      return {
+        ...state,
+        selectedDeployment: action.payload,
+        showDeploymentDetails: true,
+      };
+    case ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS:
+      return {
+        ...state,
+        selectedDeployment: null,
+        showDeploymentDetails: false,
       };
     default:
       return state;

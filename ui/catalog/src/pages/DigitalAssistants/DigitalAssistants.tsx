@@ -52,6 +52,7 @@ import {
   transformApplicationToRow,
 } from "@/api/digitalAssistants";
 import { AboutTab } from "./components/AboutTab";
+import DeploymentDetails from "@/components/DeploymentDetails";
 
 // Generic cell renderer wrapper
 interface RenderCellProps {
@@ -235,6 +236,17 @@ const DigitalAssistantsPage = () => {
     state.rowsData.length === 0 && !state.isLoadingApplications;
   const noSearchResults =
     state.rowsData.length > 0 && filteredRows.length === 0;
+
+  // Show DeploymentDetails if a deployment is selected
+  if (state.showDeploymentDetails && state.selectedDeployment) {
+    return (
+      <DeploymentDetails
+        deployment={state.selectedDeployment}
+        onBack={() => dispatch({ type: ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS })}
+        deploymentSource="Digital assistants"
+      />
+    );
+  }
 
   return (
     <>

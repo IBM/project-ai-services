@@ -1,4 +1,4 @@
-import { useReducer, useEffect, useCallback, useRef } from "react";
+import { useReducer, useEffect, useCallback, useRef, useMemo } from "react";
 import { Tearsheet } from "@carbon/ibm-products";
 import {
   ProgressIndicator,
@@ -13,50 +13,16 @@ import type {
   DeployFlowAction,
 } from "./types.ts";
 import { ACTION_TYPES } from "./types.ts";
-import { deployApplication } from "@/api/digitalAssistants";
+import { deployApplication, fetchServices } from "@/api/digitalAssistants";
 import { transformToDeploymentPayload } from "@/utils/deploymentTransform";
 import { StepOne } from "./steps/StepOne";
 import { StepTwo } from "./steps/StepTwo";
 import { useDeployOptions } from "@/hooks/useDeployOptions";
+import { useDeployStore } from "@/store/deploy.store";
+import { initializeFormData } from "@/utils/formDataInitializer";
 import styles from "./DeployFlow.module.scss";
 
-const INITIAL_FORM_DATA: DeployFormData = {
-  name: "Digital assistant (copy)",
-  version: "",
-  embeddingModel: "",
-  vectorStore: "",
-  services: {
-    digitizeDocuments: {
-      enabled: true,
-      serviceVersion: "",
-      embeddingModel: "",
-      rerankerModel: "",
-      llm: "",
-      inferenceMethod: "",
-    },
-    findSimilarItems: {
-      enabled: true,
-      serviceVersion: "",
-      embeddingModel: "",
-      rerankerModel: "",
-      inferenceMethod: "",
-    },
-    questionAndAnswer: {
-      enabled: true,
-      serviceVersion: "",
-      llm: "",
-      inferenceMethod: "",
-    },
-    summarization: {
-      enabled: true,
-      serviceVersion: "",
-      llm: "",
-      inferenceMethod: "",
-    },
-  },
-};
-
-const INITIAL_STATE: DeployFlowState = {
+const getInitialState = (formData: DeployFormData): DeployFlowState => ({
   currentStep: 0,
   isLoading: false,
   isDeploying: false,
@@ -65,9 +31,9 @@ const INITIAL_STATE: DeployFlowState = {
   error: null,
   deployError: null,
   deployToastOpen: false,
-  formData: INITIAL_FORM_DATA,
+  formData,
   showStepOneNameError: false,
-};
+});
 
 const deployFlowReducer = (
   state: DeployFlowState,
@@ -107,99 +73,83 @@ const deployFlowReducer = (
     case ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR:
       return { ...state, showStepOneNameError: action.payload };
     case ACTION_TYPES.RESET_STATE:
-      return INITIAL_STATE;
+      return getInitialState({
+        name: "Digital assistant (copy)",
+        version: "",
+        globalComponents: {},
+        services: {},
+      });
     default:
       return state;
   }
 };
 
 export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
-  const [state, dispatch] = useReducer(deployFlowReducer, INITIAL_STATE);
-  const hasInitialized = useRef(false);
-
-  // Use cached deploy options from Zustand store
   const { deployOptions, isLoading, error } = useDeployOptions();
 
-  // Reset initialization flag when tearsheet closes
+  const {
+    serviceSummaries,
+    setServiceSummaries,
+    setServiceSummariesLoading,
+    setServiceSummariesError,
+  } = useDeployStore();
+
+  useEffect(() => {
+    if (open && serviceSummaries.length === 0) {
+      setServiceSummariesLoading(true);
+      fetchServices()
+        .then((data) => {
+          setServiceSummaries(data);
+        })
+        .catch((err) => {
+          const errorMessage =
+            err instanceof Error
+              ? err.message
+              : "Failed to load service descriptions";
+          setServiceSummariesError(errorMessage);
+          console.error("Error fetching service summaries:", err);
+        });
+    }
+  }, [
+    open,
+    serviceSummaries.length,
+    setServiceSummaries,
+    setServiceSummariesLoading,
+    setServiceSummariesError,
+  ]);
+
+  const initialState = useMemo(() => {
+    if (deployOptions) {
+      return getInitialState(initializeFormData(deployOptions));
+    }
+    return getInitialState({
+      name: "Digital assistant (copy)",
+      version: "",
+      globalComponents: {},
+      services: {},
+    });
+  }, [deployOptions]);
+
+  const [state, dispatch] = useReducer(deployFlowReducer, initialState);
+  const hasInitialized = useRef(false);
+
   useEffect(() => {
     if (!open) {
       hasInitialized.current = false;
     }
   }, [open]);
 
-  // Initialize form data with defaults when deploy options are loaded (only once)
   useEffect(() => {
-    // Initialize form when tearsheet opens and we have deployOptions
     if (open && deployOptions && !hasInitialized.current) {
       hasInitialized.current = true;
-      // Extract default values from API response
-      const embeddingComponent = deployOptions.global_components.find(
-        (c) => c.type === "embedding",
-      );
-      const vectorStoreComponent = deployOptions.global_components.find(
-        (c) => c.type === "vector_store",
-      );
-
-      // Get chat service for service-level defaults
-      const chatService = deployOptions.services.find((s) => s.id === "chat");
-      const embeddingFromService = chatService?.components.find(
-        (c) => c.type === "embedding",
-      );
-      const rerankerFromService = chatService?.components.find(
-        (c) => c.type === "reranker",
-      );
-      const llmFromService = chatService?.components.find(
-        (c) => c.type === "llm",
-      );
-
+      const formData = initializeFormData(deployOptions);
       dispatch({
-        type: ACTION_TYPES.UPDATE_FORM_DATA,
-        payload: {
-          version: deployOptions.version,
-          embeddingModel:
-            embeddingComponent?.providers[0]?.id ||
-            state.formData.embeddingModel,
-          vectorStore:
-            vectorStoreComponent?.providers[0]?.id ||
-            state.formData.vectorStore,
-          services: {
-            digitizeDocuments: {
-              enabled: true,
-              serviceVersion: deployOptions.version,
-              embeddingModel: embeddingFromService?.providers[0]?.id || "",
-              rerankerModel: rerankerFromService?.providers[0]?.id || "",
-              llm: llmFromService?.providers[0]?.id || "",
-              inferenceMethod: llmFromService?.providers[0]?.id || "",
-            },
-            findSimilarItems: {
-              enabled: true,
-              serviceVersion: deployOptions.version,
-              embeddingModel: embeddingFromService?.providers[0]?.id || "",
-              rerankerModel: rerankerFromService?.providers[0]?.id || "",
-              inferenceMethod: llmFromService?.providers[0]?.id || "",
-            },
-            questionAndAnswer: {
-              enabled: true,
-              serviceVersion: deployOptions.version,
-              embeddingModel: embeddingFromService?.providers[0]?.id || "",
-              rerankerModel: rerankerFromService?.providers[0]?.id || "",
-              llm: llmFromService?.providers[0]?.id || "",
-              inferenceMethod: llmFromService?.providers[0]?.id || "",
-            },
-            summarization: {
-              enabled: true,
-              serviceVersion: deployOptions.version,
-              llm: llmFromService?.providers[0]?.id || "",
-              inferenceMethod: llmFromService?.providers[0]?.id || "",
-            },
-          },
-        },
+        type: ACTION_TYPES.SET_FORM_DATA,
+        payload: formData,
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, deployOptions]);
 
-  // Sync loading and error states
   useEffect(() => {
     dispatch({ type: ACTION_TYPES.SET_IS_LOADING, payload: isLoading });
   }, [isLoading]);
@@ -276,7 +226,7 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
     dispatch({ type: ACTION_TYPES.HIDE_DEPLOY_TOAST });
 
     try {
-      const deploymentPayload = await transformToDeploymentPayload(
+      const deploymentPayload = transformToDeploymentPayload(
         state.formData,
         deployOptions,
       );
@@ -286,7 +236,6 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
       dispatch({ type: ACTION_TYPES.RESET_STATE });
       onClose();
     } catch (error: unknown) {
-      // Extract detailed error message from API response
       let errorMessage = "Failed to deploy application";
 
       if (error && typeof error === "object") {
@@ -322,7 +271,7 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
 
   const handleClose = () => {
     dispatch({ type: ACTION_TYPES.RESET_STATE });
-    hasInitialized.current = false; // Reset initialization flag
+    hasInitialized.current = false;
     onClose();
   };
 
