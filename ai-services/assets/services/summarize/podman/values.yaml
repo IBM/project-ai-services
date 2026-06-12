@@ -1,6 +1,6 @@
 summarize:
   port: ""
-  image: icr.io/ai-services-cicd/summarize-service:v0.0.10
+  image: icr.io/ai-services-cicd/summarize-service:v0.0.11
   log_level: "INFO"
   database: "summarize_metadata"
 
