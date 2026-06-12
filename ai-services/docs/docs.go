@@ -1735,6 +1735,9 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "standalone": {
+                    "type": "boolean"
                 }
             }
         },

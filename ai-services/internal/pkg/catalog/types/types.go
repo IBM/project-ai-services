@@ -76,6 +76,7 @@ type ServiceSummary struct {
 	Description   string   `json:"description"`
 	CertifiedBy   string   `json:"certified_by"`
 	Architectures []string `json:"architectures"`
+	Standalone    bool     `json:"standalone"`
 }
 
 // Component represents an infrastructure component (vector_store, embedding, llm, etc.).
