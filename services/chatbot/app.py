@@ -16,6 +16,8 @@ from starlette.concurrency import iterate_in_threadpool
 from lingua import Language
 
 from common.misc_utils import set_log_level
+from common.lang_utils import detect_language, LanguageCodes, get_max_tokens_map
+
 from chatbot.settings import settings
 from chatbot.conversation_utils import get_conversation_context, truncate_history_by_tokens
 from chatbot.query_rephrasing import rephrase_query_with_context
@@ -24,8 +26,7 @@ set_log_level(settings.common.app.log_level)
 
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 import common.db_utils as db
-from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
-from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
+from common.misc_utils import get_embedding_endpoint, get_llm_endpoint, get_reranker_endpoint, set_request_id, create_llm_session, configure_uvicorn_logging
 from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models, tokenize_with_llm
 from common.perf_utils import perf_registry
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
@@ -49,6 +50,14 @@ emb_model_dict = {}
 llm_model_dict = {}
 reranker_model_dict = {}
 
+# Language-specific messages
+NO_DOCUMENTS_FOUND_MESSAGES = {
+    "EN": "No documents found in the knowledge base for this query.",
+    "DE": "Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden.",
+    "IT": "Nessun documento trovato nella base di conoscenza per questa richiesta.",
+    "FR": "Aucun document trouvé dans la base de connaissances pour cette requête.",
+}
+
 # Cache for auth requirement check
 auth_required_cache = {"checked": False, "required": False}
 auth_cache_lock = asyncio.Lock()
@@ -57,7 +66,9 @@ concurrency_limiter = BoundedSemaphore(settings.common.llm.max_batch_size)
 
 def initialize_models():
     global emb_model_dict, llm_model_dict, reranker_model_dict
-    emb_model_dict, llm_model_dict, reranker_model_dict = get_model_endpoints()
+    emb_model_dict = get_embedding_endpoint()
+    llm_model_dict = get_llm_endpoint()
+    reranker_model_dict = get_reranker_endpoint()
 
 def initialize_vectorstore():
     global vectorstore
@@ -85,9 +96,8 @@ diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_ha
 async def lifespan(app):
     filtered_paths = ['/health']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
-    initialize_models()
-    setup_language_detector([Language.ENGLISH, Language.GERMAN])
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
+    initialize_models()
     yield
     stderr_monitor.stop()
 
@@ -114,7 +124,17 @@ tags_metadata = [
 app = FastAPI(
     lifespan=lifespan,
     title="AI-Services Chatbot API",
-    description="RAG-based chatbot API with document retrieval, reranking, and LLM-powered responses.",
+    description="""RAG-based chatbot API with document retrieval, reranking, and LLM-powered responses.
+
+**Key Features**:
+- **Conversational RAG**: Multi-turn conversations with automatic context management and query rephrasing
+- **Semantic Search**: Vector-based document retrieval with reranking for improved relevance
+- **Streaming Support**: Real-time token generation for responsive user experience
+- **Multi-language**: Automatic language detection (English, German, French, Italian supported)
+- **Performance Metrics**: Detailed timing and token usage tracking
+
+**Authentication**: Optional vLLM API key authentication via Bearer token in Authorization header.
+""",
     version="1.0.0",
     openapi_tags=tags_metadata
 )
@@ -154,10 +174,10 @@ def limit_concurrency(f):
 def get_stop_words_with_special_tokens(request_stop_words):
     """
     Add common special tokens to stop words to prevent them from appearing in responses.
-    
+
     Args:
         request_stop_words: Stop words from the request (can be None, list, or string)
-    
+
     Returns:
         List of stop words including special tokens
     """
@@ -175,16 +195,16 @@ async def is_auth_required() -> bool:
     Returns True if auth is required, False otherwise.
     """
     global auth_required_cache
-    
+
     # Check cache first
     if auth_required_cache["checked"]:
         return auth_required_cache["required"]
-    
+
     async with auth_cache_lock:
         # Double-check after acquiring lock
         if auth_required_cache["checked"]:
             return auth_required_cache["required"]
-        
+
         try:
             llm_endpoint = llm_model_dict['llm_endpoint']
             # Try to access without API key
@@ -221,15 +241,15 @@ async def is_auth_required() -> bool:
 async def list_models(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
     """List available LLM models. Requires Authorization header with Bearer token if authentication is enabled."""
     logging.debug("List models..")
-    
+
     # Extract API key from credentials
     api_key = credentials.credentials if credentials else None
-    
+
     # Check if auth is required and enforce it
     if await is_auth_required():
         if not api_key:
             APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "API key is required when vLLM authentication is enabled")
-    
+
     try:
         llm_endpoint = llm_model_dict['llm_endpoint']
         return await asyncio.to_thread(query_vllm_models, llm_endpoint, api_key)
@@ -285,28 +305,73 @@ async def locked_stream(stream_g, perf_stat_dict):
     response_model=ChatCompletionResponse,
     tags=["chat"],
     summary="Chat with RAG",
-    description="Generate chat completions grounded in retrieved documents. Returns streaming response if stream=true, otherwise returns structured JSON. **Requires API key in Authorization header** (Bearer token) if vLLM authentication is enabled.",
+    description="""Generate chat completions grounded in retrieved documents using RAG (Retrieval-Augmented Generation).
+
+**Conversational Mode**: Supports multi-turn conversations by passing message history. The system automatically:
+- Extracts the current query from the last message
+- Uses previous messages as conversation context
+- Rephrases the current query based on conversation history for better retrieval
+- Maintains context-aware responses across turns
+
+**Features**:
+- Single-turn queries: Pass one message for standalone questions
+- Multi-turn conversations: Pass message array with history for context-aware responses
+- Streaming: Set `stream=true` for real-time token generation
+- Language detection: Automatically detects query language (English, German, French, Italian supported)
+- Query rephrasing: Automatically rephrases follow-up questions using conversation context
+
+**Authentication**: Requires API key in Authorization header (Bearer token) if vLLM authentication is enabled.
+
+**Response Headers**:
+- `X-Rephrased-Query`: Contains the rephrased query when conversation history is used (only if different from original)
+- `X-Request-ID`: Unique request identifier for tracking and metrics
+""",
     responses={
         200: {
             "description": "Successful Response",
             "content": {
                 "application/json": {
-                    "example": {
-                        "choices": [
-                            {
-                                "message": {
-                                    "content": "Based on the retrieved documents, artificial intelligence..."
-                                }
+                    "examples": {
+                        "single_turn": {
+                            "summary": "Single-turn response",
+                            "description": "Response to a standalone query without conversation history",
+                            "value": {
+                                "choices": [
+                                    {
+                                        "message": {
+                                            "content": "Based on the retrieved documents, artificial intelligence (AI) is the simulation of human intelligence processes by machines, especially computer systems. These processes include learning, reasoning, and self-correction."
+                                        }
+                                    }
+                                ]
                             }
-                        ]
+                        },
+                        "multi_turn": {
+                            "summary": "Multi-turn response",
+                            "description": "Response to a follow-up question with conversation context",
+                            "value": {
+                                "choices": [
+                                    {
+                                        "message": {
+                                            "content": "Some common examples of machine learning applications include: 1) Email spam filtering, 2) Image recognition and classification, 3) Recommendation systems (like Netflix or Amazon), 4) Voice assistants (Siri, Alexa), and 5) Autonomous vehicles."
+                                        }
+                                    }
+                                ]
+                            }
+                        }
                     }
                 },
                 "text/event-stream": {
                     "schema": {
                         "type": "string",
-                        "description": "Server-Sent Events stream. Each event is formatted as: data: {JSON}\\n\\n"
+                        "description": "Server-Sent Events stream. Each event is formatted as: data: {JSON}\\n\\n. Stream ends with data: [DONE]\\n\\n"
                     },
-                    "example": 'data: {"choices":[{"delta":{"content":"Based on"}}]}\n\ndata: {"choices":[{"delta":{"content":" the retrieved"}}]}\n\ndata: {"choices":[{"delta":{"content":" documents..."}}]}\n\n'
+                    "examples": {
+                        "streaming": {
+                            "summary": "Streaming response",
+                            "description": "Real-time token generation for immediate user feedback",
+                            "value": 'data: {"choices":[{"delta":{"content":"Based on"}}]}\n\ndata: {"choices":[{"delta":{"content":" the retrieved"}}]}\n\ndata: {"choices":[{"delta":{"content":" documents,"}}]}\n\ndata: {"choices":[{"delta":{"content":" artificial"}}]}\n\ndata: {"choices":[{"delta":{"content":" intelligence..."}}]}\n\ndata: [DONE]\n\n'
+                        }
+                    }
                 }
             }
         },
@@ -320,7 +385,7 @@ async def locked_stream(stream_g, perf_stat_dict):
 async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> ChatCompletionResponse | StreamingResponse | Response:
     # Extract API key from credentials
     api_key = credentials.credentials if credentials else None
-    
+
     # Check if auth is required and enforce it
     if await is_auth_required():
         if not api_key:
@@ -330,7 +395,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
                 return StreamingResponse(stream_auth_error(), media_type="text/event-stream", status_code=401)
             APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, message)
-    
+
     if not req.messages:
         APIError.raise_error(ErrorCode.EMPTY_INPUT, "messages can't be empty")
 
@@ -339,6 +404,27 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
     # Validate query is not empty
     if not current_query or not current_query.strip():
         APIError.raise_error(ErrorCode.EMPTY_INPUT, "Query cannot be empty")
+
+    # Detect language from current query (stateless - detect on every message)
+    try:
+        query_lang = detect_language(current_query)
+        
+        # Fallback to English if unsupported language detected
+        if query_lang not in LanguageCodes.supported_languages():
+            logging.debug(
+                f"Unsupported language detected ({query_lang}). "
+                "Falling back to English."
+            )
+            query_lang = LanguageCodes.ENGLISH
+        
+        logging.debug(f"Detected language for current message: {query_lang}")
+        
+    except Exception as e:
+        logging.warning(
+            f"Language detection failed: {e}. "
+            "Falling back to English."
+        )
+        query_lang = LanguageCodes.ENGLISH
 
     # Ensure vectorstore is initialized on first request
     if vectorstore is None:
@@ -367,25 +453,22 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                 return StreamingResponse(stream_query_length_error(), media_type="text/event-stream")
             APIError.raise_error(ErrorCode.INVALID_PARAMETER, error_msg)
 
-        lang = detect_language(current_query)
-
         max_tokens = req.max_tokens
-        # giving priority to max_tokens passed in the request, otherwise according to detected language of query
+        # giving priority to max_tokens passed in the request, otherwise according to query language
         if not max_tokens:
-            max_tokens = max_tokens_map.get(lang, settings.llm.max_tokens)
+            max_tokens = get_max_tokens_map().get(query_lang, settings.llm.english.max_tokens)
 
         rephrased_query = current_query
         
-        # Process conversation history and rephrase query for English language
-        if previous_messages and lang == "EN":
-            # Truncate history for query rephrasing with 1000 token budget
+        # Process conversation history and rephrase query for supported conversational languages
+        if previous_messages:
             truncated_history_for_rephrasing = await asyncio.to_thread(
                 truncate_history_by_tokens,
                 previous_messages,
                 settings.query_rephrasing.history_token_budget,
                 lambda text: tokenize_with_llm(text, llm_endpoint)
             )
-            
+
             if truncated_history_for_rephrasing:
                 rephrased_query = await rephrase_query_with_context(
                     current_query=current_query,
@@ -393,7 +476,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     llm_endpoint=llm_endpoint,
                     llm_model=llm_model,
                     api_key=api_key,
-                    lang=lang,
+                    lang=query_lang,
                 )
 
         docs, perf_stat_dict = await asyncio.to_thread(
@@ -406,11 +489,9 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
             settings.chatbot.num_chunks_post_reranker,
             vectorstore=vectorstore
         )
-        
+
         if not docs:
-            message = "No documents found in the knowledge base for this query."
-            if lang == lang_de:
-                message = "Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden."
+            message = NO_DOCUMENTS_FOUND_MESSAGES.get(query_lang, NO_DOCUMENTS_FOUND_MESSAGES["EN"])
             if req.stream:
                 async def stream_docs_not_found():
                     yield f"data: {json.dumps({'choices': [{'delta': {'content': message}}]})}\n\n"
@@ -430,7 +511,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
 
         try:
             stop_words = get_stop_words_with_special_tokens(req.stop)
-            
+
             if req.stream:
                 vllm_stream = await asyncio.to_thread(
                     query_vllm_stream,
@@ -442,7 +523,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     max_tokens,
                     req.temperature,
                     perf_stat_dict,
-                    lang,
+                    query_lang,
                     api_key,
                     previous_messages,
                     rephrased_query,
@@ -464,7 +545,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                 max_tokens,
                 req.temperature,
                 perf_stat_dict,
-                lang,
+                query_lang,
                 api_key,
                 previous_messages,
                 rephrased_query,
@@ -485,8 +566,10 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                         if isinstance(message_dict, dict):
                             message_content = message_dict.get("content", "")
                             choices.append(ChatChoice(message=ChatMessage(content=message_content)))
-                
-                response_data = ChatCompletionResponse(choices=choices)
+
+                response_data = ChatCompletionResponse(
+                    choices=choices
+                )
                 # Add rephrased query as a custom header if available
                 if rephrased_query and rephrased_query != current_query:
                     return Response(

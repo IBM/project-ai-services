@@ -57,7 +57,7 @@ func (r *NodeLabelsRule) Verify() error {
 
 // validateNodes performs the actual node checks.
 func (r *NodeLabelsRule) validateNodes(nodes []corev1.Node) []string {
-	var failed []string
+	failed := make([]string, 0, 1)
 
 	for _, node := range nodes {
 		labels := node.Labels

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
+	cliutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -13,10 +14,21 @@ import (
 
 // Start starts a stopped application.
 func (p *PodmanApplication) Start(opts appTypes.StartOptions) error {
-	pods, err := p.fetchPodsFromRuntime(opts.Name)
-	if err != nil {
-		return err
+	var pods []types.Pod
+	var err error
+	// if experimental flag is set, get pods from applications-ps
+	if !opts.Experimental {
+		pods, err = p.fetchPodsFromRuntime(opts.Name)
+		if err != nil {
+			return err
+		}
+	} else {
+		pods, err = cliutils.GetPodsFromApplicationsPS(opts.Name)
+		if err != nil {
+			return err
+		}
 	}
+
 	if len(pods) == 0 {
 		logger.Infof("No pods found with given application: %s\n", opts.Name)
 

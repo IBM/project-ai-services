@@ -220,8 +220,8 @@ class TestRequestValidation:
 class TestReturnTimings:
     """Tests for the return_timings option on perform_similarity_search"""
 
-    def test_default_returns_three_tuple(self):
-        """Without return_timings, the function returns (docs, scores, score_type)."""
+    def test_always_returns_four_tuple_with_timing_info(self):
+        """The function always returns (docs, scores, score_type, perf_stat_dict) with timing information."""
         from similarity.similarity_utils import perform_similarity_search
 
         with patch("similarity.similarity_utils.retrieve_documents") as mock_retrieve, \
@@ -243,11 +243,16 @@ class TestReturnTimings:
                 mode="dense",
             )
 
-            assert len(result) == 3
+            assert len(result) == 4
+            docs, scores, score_type, perf = result
+            assert "retrieve_time" in perf
+            assert perf["retrieve_time"] >= 0
+            assert "rerank_time" not in perf
+            assert score_type == "cosine"
             assert mock_rerank.call_count == 0
 
-    def test_return_timings_includes_retrieve_time(self):
-        """With return_timings=True, perf dict includes retrieve_time."""
+    def test_timing_info_includes_retrieve_time(self):
+        """Perf dict always includes retrieve_time."""
         from similarity.similarity_utils import perform_similarity_search
 
         with patch("similarity.similarity_utils.retrieve_documents") as mock_retrieve:
@@ -266,7 +271,6 @@ class TestReturnTimings:
                 top_k=5,
                 rerank=False,
                 mode="dense",
-                return_timings=True,
             )
 
             assert "retrieve_time" in perf
@@ -274,8 +278,8 @@ class TestReturnTimings:
             assert "rerank_time" not in perf
             assert score_type == "cosine"
 
-    def test_return_timings_includes_rerank_time_when_reranked(self):
-        """With rerank=True and return_timings=True, perf dict includes both timings."""
+    def test_timing_info_includes_rerank_time_when_reranked(self):
+        """With rerank=True, perf dict includes both retrieve_time and rerank_time."""
         from similarity.similarity_utils import perform_similarity_search
 
         with patch("similarity.similarity_utils.retrieve_documents") as mock_retrieve, \
@@ -296,7 +300,6 @@ class TestReturnTimings:
                 mode="hybrid",
                 reranker_model="r",
                 reranker_endpoint="http://rerank",
-                return_timings=True,
             )
 
             assert "retrieve_time" in perf

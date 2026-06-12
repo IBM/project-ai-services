@@ -3,6 +3,7 @@ package spyre
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/spyreconfig/check"
@@ -41,7 +42,8 @@ type RepairResult struct {
 
 // Repair attempts to fix all failed Spyre checks.
 func Repair(checks []check.CheckResult) []RepairResult {
-	var results []RepairResult
+	const checkResultsLen = 11
+	results := make([]RepairResult, 0, checkResultsLen)
 
 	// Create a map for easy lookup.
 	checkMap := make(map[string]check.CheckResult)
@@ -249,10 +251,10 @@ func fixUdevRule(checkMap map[string]check.CheckResult) RepairResult {
 		return RepairResult{CheckName: checkName, Status: StatusFailedToFix, Message: "Invalid check type"}
 	}
 
-	expectedRules := []string{
-		`SUBSYSTEM=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`,
-		`KERNEL=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`,
-	}
+	const expectedRuleCount = 2
+	expectedRules := make([]string, 0, expectedRuleCount)
+	expectedRules = append(expectedRules, `SUBSYSTEM=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`)
+	expectedRules = append(expectedRules, `KERNEL=="vfio", GROUP:="sentient", MODE:="0660", SECLABEL{selinux}="system_u:object_r:vfio_device_t:s0"`)
 
 	// Read existing file if it exists.
 	var updatedLines []string
@@ -550,12 +552,48 @@ func ApplySELinuxPolicy(checkName, policyName, policyContent, successMessage str
 		}
 	}()
 
-	// Use reinstall=true to ensure policy is updated if it already exists
-	if err := buildAndInstallSELinuxPolicy(tmpDir, policyName, policyContent, true); err != nil {
-		return RepairResult{CheckName: checkName, Status: StatusFailedToFix, Error: err}
+	if slices.Contains(selinux.CILPolicyContent, policyName) {
+		// Use reinstall=true to ensure policy is updated if it already exists
+		err = installSELinuxPolicyCil(tmpDir, policyName, policyContent, true)
+	} else {
+		// Use reinstall=true to ensure policy is updated if it already exists
+		err = buildAndInstallSELinuxPolicy(tmpDir, policyName, policyContent, true)
+	}
+	if err != nil {
+		return RepairResult{
+			CheckName: checkName,
+			Status:    StatusFailedToFix,
+			Error:     err,
+		}
 	}
 
 	return RepairResult{CheckName: checkName, Status: StatusFixed, Message: successMessage}
+}
+
+// buildAndInstallSELinuxPolicy builds and installs a SELinux policy module.
+func installSELinuxPolicyCil(tmpDir, policyName, teContent string, reinstall bool) error {
+	// Write the .te file
+	cilPath := fmt.Sprintf("%s/%s.cil", tmpDir, policyName)
+	if err := utils.WriteToFile(cilPath, teContent); err != nil {
+		return fmt.Errorf("failed to write .cil file: %w", err)
+	}
+
+	// Install or update the module
+	if reinstall {
+		// Remove old module first
+		_, _, _, _ = utils.ExecuteCommand("semodule", "-r", policyName)
+	}
+
+	// Install the module
+	exitCode, _, stderr, err := utils.ExecuteCommand("semodule", "-i",
+		cilPath,
+		"/usr/share/udica/templates/base_container.cil",
+		"/usr/share/udica/templates/net_container.cil")
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("failed to install custom selinux policy: %v, stderr: %s", err, stderr)
+	}
+
+	return nil
 }
 
 // buildAndInstallSELinuxPolicy builds and installs a SELinux policy module.
@@ -565,7 +603,6 @@ func buildAndInstallSELinuxPolicy(tmpDir, policyName, teContent string, reinstal
 	if err := utils.WriteToFile(tePath, teContent); err != nil {
 		return fmt.Errorf("failed to write .te file: %w", err)
 	}
-
 	// Compile .te -> .mod
 	modPath := fmt.Sprintf("%s/%s.mod", tmpDir, policyName)
 	exitCode, _, stderr, err := utils.ExecuteCommand("checkmodule", "-M", "-m", "-o", modPath, tePath)

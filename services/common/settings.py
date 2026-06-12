@@ -49,36 +49,6 @@ class LLMConfig(BaseSettings):
         description="API key for vLLM authentication (optional, read from LLM_API_KEY env var)",
     )
 
-    max_tokens: int = Field(
-        default=512,
-        gt=0,
-        description="Maximum tokens for LLM generation (English)",
-    )
-
-    max_tokens_de: int = Field(
-        default=700,
-        gt=0,
-        description="Maximum tokens for LLM generation (German)",
-    )
-
-    @field_validator('max_tokens')
-    @classmethod
-    def validate_max_tokens(cls, v):
-        """Validate max_tokens with warning fallback."""
-        if not (isinstance(v, int) and v > 0):
-            logger.warning("Setting max_tokens to default '512' as it is missing or malformed in the settings")
-            return 512
-        return v
-
-    @field_validator('max_tokens_de')
-    @classmethod
-    def validate_max_tokens_de(cls, v):
-        """Validate max_tokens_de with warning fallback."""
-        if not (isinstance(v, int) and v > 0):
-            logger.warning("Setting max_tokens_de to default '700' as it is missing or malformed in the settings")
-            return 700
-        return v
-
 
 class EmbeddingConfig(BaseSettings):
     """Embedding model configuration."""

@@ -183,7 +183,8 @@ func systemctl(action, unit string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 	defer cancel()
 
-	cmdArgs := []string{action}
+	cmdArgs := make([]string, 0, len(args))
+	cmdArgs = append(cmdArgs, action)
 	cmdArgs = append(cmdArgs, args...)
 	cmdArgs = append(cmdArgs, unit)
 

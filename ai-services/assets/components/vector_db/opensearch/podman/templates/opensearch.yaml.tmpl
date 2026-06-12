@@ -6,18 +6,10 @@ metadata:
     ai-services.io/template: "{{ .TemplateID }}"
     ai-services.io/secret: "opensearch-secret-{{ .InstanceSlug }}"
     ai-services.io/secret-skip-cleanup: "true"
+    ai-services.io/volume: "opensearch-{{ .InstanceSlug }}"
   annotations:
     io.podman.annotations.pids-limit/opensearch: "4096"
 spec:
-  initContainers:
-    - name: fix-permissions
-      image: "{{ .Values.image }}"
-      command: ["sh", "-c", "chown -R 1000:1000 /usr/share/opensearch/data"]
-      securityContext:
-        runAsUser: 0
-      volumeMounts:
-        - name: opensearch-data
-          mountPath: /usr/share/opensearch/data
   containers:
     - name: opensearch
       image: "{{ .Values.image }}"
@@ -64,6 +56,5 @@ spec:
         failureThreshold: 5
   volumes:
     - name: opensearch-data
-      hostPath:
-        path: "{{ .BaseDir }}/applications/components/{{ .InstanceSlug }}/volumes/opensearch"
-        type: DirectoryOrCreate
+      persistentVolumeClaim:
+        claimName: "opensearch-{{ .InstanceSlug }}"

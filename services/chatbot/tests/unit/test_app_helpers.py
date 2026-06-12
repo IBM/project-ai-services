@@ -169,7 +169,7 @@ class TestQueryRephrasingIntegration:
     async def test_query_rephrasing_skipped_for_german(
         self, test_client, monkeypatch
     ):
-        """Test query rephrasing is skipped for non-English queries"""
+        """Test query rephrasing is called for German queries (now supported)"""
         
         # Mock all dependencies
         mock_validate = Mock(return_value=(True, None))
@@ -195,10 +195,19 @@ class TestQueryRephrasingIntegration:
         mock_settings.chatbot.num_chunks_post_reranker = 5
         mock_settings.chatbot.score_threshold = 0.5
         mock_settings.common.llm.llm_max_tokens = 512
+        mock_settings.query_rephrasing.history_token_budget = 1000
         monkeypatch.setattr("chatbot.app.settings", mock_settings)
         
-        # Mock rephrase_query_with_context
-        mock_rephrase = AsyncMock(return_value="Should not be called")
+        # Mock tokenize
+        mock_tokenize = Mock(return_value=[0] * 50)
+        monkeypatch.setattr("chatbot.app.tokenize_with_llm", mock_tokenize)
+        
+        # Mock truncate_history_by_tokens
+        mock_truncate = Mock(return_value=[{"role": "user", "content": "Was ist Spyre?"}])
+        monkeypatch.setattr("chatbot.app.truncate_history_by_tokens", mock_truncate)
+        
+        # Mock rephrase_query_with_context - German is now supported
+        mock_rephrase = AsyncMock(return_value="Umformulierte Anfrage")
         monkeypatch.setattr("chatbot.app.rephrase_query_with_context", mock_rephrase)
         
         # Mock concurrency limiter
@@ -223,8 +232,8 @@ class TestQueryRephrasingIntegration:
         response = test_client.post("/v1/chat/completions", json=request_data)
         
         assert response.status_code == 200
-        # Verify rephrase was NOT called for German
-        mock_rephrase.assert_not_called()
+        # Verify rephrase WAS called for German (now supported)
+        mock_rephrase.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_query_rephrasing_skipped_without_history(

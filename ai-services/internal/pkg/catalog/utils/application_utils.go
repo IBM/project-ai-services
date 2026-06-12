@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -73,6 +75,36 @@ func GenerateInstanceSlug(id string) string {
 	hexHash := hex.EncodeToString(hash[:])
 
 	return hexHash[:10]
+}
+
+// IsNotFoundError checks if an error indicates a resource was not found.
+// Returns true for "no such pod", "no such secret", "no such volume" errors.
+func IsNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+
+	return strings.Contains(errMsg, "no such pod") ||
+		strings.Contains(errMsg, "no pod with name or ID") ||
+		strings.Contains(errMsg, "no such secret") ||
+		strings.Contains(errMsg, "no such volume")
+}
+
+// CalculateComponentHash creates a unique hash for a component configuration.
+// Components with same type, provider, and params will have the same hash.
+func CalculateComponentHash(componentType string, providerID string, params map[string]any) string {
+	// Create a deterministic string representation
+	hashInput := fmt.Sprintf("%s:%s:", componentType, providerID)
+
+	// Sort and add params to ensure consistent hashing
+	paramsJSON, _ := json.Marshal(params)
+	hashInput += string(paramsJSON)
+
+	// Calculate SHA256 hash
+	hash := sha256.Sum256([]byte(hashInput))
+
+	return fmt.Sprintf("%x", hash[:16]) // Use first 16 bytes (32 hex chars)
 }
 
 // Made with Bob

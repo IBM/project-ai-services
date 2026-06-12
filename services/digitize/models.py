@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import List, Optional, Dict, Any, Union
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
 
 class OutputFormat(str, Enum):
@@ -80,25 +80,21 @@ class DocumentContentResponse(BaseModel):
 
 class JobDocumentSummary(BaseModel):
     """Compact per-document entry for job status responses."""
+    model_config = ConfigDict(use_enum_values=True)
+    
     id: str
     name: str
     status: str
 
-    class Config:
-        """Pydantic configuration."""
-        use_enum_values = True
-
 
 class JobStats(BaseModel):
     """Statistics for documents in a job."""
+    model_config = ConfigDict(use_enum_values=True)
+    
     total_documents: int = Field(default=0, ge=0, description="Total number of documents")
     completed: int = Field(default=0, ge=0, description="Number of completed documents")
     failed: int = Field(default=0, ge=0, description="Number of failed documents")
     in_progress: int = Field(default=0, ge=0, description="Number of in-progress documents")
-
-    class Config:
-        """Pydantic configuration."""
-        use_enum_values = True
 
 
 class JobState(BaseModel):
@@ -107,6 +103,8 @@ class JobState(BaseModel):
 
     This model is used to validate and serialize job data from the database.
     """
+    model_config = ConfigDict(use_enum_values=True)
+    
     job_id: str
     job_name: Optional[str] = None
     operation: str
@@ -158,10 +156,6 @@ class JobState(BaseModel):
             except Exception:
                 return JobStats()
         return JobStats()
-
-    class Config:
-        """Pydantic configuration."""
-        use_enum_values = True
 
     def to_dict(self) -> dict:
         """

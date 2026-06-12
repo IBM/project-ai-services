@@ -121,6 +121,21 @@ definitions:
         description: Actually used memory in bytes
         type: integer
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationPSResponse:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Pod'
+        type: array
+      id:
+        type: string
+      name:
+        type: string
+      services:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Pod'
+        type: array
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationResourcesResponse:
     properties:
       accelerators:
@@ -162,6 +177,7 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture:
     properties:
+      about: {}
       certified_by:
         type: string
       description:
@@ -301,6 +317,32 @@ definitions:
       total_pages:
         type: integer
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Pod:
+    properties:
+      containers:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PodContainer'
+        type: array
+      created:
+        type: string
+      healthy:
+        type: boolean
+      pod_id:
+        type: string
+      pod_name:
+        type: string
+      status:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Status'
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PodContainer:
+    properties:
+      healthy:
+        type: boolean
+      name:
+        type: string
+      status:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Status'
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources:
     properties:
       accelerators:
@@ -320,6 +362,7 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service:
     properties:
+      about: {}
       architectures:
         items:
           type: string
@@ -336,12 +379,16 @@ definitions:
         type: string
       name:
         type: string
+      standalone:
+        type: boolean
       type:
         description: '"service"'
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ServiceComponentResp:
     properties:
+      id:
+        type: string
       metadata:
         additionalProperties: {}
         type: object
@@ -374,6 +421,28 @@ definitions:
       name:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Status:
+    enum:
+    - waiting
+    - running
+    - terminated
+    - created
+    - paused
+    - restarting
+    - exited
+    - removing
+    - dead
+    type: string
+    x-enum-varnames:
+    - Waiting
+    - Running
+    - Terminated
+    - Created
+    - Paused
+    - Restarting
+    - Exited
+    - Removing
+    - Dead
   github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo:
     properties:
       available:
@@ -672,6 +741,43 @@ paths:
       security:
       - BearerAuth: []
       summary: Update application
+      tags:
+      - Applications
+  /applications/{id}/ps:
+    get:
+      description: Retrieves the process status and runtime information for an application
+      parameters:
+      - description: Application ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationPSResponse'
+        "400":
+          description: Invalid application ID format
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Application not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get application process status
       tags:
       - Applications
   /applications/{id}/resources:

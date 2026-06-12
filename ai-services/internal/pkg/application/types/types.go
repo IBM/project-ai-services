@@ -39,17 +39,19 @@ type DeleteOptions struct {
 
 // StartOptions contains parameters for starting an application.
 type StartOptions struct {
-	Name     string
-	PodNames []string
-	SkipLogs bool
-	AutoYes  bool
+	Name         string
+	PodNames     []string
+	SkipLogs     bool
+	AutoYes      bool
+	Experimental bool
 }
 
 // StopOptions contains parameters for stopping an application.
 type StopOptions struct {
-	Name     string
-	PodNames []string
-	AutoYes  bool
+	Name         string
+	PodNames     []string
+	AutoYes      bool
+	Experimental bool
 }
 
 // ListOptions contains parameters for listing applications.
@@ -67,6 +69,14 @@ type InfoOptions struct {
 type LogsOptions struct {
 	PodName           string
 	ContainerNameOrID string
+}
+
+// RestoreOptions contains parameters for restoring application data.
+type RestoreOptions struct {
+	Name       string
+	Target     string // opensearch, digitize, etc.
+	BackupFile string
+	AutoYes    bool
 }
 
 // ApplicationInfo represents information about a deployed application.

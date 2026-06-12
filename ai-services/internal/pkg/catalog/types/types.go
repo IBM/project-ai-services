@@ -12,6 +12,7 @@ type Architecture struct {
 	GlobalComponents []ComponentReference `yaml:"global_components,omitempty" json:"global_components,omitempty"`
 	Services         []ServiceReference   `yaml:"services" json:"services"`
 	Links            *ArchitectureLinks   `yaml:"links,omitempty" json:"links,omitempty"`
+	About            any                  `yaml:"about,omitempty" json:"about,omitempty"`
 }
 
 // ArchitectureSummary represents an architecture for list API responses.
@@ -64,6 +65,8 @@ type Service struct {
 	CertifiedBy   string                `yaml:"certified_by" json:"certified_by"`
 	Architectures []string              `yaml:"architectures" json:"architectures"`
 	Dependencies  []DependencyReference `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
+	Standalone    bool                  `yaml:"standalone,omitempty" json:"standalone,omitempty"`
+	About         any                   `yaml:"about,omitempty" json:"about,omitempty"`
 }
 
 // ServiceSummary represents a service for list API responses.

@@ -22,10 +22,16 @@ const (
 const (
 	// CatalogAppName represents the catalog name.
 	CatalogAppName = "ai-services"
+	// CatalogAppTemplate represents the catalog template name used for loading catalog infrastructure templates.
+	CatalogAppTemplate = "catalog"
 	// CatalogSecretLabel represents the catalog secret name associated with Catalog Pod.
 	CatalogSecretLabel = "ai-services.io/secret"
 	// CatalogSecretSkipLabel represents if catalog secret associated with pod should be skipped while deletion.
 	CatalogSecretSkipLabel = "ai-services.io/secret-skip-cleanup"
+	// CatalogVolumeLabel represents the catalog volume name associated with Catalog Pod.
+	CatalogVolumeLabel = "ai-services.io/volume"
+	// CatalogVolumeSkipLabel represents if catalog volume associated with pod should be skipped while deletion.
+	CatalogVolumeSkipLabel = "ai-services.io/volume-skip-cleanup"
 	// PodmanAuthSecret represents podman auth secret name.
 	PodmanAuthSecret = "podman-auth-secret"
 )

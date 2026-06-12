@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
@@ -90,6 +91,8 @@ func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool)
 	secretsToDelete, secretsToSkip := fetchSecretsToDelete(pods)
 	secretsToDelete = append(secretsToDelete, catalogConstants.PodmanAuthSecret)
 
+	volumesToDelete, volumesToSkip := fetchVolumesToDelete(pods)
+
 	// Delete catalog pods
 	if err := podsDeletion(rt, pods); err != nil {
 		return err
@@ -100,6 +103,11 @@ func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool)
 		return err
 	}
 
+	// Delete volumes (only those without skip-cleanup label)
+	if err := deleteVolumes(rt, volumesToDelete); err != nil {
+		return err
+	}
+
 	// Delete caddy data
 	caddyDataPath := getDataPath(baseDir, "common")
 	if err := dataDeletion(caddyDataPath); err != nil {
@@ -107,7 +115,7 @@ func performCleanup(rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool)
 	}
 
 	// Delete database data and secrets
-	if err := cleanupDatabaseResources(rt, baseDir, secretsToSkip, skipCleanup); err != nil {
+	if err := cleanupDatabaseResources(rt, secretsToSkip, volumesToSkip, skipCleanup); err != nil {
 		return err
 	}
 
@@ -137,8 +145,8 @@ func getDataPath(baseDir, subDir string) string {
 	return filepath.Join(baseDir, "ai-services", subDir)
 }
 
-// cleanupDatabaseResources handles database data and secret cleanup.
-func cleanupDatabaseResources(rt *podman.PodmanClient, baseDir string, secretsToSkip []string, skipCleanup bool) error {
+// cleanupDatabaseResources handles database volume and secret cleanup.
+func cleanupDatabaseResources(rt *podman.PodmanClient, secretsToSkip []string, volumesToSkip []string, skipCleanup bool) error {
 	if skipCleanup {
 		logger.Infoln("Skipping database data cleanup (--skip-cleanup flag set)")
 
@@ -150,10 +158,8 @@ func cleanupDatabaseResources(rt *podman.PodmanClient, baseDir string, secretsTo
 		return err
 	}
 
-	// Delete database data
-	dbDataPath := getDataPath(baseDir, "db")
-
-	return dataDeletion(dbDataPath)
+	// Delete volumes with skip-cleanup label (only when --skip-cleanup is not set)
+	return deleteVolumes(rt, volumesToSkip)
 }
 
 // podsDeletion removes all catalog pods.
@@ -200,6 +206,47 @@ func fetchSecretsToDelete(pods []types.Pod) ([]string, []string) {
 	return secretsToDelete, secretsToSkip
 }
 
+// fetchVolumesToDelete extracts volume names from pod labels and separates them based on skip-cleanup label.
+// Returns two lists: volumes to delete immediately, and volumes to skip (only deleted when --skip-cleanup is not set).
+func fetchVolumesToDelete(pods []types.Pod) ([]string, []string) {
+	volumeMapToDelete := make(map[string]bool) // Use map to avoid duplicates
+	volumeMapToSkip := make(map[string]bool)
+
+	for _, pod := range pods {
+		// fetch volume names from pod labels
+		if volumeNames, ok := pod.Labels[catalogConstants.CatalogVolumeLabel]; ok && volumeNames != "" {
+			// Check if this pod has skip-cleanup label for volumes
+			_, hasSkipLabel := pod.Labels[catalogConstants.CatalogVolumeSkipLabel]
+
+			// Split comma-separated volume names (in case a pod has multiple volumes)
+			volumes := strings.Split(volumeNames, ",")
+			for _, volumeName := range volumes {
+				volumeName = strings.TrimSpace(volumeName)
+				if volumeName != "" {
+					if hasSkipLabel {
+						volumeMapToSkip[volumeName] = true
+					} else {
+						volumeMapToDelete[volumeName] = true
+					}
+				}
+			}
+		}
+	}
+
+	// Convert maps to slices
+	volumesToDelete := make([]string, 0, len(volumeMapToDelete))
+	for volumeName := range volumeMapToDelete {
+		volumesToDelete = append(volumesToDelete, volumeName)
+	}
+
+	volumesToSkip := make([]string, 0, len(volumeMapToSkip))
+	for volumeName := range volumeMapToSkip {
+		volumesToSkip = append(volumesToSkip, volumeName)
+	}
+
+	return volumesToDelete, volumesToSkip
+}
+
 // dataDeletion removes the specified data directory.
 func dataDeletion(dataPath string) error {
 	// Check if data directory exists
@@ -217,6 +264,43 @@ func dataDeletion(dataPath string) error {
 	}
 
 	logger.Infof("Successfully removed data at: %s\n", dataPath)
+
+	return nil
+}
+
+// deleteVolumes removes the specified volumes.
+func deleteVolumes(rt *podman.PodmanClient, volumeNames []string) error {
+	if len(volumeNames) == 0 {
+		// Just return if there are no volumes to delete.
+		return nil
+	}
+
+	logger.Infof("Deleting %d volume(s)\n", len(volumeNames))
+
+	var errors []string
+	for _, volumeName := range volumeNames {
+		logger.Infof("Deleting volume: %s\n", volumeName)
+
+		if err := rt.DeleteVolume(volumeName); err != nil {
+			// Ignore "not found" errors - volume already deleted or never existed
+			if catalogUtils.IsNotFoundError(err) {
+				logger.Infof("Volume %s already deleted or does not exist\n", volumeName)
+
+				continue
+			}
+
+			errors = append(errors, fmt.Sprintf("volume %s: %v", volumeName, err))
+
+			continue
+		}
+
+		logger.Infof("Successfully deleted volume: %s\n", volumeName)
+	}
+
+	// Aggregate errors at the end
+	if len(errors) > 0 {
+		return fmt.Errorf("failed to remove volumes: \n%s", strings.Join(errors, "\n"))
+	}
 
 	return nil
 }

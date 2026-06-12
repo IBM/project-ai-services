@@ -19,4 +19,76 @@ dependencies:
 
 standalone: false
 
+# About field containing detailed service information
+about:
+  - title: "Service details"
+    sections:
+      - title: "Version"
+        value: "1.0.0"
+      - title: "Inference backend"
+        values:
+          - "RedHat AI Inference with Spyre"
+          - "AI Inference on CPU"
+      - title: "Embedding Model"
+        value: "granite-embedding-278m-multilingual"
+      - title: "Reranker Model"
+        value: "bge-reranker-v2-m3"
+      - title: "Vector Store"
+        value: "OpenSearch"
+
+  - title: "Inputs and outputs"
+    sections:
+      - title: "Inputs"
+        values:
+          - "Item to find similar items for (e.g., text or document)"
+          - "Number of documents to receive, (optional) flag to activate reranking"
+      - title: "Outputs"
+        values:
+          - "Ranked list of items (e.g., text chunks) and pointers to their associated source (e.g., originating document)"
+
+  - title: "Dependencies and integration"
+    sections:
+      - title: "External dependencies"
+        values:
+          - "Inferencing endpoint compatible with OpenAI or similar AI APIs (required for embedding and reranking capabilities)"
+          - "Supported VectorDB (required as source for similar items)"
+
+  - title: "Content and format support"
+    sections:
+      - title: "Languages"
+        values:
+          - "English"
+          - "French"
+          - "German"
+          - "Italian"
+      - title: "Content"
+        values:
+          - "Text"
+          - "Tables"
+      - title: "Reranking"
+        values:
+          - "Improved ranking through reranking AI model"
+
+  - title: "Expected resource consumption"
+    sections:
+      - title: "per 5 concurrent users"
+        values:
+          - title: "Compute"
+            value: "10 CPU cores"
+          - title: "Memory"
+            value: "18.00 GB"
+          - title: "Storage"
+            value: "40.00 GB"
+          - title: "Spyre acceleration cards"
+            value: 1
+
+  - title: "Assets"
+    sections:
+      - title: "Architectures"
+        values:
+          - "Digital assistant"
+      - title: "Source code"
+        ctaLabel: "View source code"
+        url: "https://github.com/IBM/project-ai-services"
+
 # Made with Bob

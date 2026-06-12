@@ -5,8 +5,11 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
+	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	appFlags "github.com/project-ai-services/ai-services/internal/pkg/cli/constants/application"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
@@ -14,6 +17,7 @@ import (
 var (
 	podName           string
 	containerNameOrID string
+	experimentalLogs  bool
 )
 
 var logsCmd = &cobra.Command{
@@ -44,6 +48,20 @@ Arguments
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
 
+		// When experimentalLogs is true and runtime is podman, validate application name using catalog API
+		// For openshift runtime, always use the older/stable code path regardless of experimental flag
+		if experimentalLogs && rt == types.RuntimeTypePodman {
+			appClient, err := catalogClient.NewApplicationClient()
+			if err != nil {
+				return fmt.Errorf("failed to create application client: %w", err)
+			}
+			if _, err := utils.GetAppByName(appClient, applicationName); err != nil {
+				return err
+			}
+
+			return nil
+		}
+
 		// Create application instance using factory
 		factory := application.NewFactory(rt)
 		app, err := factory.Create(applicationName)
@@ -65,6 +83,7 @@ func init() {
 }
 
 func initLogsCommonFlags() {
+	logsCmd.Flags().BoolVar(&experimentalLogs, "experimental", false, "Include experimental application logs")
 	logsCmd.Flags().StringVar(&podName, appFlags.Logs.Pod, "", "Pod name to show logs from (required)")
 	logsCmd.Flags().StringVar(&containerNameOrID, appFlags.Logs.Container, "", "Container logs to show logs from (Optional)")
 	_ = logsCmd.MarkFlagRequired(appFlags.Logs.Pod)

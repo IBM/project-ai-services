@@ -45,6 +45,9 @@ def summarize_test_client(monkeypatch, summarize_mock_model_dict):
     monkeypatch.setattr(summarize_app, "create_llm_session", Mock())
     monkeypatch.setattr(summarize_app, "configure_uvicorn_logging", Mock())
 
-    return TestClient(summarize_app.app)
+    # Use context manager to ensure proper cleanup of file handles
+    client = TestClient(summarize_app.app)
+    yield client
+    client.close()
 
 # Made with Bob

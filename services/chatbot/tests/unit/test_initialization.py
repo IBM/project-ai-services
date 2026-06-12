@@ -13,41 +13,53 @@ class TestInitializeModels:
     
     def test_initialize_models_success(self, monkeypatch, mock_model_dicts):
         """Test successful model initialization with valid endpoints"""
-        # Mock get_model_endpoints to return test data
-        mock_get_endpoints = Mock(return_value=(
-            mock_model_dicts['emb_model_dict'],
-            mock_model_dicts['llm_model_dict'],
-            mock_model_dicts['reranker_model_dict']
-        ))
+        # Mock individual endpoint functions
+        mock_get_emb = Mock(return_value=mock_model_dicts['emb_model_dict'])
+        mock_get_llm = Mock(return_value=mock_model_dicts['llm_model_dict'])
+        mock_get_reranker = Mock(return_value=mock_model_dicts['reranker_model_dict'])
         
-        with patch('chatbot.app.get_model_endpoints', mock_get_endpoints):
+        with patch('chatbot.app.get_embedding_endpoint', mock_get_emb), \
+             patch('chatbot.app.get_llm_endpoint', mock_get_llm), \
+             patch('chatbot.app.get_reranker_endpoint', mock_get_reranker):
             from chatbot.app import initialize_models, emb_model_dict, llm_model_dict, reranker_model_dict
             
             # Call initialization
             initialize_models()
             
-            # Verify get_model_endpoints was called
-            mock_get_endpoints.assert_called_once()
+            # Verify all endpoint functions were called
+            mock_get_emb.assert_called_once()
+            mock_get_llm.assert_called_once()
+            mock_get_reranker.assert_called_once()
     
     def test_initialize_models_empty_dicts(self, monkeypatch):
-        """Test initialization when get_model_endpoints returns empty dicts"""
-        mock_get_endpoints = Mock(return_value=({}, {}, {}))
+        """Test initialization when endpoint functions return empty dicts"""
+        mock_get_emb = Mock(return_value={})
+        mock_get_llm = Mock(return_value={})
+        mock_get_reranker = Mock(return_value={})
         
-        with patch('chatbot.app.get_model_endpoints', mock_get_endpoints):
+        with patch('chatbot.app.get_embedding_endpoint', mock_get_emb), \
+             patch('chatbot.app.get_llm_endpoint', mock_get_llm), \
+             patch('chatbot.app.get_reranker_endpoint', mock_get_reranker):
             from chatbot.app import initialize_models
             
             # Should not raise exception
             initialize_models()
-            mock_get_endpoints.assert_called_once()
+            mock_get_emb.assert_called_once()
+            mock_get_llm.assert_called_once()
+            mock_get_reranker.assert_called_once()
     
     def test_initialize_models_exception(self, monkeypatch):
-        """Test initialization when get_model_endpoints raises exception"""
-        mock_get_endpoints = Mock(side_effect=Exception("Connection error"))
+        """Test initialization when endpoint function raises exception"""
+        mock_get_emb = Mock(side_effect=Exception("Connection error"))
+        mock_get_llm = Mock(return_value={})
+        mock_get_reranker = Mock(return_value={})
         
-        with patch('chatbot.app.get_model_endpoints', mock_get_endpoints):
+        with patch('chatbot.app.get_embedding_endpoint', mock_get_emb), \
+             patch('chatbot.app.get_llm_endpoint', mock_get_llm), \
+             patch('chatbot.app.get_reranker_endpoint', mock_get_reranker):
             from chatbot.app import initialize_models
             
-            # Should raise the exception
+            # Should raise the exception from get_embedding_endpoint
             with pytest.raises(Exception, match="Connection error"):
                 initialize_models()
 
@@ -101,7 +113,6 @@ class TestLifespan:
         # Create mocks
         mock_init_models = Mock()
         mock_init_vectorstore = Mock()
-        mock_setup_lang = Mock()
         mock_create_session = Mock()
         
         # Track call order
@@ -115,17 +126,12 @@ class TestLifespan:
             call_order.append('vectorstore')
             mock_init_vectorstore()
         
-        def track_setup_lang(langs):
-            call_order.append('language')
-            mock_setup_lang(langs)
-        
         def track_create_session(pool_maxsize):
             call_order.append('session')
             mock_create_session(pool_maxsize)
         
         with patch('chatbot.app.initialize_models', track_init_models), \
              patch('chatbot.app.initialize_vectorstore', track_init_vectorstore), \
-             patch('chatbot.app.setup_language_detector', track_setup_lang), \
              patch('chatbot.app.create_llm_session', track_create_session):
             
             from chatbot.app import lifespan
@@ -137,44 +143,29 @@ class TestLifespan:
             async with lifespan(mock_app):
                 pass
             
-            # Verify all functions were called (vectorstore is NOT initialized in lifespan, it's lazy-loaded)
-            assert call_order == ['models', 'language', 'session']
+            # Verify all functions were called in correct order
+            # Note: vectorstore is NOT initialized in lifespan, it's lazy-loaded on first request
+            # Note: language detector is initialized in settings module, not in lifespan
+            assert call_order == ['session', 'models']
             mock_init_models.assert_called_once()
             mock_init_vectorstore.assert_not_called()  # Vectorstore is lazy-loaded on first request
-            mock_setup_lang.assert_called_once()
-            # Pool size comes from settings.common.llm.llm_max_batch_size
+            # Pool size comes from settings.common.llm.max_batch_size
             mock_create_session.assert_called_once()
     
     async def test_lifespan_language_detector_setup(self, monkeypatch):
-        """Test language detector is set up with correct languages"""
+        """Test language detector is initialized in settings module (not in lifespan)"""
         from lingua import Language
+        from common.lang_utils import _language_detector
         
-        mock_setup_lang = Mock()
-        
-        with patch('chatbot.app.initialize_models'), \
-             patch('chatbot.app.initialize_vectorstore'), \
-             patch('chatbot.app.setup_language_detector', mock_setup_lang), \
-             patch('chatbot.app.create_llm_session'):
-            
-            from chatbot.app import lifespan
-            
-            mock_app = Mock()
-            
-            async with lifespan(mock_app):
-                pass
-            
-            # Verify language detector was set up with English and German
-            mock_setup_lang.assert_called_once()
-            call_args = mock_setup_lang.call_args[0][0]
-            assert Language.ENGLISH in call_args
-            assert Language.GERMAN in call_args
+        # Language detector should already be initialized by settings module
+        # This test verifies it's available (initialized in settings, not lifespan)
+        assert _language_detector is not None, "Language detector should be initialized by settings module"
     
     async def test_lifespan_llm_session_pool_size(self, monkeypatch):
         """Test LLM session is created with correct pool size from settings"""
         mock_create_session = Mock()
         
         with patch('chatbot.app.initialize_models'), \
-             patch('chatbot.app.setup_language_detector'), \
              patch('chatbot.app.create_llm_session', mock_create_session):
             
             from chatbot.app import lifespan
@@ -214,7 +205,6 @@ class TestLifespan:
         
         with patch('chatbot.app.initialize_models', mock_init), \
              patch('chatbot.app.initialize_vectorstore'), \
-             patch('chatbot.app.setup_language_detector'), \
              patch('chatbot.app.create_llm_session'):
             
             from chatbot.app import lifespan

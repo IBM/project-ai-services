@@ -28,9 +28,53 @@ func GetCaddyAdminPort(rt runtime.Runtime, podName string) (string, error) {
 	return "", fmt.Errorf("admin port mapping not found in pod ports")
 }
 
+// RouteEntryParts represents the parsed components of a route entry.
+type RouteEntryParts struct {
+	Port      string
+	Subdomain string
+	Type      string
+}
+
+// ParseRouteEntry parses a single route entry string in the format "port:subdomain:type".
+// Returns the parsed parts or an error if the format is invalid.
+func ParseRouteEntry(routeEntry string) (*RouteEntryParts, error) {
+	const expectedParts = 3
+
+	routeEntry = strings.TrimSpace(routeEntry)
+	if routeEntry == "" {
+		return nil, fmt.Errorf("route entry is empty")
+	}
+
+	// Split by colon
+	parts := strings.Split(routeEntry, ":")
+	if len(parts) != expectedParts {
+		return nil, fmt.Errorf("invalid route format '%s': expected 'port:subdomain:type', got %d parts", routeEntry, len(parts))
+	}
+
+	port := strings.TrimSpace(parts[0])
+	subdomain := strings.TrimSpace(parts[1])
+	routeType := strings.ToLower(strings.TrimSpace(parts[2]))
+
+	if port == "" {
+		return nil, fmt.Errorf("invalid route '%s': port cannot be empty", routeEntry)
+	}
+	if subdomain == "" {
+		return nil, fmt.Errorf("invalid route '%s': subdomain cannot be empty", routeEntry)
+	}
+	if routeType == "" {
+		return nil, fmt.Errorf("invalid route '%s': type cannot be empty", routeEntry)
+	}
+
+	return &RouteEntryParts{
+		Port:      port,
+		Subdomain: subdomain,
+		Type:      routeType,
+	}, nil
+}
+
 // BuildRoutesFromAnnotation parses a routes annotation string and builds Route objects.
-// The annotation format is: "port:subdomain, port:subdomain, ...".
-// Example: "8081:catalog-ui, 8080:catalog-api".
+// The annotation format is: "port:subdomain:type, port:subdomain:type, ...".
+// Example: "8081:catalog-ui:ui, 8080:catalog-api:api".
 // The domainSuffix is pre-computed (e.g., "example.com" or "192.168.1.100.nip.io").
 func BuildRoutesFromAnnotation(routesAnnotation, domainSuffix, podName string) ([]Route, error) {
 	if routesAnnotation == "" {
@@ -38,43 +82,29 @@ func BuildRoutesFromAnnotation(routesAnnotation, domainSuffix, podName string) (
 	}
 
 	routes := []Route{}
-	const expectedParts = 3
 
-	// Parse routes annotation (format: "port:subdomain, port:subdomain, ...")
+	// Parse routes annotation (format: "port:subdomain:type, port:subdomain:type, ...")
 	for _, r := range strings.Split(routesAnnotation, ",") {
 		r = strings.TrimSpace(r)
 		if r == "" {
 			continue
 		}
 
-		// Split by colon
-		parts := strings.Split(r, ":")
-		if len(parts) != expectedParts {
-			return nil, fmt.Errorf("invalid route format '%s': expected 'port:subdomain:type', got %d parts", r, len(parts))
-		}
-
-		port := strings.TrimSpace(parts[0])
-		subdomain := strings.TrimSpace(parts[1])
-		routeType := strings.ToLower(strings.TrimSpace(parts[2]))
-
-		if port == "" {
-			return nil, fmt.Errorf("invalid route '%s': port cannot be empty", r)
-		}
-		if subdomain == "" {
-			return nil, fmt.Errorf("invalid route '%s': subdomain cannot be empty", r)
-		}
-		if routeType == "" {
-			return nil, fmt.Errorf("invalid route '%s': type cannot be empty", r)
+		// Parse the route entry using shared helper
+		parts, err := ParseRouteEntry(r)
+		if err != nil {
+			return nil, err
 		}
 
 		// Build route - use pod name as upstream since containers are in the same pod
 		// Domain is simply: subdomain.domainSuffix
+		// Route ID uses just the subdomain since subdomains are already globally unique
 		route := Route{
-			ID:       fmt.Sprintf("%s--%s", podName, subdomain),
-			Domain:   fmt.Sprintf("%s.%s", subdomain, domainSuffix),
-			Upstream: fmt.Sprintf("%s:%s", podName, port),
+			ID:       parts.Subdomain,
+			Domain:   fmt.Sprintf("%s.%s", parts.Subdomain, domainSuffix),
+			Upstream: fmt.Sprintf("%s:%s", podName, parts.Port),
 			Terminal: true,
-			Type:     routeType,
+			Type:     parts.Type,
 		}
 		routes = append(routes, route)
 	}

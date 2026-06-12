@@ -1,6 +1,6 @@
 module github.com/project-ai-services/ai-services
 
-go 1.25.9
+go 1.26.4
 
 require (
 	github.com/charmbracelet/bubbles v0.21.0
@@ -20,6 +20,7 @@ require (
 	github.com/openshift/client-go v0.0.0-20260213141500-06efc6dce93b
 	github.com/operator-framework/api v0.39.0
 	github.com/pressly/goose/v3 v3.27.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/files v1.0.1
@@ -220,7 +221,6 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rubenv/sql-migrate v1.8.1 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/secure-systems-lab/go-securesystemslib v0.9.1 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect

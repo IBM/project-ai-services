@@ -5,7 +5,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.openapi.docs import get_swagger_ui_html
 
 from common.misc_utils import set_log_level
@@ -21,7 +21,7 @@ if level != "":
 set_log_level(log_level)
 
 import common.db_utils as db
-from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session
+from common.misc_utils import get_embedding_endpoint, get_reranker_endpoint, set_request_id, create_llm_session
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from common.validation_utils import validate_query_length as _validate_query_length
 from similarity.settings import settings
@@ -39,9 +39,8 @@ reranker_model_dict: dict = {}
 
 def _initialize_models():
     global emb_model_dict, reranker_model_dict
-    # get_model_endpoints() also returns llm_model_dict, which we discard —
-    # similarity search has no LLM dependency.
-    emb_model_dict, _, reranker_model_dict = get_model_endpoints()
+    emb_model_dict = get_embedding_endpoint()
+    reranker_model_dict = get_reranker_endpoint()
 
 
 def _initialize_vectorstore():
@@ -51,9 +50,9 @@ def _initialize_vectorstore():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _initialize_models()
-    _initialize_vectorstore()
     create_llm_session(pool_maxsize=10)
+    _initialize_models()
+    await asyncio.to_thread(_initialize_vectorstore)
     yield
 
 tags_metadata = [
@@ -115,11 +114,18 @@ def swagger_root():
         "| `false` (default) | Low |\n"
         "| `true` | Medium |\n\n"
         "**`top_k`** defaults to `NUM_CHUNKS_POST_SEARCH` "
-        f"(currently {settings.similarity.num_chunks_post_search}) if not provided."
+        f"(currently {settings.similarity.num_chunks_post_search}) if not provided.\n\n"
+        "## Performance Timing Headers\n\n"
+        "The response includes timing information in custom headers:\n\n"
+        "- **`X-Retrieve-Time`**: Time taken for document retrieval (seconds)\n"
+        "- **`X-Rerank-Time`**: Time taken for reranking (seconds, only if rerank=true)\n"
+        "- **`X-Total-Time`**: Total processing time (seconds)\n\n"
+        "These headers enable cross-service performance monitoring and can be used by clients "
+        "to track and optimize search performance."
     ),
-    response_description="Documents ranked by descending score, with score_type indicating the scoring method used."
+    response_description="Documents ranked by descending score, with score_type indicating the scoring method used. Performance metrics available in response headers."
 )
-async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchResponse:
+async def similarity_search(req: SimilaritySearchRequest, response: Response) -> SimilaritySearchResponse:
     if not req.query or not req.query.strip():
         APIError.raise_error(ErrorCode.EMPTY_INPUT, "query is required")
 
@@ -145,7 +151,7 @@ async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchRes
         reranker_model = reranker_model_dict.get("reranker_model") if req.rerank else None
         reranker_endpoint = reranker_model_dict.get("reranker_endpoint") if req.rerank else None
 
-        docs, scores, score_type = await asyncio.to_thread(
+        docs, scores, score_type, perf_stat_dict = await asyncio.to_thread(
             perform_similarity_search,
             req.query,
             emb_model,
@@ -176,7 +182,17 @@ async def similarity_search(req: SimilaritySearchRequest) -> SimilaritySearchRes
         for doc, score in zip(docs, scores)
     ]
 
-    return SimilaritySearchResponse(score_type=score_type, results=results)
+    # Add timing information to response headers
+    response.headers["X-Retrieve-Time"] = str(perf_stat_dict.get("retrieve_time", 0.0))
+    if "rerank_time" in perf_stat_dict:
+        response.headers["X-Rerank-Time"] = str(perf_stat_dict["rerank_time"])
+    total_time = sum(v for v in perf_stat_dict.values() if v is not None)
+    response.headers["X-Total-Time"] = str(total_time)
+
+    return SimilaritySearchResponse(
+        score_type=score_type,
+        results=results
+    )
 
 
 @app.get(
@@ -191,3 +207,4 @@ async def health():
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "7000"))
     uvicorn.run(app, host="0.0.0.0", port=port)
+

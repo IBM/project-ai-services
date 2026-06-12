@@ -1,13 +1,8 @@
 package deployment
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
-	"regexp"
-	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
@@ -15,10 +10,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/params"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
-	k8syaml "sigs.k8s.io/yaml"
 )
 
 // DeploymentPlanner plans the deployment of applications by:
@@ -160,7 +154,7 @@ func (p *DeploymentPlanner) processComponent(
 ) (string, error) {
 	// Calculate component hash based on type + provider + params
 	// This allows deduplication: same config = same deployment
-	componentHash := p.calculateComponentHash(
+	componentHash := utils.CalculateComponentHash(
 		comp.ComponentType,
 		comp.ProviderID,
 		comp.Params,
@@ -196,26 +190,6 @@ func (p *DeploymentPlanner) processComponent(
 	plan.Components[componentHash] = compPlan
 
 	return componentHash, nil
-}
-
-// calculateComponentHash creates a unique hash for a component configuration.
-// Components with same type, provider, and params will have the same hash.
-func (p *DeploymentPlanner) calculateComponentHash(
-	componentType string,
-	providerID string,
-	params map[string]any,
-) string {
-	// Create a deterministic string representation
-	hashInput := fmt.Sprintf("%s:%s:", componentType, providerID)
-
-	// Sort and add params to ensure consistent hashing
-	paramsJSON, _ := json.Marshal(params)
-	hashInput += string(paramsJSON)
-
-	// Calculate SHA256 hash
-	hash := sha256.Sum256([]byte(hashInput))
-
-	return fmt.Sprintf("%x", hash[:16]) // Use first 16 bytes (32 hex chars)
 }
 
 // calculateAndAllocateSpyreCards calculates required Spyre cards and creates allocation pool.
@@ -272,72 +246,14 @@ func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(comp *ComponentPla
 		return 0, fmt.Errorf("failed to load component templates: %w", err)
 	}
 
-	totalSpyreCards := 0
-
-	for templateName, tmpl := range tmpls {
-		// Prepare minimal params for rendering
-		params := map[string]any{
-			"InstanceSlug": "slug", // dummy
-			"TemplateID":   "test", // dummy
-			"Values":       comp.Params,
-			"env":          map[string]map[string]string{},
-		}
-
-		// Render template
-		var rendered bytes.Buffer
-		if err := tmpl.Execute(&rendered, params); err != nil {
-			continue
-		}
-
-		// Parse rendered YAML to get pod spec
-		var podSpec podmodels.PodSpec
-		if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
-			continue
-		}
-
-		// Extract Spyre card requirements from annotations
-		spyreCards, _, err := fetchSpyreCardsFromPodAnnotations(podSpec.Annotations)
-		if err != nil {
-			return 0, err
-		}
-
-		totalSpyreCards += spyreCards
-		if spyreCards > 0 {
-			logger.Infof("Template %s requires %d Spyre cards\n", templateName, spyreCards)
-		}
+	// Use the catalog provider's CollectSpyreCardsFromTemplates function
+	// Use comp.Values instead of comp.Params to include defaults from values.yaml
+	totalSpyreCards, err := p.catalogProvider.CollectSpyreCardsFromTemplates(tmpls, comp.Values)
+	if err != nil {
+		return 0, fmt.Errorf("failed to collect Spyre cards from templates: %w", err)
 	}
 
 	return totalSpyreCards, nil
-}
-
-// fetchSpyreCardsFromPodAnnotations extracts Spyre card requirements from pod annotations.
-func fetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[string]int, error) {
-	var spyreCards int
-	spyreCardContainerMap := map[string]int{}
-
-	spyreCardAnnotationRegex := regexp.MustCompile(`^ai-services\.io\/([A-Za-z0-9][-A-Za-z0-9_.]*)--spyre-cards$`)
-
-	isSpyreCardAnnotation := func(annotation string) (string, bool) {
-		matches := spyreCardAnnotationRegex.FindStringSubmatch(annotation)
-		if matches == nil {
-			return "", false
-		}
-
-		return matches[1], true
-	}
-
-	for annotationKey, val := range annotations {
-		if containerName, ok := isSpyreCardAnnotation(annotationKey); ok {
-			valInt, err := strconv.Atoi(val)
-			if err != nil {
-				return 0, spyreCardContainerMap, fmt.Errorf("failed to convert to int. Provided val: %s is not of int type", val)
-			}
-			spyreCardContainerMap[containerName] = valInt
-			spyreCards += valInt
-		}
-	}
-
-	return spyreCards, spyreCardContainerMap, nil
 }
 
 // Made with Bob

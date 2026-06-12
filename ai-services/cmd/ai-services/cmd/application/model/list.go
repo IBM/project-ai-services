@@ -31,6 +31,10 @@ func init() {
 }
 
 func list(cmd *cobra.Command) error {
+	if experimentalModels && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+		return listCatalogModels(templateName)
+	}
+
 	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypeOpenShift {
 		// Since we do not have tmpl files in OpenShift marking it as unsupported for now
 		logger.Warningln("Not supported for openshift runtime")
@@ -45,6 +49,27 @@ func list(cmd *cobra.Command) error {
 	logger.Infoln("Models in application template " + templateName + ":")
 	for _, model := range models {
 		logger.Infoln("- " + model)
+	}
+
+	return nil
+}
+
+// listCatalogModels lists models for services or architectures from the catalog.
+func listCatalogModels(templateID string) error {
+	models, err := getCatalogModels(templateID)
+	if err != nil {
+		return err
+	}
+
+	if len(models) == 0 {
+		logger.Infoln("No models found")
+
+		return nil
+	}
+
+	logger.Infof("Models for template '%s':\n", templateID)
+	for _, model := range models {
+		logger.Infof("- %s\n", model)
 	}
 
 	return nil

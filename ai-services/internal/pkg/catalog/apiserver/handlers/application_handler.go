@@ -17,8 +17,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
+var (
+	ErrInvalidIDParameter = ErrorResponse{Error: "Invalid application ID format"}
+)
+
 // Ensure types package is imported for Swagger documentation.
 var _ types.ApplicationListResponse
+var _ types.ApplicationPSResponse
 
 // ApplicationHandler handles application-related HTTP requests.
 type ApplicationHandler struct {
@@ -119,7 +124,7 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 func (h *ApplicationHandler) UpdateApplication(c *gin.Context) {
 	appID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid application ID format"})
+		c.JSON(http.StatusBadRequest, ErrInvalidIDParameter)
 
 		return
 	}
@@ -197,6 +202,16 @@ func (h *ApplicationHandler) CreateApplication(c *gin.Context) {
 	// Call service layer to create application
 	response, err := h.appService.CreateApplication(c.Request.Context(), req)
 	if err != nil {
+		// Check if it's a validation error with specific status code
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{
+				Error: valErr.Message,
+			})
+
+			return
+		}
+
+		// Default to internal server error
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to create application: %v", err),
 		})
@@ -223,7 +238,7 @@ func (h *ApplicationHandler) CreateApplication(c *gin.Context) {
 func (h *ApplicationHandler) GetApplicationByID(c *gin.Context) {
 	appID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid application ID format"})
+		c.JSON(http.StatusBadRequest, ErrInvalidIDParameter)
 
 		return
 	}
@@ -307,7 +322,7 @@ func (h *ApplicationHandler) GetApplicationResources(c *gin.Context) {
 func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
 	appID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid application ID format, expected UUID"})
+		c.JSON(http.StatusBadRequest, ErrInvalidIDParameter)
 
 		return
 	}
@@ -356,6 +371,46 @@ func (h *ApplicationHandler) handleDeleteError(c *gin.Context, err error) {
 	default:
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
 	}
+}
+
+// ApplicationPS godoc
+//
+//	@Summary		Get application process status
+//	@Description	Retrieves the process status and runtime information for an application
+//	@Tags			Applications
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string	true	"Application ID (UUID)"
+//	@Success		200	{object}	types.ApplicationPSResponse
+//	@Failure		400	{object}	ErrorResponse	"Invalid application ID format"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized"
+//	@Failure		404	{object}	ErrorResponse	"Application not found"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/applications/{id}/ps [get]
+func (h *ApplicationHandler) ApplicationPS(c *gin.Context) {
+	appID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrInvalidIDParameter)
+
+		return
+	}
+
+	response, err := h.appService.ApplicationsPs(c.Request.Context(), appID)
+	if err != nil {
+		if err == repository.ErrApplicationNotFound {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: "Application not found"})
+
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get application: %v", err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // Made with Bob

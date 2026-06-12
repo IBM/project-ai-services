@@ -1,7 +1,11 @@
 package utils
 
 import (
+	"archive/tar"
+	"compress/gzip"
+	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"net"
 	"os"
@@ -10,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
@@ -36,7 +41,14 @@ func BoolPtr(v bool) *bool {
 
 // FlattenArray takes a 2D slice and returns a 1D slice with all values.
 func FlattenArray[T comparable](arr [][]T) []T {
-	flatArr := []T{}
+	// Calculate total capacity needed
+	totalLen := 0
+	for _, row := range arr {
+		totalLen += len(row)
+	}
+
+	// Preallocate slice with exact capacity
+	flatArr := make([]T, 0, totalLen)
 
 	for _, row := range arr {
 		flatArr = append(flatArr, row...)
@@ -504,11 +516,6 @@ func GetApplicationsPath() string {
 	return filepath.Join(GetBaseDir(), "applications")
 }
 
-// GetComponentsPath returns the components path based on the configured base directory.
-func GetComponentsPath() string {
-	return filepath.Join(GetBaseDir(), "applications", "components")
-}
-
 // GetModelsPath returns the models path based on the configured base directory.
 func GetModelsPath() string {
 	return filepath.Join(GetBaseDir(), "models")
@@ -570,4 +577,104 @@ func getPodmanURIAsRoot() (string, error) {
 		"unix:///run/user/%s/podman/podman.sock",
 		u.Uid,
 	), nil
+}
+
+// ExtractTarGz extracts a tar.gz file to a destination directory.
+func ExtractTarGz(srcFile, destDir string) error {
+	file, err := os.Open(srcFile)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	gzr, err := gzip.NewReader(file)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = gzr.Close()
+	}()
+
+	tr := tar.NewReader(gzr)
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		if err := extractTarEntry(tr, header, destDir); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// extractTarEntry extracts a single tar entry.
+func extractTarEntry(tr *tar.Reader, header *tar.Header, destDir string) error {
+	target := filepath.Join(destDir, header.Name)
+
+	switch header.Typeflag {
+	case tar.TypeDir:
+		if err := os.MkdirAll(target, constants.DirPerm); err != nil {
+			return err
+		}
+	case tar.TypeReg:
+		if err := os.MkdirAll(filepath.Dir(target), constants.DirPerm); err != nil {
+			return err
+		}
+
+		outFile, err := os.Create(target)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = outFile.Close()
+		}()
+
+		if _, err := io.Copy(outFile, tr); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// ErrorResponse represents an error response.
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+// ParseErrorResponse attempts to parse the error response from the API.
+// It returns the error message if successfully parsed, otherwise returns the raw response body.
+func ParseErrorResponse(resp *resty.Response) string {
+	var errResp ErrorResponse
+	if err := json.Unmarshal(resp.Body(), &errResp); err == nil && errResp.Error != "" {
+		return errResp.Error
+	}
+
+	return resp.String()
+}
+
+// GetNumericValFromMap safely extracts a numeric value from a map as an integer, returning 0 if not found or not a number.
+// Handles both int and float64 types from JSON unmarshaling.
+func GetNumericValFromMap(m map[string]interface{}, key string) int {
+	if val, ok := m[key]; ok {
+		switch v := val.(type) {
+		case int:
+			return v
+		case float64:
+			return int(v)
+		case int64:
+			return int(v)
+		}
+	}
+
+	return 0
 }

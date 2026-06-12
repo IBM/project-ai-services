@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -18,10 +19,12 @@ import (
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	consts "github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -41,7 +44,11 @@ type ApplicationService struct {
 	deploymentPlanner     *deployment.DeploymentPlanner
 	deploymentExecutor    *deployment.DeploymentExecutor
 	deletionService       *deletion.DeletionService
+	validator             *validators.ApplicationValidator
 }
+
+// ValidationError represents a validation error with HTTP status code.
+type ValidationError = validators.ValidationError
 
 // NewApplicationService creates a new application service.
 func NewApplicationService(
@@ -60,6 +67,7 @@ func NewApplicationService(
 		deploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo),
 		deploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo),
 		deletionService:       deletion.NewDeletionService(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
+		validator:             validators.NewApplicationValidator(provider),
 	}
 }
 
@@ -260,22 +268,27 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 		return nil, fmt.Errorf("application with name '%s' already exists", req.Name)
 	}
 
-	// Phase 2: Create deployment plan (synchronous - fail fast if invalid)
+	// Phase 2: Validate request payload
+	if err := s.validator.ValidateDeploymentRequest(req); err != nil {
+		return nil, err
+	}
+
+	// Phase 3: Create deployment plan (synchronous - fail fast if invalid)
 	// Use podman as default runtime type for planning
 	plan, err := s.deploymentPlanner.PlanDeployment(ctx, req, runtimeTypes.RuntimeTypePodman.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create deployment plan: %w", err)
 	}
 
-	// Phase 3: Insert database records for application, services, components, and dependencies
+	// Phase 4: Insert database records for application, services, components, and dependencies
 	if err := s.insertDeploymentRecords(ctx, plan, req.CreatedBy); err != nil {
 		return nil, fmt.Errorf("failed to insert deployment records: %w", err)
 	}
 
-	// Phase 4: Spawn goroutine for async deployment execution with panic recovery
+	// Phase 5: Spawn goroutine for async deployment execution with panic recovery
 	go s.executeDeploymentAsync(plan, req)
 
-	// Phase 5: Return 202 Accepted immediately with application ID
+	// Phase 6: Return 202 Accepted immediately with application ID
 	response := &apimodels.CreateApplicationResponse{
 		ID: plan.ApplicationID.String(),
 	}
@@ -555,6 +568,7 @@ func (s *ApplicationService) loadServiceComponents(ctx context.Context, sd []mod
 
 			// Transform to response object
 			temp := types.ServiceComponentResp{
+				ID:       component.ID.String(),
 				Type:     component.Type,
 				Provider: component.Provider,
 				Metadata: component.Metadata,
@@ -945,6 +959,172 @@ func buildResourcesResponse(totals *resourceTotals) *types.ApplicationResourcesR
 		},
 		Accelerators: accelerators,
 	}
+}
+
+// ApplicationsPs retrieves runtime pod status for an application and its related resources.
+// It loads the application from the database, inspects service pods directly, and then
+// resolves component pods through service dependencies so shared components are returned once.
+func (s *ApplicationService) ApplicationsPs(ctx context.Context, appID uuid.UUID) (*types.ApplicationPSResponse, error) {
+	app, err := s.appRepo.GetByID(ctx, appID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrApplicationNotFound
+		}
+
+		return nil, fmt.Errorf("failed to get application: %w", err)
+	}
+
+	// Initialize runtime client for pod operations
+	rt, err := vars.RuntimeFactory.Create("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to init %s client: %w", rt.Type(), err)
+	}
+
+	// Collect service pod details (one pod per service)
+	servicePods, err := s.collectServicePods(ctx, rt, app.Services)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect service pods: %w", err)
+	}
+
+	// Collect component pod details
+	componentPods, err := s.collectComponentPods(ctx, rt, app.Services)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect component pods: %w", err)
+	}
+
+	// Build response with application metadata and all pods
+	return &types.ApplicationPSResponse{
+		ID:         app.ID.String(),
+		Name:       app.Name,
+		Services:   servicePods,
+		Components: componentPods,
+	}, nil
+}
+
+// collectServicePods resolves one pod view per service by querying Podman with the
+// service template label. Missing or failed lookups are logged and skipped so one
+// unhealthy service does not prevent returning status for the rest of the application.
+func (s *ApplicationService) collectServicePods(
+	ctx context.Context,
+	rt runtime.Runtime,
+	services []models.Service,
+) ([]types.Pod, error) {
+	// Pre-allocate slice for efficiency (one pod per service expected)
+	servicePods := make([]types.Pod, 0, len(services))
+
+	// Load pod details for each service
+	for _, service := range services {
+		// Query runtime using service ID as template label
+		pod, err := loadApplicationPod(rt, service.ID.String())
+		if err != nil {
+			// Log error but continue with other services (fault-tolerant)
+			logger.Errorf("Failed to load service pod: %w", err)
+
+			continue
+		}
+		servicePods = append(servicePods, pod)
+	}
+
+	logger.Infof("Successfully collected %d service pods", len(servicePods))
+
+	return servicePods, nil
+}
+
+// collectComponentPods resolves pod details for component dependencies referenced by
+// application services. Components are deduplicated by dependency ID because the same
+// backing component can be shared by multiple services within one application.
+func (s *ApplicationService) collectComponentPods(
+	ctx context.Context,
+	rt runtime.Runtime,
+	services []models.Service,
+) ([]types.Pod, error) {
+	// Use map to deduplicate shared components (key: component ID)
+	componentMap := make(map[string]types.Pod)
+
+	// Iterate through services to find component dependencies
+	for _, service := range services {
+		// Fetch service dependencies from database
+		serviceDependencies, err := s.serviceDependencyRepo.GetDependenciesByServiceID(ctx, service.ID)
+		if err != nil {
+			logger.Errorf("Failed to get dependencies for service %s: %v", service.ID, err)
+
+			continue
+		}
+
+		// Extract component pods from dependencies
+		for _, dependency := range serviceDependencies {
+			if dependency.DependencyType != models.DependencyTypeComponent {
+				continue
+			}
+
+			componentID := dependency.DependencyID.String()
+
+			// Skip if component already processed (deduplication)
+			if _, exists := componentMap[componentID]; exists {
+				continue
+			}
+
+			// Load component pod from runtime
+			componentPod, err := loadApplicationPod(rt, componentID)
+			if err != nil {
+				logger.Errorf("Failed to load component pod: %w", err)
+
+				continue
+			}
+
+			// Store in map to prevent duplicate processing
+			componentMap[componentID] = componentPod
+		}
+	}
+
+	// Convert map to slice for response
+	componentPods := make([]types.Pod, 0, len(componentMap))
+	for _, podDetails := range componentMap {
+		componentPods = append(componentPods, podDetails)
+	}
+
+	logger.Infof("Successfully collected %d unique component pods", len(componentPods))
+
+	return componentPods, nil
+}
+
+// loadApplicationPod fetches the application pod from the runtime.
+func loadApplicationPod(rt runtime.Runtime, appID string) (types.Pod, error) {
+	filteredPod, err := common.FetchFilteredPods(rt, appID)
+	if err != nil {
+		return types.Pod{}, err
+	}
+	// Validate exactly one pod exists
+	if len(filteredPod) == 0 {
+		return types.Pod{}, fmt.Errorf("no pod found with given id")
+	}
+
+	pod := filteredPod[0]
+
+	processedPod, err := common.ProcessPod(rt, pod)
+	if err != nil {
+		return types.Pod{}, fmt.Errorf("failed to process pod: %w", err)
+	}
+
+	// Transform containers to API response format with health indicators
+	containers := make([]types.PodContainer, 0, len(pod.Containers))
+	for _, container := range processedPod.Containers {
+		containers = append(containers, types.PodContainer{
+			Name:    container.Name,
+			Status:  types.Status(strings.ToLower(processedPod.Status)),
+			Healthy: strings.ToLower(container.Health) == "healthy",
+		})
+	}
+
+	// Build pod response with metadata and container details
+	return types.Pod{
+		PodID:      processedPod.ID,
+		PodName:    processedPod.Name,
+		Status:     types.Status(strings.ToLower(processedPod.Status)),
+		Healthy:    processedPod.Health == "healthy",
+		Created:    pod.Created.Format(constants.RFC3339WithTimezone),
+		Containers: containers,
+	}, nil
 }
 
 // Made with Bob

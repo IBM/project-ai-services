@@ -7,3 +7,9 @@ nohup.out
 env
 venv
 vendor
+.claude/
+.vscode/
+
+# Coverage reports
+.coverage
+coverage.xml

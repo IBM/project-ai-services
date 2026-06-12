@@ -16,3 +16,65 @@ dependencies:
   - id: llm
 
 standalone: true
+
+# About field containing detailed service information
+about:
+  - title: "Service details"
+    sections:
+      - title: "Version"
+        value: "1.0.0"
+      - title: "Large Language Model (LLM)"
+        value: "granite-3.3-8b-instruct"
+      - title: "Inference backend"
+        values:
+          - "RedHat AI Inference with Spyre"
+          - "AI Inference on CPU"
+          - "IBM watsonx.ai on IBM Cloud"
+
+  - title: "Inputs and outputs"
+    sections:
+      - title: "Inputs"
+        values:
+          - "Text to be summarized"
+          - "level (string, optional): Abstraction level: 'brief', 'standard' (default), or 'detailed'"
+          - "length (integer, optional): (Legacy) Desired summary length in words"
+          - "stream (boolean, optional): Stream the summary as it is generated, default False"
+      - title: "Outputs"
+        values:
+          - "Summary of the input text"
+
+  - title: "Dependencies and integration"
+    sections:
+      - title: "External dependencies"
+        values:
+          - "Inferencing endpoint compatible with OpenAI or similar AI APIs (required for LLM-based summarization capabilities)"
+
+  - title: "Content and format support"
+    sections:
+      - title: "Languages"
+        values:
+          - "English"
+
+  - title: "Expected resource consumption"
+    sections:
+      - title: "per 5 concurrent users"
+        values:
+          - title: "Compute"
+            value: "7 CPU cores"
+          - title: "Memory"
+            value: "101.00 GB"
+          - title: "Storage"
+            value: "60.00 GB"
+          - title: "Spyre acceleration cards"
+            value: 4
+
+  - title: "Assets"
+    sections:
+      - title: "Architectures"
+        values:
+          - "Digital assistant"
+      - title: "Source code"
+        ctaLabel: "View source code"
+        url: "https://github.com/IBM/project-ai-services"
+
+# Made with Bob

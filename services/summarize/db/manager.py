@@ -166,7 +166,7 @@ class DatabaseManager:
             status: Optional[JobStatus] = None,
             completed_at: Optional[datetime] = None,
             error: Optional[str] = None,
-            metadata : Optional[Dict[str, int]] = None
+            metadata : Optional[Dict[str, Any]] = None
     ) -> bool:
         """
         Update job fields in the database.
@@ -267,6 +267,9 @@ class DatabaseManager:
                     stmt = stmt.where(SummarizeJob.job_type == job_type)
 
                 jobs = list(session.scalars(stmt).all())
+                # Expunge all jobs from session to prevent DetachedInstanceError
+                for job in jobs:
+                    session.expunge(job)
                 logger.debug(f"Retrieved {len(jobs)} active jobs")
                 return jobs
         except SQLAlchemyError as e:
@@ -275,6 +278,28 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Unexpected error retrieving active jobs: {e}", exc_info=True)
             return []
+
+    @staticmethod
+    def delete_all_jobs() -> bool:
+        """
+        Delete all jobs from the database.
+        Used for bulk cleanup operations.
+        
+        Returns:
+            True if deletion successful, False otherwise
+        """
+        try:
+            with get_db_session() as session:
+                stmt = delete(SummarizeJob)
+                result = session.execute(stmt)
+                logger.info(f"Deleted {result.rowcount} jobs from database")
+                return True
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting all jobs: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error deleting all jobs: {e}", exc_info=True)
+            return False
 
 
 # Singleton instance for easy access

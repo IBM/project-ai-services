@@ -67,6 +67,7 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 		applications.POST("/", applicationHandler.CreateApplication)
 		applications.PUT("/:id", applicationHandler.UpdateApplication)
 		applications.DELETE("/:id", applicationHandler.DeleteApplication)
+		applications.GET("/:id/ps", applicationHandler.ApplicationPS)
 	}
 
 	return router
