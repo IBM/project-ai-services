@@ -155,7 +155,7 @@ func processResetPassword() error {
 
 	setGlobalFlagValues(podEnv)
 
-	return catalogPodman.DeployCatalog(context.Background(), baseDir, map[string]string{}, domainName, "", "", httpsPort)
+	return catalogPodman.DeployCatalog(context.Background(), baseDir, domainName, "", "", httpsPort)
 }
 
 func setGlobalFlagValues(podEnv map[string]string) {
