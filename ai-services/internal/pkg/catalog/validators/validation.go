@@ -174,22 +174,21 @@ func (v *ApplicationValidator) validateServiceComponents(components []apimodels.
 	return nil
 }
 
-// validateNoDuplicateComponents ensures no duplicate component (type + provider) exists in the array.
+// validateNoDuplicateComponents ensures no duplicate component type exists in the array.
 func (v *ApplicationValidator) validateNoDuplicateComponents(components []apimodels.Component) error {
 	seen := make(map[string]bool)
 
 	for _, component := range components {
-		// Create unique key for this component type + provider combination
-		componentKey := fmt.Sprintf("%s:%s", component.ComponentType, component.ProviderID)
+		// Create unique key based on component type only
+		componentKey := component.ComponentType
 
 		if seen[componentKey] {
 			return &ValidationError{
 				Code: http.StatusBadRequest,
 				Message: fmt.Sprintf(
-					"Duplicate component found: component type '%s' with provider '%s' appears multiple times. "+
-						"Each component type and provider combination must be unique within a service",
+					"Duplicate component found: component type '%s' appears multiple times. "+
+						"Each component type must be unique within a service",
 					component.ComponentType,
-					component.ProviderID,
 				),
 			}
 		}
