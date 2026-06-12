@@ -101,7 +101,7 @@ func (c *catalogDeploymentContext) getCaddyHostAdminURL(rt *podman.PodmanClient,
 }
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
-func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, baseDir string, argParams map[string]string, domainName string, sslCertPath, sslKeyPath string, httpsPort int) error {
+func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, baseDir string, argParams map[string]string, domainName string, sslCertPath, sslKeyPath string, httpsPort int, resetCert bool) error {
 	s := spinner.New("Deploying catalog service...")
 	s.Start(ctx)
 
@@ -130,11 +130,11 @@ func DeployCatalog(ctx context.Context, podmanURI, authFilePath, passwordHash, b
 
 	if !isDeployed {
 		// Fresh deployment path
-		return handleFreshDeployment(deployCtx, rt, tp, appMetadata, tmpls, podmanURI, authFilePath, passwordHash, baseDir, domainName, certDomain, sslCertPath, sslKeyPath, argParams, existingResources, s)
+		return handleFreshDeployment(deployCtx, rt, tp, appMetadata, tmpls, podmanURI, authFilePath, passwordHash, baseDir, domainName, certDomain, sslCertPath, sslKeyPath, argParams, existingResources, s, resetCert)
 	}
 
 	// Reconfigure path - pass the httpsPort parameter to handle default vs user-provided
-	return handleReconfigure(deployCtx, rt, tp, baseDir, certDomain, domainName, sslCertPath, sslKeyPath, argParams, httpsPort, s)
+	return handleReconfigure(deployCtx, rt, tp, baseDir, certDomain, domainName, sslCertPath, sslKeyPath, argParams, httpsPort, s, resetCert)
 }
 
 // handleFreshDeployment handles the fresh deployment path for catalog service.
@@ -148,6 +148,7 @@ func handleFreshDeployment(
 	argParams map[string]string,
 	existingResources []string,
 	s *spinner.Spinner,
+	resetCert bool,
 ) error {
 	// Prepare deployment configuration
 	values, err := prepareCatalogDeployment(deployCtx, tp, podmanURI, authFilePath, passwordHash, baseDir, domainName, certDomain, argParams, s)
@@ -164,7 +165,7 @@ func handleFreshDeployment(
 	logger.Infoln("-------")
 
 	// Handle post-deployment operations (cert loading and route registration)
-	return handlePostDeployment(deployCtx, rt, tp, baseDir, sslCertPath, sslKeyPath, argParams, false)
+	return handlePostDeployment(deployCtx, rt, tp, baseDir, sslCertPath, sslKeyPath, argParams, false, resetCert)
 }
 
 // handleReconfigure handles the reconfigure path for catalog service.
@@ -176,6 +177,7 @@ func handleReconfigure(
 	argParams map[string]string,
 	httpsPort int,
 	s *spinner.Spinner,
+	resetCert bool,
 ) error {
 	s.Stop("Catalog service already deployed, validating configuration...")
 
@@ -190,7 +192,7 @@ func handleReconfigure(
 	deployCtx.domainSuffix = existingDomain
 
 	// Handle post-deployment operations (cert loading and route registration)
-	return handlePostDeployment(deployCtx, rt, tp, baseDir, sslCertPath, sslKeyPath, argParams, true)
+	return handlePostDeployment(deployCtx, rt, tp, baseDir, sslCertPath, sslKeyPath, argParams, true, resetCert)
 }
 
 // initializeCatalogDeployment handles initialization and validation steps.
@@ -228,15 +230,15 @@ func initializeCatalogDeployment(argParams map[string]string, httpsPort int, s *
 }
 
 // handlePostDeployment handles certificate loading, route registration and next steps display after catalog deployment.
-func handlePostDeployment(deployCtx *catalogDeploymentContext, rt *podman.PodmanClient, tp templates.Template, baseDir, sslCertPath, sslKeyPath string, argParams map[string]string, isReconfigure bool) error {
+func handlePostDeployment(deployCtx *catalogDeploymentContext, rt *podman.PodmanClient, tp templates.Template, baseDir, sslCertPath, sslKeyPath string, argParams map[string]string, isReconfigure bool, resetCert bool) error {
 	// Get Caddy admin URL from cache (will fetch and cache if not already cached)
 	adminURL, err := deployCtx.getCaddyHostAdminURL(rt, tp, catalogAppTemplate, argParams)
 	if err != nil {
 		return fmt.Errorf("failed to get Caddy admin URL: %w", err)
 	}
 
-	// Load SSL certificates if provided (do not allow cert updates during reconfigure)
-	if err := loadSSLCertificatesIfProvided(deployCtx, rt, tp, baseDir, sslCertPath, sslKeyPath, argParams, isReconfigure); err != nil {
+	// Load SSL certificates if provided (allow cert updates during reconfigure only with --reset-cert)
+	if err := loadSSLCertificatesIfProvided(deployCtx, rt, tp, baseDir, sslCertPath, sslKeyPath, argParams, isReconfigure, resetCert); err != nil {
 		return fmt.Errorf("failed to load SSL certificates: %w", err)
 	}
 
@@ -325,8 +327,8 @@ func prepareCatalogDeployment(deployCtx *catalogDeploymentContext, tp templates.
 }
 
 // loadSSLCertificatesIfProvided stages user-provided certificates for the Caddy pod and updates TLS config via Admin API.
-// During reconfigure, it validates certificate changes and blocks unauthorized updates.
-func loadSSLCertificatesIfProvided(deployCtx *catalogDeploymentContext, rt *podman.PodmanClient, tp templates.Template, baseDir, sslCertPath, sslKeyPath string, argParams map[string]string, isReconfigure bool) error {
+// During reconfigure, it validates certificate changes and blocks unauthorized updates unless --reset-cert is provided.
+func loadSSLCertificatesIfProvided(deployCtx *catalogDeploymentContext, rt *podman.PodmanClient, tp templates.Template, baseDir, sslCertPath, sslKeyPath string, argParams map[string]string, isReconfigure bool, resetCert bool) error {
 	if sslCertPath == "" || sslKeyPath == "" {
 		return nil
 	}
@@ -336,7 +338,8 @@ func loadSSLCertificatesIfProvided(deployCtx *catalogDeploymentContext, rt *podm
 	stagedKeyPath := filepath.Join(baseDir, "common", "caddy", caddyCertsDirName, "tls.key")
 
 	// Handle reconfigure scenario
-	if isReconfigure {
+	if isReconfigure && !resetCert {
+		// Only validate if --reset-cert is NOT provided
 		if err := validateCertificateUpdate(sslCertPath, sslKeyPath, stagedCertPath, stagedKeyPath); err != nil {
 			// Check if this is the special "already loaded" error
 			if errors.Is(err, ErrCertificatesAlreadyLoaded) {

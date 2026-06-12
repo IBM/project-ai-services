@@ -29,6 +29,8 @@ var (
 	sslKeyPath  string
 	// HTTPS port flag for catalog configure command.
 	httpsPort int
+	// Reset certificate flag to allow certificate changes during reconfigure.
+	resetCert bool
 )
 
 const defaultHTTPSPort = 443
@@ -119,6 +121,7 @@ func runConfigure(argParams map[string]string) error {
 		SSLCertPath:   cleanCertPath,
 		SSLKeyPath:    cleanKeyPath,
 		HttpsPort:     httpsPort,
+		ResetCert:     resetCert,
 	})
 }
 
@@ -279,6 +282,17 @@ func configureConfigureFlags(cmd *cobra.Command, rawArgParams *[]string) {
 		"Path to user-provided SSL private key (optional).\n"+
 			"Must be used together with --ssl-cert.\n"+
 			"Example: --ssl-key /path/to/key.pem\n",
+	)
+
+	cmd.Flags().BoolVar(
+		&resetCert,
+		"reset",
+		false,
+		"Reset specific configurations during reconfigure (podman runtime only).\n"+
+			"Currently supports: certificate\n"+
+			"By default, certificate changes are blocked during reconfigure to prevent accidental modifications.\n"+
+			"Use this flag with 'certificate' to explicitly allow loading new certificates or switching between custom and auto-generated certificates.\n"+
+			"Example: --reset certificate --ssl-cert /path/to/new-cert.pem --ssl-key /path/to/new-key.pem\n",
 	)
 }
 
