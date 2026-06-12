@@ -14,6 +14,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -38,7 +39,7 @@ var infoCmd = &cobra.Command{
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
 
-		if experimentalInfo {
+		if experimentalInfo && rt == types.RuntimeTypePodman {
 			return renderApplicationInfo(applicationName)
 		}
 
