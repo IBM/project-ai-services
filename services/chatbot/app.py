@@ -26,7 +26,7 @@ set_log_level(settings.common.app.log_level)
 
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 import common.db_utils as db
-from common.misc_utils import get_model_endpoints, set_request_id, create_llm_session, configure_uvicorn_logging
+from common.misc_utils import get_embedding_endpoint, get_llm_endpoint, get_reranker_endpoint, set_request_id, create_llm_session, configure_uvicorn_logging
 from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models, tokenize_with_llm
 from common.perf_utils import perf_registry
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
@@ -66,7 +66,9 @@ concurrency_limiter = BoundedSemaphore(settings.common.llm.max_batch_size)
 
 def initialize_models():
     global emb_model_dict, llm_model_dict, reranker_model_dict
-    emb_model_dict, llm_model_dict, reranker_model_dict = get_model_endpoints()
+    emb_model_dict = get_embedding_endpoint()
+    llm_model_dict = get_llm_endpoint()
+    reranker_model_dict = get_reranker_endpoint()
 
 def initialize_vectorstore():
     global vectorstore
@@ -94,8 +96,8 @@ diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_ha
 async def lifespan(app):
     filtered_paths = ['/health']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
-    initialize_models()
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
+    initialize_models()
     yield
     stderr_monitor.stop()
 

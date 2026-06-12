@@ -210,10 +210,11 @@ def resolve_model_max_len(endpoint: str, model_name: str, fallback_max_model_len
 
 
 
-def get_model_endpoints():
+def get_embedding_endpoint():
+    """Get embedding model endpoint configuration."""
     from common.settings import settings
 
-    emb_model_dict = {
+    return {
         'emb_endpoint': settings.embedding.endpoint,
         'emb_model':    settings.embedding.model,
         'max_model_len': resolve_model_max_len(
@@ -223,7 +224,12 @@ def get_model_endpoints():
         ),
     }
 
-    llm_model_dict = {
+
+def get_llm_endpoint():
+    """Get LLM model endpoint configuration."""
+    from common.settings import settings
+
+    return {
         'llm_endpoint': settings.llm.endpoint,
         'llm_model':    settings.llm.model,
         'max_model_len': resolve_model_max_len(
@@ -234,12 +240,17 @@ def get_model_endpoints():
         ),
     }
 
-    reranker_model_dict = {
+
+def get_reranker_endpoint():
+    """Get reranker model endpoint configuration."""
+    from common.settings import settings
+
+    return {
         'reranker_endpoint': settings.reranker.endpoint,
         'reranker_model':    settings.reranker.model,
     }
 
-    return emb_model_dict, llm_model_dict, reranker_model_dict
+
 
 def setup_digitized_doc_dir():
     from digitize.settings import settings
