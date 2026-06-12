@@ -1,5 +1,5 @@
 IMAGE=chatbot-service
-TAG?=v0.0.15
+TAG?=v0.0.16
 
 run:
 	PORT=$${PORT:-5000} /var/venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port $$PORT

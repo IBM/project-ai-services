@@ -144,7 +144,8 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
 
         logger.info(f"Processing {total_documents} document(s)")
 
-        emb_model_dict, llm_model_dict, _ = get_model_endpoints()
+        emb_model_dict = get_embedding_endpoint()
+        llm_model_dict = get_llm_endpoint()
 
         out_path = setup_digitized_doc_dir()
 

@@ -13,41 +13,53 @@ class TestInitializeModels:
     
     def test_initialize_models_success(self, monkeypatch, mock_model_dicts):
         """Test successful model initialization with valid endpoints"""
-        # Mock get_model_endpoints to return test data
-        mock_get_endpoints = Mock(return_value=(
-            mock_model_dicts['emb_model_dict'],
-            mock_model_dicts['llm_model_dict'],
-            mock_model_dicts['reranker_model_dict']
-        ))
+        # Mock individual endpoint functions
+        mock_get_emb = Mock(return_value=mock_model_dicts['emb_model_dict'])
+        mock_get_llm = Mock(return_value=mock_model_dicts['llm_model_dict'])
+        mock_get_reranker = Mock(return_value=mock_model_dicts['reranker_model_dict'])
         
-        with patch('chatbot.app.get_model_endpoints', mock_get_endpoints):
+        with patch('chatbot.app.get_embedding_endpoint', mock_get_emb), \
+             patch('chatbot.app.get_llm_endpoint', mock_get_llm), \
+             patch('chatbot.app.get_reranker_endpoint', mock_get_reranker):
             from chatbot.app import initialize_models, emb_model_dict, llm_model_dict, reranker_model_dict
             
             # Call initialization
             initialize_models()
             
-            # Verify get_model_endpoints was called
-            mock_get_endpoints.assert_called_once()
+            # Verify all endpoint functions were called
+            mock_get_emb.assert_called_once()
+            mock_get_llm.assert_called_once()
+            mock_get_reranker.assert_called_once()
     
     def test_initialize_models_empty_dicts(self, monkeypatch):
-        """Test initialization when get_model_endpoints returns empty dicts"""
-        mock_get_endpoints = Mock(return_value=({}, {}, {}))
+        """Test initialization when endpoint functions return empty dicts"""
+        mock_get_emb = Mock(return_value={})
+        mock_get_llm = Mock(return_value={})
+        mock_get_reranker = Mock(return_value={})
         
-        with patch('chatbot.app.get_model_endpoints', mock_get_endpoints):
+        with patch('chatbot.app.get_embedding_endpoint', mock_get_emb), \
+             patch('chatbot.app.get_llm_endpoint', mock_get_llm), \
+             patch('chatbot.app.get_reranker_endpoint', mock_get_reranker):
             from chatbot.app import initialize_models
             
             # Should not raise exception
             initialize_models()
-            mock_get_endpoints.assert_called_once()
+            mock_get_emb.assert_called_once()
+            mock_get_llm.assert_called_once()
+            mock_get_reranker.assert_called_once()
     
     def test_initialize_models_exception(self, monkeypatch):
-        """Test initialization when get_model_endpoints raises exception"""
-        mock_get_endpoints = Mock(side_effect=Exception("Connection error"))
+        """Test initialization when endpoint function raises exception"""
+        mock_get_emb = Mock(side_effect=Exception("Connection error"))
+        mock_get_llm = Mock(return_value={})
+        mock_get_reranker = Mock(return_value={})
         
-        with patch('chatbot.app.get_model_endpoints', mock_get_endpoints):
+        with patch('chatbot.app.get_embedding_endpoint', mock_get_emb), \
+             patch('chatbot.app.get_llm_endpoint', mock_get_llm), \
+             patch('chatbot.app.get_reranker_endpoint', mock_get_reranker):
             from chatbot.app import initialize_models
             
-            # Should raise the exception
+            # Should raise the exception from get_embedding_endpoint
             with pytest.raises(Exception, match="Connection error"):
                 initialize_models()
 
@@ -134,7 +146,7 @@ class TestLifespan:
             # Verify all functions were called in correct order
             # Note: vectorstore is NOT initialized in lifespan, it's lazy-loaded on first request
             # Note: language detector is initialized in settings module, not in lifespan
-            assert call_order == ['models', 'session']
+            assert call_order == ['session', 'models']
             mock_init_models.assert_called_once()
             mock_init_vectorstore.assert_not_called()  # Vectorstore is lazy-loaded on first request
             # Pool size comes from settings.common.llm.max_batch_size
