@@ -25,7 +25,7 @@ from common.thread_utils import ContextAwareThreadPoolExecutor
 from common.llm_utils import summarize_and_classify_tables, tokenize_with_llm
 from common.misc_utils import get_logger, text_suffix, table_suffix, text_chunk_suffix, table_chunk_suffix, get_utc_timestamp
 from common.lang_utils import detect_language, get_prompt_for_language, to_sentence_splitter_lang, LanguageCodes
-from digitize.pdf_utils import get_pdf_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
+from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
 from digitize.docx_utils import get_docx_toc, estimate_docx_page_count
 from digitize.models import DocStatus, JobStatus, OutputFormat
 from digitize.settings import settings
@@ -317,10 +317,11 @@ excluded_labels = {
     'page_header', 'page_footer', 'caption', 'reference', 'footnote'
 }
 
-def process_text_pdf(converted_doc, pdf_path, out_path):
+
+def process_text_docx(converted_doc, docx_path, out_path):
     """
-    Process text content from PDF files.
-    Original implementation for PDF processing.
+    Process text content from DOCX files.
+    Simplified implementation for DOCX processing without page numbers or font sizes.
     """
     page_count = 0
     process_time = 0.0
@@ -330,7 +331,89 @@ def process_text_pdf(converted_doc, pdf_path, out_path):
     
     toc_headers = None
     try:
-        toc_headers, page_count = get_pdf_toc(pdf_path)
+        toc_headers = get_docx_toc(docx_path)
+        page_count = estimate_docx_page_count(docx_path)
+    except Exception as e:
+        logger.debug(f"No TOC found or failed to load TOC: {e}")
+
+    # --- Text Extraction ---
+    if not converted_doc.texts:
+        logger.debug(f"No text content found in '{docx_path}'")
+        out_path.write_text(json.dumps([], indent=2), encoding="utf-8")
+        return page_count, process_time
+
+    structured_output = []
+    last_header_level = 0
+    for text_obj in tqdm_wrapper(converted_doc.texts, desc=f"Processing text content of '{docx_path}'"):
+        label = text_obj.label
+        if label in excluded_labels:
+            continue
+
+        # Check if it's a section header
+        if label == "section_header":
+            # For DOCX files, use TOC for heading levels
+            page_no = None
+            header_text = text_obj.text
+            text_content = text_obj.text.strip()
+            
+            # Check if we have TOC for this header
+            if toc_headers:
+                header_prefix = get_matching_header_lvl(toc_headers, text_content)
+                if header_prefix:
+                    # Use TOC level
+                    header_text = f"{header_prefix} {text_content}"
+                    last_header_level = len(header_prefix.strip())
+                    logger.debug(f"DOCX header '{text_content[:50]}...' matched TOC level {last_header_level}")
+                else:
+                    # No TOC match, use previous level + 1
+                    new_header_level = last_header_level + 1
+                    header_text = f"{'#' * new_header_level} {text_content}"
+                    logger.debug(f"DOCX header '{text_content[:50]}...' assigned level {new_header_level}")
+            
+            structured_output.append({
+                "label": label,
+                "text": header_text,
+                "page": page_no,
+                "font_size": None
+            })
+        else:
+            # For non-header elements
+            page_no = None
+            
+            structured_output.append({
+                "label": label,
+                "text": text_obj.text,
+                "page": page_no,
+                "font_size": None
+            })
+
+    process_time = time.time() - t0
+    out_path.write_text(json.dumps(structured_output, indent=2), encoding="utf-8")
+
+    return page_count, process_time
+
+
+def process_text(converted_doc, pdf_path, out_path):
+    """
+    Process text content from document files (PDF or DOCX).
+    For DOCX files, routes to separate processing function.
+    For PDF files, uses original implementation below.
+    """
+    # Check file type and route DOCX to separate function
+    file_ext = Path(pdf_path).suffix.lower()
+    if file_ext == '.docx':
+        return process_text_docx(converted_doc, pdf_path, out_path)
+    
+    # Original PDF processing implementation below
+    page_count = 0
+    process_time = 0.0
+
+    # Initialize TocHeaders to get the Table of Contents (TOC)
+    t0 = time.time()
+    
+    toc_headers = None
+    try:
+        toc_headers, page_count = get_toc(pdf_path)
     except Exception as e:
         logger.debug(f"No TOC found or failed to load TOC: {e}")
 
@@ -416,95 +499,6 @@ def process_text_pdf(converted_doc, pdf_path, out_path):
     out_path.write_text(json.dumps(structured_output, indent=2), encoding="utf-8")
 
     return page_count, process_time
-
-
-def process_text_docx(converted_doc, docx_path, out_path):
-    """
-    Process text content from DOCX files.
-    Simplified implementation for DOCX processing without page numbers or font sizes.
-    """
-    page_count = 0
-    process_time = 0.0
-
-    # Initialize TocHeaders to get the Table of Contents (TOC)
-    t0 = time.time()
-    
-    toc_headers = None
-    try:
-        toc_headers = get_docx_toc(docx_path)
-        page_count = estimate_docx_page_count(docx_path)
-    except Exception as e:
-        logger.debug(f"No TOC found or failed to load TOC: {e}")
-
-    # --- Text Extraction ---
-    if not converted_doc.texts:
-        logger.debug(f"No text content found in '{docx_path}'")
-        out_path.write_text(json.dumps([], indent=2), encoding="utf-8")
-        return page_count, process_time
-
-    structured_output = []
-    last_header_level = 0
-    for text_obj in tqdm_wrapper(converted_doc.texts, desc=f"Processing text content of '{docx_path}'"):
-        label = text_obj.label
-        if label in excluded_labels:
-            continue
-
-        # Check if it's a section header
-        if label == "section_header":
-            # For DOCX files, use TOC for heading levels
-            page_no = None
-            header_text = text_obj.text
-            text_content = text_obj.text.strip()
-            
-            # Check if we have TOC for this header
-            if toc_headers:
-                header_prefix = get_matching_header_lvl(toc_headers, text_content)
-                if header_prefix:
-                    # Use TOC level
-                    header_text = f"{header_prefix} {text_content}"
-                    last_header_level = len(header_prefix.strip())
-                    logger.debug(f"DOCX header '{text_content[:50]}...' matched TOC level {last_header_level}")
-                else:
-                    # No TOC match, use previous level + 1
-                    new_header_level = last_header_level + 1
-                    header_text = f"{'#' * new_header_level} {text_content}"
-                    logger.debug(f"DOCX header '{text_content[:50]}...' assigned level {new_header_level}")
-            
-            structured_output.append({
-                "label": label,
-                "text": header_text,
-                "page": page_no,
-                "font_size": None
-            })
-        else:
-            # For non-header elements
-            page_no = None
-            
-            structured_output.append({
-                "label": label,
-                "text": text_obj.text,
-                "page": page_no,
-                "font_size": None
-            })
-
-    process_time = time.time() - t0
-    out_path.write_text(json.dumps(structured_output, indent=2), encoding="utf-8")
-
-    return page_count, process_time
-
-
-def process_text(converted_doc, pdf_path, out_path):
-    """
-    Process text content from document files (PDF or DOCX).
-    Routes to appropriate processing function based on file type.
-    """
-    # Check file type
-    file_ext = Path(pdf_path).suffix.lower()
-    
-    if file_ext == '.docx':
-        return process_text_docx(converted_doc, pdf_path, out_path)
-    else:
-        return process_text_pdf(converted_doc, pdf_path, out_path)
 
 def extract_table_headers(markdown_table: str) -> list[str]:
     """

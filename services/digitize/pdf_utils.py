@@ -81,20 +81,12 @@ def get_matching_header_lvl(toc, title, threshold=80):
             return "#" * toc[toc_title]
     return ""
 
-def get_pdf_toc(pdf_file):
-    """
-    Extract table of contents from a PDF file using bookmarks/outlines.
-    
-    Args:
-        pdf_file: Path to the PDF file
-        
-    Returns:
-        Tuple of (toc_dict, page_count) where toc_dict maps heading text to level
-    """
+
+def get_toc(file):
     toc = {}
     page_count = 0
     parser = None
-    with open(pdf_file, "rb") as fp:
+    with open(file, "rb") as fp:
         try:
             parser = PDFParser(fp)
             document = PDFDocument(parser)
