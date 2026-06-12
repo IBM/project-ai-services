@@ -50,39 +50,41 @@ Examples:
 			return validateServerURL(serverURL)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Once precheck passes, silence usage for any *later* internal errors.
-			cmd.SilenceUsage = true
-
-			password, err := promptPassword(passwordStdin)
-			if err != nil {
-				return err
-			}
-
-			// Warn user about insecure mode
-			if insecure {
-				logger.Warningln("WARNING: TLS certificate verification is disabled. This should NOT be used in production environments.")
-			}
-
-			logger.Infof("Logging in to %s as %q...\n", serverURL, username)
-
-			if _, err := client.NewWithLogin(serverURL, username, password, insecure); err != nil {
-				return fmt.Errorf("login failed: %w", err)
-			}
-
-			logger.Infoln("Login successful.")
-
-			return nil
+			return runLogin(serverURL, username, passwordStdin, insecure)
 		},
 	}
 
 	cmd.Flags().StringVar(&serverURL, "server", "http://localhost:8080", "Catalog API server URL")
 	cmd.Flags().StringVar(&username, "username", "", "Username to authenticate with (required)")
 	cmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "Read password from stdin instead of an interactive prompt")
-	cmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification (NOT recommended for production use)")
+	cmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification (NOT for production use)")
 
 	_ = cmd.MarkFlagRequired("username")
 
 	return cmd
+}
+
+// runLogin executes the login flow with the provided parameters.
+func runLogin(serverURL, username string, passwordStdin, insecure bool) error {
+	password, err := promptPassword(passwordStdin)
+	if err != nil {
+		return err
+	}
+
+	// Warn user about insecure mode
+	if insecure {
+		logger.Warningln("WARNING: TLS certificate verification is disabled. This should NOT be used in production environments.")
+	}
+
+	logger.Infof("Logging in to %s as %q...\n", serverURL, username)
+
+	if _, err := client.NewWithLogin(serverURL, username, password, insecure); err != nil {
+		return fmt.Errorf("login failed: %w", err)
+	}
+
+	logger.Infoln("Login successful.")
+
+	return nil
 }
 
 // promptPassword reads the password from stdin if passwordStdin is true, or
