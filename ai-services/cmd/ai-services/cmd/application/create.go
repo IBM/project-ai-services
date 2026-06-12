@@ -31,6 +31,14 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
+const (
+	// Polling configuration.
+	pollInterval       = 10 * time.Second
+	pollTimeout        = 10 * time.Minute
+	paramSplitParts    = 2
+	expectedParamParts = 2
+)
+
 // Variables for flags placeholder.
 var (
 	// common flags.
@@ -362,6 +370,34 @@ func createApp(appName string) error {
 	}
 
 	// 2. Check if application already exists
+	if err := checkApplicationExists(appClient, appName); err != nil {
+		return err
+	}
+
+	// 3. Build the catalog API payload
+	payload, err := buildCatalogPayload(appName)
+	if err != nil {
+		return err
+	}
+
+	// 4. Debug: Print the payload being sent
+	logPayload(payload)
+
+	// 5. Create application via catalog API
+	logger.Infof("Creating application '%s' using template '%s'...\n", appName, templateName)
+	resp, err := appClient.CreateApplication(payload)
+	if err != nil {
+		return fmt.Errorf("failed to create application: %w", err)
+	}
+
+	logger.Infof("Application creation initiated (ID: %s)\n", resp.ID)
+
+	// 6. Poll for application status
+	return pollApplicationStatus(appClient, appName)
+}
+
+// checkApplicationExists checks if an application with the given name already exists.
+func checkApplicationExists(appClient *catalogClient.ApplicationClient, appName string) error {
 	existingApp, err := cliutils.GetAppByName(appClient, appName)
 	if err != nil && !strings.Contains(err.Error(), "not found") {
 		return err
@@ -371,60 +407,51 @@ func createApp(appName string) error {
 		return fmt.Errorf("application with name '%s' already exists", appName)
 	}
 
-	// 3. Initialize catalog provider
+	return nil
+}
+
+// buildCatalogPayload builds the catalog API payload for the given template.
+func buildCatalogPayload(appName string) (*apiModels.CreateApplicationRequest, error) {
+	// Initialize catalog provider
 	provider, err := catalog.NewCatalogProvider()
 	if err != nil {
-		return fmt.Errorf("failed to create catalog provider: %w", err)
+		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
 	}
 
-	// 4. Determine if template is architecture or service
+	// Determine if template is architecture or service
 	isArchitecture := provider.ArchitectureExists(templateName)
 	isService := provider.ServiceExists(templateName)
 
 	if !isArchitecture && !isService {
-		return fmt.Errorf("template '%s' not found as architecture or service", templateName)
+		return nil, fmt.Errorf("template '%s' not found as architecture or service", templateName)
 	}
 
-	// 5. Build the catalog API payload
-	var payload *apiModels.CreateApplicationRequest
+	// Build the payload
 	if isArchitecture {
-		payload, err = buildArchitecturePayload(provider, templateName, appName)
-	} else {
-		payload, err = buildServicePayload(templateName, appName)
-	}
-	if err != nil {
-		return fmt.Errorf("failed to build payload: %w", err)
+		return buildArchitecturePayload(provider, templateName, appName)
 	}
 
-	// 6. Debug: Print the payload being sent
+	return buildServicePayload(templateName, appName)
+}
+
+// logPayload logs the payload for debugging purposes.
+func logPayload(payload *apiModels.CreateApplicationRequest) {
 	payloadJSON, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		logger.Warningf("Failed to marshal payload for debugging: %v\n", err)
 	} else {
 		logger.Infof("CLI REQUEST PAYLOAD:\n%s\n", string(payloadJSON))
 	}
-
-	// 7. Create application via catalog API
-	logger.Infof("Creating application '%s' using template '%s'...\n", appName, templateName)
-	resp, err := appClient.CreateApplication(payload)
-	if err != nil {
-		return fmt.Errorf("failed to create application: %w", err)
-	}
-
-	logger.Infof("Application creation initiated (ID: %s)\n", resp.ID)
-
-	// 8. Poll for application status
-	return pollApplicationStatus(appClient, appName)
 }
 
 // pollApplicationStatus polls the application status until it's ready or fails.
 func pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName string) error {
 	logger.Infof("Waiting for application '%s' to be ready...\n", appName)
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
-	timeout := time.After(10 * time.Minute)
+	timeout := time.After(pollTimeout)
 
 	for {
 		select {
@@ -437,29 +464,42 @@ func pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName s
 				return fmt.Errorf("failed to get application status: %w", err)
 			}
 
-			// Status values from ai-services/internal/pkg/catalog/db/models/application.go
-			switch app.Status {
-			case "Running":
-				logger.Infof("Application '%s' is ready!\n", appName)
-				return nil
-
-			case "Error":
-				if app.Message != "" {
-					return fmt.Errorf("application deployment failed: %s", app.Message)
-				}
-				return fmt.Errorf("application deployment failed")
-
-			case "Downloading", "Deploying":
-				// Still in progress, continue polling
-				logger.Infof("Deploying application: %s, Status: %s, Message: %s...\n", appName, app.Status, app.Message)
-
-			case "Deleting":
-				return fmt.Errorf("application is being deleted")
-
-			default:
-				logger.Infof("Status: %s\n", app.Status)
+			if err := handleApplicationStatus(app, appName); err != nil {
+				return err
 			}
 		}
+	}
+}
+
+// handleApplicationStatus handles the application status and returns an error if deployment failed or completed.
+func handleApplicationStatus(app *catalogTypes.Application, appName string) error {
+	// Status values from ai-services/internal/pkg/catalog/db/models/application.go.
+	switch app.Status {
+	case "Running":
+		logger.Infof("Application '%s' is ready!\n", appName)
+
+		return nil
+
+	case "Error":
+		if app.Message != "" {
+			return fmt.Errorf("application deployment failed: %s", app.Message)
+		}
+
+		return fmt.Errorf("application deployment failed")
+
+	case "Downloading", "Deploying":
+		// Still in progress, continue polling.
+		logger.Infof("Deploying application: %s, Status: %s, Message: %s...\n", appName, app.Status, app.Message)
+
+		return nil
+
+	case "Deleting":
+		return fmt.Errorf("application is being deleted")
+
+	default:
+		logger.Infof("Status: %s\n", app.Status)
+
+		return nil
 	}
 }
 
@@ -491,6 +531,7 @@ func buildArchitecturePayload(provider *catalog.CatalogProvider, archID, appName
 		for i := range deployOptions.Services {
 			if deployOptions.Services[i].ID == svcRef.ID {
 				svcDeployOpts = &deployOptions.Services[i]
+
 				break
 			}
 		}
@@ -562,6 +603,7 @@ func buildServiceEntryWithDeployOptions(appClient *catalogClient.ApplicationClie
 			if p.ID == providerID {
 				providerVersion = p.Version
 				providerFound = true
+
 				break
 			}
 		}
@@ -602,102 +644,126 @@ func buildServiceEntryWithDeployOptions(appClient *catalogClient.ApplicationClie
 }
 
 // extractServiceParams extracts service-level parameters from argParams, excluding component params.
-// Format: {serviceID}.{param} -> {param}
-// Excludes: {serviceID}.{componentType}.{param} (those are component params)
+// Format: {serviceID}.{param} -> {param}.
+// Excludes: {serviceID}.{componentType}.{param} (those are component params).
 func extractServiceParams(serviceID string, components []catalogTypes.DeployOptionsComponent, allParams map[string]string) map[string]any {
 	serviceParams := make(map[string]any)
 	servicePrefix := serviceID + "."
 
-	// Build a set of component types for this service
+	// Build a set of component types for this service.
 	componentTypes := make(map[string]bool)
 	for _, comp := range components {
 		componentTypes[comp.Type] = true
 	}
 
 	for key, value := range allParams {
-		if after, ok := strings.CutPrefix(key, servicePrefix); ok {
-			// Check if this is a component parameter (e.g., chat.llm.model)
-			// by seeing if it starts with a known component type
-			isComponentParam := false
-			for compType := range componentTypes {
-				if strings.HasPrefix(after, compType+".") {
-					isComponentParam = true
-					break
-				}
-			}
+		after, ok := strings.CutPrefix(key, servicePrefix)
+		if !ok {
+			continue
+		}
 
-			// Only add to service params if it's not a component param
-			if !isComponentParam {
-				serviceParams[after] = value
-			}
+		// Check if this is a component parameter by seeing if it starts with a known component type.
+		isComponentParam := isComponentParameter(after, componentTypes)
+
+		// Only add to service params if it's not a component param.
+		if !isComponentParam {
+			serviceParams[after] = value
 		}
 	}
 
 	return serviceParams
 }
 
+// isComponentParameter checks if a parameter belongs to a component.
+func isComponentParameter(param string, componentTypes map[string]bool) bool {
+	for compType := range componentTypes {
+		if strings.HasPrefix(param, compType+".") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // extractComponentParamsForService extracts parameters for a specific component type from argParams.
 // Supports provider-specific params:
-// - Provider only: {componentType}.{providerID} (e.g., llm.vllm-cpu) - selects provider with defaults
-// - Provider with params: {componentType}.{providerID}.{param} (e.g., llm.vllm-cpu.model)
-// - Service-specific: {serviceID}.{componentType}.{providerID}[.{param}] (e.g., chat.llm.vllm-cpu or chat.llm.vllm-cpu.model)
-// Returns a map with provider as key and params as value
+// - Provider only: {componentType}.{providerID} (e.g., llm.vllm-cpu) - selects provider with defaults.
+// - Provider with params: {componentType}.{providerID}.{param} (e.g., llm.vllm-cpu.model).
+// - Service-specific: {serviceID}.{componentType}.{providerID}[.{param}] (e.g., chat.llm.vllm-cpu or chat.llm.vllm-cpu.model).
+// Returns a map with provider as key and params as value.
 func extractComponentParamsForService(serviceID string, componentType string, allParams map[string]string) map[string]map[string]string {
 	providerParams := make(map[string]map[string]string)
 
-	// Extract global component params: {componentType}.{providerID}[.{param}]
-	globalPrefix := componentType + "."
-	for key, value := range allParams {
-		if after, ok := strings.CutPrefix(key, globalPrefix); ok {
-			// Split to get providerID and optional param
-			parts := strings.SplitN(after, ".", 2)
-			if len(parts) >= 1 {
-				providerID := parts[0]
-				if providerParams[providerID] == nil {
-					providerParams[providerID] = make(map[string]string)
-				}
-				// If there's a param name, add it; otherwise just mark provider as selected
-				if len(parts) == 2 {
-					paramName := parts[1]
-					providerParams[providerID][paramName] = value
-				}
-			}
-		}
-	}
+	// Extract global component params: {componentType}.{providerID}[.{param}].
+	extractProviderParams(componentType+".", allParams, providerParams)
 
-	// Extract service-specific component params (these override global)
-	servicePrefix := serviceID + "." + componentType + "."
-	for key, value := range allParams {
-		if after, ok := strings.CutPrefix(key, servicePrefix); ok {
-			// Split to get providerID and optional param
-			parts := strings.SplitN(after, ".", 2)
-			if len(parts) >= 1 {
-				providerID := parts[0]
-				if providerParams[providerID] == nil {
-					providerParams[providerID] = make(map[string]string)
-				}
-				// If there's a param name, add it; otherwise just mark provider as selected
-				if len(parts) == 2 {
-					paramName := parts[1]
-					providerParams[providerID][paramName] = value
-				}
-			}
-		}
-	}
+	// Extract service-specific component params (these override global).
+	extractProviderParams(serviceID+"."+componentType+".", allParams, providerParams)
 
 	return providerParams
 }
 
+// extractProviderParams extracts provider parameters from allParams with the given prefix.
+func extractProviderParams(prefix string, allParams map[string]string, providerParams map[string]map[string]string) {
+	for key, value := range allParams {
+		after, ok := strings.CutPrefix(key, prefix)
+		if !ok {
+			continue
+		}
+
+		// Split to get providerID and optional param.
+		parts := strings.SplitN(after, ".", paramSplitParts)
+		if len(parts) < 1 {
+			continue
+		}
+
+		providerID := parts[0]
+		if providerParams[providerID] == nil {
+			providerParams[providerID] = make(map[string]string)
+		}
+
+		// If there's a param name, add it; otherwise just mark provider as selected.
+		if len(parts) == expectedParamParts {
+			paramName := parts[1]
+			providerParams[providerID][paramName] = value
+		}
+	}
+}
+
 // selectProviderFromDeployOptions determines the provider ID for a component using deploy options.
 // Priority:
-// 1. If user provided provider-specific params (e.g., llm.vllm-cpu.model), use that provider
-// 2. For LLM and reranker components: Use vllm-spyre by default
-// 3. Default provider marked in deploy options
-// 4. First available provider
+// 1. If user provided provider-specific params (e.g., llm.vllm-cpu.model), use that provider.
+// 2. For LLM and reranker components: Use vllm-spyre by default.
+// 3. Default provider marked in deploy options.
+// 4. First available provider.
 func selectProviderFromDeployOptions(compDeployOpt catalogTypes.DeployOptionsComponent, providerParams map[string]map[string]string) (string, map[string]string) {
-	// Check if user specified params for a specific provider
+	// Check if user specified params for a specific provider.
+	if providerID, params := findUserSpecifiedProvider(compDeployOpt, providerParams); providerID != "" {
+		return providerID, params
+	}
+
+	// Special logic for LLM and reranker component types - prefer Spyre acceleration.
+	if providerID := findSpyreProvider(compDeployOpt); providerID != "" {
+		return providerID, make(map[string]string)
+	}
+
+	// Use default provider if marked.
+	if providerID := findDefaultProvider(compDeployOpt); providerID != "" {
+		return providerID, make(map[string]string)
+	}
+
+	// Fall back to first available provider.
+	if len(compDeployOpt.Providers) > 0 {
+		return compDeployOpt.Providers[0].ID, make(map[string]string)
+	}
+
+	return "", make(map[string]string)
+}
+
+// findUserSpecifiedProvider checks if user specified params for a specific provider.
+func findUserSpecifiedProvider(compDeployOpt catalogTypes.DeployOptionsComponent, providerParams map[string]map[string]string) (string, map[string]string) {
 	for providerID := range providerParams {
-		// Verify this provider exists in deploy options
+		// Verify this provider exists in deploy options.
 		for _, p := range compDeployOpt.Providers {
 			if p.ID == providerID {
 				return providerID, providerParams[providerID]
@@ -705,29 +771,33 @@ func selectProviderFromDeployOptions(compDeployOpt catalogTypes.DeployOptionsCom
 		}
 	}
 
-	// Special logic for LLM and reranker component types - prefer Spyre acceleration
-	if compDeployOpt.Type == "llm" || compDeployOpt.Type == "reranker" {
-		// Default to vllm-spyre for LLM/reranker if available
-		for _, p := range compDeployOpt.Providers {
-			if p.ID == "vllm-spyre" {
-				return p.ID, make(map[string]string)
-			}
+	return "", nil
+}
+
+// findSpyreProvider finds vllm-spyre provider for LLM and reranker components.
+func findSpyreProvider(compDeployOpt catalogTypes.DeployOptionsComponent) string {
+	if compDeployOpt.Type != "llm" && compDeployOpt.Type != "reranker" {
+		return ""
+	}
+
+	for _, p := range compDeployOpt.Providers {
+		if p.ID == "vllm-spyre" {
+			return p.ID
 		}
 	}
 
-	// Use default provider if marked
+	return ""
+}
+
+// findDefaultProvider finds the default provider marked in deploy options.
+func findDefaultProvider(compDeployOpt catalogTypes.DeployOptionsComponent) string {
 	for _, p := range compDeployOpt.Providers {
 		if p.Default {
-			return p.ID, make(map[string]string)
+			return p.ID
 		}
 	}
 
-	// Fall back to first available provider
-	if len(compDeployOpt.Providers) > 0 {
-		return compDeployOpt.Providers[0].ID, make(map[string]string)
-	}
-
-	return "", make(map[string]string)
+	return ""
 }
 
 // applySchemaDefaults fetches the component provider schema and applies default values.
