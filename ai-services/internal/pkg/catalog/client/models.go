@@ -11,3 +11,9 @@ type ListApplicationsParams struct {
 	// CatalogID filters by catalog ID (e.g., 'rag', 'chat', 'digitize', 'summarize')
 	CatalogID string
 }
+
+// DeleteApplicationParams holds optional query parameters for deleting applications.
+type DeleteApplicationParams struct {
+	// KeepData preserves underlying data (volumes of databases/service resources) when true. Default: false
+	KeepData bool
+}

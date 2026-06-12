@@ -667,6 +667,9 @@ func registerCatalogRoutes(rt *podman.PodmanClient, tp templates.Template, appTe
 		return nil, nil
 	}
 
+	// Create proxy manager once before registering routes
+	proxyManager := proxy.NewCaddyManager(adminURL, constants.CaddyServerName)
+
 	// Build route domains map
 	routeDomains := make(map[string]string)
 
@@ -676,7 +679,7 @@ func registerCatalogRoutes(rt *podman.PodmanClient, tp templates.Template, appTe
 		logger.Infof("Registering routes for pod: %s\n", info.PodName, logger.VerbosityLevelDebug)
 
 		// Register routes and get the built routes back
-		routes, err := proxy.RegisterRoutesForAppAndReturn(rt, catalogconstants.CatalogAppName, constants.CaddyServerName, info.RoutesAnnotation, adminURL, domainSuffix, info.PodName)
+		routes, err := proxy.RegisterRoutesForAppAndReturn(rt, catalogconstants.CatalogAppName, proxyManager, info.RoutesAnnotation, domainSuffix, info.PodName)
 		if err != nil {
 			registrationErrors = append(registrationErrors, fmt.Errorf("pod %s: %w", info.PodName, err))
 
