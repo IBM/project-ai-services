@@ -88,7 +88,7 @@ func performBackupWithCurl(ctx context.Context, pc *podman.PodmanClient, contain
 	}
 
 	// Create backup_info.json
-	if err := createBackupInfo(ctx, pc, containerID, backupDir); err != nil {
+	if err := createBackupInfo(pc, containerID, backupDir); err != nil {
 		logger.Warningf("Failed to create backup_info.json: %v\n", err)
 	}
 
@@ -97,15 +97,19 @@ func performBackupWithCurl(ctx context.Context, pc *podman.PodmanClient, contain
 
 // listRagIndices lists all indices that start with "rag".
 func listRagIndices(pc *podman.PodmanClient, containerID, osHost, osPassword string) ([]string, error) {
-	listScript := `curl -s -k -u "admin:${OS_PASSWORD}" "https://` + osHost + `/_cat/indices?format=json" | jq -r '.[] | select(.index | startswith("rag")) | .index'`
+	// Use environment variable for password to avoid exposure in process list
+	listScript := fmt.Sprintf(`curl -s -k -u "admin:${OS_PASSWORD}" "https://%s/_cat/indices?format=json" | jq -r '.[] | select(.index | startswith("rag")) | .index'`, osHost)
 
-	output, err := pc.ExecInContainerWithOutput(containerID, []string{"sh", "-c", "OS_PASSWORD='${OS_PASSWORD}' " + listScript})
+	// Create a temporary script file to capture output
+	tempScript := fmt.Sprintf(`
+		OS_PASSWORD='%s'
+		export OS_PASSWORD
+		%s
+	`, strings.ReplaceAll(osPassword, "'", "'\\''"), listScript)
+
+	output, err := pc.ExecInContainerWithOutput(containerID, []string{"sh", "-c", tempScript})
 	if err != nil {
-		// Try with environment variable approach
-		output, err = execWithEnv(pc, containerID, osPassword, listScript)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list indices: %w", err)
-		}
+		return nil, fmt.Errorf("failed to list indices: %w, output: %s", err, output)
 	}
 
 	indicesStr := strings.TrimSpace(output)
@@ -162,41 +166,44 @@ func handleBackupResults(backedUpCount, totalCount int, lastErr error) error {
 	return nil
 }
 
-// execWithEnv executes a script with environment variables using the PodmanClient.
-func execWithEnv(pc *podman.PodmanClient, containerID, osPassword, script string) (string, error) {
-	fullScript := fmt.Sprintf("OS_PASSWORD='%s' %s", strings.ReplaceAll(osPassword, "'", "'\\''"), script)
-
-	return pc.ExecInContainerWithOutput(containerID, []string{"sh", "-c", fullScript})
-}
-
 // backupIndexWithCurl backs up a single index using curl in container.
 func backupIndexWithCurl(ctx context.Context, pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir, indexName string) error {
 	logger.Infof("  Exporting index: %s\n", indexName, 0)
 
-	if err := exportIndexMetadata(ctx, pc, containerID, osHost, osPassword, backupDir, indexName); err != nil {
+	if err := exportIndexMetadata(pc, containerID, osHost, osPassword, backupDir, indexName); err != nil {
 		return err
 	}
 
-	if err := exportIndexData(ctx, pc, containerID, osHost, osPassword, backupDir, indexName); err != nil {
+	if err := exportIndexData(pc, containerID, osHost, osPassword, backupDir, indexName); err != nil {
 		return err
 	}
 
-	countDocuments(ctx, pc, containerID, backupDir, indexName)
+	countDocuments(pc, containerID, backupDir, indexName)
 
 	return nil
 }
 
 // exportIndexMetadata exports mapping and settings for an index using environment variables for password.
-func exportIndexMetadata(ctx context.Context, pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir, indexName string) error {
+func exportIndexMetadata(pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir, indexName string) error {
 	// Export mapping using environment variable for password
-	mappingScript := fmt.Sprintf(`curl -s -k -u "admin:${OS_PASSWORD}" "https://%s/%s/_mapping" | jq '.' > %s/%s_mapping.json`, osHost, indexName, backupDir, indexName)
-	if err := pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, mappingScript); err != nil {
+	mappingScript := fmt.Sprintf(`
+		OS_PASSWORD='%s'
+		export OS_PASSWORD
+		curl -s -k -u "admin:${OS_PASSWORD}" "https://%s/%s/_mapping" | jq '.' > %s/%s_mapping.json
+	`, strings.ReplaceAll(osPassword, "'", "'\\''"), osHost, indexName, backupDir, indexName)
+
+	if err := pc.ExecInContainer(containerID, []string{"sh", "-c", mappingScript}); err != nil {
 		return fmt.Errorf("failed to export mapping: %w", err)
 	}
 
 	// Export settings using environment variable for password
-	settingsScript := fmt.Sprintf(`curl -s -k -u "admin:${OS_PASSWORD}" "https://%s/%s/_settings" | jq '.' > %s/%s_settings.json`, osHost, indexName, backupDir, indexName)
-	if err := pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, settingsScript); err != nil {
+	settingsScript := fmt.Sprintf(`
+		OS_PASSWORD='%s'
+		export OS_PASSWORD
+		curl -s -k -u "admin:${OS_PASSWORD}" "https://%s/%s/_settings" | jq '.' > %s/%s_settings.json
+	`, strings.ReplaceAll(osPassword, "'", "'\\''"), osHost, indexName, backupDir, indexName)
+
+	if err := pc.ExecInContainer(containerID, []string{"sh", "-c", settingsScript}); err != nil {
 		return fmt.Errorf("failed to export settings: %w", err)
 	}
 
@@ -204,16 +211,21 @@ func exportIndexMetadata(ctx context.Context, pc *podman.PodmanClient, container
 }
 
 // exportIndexData exports all documents from an index using scroll API with environment variables for password.
-func exportIndexData(ctx context.Context, pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir, indexName string) error {
+func exportIndexData(pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir, indexName string) error {
 	// First, initiate scroll using environment variable for password
-	scrollInitScript := fmt.Sprintf(`curl -s -k -u "admin:${OS_PASSWORD}" "https://%s/%s/_search?scroll=5m" -H 'Content-Type: application/json' -d '{"query":{"match_all":{}},"size":1000}' | jq '.' > /tmp/scroll_init.json`, osHost, indexName)
-	if err := pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, scrollInitScript); err != nil {
+	scrollInitScript := fmt.Sprintf(`
+		OS_PASSWORD='%s'
+		export OS_PASSWORD
+		curl -s -k -u "admin:${OS_PASSWORD}" "https://%s/%s/_search?scroll=5m" -H 'Content-Type: application/json' -d '{"query":{"match_all":{}},"size":1000}' | jq '.' > /tmp/scroll_init.json
+	`, strings.ReplaceAll(osPassword, "'", "'\\''"), osHost, indexName)
+
+	if err := pc.ExecInContainer(containerID, []string{"sh", "-c", scrollInitScript}); err != nil {
 		return fmt.Errorf("failed to initiate scroll: %w", err)
 	}
 
 	// Extract scroll_id and hits with improved error handling and loop protection
-	extractScript := buildScrollExportScript(osHost, backupDir, indexName)
-	if err := pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, extractScript); err != nil {
+	extractScript := buildScrollExportScript(osHost, osPassword, backupDir, indexName)
+	if err := pc.ExecInContainer(containerID, []string{"sh", "-c", extractScript}); err != nil {
 		return fmt.Errorf("failed to export data: %w", err)
 	}
 
@@ -221,8 +233,11 @@ func exportIndexData(ctx context.Context, pc *podman.PodmanClient, containerID, 
 }
 
 // buildScrollExportScript builds the shell script for exporting data using scroll API with environment variables.
-func buildScrollExportScript(osHost, backupDir, indexName string) string {
+func buildScrollExportScript(osHost, osPassword, backupDir, indexName string) string {
 	return fmt.Sprintf(`
+		OS_PASSWORD='%s'
+		export OS_PASSWORD
+		
 		set -e
 		set -o pipefail
 		
@@ -281,11 +296,11 @@ func buildScrollExportScript(osHost, backupDir, indexName string) string {
 		fi
 		
 		exit 0
-	`, backupDir, indexName, osHost, backupDir, indexName, backupDir, indexName, osHost)
+	`, strings.ReplaceAll(osPassword, "'", "'\\''"), backupDir, indexName, osHost, backupDir, indexName, backupDir, indexName, osHost)
 }
 
 // countDocuments counts and logs the number of documents in the backup.
-func countDocuments(ctx context.Context, pc *podman.PodmanClient, containerID, backupDir, indexName string) {
+func countDocuments(pc *podman.PodmanClient, containerID, backupDir, indexName string) {
 	countScript := fmt.Sprintf(`jq 'length' %s/%s_data.json`, backupDir, indexName)
 	countOutput, err := pc.ExecInContainerWithOutput(containerID, []string{"sh", "-c", countScript})
 	if err == nil {
@@ -295,7 +310,7 @@ func countDocuments(ctx context.Context, pc *podman.PodmanClient, containerID, b
 }
 
 // createBackupInfo creates a backup_info.json file with metadata.
-func createBackupInfo(ctx context.Context, pc *podman.PodmanClient, containerID, backupDir string) error {
+func createBackupInfo(pc *podman.PodmanClient, containerID, backupDir string) error {
 	timestamp := time.Now().Format(time.RFC3339)
 	infoScript := fmt.Sprintf(`cat > %s/../backup_info.json << 'EOF'
 {
