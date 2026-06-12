@@ -160,10 +160,41 @@ func (v *ApplicationValidator) ValidateComponentParams(componentType, providerID
 
 // validateServiceComponents validates all components in a service.
 func (v *ApplicationValidator) validateServiceComponents(components []apimodels.Component) error {
+	// Check for duplicate components (same component_type + provider_id combination)
+	if err := v.validateNoDuplicateComponents(components); err != nil {
+		return err
+	}
+
 	for _, component := range components {
 		if err := v.ValidateSingleComponent(component); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// validateNoDuplicateComponents ensures no duplicate component (type + provider) exists in the array.
+func (v *ApplicationValidator) validateNoDuplicateComponents(components []apimodels.Component) error {
+	seen := make(map[string]bool)
+
+	for _, component := range components {
+		// Create unique key for this component type + provider combination
+		componentKey := fmt.Sprintf("%s:%s", component.ComponentType, component.ProviderID)
+
+		if seen[componentKey] {
+			return &ValidationError{
+				Code: http.StatusBadRequest,
+				Message: fmt.Sprintf(
+					"Duplicate component found: component type '%s' with provider '%s' appears multiple times. "+
+						"Each component type and provider combination must be unique within a service",
+					component.ComponentType,
+					component.ProviderID,
+				),
+			}
+		}
+
+		seen[componentKey] = true
 	}
 
 	return nil
