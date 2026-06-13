@@ -142,6 +142,18 @@ func readDocumentFiles(docsDir string) ([]interface{}, error) {
 	return documents, nil
 }
 
+// DigitizeRestoreClient wraps the HTTP client for digitize restore operations.
+type DigitizeRestoreClient struct {
+	client *httpclient.HTTPClient
+}
+
+// NewDigitizeRestoreClient creates a new digitize restore client.
+func NewDigitizeRestoreClient(serviceURL string) *DigitizeRestoreClient {
+	return &DigitizeRestoreClient{
+		client: httpclient.New(serviceURL),
+	}
+}
+
 // GetDigitizeAPIURL extracts the digitize API URL from application details.
 func GetDigitizeAPIURL(appDetails *catalogTypes.Application) (string, error) {
 	// Search through services to find digitize service
@@ -163,19 +175,16 @@ func GetDigitizeAPIURL(appDetails *catalogTypes.Application) (string, error) {
 	return "", fmt.Errorf("digitize service not found in application")
 }
 
-// CallDigitizeImportAPI calls the digitize service Import API with the metadata payload.
-func CallDigitizeImportAPI(serviceURL string, payload map[string]interface{}) error {
+// CallImportAPI calls the digitize service Import API with the metadata payload.
+func (c *DigitizeRestoreClient) CallImportAPI(payload map[string]interface{}) error {
 	logger.Infof("Calling digitize Import API...\n", 0)
-
-	// Create HTTP client
-	client := httpclient.New(serviceURL)
 
 	// Prepare response container
 	var importResponse map[string]interface{}
 
 	// Make the API call using the reusable HTTP client
-	logger.Infof("Sending import request to: %s/v1/import\n", serviceURL, 0)
-	err := client.Do(httpclient.Request{
+	logger.Infof("Sending import request to: /v1/import\n", 0)
+	err := c.client.Do(httpclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/v1/import",
 		Payload:  payload,

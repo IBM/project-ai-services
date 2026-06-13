@@ -54,25 +54,11 @@ func CopyAndTarBackup(ctx context.Context, containerID, containerBackupPath, bac
 	// Create tar.gz archive on host
 	logger.Infof("Creating tar.gz archive on host...\n", 0)
 
-	// Change to temp directory and create tar with relative paths
-	tarCmd := exec.CommandContext(ctx, "tar", "-czf", backupFile, "-C", tempDir, "backup_info.json", "opensearch_backup")
-	output, err := tarCmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to create tar archive: %w, output: %s", err, string(output))
+	if err := CreateTarGzArchive(tempDir, backupFile, []string{"backup_info.json", "opensearch_backup"}); err != nil {
+		return err
 	}
 
-	const (
-		bytesPerKB = 1024
-		bytesPerMB = bytesPerKB * 1024
-	)
-	// Get file size
-	fileInfo, err := os.Stat(backupFile)
-	if err == nil {
-		sizeMB := float64(fileInfo.Size()) / bytesPerMB
-		logger.Infof("✓ Tar archive created: %s (%.2f MB)\n", backupFile, sizeMB, 0)
-	} else {
-		logger.Infof("✓ Tar archive created: %s\n", backupFile, 0)
-	}
+	LogArchiveSize(backupFile)
 
 	return nil
 }

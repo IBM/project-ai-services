@@ -75,6 +75,12 @@ func manageSidecarWithGo(ctx context.Context, podID, backupDir string) error {
 
 // prepareSidecarAndRestore prepares the sidecar container and performs the restore.
 func prepareSidecarAndRestore(ctx context.Context, containerID, backupDir string) error {
+	// Create podman client once for all operations
+	pc, err := podman.NewPodmanClient()
+	if err != nil {
+		return fmt.Errorf("failed to create podman client: %w", err)
+	}
+
 	osPassword, err := common.GetOpenSearchPasswordFromSecret(ctx, containerID)
 	if err != nil {
 		return fmt.Errorf("failed to get OpenSearch password: %w", err)
@@ -85,11 +91,11 @@ func prepareSidecarAndRestore(ctx context.Context, containerID, backupDir string
 		return err
 	}
 
-	if err := copyBackupToSidecar(ctx, containerID, backupOSDir, containerBackupPath); err != nil {
+	if err := copyBackupToSidecar(pc, containerID, backupOSDir, containerBackupPath); err != nil {
 		return err
 	}
 
-	if err := performRestoreWithCurl(ctx, containerID, defaultOpenSearchHost, osPassword, containerBackupPath); err != nil {
+	if err := performRestoreWithCurl(ctx, pc, containerID, defaultOpenSearchHost, osPassword, containerBackupPath); err != nil {
 		return fmt.Errorf("restore failed: %w", err)
 	}
 
@@ -116,14 +122,8 @@ func determineBackupPaths(backupDir string) (string, string, error) {
 }
 
 // copyBackupToSidecar copies backup files to the sidecar container.
-func copyBackupToSidecar(ctx context.Context, containerID, backupOSDir, containerBackupPath string) error {
+func copyBackupToSidecar(pc *podman.PodmanClient, containerID, backupOSDir, containerBackupPath string) error {
 	logger.Infof("Copying backup files to sidecar...\n", 0)
-
-	// Create podman client to use runtime methods
-	pc, err := podman.NewPodmanClient()
-	if err != nil {
-		return fmt.Errorf("failed to create podman client: %w", err)
-	}
 
 	if err := pc.CopyDirToContainer(containerID, backupOSDir, containerBackupPath); err != nil {
 		return fmt.Errorf("failed to copy backup files: %w", err)
@@ -133,25 +133,19 @@ func copyBackupToSidecar(ctx context.Context, containerID, backupOSDir, containe
 }
 
 // execInContainer executes a command in a container using the runtime package.
-func execInContainer(ctx context.Context, containerID string, cmd []string) error {
-	// Create podman client to use runtime methods
-	pc, err := podman.NewPodmanClient()
-	if err != nil {
-		return fmt.Errorf("failed to create podman client: %w", err)
-	}
-
+func execInContainer(pc *podman.PodmanClient, containerID string, cmd []string) error {
 	return pc.ExecInContainer(containerID, cmd)
 }
 
 // performRestoreWithCurl performs the OpenSearch restore using curl commands in container.
-func performRestoreWithCurl(ctx context.Context, containerID, osHost, osPassword, backupDir string) error {
+func performRestoreWithCurl(ctx context.Context, pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir string) error {
 	// Verify backup directory exists in container
-	if err := verifyBackupDirectory(ctx, containerID, backupDir); err != nil {
+	if err := verifyBackupDirectory(pc, containerID, backupDir); err != nil {
 		return err
 	}
 
 	// List and validate indices
-	indices, err := listBackupIndices(ctx, containerID, backupDir)
+	indices, err := listBackupIndices(pc, containerID, backupDir)
 	if err != nil {
 		return err
 	}
@@ -159,13 +153,13 @@ func performRestoreWithCurl(ctx context.Context, containerID, osHost, osPassword
 	logger.Infof("Found %d indices to restore\n", len(indices), 0)
 
 	// Restore each index with error tracking
-	return restoreAllIndices(ctx, containerID, osHost, osPassword, backupDir, indices)
+	return restoreAllIndices(ctx, pc, containerID, osHost, osPassword, backupDir, indices)
 }
 
 // verifyBackupDirectory checks if the backup directory exists in the container.
-func verifyBackupDirectory(ctx context.Context, containerID, backupDir string) error {
+func verifyBackupDirectory(pc *podman.PodmanClient, containerID, backupDir string) error {
 	verifyScript := fmt.Sprintf("test -d %s && echo 'exists' || echo 'not found'", backupDir)
-	if err := execInContainer(ctx, containerID, []string{"sh", "-c", verifyScript}); err != nil {
+	if err := execInContainer(pc, containerID, []string{"sh", "-c", verifyScript}); err != nil {
 		return fmt.Errorf("backup directory not found in container: %w", err)
 	}
 
@@ -173,14 +167,8 @@ func verifyBackupDirectory(ctx context.Context, containerID, backupDir string) e
 }
 
 // listBackupIndices lists and validates index names from backup files.
-func listBackupIndices(ctx context.Context, containerID, backupDir string) ([]string, error) {
+func listBackupIndices(pc *podman.PodmanClient, containerID, backupDir string) ([]string, error) {
 	listScript := fmt.Sprintf("cd %s && ls *_data.json 2>/dev/null | sed 's/_data.json//' || true", backupDir)
-
-	// Use runtime package's exec method with output capture
-	pc, err := podman.NewPodmanClient()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create podman client: %w", err)
-	}
 
 	output, err := pc.ExecInContainerWithOutput(containerID, []string{"sh", "-c", listScript})
 	if err != nil {
@@ -273,7 +261,7 @@ func validateIndexNamePrefix(indexName string) error {
 }
 
 // restoreAllIndices restores all indices and tracks errors.
-func restoreAllIndices(ctx context.Context, containerID, osHost, osPassword, backupDir string, indices []string) error {
+func restoreAllIndices(ctx context.Context, pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir string, indices []string) error {
 	restoredCount := 0
 	var errors []error
 
@@ -285,7 +273,7 @@ func restoreAllIndices(ctx context.Context, containerID, osHost, osPassword, bac
 		default:
 		}
 
-		if err := restoreIndexWithCurl(ctx, containerID, osHost, osPassword, backupDir, indexName); err != nil {
+		if err := restoreIndexWithCurl(ctx, pc, containerID, osHost, osPassword, backupDir, indexName); err != nil {
 			logger.Errorf("Failed to restore index %s: %v\n", indexName, err)
 			errors = append(errors, fmt.Errorf("index %s: %w", indexName, err))
 
@@ -310,17 +298,17 @@ func restoreAllIndices(ctx context.Context, containerID, osHost, osPassword, bac
 // restoreIndexWithCurl restores a single index using curl in container.
 // Password is passed via environment variable to avoid exposure in process lists.
 // The restore process follows: cleanup (delete existing) -> create -> insert data.
-func restoreIndexWithCurl(ctx context.Context, containerID, osHost, osPassword, backupDir, indexName string) error {
+func restoreIndexWithCurl(ctx context.Context, pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir, indexName string) error {
 	logger.Infof("  Restoring index: %s\n", indexName, 0)
 
 	// Verify required backup files exist
-	if err := verifyBackupFiles(ctx, containerID, backupDir, indexName); err != nil {
+	if err := verifyBackupFiles(pc, containerID, backupDir, indexName); err != nil {
 		return err
 	}
 
 	// Step 1: Cleanup - Delete existing index if it exists
 	logger.Infof("    Cleaning up existing index...\n", 0)
-	if err := deleteExistingIndex(ctx, containerID, osHost, osPassword, indexName); err != nil {
+	if err := deleteExistingIndex(pc, containerID, osHost, osPassword, indexName); err != nil {
 		logger.Warningf("    Failed to delete existing index (may not exist): %v\n", err)
 	} else {
 		logger.Infof("    ✓ Existing index cleaned up\n", 0)
@@ -328,20 +316,20 @@ func restoreIndexWithCurl(ctx context.Context, containerID, osHost, osPassword, 
 
 	// Step 2: Create index with settings and mappings
 	logger.Infof("    Creating index with mappings...\n", 0)
-	if err := createIndexWithMappings(ctx, containerID, osHost, osPassword, backupDir, indexName); err != nil {
+	if err := createIndexWithMappings(pc, containerID, osHost, osPassword, backupDir, indexName); err != nil {
 		return err
 	}
 	logger.Infof("    ✓ Index created\n", 0)
 
 	// Step 3: Insert data - Bulk index documents
 	logger.Infof("    Inserting documents...\n", 0)
-	if err := bulkIndexDocuments(ctx, containerID, osHost, osPassword, backupDir, indexName); err != nil {
+	if err := bulkIndexDocuments(pc, containerID, osHost, osPassword, backupDir, indexName); err != nil {
 		return err
 	}
 	logger.Infof("    ✓ Documents inserted\n", 0)
 
 	// Step 4: Refresh index to make documents searchable
-	if err := refreshIndex(ctx, containerID, osHost, osPassword, indexName); err != nil {
+	if err := refreshIndex(pc, containerID, osHost, osPassword, indexName); err != nil {
 		return err
 	}
 
@@ -351,7 +339,7 @@ func restoreIndexWithCurl(ctx context.Context, containerID, osHost, osPassword, 
 }
 
 // verifyBackupFiles checks if all required backup files exist.
-func verifyBackupFiles(ctx context.Context, containerID, backupDir, indexName string) error {
+func verifyBackupFiles(pc *podman.PodmanClient, containerID, backupDir, indexName string) error {
 	requiredFiles := []string{
 		fmt.Sprintf("%s/%s_mapping.json", backupDir, indexName),
 		fmt.Sprintf("%s/%s_settings.json", backupDir, indexName),
@@ -360,7 +348,7 @@ func verifyBackupFiles(ctx context.Context, containerID, backupDir, indexName st
 
 	for _, file := range requiredFiles {
 		verifyScript := fmt.Sprintf("test -f %s && echo 'exists' || echo 'not found'", file)
-		if err := execInContainer(ctx, containerID, []string{"sh", "-c", verifyScript}); err != nil {
+		if err := execInContainer(pc, containerID, []string{"sh", "-c", verifyScript}); err != nil {
 			return fmt.Errorf("required backup file not found: %s", file)
 		}
 	}
@@ -369,7 +357,7 @@ func verifyBackupFiles(ctx context.Context, containerID, backupDir, indexName st
 }
 
 // deleteExistingIndex deletes an existing index if it exists.
-func deleteExistingIndex(ctx context.Context, containerID, osHost, osPassword, indexName string) error {
+func deleteExistingIndex(pc *podman.PodmanClient, containerID, osHost, osPassword, indexName string) error {
 	// Use environment variable for password to avoid exposure in process list
 	// Check if index exists first, then delete it
 	deleteScript := fmt.Sprintf(`
@@ -389,16 +377,11 @@ else
 fi
 `, osHost, indexName, osHost, indexName)
 
-	pc, err := podman.NewPodmanClient()
-	if err != nil {
-		return fmt.Errorf("failed to create podman client: %w", err)
-	}
-
 	return pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, deleteScript)
 }
 
 // createIndexWithMappings creates an index with settings and mappings.
-func createIndexWithMappings(ctx context.Context, containerID, osHost, osPassword, backupDir, indexName string) error {
+func createIndexWithMappings(pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir, indexName string) error {
 	// Use environment variable for password and validate HTTP response
 	createScript := fmt.Sprintf(`
 MAPPING=$(cat %s/%s_mapping.json | jq -c '."%s".mappings')
@@ -418,11 +401,6 @@ if ! echo "$BODY" | jq -e '.acknowledged == true' > /dev/null 2>&1; then
 fi
 `, backupDir, indexName, indexName, backupDir, indexName, indexName, osHost, indexName)
 
-	pc, err := podman.NewPodmanClient()
-	if err != nil {
-		return fmt.Errorf("failed to create podman client: %w", err)
-	}
-
 	if err := pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, createScript); err != nil {
 		return fmt.Errorf("failed to create index: %w", err)
 	}
@@ -430,8 +408,8 @@ fi
 	return nil
 }
 
-// bulkIndexDocuments performs bulk indexing of documents in batches to avoid 413 errors.
-func bulkIndexDocuments(ctx context.Context, containerID, osHost, osPassword, backupDir, indexName string) error {
+// bulkIndexDocuments performs bulk indexing of documents.
+func bulkIndexDocuments(pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir, indexName string) error {
 	// Use environment variable for password and validate HTTP response
 	// Process documents in batches of 1000 to balance speed and request size limits
 	bulkScript := fmt.Sprintf(`
@@ -480,11 +458,6 @@ done
 echo "Successfully indexed all $TOTAL_DOCS documents in $BATCHES batch(es)"
 `, backupDir, indexName, indexName, osHost)
 
-	pc, err := podman.NewPodmanClient()
-	if err != nil {
-		return fmt.Errorf("failed to create podman client: %w", err)
-	}
-
 	if err := pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, bulkScript); err != nil {
 		return fmt.Errorf("failed to bulk index documents: %w", err)
 	}
@@ -493,13 +466,8 @@ echo "Successfully indexed all $TOTAL_DOCS documents in $BATCHES batch(es)"
 }
 
 // refreshIndex refreshes an index to make documents searchable.
-func refreshIndex(ctx context.Context, containerID, osHost, osPassword, indexName string) error {
+func refreshIndex(pc *podman.PodmanClient, containerID, osHost, osPassword, indexName string) error {
 	refreshScript := fmt.Sprintf(`curl -k -u "admin:${OS_PASSWORD}" "https://%s/%s/_refresh" -X POST -s -o /dev/null`, osHost, indexName)
-
-	pc, err := podman.NewPodmanClient()
-	if err != nil {
-		return fmt.Errorf("failed to create podman client: %w", err)
-	}
 
 	if err := pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, refreshScript); err != nil {
 		return fmt.Errorf("failed to refresh index: %w", err)
