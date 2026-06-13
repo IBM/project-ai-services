@@ -51,30 +51,59 @@ interface CellRendererProps {
   value: unknown;
   rowId: string;
   dispatch: Dispatch<AppAction>;
+  rowData?: { status?: string };
 }
 
-export const ActionCell = ({ rowId, dispatch }: CellRendererProps) => (
-  <OverflowMenu size="lg" flipped aria-label="Actions">
-    <OverflowMenuItem
-      itemText={
-        <div className={styles.deleteMenuItem}>
-          <span>Delete</span>
-          <Delete size={16} />
-        </div>
-      }
-      isDelete
-      onClick={() => {
-        dispatch({
-          type: ACTION_TYPES.OPEN_DELETE_DIALOG,
-          payload: rowId,
-        });
-      }}
-    />
-  </OverflowMenu>
-);
+export const ActionCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
+  const canDelete =
+    rowData?.status === "Running" || rowData?.status === "Error";
 
-export const NameCell = ({ value }: CellRendererProps) => (
-  <Link href="#">{String(value)}</Link>
+  return (
+    <OverflowMenu size="lg" flipped aria-label="Actions">
+      <OverflowMenuItem
+        itemText={
+          <div className={styles.deleteMenuItem}>
+            <span>Delete</span>
+            <Delete size={16} />
+          </div>
+        }
+        isDelete
+        disabled={!canDelete}
+        onClick={() => {
+          dispatch({
+            type: ACTION_TYPES.OPEN_DELETE_DIALOG,
+            payload: rowId,
+          });
+        }}
+      />
+    </OverflowMenu>
+  );
+};
+
+export const NameCell = ({
+  value,
+  rowId,
+  dispatch,
+  rowData,
+}: CellRendererProps) => (
+  <Link
+    href="#"
+    onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
+      e.preventDefault();
+      dispatch({
+        type: ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS,
+        payload: {
+          id: rowId,
+          name: String(value),
+          status: rowData?.status || "Unknown",
+          type: "Digital assistant",
+          resources: [],
+        },
+      });
+    }}
+  >
+    {String(value)}
+  </Link>
 );
 
 export const StatusCell = ({ value }: CellRendererProps) => {
@@ -102,15 +131,30 @@ export const MessageCell = ({ value }: CellRendererProps) => {
     return <span>{message}</span>;
   }
 
-  const isError = message.toLowerCase().includes("error");
-  const MessageIcon = isError ? ErrorFilled : InProgress;
+  // Check message content to determine appropriate icon
+  const messageLower = message.toLowerCase();
+  const isError =
+    messageLower.includes("error") || messageLower.includes("failed");
+  const isSuccess =
+    messageLower.includes("success") || messageLower.includes("completed");
+
+  let MessageIcon;
+  let iconClass;
+
+  if (isError) {
+    MessageIcon = ErrorFilled;
+    iconClass = styles.messageIconError;
+  } else if (isSuccess) {
+    MessageIcon = CheckmarkFilled;
+    iconClass = styles.messageIconSuccess;
+  } else {
+    MessageIcon = InProgress;
+    iconClass = styles.messageIconInfo;
+  }
 
   return (
     <div className={styles.messageWithIcon}>
-      <MessageIcon
-        size={16}
-        className={isError ? styles.messageIconError : styles.messageIconInfo}
-      />
+      <MessageIcon size={16} className={iconClass} />
       <span>{message}</span>
     </div>
   );

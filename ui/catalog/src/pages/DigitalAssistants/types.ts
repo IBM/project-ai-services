@@ -1,4 +1,8 @@
 import type { DataTableHeader } from "@carbon/react";
+import type {
+  PaginationMetadata,
+  DeploymentDetails,
+} from "@/types/digitalAssistants";
 
 export interface DigitalAssistantRow {
   id: string;
@@ -25,11 +29,19 @@ export interface AppState {
   isExportDialogOpen: boolean;
   csvFileName: string;
   exportErrorMessage: string;
-  hasError: boolean;
   visibleColumns: Record<string, boolean>;
   exportToastOpen: boolean;
   exportToastMessage: string;
   exportToastKind: "success" | "error";
+  isDeployFlowOpen: boolean;
+  // API state
+  isLoadingApplications: boolean;
+  fetchError: string | null;
+  pagination: PaginationMetadata | null;
+  totalItems: number;
+  // DeploymentDetails state
+  selectedDeployment: DeploymentDetails | null;
+  showDeploymentDetails: boolean;
 }
 
 export const ACTION_TYPES = {
@@ -39,7 +51,6 @@ export const ACTION_TYPES = {
   OPEN_DELETE_DIALOG: "OPEN_DELETE_DIALOG",
   CLOSE_DELETE_DIALOG: "CLOSE_DELETE_DIALOG",
   SET_CONFIRMED: "SET_CONFIRMED",
-  DELETE_ROW: "DELETE_ROW",
   SHOW_ERROR: "SHOW_ERROR",
   HIDE_ERROR: "HIDE_ERROR",
   SET_IS_DELETING: "SET_IS_DELETING",
@@ -53,6 +64,15 @@ export const ACTION_TYPES = {
   RESET_COLUMN_VISIBILITY: "RESET_COLUMN_VISIBILITY",
   SHOW_EXPORT_TOAST: "SHOW_EXPORT_TOAST",
   HIDE_EXPORT_TOAST: "HIDE_EXPORT_TOAST",
+  OPEN_DEPLOY_FLOW: "OPEN_DEPLOY_FLOW",
+  CLOSE_DEPLOY_FLOW: "CLOSE_DEPLOY_FLOW",
+  // API actions
+  FETCH_APPLICATIONS_START: "FETCH_APPLICATIONS_START",
+  FETCH_APPLICATIONS_SUCCESS: "FETCH_APPLICATIONS_SUCCESS",
+  FETCH_APPLICATIONS_ERROR: "FETCH_APPLICATIONS_ERROR",
+  // DeploymentDetails actions
+  SHOW_DEPLOYMENT_DETAILS: "SHOW_DEPLOYMENT_DETAILS",
+  HIDE_DEPLOYMENT_DETAILS: "HIDE_DEPLOYMENT_DETAILS",
 } as const;
 
 export type AppAction =
@@ -62,7 +82,6 @@ export type AppAction =
   | { type: typeof ACTION_TYPES.OPEN_DELETE_DIALOG; payload: string }
   | { type: typeof ACTION_TYPES.CLOSE_DELETE_DIALOG }
   | { type: typeof ACTION_TYPES.SET_CONFIRMED; payload: boolean }
-  | { type: typeof ACTION_TYPES.DELETE_ROW; payload: string }
   | {
       type: typeof ACTION_TYPES.SHOW_ERROR;
       payload: { message: string; rowName?: string };
@@ -81,7 +100,23 @@ export type AppAction =
       type: typeof ACTION_TYPES.SHOW_EXPORT_TOAST;
       payload: { message: string; kind: "success" | "error" };
     }
-  | { type: typeof ACTION_TYPES.HIDE_EXPORT_TOAST };
+  | { type: typeof ACTION_TYPES.HIDE_EXPORT_TOAST }
+  | { type: typeof ACTION_TYPES.OPEN_DEPLOY_FLOW }
+  | { type: typeof ACTION_TYPES.CLOSE_DEPLOY_FLOW }
+  | { type: typeof ACTION_TYPES.FETCH_APPLICATIONS_START }
+  | {
+      type: typeof ACTION_TYPES.FETCH_APPLICATIONS_SUCCESS;
+      payload: {
+        rows: DigitalAssistantRow[];
+        pagination: PaginationMetadata;
+      };
+    }
+  | { type: typeof ACTION_TYPES.FETCH_APPLICATIONS_ERROR; payload: string }
+  | {
+      type: typeof ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS;
+      payload: DeploymentDetails;
+    }
+  | { type: typeof ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS };
 
 // Table headers
 export const HEADERS: DataTableHeader[] = [
@@ -92,106 +127,6 @@ export const HEADERS: DataTableHeader[] = [
   { header: "", key: "actions" },
 ];
 
-// Status Column sort order
-export const STATUS_SORT_ORDER: Record<string, number> = {
-  "Deploying...": 1,
-  "Deleting...": 2,
-  Error: 3,
-  Stopped: 4,
-  Running: 5,
-};
-
-// Mock data
-export const MOCK_ROWS: DigitalAssistantRow[] = [
-  {
-    id: "1",
-    name: "Incident troubleshooting",
-    status: "Error",
-    uptime: "Mar 4, 2026",
-    messages: "Error message goes ...",
-    actions: "actions",
-    children: [],
-  },
-  {
-    id: "2",
-    name: "Process FAQs",
-    status: "Running",
-    uptime: "2 days",
-    messages: "",
-    actions: "actions",
-    children: [],
-  },
-  {
-    id: "3",
-    name: "Permissions ops",
-    status: "Running",
-    uptime: "Mar 4, 2026",
-    messages: "",
-    actions: "actions",
-    children: [
-      {
-        id: "3-1",
-        name: "Digitize documents (service)",
-        status: "Running",
-        uptime: "",
-        messages: "",
-        actions: "actions",
-      },
-      {
-        id: "3-2",
-        name: "Find similar item (service)",
-        status: "Running",
-        uptime: "",
-        messages: "",
-        actions: "actions",
-      },
-      {
-        id: "3-3",
-        name: "Question and answer (se...)",
-        status: "Running",
-        uptime: "",
-        messages: "",
-        actions: "actions",
-      },
-      {
-        id: "3-4",
-        name: "Summarize (service)",
-        status: "Running",
-        uptime: "",
-        messages: "",
-        actions: "actions",
-      },
-    ],
-  },
-  {
-    id: "4",
-    name: "Deals tracker",
-    status: "Running",
-    uptime: "2 days",
-    messages: "",
-    actions: "actions",
-    children: [],
-  },
-  {
-    id: "5",
-    name: "Contract analysis agent",
-    status: "Running",
-    uptime: "2 days",
-    messages: "",
-    actions: "actions",
-    children: [],
-  },
-  {
-    id: "6",
-    name: "Case routing",
-    status: "Running",
-    uptime: "2 days",
-    messages: "",
-    actions: "actions",
-    children: [],
-  },
-];
-
 // Initial state
 export const INITIAL_STATE: AppState = {
   search: "",
@@ -199,15 +134,12 @@ export const INITIAL_STATE: AppState = {
   pageSize: 10,
   isDeleteDialogOpen: false,
   isConfirmed: false,
-  rowsData: [...MOCK_ROWS].sort(
-    (a, b) => STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status],
-  ),
+  rowsData: [],
   selectedRowId: null,
   toastOpen: false,
   deleteErrorMessage: "",
   deleteErrorRowName: "",
   isDeleting: false,
-  hasError: false,
   isExportDialogOpen: false,
   csvFileName: "",
   exportErrorMessage: "",
@@ -220,6 +152,13 @@ export const INITIAL_STATE: AppState = {
   exportToastOpen: false,
   exportToastMessage: "",
   exportToastKind: "success",
+  isDeployFlowOpen: false,
+  isLoadingApplications: false,
+  fetchError: null,
+  pagination: null,
+  totalItems: 0,
+  selectedDeployment: null,
+  showDeploymentDetails: false,
 };
 
 // Reducer
@@ -243,17 +182,10 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         ...state,
         isDeleteDialogOpen: false,
         isConfirmed: false,
-        selectedRowId: state.hasError ? state.selectedRowId : null,
+        selectedRowId: null,
       };
     case ACTION_TYPES.SET_CONFIRMED:
       return { ...state, isConfirmed: action.payload };
-    case ACTION_TYPES.DELETE_ROW:
-      return {
-        ...state,
-        rowsData: state.rowsData.filter((r) => r.id !== action.payload),
-        isDeleteDialogOpen: false,
-        isConfirmed: false,
-      };
     case ACTION_TYPES.SHOW_ERROR:
       return {
         ...state,
@@ -261,14 +193,12 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         deleteErrorRowName: action.payload.rowName ?? "",
         toastOpen: true,
         isDeleting: false,
-        hasError: true,
       };
     case ACTION_TYPES.HIDE_ERROR:
       return {
         ...state,
         toastOpen: false,
         selectedRowId: null,
-        hasError: false,
         deleteErrorRowName: "",
       };
     case ACTION_TYPES.SET_IS_DELETING:
@@ -328,6 +258,49 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       return {
         ...state,
         exportToastOpen: false,
+      };
+    case ACTION_TYPES.OPEN_DEPLOY_FLOW:
+      return {
+        ...state,
+        isDeployFlowOpen: true,
+      };
+    case ACTION_TYPES.CLOSE_DEPLOY_FLOW:
+      return {
+        ...state,
+        isDeployFlowOpen: false,
+      };
+    case ACTION_TYPES.FETCH_APPLICATIONS_START:
+      return {
+        ...state,
+        isLoadingApplications: true,
+        fetchError: null,
+      };
+    case ACTION_TYPES.FETCH_APPLICATIONS_SUCCESS:
+      return {
+        ...state,
+        isLoadingApplications: false,
+        rowsData: action.payload.rows,
+        pagination: action.payload.pagination,
+        totalItems: action.payload.pagination.total_items,
+        fetchError: null,
+      };
+    case ACTION_TYPES.FETCH_APPLICATIONS_ERROR:
+      return {
+        ...state,
+        isLoadingApplications: false,
+        fetchError: action.payload,
+      };
+    case ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS:
+      return {
+        ...state,
+        selectedDeployment: action.payload,
+        showDeploymentDetails: true,
+      };
+    case ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS:
+      return {
+        ...state,
+        selectedDeployment: null,
+        showDeploymentDetails: false,
       };
     default:
       return state;
