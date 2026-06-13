@@ -386,7 +386,7 @@ func (s *DeletionService) deleteVolumesFromPods(rt runtime.Runtime, pods []runti
 			}
 			errMsg := fmt.Sprintf("%s %s: failed to delete volume %s: %s", instanceType, instanceID, volumeName, err)
 			errorMessages = append(errorMessages, errMsg)
-			logger.Errorf(errMsg)
+			logger.Errorf("%s %s: failed to delete volume %s: %s", instanceType, instanceID, volumeName, err)
 		} else {
 			logger.Infof("Successfully deleted volume: %s", volumeName)
 		}
@@ -440,7 +440,7 @@ func (s *DeletionService) deleteSecretsFromPods(rt runtime.Runtime, pods []runti
 			}
 			errMsg := fmt.Sprintf("%s %s: failed to delete secret %s: %s", instanceType, instanceID, secretName, err)
 			errorMessages = append(errorMessages, errMsg)
-			logger.Errorf(errMsg)
+			logger.Errorf("%s %s: failed to delete secret %s: %s", instanceType, instanceID, secretName, err)
 		} else {
 			logger.Infof("Successfully deleted secret: %s", secretName)
 		}

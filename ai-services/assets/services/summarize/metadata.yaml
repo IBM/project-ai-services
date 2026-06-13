@@ -1,7 +1,7 @@
 # Service identification
 id: summarize
 name: "Summarize"
-description: "Consolidates input text into a brief statement of main points"
+description: "Condenses long-form content into concise, accurate summaries while preserving key information; enables efficient document analysis and information extraction at scale."
 type: service
 
 # Certification and support

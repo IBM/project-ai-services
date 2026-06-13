@@ -1,7 +1,7 @@
 # Service identification
 id: similarity
 name: "Find Similar Items"
-description: "Finds semantically similar content using embeddings and reranking"
+description: "Identifies and retrieves items similar to a reference item based on content, attributes, or patterns; enables efficient recommendation, duplicate detection, and content discovery at scale."
 type: service
 
 # Certification and support

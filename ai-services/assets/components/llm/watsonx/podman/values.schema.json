@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
+  "required": ["watsonxApiKey", "watsonxProjectId", "watsonxUrl"],
   "properties": {
     "model": {
       "type": "string",
@@ -17,19 +18,19 @@
     },
     "watsonxApiKey": {
       "type": "string",
-      "title": "WatsonX API Key",
+      "title": "watsonx API Key",
       "format": "password",
-      "description": "WatsonX API Key for LiteLLM integration"
+      "description": "watsonx API Key for LiteLLM integration"
     },
     "watsonxProjectId": {
       "type": "string",
-      "title": "WatsonX Project ID",
-      "description": "WatsonX Project ID for LiteLLM integration"
+      "title": "watsonx Project ID",
+      "description": "watsonx Project ID for LiteLLM integration"
     },
     "watsonxUrl": {
       "type": "string",
-      "title": "WatsonX Base URL",
-      "description": "WatsonX Base URL for LiteLLM integration"
+      "title": "watsonx Base URL",
+      "description": "watsonx Base URL for LiteLLM integration"
     }
   }
 }

@@ -1,5 +1,16 @@
 package types
 
+import (
+	"encoding/json"
+
+	"gopkg.in/yaml.v3"
+)
+
+const (
+	// yamlMappingKeyValuePairs represents that YAML mapping nodes store content as key-value pairs.
+	yamlMappingKeyValuePairs = 2
+)
+
 // Architecture represents a complete AI solution template.
 type Architecture struct {
 	ID               string               `yaml:"id" json:"id"`
@@ -12,7 +23,42 @@ type Architecture struct {
 	GlobalComponents []ComponentReference `yaml:"global_components,omitempty" json:"global_components,omitempty"`
 	Services         []ServiceReference   `yaml:"services" json:"services"`
 	Links            *ArchitectureLinks   `yaml:"links,omitempty" json:"links,omitempty"`
-	About            any                  `yaml:"about,omitempty" json:"about,omitempty"`
+	About            *yaml.Node           `yaml:"-" json:"-"`
+}
+
+// MarshalJSON implements custom JSON marshaling for Architecture to properly handle yaml.Node.
+func (a Architecture) MarshalJSON() ([]byte, error) {
+	type Alias Architecture
+	aux := &struct {
+		About interface{} `json:"about,omitempty"`
+		*Alias
+	}{
+		Alias: (*Alias)(&a),
+	}
+	if a.About != nil && a.About.Kind != 0 {
+		aux.About = yamlNodeToInterface(a.About) // Uses your helper below
+	}
+
+	return json.Marshal(aux)
+}
+
+// UnmarshalYAML handles raw document maps to safely capture nested array/map structure nodes.
+func (a *Architecture) UnmarshalYAML(value *yaml.Node) error {
+	type Alias Architecture
+	aux := (*Alias)(a)
+
+	// Temporarily nil out About to prevent unmarshal errors
+	aux.About = nil
+
+	// Decode all fields except About
+	if err := value.Decode(aux); err != nil {
+		return err
+	}
+
+	// Extract About node manually
+	a.About = extractAboutNode(value)
+
+	return nil
 }
 
 // ArchitectureSummary represents an architecture for list API responses.
@@ -66,7 +112,42 @@ type Service struct {
 	Architectures []string              `yaml:"architectures" json:"architectures"`
 	Dependencies  []DependencyReference `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
 	Standalone    bool                  `yaml:"standalone,omitempty" json:"standalone,omitempty"`
-	About         any                   `yaml:"about,omitempty" json:"about,omitempty"`
+	About         *yaml.Node            `yaml:"-" json:"-"`
+}
+
+// UnmarshalYAML extracts the 'about' node manually, insulating it from reflection errors.
+func (s *Service) UnmarshalYAML(value *yaml.Node) error {
+	type Alias Service
+	aux := (*Alias)(s)
+
+	// Temporarily nil out About to prevent unmarshal errors
+	aux.About = nil
+
+	// Decode all fields except About
+	if err := value.Decode(aux); err != nil {
+		return err
+	}
+
+	// Extract About node manually
+	s.About = extractAboutNode(value)
+
+	return nil
+}
+
+// MarshalJSON implements custom JSON marshaling for Service to properly handle yaml.Node.
+func (s Service) MarshalJSON() ([]byte, error) {
+	type Alias Service
+	aux := &struct {
+		About interface{} `json:"about,omitempty"`
+		*Alias
+	}{
+		Alias: (*Alias)(&s),
+	}
+	if s.About != nil && s.About.Kind != 0 {
+		aux.About = yamlNodeToInterface(s.About)
+	}
+
+	return json.Marshal(aux)
 }
 
 // ServiceSummary represents a service for list API responses.
@@ -138,6 +219,111 @@ type DeployOptionsArchitecture struct {
 	Version          string                   `json:"version,omitempty"`
 	GlobalComponents []DeployOptionsComponent `json:"global_components"`
 	Services         []DeployOptionsService   `json:"services"`
+}
+
+// extractAboutNode finds and returns the 'about' field from a YAML node.
+func extractAboutNode(value *yaml.Node) *yaml.Node {
+	mapNode := value
+	if value.Kind == yaml.DocumentNode && len(value.Content) > 0 {
+		mapNode = value.Content[0]
+	}
+
+	for i := 0; i < len(mapNode.Content); i += 2 {
+		if mapNode.Content[i].Value == "about" && i+1 < len(mapNode.Content) {
+			return mapNode.Content[i+1]
+		}
+	}
+
+	return nil
+}
+
+// OrderedMap represents a map that preserves insertion order for JSON marshaling.
+type OrderedMap []OrderedMapEntry
+
+// OrderedMapEntry represents a single key-value pair in an ordered map.
+type OrderedMapEntry struct {
+	Key   string      `json:"-"`
+	Value interface{} `json:"-"`
+}
+
+// MarshalJSON implements custom JSON marshaling for OrderedMap to preserve key order.
+func (om OrderedMap) MarshalJSON() ([]byte, error) {
+	if len(om) == 0 {
+		return []byte("{}"), nil
+	}
+
+	jsonBytes := []byte("{")
+	for i, entry := range om {
+		if i > 0 {
+			jsonBytes = append(jsonBytes, ',')
+		}
+
+		keyJSON, err := json.Marshal(entry.Key)
+		if err != nil {
+			return nil, err
+		}
+		jsonBytes = append(jsonBytes, keyJSON...)
+		jsonBytes = append(jsonBytes, ':')
+
+		valueJSON, err := json.Marshal(entry.Value)
+		if err != nil {
+			return nil, err
+		}
+		jsonBytes = append(jsonBytes, valueJSON...)
+	}
+	jsonBytes = append(jsonBytes, '}')
+
+	return jsonBytes, nil
+}
+
+// yamlNodeToInterface converts a yaml.Node to a native Go interface{} while preserving order.
+func yamlNodeToInterface(node *yaml.Node) interface{} {
+	if node == nil {
+		return nil
+	}
+
+	switch node.Kind {
+	case yaml.DocumentNode:
+		return yamlNodeToDocument(node)
+	case yaml.SequenceNode:
+		return yamlNodeToSequence(node)
+	case yaml.MappingNode:
+		return yamlNodeToMapping(node)
+	case yaml.ScalarNode:
+		return node.Value
+	case yaml.AliasNode:
+		return yamlNodeToInterface(node.Alias)
+	default:
+		return nil
+	}
+}
+
+func yamlNodeToDocument(node *yaml.Node) interface{} {
+	if len(node.Content) > 0 {
+		return yamlNodeToInterface(node.Content[0])
+	}
+
+	return nil
+}
+
+func yamlNodeToSequence(node *yaml.Node) []interface{} {
+	result := make([]interface{}, 0, len(node.Content))
+	for _, item := range node.Content {
+		result = append(result, yamlNodeToInterface(item))
+	}
+
+	return result
+}
+
+func yamlNodeToMapping(node *yaml.Node) OrderedMap {
+	result := make(OrderedMap, 0, len(node.Content)/yamlMappingKeyValuePairs)
+	for i := 0; i < len(node.Content); i += yamlMappingKeyValuePairs {
+		key := node.Content[i].Value
+		value := yamlNodeToInterface(node.Content[i+1])
+		result = append(result, OrderedMapEntry{Key: key, Value: value})
+	}
+
+	return result
 }
 
 // Made with Bob

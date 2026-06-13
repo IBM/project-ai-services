@@ -907,7 +907,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves a list of all deployable service templates. Dependency-only services are excluded from this list. Returns service summaries without endpoints and pod templates.",
+                "description": "Retrieves a list of all deployable service templates. Dependency-only services are excluded from this list. Returns service summaries including standalone flag without endpoints and pod templates.",
                 "produces": [
                     "application/json"
                 ],
@@ -1368,7 +1368,6 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Architecture": {
             "type": "object",
             "properties": {
-                "about": {},
                 "certified_by": {
                     "type": "string"
                 },
@@ -1649,7 +1648,6 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Service": {
             "type": "object",
             "properties": {
-                "about": {},
                 "architectures": {
                     "type": "array",
                     "items": {

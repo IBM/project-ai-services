@@ -78,14 +78,14 @@ func readJobFiles(jobsDir string) ([]interface{}, error) {
 		filePath := filepath.Join(jobsDir, entry.Name())
 		data, err := os.ReadFile(filePath)
 		if err != nil {
-			logger.Warningf("Failed to read job file %s: %v\n", entry.Name(), err, 0)
+			logger.Warningf("Failed to read job file %s: %v\n", entry.Name(), err)
 
 			continue
 		}
 
 		var job map[string]interface{}
 		if err := json.Unmarshal(data, &job); err != nil {
-			logger.Warningf("Failed to parse job file %s: %v\n", entry.Name(), err, 0)
+			logger.Warningf("Failed to parse job file %s: %v\n", entry.Name(), err)
 
 			continue
 		}
@@ -122,14 +122,14 @@ func readDocumentFiles(docsDir string) ([]interface{}, error) {
 		filePath := filepath.Join(docsDir, entry.Name())
 		data, err := os.ReadFile(filePath)
 		if err != nil {
-			logger.Warningf("Failed to read document file %s: %v\n", entry.Name(), err, 0)
+			logger.Warningf("Failed to read document file %s: %v\n", entry.Name(), err)
 
 			continue
 		}
 
 		var doc map[string]interface{}
 		if err := json.Unmarshal(data, &doc); err != nil {
-			logger.Warningf("Failed to parse document file %s: %v\n", entry.Name(), err, 0)
+			logger.Warningf("Failed to parse document file %s: %v\n", entry.Name(), err)
 
 			continue
 		}

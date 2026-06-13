@@ -89,7 +89,7 @@ func (h *CatalogHandler) GetArchitectureDetails(c *gin.Context) {
 // ListServices godoc
 //
 //	@Summary		List available services
-//	@Description	Retrieves a list of all deployable service templates. Dependency-only services are excluded from this list. Returns service summaries without endpoints and pod templates.
+//	@Description	Retrieves a list of all deployable service templates. Dependency-only services are excluded from this list. Returns service summaries including standalone flag without endpoints and pod templates.
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth

@@ -1,7 +1,7 @@
 # Service identification
 id: digitize
 name: "Digitize Documents"
-description: "Transforms documents such as manuals, invoices, and more into texts"
+description: "Converts physical and scanned documents into searchable, editable digital formats; enables efficient document management, data extraction, and workflow automation at scale."
 type: service
 
 # Certification and support

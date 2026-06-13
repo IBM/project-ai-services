@@ -147,7 +147,7 @@ func (p *CatalogProvider) GetServiceDeployOptions(serviceID string) (*types.Depl
 	for _, dep := range service.Dependencies {
 		component, err := p.buildDeployOptionsComponent(dep.ID, true)
 		if err != nil {
-			logger.Errorf(fmt.Sprintf("failed to build component '%s': %v", dep.ID, err))
+			logger.Errorf("failed to build component '%s': %v", dep.ID, err)
 
 			continue
 		}
@@ -291,7 +291,7 @@ func (p *CatalogProvider) GetComponentProviderParams(componentType, providerID s
 	schemaData, err := assets.CatalogFS.ReadFile(schemaPath)
 	if err != nil {
 		// If schema file doesn't exist, return empty schema instead of failing
-		logger.Warningf(fmt.Sprintf("schema file not found at '%s': %v", schemaPath, err))
+		logger.Warningf("schema file not found at '%s': %v", schemaPath, err)
 
 		return map[string]any{}, nil
 	}
@@ -326,7 +326,7 @@ func (p *CatalogProvider) GetServiceParams(serviceID string) (map[string]any, er
 	schemaData, err := assets.CatalogFS.ReadFile(schemaPath)
 	if err != nil {
 		// If schema file doesn't exist, return empty schema instead of failing
-		logger.Warningf(fmt.Sprintf("schema file not found at '%s': %v", schemaPath, err))
+		logger.Warningf("schema file not found at '%s': %v", schemaPath, err)
 
 		return map[string]any{}, nil
 	}
