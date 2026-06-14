@@ -11,6 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver"
 	apirepository "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/sync"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
@@ -94,6 +95,17 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 	serviceRepo := repository.NewServiceRepository(pool)
 	componentRepo := repository.NewComponentRepository(pool)
 	serviceDependencyRepo := repository.NewServiceDependencyRepository(pool)
+
+	// Initialize sync service for background DB-Pod synchronization
+	syncService := sync.NewSyncService(
+		applicationRepo,
+		serviceRepo,
+		componentRepo,
+		serviceDependencyRepo,
+		sync.DefaultSyncInterval,
+	)
+	syncService.Start()
+	defer syncService.Stop()
 
 	catalogProvider, err := catalog.NewCatalogProvider()
 	if err != nil {
