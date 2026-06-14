@@ -107,7 +107,7 @@ func renderApplicationInfo(appName string) error {
 			}
 		}
 
-		err = printInfo(tp, params, service.Type)
+		err = printInfo(tp, params, service.CatalogID)
 		if err != nil {
 			return fmt.Errorf("failed to load application info: %w", err)
 		}
@@ -119,10 +119,12 @@ func renderApplicationInfo(appName string) error {
 func printInfo(tp templates.Template, params map[string]string, appTemplate string) error {
 	tmpls, err := tp.LoadMdFiles(appTemplate)
 	if err != nil {
+		logger.Warningf("failed to load templates: %w", err)
 		return nil
 	}
 	tmpl, ok := tmpls["info.md"]
 	if !ok {
+		logger.Warningf("failed to find info.md template")
 		return nil
 	}
 
