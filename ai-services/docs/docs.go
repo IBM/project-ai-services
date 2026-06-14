@@ -1335,6 +1335,9 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationService": {
             "type": "object",
             "properties": {
+                "catalog_id": {
+                    "type": "string"
+                },
                 "components": {
                     "type": "array",
                     "items": {
