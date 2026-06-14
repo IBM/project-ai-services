@@ -68,9 +68,7 @@ type HTTPClient struct {
 func New(serverURL string) *HTTPClient {
 	return &HTTPClient{
 		serverURL: serverURL,
-		httpClient: &http.Client{Timeout: defaultTimeout, Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}},
+		httpClient: &http.Client{Timeout: defaultTimeout},
 	}
 }
 
