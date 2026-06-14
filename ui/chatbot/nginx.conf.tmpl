@@ -44,7 +44,11 @@ http {
 
         # Proxy API requests
         location /v1/similarity-search {
-          proxy_pass http://${SIMILARITY_SEARCH_HOST}:${SIMILARITY_SEARCH_PORT};
+          resolver ${PODMAN_DNS} valid=5s;
+
+          set $similarity_backend "http://${SIMILARITY_SEARCH_HOST}:${SIMILARITY_SEARCH_PORT}";
+          proxy_pass $similarity_backend;
+
           proxy_http_version 1.1;
           proxy_set_header Upgrade $http_upgrade;
           proxy_set_header Connection 'upgrade';

@@ -18,4 +18,4 @@ COPY --from=build /app/build /usr/share/nginx/html
 EXPOSE 3000
 
 # Render nginx.conf.tmpl with backend server details and start the nginx server
-CMD /bin/bash -c "envsubst '\$BACKEND_HOST \$BACKEND_PORT \$SIMILARITY_SEARCH_HOST \$SIMILARITY_SEARCH_PORT \$CHATBOT_SEARCH_MODE \$CHATBOT_NUM_CHUNKS_POST_RERANKER \$CHATBOT_RERANK' < /etc/nginx.conf.tmpl > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"
+CMD /bin/bash -c "export PODMAN_DNS=\$(awk '/nameserver/ {print \$2; exit}' /etc/resolv.conf) && envsubst '\$BACKEND_HOST \$BACKEND_PORT \$SIMILARITY_SEARCH_HOST \$SIMILARITY_SEARCH_PORT \$CHATBOT_SEARCH_MODE \$CHATBOT_NUM_CHUNKS_POST_RERANKER \$CHATBOT_RERANK \$PODMAN_DNS' < /etc/nginx.conf.tmpl > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"
