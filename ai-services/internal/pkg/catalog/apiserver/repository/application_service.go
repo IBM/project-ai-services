@@ -573,11 +573,25 @@ func (s *ApplicationService) loadServiceComponents(ctx context.Context, sd []mod
 				continue
 			}
 
+			// Get provider name from catalog metadata using existing LoadComponent helper
+			componentMetadata, err := s.provider.LoadComponent(component.Type, component.Provider)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load component metadata for %s/%s: %w", component.Type, component.Provider, err)
+			}
+
+			providerName := component.Provider // Default to provider ID
+			if componentMetadata != nil && componentMetadata.Name != "" {
+				providerName = componentMetadata.Name
+			}
+
 			// Transform to response object
 			temp := types.ServiceComponentResp{
-				ID:       component.ID.String(),
-				Type:     component.Type,
-				Provider: component.Provider,
+				ID:   component.ID.String(),
+				Type: component.Type,
+				Provider: types.ProviderInfo{
+					ID:   component.Provider,
+					Name: providerName,
+				},
 				Metadata: component.Metadata,
 			}
 			components = append(components, temp)
