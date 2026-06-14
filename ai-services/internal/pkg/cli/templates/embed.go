@@ -60,6 +60,8 @@ func NewEmbedTemplateProvider(fs *embed.FS, root ...string) Template {
 			rootPath = "bootstrap"
 		case &assets.CatalogFS:
 			rootPath = "catalog"
+		case &assets.ServicesFS:
+			rootPath = "services"
 		default:
 			rootPath = "applications"
 		}
