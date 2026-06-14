@@ -5,6 +5,7 @@ package httpclient
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -65,9 +66,26 @@ type HTTPClient struct {
 
 // New creates a new HTTPClient targeting the given server URL.
 func New(serverURL string) *HTTPClient {
+	return NewWithInsecure(serverURL, false)
+}
+
+// NewWithInsecure creates a new HTTPClient targeting the given server URL.
+// If insecure is true, TLS certificate verification will be skipped.
+func NewWithInsecure(serverURL string, insecure bool) *HTTPClient {
+	transport := &http.Transport{}
+
+	if insecure {
+		transport.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: true,
+		}
+	}
+
 	return &HTTPClient{
-		serverURL:  serverURL,
-		httpClient: &http.Client{Timeout: defaultTimeout},
+		serverURL: serverURL,
+		httpClient: &http.Client{
+			Timeout:   defaultTimeout,
+			Transport: transport,
+		},
 	}
 }
 

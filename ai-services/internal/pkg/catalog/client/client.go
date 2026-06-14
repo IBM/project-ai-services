@@ -53,7 +53,7 @@ func New() (*Client, error) {
 
 	c := &Client{
 		serverURL:  creds.ServerURL,
-		httpClient: httpclient.New(creds.ServerURL),
+		httpClient: httpclient.NewWithInsecure(creds.ServerURL, creds.Insecure),
 		creds:      creds,
 	}
 
@@ -91,10 +91,11 @@ func (c *Client) accessTokenNeedsRefresh() bool {
 
 // NewWithLogin creates a Client by performing a fresh login with username/password.
 // The resulting tokens are saved to the local config file.
-func NewWithLogin(serverURL, username, password string) (*Client, error) {
+// If insecure is true, TLS certificate verification will be skipped.
+func NewWithLogin(serverURL, username, password string, insecure bool) (*Client, error) {
 	c := &Client{
 		serverURL:  serverURL,
-		httpClient: httpclient.New(serverURL),
+		httpClient: httpclient.NewWithInsecure(serverURL, insecure),
 	}
 
 	resp, err := c.Login(username, password)
@@ -106,6 +107,7 @@ func NewWithLogin(serverURL, username, password string) (*Client, error) {
 		ServerURL:    serverURL,
 		AccessToken:  resp.AccessToken,
 		RefreshToken: resp.RefreshToken,
+		Insecure:     insecure,
 	}
 
 	// Best-effort: record the expiry so future calls can skip unnecessary refreshes.
