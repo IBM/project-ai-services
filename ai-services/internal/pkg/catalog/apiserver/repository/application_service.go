@@ -1014,14 +1014,14 @@ func (s *ApplicationService) collectServicePods(
 	// Load pod details for each service
 	for _, service := range services {
 		// Query runtime using service ID as template label
-		pod, err := loadApplicationPod(rt, service.ID.String())
+		pod, err := loadApplicationPods(rt, service.ID.String())
 		if err != nil {
 			// Log error but continue with other services (fault-tolerant)
 			logger.Errorf("Failed to load service pod: %v", err)
 
 			continue
 		}
-		servicePods = append(servicePods, pod)
+		servicePods = append(servicePods, pod...)
 	}
 
 	logger.Infof("Successfully collected %d service pods", len(servicePods))
@@ -1038,7 +1038,7 @@ func (s *ApplicationService) collectComponentPods(
 	services []models.Service,
 ) ([]types.Pod, error) {
 	// Use map to deduplicate shared components (key: component ID)
-	componentMap := make(map[string]types.Pod)
+	componentMap := make(map[string][]types.Pod)
 
 	// Iterate through services to find component dependencies
 	for _, service := range services {
@@ -1064,7 +1064,7 @@ func (s *ApplicationService) collectComponentPods(
 			}
 
 			// Load component pod from runtime
-			componentPod, err := loadApplicationPod(rt, componentID)
+			componentPod, err := loadApplicationPods(rt, componentID)
 			if err != nil {
 				logger.Errorf("Failed to load component pod: %v", err)
 
@@ -1079,7 +1079,7 @@ func (s *ApplicationService) collectComponentPods(
 	// Convert map to slice for response
 	componentPods := make([]types.Pod, 0, len(componentMap))
 	for _, podDetails := range componentMap {
-		componentPods = append(componentPods, podDetails)
+		componentPods = append(componentPods, podDetails...)
 	}
 
 	logger.Infof("Successfully collected %d unique component pods", len(componentPods))
@@ -1087,43 +1087,49 @@ func (s *ApplicationService) collectComponentPods(
 	return componentPods, nil
 }
 
-// loadApplicationPod fetches the application pod from the runtime.
-func loadApplicationPod(rt runtime.Runtime, appID string) (types.Pod, error) {
+// loadApplicationPods fetches the application pods from the runtime.
+func loadApplicationPods(rt runtime.Runtime, appID string) ([]types.Pod, error) {
 	filteredPod, err := common.FetchFilteredPods(rt, appID)
 	if err != nil {
-		return types.Pod{}, err
+		return nil, err
 	}
 	// Validate exactly one pod exists
 	if len(filteredPod) == 0 {
-		return types.Pod{}, fmt.Errorf("no pod found with given id")
+		return nil, fmt.Errorf("no pod found with given id")
 	}
 
-	pod := filteredPod[0]
+	appPodList := make([]types.Pod, 0, len(filteredPod))
 
-	processedPod, err := common.ProcessPod(rt, pod)
-	if err != nil {
-		return types.Pod{}, fmt.Errorf("failed to process pod: %w", err)
-	}
+	for _, pod := range filteredPod {
+		processedPod, err := common.ProcessPod(rt, pod)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process pod: %w", err)
+		}
 
-	// Transform containers to API response format with health indicators
-	containers := make([]types.PodContainer, 0, len(pod.Containers))
-	for _, container := range processedPod.Containers {
-		containers = append(containers, types.PodContainer{
-			Name:    container.Name,
-			Status:  types.Status(strings.ToLower(processedPod.Status)),
-			Healthy: strings.ToLower(container.Health) == "healthy",
-		})
+		// Transform containers to API response format with health indicators
+		containers := make([]types.PodContainer, 0, len(pod.Containers))
+		for _, container := range processedPod.Containers {
+			containers = append(containers, types.PodContainer{
+				Name:    container.Name,
+				Status:  types.Status(strings.ToLower(processedPod.Status)),
+				Healthy: strings.ToLower(container.Health) == string(consts.Ready),
+			})
+		}
+
+		appPod := types.Pod{
+			PodID:      processedPod.ID,
+			PodName:    processedPod.Name,
+			Status:     types.Status(strings.ToLower(processedPod.Status)),
+			Healthy:    processedPod.Health == string(consts.Ready),
+			Created:    pod.Created.Format(constants.RFC3339WithTimezone),
+			Containers: containers,
+		}
+
+		appPodList = append(appPodList, appPod)
 	}
 
 	// Build pod response with metadata and container details
-	return types.Pod{
-		PodID:      processedPod.ID,
-		PodName:    processedPod.Name,
-		Status:     types.Status(strings.ToLower(processedPod.Status)),
-		Healthy:    processedPod.Health == "healthy",
-		Created:    pod.Created.Format(constants.RFC3339WithTimezone),
-		Containers: containers,
-	}, nil
+	return appPodList, nil
 }
 
 // Made with Bob
