@@ -31,7 +31,6 @@ func NewApplicationClient() (*ApplicationClient, error) {
 	}
 
 	httpClient := resty.New().SetBaseURL(client.ServerURL())
-	httpClient.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true})
 
 	return &ApplicationClient{
 		httpClient: httpClient,
