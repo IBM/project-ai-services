@@ -25,6 +25,7 @@ type Application struct {
 type ApplicationService struct {
 	ID        string                 `json:"id"`
 	Type      string                 `json:"type"`
+	CatalogID string                 `json:"catalog_id"`
 	Status    string                 `json:"status,omitempty"`
 	Message   string                 `json:"message"`
 	Endpoints []map[string]any       `json:"endpoints,omitempty"`

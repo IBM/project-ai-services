@@ -534,9 +534,15 @@ func (s *ApplicationService) loadApplicationServices(ctx context.Context, servic
 	appServices := []types.ApplicationService{}
 	for _, service := range services {
 		// Build application service response
+		serviceDisplayName := service.CatalogID
+		if service, err := s.provider.LoadService(service.CatalogID); err == nil && service.Name != "" {
+			serviceDisplayName = service.Name
+		}
+
 		appService := types.ApplicationService{
 			ID:        service.ID.String(),
-			Type:      service.CatalogID,
+			Type:      serviceDisplayName,
+			CatalogID: service.CatalogID,
 			Endpoints: service.Endpoints,
 			Version:   service.Version,
 			Status:    string(service.Status),
