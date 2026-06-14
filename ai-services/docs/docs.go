@@ -1621,6 +1621,17 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderInfo": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources": {
             "type": "object",
             "properties": {
@@ -1692,7 +1703,7 @@ const docTemplate = `{
                     "additionalProperties": {}
                 },
                 "provider": {
-                    "type": "string"
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderInfo"
                 },
                 "type": {
                     "type": "string"

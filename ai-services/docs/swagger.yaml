@@ -342,6 +342,13 @@ definitions:
       status:
         $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Status'
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderInfo:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources:
     properties:
       accelerators:
@@ -391,7 +398,7 @@ definitions:
         additionalProperties: {}
         type: object
       provider:
-        type: string
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderInfo'
       type:
         type: string
     type: object
