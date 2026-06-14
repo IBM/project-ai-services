@@ -97,6 +97,7 @@ func renderApplicationInfo(appName string) error {
 	for _, service := range application.Services {
 		params := map[string]string{}
 		params["STATUS"] = strings.ToLower(service.Status)
+		params["SERVICE_NAME"] = service.Type
 
 		for _, endpoint := range service.Endpoints {
 			urlType, urlTypeOk := endpoint["type"].(string)
