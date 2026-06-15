@@ -59,7 +59,7 @@ func ValidateReconfigureParameters(rt runtime.Runtime, domainSuffix string, http
 	return validateCertificateChanges(baseDir, sslCertPath, sslKeyPath)
 }
 
-// validateConfigParameters validates domain, HTTPS port, and base directory haven't changed
+// validateConfigParameters validates domain, HTTPS port, and base directory haven't changed.
 func validateConfigParameters(existingDomain, domainSuffix, existingHTTPSPort string, httpsPort int, existingBaseDir, baseDir string) error {
 	if existingDomain != domainSuffix {
 		return fmt.Errorf("domain change not allowed during reconfigure: existing=%s, new=%s. Please uninstall the catalog deployment and re-run configure to change domain", existingDomain, domainSuffix)
@@ -77,7 +77,7 @@ func validateConfigParameters(existingDomain, domainSuffix, existingHTTPSPort st
 	return nil
 }
 
-// validateCertificateChanges checks if certificate content has changed during reconfigure
+// validateCertificateChanges checks if certificate content has changed during reconfigure.
 func validateCertificateChanges(baseDir, sslCertPath, sslKeyPath string) error {
 	if sslCertPath == "" || sslKeyPath == "" {
 		return nil
