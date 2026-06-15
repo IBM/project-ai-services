@@ -188,6 +188,7 @@ export const AboutTab: React.FC<AboutTabProps> = ({ onDeployClick }) => {
           )}
           {imageSection && imageSection.image && (
             <div className={styles.architectureDiagram}>
+              {/* TODO: Update image here */}
               <img
                 src={imageSection.image.source}
                 alt="Architecture Diagram"
@@ -210,8 +211,9 @@ export const AboutTab: React.FC<AboutTabProps> = ({ onDeployClick }) => {
           <h4 className={styles.aboutSectionTitle}>{section.title}</h4>
           {section.sections.map((demo, idx) => (
             <div className={styles.demoCard} key={idx}>
+              {/* TODO: Update image here */}
               <img
-                src={demo.image?.source || "images/ragDemoThumbnail.webp"}
+                src={demo.image?.source}
                 alt={demo.title || "Demo"}
                 className={styles.demoImage}
               />

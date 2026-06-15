@@ -2,8 +2,8 @@ REGISTRY?=icr.io/ai-services-private
 IMAGE=litellm
 # 1. Must run update-patch after updating the Litellm version
 # 2. Manually regenerate the patches/watsonx-passthrough.patch
-LITELLM_VERSION?=1.84.0
-IMAGE_REVISION?=1
+LITELLM_VERSION?=1.86.5
+IMAGE_REVISION?=0
 TAG?=v$(LITELLM_VERSION)-$(IMAGE_REVISION)
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
