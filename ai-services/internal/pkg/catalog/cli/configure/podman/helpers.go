@@ -50,24 +50,31 @@ func ValidateReconfigureParameters(rt runtime.Runtime, domainSuffix string, http
 		return fmt.Errorf("failed to get existing configuration from catalog-backend: %w", err)
 	}
 
-	// Validate domain matches (using pre-computed domain suffix)
+	// Validate configuration parameters haven't changed
+	if err := validateConfigParameters(existingDomain, domainSuffix, existingHTTPSPort, httpsPort, existingBaseDir, baseDir); err != nil {
+		return err
+	}
+
+	// Validate certificate changes if SSL certificates are provided
+	return validateCertificateChanges(baseDir, sslCertPath, sslKeyPath)
+}
+
+// validateConfigParameters validates domain, HTTPS port, and base directory haven't changed
+func validateConfigParameters(existingDomain, domainSuffix, existingHTTPSPort string, httpsPort int, existingBaseDir, baseDir string) error {
 	if existingDomain != domainSuffix {
 		return fmt.Errorf("domain change not allowed during reconfigure: existing=%s, new=%s. Please uninstall the catalog deployment and re-run configure to change domain", existingDomain, domainSuffix)
 	}
 
-	// Always validate HTTPS port
 	newPortStr := fmt.Sprintf("%d", httpsPort)
 	if existingHTTPSPort != newPortStr {
 		return fmt.Errorf("HTTPS port change not allowed during reconfigure: existing=%s, new=%s. Please uninstall the catalog deployment and re-run configure to change https port", existingHTTPSPort, newPortStr)
 	}
 
-	// Always validate base directory
 	if existingBaseDir != baseDir {
 		return fmt.Errorf("base directory change not allowed during reconfigure: existing=%s, new=%s. Please uninstall the catalog deployment and re-run configure to change base directory", existingBaseDir, baseDir)
 	}
 
-	// Validate certificate changes if SSL certificates are provided
-	return validateCertificateChanges(baseDir, sslCertPath, sslKeyPath)
+	return nil
 }
 
 // validateCertificateChanges checks if certificate content has changed during reconfigure
