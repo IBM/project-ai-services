@@ -181,9 +181,30 @@ def query_vllm_payload(
 
     logger.debug(f"Original Context: {context}")
 
+    match lang:
+        case "DE":
+            system_prompt = chatbot_settings.chatbot.german.system_prompt
+            query_system_prompt = chatbot_settings.chatbot.german.query_system_prompt
+        case "IT":
+            system_prompt = chatbot_settings.chatbot.italian.system_prompt
+            query_system_prompt = chatbot_settings.chatbot.italian.query_system_prompt
+        case "FR":
+            system_prompt = chatbot_settings.chatbot.french.system_prompt
+            query_system_prompt = chatbot_settings.chatbot.french.query_system_prompt
+        case _:
+            system_prompt = chatbot_settings.chatbot.english.system_prompt
+            query_system_prompt = chatbot_settings.chatbot.english.query_system_prompt
+
+    # Calculate token counts
     question_token_count = len(tokenize_with_llm(question, llm_endpoint))
     context_tokens = tokenize_with_llm(context, llm_endpoint)
     context_token_count = len(context_tokens)
+    initial_system_token_overhead = len(tokenize_with_llm(system_prompt, llm_endpoint))
+    query_system_prompt_sample = query_system_prompt.format(
+        context="",
+        rephrased_query="",
+    )
+    rag_system_token_overhead = len(tokenize_with_llm(query_system_prompt_sample, llm_endpoint))
 
     llm_max_model_len = resolve_model_max_len(
         llm_endpoint,
@@ -194,8 +215,8 @@ def query_vllm_payload(
 
     # Calculate budget for context first (prioritize context over history)
     budget_for_context = llm_max_model_len - (
-        chatbot_settings.chatbot.initial_system_token_overhead +
-        chatbot_settings.chatbot.rag_system_token_overhead +
+        initial_system_token_overhead +
+        rag_system_token_overhead +
         question_token_count +
         max_new_tokens
     )
@@ -220,20 +241,6 @@ def query_vllm_payload(
         )
 
     logger.debug(f"Truncated Context: {context}")
-
-    match lang:
-        case "DE":
-            system_prompt = chatbot_settings.chatbot.german.system_prompt
-            query_system_prompt = chatbot_settings.chatbot.german.query_system_prompt
-        case "IT":
-            system_prompt = chatbot_settings.chatbot.italian.system_prompt
-            query_system_prompt = chatbot_settings.chatbot.italian.query_system_prompt
-        case "FR":
-            system_prompt = chatbot_settings.chatbot.french.system_prompt
-            query_system_prompt = chatbot_settings.chatbot.french.query_system_prompt
-        case _:
-            system_prompt = chatbot_settings.chatbot.english.system_prompt
-            query_system_prompt = chatbot_settings.chatbot.english.query_system_prompt
 
     message_array = [
         {
