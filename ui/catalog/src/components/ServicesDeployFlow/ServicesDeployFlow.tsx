@@ -239,7 +239,6 @@ export const ServicesDeployFlow = ({
 
       // If models exist, set the first one as default
       if (models.length > 0) {
-      
         updates[component.type] = {
           ...componentConfig,
           params: {
@@ -342,7 +341,7 @@ export const ServicesDeployFlow = ({
         providerSchemas, // Pass cached schemas from store
         state.selectedServiceId, // Pass serviceId for correct cache key lookup
       );
-   
+
       // Add deployment_type property required by deployApplication API
       await deployApplication({
         ...deploymentPayload,
@@ -371,7 +370,6 @@ export const ServicesDeployFlow = ({
     } finally {
       dispatch({ type: ACTION_TYPES.SET_IS_DEPLOYING, payload: false });
     }
-
   };
 
   const handleClose = () => {
