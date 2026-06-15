@@ -251,6 +251,11 @@
   justify-content: flex-start;
 }
 
+.saveError {
+  margin-bottom: $spacing-05;
+  color: $support-error;
+}
+
 .placeholderContent {
   padding: $spacing-07;
   text-align: center;

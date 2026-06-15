@@ -56,14 +56,14 @@ const DeploymentDetails = ({
     DeployIntegrationEndpoints[]
   >([]);
   const [editedName, setEditedName] = useState(deployment.name);
-  const [isSaving, setIsSaving]     = useState(false);
-  const [saveError, setSaveError]   = useState(""); 
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   useEffect(() => {
     setEditedName(deployment.name);
     setSaveError("");
   }, [deployment.name]);
 
-  useEffect(() => { 
+  useEffect(() => {
     const fetchResources = async () => {
       setIsLoadingResources(true);
       setResources([]);
@@ -309,10 +309,9 @@ const DeploymentDetails = ({
     setSaveError("");
 
     try {
-      await api.put(
-        APPLICATION_ENDPOINTS.UPDATE_APPLICATION(deployment.id),
-        { name: editedName }
-      );
+      await api.put(APPLICATION_ENDPOINTS.UPDATE_APPLICATION(deployment.id), {
+        name: editedName,
+      });
       onNameUpdate?.(editedName);
     } catch (error) {
       const errorMessage =
@@ -441,7 +440,9 @@ const DeploymentDetails = ({
                               setEditedName(e.target.value);
                               setSaveError("");
                             }}
-                            invalid={editedName.length < 3 || editedName.length > 100}
+                            invalid={
+                              editedName.length < 3 || editedName.length > 100
+                            }
                             invalidText={
                               editedName.length < 3
                                 ? "Name must be at least 3 characters"
@@ -545,9 +546,7 @@ const DeploymentDetails = ({
               <Grid className={styles.actionsGrid}>
                 <Column sm={4} md={8} lg={16}>
                   {saveError && (
-                    <div style={{ marginBottom: "1rem", color: "#da1e28" }}>
-                      {saveError}
-                    </div>
+                    <div className={styles.saveError}>{saveError}</div>
                   )}
                   <div className={styles.actionButtons}>
                     <Button
