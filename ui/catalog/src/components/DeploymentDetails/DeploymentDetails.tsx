@@ -99,7 +99,7 @@ const DeploymentDetails = ({
         ) {
           // Get the array of PCI addresses from ibm.com/spyre_pf
           const spyreCards = response.data.accelerators["ibm.com/spyre_pf"];
-          
+
           if (Array.isArray(spyreCards) && spyreCards.length > 0) {
             const cards: AcceleratorCard[] = spyreCards.map((cardId) => ({
               id: cardId,
