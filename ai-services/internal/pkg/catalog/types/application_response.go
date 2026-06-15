@@ -36,8 +36,14 @@ type ApplicationService struct {
 type ServiceComponentResp struct {
 	ID       string         `json:"id"`
 	Type     string         `json:"type"`
-	Provider string         `json:"provider"`
+	Provider ProviderInfo   `json:"provider"`
 	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// ProviderInfo represents provider information with ID and name.
+type ProviderInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // PaginationMetadata represents pagination information in the response.
