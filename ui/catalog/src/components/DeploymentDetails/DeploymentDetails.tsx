@@ -119,13 +119,18 @@ const DeploymentDetails = ({
           response.data.accelerators &&
           Object.keys(response.data.accelerators).length > 0
         ) {
-          const cards: AcceleratorCard[] = Object.keys(
-            response.data.accelerators,
-          ).map((cardId) => ({
-            id: cardId,
-            label: cardId,
-          }));
-          setAcceleratorCards(cards);
+          // Get the array of PCI addresses from ibm.com/spyre_pf
+          const spyreCards = response.data.accelerators["ibm.com/spyre_pf"];
+          
+          if (Array.isArray(spyreCards) && spyreCards.length > 0) {
+            const cards: AcceleratorCard[] = spyreCards.map((cardId) => ({
+              id: cardId,
+              label: cardId,
+            }));
+            setAcceleratorCards(cards);
+          } else {
+            setAcceleratorCards([]);
+          }
         } else {
           setAcceleratorCards([]);
         }
