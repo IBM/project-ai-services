@@ -1,8 +1,9 @@
 package application
 
 import (
+	"errors"
 	"fmt"
-	"strings"
+	"net/http"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -174,8 +175,10 @@ func waitForApplicationDeletion(appClient *catalogClient.ApplicationClient, appI
 		// Check if application still exists via API
 		app, err := appClient.GetApplication(appID)
 		if err != nil {
-			// If application is not found (HTTP 404), it's been successfully deleted
-			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+			// Check if it's an HTTPError with 404 status code
+			var httpErr *catalogClient.HTTPError
+			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+				// Application not found (HTTP 404) - successfully deleted
 				return nil
 			}
 

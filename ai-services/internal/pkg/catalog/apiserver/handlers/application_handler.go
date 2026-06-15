@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -143,16 +142,16 @@ func (h *ApplicationHandler) UpdateApplication(c *gin.Context) {
 	}
 	updatedApp, err := h.appService.UpdateApplication(c.Request.Context(), appID, userID, req.Name)
 	if err != nil {
-		if err == repository.ErrApplicationNotFound {
-			c.JSON(http.StatusNotFound, ErrorResponse{Error: "Application not found"})
+		// Check if it's a validation error with specific status code
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{
+				Error: valErr.Message,
+			})
 
 			return
 		}
-		if err == repository.ErrUnauthorized {
-			c.JSON(http.StatusForbidden, ErrorResponse{Error: "User doesn't own this application"})
 
-			return
-		}
+		// Default to internal server error
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to update application: %v", err)})
 
 		return
@@ -246,12 +245,16 @@ func (h *ApplicationHandler) GetApplicationByID(c *gin.Context) {
 	// Call service layer
 	response, err := h.appService.GetApplicationByID(c.Request.Context(), appID)
 	if err != nil {
-		if err == repository.ErrApplicationNotFound {
-			c.JSON(http.StatusNotFound, ErrorResponse{Error: "Application not found"})
+		// Check if it's a validation error with specific status code
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{
+				Error: valErr.Message,
+			})
 
 			return
 		}
 
+		// Default to internal server error
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get application: %v", err),
 		})
@@ -286,12 +289,16 @@ func (h *ApplicationHandler) GetApplicationResources(c *gin.Context) {
 	// Call service layer
 	response, err := h.appService.GetApplicationResources(c.Request.Context(), appID)
 	if err != nil {
-		if err == repository.ErrApplicationNotFound {
-			c.JSON(http.StatusNotFound, ErrorResponse{Error: "Application not found"})
+		// Check if it's a validation error with specific status code
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{
+				Error: valErr.Message,
+			})
 
 			return
 		}
 
+		// Default to internal server error
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get application resources: %v", err),
 		})
@@ -350,27 +357,22 @@ func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
 
 	response, err := h.appService.DeleteApplication(c.Request.Context(), appID, userID, keepData)
 	if err != nil {
-		h.handleDeleteError(c, err)
+		// Check if it's a validation error with specific status code
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{
+				Error: valErr.Message,
+			})
+
+			return
+		}
+
+		// Default to internal server error
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
 
 		return
 	}
 
 	c.JSON(http.StatusAccepted, response)
-}
-
-func (h *ApplicationHandler) handleDeleteError(c *gin.Context, err error) {
-	msg := err.Error()
-
-	switch {
-	case strings.Contains(msg, "not found"):
-		c.JSON(http.StatusNotFound, ErrorResponse{Error: msg})
-	case strings.Contains(msg, "forbidden"):
-		c.JSON(http.StatusForbidden, ErrorResponse{Error: msg})
-	case strings.Contains(msg, "conflict"):
-		c.JSON(http.StatusConflict, ErrorResponse{Error: msg})
-	default:
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
-	}
 }
 
 // ApplicationPS godoc
@@ -397,12 +399,16 @@ func (h *ApplicationHandler) ApplicationPS(c *gin.Context) {
 
 	response, err := h.appService.ApplicationsPs(c.Request.Context(), appID)
 	if err != nil {
-		if err == repository.ErrApplicationNotFound {
-			c.JSON(http.StatusNotFound, ErrorResponse{Error: "Application not found"})
+		// Check if it's a validation error with specific status code
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{
+				Error: valErr.Message,
+			})
 
 			return
 		}
 
+		// Default to internal server error
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get application: %v", err),
 		})
