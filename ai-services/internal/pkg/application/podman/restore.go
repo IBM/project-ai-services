@@ -10,7 +10,6 @@ import (
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	runtimePodman "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 )
 
 // Restore restores application data from a backup file for Podman runtime.
@@ -62,16 +61,6 @@ func (p *PodmanApplication) restoreOpenSearch(ctx context.Context, templateID, b
 	return restore.RestoreOpenSearch(podmanCtx, templateID, backupFile)
 }
 
-// getPodmanContext extracts the Podman context from the runtime client.
-func (p *PodmanApplication) getPodmanContext() (context.Context, error) {
-	podmanClient, ok := p.runtime.(*runtimePodman.PodmanClient)
-	if !ok {
-		return nil, fmt.Errorf("runtime is not a Podman client")
-	}
-
-	return podmanClient.Context, nil
-}
-
 // restoreDigitize restores digitize metadata using the Import API.
 func (p *PodmanApplication) restoreDigitize(ctx context.Context, appDetails *catalogTypes.Application, backupFile string) error {
 	logger.Infof("Restoring digitize metadata\n", 0)
@@ -98,8 +87,9 @@ func (p *PodmanApplication) restoreDigitize(ctx context.Context, appDetails *cat
 
 	logger.Infof("Digitize API URL: %s\n", digitizeURL, 0)
 
-	// Call Import API
-	if err := restore.CallDigitizeImportAPI(digitizeURL, importPayload); err != nil {
+	// Create digitize restore client and call Import API
+	client := restore.NewDigitizeRestoreClient(digitizeURL)
+	if err := client.CallImportAPI(importPayload); err != nil {
 		return err
 	}
 

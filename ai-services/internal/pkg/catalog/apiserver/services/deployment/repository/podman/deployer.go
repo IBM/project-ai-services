@@ -1181,7 +1181,6 @@ func (d *PodmanDeployer) registerServiceRoutes(
 	// Register routes for each pod in the service
 	for podName, routesAnnotation := range svc.Routes {
 		registeredRoutes, err := proxy.RegisterRoutesForAppAndReturn(
-			d.runtime,
 			catalogconstants.CatalogAppName,
 			proxyManager,
 			routesAnnotation,

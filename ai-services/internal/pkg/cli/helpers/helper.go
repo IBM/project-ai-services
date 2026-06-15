@@ -143,8 +143,7 @@ func existingPods(runtime runtime.Runtime, appName string) ([]string, error) {
 	}
 
 	if len(pods) == 0 {
-		logger.Infof("No existing pods found for application: %s\n", appName)
-
+		// No existing pods found for application
 		return nil, nil
 	}
 

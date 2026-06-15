@@ -21,6 +21,7 @@ func NewLoginCmd() *cobra.Command {
 		serverURL     string
 		username      string
 		passwordStdin bool
+		insecure      bool
 	)
 
 	cmd := &cobra.Command{
@@ -36,43 +37,57 @@ The stored access token is reused for subsequent commands as long as it is still
 valid. It is refreshed automatically only when it is about to expire, avoiding
 unnecessary round-trips to the server.
 
+To get the Catalog backend endpoint, use: ai-services catalog info
+
 Examples:
 		# Interactive login (password is prompted securely)
-		ai-services catalog login --server http://localhost:8080 --username admin
+		ai-services catalog login --server <catalog_backend_endpoint> --username admin
 
 		# Non-interactive login via stdin pipe (password not recorded in shell history)
-		echo "$MY_PASSWORD" | ai-services catalog login --server http://localhost:8080 --username admin --password-stdin`,
+		echo "$MY_PASSWORD" | ai-services catalog login --server <catalog_backend_endpoint> --username admin --password-stdin
+
+		# Login with insecure TLS (skip certificate verification)
+		ai-services catalog login --server <catalog_backend_endpoint> --username admin --insecure`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return validateServerURL(serverURL)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Once precheck passes, silence usage for any *later* internal errors.
-			cmd.SilenceUsage = true
-
-			password, err := promptPassword(passwordStdin)
-			if err != nil {
-				return err
-			}
-
-			logger.Infof("Logging in to %s as %q...\n", serverURL, username)
-
-			if _, err := client.NewWithLogin(serverURL, username, password); err != nil {
-				return fmt.Errorf("login failed: %w", err)
-			}
-
-			logger.Infoln("Login successful.")
-
-			return nil
+			return runLogin(serverURL, username, passwordStdin, insecure)
 		},
 	}
 
-	cmd.Flags().StringVar(&serverURL, "server", "http://localhost:8080", "Catalog API server URL")
+	cmd.Flags().StringVar(&serverURL, "server", "", "Catalog backend endpoint (required)")
 	cmd.Flags().StringVar(&username, "username", "", "Username to authenticate with (required)")
 	cmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "Read password from stdin instead of an interactive prompt")
+	cmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification (NOT for production use)")
 
+	_ = cmd.MarkFlagRequired("server")
 	_ = cmd.MarkFlagRequired("username")
 
 	return cmd
+}
+
+// runLogin executes the login flow with the provided parameters.
+func runLogin(serverURL, username string, passwordStdin, insecure bool) error {
+	password, err := promptPassword(passwordStdin)
+	if err != nil {
+		return err
+	}
+
+	// Warn user about insecure mode
+	if insecure {
+		logger.Warningln("WARNING: TLS certificate verification is disabled. This should NOT be used in production environments.")
+	}
+
+	logger.Infof("Logging in to %s as %q...\n", serverURL, username)
+
+	if _, err := client.NewWithLogin(serverURL, username, password, insecure); err != nil {
+		return fmt.Errorf("login failed: %w", err)
+	}
+
+	logger.Infoln("Login successful.")
+
+	return nil
 }
 
 // promptPassword reads the password from stdin if passwordStdin is true, or

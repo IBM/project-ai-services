@@ -1,9 +1,6 @@
 package catalog
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -11,11 +8,9 @@ import (
 	"strings"
 	"syscall"
 
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/spf13/cobra"
-	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/term"
-
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 )
 
 const (
@@ -52,7 +47,7 @@ Tip: Avoid passing plain passwords as CLI args (they can leak via process list).
 				return err
 			}
 
-			hash, err := hashPasswordPBKDF2(pw, iterations)
+			hash, err := catalogutils.HashPasswordPBKDF2(pw, iterations)
 			if err != nil {
 				return fmt.Errorf("pbkdf2: %w", err)
 			}
@@ -134,21 +129,4 @@ func readHidden(prompt string) (string, error) {
 	}
 
 	return strings.TrimSpace(string(b)), nil
-}
-
-func hashPasswordPBKDF2(password string, iteration int) (string, error) {
-	salt := make([]byte, constants.Pbkdf2SaltLen)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
-
-	hash := pbkdf2.Key([]byte(password), salt, iteration, constants.Pbkdf2KeyLen, sha256.New)
-
-	// Format: iterations.salt.hash (base64 encoded)
-	encoded := fmt.Sprintf("%d.%s.%s",
-		iteration,
-		base64.RawStdEncoding.EncodeToString(salt),
-		base64.RawStdEncoding.EncodeToString(hash))
-
-	return encoded, nil
 }

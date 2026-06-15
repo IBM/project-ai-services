@@ -10,3 +10,9 @@ export type {
 export { default as SolutionCard } from "./SolutionCard";
 export type { SolutionCardProps } from "./SolutionCard";
 export { default as DeployedServicesTable } from "./DeployedServicesTable";
+export { DeployFlow } from "./DeployFlow";
+export type {
+  DeployFlowProps,
+  DeployFormData,
+  ServiceConfig,
+} from "./DeployFlow";

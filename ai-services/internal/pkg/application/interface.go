@@ -33,6 +33,9 @@ type Application interface {
 	// Restore restores application data from a backup file.
 	Restore(ctx context.Context, opts types.RestoreOptions) error
 
+	// Backup creates a backup of application data.
+	Backup(ctx context.Context, opts types.BackupOptions) error
+
 	// Type returns the runtime type.
 	Type() runtimeTypes.RuntimeType
 }

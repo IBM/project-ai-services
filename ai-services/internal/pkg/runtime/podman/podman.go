@@ -421,6 +421,10 @@ func (pc *PodmanClient) ListSecrets(filters map[string][]string) ([]string, erro
 	return secretIDorNames, nil
 }
 
+func (pc *PodmanClient) SecretExists(nameOrID string) (bool, error) {
+	return secrets.Exists(pc.Context, nameOrID)
+}
+
 // Type returns the runtime type for PodmanClient.
 func (pc *PodmanClient) Type() types.RuntimeType {
 	return types.RuntimeTypePodman

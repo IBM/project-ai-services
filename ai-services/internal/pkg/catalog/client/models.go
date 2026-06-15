@@ -17,3 +17,36 @@ type DeleteApplicationParams struct {
 	// KeepData preserves underlying data (volumes of databases/service resources) when true. Default: false
 	KeepData bool
 }
+
+// CreateApplicationRequest represents the payload for creating an application.
+type CreateApplicationRequest struct {
+	CatalogID string                     `json:"catalog_id"`
+	Name      string                     `json:"name"`
+	Services  []CreateApplicationService `json:"services"`
+	Version   string                     `json:"version,omitempty"`
+}
+
+// CreateApplicationService represents a service in the create application request.
+type CreateApplicationService struct {
+	CatalogID  string                       `json:"catalog_id"`
+	Components []CreateApplicationComponent `json:"components,omitempty"`
+	Params     map[string]interface{}       `json:"params,omitempty"`
+	Version    string                       `json:"version,omitempty"`
+}
+
+// CreateApplicationComponent represents a component in the create application request.
+type CreateApplicationComponent struct {
+	ComponentType string                 `json:"component_type"`
+	InstanceID    string                 `json:"instance_id,omitempty"`
+	Params        map[string]interface{} `json:"params,omitempty"`
+	ProviderID    string                 `json:"provider_id"`
+	Version       string                 `json:"version,omitempty"`
+}
+
+// CreateApplicationResponse represents the response after creating an application.
+type CreateApplicationResponse struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}

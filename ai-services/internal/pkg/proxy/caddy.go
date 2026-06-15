@@ -11,7 +11,6 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
@@ -254,7 +253,6 @@ func (c *caddyManager) UnregisterRoute(routeID string) error {
 //   - []Route: List of successfully built and registered routes
 //   - error: nil if routes were registered successfully, error otherwise
 func RegisterRoutesForAppAndReturn(
-	rt runtime.Runtime,
 	appName string,
 	proxyManager ProxyManager,
 	routesAnnotation string,

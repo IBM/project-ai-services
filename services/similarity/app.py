@@ -24,6 +24,7 @@ import common.db_utils as db
 from common.misc_utils import get_embedding_endpoint, get_reranker_endpoint, set_request_id, create_llm_session
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from common.validation_utils import validate_query_length as _validate_query_length
+from common.retry_utils import retry_on_transient_error
 from similarity.settings import settings
 from similarity.similarity_utils import (
     SimilaritySearchRequest,
@@ -43,9 +44,16 @@ def _initialize_models():
     reranker_model_dict = get_reranker_endpoint()
 
 
+@retry_on_transient_error(max_retries=5, initial_delay=2.0, backoff_multiplier=2.0, max_delay=30.0)
 def _initialize_vectorstore():
+    """
+    Initialize the vector store with retry logic for OpenSearch connection.
+    Uses the common retry mechanism to handle cases where OpenSearch is not ready during service startup.
+    Retries up to 5 times with exponential backoff (2s, 4s, 8s, 16s, 30s).
+    """
     global vectorstore
     vectorstore = db.get_vector_store()
+    logging.info("Successfully initialized vector store connection")
 
 
 @asynccontextmanager

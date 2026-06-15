@@ -6,7 +6,7 @@ digitize:
 
 digitizeUi:
   port: ""
-  image: icr.io/ai-services-cicd/digitize-ui:v0.0.22
+  image: icr.io/ai-services-cicd/digitize-ui:v0.0.23
 
 postgres:
   image: icr.io/ai-services-cicd/postgres:18-2
