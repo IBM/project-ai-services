@@ -61,8 +61,18 @@ var createCmd = &cobra.Command{
 	Use:   "create [name]",
 	Short: "Deploys an application",
 	Long: `Deploys an application with the provided application name based on the template
-		Arguments
-		- [name]: Application name (Required)
+Arguments
+- [name]: Application name (Required)
+
+Examples:
+# Deploy with experimental mode (5 Spyre cards)
+ai-services application create rag --template rag --runtime podman --experimental
+
+# Deploy with experimental mode (4 Spyre cards - reranker on CPU)
+ai-services application create rag --template rag --runtime podman --experimental --params reranker.vllm-cpu=true
+
+# Deploy with experimental mode (CPU mode)
+ai-services application create rag --template rag --runtime podman --experimental --params reranker.vllm-cpu=true,llm.vllm-cpu=true
 	`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -389,34 +399,7 @@ func createApp(appName string) error {
 	logger.Infof("Application creation initiated (ID: %s)\n", resp.ID)
 
 	// 5. Poll for application status
-	if err := pollApplicationStatus(appClient, appName); err != nil {
-		return err
-	}
-
-	// 6. Print next steps after successful deployment
-	return printNextSteps(appName)
-}
-
-// printNextSteps prints the next steps after successful application deployment.
-func printNextSteps(appName string) error {
-	// Create template provider
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
-
-	// Get runtime instance
-	rt, err := vars.RuntimeFactory.Create(appName)
-	if err != nil {
-		logger.Infof("Unable to create runtime for next steps: %v\n", err)
-
-		return nil
-	}
-
-	// Print next steps
-	if err := helpers.PrintNextSteps(tp, rt, appName, templateName); err != nil {
-		// Don't fail the overall create if we cannot print next steps
-		logger.Infof("Failed to display next steps: %v\n", err)
-	}
-
-	return nil
+	return pollApplicationStatus(appClient, appName)
 }
 
 // checkApplicationExists checks if an application with the given name already exists.
@@ -477,42 +460,46 @@ func pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName s
 				return fmt.Errorf("failed to get application status: %w", err)
 			}
 
-			if err := handleApplicationStatus(app, appName); err != nil {
+			done, err := handleApplicationStatus(app, appName)
+			if err != nil {
 				return err
+			}
+			if done {
+				return nil
 			}
 		}
 	}
 }
 
-// handleApplicationStatus handles the application status and returns an error if deployment failed or completed.
-func handleApplicationStatus(app *catalogTypes.Application, appName string) error {
+// handleApplicationStatus handles the application status and returns (done, error).
+func handleApplicationStatus(app *catalogTypes.Application, appName string) (bool, error) {
 	// Status values from ai-services/internal/pkg/catalog/db/models/application.go.
 	switch app.Status {
 	case "Running":
 		logger.Infof("Application '%s' is ready!\n", appName)
 
-		return nil
+		return true, nil
 
 	case "Error":
 		if app.Message != "" {
-			return fmt.Errorf("application deployment failed: %s", app.Message)
+			return false, fmt.Errorf("application deployment failed: %s", app.Message)
 		}
 
-		return fmt.Errorf("application deployment failed")
+		return false, fmt.Errorf("application deployment failed")
 
 	case "Downloading", "Deploying":
 		// Still in progress, continue polling.
-		logger.Infof("Deploying application: %s, Status: %s, Message: %s...\n", appName, app.Status, app.Message)
+		logger.Infof("Deploying application: %s, Status: %s, Message: %s\n", appName, app.Status, app.Message)
 
-		return nil
+		return false, nil
 
 	case "Deleting":
-		return fmt.Errorf("application is being deleted")
+		return false, fmt.Errorf("application is being deleted")
 
 	default:
 		logger.Infof("Status: %s\n", app.Status)
 
-		return nil
+		return false, nil
 	}
 }
 
