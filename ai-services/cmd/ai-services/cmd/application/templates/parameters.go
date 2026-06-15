@@ -162,14 +162,25 @@ func displaySchemaParameters(schema map[string]any, prefix string) {
 		return
 	}
 
-	displayPropertiesRecursive(properties, prefix)
+	displayPropertiesRecursive(schema, properties, prefix)
 }
 
 // displayPropertiesRecursive recursively displays properties, handling nested objects.
-func displayPropertiesRecursive(properties map[string]any, prefix string) {
-	for paramName, propValue := range properties {
+// It skips fields marked with "x-ui-only": true (UI-only fields with no CLI meaning)
+// and collects all properties from the schema including those in conditional branches.
+func displayPropertiesRecursive(parentSchema map[string]any, properties map[string]any, prefix string) {
+	// Collect all properties including those from conditional branches
+	allProperties := collectAllProperties(parentSchema, properties)
+
+	// Display each property
+	for paramName, propValue := range allProperties {
 		prop, ok := propValue.(map[string]any)
 		if !ok {
+			continue
+		}
+
+		// Skip fields explicitly marked as UI-only
+		if uiOnly, _ := prop["x-ui-only"].(bool); uiOnly {
 			continue
 		}
 
@@ -179,17 +190,85 @@ func displayPropertiesRecursive(properties map[string]any, prefix string) {
 		// If this is an object type with nested properties, recurse into it
 		if propType == "object" {
 			if nestedProps, ok := prop["properties"].(map[string]any); ok {
-				displayPropertiesRecursive(nestedProps, fmt.Sprintf("%s.%s", prefix, paramName))
-
+				displayPropertiesRecursive(prop, nestedProps, fmt.Sprintf("%s.%s", prefix, paramName))
 				continue
 			}
 		}
 
-		// Append default value if present and not empty
+		// Display the parameter with its description and default value
 		if defaultValue, hasDefault := prop["default"]; hasDefault && defaultValue != nil && defaultValue != "" {
 			logger.Infof("  %s.%s: %s (Default: %v)", prefix, paramName, description, defaultValue)
 		} else {
 			logger.Infof("  %s.%s: %s", prefix, paramName, description)
 		}
 	}
+}
+
+// collectAllProperties gathers all properties from a schema, including those defined
+// in conditional branches (oneOf, anyOf, allOf, dependencies, if/then/else).
+// It merges properties from all branches, with later definitions taking precedence.
+func collectAllProperties(parentSchema map[string]any, baseProperties map[string]any) map[string]any {
+	result := make(map[string]any)
+
+	// Start with base properties, skipping empty placeholders
+	for name, prop := range baseProperties {
+		if propMap, ok := prop.(map[string]any); ok && len(propMap) > 0 {
+			result[name] = prop
+		}
+	}
+
+	// Collect from conditional branches at current level
+	collectFromBranches := func(branches []any) {
+		for _, branch := range branches {
+			if branchMap, ok := branch.(map[string]any); ok {
+				if branchProps, ok := branchMap["properties"].(map[string]any); ok {
+					for name, prop := range branchProps {
+						// Only add if not already present or if this has more detail
+						if existing, exists := result[name]; !exists {
+							result[name] = prop
+						} else if existingMap, ok := existing.(map[string]any); ok {
+							if propMap, ok := prop.(map[string]any); ok && len(propMap) > len(existingMap) {
+								result[name] = prop
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Check oneOf/anyOf/allOf at current schema level
+	for _, keyword := range []string{"oneOf", "anyOf", "allOf"} {
+		if branches, ok := parentSchema[keyword].([]any); ok {
+			collectFromBranches(branches)
+		}
+	}
+
+	// Check dependencies (legacy pattern)
+	if deps, ok := parentSchema["dependencies"].(map[string]any); ok {
+		for _, depValue := range deps {
+			if depSchema, ok := depValue.(map[string]any); ok {
+				for _, keyword := range []string{"oneOf", "anyOf", "allOf"} {
+					if branches, ok := depSchema[keyword].([]any); ok {
+						collectFromBranches(branches)
+					}
+				}
+			}
+		}
+	}
+
+	// Check if/then/else
+	for _, keyword := range []string{"then", "else"} {
+		if branch, ok := parentSchema[keyword].(map[string]any); ok {
+			if branchProps, ok := branch["properties"].(map[string]any); ok {
+				for name, prop := range branchProps {
+					if _, exists := result[name]; !exists {
+						result[name] = prop
+					}
+				}
+			}
+		}
+	}
+
+	return result
 }

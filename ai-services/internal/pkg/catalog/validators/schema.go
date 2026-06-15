@@ -11,24 +11,27 @@ import (
 )
 
 // ValidateParams validates parameters against a JSON schema.
+// This function relies entirely on the JSON Schema validator to handle all validation logic,
+// including parameter existence, types, constraints, and conditional requirements.
 func ValidateParams(params map[string]any, schema map[string]any, contextName string) error {
 	// If no params provided or schema is empty, skip validation
 	if len(params) == 0 || len(schema) == 0 {
 		return nil
 	}
 
-	// First, validate that all provided params are supported by the schema
-	if err := ValidateSupportedParams(params, schema, contextName); err != nil {
-		return err
-	}
-
 	// Compile and validate against JSON schema
+	// The JSON Schema validator handles everything:
+	// - Parameter existence (via additionalProperties: false in schema)
+	// - Required/optional fields
+	// - Conditional requirements (dependencies, oneOf, anyOf, allOf, if/then/else)
+	// - Type validation
+	// - Format validation
+	// - Constraint validation (minLength, maxLength, min, max, pattern, etc.)
 	compiledSchema, err := compileJSONSchema(schema, contextName)
 	if err != nil {
 		return err
 	}
 
-	// Validate params against schema
 	return validateAgainstSchema(compiledSchema, params, contextName)
 }
 
@@ -83,84 +86,6 @@ func validateAgainstSchema(compiledSchema *jsonschema.Schema, params map[string]
 		return &ValidationError{
 			Code:    http.StatusBadRequest,
 			Message: fmt.Sprintf("Parameter validation failed for %s: %s", contextName, strings.Join(errorMessages, "; ")),
-		}
-	}
-
-	return nil
-}
-
-// ValidateSupportedParams checks if all provided parameters are defined in the schema.
-// This ensures users don't provide unsupported parameters that would be silently ignored.
-func ValidateSupportedParams(params map[string]any, schema map[string]any, contextName string) error {
-	// Extract the properties defined in the schema
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok || len(properties) == 0 {
-		// If no properties defined in schema, no params should be provided
-		if len(params) > 0 {
-			paramKeys := make([]string, 0, len(params))
-			for key := range params {
-				paramKeys = append(paramKeys, key)
-			}
-
-			return &ValidationError{
-				Code:    http.StatusBadRequest,
-				Message: fmt.Sprintf("Unsupported parameters for %s: %s. No parameters are supported for this resource.", contextName, strings.Join(paramKeys, ", ")),
-			}
-		}
-
-		return nil
-	}
-
-	// Check each provided parameter against the schema properties
-	var unsupportedParams []string
-	for paramKey := range params {
-		if err := ValidateNestedParam(paramKey, params[paramKey], properties); err != nil {
-			unsupportedParams = append(unsupportedParams, paramKey)
-		}
-	}
-
-	if len(unsupportedParams) > 0 {
-		// Get list of supported parameters for helpful error message
-		supportedParams := make([]string, 0, len(properties))
-		for key := range properties {
-			supportedParams = append(supportedParams, key)
-		}
-
-		return &ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("Unsupported parameters for %s: %s. Supported parameters are: %s", contextName, strings.Join(unsupportedParams, ", "), strings.Join(supportedParams, ", ")),
-		}
-	}
-
-	return nil
-}
-
-// ValidateNestedParam validates a parameter key against schema properties, handling nested objects.
-func ValidateNestedParam(paramKey string, paramValue any, properties map[string]any) error {
-	// Check if the parameter exists in the schema properties
-	propSchema, exists := properties[paramKey]
-	if !exists {
-		return fmt.Errorf("parameter '%s' not found in schema", paramKey)
-	}
-
-	// If the parameter value is a map (nested object), validate its nested properties
-	if nestedParams, ok := paramValue.(map[string]any); ok {
-		propSchemaMap, ok := propSchema.(map[string]any)
-		if !ok {
-			return nil // Schema doesn't define nested structure, let JSON schema validator handle it
-		}
-
-		// Check if the property schema defines nested properties
-		nestedProperties, ok := propSchemaMap["properties"].(map[string]any)
-		if !ok || len(nestedProperties) == 0 {
-			return nil // No nested properties defined, let JSON schema validator handle it
-		}
-
-		// Validate each nested parameter
-		for nestedKey := range nestedParams {
-			if _, exists := nestedProperties[nestedKey]; !exists {
-				return fmt.Errorf("nested parameter '%s.%s' not found in schema", paramKey, nestedKey)
-			}
 		}
 	}
 
