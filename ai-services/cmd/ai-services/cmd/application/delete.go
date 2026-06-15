@@ -154,7 +154,7 @@ func deleteApplication(appName string) error {
 
 	// Poll to verify deletion is complete
 	logger.Infof("Waiting for application %s to be deleted...\n", appName)
-	if err := waitForApplicationDeletion(appClient, app.ID, app.Name); err != nil {
+	if err := waitForApplicationDeletion(appClient, app.ID); err != nil {
 		return fmt.Errorf("failed to verify application deletion: %w", err)
 	}
 
