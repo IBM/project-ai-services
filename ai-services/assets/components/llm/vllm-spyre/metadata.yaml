@@ -7,3 +7,4 @@ description: "Deploy instruct models on vLLM inference engine with Spyre acceler
 # Component type this provider belongs to
 component_type: llm
 component_name: "Large language model (LLM)"
+default: true

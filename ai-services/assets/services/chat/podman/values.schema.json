@@ -5,13 +5,39 @@
     "backend": {
       "type": "object",
       "properties": {
-        "systemPrompt": {
-          "type": "string",
-          "title": "System Prompt",
-          "description": "Custom initial system prompt for conversational RAG. Leave empty to use default.",
-          "default": "",
-          "minLength": 10,
-          "maxLength": 5000
+        "editSystemPrompt": {
+          "type": "boolean",
+          "title": "Edit system prompt for queries",
+          "description": "Enable editing of the system prompt used for conversational queries",
+          "default": false
+        }
+      },
+      "dependencies": {
+        "editSystemPrompt": {
+          "oneOf": [
+            {
+              "properties": {
+                "editSystemPrompt": {
+                  "enum": [false]
+                }
+              }
+            },
+            {
+              "properties": {
+                "editSystemPrompt": {
+                  "enum": [true]
+                },
+                "systemPrompt": {
+                  "type": "string",
+                  "title": "Prompt text",
+                  "description": "Custom initial system prompt for conversational RAG",
+                  "default": "You are a helpful, conversational AI assistant. Engage naturally with users across multiple turns of conversation. Provide clear, accurate, and contextually relevant responses. Reference previous exchanges when appropriate to maintain conversation flow.",
+                  "minLength": 10,
+                  "maxLength": 2500
+                }
+              }
+            }
+          ]
         }
       }
     }
