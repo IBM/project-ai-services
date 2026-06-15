@@ -77,28 +77,6 @@ const DeploymentDetails = ({
             unit: "cores",
           },
           {
-            name: "Spyre cards",
-            used:
-              response.data.accelerators &&
-              Object.keys(response.data.accelerators).length > 0
-                ? Object.values(response.data.accelerators).reduce(
-                    (sum: number, val: { used?: number; total?: number }) =>
-                      sum + (val?.used || 0),
-                    0,
-                  )
-                : 0,
-            allocated:
-              response.data.accelerators &&
-              Object.keys(response.data.accelerators).length > 0
-                ? Object.values(response.data.accelerators).reduce(
-                    (sum: number, val: { used?: number; total?: number }) =>
-                      sum + (val?.total || 0),
-                    0,
-                  )
-                : 0,
-            unit: "cards",
-          },
-          {
             name: "Memory",
             used:
               Math.round(
