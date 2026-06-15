@@ -57,7 +57,7 @@ type DigitizeBackupClient struct {
 // NewDigitizeBackupClient creates a new digitize backup client.
 func NewDigitizeBackupClient(serviceURL string) *DigitizeBackupClient {
 	return &DigitizeBackupClient{
-		client: httpclient.New(serviceURL),
+		client: httpclient.New(serviceURL, true),
 	}
 }
 
