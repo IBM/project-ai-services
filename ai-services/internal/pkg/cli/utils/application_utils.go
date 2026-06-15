@@ -56,24 +56,14 @@ func GetAppDetailsWithComponents(appName string) (*types.Application, error) {
 
 // GetComponentID extracts the component ID for the specified target from application details.
 func GetComponentID(appDetails *types.Application, target string) (string, error) {
-	// Map target names to component provider names
-	targetToProvider := map[string]string{
-		"opensearch": "opensearch",
-	}
-
-	providerName, ok := targetToProvider[target]
-	if !ok {
-		return "", fmt.Errorf("unknown target: %s", target)
-	}
-
 	// Search through services and their components
 	for _, service := range appDetails.Services {
 		for _, component := range service.Component {
-			if component.Provider == providerName {
+			if component.Provider == target {
 				return component.ID, nil
 			}
 		}
 	}
 
-	return "", fmt.Errorf("component with provider '%s' not found for target '%s'", providerName, target)
+	return "", fmt.Errorf("component with provider not found for target '%s'", target)
 }
