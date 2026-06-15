@@ -69,9 +69,9 @@ const SolutionDetailPanel = ({
             <Tag type="outline" size="sm">
               by IBM Power
             </Tag>
-            {solutionData.architectures.map((arch, index) => (
+            {solutionData.tag.map((tagItem, index) => (
               <Tag type="gray" size="sm" key={index}>
-                {arch}
+                {tagItem}
               </Tag>
             ))}
             {isCertified && (

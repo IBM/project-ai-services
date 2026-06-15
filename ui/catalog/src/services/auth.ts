@@ -42,11 +42,8 @@ export const logout = async () => {
   useAuthStore.getState().clearTokens();
   useAuthStore.getState().clearUserInfo();
 
-  // Clear deploy store state
-  useDeployStore.getState().clearArchitectures();
-  useDeployStore.getState().clearServiceSummaries();
-  useDeployStore.getState().clearArchitectureDetails();
-  useDeployStore.getState().clearDeployOptions();
+  // Clear all deploy store data
+  useDeployStore.getState().clearAll();
 };
 
 export const getUserInfo = async (): Promise<UserInfo> => {

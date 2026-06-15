@@ -36,7 +36,7 @@ import {
   Export,
   Column as ColumnIcon,
   Deploy,
-  Renew,
+  Reset,
 } from "@carbon/icons-react";
 import styles from "./DigitalAssistants.module.scss";
 import type { DigitalAssistantRow } from "./types";
@@ -99,6 +99,23 @@ const DigitalAssistantsPage = () => {
   const deployOptions = useDeployStore((state) => state.deployOptions);
   const catalogId = deployOptions?.id;
 
+  // Get architecture data from store for dynamic title and subtitle
+  const architectures = useDeployStore((state) => state.architectures);
+  const selectedArchitectureId = useDeployStore(
+    (state) => state.selectedArchitectureId,
+  );
+
+  // Find the selected architecture to get name and description
+  const selectedArchitecture = architectures.find(
+    (arch) => arch.id === selectedArchitectureId,
+  );
+
+  // Use architecture data or fallback to defaults
+  const pageTitle = selectedArchitecture?.name || "Digital assistants";
+  const pageSubtitle =
+    selectedArchitecture?.description ||
+    "Production-ready tools that help users complete tasks and access information through conversation or commands. Assistants integrate multiple services for complex use cases and support retrieval-augmented generation (RAG).";
+
   // Fetch applications from API
   const loadApplications = async () => {
     // Don't fetch if we don't have a catalog_id yet
@@ -139,6 +156,17 @@ const DigitalAssistantsPage = () => {
     loadApplications();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.page, state.pageSize, catalogId]);
+
+  //auto-refresh every 2 minutes
+  useEffect(() => {
+    if (catalogId && state.rowsData.length > 0) {
+      const intervalId = setInterval(() => {
+        loadApplications();
+      }, 120000);
+      return () => clearInterval(intervalId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalogId, state.rowsData.length]);
 
   const handleDeploySubmit = () => {
     loadApplications();
@@ -293,8 +321,8 @@ const DigitalAssistantsPage = () => {
       )}
       <Tabs>
         <PageHeader
-          title={{ text: "Digital assistants" }}
-          subtitle="Production-ready tools that help users complete tasks and access information through conversation or commands. Assistants integrate multiple services for complex use cases and support retrieval-augmented generation (RAG)."
+          title={{ text: pageTitle }}
+          subtitle={pageSubtitle}
           fullWidthGrid="xl"
           navigation={
             <TabList aria-label="Digital assistants tabs">
@@ -357,7 +385,7 @@ const DigitalAssistantsPage = () => {
                                 <Button
                                   hasIconOnly
                                   kind="ghost"
-                                  renderIcon={Renew}
+                                  renderIcon={Reset}
                                   iconDescription="Refresh"
                                   size="lg"
                                   onClick={loadApplications}

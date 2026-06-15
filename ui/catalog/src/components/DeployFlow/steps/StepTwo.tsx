@@ -9,7 +9,10 @@ import {
 import { ResourceRequirements } from "../components/ResourceRequirements";
 import { ServiceConfigCard } from "../components/ServiceConfigCard";
 import { fetchResources } from "@/api/digitalAssistants";
-import { useBatchProviderParams } from "@/hooks/useProviderParams";
+import {
+  useBatchProviderParams,
+  useMultiTypeProviderParams,
+} from "@/hooks/useProviderParams";
 import { getResourceSharingKey } from "@/utils/resourceSharing";
 import { useDeployStore } from "@/store/deploy.store";
 import type { ResourcesResponse, Component } from "@/types/digitalAssistants";
@@ -361,21 +364,31 @@ export const StepTwo: React.FC<StepProps> = ({
     return result;
   }, [deployOptions.services]);
 
-  // Dynamically fetch provider parameters for all component types
-  const componentTypes = Object.keys(allProviderIds);
-  const providerParamsHooks = componentTypes.reduce(
-    (acc, type) => {
-      // eslint-disable-next-line react-hooks/rules-of-hooks
-      acc[type] = useBatchProviderParams(type, allProviderIds[type] || []);
-      return acc;
-    },
-    {} as Record<string, ReturnType<typeof useBatchProviderParams>>,
-  );
+  // Fetch provider parameters for all component types dynamically
+  // This single hook call handles all component types, respecting Rules of Hooks
+  const {
+    paramsByType,
+    isLoading: _paramsLoading,
+    errorsByType,
+  } = useMultiTypeProviderParams(allProviderIds);
 
-  const providerParamsByType = useMemo(
-    () => providerParamsHooks,
-    [providerParamsHooks],
-  );
+  // Transform to match the interface expected by the rest of the component
+  const providerParamsByType = useMemo(() => {
+    const result: Record<
+      string,
+      ReturnType<typeof useBatchProviderParams>
+    > = {};
+
+    Object.entries(paramsByType).forEach(([componentType, paramsMap]) => {
+      result[componentType] = {
+        paramsMap,
+        isLoading: false, // Already loaded by useMultiTypeProviderParams
+        errors: errorsByType[componentType] || {},
+      };
+    });
+
+    return result;
+  }, [paramsByType, errorsByType]);
 
   // Extract model names from params for display - DYNAMIC for all component types
   useEffect(() => {

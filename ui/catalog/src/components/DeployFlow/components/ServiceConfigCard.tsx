@@ -1,4 +1,4 @@
-import { Fragment, useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Button, Dropdown, TextInput } from "@carbon/react";
 import { ProductiveCard } from "@carbon/ibm-products";
 import { Checkmark, Edit, View, ViewOff } from "@carbon/icons-react";
@@ -8,8 +8,8 @@ import type { ServiceConfigField } from "../types/StepTwo.types";
 import { getDisplayName } from "../utils/StepTwo.utils";
 import type { useBatchProviderParams } from "@/hooks/useProviderParams";
 import { DynamicSchemaFields } from "./DynamicSchemaFields";
-import { useState } from "react";
 import type { Component } from "@/types/digitalAssistants";
+import { parseSchema, validateField } from "@/utils/schemaParser";
 
 interface ServiceConfigCardProps {
   serviceName: string;
@@ -48,12 +48,60 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>(
     {},
   );
+  const [hasValidationError, setHasValidationError] = useState(false);
 
   const togglePasswordVisibility = (key: string) => {
     setShowPasswords((prev) => ({
       ...prev,
       [key]: !prev[key],
     }));
+  };
+
+  // Validate inference backend parameters
+  const validateInferenceBackendParams = (): boolean => {
+    if (!currentConfig?.inferenceBackend || !currentConfig?.params) {
+      return true; // No params to validate
+    }
+
+    const componentType = llmComponent ? "llm" : "reranker";
+    const paramsMap = providerParamsByType[componentType]?.paramsMap || {};
+    const schema = paramsMap[currentConfig.inferenceBackend];
+
+    if (!schema || !schema.properties) {
+      return true; // No schema to validate against
+    }
+
+    // Parse schema to get field definitions with validation rules
+    const fields = parseSchema(
+      schema as import("@/utils/schemaParser").JSONSchema,
+    );
+
+    // Validate each field
+    for (const field of fields) {
+      if (field.key === "model") continue; // Skip model field
+
+      const value = currentConfig.params[field.key];
+      const error = validateField(value, field);
+
+      if (error) {
+        return false; // Validation failed
+      }
+    }
+
+    return true; // All validations passed
+  };
+
+  // Handle Apply with validation
+  const handleApplyWithValidation = () => {
+    const isValid = validateInferenceBackendParams();
+
+    if (!isValid) {
+      setHasValidationError(true);
+      return;
+    }
+
+    setHasValidationError(false);
+    onApply();
   };
 
   // Compute available inference backend options based on selected model compatibility
@@ -119,13 +167,20 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       )}
       {isEditing && (
         <div className={styles.cardEditAction}>
-          <Button kind="ghost" size="sm" onClick={onCancel}>
+          <Button
+            kind="ghost"
+            size="sm"
+            onClick={() => {
+              setHasValidationError(false);
+              onCancel();
+            }}
+          >
             Cancel
           </Button>
           <Button
             kind="tertiary"
             size="sm"
-            onClick={onApply}
+            onClick={handleApplyWithValidation}
             renderIcon={Checkmark}
           >
             Apply
@@ -435,6 +490,10 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                         providerId={fieldValue || ""}
                         values={currentConfig?.params || {}}
                         onChange={(params) => {
+                          // Clear validation error when user makes changes
+                          if (hasValidationError) {
+                            setHasValidationError(false);
+                          }
                           onUpdateConfig({
                             params: {
                               ...currentConfig?.params,
@@ -449,6 +508,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                             import("@/utils/schemaParser").JSONSchema
                           >
                         }
+                        hasValidationError={hasValidationError}
                       />
                     </div>
                   </Fragment>

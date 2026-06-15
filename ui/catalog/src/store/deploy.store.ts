@@ -10,7 +10,6 @@ import type {
 
 interface ProviderParamsCache {
   data: Record<string, unknown>;
-  fetchedAt: number;
 }
 
 interface DeployState {
@@ -41,7 +40,7 @@ interface DeployState {
   resourcesError: string | null;
   resourcesFetchedAt: number | null;
 
-  // Provider params cache - not persisted (dynamic data)
+  // Provider params cache - persisted (configuration data)
   providerParams: Record<string, ProviderParamsCache>;
 
   // Architecture actions
@@ -91,6 +90,9 @@ interface DeployState {
 
   // Check if cache is stale (older than 5 minutes) - only for resources
   isResourcesStale: () => boolean;
+
+  // Clear all deploy store data
+  clearAll: () => void;
 }
 
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
@@ -249,7 +251,6 @@ export const useDeployStore = create<DeployState>()(
             ...state.providerParams,
             [key]: {
               data,
-              fetchedAt: Date.now(),
             },
           },
         }));
@@ -260,19 +261,14 @@ export const useDeployStore = create<DeployState>()(
         const cached = get().providerParams[key];
         if (!cached) return null;
 
-        // Check if stale
-        if (Date.now() - cached.fetchedAt > CACHE_DURATION) {
-          return null;
-        }
-
         return cached.data;
       },
 
       isProviderParamsStale: (componentType, providerId) => {
         const key = `${componentType}:${providerId}`;
         const cached = get().providerParams[key];
-        if (!cached) return true;
-        return Date.now() - cached.fetchedAt > CACHE_DURATION;
+        // Provider params are static configuration data - never stale
+        return !cached;
       },
 
       clearProviderParams: () => set({ providerParams: {} }),
@@ -283,17 +279,37 @@ export const useDeployStore = create<DeployState>()(
         if (!resourcesFetchedAt) return true;
         return Date.now() - resourcesFetchedAt > CACHE_DURATION;
       },
+
+      // Clear all deploy store data
+      clearAll: () => {
+        set({
+          architectures: [],
+          selectedArchitectureId: null,
+          architecturesError: null,
+          serviceSummaries: [],
+          serviceSummariesError: null,
+          architectureDetails: null,
+          architectureDetailsError: null,
+          deployOptions: null,
+          deployOptionsError: null,
+          resources: null,
+          resourcesError: null,
+          resourcesFetchedAt: null,
+          providerParams: {},
+        });
+      },
     }),
     {
       name: "deploy-storage",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        // Only persist architectures, serviceSummaries, architectureDetails, and deployOptions
+        // Only persist static configuration data (architectures, serviceSummaries, architectureDetails, deployOptions, and providerParams)
         architectures: state.architectures,
         selectedArchitectureId: state.selectedArchitectureId,
         serviceSummaries: state.serviceSummaries,
         architectureDetails: state.architectureDetails,
         deployOptions: state.deployOptions,
+        providerParams: state.providerParams,
       }),
     },
   ),

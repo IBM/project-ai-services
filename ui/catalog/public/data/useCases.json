@@ -10,6 +10,9 @@
         "Digital assistant"
       ],
       "assets": [
+        "Video demos"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "demo": "https://mediacenter.ibm.com/media/IBM+Spyre+for+Power%3A+Turn-key+AI/1_etcvyc6u",
@@ -22,11 +25,14 @@
       "title": "Analyst assistant",
       "description": "Enables finance teams to investigate fraud, identify high‑value clients, and uncover non‑performing assets using their core data—without needing specialized AI or IT skills such as SQL.",
       "creator": "IBM",
-      "domain": "Banking & Finance",
+      "domain": "Banking and finance",
       "architectures": [
         "Digital assistant"
       ],
       "assets": [
+        "Video demos"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "demo": "https://mediacenter.ibm.com/media/Infusing%20AI%20into%20mission%20critical%20workloads%20with%20PowerVS%20and%20watsonx.ai/1_fzqutamr",
@@ -39,11 +45,14 @@
       "title": "BI assistant",
       "description": "Enables teams to ask a question to analyze their data, understand business logic, and uncover what's happening, why it matters, and what to do next.",
       "creator": "IBM",
-      "domain": "Enterprise Resource Planning",
+      "domain": "Enterprise resource planning",
       "architectures": [
         "Digital assistant"
       ],
       "assets": [
+        "Video demos"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "demo": "https://mediacenter.ibm.com/media/IBM%20watsonx%20BI%2C%20your%20new%20AI-powered%20business%20insights%20agent/1_402dvneq",
@@ -56,11 +65,14 @@
       "title": "Conference slide search",
       "description": "Innovates conference experiences by enabling fast access to presentation slides from current and past events through a search‑driven digital assistant.",
       "creator": "IBM",
-      "domain": "Professional Services",
+      "domain": "Professional services",
       "architectures": [
         "Digital assistant"
       ],
       "assets": [
+        "Reference stories"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "featuredArticle": {
@@ -76,11 +88,14 @@
       "title": "Financial documents assistant",
       "description": "Enables conversational self-service for financial FAQs by helping customers quickly find information without digging through documents—reducing support friction.",
       "creator": "IBM",
-      "domain": "Banking & Finance",
+      "domain": "Banking and finance",
       "architectures": [
         "Digital assistant"
       ],
       "assets": [
+        "Reference stories"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "featuredArticle": {
@@ -95,11 +110,14 @@
       "title": "Invoice matching assistant",
       "description": "Ensures accurate, complete, and compliant financial transactions through automated multi‑way invoice matching within your ERP system.",
       "creator": "IBM",
-      "domain": "Enterprise Resource Planning",
+      "domain": "Enterprise resource planning",
       "architectures": [
         "Digital assistant"
       ],
       "assets": [
+        "Video demos"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "demo": "https://mediacenter.ibm.com/media/Intelligent%20workflow%20automation%20with%20agentic%20AI%20on%20SAP%20and%20IBM%20watsonx/1_c8dzgznk",
@@ -117,6 +135,10 @@
         "Digital assistant"
       ],
       "assets": [
+        "Video demos",
+        "Reference stories"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "demo": "https://mediacenter.ibm.com/media/IBM+Spyre+for+Power%3A+Turn-key+AI/1_etcvyc6u",
@@ -135,12 +157,15 @@
       "title": "Open account agent",
       "description": "Streamline account opening by automatically classifying onboarding documents and improving compliance with built‑in PII controls.",
       "creator": "IBM",
-      "domain": "Banking & Finance",
+      "domain": "Banking and finance",
       "architectures": [
-        "Digitize documents"
+        "Digital assistant"
       ],
       "assets": [
-        "Digitize documents"
+        "Video demos"
+      ],
+      "tag": [
+        "Digitize assistant"
       ],
       "demo": "https://mediacenter.ibm.com/media/AI+on+PowerA+IBM+Power10+Entity+Extraction+%28Demo%29/1_0r3zgnd4",
       "demoTitle": "AI on Power: IBM Power10 Entity Extraction (Demo)",
@@ -148,20 +173,25 @@
       "demoDuration": "1:36",
       "testimonial": {
         "company": "Crest Infosolutions",
-        "quote": "Personally Identifiable Information (PII) redaction helps to protect against data breach & ransom scenarios, which can cause fines on banks, insurance and other customer facing organizations, leading to loss of trust and reputation. We are planning to leverage IBM Spyre for Power for PII redaction, which we believe will decrease the amount of manual work by an organization, improving their ability to onboard customers faster and more efficiently."
+        "quote": "Personally Identifiable Information (PII) redaction helps to protect against data breach and ransom scenarios, which can cause fines on banks, insurance and other customer facing organizations, leading to loss of trust and reputation. We are planning to leverage IBM Spyre for Power for PII redaction, which we believe will decrease the amount of manual work by an organization, improving their ability to onboard customers faster and more efficiently."
       }
     },
     {
       "id": "9",
       "title": "Order processing assistant",
-      "description": "(coming soon) Streamlines order processing by automatically extracting relevant information and populating the correct ERP forms.",
+      "description": "(Coming soon...) Streamlines order processing by automatically extracting relevant information and populating the correct ERP forms.",
       "creator": "IBM",
-      "domain": "Enterprise Resource Planning",
+      "domain": "Enterprise resource planning",
       "architectures": [
         "Extract information (coming soon...)"
       ],
       "assets": [
-        "Extract information (coming soon...)"
+        "Video demos",
+        "Reference stories"
+      ],
+      "tag": [
+        "Extract information",
+        "(coming soon...)"
       ],
       "demo": "https://mediacenter.ibm.com/media/IBM+Spyre+for+Power%3A+Turn-key+AI/1_etcvyc6u",
       "demoTitle": "IBM Spyre Accelerator: Turn-key solution for AI enterprise workloads",
@@ -185,6 +215,9 @@
         "Digital assistant"
       ],
       "assets": [
+        "Reference stories"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "clientStories": [
@@ -204,6 +237,9 @@
         "Digital assistant"
       ],
       "assets": [
+        "Reference stories"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "featuredArticle": {
@@ -234,7 +270,11 @@
         "Forecasting (coming soon...)"
       ],
       "assets": [
-        "Forecasting (coming soon...)"
+        "Reference stories"
+      ],
+      "tag": [
+        "Forecasting",
+        "(coming soon...)"
       ],
       "featuredArticle": {
         "company": "BECOM Electronics GmbH",

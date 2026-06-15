@@ -18,6 +18,8 @@
 
 .description {
   @include type.type-style("body-long-01");
+  max-width: 85%;
+  word-wrap: break-word;
 }
 
 .tags {

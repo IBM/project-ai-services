@@ -30,7 +30,7 @@
 
 .stepTitle {
   @include type-style("heading-03");
-  margin: 0 0 $spacing-08 0;
+  margin: 0 0 $spacing-06 0;
 }
 
 .sectionTitle {
@@ -85,7 +85,7 @@
 
 .resourceGrid {
   display: flex;
-  gap: $spacing-05;
+  gap: $spacing-06;
   flex-wrap: wrap;
 }
 
@@ -136,7 +136,7 @@
 }
 
 .required {
-  font-weight: 600;
+  @include type-style("heading-04");
 }
 
 .serviceConfigCard {
