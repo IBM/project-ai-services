@@ -833,9 +833,10 @@ func applySchemaDefaults(appClient *catalogClient.ApplicationClient, componentTy
 	maps.Copy(result, defaults)
 
 	// Override with user-provided params (excluding 'provider' key)
+	// Support nested parameters using dot notation (e.g., auth.password)
 	for k, v := range userParams {
 		if k != "provider" {
-			result[k] = v
+			setNestedParam(result, k, v)
 		}
 	}
 
