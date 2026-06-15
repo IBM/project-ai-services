@@ -213,7 +213,7 @@ export const AboutTab: React.FC<AboutTabProps> = ({ onDeployClick }) => {
             <div className={styles.demoCard} key={idx}>
               {/* TODO: Update image here */}
               <img
-                src={demo.image?.source || "images/ragDemoThumbnail.webp"}
+                src={demo.image?.source}
                 alt={demo.title || "Demo"}
                 className={styles.demoImage}
               />
