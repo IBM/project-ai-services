@@ -3,7 +3,6 @@ package caddy
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,11 +19,8 @@ const (
 	filePerm         = 0o644
 )
 
-// ErrCertificatesAlreadyLoaded is returned when certificates are identical and don't need reloading.
-var ErrCertificatesAlreadyLoaded = errors.New("certificates already loaded")
-
 // LoadSSLCertificates stages user-provided certificates for the Caddy pod and updates TLS config via Admin API.
-// It validates certificate changes and skips loading if certificates are identical to existing ones.
+// Certificate validation is done in the CLI command's PreRunE hook before calling this function.
 func (c *Context) LoadSSLCertificates(baseDir, sslCertPath, sslKeyPath string) error {
 	logger.Infoln("loading ssl certificate to caddy...", logger.VerbosityLevelDebug)
 	if sslCertPath == "" || sslKeyPath == "" {
@@ -34,18 +30,6 @@ func (c *Context) LoadSSLCertificates(baseDir, sslCertPath, sslKeyPath string) e
 	// Define staged certificate paths
 	stagedCertPath := filepath.Join(baseDir, "common", "caddy", certsDirName, "tls.crt")
 	stagedKeyPath := filepath.Join(baseDir, "common", "caddy", certsDirName, "tls.key")
-
-	// Validate certificate update (check if certificates changed)
-	err := validateCertificateUpdate(sslCertPath, sslKeyPath, stagedCertPath, stagedKeyPath)
-	if err != nil {
-		if errors.Is(err, ErrCertificatesAlreadyLoaded) {
-			// Certificates are identical, skip staging and loading
-			logger.Infoln("Certificates unchanged, skipping reload")
-			return nil
-		}
-		// Certificate content changed - block update
-		return err
-	}
 
 	// Stage certificates
 	if err := stageCertificates(baseDir, sslCertPath, sslKeyPath); err != nil {
@@ -68,6 +52,8 @@ func (c *Context) LoadSSLCertificates(baseDir, sslCertPath, sslKeyPath string) e
 	); err != nil {
 		return fmt.Errorf("failed to load certificates via Admin API: %w", err)
 	}
+
+	logger.Infoln("SSL certificates loaded successfully into Caddy")
 
 	return nil
 }
@@ -104,42 +90,10 @@ func stageCertificates(baseDir, sslCertPath, sslKeyPath string) error {
 	return nil
 }
 
-// validateCertificateUpdate validates certificate changes during reconfigure.
-// Returns an error if validation fails or if certificates should be skipped (with special error).
-// Returns nil if certificates can proceed with loading.
-func validateCertificateUpdate(newCertPath, newKeyPath, stagedCertPath, stagedKeyPath string) error {
-	// Check if staged certificates exist from previous successful deployment
-	_, certErr := os.Stat(stagedCertPath)
-	_, keyErr := os.Stat(stagedKeyPath)
-
-	if os.IsNotExist(certErr) || os.IsNotExist(keyErr) {
-		// No staged certificates found - either:
-		// 1. Previous deployment used auto-generated certs, OR
-		// 2. Previous custom cert deployment failed during staging
-		// In both cases, allow cert loading since domain is already validated
-		logger.Infof("No existing custom certificates found, loading new certificates\n")
-		return nil
-	}
-
-	// Staged certificates exist - compare content
-	needsUpdate, err := certificatesNeedUpdate(newCertPath, newKeyPath, stagedCertPath, stagedKeyPath)
-	if err != nil {
-		return fmt.Errorf("failed to check certificate status: %w", err)
-	}
-
-	if !needsUpdate {
-		// Certificates are identical - return special error to signal skip
-		return ErrCertificatesAlreadyLoaded
-	}
-
-	// Certificates differ - block update
-	return fmt.Errorf("certificate content change not allowed during reconfigure. Please reset cert")
-}
-
-// certificatesNeedUpdate checks if new certificates differ from existing staged certificates.
+// CertificatesNeedUpdate checks if new certificates differ from existing staged certificates.
 // Returns true if certificates need to be updated, false if they are identical.
 // Assumes staged certificates exist (caller validates this).
-func certificatesNeedUpdate(newCertPath, newKeyPath, stagedCertPath, stagedKeyPath string) (bool, error) {
+func CertificatesNeedUpdate(newCertPath, newKeyPath, stagedCertPath, stagedKeyPath string) (bool, error) {
 	// Compare certificate hashes
 	newCertHash, err := computeFileHash(newCertPath)
 	if err != nil {
@@ -172,7 +126,11 @@ func computeFileHash(filePath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			logger.Warningf("Failed to close file %s: %v", filePath, closeErr)
+		}
+	}()
 
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
