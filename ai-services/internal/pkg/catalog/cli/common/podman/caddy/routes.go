@@ -22,6 +22,7 @@ type TemplateRouteInfo struct {
 func RegisterCatalogRoutes(runtime *podman.PodmanClient, caddyCtx *Context, routeInfos []TemplateRouteInfo) (map[string]string, error) {
 	if len(routeInfos) == 0 {
 		logger.Infof("No templates found with routes annotation, skipping route registration\n")
+
 		return nil, nil
 	}
 
@@ -43,6 +44,7 @@ func RegisterCatalogRoutes(runtime *podman.PodmanClient, caddyCtx *Context, rout
 		routes, err := proxy.RegisterRoutesForAppAndReturn(constants.CatalogAppName, proxyManager, info.RoutesAnnotation, caddyCtx.GetDomainSuffix(), info.PodName)
 		if err != nil {
 			registrationErrors = append(registrationErrors, fmt.Errorf("pod %s: %w", info.PodName, err))
+
 			continue
 		}
 
@@ -89,6 +91,7 @@ func GetCatalogRouteInfo(caddyCtx *Context, runtime *podman.PodmanClient, routeI
 // Converts "catalog-ui" to "CATALOG_UI_DOMAIN".
 func createRouteVariableName(subdomain string) string {
 	sanitized := strings.ReplaceAll(subdomain, "-", "_")
+
 	return strings.ToUpper(fmt.Sprintf("%s_DOMAIN", sanitized))
 }
 
@@ -99,6 +102,7 @@ func extractSubdomainFromDomain(domain string) string {
 	if len(parts) > 0 {
 		return parts[0]
 	}
+
 	return ""
 }
 
@@ -120,8 +124,10 @@ func parseRouteEntry(routeEntry, podName string) string {
 	parts, err := proxy.ParseRouteEntry(routeEntry)
 	if err != nil {
 		logger.Warningf("Invalid route format '%s' in pod %s: %v", routeEntry, podName, err)
+
 		return ""
 	}
+
 	return parts.Subdomain
 }
 
@@ -142,6 +148,7 @@ func processRouteInfo(info TemplateRouteInfo, proxyManager proxy.ProxyManager, r
 		if err != nil {
 			// Log warning but continue - route might not exist yet
 			logger.Warningf("Failed to query route %s from Caddy: %v", subdomain, err)
+
 			continue
 		}
 

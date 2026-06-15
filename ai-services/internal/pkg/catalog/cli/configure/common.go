@@ -22,6 +22,7 @@ func Run(runtime types.RuntimeType, baseDir, domainName, sslCertPath, sslKeyPath
 			SSLKeyPath:  sslKeyPath,
 			HttpsPort:   httpsPort,
 		}
+
 		return catalogPodman.DeployCatalog(ctx, opts)
 
 	case types.RuntimeTypeOpenShift:

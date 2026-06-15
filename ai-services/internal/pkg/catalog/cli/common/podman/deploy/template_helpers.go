@@ -48,6 +48,7 @@ func collectSecretNames(tp templates.Template, argParams map[string]string) ([]s
 		if podSpec.Kind == kindSecret {
 			secretNames = append(secretNames, podSpec.Name)
 		}
+
 		return nil
 	})
 

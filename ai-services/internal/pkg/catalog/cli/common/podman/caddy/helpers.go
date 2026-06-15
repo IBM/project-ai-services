@@ -16,7 +16,7 @@ import (
 )
 
 // ComputeDomainConfig computes the domain configuration from SSL certificates and domain name.
-// Priority: certDomain > customDomain > hostIP.nip.io
+// Priority: certDomain > customDomain > hostIP.nip.io.
 func ComputeDomainConfig(sslCertPath, sslKeyPath, domainName string) (string, error) {
 	var domainSuffix string
 

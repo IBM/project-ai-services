@@ -56,6 +56,7 @@ func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
 	caddyCtx, err := setupCaddyContext(deployCtx, opts, s)
 	if err != nil {
 		s.Fail("failed while setting up caddy context")
+
 		return err
 	}
 
@@ -65,17 +66,18 @@ func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
 	isDeployed, existingResources, err := deployCtx.CheckStatus()
 	if err != nil {
 		s.Fail("failed to check existing resources")
+
 		return fmt.Errorf("failed to check existing resources: %w", err)
 	}
 
 	if !isDeployed {
-
 		logger.Infoln("loading catalog service param values...", logger.VerbosityLevelDebug)
 
 		// Prepare deployment with domain suffix computation and create Caddy context
 		err = loadCatalogParamValues(deployCtx, passwordHash, opts.HttpsPort)
 		if err != nil {
 			s.Fail("failed to load param values")
+
 			return err
 		}
 
@@ -137,7 +139,6 @@ func handlePostDeployment(caddyCtx *caddy.Context, deployCtx *deploy.DeployConte
 
 // prepareCatalogDeployment prepares all necessary data for deployment including domain suffix computation.
 func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash string, httpsPort int) error {
-
 	// Generate argument parameters
 	argParams, err := generateArgParams(passwordHash, httpsPort)
 	if err != nil {
@@ -155,7 +156,6 @@ func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash string
 
 // generateArgParams generates the argument parameters for template rendering.
 func generateArgParams(passwordHash string, httpsPort int) (map[string]string, error) {
-
 	// Generate database password
 	dbPassword, err := utils.GenerateRandomPassword()
 	if err != nil {
@@ -202,12 +202,13 @@ func generateArgParams(passwordHash string, httpsPort int) (map[string]string, e
 // 1. Gets the Caddy pod name from deployment context templates
 // 2. Computes domain configuration (cert domain extraction + domain suffix resolution)
 // 3. Creates Caddy context with pod name and domain suffix
-// 4. Generates and writes Caddyfile
+// 4. Generates and writes Caddyfile.
 func setupCaddyContext(deployCtx *deploy.DeployContext, opts PodmanConfigureOptions, s *spinner.Spinner) (*caddy.Context, error) {
 	// Get Caddy pod name from deployment context (templates)
 	caddyPodName, err := deployCtx.GetCaddyPodName()
 	if err != nil {
 		s.Fail("failed to find Caddy pod name")
+
 		return nil, fmt.Errorf("failed to find Caddy pod name: %w", err)
 	}
 
@@ -215,6 +216,7 @@ func setupCaddyContext(deployCtx *deploy.DeployContext, opts PodmanConfigureOpti
 	domainSuffix, err := caddy.ComputeDomainConfig(opts.SSLCertPath, opts.SSLKeyPath, opts.DomainName)
 	if err != nil {
 		s.Fail("failed to calculate domain")
+
 		return nil, err
 	}
 
@@ -226,6 +228,7 @@ func setupCaddyContext(deployCtx *deploy.DeployContext, opts PodmanConfigureOpti
 	// Generate and write Caddyfile before deploying
 	if err := caddy.GenerateCaddyfile(opts.BaseDir); err != nil {
 		s.Fail("failed to generate Caddyfile")
+
 		return nil, fmt.Errorf("failed to generate Caddyfile: %w", err)
 	}
 

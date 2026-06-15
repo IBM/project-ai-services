@@ -60,6 +60,7 @@ func (c *Context) GetContainerAdminURL() string {
 	}
 
 	c.containerAdminURL = fmt.Sprintf("http://%s:2019", c.podName)
+
 	return c.containerAdminURL
 }
 

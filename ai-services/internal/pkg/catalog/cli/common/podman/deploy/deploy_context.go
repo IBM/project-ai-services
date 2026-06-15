@@ -79,7 +79,7 @@ func (d *DeployContext) PrepareValues(argParams map[string]string) error {
 	return nil
 }
 
-// checkStatus checks if the catalog is already deployed.
+// CheckStatus checks if the catalog is already deployed.
 func (d *DeployContext) CheckStatus() (bool, []string, error) {
 	catalogSecrets, err := collectSecretNames(d.TemplateProvider, d.argParams)
 	if err != nil {
@@ -181,6 +181,7 @@ func (d *DeployContext) executePodTemplate(podTemplateName string,
 	// filter out resources
 	if slices.Contains(existingResources, podSpec.Name) {
 		logger.Infof("%s: Skipping resource deploy as '%s' it already exists", podTemplateName, podSpec.Name)
+
 		return nil
 	}
 
