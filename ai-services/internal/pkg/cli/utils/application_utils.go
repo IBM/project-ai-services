@@ -65,5 +65,5 @@ func GetComponentID(appDetails *types.Application, target string) (string, error
 		}
 	}
 
-	return "", fmt.Errorf("component with provider not found for target '%s'", target)
+	return "", fmt.Errorf("component with not found for provider '%s'", target)
 }
