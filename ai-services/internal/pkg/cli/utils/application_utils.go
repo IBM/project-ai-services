@@ -59,11 +59,11 @@ func GetComponentID(appDetails *types.Application, target string) (string, error
 	// Search through services and their components
 	for _, service := range appDetails.Services {
 		for _, component := range service.Component {
-			if component.Provider == target {
+			if component.Provider.ID == target {
 				return component.ID, nil
 			}
 		}
 	}
 
-	return "", fmt.Errorf("component with not found for provider '%s'", target)
+	return "", fmt.Errorf("component not found for provider '%s'", target)
 }
