@@ -9,11 +9,22 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
+// HTTP header constants.
+const (
+	headerAuthorization = "Authorization"
+	headerContentType   = "Content-Type"
+	bearerPrefix        = "Bearer "
+	contentTypeJSON     = "application/json"
+)
+
 // API route constants for application endpoints.
 const (
-	listApplicationsRoute = "/api/v1/applications"
-	getApplicationPSRoute = "/api/v1/applications/%s/ps"
-	getApplicationRoute   = "/api/v1/applications/%s"
+	applicationsRoute       = "/api/v1/applications"
+	getApplicationPSRoute   = "/api/v1/applications/%s/ps"
+	getApplicationRoute     = "/api/v1/applications/%s"
+	svcDeployOptionsRoute   = "/api/v1/services/%s/deploy-options"
+	archDeployOptionsRoute  = "/api/v1/architectures/%s/deploy-options"
+	compProviderParamsRoute = "/api/v1/components/%s/providers/%s/params"
 )
 
 // ApplicationClient provides methods for interacting with the applications API.
@@ -65,7 +76,7 @@ func (c *ApplicationClient) ListApplications(params *ListApplicationsParams) (*t
 		}
 	}
 
-	resp, err := req.Get(listApplicationsRoute)
+	resp, err := req.Get(applicationsRoute)
 	if err != nil {
 		return nil, fmt.Errorf("list applications: %w", err)
 	}
@@ -148,11 +159,11 @@ func (c *ApplicationClient) GetApplication(id string) (*types.Application, error
 func (c *ApplicationClient) CreateApplication(req *models.CreateApplicationRequest) (*models.CreateApplicationResponse, error) {
 	var result models.CreateApplicationResponse
 	resp, err := c.httpClient.R().
-		SetHeader("Authorization", "Bearer "+c.client.AccessToken()).
-		SetHeader("Content-Type", "application/json").
+		SetHeader(headerAuthorization, bearerPrefix+c.client.AccessToken()).
+		SetHeader(headerContentType, contentTypeJSON).
 		SetBody(req).
 		SetResult(&result).
-		Post("/api/v1/applications")
+		Post(applicationsRoute)
 
 	if err != nil {
 		return nil, fmt.Errorf("create application: %w", err)
@@ -171,9 +182,9 @@ func (c *ApplicationClient) CreateApplication(req *models.CreateApplicationReque
 func (c *ApplicationClient) GetServiceDeployOptions(serviceID string) (*types.DeployOptionsService, error) {
 	var result types.DeployOptionsService
 	resp, err := c.httpClient.R().
-		SetHeader("Authorization", "Bearer "+c.client.AccessToken()).
+		SetHeader(headerAuthorization, bearerPrefix+c.client.AccessToken()).
 		SetResult(&result).
-		Get(fmt.Sprintf("/api/v1/services/%s/deploy-options", serviceID))
+		Get(fmt.Sprintf(svcDeployOptionsRoute, serviceID))
 	if err != nil {
 		return nil, fmt.Errorf("get service deploy options: %w", err)
 	}
@@ -190,9 +201,9 @@ func (c *ApplicationClient) GetServiceDeployOptions(serviceID string) (*types.De
 func (c *ApplicationClient) GetArchitectureDeployOptions(architectureID string) (*types.DeployOptionsArchitecture, error) {
 	var result types.DeployOptionsArchitecture
 	resp, err := c.httpClient.R().
-		SetHeader("Authorization", "Bearer "+c.client.AccessToken()).
+		SetHeader(headerAuthorization, bearerPrefix+c.client.AccessToken()).
 		SetResult(&result).
-		Get(fmt.Sprintf("/api/v1/architectures/%s/deploy-options", architectureID))
+		Get(fmt.Sprintf(archDeployOptionsRoute, architectureID))
 	if err != nil {
 		return nil, fmt.Errorf("get architecture deploy options: %w", err)
 	}
@@ -208,9 +219,9 @@ func (c *ApplicationClient) GetArchitectureDeployOptions(architectureID string) 
 func (c *ApplicationClient) GetComponentProviderParams(componentType, providerID string) (map[string]any, error) {
 	var result map[string]any
 	resp, err := c.httpClient.R().
-		SetHeader("Authorization", "Bearer "+c.client.AccessToken()).
+		SetHeader(headerAuthorization, bearerPrefix+c.client.AccessToken()).
 		SetResult(&result).
-		Get(fmt.Sprintf("/api/v1/components/%s/providers/%s/params", componentType, providerID))
+		Get(fmt.Sprintf(compProviderParamsRoute, componentType, providerID))
 	if err != nil {
 		return nil, fmt.Errorf("get component provider params: %w", err)
 	}

@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"strings"
@@ -33,8 +32,8 @@ import (
 
 const (
 	// Polling configuration.
-	pollInterval       = 10 * time.Second
-	pollTimeout        = 10 * time.Minute
+	pollInterval       = 20 * time.Second
+	pollTimeout        = 20 * time.Minute
 	paramSplitParts    = 2
 	expectedParamParts = 2
 )
@@ -380,10 +379,7 @@ func createApp(appName string) error {
 		return err
 	}
 
-	// 4. Debug: Print the payload being sent
-	logPayload(payload)
-
-	// 5. Create application via catalog API
+	// 4. Create application via catalog API
 	logger.Infof("Creating application '%s' using template '%s'...\n", appName, templateName)
 	resp, err := appClient.CreateApplication(payload)
 	if err != nil {
@@ -392,7 +388,7 @@ func createApp(appName string) error {
 
 	logger.Infof("Application creation initiated (ID: %s)\n", resp.ID)
 
-	// 6. Poll for application status
+	// 5. Poll for application status
 	return pollApplicationStatus(appClient, appName)
 }
 
@@ -432,16 +428,6 @@ func buildCatalogPayload(appName string) (*apiModels.CreateApplicationRequest, e
 	}
 
 	return buildServicePayload(templateName, appName)
-}
-
-// logPayload logs the payload for debugging purposes.
-func logPayload(payload *apiModels.CreateApplicationRequest) {
-	payloadJSON, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		logger.Warningf("Failed to marshal payload for debugging: %v\n", err)
-	} else {
-		logger.Infof("CLI REQUEST PAYLOAD:\n%s\n", string(payloadJSON))
-	}
 }
 
 // pollApplicationStatus polls the application status until it's ready or fails.
