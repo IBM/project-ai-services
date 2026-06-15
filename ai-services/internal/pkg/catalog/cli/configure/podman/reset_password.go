@@ -12,10 +12,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
-const (
-	catalogContainerName = "ai-services--catalog-backend"
-)
-
 func ResetCatalogPassword() error {
 	// Create deployment context without argParams for status check
 	deployCtx, err := deploy.NewDeployContext()
@@ -37,19 +33,12 @@ func ResetCatalogPassword() error {
 		return fmt.Errorf("failed to delete existing catalog secret: %w", err)
 	}
 
-	podEnv, err := getAndDeleteCatalogPod(deployCtx.Runtime)
+	opts, err := getAndDeleteCatalogPod(deployCtx.Runtime)
 	if err != nil {
 		return fmt.Errorf("failed to get existing catalog pod details: %w", err)
 	}
 
-	baseDir, domainName, httpsPort := getFlagValues(podEnv)
-	opts := PodmanConfigureOptions{
-		BaseDir:    baseDir,
-		DomainName: domainName,
-		HttpsPort:  httpsPort,
-	}
-
-	_, err = executeCatalogDeployment(context.Background(), deployCtx, opts, passwordHash)
+	_, err = executeCatalogDeployment(context.Background(), deployCtx, *opts, passwordHash)
 	if err != nil {
 		return fmt.Errorf("failed to deploy catalog pod: %w", err)
 	}
@@ -57,7 +46,23 @@ func ResetCatalogPassword() error {
 	return nil
 }
 
-func getAndDeleteCatalogPod(rt runtime.Runtime) (map[string]string, error) {
+func getAndDeleteCatalogPod(rt runtime.Runtime) (*PodmanConfigureOptions, error) {
+	opts, podID, err := getCatalogPodDetails(rt)
+	if err != nil {
+		return nil, err
+	}
+
+	logger.Infof("Deleting existing catalog pod %s", podID)
+	err = rt.DeletePod(podID, utils.BoolPtr(true))
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete existing catalog pod: %w", err)
+	}
+
+	return opts, nil
+}
+
+// getCatalogPodDetails retrieves catalog pod configuration by inspecting the running pod and its containers.
+func getCatalogPodDetails(rt runtime.Runtime) (*PodmanConfigureOptions, string, error) {
 	// Build filter to find all pods using the catalog secret via label
 	logger.Infof("Getting catalog pod details")
 	filter := map[string][]string{
@@ -71,61 +76,42 @@ func getAndDeleteCatalogPod(rt runtime.Runtime) (map[string]string, error) {
 	// List all pods that reference the catalog secret
 	pods, err := rt.ListPods(filter)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list pods: %w", err)
+		return nil, "", fmt.Errorf("failed to list pods: %w", err)
 	}
 	if len(pods) == 0 {
-		return nil, fmt.Errorf("no catalog pod found")
+		return nil, "", fmt.Errorf("no catalog pod found")
 	}
 
 	// Inspect catalog pod
 	pod := pods[0]
-	podID := ""
-	podEnv := map[string]string{}
 	pInfo, err := rt.InspectPod(pod.ID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to inspect pod %s: %w", pod.Name, err)
+		return nil, "", fmt.Errorf("failed to inspect pod %s: %w", pod.Name, err)
 	}
+
+	opts := &PodmanConfigureOptions{}
 
 	for _, container := range pInfo.Containers {
-		if container.Name == catalogContainerName {
-			// Inspect container for get hold of envs
-			cInfo, err := rt.InspectContainer(container.ID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
-			}
-			podID = pod.ID
-			podEnv = cInfo.Env
-
-			break
+		// Inspect container for get hold of envs
+		cInfo, err := rt.InspectContainer(container.ID)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
 		}
+		getEnvValues(cInfo.Env, opts)
 	}
 
-	logger.Infof("Deleting existing catalog pod %s", podID)
-	err = rt.DeletePod(podID, utils.BoolPtr(true))
-	if err != nil {
-		return podEnv, fmt.Errorf("failed to delete existing catalog pod: %w", err)
-	}
-
-	return podEnv, nil
+	return opts, pod.ID, nil
 }
 
-func getFlagValues(podEnv map[string]string) (string, string, int) {
-	// Setting baseDir global variable
-	var baseDir, domainName string
-	var httpsPort int
+func getEnvValues(podEnv map[string]string, opts *PodmanConfigureOptions) {
+	// Setting required 3 envs
 	if value, ok := podEnv["AI_SERVICES_BASE_DIR"]; ok {
-		baseDir = value
+		opts.BaseDir = value
 	}
-
-	// Setting domainName global variable
 	if value, ok := podEnv["DOMAIN_SUFFIX"]; ok {
-		domainName = value
+		opts.DomainName = value
 	}
-
-	// Setting httpsPort global variable
 	if value, ok := podEnv["CADDY_HTTPS_PORT"]; ok {
-		httpsPort, _ = strconv.Atoi(value)
+		opts.HttpsPort, _ = strconv.Atoi(value)
 	}
-
-	return baseDir, domainName, httpsPort
 }

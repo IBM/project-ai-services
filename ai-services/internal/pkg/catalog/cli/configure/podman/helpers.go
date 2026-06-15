@@ -4,12 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"strconv"
 
-	"github.com/containers/podman/v5/pkg/bindings/containers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
-	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
 
 const (
@@ -19,63 +17,38 @@ const (
 	certsDirName       = "certs"
 )
 
-// GetExistingConfigFromCatalogBackend retrieves the domain, HTTPS port, and base directory from the catalog-backend container.
+// GetExistingConfigFromCatalogBackend retrieves the domain, HTTPS port, and base directory from the catalog pod.
 // These values are used to validate that configuration hasn't changed during reconfigure operations.
-func GetExistingConfigFromCatalogBackend(rt *podman.PodmanClient) (domain string, httpsPort string, baseDir string, err error) {
-	// Construct the catalog-backend container name dynamically
-	// Pattern: {AppName}--catalog-backend (e.g., "ai-services--catalog-backend")
-	// This follows the Podman naming convention: {podName}-{containerName}
-	catalogBackendContainerName := fmt.Sprintf("%s--catalog-backend", catalogconstants.CatalogAppName)
-
-	// Inspect the catalog-backend container
-	stats, err := containers.Inspect(rt.Context, catalogBackendContainerName, nil)
+func GetExistingConfigFromCatalogBackend(rt runtime.Runtime) (domain string, httpsPort string, baseDir string, err error) {
+	// Use getCatalogPodDetails to retrieve configuration from the catalog pod
+	opts, _, err := getCatalogPodDetails(rt)
 	if err != nil {
-		return "", "", "", fmt.Errorf("failed to inspect catalog-backend container '%s': %w", catalogBackendContainerName, err)
+		return "", "", "", fmt.Errorf("failed to get catalog pod details: %w", err)
 	}
 
-	if stats == nil || stats.Config == nil || stats.Config.Env == nil {
-		return "", "", "", fmt.Errorf("invalid container stats when inspecting catalog-backend container")
+	// Validate that all required configuration values were found
+	if opts.DomainName == "" {
+		return "", "", "", fmt.Errorf("DOMAIN_SUFFIX environment variable not found in catalog pod")
 	}
 
-	// Extract DOMAIN_SUFFIX, HTTPS_PORT, and BASE_DIR from environment variables
-	for _, envVar := range stats.Config.Env {
-		// Environment variables are in format "KEY=VALUE"
-		parts := strings.SplitN(envVar, "=", 2)
-		if len(parts) == 2 {
-			switch parts[0] {
-			case domainSuffixEnvVar:
-				domain = parts[1]
-			case httpsPortEnvVar:
-				httpsPort = parts[1]
-			case baseDirEnvVar:
-				baseDir = parts[1]
-			}
-			// Early exit if all values found
-			if domain != "" && httpsPort != "" && baseDir != "" {
-				break
-			}
-		}
+	if opts.HttpsPort == 0 {
+		return "", "", "", fmt.Errorf("CADDY_HTTPS_PORT environment variable not found in catalog pod")
 	}
 
-	if domain == "" {
-		return "", "", "", fmt.Errorf("DOMAIN_SUFFIX environment variable not found in catalog-backend container")
+	if opts.BaseDir == "" {
+		return "", "", "", fmt.Errorf("AI_SERVICES_BASE_DIR environment variable not found in catalog pod")
 	}
 
-	if httpsPort == "" {
-		return "", "", "", fmt.Errorf("CADDY_HTTPS_PORT environment variable not found in catalog-backend container")
-	}
+	// Convert HttpsPort from int to string for return value
+	httpsPortStr := strconv.Itoa(opts.HttpsPort)
 
-	if baseDir == "" {
-		return "", "", "", fmt.Errorf("AI_SERVICES_BASE_DIR environment variable not found in catalog-backend container")
-	}
-
-	return domain, httpsPort, baseDir, nil
+	return opts.DomainName, httpsPortStr, opts.BaseDir, nil
 }
 
 // ValidateReconfigureParameters validates that domain, HTTPS port, base directory, and certificates haven't changed during reconfigure.
 // This function performs all validation checks including certificate validation.
 // Accepts pre-computed domainSuffix to avoid recomputing it.
-func ValidateReconfigureParameters(rt *podman.PodmanClient, domainSuffix string, httpsPort int, baseDir, sslCertPath, sslKeyPath string) error {
+func ValidateReconfigureParameters(rt runtime.Runtime, domainSuffix string, httpsPort int, baseDir, sslCertPath, sslKeyPath string) error {
 	// Get existing configuration from catalog-backend pod
 	existingDomain, existingHTTPSPort, existingBaseDir, err := GetExistingConfigFromCatalogBackend(rt)
 	if err != nil {
