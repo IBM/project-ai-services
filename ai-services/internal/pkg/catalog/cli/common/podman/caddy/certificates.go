@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
@@ -17,6 +18,7 @@ const (
 
 // LoadSSLCertificates stages user-provided certificates for the Caddy pod and updates TLS config via Admin API.
 func (c *Context) LoadSSLCertificates(baseDir, sslCertPath, sslKeyPath string) error {
+	logger.Infoln("loading ssl certificate to caddy...", logger.VerbosityLevelDebug)
 	if sslCertPath == "" || sslKeyPath == "" {
 		return nil
 	}

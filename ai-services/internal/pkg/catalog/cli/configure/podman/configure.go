@@ -31,7 +31,6 @@ type PodmanConfigureOptions struct {
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
 func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
-
 	logger.Infoln("started configuring catalog service...", logger.VerbosityLevelDebug)
 
 	// Create deployment context without argParams for status check
@@ -71,8 +70,6 @@ func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
 	}
 
 	if !isDeployed {
-		logger.Infoln("loading catalog service param values...", logger.VerbosityLevelDebug)
-
 		// Prepare deployment with domain suffix computation and create Caddy context
 		err = loadCatalogParamValues(deployCtx, passwordHash, opts.HttpsPort)
 		if err != nil {
@@ -80,8 +77,6 @@ func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
 
 			return err
 		}
-
-		logger.Infoln("executing catalog service resources...", logger.VerbosityLevelDebug)
 
 		// Execute pod templates
 		if err := deployCtx.ExecutePodLayers(opts.BaseDir, caddyCtx, existingResources); err != nil {
@@ -96,20 +91,18 @@ func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
 
 	logger.Infof("Catalog pod already exists: %v\n", existingResources)
 
-	logger.Infoln("loding ssl certificate to caddy...", logger.VerbosityLevelDebug)
-
 	// Load SSL certificates if provided
 	if err := caddyCtx.LoadSSLCertificates(opts.BaseDir, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
 		return err
 	}
-
-	logger.Infoln("handling post deployment steps...", logger.VerbosityLevelDebug)
 
 	return handlePostDeployment(caddyCtx, deployCtx)
 }
 
 // handlePostDeployment handles route registration and next steps display after catalog deployment.
 func handlePostDeployment(caddyCtx *caddy.Context, deployCtx *deploy.DeployContext) error {
+	logger.Infoln("handling post deployment steps...", logger.VerbosityLevelDebug)
+
 	// Extract route infos from deployment context
 	routeInfos, err := deployCtx.ExtractRouteInfos()
 	if err != nil {
@@ -139,6 +132,8 @@ func handlePostDeployment(caddyCtx *caddy.Context, deployCtx *deploy.DeployConte
 
 // prepareCatalogDeployment prepares all necessary data for deployment including domain suffix computation.
 func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash string, httpsPort int) error {
+	logger.Infoln("loading catalog service param values...", logger.VerbosityLevelDebug)
+
 	// Generate argument parameters
 	argParams, err := generateArgParams(passwordHash, httpsPort)
 	if err != nil {
