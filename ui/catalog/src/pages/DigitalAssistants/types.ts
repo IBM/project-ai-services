@@ -73,6 +73,7 @@ export const ACTION_TYPES = {
   // DeploymentDetails actions
   SHOW_DEPLOYMENT_DETAILS: "SHOW_DEPLOYMENT_DETAILS",
   HIDE_DEPLOYMENT_DETAILS: "HIDE_DEPLOYMENT_DETAILS",
+  UPDATE_DEPLOYMENT_NAME: "UPDATE_DEPLOYMENT_NAME",
 } as const;
 
 export type AppAction =
@@ -116,7 +117,8 @@ export type AppAction =
       type: typeof ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS;
       payload: DeploymentDetails;
     }
-  | { type: typeof ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS };
+  | { type: typeof ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS }
+  | { type: typeof ACTION_TYPES.UPDATE_DEPLOYMENT_NAME; payload: string };
 
 // Table headers
 export const HEADERS: DataTableHeader[] = [
@@ -301,6 +303,13 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         ...state,
         selectedDeployment: null,
         showDeploymentDetails: false,
+      };
+    case ACTION_TYPES.UPDATE_DEPLOYMENT_NAME:
+      return {
+        ...state,
+        selectedDeployment: state.selectedDeployment
+          ? { ...state.selectedDeployment, name: action.payload }
+          : null,
       };
     default:
       return state;
