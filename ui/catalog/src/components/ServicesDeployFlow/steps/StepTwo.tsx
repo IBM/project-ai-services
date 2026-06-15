@@ -311,7 +311,6 @@ export const StepTwo: React.FC<StepProps> = ({
       // Special handling for LLM: Add both Inference Method and LLM Model fields
       if (component.type === "llm") {
         // 1. Add LLM Model field first (shows model names)
-        console.log("This is the name ", component.name);
         if (llmOptions.length > 0) {
           fields.push({
             key: component.type,

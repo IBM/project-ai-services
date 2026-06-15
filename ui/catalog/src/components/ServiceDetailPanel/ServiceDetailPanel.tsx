@@ -302,7 +302,7 @@ const ServiceDetailPanel = ({
             <div className={styles.tagContainer}>
               {service.tags?.map((tag, index) => (
                 <Tag key={index} type="outline">
-                  {tag}
+                  {"by IBM Power"}
                 </Tag>
               ))}
               {service.certifiedBy && (

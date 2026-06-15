@@ -239,10 +239,7 @@ export const ServicesDeployFlow = ({
 
       // If models exist, set the first one as default
       if (models.length > 0) {
-        console.log(
-          `Setting default model for ${component.type}:`,
-          models[0].id,
-        );
+      
         updates[component.type] = {
           ...componentConfig,
           params: {
@@ -256,7 +253,6 @@ export const ServicesDeployFlow = ({
 
     // Apply updates if any
     if (hasUpdates) {
-      console.log("Applying default model updates:", updates);
       dispatch({
         type: ACTION_TYPES.UPDATE_FORM_DATA,
         payload: {
@@ -346,8 +342,7 @@ export const ServicesDeployFlow = ({
         providerSchemas, // Pass cached schemas from store
         state.selectedServiceId, // Pass serviceId for correct cache key lookup
       );
-      console.log("Payload");
-      console.log(deploymentPayload);
+   
       // Add deployment_type property required by deployApplication API
       await deployApplication({
         ...deploymentPayload,
@@ -373,11 +368,10 @@ export const ServicesDeployFlow = ({
       }
 
       dispatch({ type: ACTION_TYPES.SET_DEPLOY_ERROR, payload: errorMessage });
-      console.error("Deployment error:", error);
     } finally {
       dispatch({ type: ACTION_TYPES.SET_IS_DEPLOYING, payload: false });
     }
-    // console.log(state.formData)
+
   };
 
   const handleClose = () => {

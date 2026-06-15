@@ -1,4 +1,4 @@
-import React, { useReducer, useEffect, useCallback } from "react";
+import React, { useReducer, useEffect, useCallback, useRef } from "react";
 import { api } from "@/api/axios";
 import { APPLICATION_ENDPOINTS } from "@/constants";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
@@ -141,6 +141,12 @@ const DeployedServicesTable = ({
               cachedServices as ApplicationApiResponse[],
             ),
           });
+          // Reset loading state when using cached data
+          dispatch({
+            type: ACTION_TYPES.DEPLOYED_SERVICES_SET_LOADING,
+            payload: false,
+          });
+          setDeployedServicesLoading(false);
           return;
         }
       }
@@ -193,11 +199,26 @@ const DeployedServicesTable = ({
     ],
   );
 
+  // Track if initial fetch has been done
+  const hasFetchedRef = useRef(false);
+  const prevRefreshTriggerRef = useRef(refreshTrigger);
+
   // Fetch deployed services data on component mount and when refreshTrigger changes
   useEffect(() => {
-    // Always force refresh to ensure we get services-specific data
-    fetchDeployedServices(true);
-  }, [refreshTrigger, fetchDeployedServices]);
+    // On mount: use cache if fresh (force = false)
+    if (!hasFetchedRef.current) {
+      hasFetchedRef.current = true;
+      fetchDeployedServices(false);
+      return;
+    }
+
+    // On refreshTrigger change: force refresh to get latest data
+    if (refreshTrigger !== prevRefreshTriggerRef.current) {
+      prevRefreshTriggerRef.current = refreshTrigger;
+      fetchDeployedServices(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTrigger]);
 
   // Auto-refresh every 2 minutes
   useEffect(() => {

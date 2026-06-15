@@ -89,7 +89,6 @@ const Services = () => {
     // Refresh deployed services table after successful deployment
     // Switch to Deployments tab (index 0)
     dispatch({ type: "DEPLOY_SUBMIT" });
-    console.log("Service deployed successfully");
   };
 
   const handleClosePanel = () => {
