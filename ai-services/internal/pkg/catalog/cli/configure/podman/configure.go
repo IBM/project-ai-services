@@ -63,21 +63,10 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 	s := spinner.New("Configuring catalog service...")
 	s.Start(ctx)
 
-	// Compute domain configuration early (needed for both validation and caddy context)
-	// Note: Certificate validation already done in CLI command's PreRunE hook
-	logger.Infoln("computing domain configuration...", logger.VerbosityLevelDebug)
-	domainSuffix, err := caddy.ComputeDomainConfig(opts.SSLCertPath, opts.SSLKeyPath, opts.DomainName)
-	if err != nil {
-		s.Fail("failed to calculate domain")
-
-		return err
-	}
-	logger.Infof("Using domain suffix: %s\n", domainSuffix, logger.VerbosityLevelDebug)
-
 	logger.Infoln("setting up caddy context...", logger.VerbosityLevelDebug)
 
-	// Setup Caddy context with pre-computed domain suffix and Caddyfile generation
-	caddyCtx, err := setupCaddyContext(deployCtx, opts, domainSuffix, s)
+	// Setup Caddy context with domain configuration and Caddyfile generation
+	caddyCtx, err := setupCaddyContext(deployCtx, opts, s)
 	if err != nil {
 		s.Fail("failed while setting up caddy context")
 
@@ -112,17 +101,19 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 
 		s.Stop("Catalog service deployed successfully")
 		logger.Infoln("-------")
+	} else {
+		s.Stop("Catalog service already deployed")
+		logger.Infof("Existing resources: %v\n", existingResources)
+		// Validate domain, HTTPS port, base directory, and certificates haven't changed
+		// Pass pre-computed domainSuffix to avoid recomputing
+		if err := ValidateReconfigureParameters(deployCtx.Runtime, caddyCtx.GetDomainSuffix(), opts.HttpsPort, opts.BaseDir, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
+			s.Fail("validation failed during reconfigure")
+
+			return nil, fmt.Errorf("reconfigure validation failed: %w", err)
+		}
 	}
 
-	logger.Infof("Catalog pod already exists: %v\n", existingResources)
-
-	// Load SSL certificates if provided (validation already done above for reconfigure case)
-	if err := caddyCtx.LoadSSLCertificates(opts.BaseDir, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
-		s.Fail("failed to load SSL certificates")
-		return err
-	}
-
-	return handlePostDeployment(caddyCtx, deployCtx)
+	return caddyCtx, nil
 }
 
 // handlePostDeployment handles route registration and next steps display after catalog deployment.
@@ -227,12 +218,13 @@ func generateArgParams(passwordHash string, httpsPort int) (map[string]string, e
 	return argParams, nil
 }
 
-// setupCaddyContext sets up the Caddy context with pre-computed domain suffix and Caddyfile generation.
+// setupCaddyContext sets up the Caddy context with domain configuration and Caddyfile generation.
 // This function:
 // 1. Gets the Caddy pod name from deployment context templates
-// 2. Creates Caddy context with pod name and pre-computed domain suffix
-// 3. Generates and writes Caddyfile.
-func setupCaddyContext(deployCtx *deploy.DeployContext, opts PodmanConfigureOptions, domainSuffix string, s *spinner.Spinner) (*caddy.Context, error) {
+// 2. Computes domain configuration (cert domain extraction + domain suffix resolution)
+// 3. Creates Caddy context with pod name and domain suffix
+// 4. Generates and writes Caddyfile.
+func setupCaddyContext(deployCtx *deploy.DeployContext, opts PodmanConfigureOptions, s *spinner.Spinner) (*caddy.Context, error) {
 	// Get Caddy pod name from deployment context (templates)
 	caddyPodName, err := deployCtx.GetCaddyPodName()
 	if err != nil {
@@ -241,7 +233,17 @@ func setupCaddyContext(deployCtx *deploy.DeployContext, opts PodmanConfigureOpti
 		return nil, fmt.Errorf("failed to find Caddy pod name: %w", err)
 	}
 
-	// Create Caddy context with pod name and pre-computed domain suffix (NO template dependencies)
+	// Compute domain configuration (cert domain extraction + domain suffix resolution)
+	domainSuffix, err := caddy.ComputeDomainConfig(opts.SSLCertPath, opts.SSLKeyPath, opts.DomainName)
+	if err != nil {
+		s.Fail("failed to calculate domain")
+
+		return nil, err
+	}
+
+	logger.Infof("Using domain suffix: %s\n", domainSuffix, logger.VerbosityLevelDebug)
+
+	// Create Caddy context with pod name and domain suffix (NO template dependencies)
 	caddyCtx := caddy.NewContext(caddyPodName, domainSuffix)
 
 	// Generate and write Caddyfile before deploying
