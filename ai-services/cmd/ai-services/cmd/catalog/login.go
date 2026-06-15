@@ -39,13 +39,13 @@ unnecessary round-trips to the server.
 
 Examples:
 		# Interactive login (password is prompted securely)
-		ai-services catalog login --server http://localhost:8080 --username admin
+		ai-services catalog login --server https://localhost:443 --username admin
 
 		# Non-interactive login via stdin pipe (password not recorded in shell history)
-		echo "$MY_PASSWORD" | ai-services catalog login --server http://localhost:8080 --username admin --password-stdin
+		echo "$MY_PASSWORD" | ai-services catalog login --server https://localhost:443 --username admin --password-stdin
 
 		# Login with insecure TLS (skip certificate verification)
-		ai-services catalog login --server https://localhost:8443 --username admin --insecure`,
+		ai-services catalog login --server https://localhost:443 --username admin --insecure`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return validateServerURL(serverURL)
 		},
@@ -54,11 +54,12 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVar(&serverURL, "server", "http://localhost:8080", "Catalog API server URL")
+	cmd.Flags().StringVar(&serverURL, "server", "", "Catalog API server URL (required)")
 	cmd.Flags().StringVar(&username, "username", "", "Username to authenticate with (required)")
 	cmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "Read password from stdin instead of an interactive prompt")
 	cmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification (NOT for production use)")
 
+	_ = cmd.MarkFlagRequired("server")
 	_ = cmd.MarkFlagRequired("username")
 
 	return cmd
