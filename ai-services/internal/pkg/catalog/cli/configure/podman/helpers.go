@@ -10,12 +10,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
 
-const (
-	domainSuffixEnvVar = "DOMAIN_SUFFIX"
-	httpsPortEnvVar    = "CADDY_HTTPS_PORT"
-	baseDirEnvVar      = "AI_SERVICES_BASE_DIR"
-	certsDirName       = "certs"
-)
+const certsDirName = "certs"
 
 // GetExistingConfigFromCatalogBackend retrieves the domain, HTTPS port, and base directory from the catalog pod.
 // These values are used to validate that configuration hasn't changed during reconfigure operations.
@@ -72,30 +67,36 @@ func ValidateReconfigureParameters(rt runtime.Runtime, domainSuffix string, http
 	}
 
 	// Validate certificate changes if SSL certificates are provided
-	if sslCertPath != "" && sslKeyPath != "" {
-		// Define staged certificate paths
-		stagedCertPath := filepath.Join(baseDir, "common", "caddy", certsDirName, "tls.crt")
-		stagedKeyPath := filepath.Join(baseDir, "common", "caddy", certsDirName, "tls.key")
+	return validateCertificateChanges(baseDir, sslCertPath, sslKeyPath)
+}
 
-		// Check if staged certificates exist from previous successful deployment
-		_, certErr := os.Stat(stagedCertPath)
-		_, keyErr := os.Stat(stagedKeyPath)
+// validateCertificateChanges checks if certificate content has changed during reconfigure
+func validateCertificateChanges(baseDir, sslCertPath, sslKeyPath string) error {
+	if sslCertPath == "" || sslKeyPath == "" {
+		return nil
+	}
 
-		if os.IsNotExist(certErr) || os.IsNotExist(keyErr) {
-			// No staged certificates found - allow cert loading since domain is already validated
-			return nil
-		}
+	// Define staged certificate paths
+	stagedCertPath := filepath.Join(baseDir, "common", "caddy", certsDirName, "tls.crt")
+	stagedKeyPath := filepath.Join(baseDir, "common", "caddy", certsDirName, "tls.key")
 
-		// Staged certificates exist - compare content
-		needsUpdate, err := caddy.CertificatesNeedUpdate(sslCertPath, sslKeyPath, stagedCertPath, stagedKeyPath)
-		if err != nil {
-			return fmt.Errorf("failed to check certificate status: %w", err)
-		}
+	// Check if both staged certificates exist from previous successful deployment
+	if _, err := os.Stat(stagedCertPath); os.IsNotExist(err) {
+		return nil
+	}
+	if _, err := os.Stat(stagedKeyPath); os.IsNotExist(err) {
+		return nil
+	}
 
-		if needsUpdate {
-			// Certificates differ - block update
-			return fmt.Errorf("certificate content change not allowed during reconfigure. Please reset cert")
-		}
+	// Staged certificates exist - compare content
+	needsUpdate, err := caddy.CertificatesNeedUpdate(sslCertPath, sslKeyPath, stagedCertPath, stagedKeyPath)
+	if err != nil {
+		return fmt.Errorf("failed to check certificate status: %w", err)
+	}
+
+	if needsUpdate {
+		// Certificates differ - block update
+		return fmt.Errorf("certificate content change not allowed during reconfigure. Please reset cert")
 	}
 
 	return nil

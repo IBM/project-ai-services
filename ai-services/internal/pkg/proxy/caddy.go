@@ -104,6 +104,7 @@ func (c *caddyManager) RegisterRoute(route Route) error {
 	if checkResp.StatusCode() == http.StatusOK {
 		// Route already exists, skip registration
 		logger.Infof("Route %s already exists, skipping registration\n", route.ID, logger.VerbosityLevelDebug)
+
 		return nil
 	}
 
@@ -160,13 +161,11 @@ func extractDomainFromRoute(rawRoute map[string]any) (string, error) {
 
 // GetRouteByID retrieves a specific route by its ID from Caddy.
 func (c *caddyManager) GetRouteByID(routeID string) (*Route, error) {
-	// Build URL to get specific route by ID
 	idURL, err := url.JoinPath(c.adminURL, "id", routeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build route ID URL: %w", err)
 	}
 
-	// Query Caddy for the specific route
 	var rawRoute map[string]any
 	resp, err := c.httpClient.R().
 		SetResult(&rawRoute).
@@ -183,13 +182,11 @@ func (c *caddyManager) GetRouteByID(routeID string) (*Route, error) {
 		return nil, fmt.Errorf("caddy returned status %d for route %s", resp.StatusCode(), routeID)
 	}
 
-	// Extract domain using helper function
 	domain, err := extractDomainFromRoute(rawRoute)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract domain from route %s: %w", routeID, err)
 	}
 
-	// Build Route object with ID and Domain
 	return &Route{
 		ID:     routeID,
 		Domain: domain,
@@ -310,6 +307,10 @@ func UnregisterRoutesFromEndpoints(
 
 // extractRouteIDsFromEndpoints extracts unique route IDs from endpoints.
 func extractRouteIDsFromEndpoints(endpoints []map[string]any) map[string]bool {
+	if len(endpoints) == 0 {
+		return nil
+	}
+
 	routesToUnregister := make(map[string]bool)
 
 	for _, endpoint := range endpoints {
