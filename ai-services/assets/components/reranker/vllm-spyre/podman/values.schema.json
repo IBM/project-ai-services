@@ -10,7 +10,7 @@
         {
           "const": "BAAI/bge-reranker-v2-m3",
           "title": "bge-reranker-v2-m3",
-          "description": "**Languages:** Multilingual (100+ languages)\n\n**Use Cases:** Search result reranking, Document relevance scoring, Query-document matching refinement, RAG pipeline optimization\n\n**Strengths:** State-of-the-art reranking performance, Excellent multilingual support, GPU-accelerated inference with Spyre, Improved retrieval accuracy for RAG applications"
+          "description": "A multilingual, cross‑encoder–based reranker model used to improve retrieval quality by scoring and ranking candidate documents. It enhances search relevance by providing high‑accuracy reranking on top of initial vector retrieval."
         }
       ],
       "default": "BAAI/bge-reranker-v2-m3"
