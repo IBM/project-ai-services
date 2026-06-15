@@ -12,37 +12,19 @@
           "title": "Edit system prompt for queries",
           "description": "Enable editing of the system prompt used for conversational queries",
           "default": false,
-          "x-ui-only": true
+          "x-ui-only": true,
+          "x-ui-controls": "systemPrompt"
         },
-        "systemPrompt": {}
-      },
-      "oneOf": [
-        {
-          "properties": {
-            "editSystemPrompt": { 
-              "type": "boolean",
-              "const": false 
-            }
-          }
-        },
-        {
-          "properties": {
-            "editSystemPrompt": { 
-              "type": "boolean",
-              "const": true 
-            },
-            "systemPrompt": {
-              "type": "string",
-              "title": "Prompt text",
-              "description": "Custom initial system prompt for conversational RAG",
-              "default": "You are a helpful, conversational AI assistant. Engage naturally with users across multiple turns of conversation. Provide clear, accurate, and contextually relevant responses. Reference previous exchanges when appropriate to maintain conversation flow.",
-              "minLength": 10,
-              "maxLength": 2500
-            }
-          },
-          "required": ["systemPrompt"]
+        "systemPrompt": {
+          "type": "string",
+          "title": "Prompt text",
+          "description": "Custom initial system prompt for conversational RAG",
+          "default": "You are a helpful, conversational AI assistant. Engage naturally with users across multiple turns of conversation. Provide clear, accurate, and contextually relevant responses. Reference previous exchanges when appropriate to maintain conversation flow.",
+          "minLength": 10,
+          "maxLength": 2500,
+          "x-ui-controlled-by": "editSystemPrompt"
         }
-      ]
+      }
     }
   }
 }
