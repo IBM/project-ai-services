@@ -37,15 +37,17 @@ The stored access token is reused for subsequent commands as long as it is still
 valid. It is refreshed automatically only when it is about to expire, avoiding
 unnecessary round-trips to the server.
 
+To get the catalog backend IP address, use: ai-services catalog info
+
 Examples:
 		# Interactive login (password is prompted securely)
-		ai-services catalog login --server https://localhost:443 --username admin
+		ai-services catalog login --server https://<backend_ip>:443 --username admin
 
 		# Non-interactive login via stdin pipe (password not recorded in shell history)
-		echo "$MY_PASSWORD" | ai-services catalog login --server https://localhost:443 --username admin --password-stdin
+		echo "$MY_PASSWORD" | ai-services catalog login --server https://<backend_ip>:443 --username admin --password-stdin
 
 		# Login with insecure TLS (skip certificate verification)
-		ai-services catalog login --server https://localhost:443 --username admin --insecure`,
+		ai-services catalog login --server https://<backend_ip>:443 --username admin --insecure`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return validateServerURL(serverURL)
 		},
