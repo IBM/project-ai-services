@@ -15,7 +15,8 @@ export interface AboutSectionValue {
 
 export interface AboutSectionItem {
   title?: string;
-  values?: string[];
+  value?: string; // Single value for resource allocation items (e.g., "15 - 20")
+  values?: string[]; // Multiple values for use case domain items (e.g., ["Assistant 1", "Assistant 2"])
   url?: string;
   ctaLabel?: string;
   description?: string;

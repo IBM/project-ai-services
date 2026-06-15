@@ -8,6 +8,7 @@ import type {
   Component,
   Provider,
 } from "@/types/digitalAssistants";
+import { isInferenceComponent } from "./inferenceComponentHelper";
 
 interface DeploymentComponent {
   component_type: string;
@@ -74,7 +75,7 @@ function getProviderVersion(
 /**
  * Builds a deployment component from component configuration
  * All data comes from formData - no API calls needed
- * For LLM/reranker components, uses inferenceBackend as provider_id if specified
+ * For inference components (determined generically), uses inferenceBackend as provider_id if specified
  */
 function buildDeploymentComponent(
   componentType: string,
@@ -85,12 +86,30 @@ function buildDeploymentComponent(
   inferenceBackend?: string,
   serviceLevelParams?: Record<string, unknown>,
 ): DeploymentComponent {
-  // For LLM and reranker components, use inferenceBackend as provider if specified
+  // Determine if this is an inference component using generic logic
+  // An inference component has multiple providers with model input parameters
+  let componentDefinition: Component | undefined;
+
+  // Find component definition in service or global components
+  if (serviceDefinition) {
+    componentDefinition = serviceDefinition.components.find(
+      (c) => c.type === componentType,
+    );
+  }
+  if (!componentDefinition) {
+    componentDefinition = deployOptions.global_components.find(
+      (c) => c.type === componentType,
+    );
+  }
+
+  const isInferenceComp = componentDefinition
+    ? isInferenceComponent(componentDefinition)
+    : false;
+
+  // For inference components, use inferenceBackend as provider if specified
   // This allows the UI's "Inference Backend" dropdown to control which provider runs the model
-  const isInferenceComponent =
-    componentType === "llm" || componentType === "reranker";
   const providerId =
-    isInferenceComponent && inferenceBackend
+    isInferenceComp && inferenceBackend
       ? inferenceBackend
       : componentConfig.providerId;
 
@@ -99,7 +118,7 @@ function buildDeploymentComponent(
 
   // For inference components, merge service-level params (e.g., watsonx credentials)
   // These are entered via DynamicSchemaFields when selecting the inference backend
-  if (isInferenceComponent && serviceLevelParams) {
+  if (isInferenceComp && serviceLevelParams) {
     params = {
       ...serviceLevelParams,
       ...params,
