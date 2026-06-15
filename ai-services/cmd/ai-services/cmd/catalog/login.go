@@ -37,17 +37,17 @@ The stored access token is reused for subsequent commands as long as it is still
 valid. It is refreshed automatically only when it is about to expire, avoiding
 unnecessary round-trips to the server.
 
-To get the Catalog backend URL, use: ai-services catalog info
+To get the Catalog backend endpoint, use: ai-services catalog info
 
 Examples:
 		# Interactive login (password is prompted securely)
-		ai-services catalog login --server <catalog_backend_url> --username admin
+		ai-services catalog login --server <catalog_backend_endpoint> --username admin
 
 		# Non-interactive login via stdin pipe (password not recorded in shell history)
-		echo "$MY_PASSWORD" | ai-services catalog login --server <catalog_backend_url> --username admin --password-stdin
+		echo "$MY_PASSWORD" | ai-services catalog login --server <catalog_backend_endpoint> --username admin --password-stdin
 
 		# Login with insecure TLS (skip certificate verification)
-		ai-services catalog login --server <catalog_backend_url> --username admin --insecure`,
+		ai-services catalog login --server <catalog_backend_endpoint> --username admin --insecure`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return validateServerURL(serverURL)
 		},
@@ -56,7 +56,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVar(&serverURL, "server", "", "Catalog API backend URL (required)")
+	cmd.Flags().StringVar(&serverURL, "server", "", "Catalog backend endpoint (required)")
 	cmd.Flags().StringVar(&username, "username", "", "Username to authenticate with (required)")
 	cmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "Read password from stdin instead of an interactive prompt")
 	cmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification (NOT for production use)")
