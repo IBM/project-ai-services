@@ -579,6 +579,16 @@ func getPodmanURIAsRoot() (string, error) {
 	), nil
 }
 
+// GetAuthFilePath determines the auth.json file path based on the current user.
+// Returns the path to the Podman auth.json file for container registry authentication.
+func GetAuthFilePath() (string, error) {
+	if os.Geteuid() == 0 {
+		return "/run/user/0/containers/auth.json", nil
+	}
+
+	return fmt.Sprintf("/run/user/%d/containers/auth.json", os.Getuid()), nil
+}
+
 // ExtractTarGz extracts a tar.gz file to a destination directory.
 func ExtractTarGz(srcFile, destDir string) error {
 	file, err := os.Open(srcFile)
@@ -618,7 +628,19 @@ func ExtractTarGz(srcFile, destDir string) error {
 
 // extractTarEntry extracts a single tar entry.
 func extractTarEntry(tr *tar.Reader, header *tar.Header, destDir string) error {
-	target := filepath.Join(destDir, header.Name)
+	// Get the absolute path of the destination directory
+	destPath, err := filepath.Abs(destDir)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path for destination: %w", err)
+	}
+
+	// Join the paths. filepath.Join automatically calls filepath.Clean
+	target := filepath.Join(destPath, header.Name)
+
+	// ZIP SLIP FIX: Check if the resolved target path falls outside the destination directory
+	if !strings.HasPrefix(target, destPath+string(os.PathSeparator)) && target != destPath {
+		return fmt.Errorf("illegal file path in archive: %s", header.Name)
+	}
 
 	switch header.Typeflag {
 	case tar.TypeDir:

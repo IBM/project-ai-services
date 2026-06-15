@@ -4,7 +4,8 @@ import (
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/assets"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -50,7 +51,7 @@ func DisplayCatalogInfo() error {
 
 	// Step 3: Fetch route information
 	tp := templates.NewEmbedTemplateProvider(&assets.CatalogFS, "")
-	routeDomains, httpsPort, err := podman.GetCatalogRouteInfo(runtime, tp, catalogTemplate, nil)
+	routeDomains, httpsPort, err := GetCatalogRouteInfo(runtime)
 	if err != nil {
 		logger.Errorf("failed to get route info: %v\n", err)
 		// Continue with basic info display
@@ -70,6 +71,35 @@ func DisplayCatalogInfo() error {
 	}
 
 	return nil
+}
+
+// GetCatalogRouteInfo retrieves route domains and HTTPS port for the catalog service.
+// This orchestrates: deployContext gets pod name and route info from templates,
+// caddy.Context queries Caddy for route domains and HTTPS port.
+func GetCatalogRouteInfo(rt *rt.PodmanClient) (map[string]string, string, error) {
+	// Create deployment context to access templates
+	deployCtx, err := deploy.NewDeployContext()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create deployment context: %w", err)
+	}
+
+	// Get Caddy pod name from templates
+	caddyPodName, err := deployCtx.GetCaddyPodName()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get Caddy pod name: %w", err)
+	}
+
+	// Extract route infos from deployment context
+	routeInfos, err := deployCtx.ExtractRouteInfos()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to extract route infos: %w", err)
+	}
+
+	// Create Caddy context (domain suffix not needed for querying existing routes)
+	caddyCtx := caddy.NewContext(caddyPodName, "")
+
+	// Use caddy package to get route info
+	return caddy.GetCatalogRouteInfo(caddyCtx, rt, routeInfos)
 }
 
 // Made with Bob

@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -31,7 +29,9 @@ var (
 	httpsPort int
 )
 
-const defaultHTTPSPort = 443
+const (
+	defaultHTTPSPort = 443
+)
 
 // NewConfigureCmd creates a new configure command for the catalog service.
 func NewConfigureCmd() *cobra.Command {
@@ -52,7 +52,6 @@ Examples:
 			return validateConfigureFlags()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Prompt for admin password
 			return runConfigure()
 		},
 	}
@@ -64,13 +63,8 @@ Examples:
 
 // runConfigure executes the catalog configuration process.
 func runConfigure() error {
-	// Prompt for admin password
-	adminPassword, err := promptForPassword()
-	if err != nil {
-		return fmt.Errorf("failed to read admin password: %w", err)
-	}
-
 	var aiServicesDir string
+	var err error
 
 	// Use default base directory if not specified, otherwise validate
 	if baseDir == "" {
@@ -102,15 +96,7 @@ func runConfigure() error {
 		cleanKeyPath = filepath.Clean(sslKeyPath)
 	}
 
-	return configure.Run(configure.ConfigureOptions{
-		AdminPassword: adminPassword,
-		Runtime:       vars.RuntimeFactory.GetRuntimeType(),
-		BaseDir:       aiServicesDir,
-		DomainName:    domainName,
-		SSLCertPath:   cleanCertPath,
-		SSLKeyPath:    cleanKeyPath,
-		HttpsPort:     httpsPort,
-	})
+	return configure.Run(vars.RuntimeFactory.GetRuntimeType(), aiServicesDir, domainName, cleanCertPath, cleanKeyPath, httpsPort)
 }
 
 // validateConfigureFlags validates the configure command flags and initializes runtime.
@@ -248,36 +234,6 @@ func configureConfigureFlags(cmd *cobra.Command) {
 			"Must be used together with --ssl-cert.\n"+
 			"Example: --ssl-key /path/to/key.pem\n",
 	)
-}
-
-// promptForPassword prompts the user to enter a password securely.
-func promptForPassword() (string, error) {
-	fmt.Print("Enter admin password: ")
-	passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
-	fmt.Println() // Print newline after password input
-	if err != nil {
-		return "", err
-	}
-
-	password := string(passwordBytes)
-	if password == "" {
-		return "", fmt.Errorf("password cannot be empty")
-	}
-
-	// Prompt for confirmation
-	fmt.Print("Confirm admin password: ")
-	confirmBytes, err := term.ReadPassword(int(syscall.Stdin))
-	fmt.Println() // Print newline after password input
-	if err != nil {
-		return "", err
-	}
-
-	confirm := string(confirmBytes)
-	if password != confirm {
-		return "", fmt.Errorf("passwords do not match")
-	}
-
-	return password, nil
 }
 
 // Made with Bob

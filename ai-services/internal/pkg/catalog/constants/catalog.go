@@ -34,6 +34,8 @@ const (
 	CatalogVolumeSkipLabel = "ai-services.io/volume-skip-cleanup"
 	// PodmanAuthSecret represents podman auth secret name.
 	PodmanAuthSecret = "podman-auth-secret"
+	// CatalogSecretName represents the catalog secret name.
+	CatalogSecretName = "catalog-secret"
 )
 
 // Pagination constants.
