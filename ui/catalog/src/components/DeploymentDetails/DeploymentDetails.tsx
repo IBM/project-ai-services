@@ -28,10 +28,12 @@ import type {
   DeployIntegrationEndpoints,
   ResourcesApiResponse,
   ApplicationDetailsApiResponse,
+  AcceleratorCard,
 } from "@/types/digitalAssistants";
 import styles from "./DeploymentDetails.module.scss";
 import { api } from "@/api/axios";
 import { APPLICATION_ENDPOINTS, SERVICE_ENDPOINTS } from "@/constants";
+import AcceleratorCards from "./AcceleratorCards";
 
 interface DeploymentDetailsProps {
   deployment: DeploymentDetailsType;
@@ -53,6 +55,9 @@ const DeploymentDetails = ({
   const [integrationEndpoints, setIntegrationEndpoints] = useState<
     DeployIntegrationEndpoints[]
   >([]);
+  const [acceleratorCards, setAcceleratorCards] = useState<AcceleratorCard[]>(
+    [],
+  );
 
   useEffect(() => {
     const fetchResources = async () => {
@@ -108,9 +113,26 @@ const DeploymentDetails = ({
         ];
 
         setResources(transformedResources);
+
+        // Extract accelerator card IDs from the response
+        if (
+          response.data.accelerators &&
+          Object.keys(response.data.accelerators).length > 0
+        ) {
+          const cards: AcceleratorCard[] = Object.keys(
+            response.data.accelerators,
+          ).map((cardId) => ({
+            id: cardId,
+            label: cardId,
+          }));
+          setAcceleratorCards(cards);
+        } else {
+          setAcceleratorCards([]);
+        }
       } catch (error) {
         console.error("Error fetching application resources:", error);
         setResources([]);
+        setAcceleratorCards([]);
       } finally {
         setIsLoadingResources(false);
       }
@@ -486,6 +508,11 @@ const DeploymentDetails = ({
                   </ProductiveCard>
                 </Column>
               </Grid>
+
+              {/* Accelerator Cards Section */}
+              {acceleratorCards.length > 0 && (
+                <AcceleratorCards cards={acceleratorCards} />
+              )}
 
               <Grid className={styles.actionsGrid}>
                 <Column sm={4} md={8} lg={16}>
