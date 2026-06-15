@@ -191,6 +191,7 @@ func displayPropertiesRecursive(parentSchema map[string]any, properties map[stri
 		if propType == "object" {
 			if nestedProps, ok := prop["properties"].(map[string]any); ok {
 				displayPropertiesRecursive(prop, nestedProps, fmt.Sprintf("%s.%s", prefix, paramName))
+
 				continue
 			}
 		}
@@ -208,67 +209,116 @@ func displayPropertiesRecursive(parentSchema map[string]any, properties map[stri
 // in conditional branches (oneOf, anyOf, allOf, dependencies, if/then/else).
 // It merges properties from all branches, with later definitions taking precedence.
 func collectAllProperties(parentSchema map[string]any, baseProperties map[string]any) map[string]any {
-	result := make(map[string]any)
+	result := initializeBaseProperties(baseProperties)
 
-	// Start with base properties, skipping empty placeholders
+	// Collect from conditional branches at current schema level
+	collectConditionalBranches(parentSchema, result)
+
+	// Check dependencies (legacy pattern)
+	collectDependencyBranches(parentSchema, result)
+
+	// Check if/then/else
+	collectIfThenElseBranches(parentSchema, result)
+
+	return result
+}
+
+// initializeBaseProperties creates the initial result map with base properties,
+// skipping empty placeholders.
+func initializeBaseProperties(baseProperties map[string]any) map[string]any {
+	result := make(map[string]any)
 	for name, prop := range baseProperties {
-		if propMap, ok := prop.(map[string]any); ok && len(propMap) > 0 {
+		if isValidProperty(prop) {
 			result[name] = prop
 		}
 	}
 
-	// Collect from conditional branches at current level
-	collectFromBranches := func(branches []any) {
-		for _, branch := range branches {
-			if branchMap, ok := branch.(map[string]any); ok {
-				if branchProps, ok := branchMap["properties"].(map[string]any); ok {
-					for name, prop := range branchProps {
-						// Only add if not already present or if this has more detail
-						if existing, exists := result[name]; !exists {
-							result[name] = prop
-						} else if existingMap, ok := existing.(map[string]any); ok {
-							if propMap, ok := prop.(map[string]any); ok && len(propMap) > len(existingMap) {
-								result[name] = prop
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+	return result
+}
 
-	// Check oneOf/anyOf/allOf at current schema level
+// isValidProperty checks if a property is valid (non-empty map).
+func isValidProperty(prop any) bool {
+	propMap, ok := prop.(map[string]any)
+
+	return ok && len(propMap) > 0
+}
+
+// collectConditionalBranches collects properties from oneOf/anyOf/allOf branches.
+func collectConditionalBranches(parentSchema map[string]any, result map[string]any) {
 	for _, keyword := range []string{"oneOf", "anyOf", "allOf"} {
 		if branches, ok := parentSchema[keyword].([]any); ok {
-			collectFromBranches(branches)
+			mergePropertiesFromBranches(branches, result)
 		}
 	}
+}
 
-	// Check dependencies (legacy pattern)
-	if deps, ok := parentSchema["dependencies"].(map[string]any); ok {
-		for _, depValue := range deps {
-			if depSchema, ok := depValue.(map[string]any); ok {
-				for _, keyword := range []string{"oneOf", "anyOf", "allOf"} {
-					if branches, ok := depSchema[keyword].([]any); ok {
-						collectFromBranches(branches)
-					}
-				}
-			}
-		}
+// collectDependencyBranches collects properties from dependency schemas.
+func collectDependencyBranches(parentSchema map[string]any, result map[string]any) {
+	deps, ok := parentSchema["dependencies"].(map[string]any)
+	if !ok {
+		return
 	}
 
-	// Check if/then/else
+	for _, depValue := range deps {
+		depSchema, ok := depValue.(map[string]any)
+		if !ok {
+			continue
+		}
+		collectConditionalBranches(depSchema, result)
+	}
+}
+
+// collectIfThenElseBranches collects properties from if/then/else branches.
+func collectIfThenElseBranches(parentSchema map[string]any, result map[string]any) {
 	for _, keyword := range []string{"then", "else"} {
 		if branch, ok := parentSchema[keyword].(map[string]any); ok {
-			if branchProps, ok := branch["properties"].(map[string]any); ok {
-				for name, prop := range branchProps {
-					if _, exists := result[name]; !exists {
-						result[name] = prop
-					}
-				}
-			}
+			mergePropertiesFromBranch(branch, result)
 		}
 	}
+}
 
-	return result
+// mergePropertiesFromBranches merges properties from multiple branches into result.
+func mergePropertiesFromBranches(branches []any, result map[string]any) {
+	for _, branch := range branches {
+		branchMap, ok := branch.(map[string]any)
+		if !ok {
+			continue
+		}
+		mergePropertiesFromBranch(branchMap, result)
+	}
+}
+
+// mergePropertiesFromBranch merges properties from a single branch into result.
+func mergePropertiesFromBranch(branchMap map[string]any, result map[string]any) {
+	branchProps, ok := branchMap["properties"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	for name, prop := range branchProps {
+		mergeProperty(name, prop, result)
+	}
+}
+
+// mergeProperty merges a single property into result, preferring more detailed definitions.
+func mergeProperty(name string, prop any, result map[string]any) {
+	existing, exists := result[name]
+	if !exists {
+		result[name] = prop
+
+		return
+	}
+
+	// Replace if new property has more detail
+	if shouldReplaceProperty(existing, prop) {
+		result[name] = prop
+	}
+}
+
+// shouldReplaceProperty determines if an existing property should be replaced
+// with a new one based on detail level (map size).
+func shouldReplaceProperty(existing, new any) bool {
+	existingMap, existingOk := existing.(map[string]any)
+	newMap, newOk := new.(map[string]any)
+	return existingOk && newOk && len(newMap) > len(existingMap)
 }

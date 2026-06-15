@@ -676,7 +676,7 @@ func extractServiceParams(serviceID string, components []catalogTypes.DeployOpti
 }
 
 // setNestedParam sets a value in a nested map using a dot-notation key.
-// e.g. setNestedParam(m, "backend.systemPrompt", "hello") → m["backend"]["systemPrompt"] = "hello"
+// e.g. setNestedParam(m, "backend.systemPrompt", "hello") → m["backend"]["systemPrompt"] = "hello".
 func setNestedParam(m map[string]any, dotKey string, value string) {
 	parts := strings.SplitN(dotKey, ".", paramSplitParts)
 	if len(parts) == 1 {
