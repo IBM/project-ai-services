@@ -17,6 +17,9 @@ import (
 func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService *repository.ApplicationService) *gin.Engine {
 	router := gin.Default()
 
+	// Apply RequestID middleware to all routes
+	router.Use(middleware.RequestIDMiddleware())
+
 	// Health check endpoint
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "ok"})
