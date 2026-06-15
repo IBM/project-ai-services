@@ -31,19 +31,33 @@ type PodmanConfigureOptions struct {
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
 func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
+	deployCtx, caddyCtx, err := ExecuteCatalogDeployment(ctx, opts)
+	if err != nil {
+		return err
+	}
+	
+	// Load SSL certificates if provided
+	if err := caddyCtx.LoadSSLCertificates(opts.BaseDir, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
+		return err
+	}
+
+	return handlePostDeployment(caddyCtx, deployCtx)
+}
+
+func ExecuteCatalogDeployment(ctx context.Context, opts PodmanConfigureOptions) (*deploy.DeployContext, *caddy.Context, error) {
 	logger.Infoln("started configuring catalog service...", logger.VerbosityLevelDebug)
 
 	// Create deployment context without argParams for status check
 	deployCtx, err := deploy.NewDeployContext()
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	// Collect and hash password
 	// If secret exist passwordHash will be empty
 	passwordHash, err := collectAndHashPassword(deployCtx.Runtime)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	s := spinner.New("Configuring catalog service...")
@@ -56,7 +70,7 @@ func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
 	if err != nil {
 		s.Fail("failed while setting up caddy context")
 
-		return err
+		return nil, nil, err
 	}
 
 	logger.Infoln("checking for existing resources...", logger.VerbosityLevelDebug)
@@ -66,7 +80,7 @@ func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
 	if err != nil {
 		s.Fail("failed to check existing resources")
 
-		return fmt.Errorf("failed to check existing resources: %w", err)
+		return nil, nil, fmt.Errorf("failed to check existing resources: %w", err)
 	}
 
 	if !isDeployed {
@@ -75,14 +89,14 @@ func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
 		if err != nil {
 			s.Fail("failed to load param values")
 
-			return err
+			return nil, nil, err
 		}
 
 		// Execute pod templates
 		if err := deployCtx.ExecutePodLayers(opts.BaseDir, caddyCtx, existingResources); err != nil {
 			s.Fail("failed to deploy catalog pod")
 
-			return err
+			return nil, nil, err
 		}
 
 		s.Stop("Catalog service deployed successfully")
@@ -91,13 +105,9 @@ func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
 
 	logger.Infof("Catalog pod already exists: %v\n", existingResources)
 
-	// Load SSL certificates if provided
-	if err := caddyCtx.LoadSSLCertificates(opts.BaseDir, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
-		return err
-	}
-
-	return handlePostDeployment(caddyCtx, deployCtx)
+	return deployCtx, caddyCtx, nil
 }
+
 
 // handlePostDeployment handles route registration and next steps display after catalog deployment.
 func handlePostDeployment(caddyCtx *caddy.Context, deployCtx *deploy.DeployContext) error {

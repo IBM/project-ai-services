@@ -4,18 +4,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	"github.com/spf13/cobra"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
-	catalogConstant "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
 )
 
 var (
@@ -34,8 +33,7 @@ var (
 )
 
 const (
-	defaultHTTPSPort     = 443
-	catalogContainerName = "ai-services--catalog-backend"
+	defaultHTTPSPort = 443
 )
 
 // NewConfigureCmd creates a new configure command for the catalog service.
@@ -54,11 +52,15 @@ Examples:
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
+			if resetPasswordFlag {
+				return validateResetFlags(cmd)
+			}
+
 			return validateConfigureFlags()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if resetPasswordFlag {
-				return resetCatalogPassword()
+				return runResetPassword()
 			}
 
 			return runConfigure()
@@ -106,6 +108,29 @@ func runConfigure() error {
 	}
 
 	return configure.Run(vars.RuntimeFactory.GetRuntimeType(), aiServicesDir, domainName, cleanCertPath, cleanKeyPath, httpsPort)
+}
+
+func validateResetFlags(cmd *cobra.Command) error {
+	if !resetPasswordFlag {
+		return nil
+	}
+
+	// Check if domain-name was explicitly set
+	if domainName != "" {
+		return fmt.Errorf("--domain-name cannot be used with --reset-password")
+	}
+
+	// Check if https-port was explicitly set by the user
+	if cmd.Flags().Changed("https-port") {
+		return fmt.Errorf("--https-port cannot be used with --reset-password")
+	}
+
+	// Check if SSL certificate flags were set
+	if sslCertPath != "" || sslKeyPath != "" {
+		return fmt.Errorf("--ssl-cert and --ssl-key cannot be used with --reset-password")
+	}
+
+	return nil
 }
 
 // validateConfigureFlags validates the configure command flags and initializes runtime.
@@ -252,100 +277,22 @@ func configureConfigureFlags(cmd *cobra.Command) {
 	)
 }
 
-func resetCatalogPassword() error {
-	rt, err := vars.RuntimeFactory.Create("")
+func runResetPassword() error {
+	logger.Warningf("Resetting password will lead to restart of catalog UI and Backend pod.")
+	// Confirm deletion
+	confirmed, err := utils.ConfirmAction("\nDo you want to continue, with password reset?")
 	if err != nil {
-		return fmt.Errorf("failed to create runtime: %w", err)
+		return fmt.Errorf("failed to get confirmation: %w", err)
 	}
 
-	secretExists, err := rt.SecretExists(catalogConstant.CatalogSecretName)
-	if err != nil {
-		return fmt.Errorf("failed to check existing secrets: %w", err)
+	if !confirmed {
+		logger.Infoln("Catalog password reset cancelled")
+
+		return nil
 	}
 
-	if secretExists {
-		// Delete existing secret
-		logger.Infof("Deleting existing catalog secret %s", catalogConstant.CatalogSecretName)
-		err = rt.DeleteSecret(catalogConstant.CatalogSecretName)
-		if err != nil {
-			return fmt.Errorf("failed to delete existing catalog secret: %w", err)
-		}
-	}
-
-	podId, podEnv, err := getCatalogPodDetails(rt)
-	if err != nil {
-		return fmt.Errorf("failed to get existing catalog pod details: %w", err)
-	}
-
-	logger.Infof("Deleting existing catalog pod %s", podId)
-	err = rt.DeletePod(podId, utils.BoolPtr(true))
-	if err != nil {
-		return fmt.Errorf("failed to delete existing catalog pod: %w", err)
-	}
-
-	setGlobalFlagValues(podEnv)
-
-	// Deploy
-	return configure.Run(vars.RuntimeFactory.GetRuntimeType(), baseDir, domainName, "", "", httpsPort)
+	return catalogPodman.ResetCatalogPassword()
 }
 
-func setGlobalFlagValues(podEnv map[string]string) {
-	// Setting baseDir global variable
-	if value, ok := podEnv["AI_SERVICES_BASE_DIR"]; ok {
-		baseDir = value
-	}
-
-	// Setting domainName global variable
-	if value, ok := podEnv["DOMAIN_SUFFIX"]; ok {
-		domainName = value
-	}
-
-	// Setting httpsPort global variable
-	if value, ok := podEnv["CADDY_HTTPS_PORT"]; ok {
-		httpsPort, _ = strconv.Atoi(value)
-	}
-}
-
-func getCatalogPodDetails(rt runtime.Runtime) (string, map[string]string, error) {
-	// Build filter to find all pods using the catalog secret via label
-	logger.Infof("Getting catalog pod details")
-	filter := map[string][]string{
-		"label": {fmt.Sprintf(
-			"%s=%s",
-			catalogConstant.CatalogSecretLabel,
-			catalogConstant.CatalogSecretName,
-		)},
-	}
-
-	// List all pods that reference the catalog secret
-	pods, err := rt.ListPods(filter)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to list pods: %w", err)
-	}
-	if len(pods) == 0 {
-		return "", nil, fmt.Errorf("no catalog pod found")
-	}
-
-	// Inspect catalog pod
-	pod := pods[0]
-	pInfo, err := rt.InspectPod(pod.ID)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to inspect pod %s: %w", pod.Name, err)
-	}
-
-	for _, container := range pInfo.Containers {
-		if container.Name == catalogContainerName {
-			// Inspect container for get hold of envs
-			cInfo, err := rt.InspectContainer(container.ID)
-			if err != nil {
-				return "", nil, fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
-			}
-
-			return pod.ID, cInfo.Env, nil
-		}
-	}
-
-	return "", nil, fmt.Errorf("failed to find catalog container in pod %s", pod.Name)
-}
 
 // Made with Bob
