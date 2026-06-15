@@ -8,11 +8,18 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/containers/podman/v5/pkg/bindings/containers"
 	"github.com/project-ai-services/ai-services/assets"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+)
+
+const (
+	domainSuffixEnvVar = "DOMAIN_SUFFIX"
+	httpsPortEnvVar    = "CADDY_HTTPS_PORT"
+	baseDirEnvVar      = "AI_SERVICES_BASE_DIR"
 )
 
 // ComputeDomainConfig computes the domain configuration from SSL certificates and domain name.
@@ -127,6 +134,93 @@ func GenerateCaddyfile(baseDir string) error {
 	caddyfilePath := filepath.Join(caddyDir, "Caddyfile")
 	if err := os.WriteFile(caddyfilePath, rendered.Bytes(), filePerm); err != nil {
 		return fmt.Errorf("failed to write Caddyfile: %w", err)
+	}
+
+	return nil
+}
+
+// GetExistingConfigFromCatalogBackend retrieves the domain, HTTPS port, and base directory from the catalog-backend container.
+// These values are used to validate that configuration hasn't changed during reconfigure operations.
+func GetExistingConfigFromCatalogBackend(rt *podman.PodmanClient) (domain string, httpsPort string, baseDir string, err error) {
+	// Construct the catalog-backend container name dynamically
+	// Pattern: {AppName}--catalog-backend (e.g., "ai-services--catalog-backend")
+	// This follows the Podman naming convention: {podName}-{containerName}
+	catalogBackendContainerName := fmt.Sprintf("%s--catalog-backend", catalogconstants.CatalogAppName)
+
+	// Inspect the catalog-backend container
+	stats, err := containers.Inspect(rt.Context, catalogBackendContainerName, nil)
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to inspect catalog-backend container '%s': %w", catalogBackendContainerName, err)
+	}
+
+	if stats == nil || stats.Config == nil || stats.Config.Env == nil {
+		return "", "", "", fmt.Errorf("invalid container stats when inspecting catalog-backend container")
+	}
+
+	// Extract DOMAIN_SUFFIX, HTTPS_PORT, and BASE_DIR from environment variables
+	for _, envVar := range stats.Config.Env {
+		// Environment variables are in format "KEY=VALUE"
+		parts := strings.SplitN(envVar, "=", 2)
+		if len(parts) == 2 {
+			switch parts[0] {
+			case domainSuffixEnvVar:
+				domain = parts[1]
+			case httpsPortEnvVar:
+				httpsPort = parts[1]
+			case baseDirEnvVar:
+				baseDir = parts[1]
+			}
+			// Early exit if all values found
+			if domain != "" && httpsPort != "" && baseDir != "" {
+				break
+			}
+		}
+	}
+
+	if domain == "" {
+		return "", "", "", fmt.Errorf("DOMAIN_SUFFIX environment variable not found in catalog-backend container")
+	}
+
+	if httpsPort == "" {
+		return "", "", "", fmt.Errorf("CADDY_HTTPS_PORT environment variable not found in catalog-backend container")
+	}
+
+	if baseDir == "" {
+		return "", "", "", fmt.Errorf("AI_SERVICES_BASE_DIR environment variable not found in catalog-backend container")
+	}
+
+	return domain, httpsPort, baseDir, nil
+}
+
+// ValidateReconfigureParameters validates that domain, HTTPS port, and base directory haven't changed during reconfigure.
+// Simplified validation: always check all parameters against existing configuration.
+func ValidateReconfigureParameters(rt *podman.PodmanClient, sslCertPath, sslKeyPath, domainName string, httpsPort int, baseDir string) error {
+	// Get existing configuration from catalog-backend pod
+	existingDomain, existingHTTPSPort, existingBaseDir, err := GetExistingConfigFromCatalogBackend(rt)
+	if err != nil {
+		return fmt.Errorf("failed to get existing configuration from catalog-backend: %w", err)
+	}
+
+	// Always validate domain during reconfigure
+	newDomain, err := ComputeDomainConfig(sslCertPath, sslKeyPath, domainName)
+	if err != nil {
+		return fmt.Errorf("failed to compute domain suffix: %w", err)
+	}
+
+	// Validate domain matches
+	if existingDomain != newDomain {
+		return fmt.Errorf("domain change not allowed during reconfigure: existing=%s, new=%s. Please delete the catalog deployment and reconfigure fresh to change domain", existingDomain, newDomain)
+	}
+
+	// Always validate HTTPS port
+	newPortStr := fmt.Sprintf("%d", httpsPort)
+	if existingHTTPSPort != newPortStr {
+		return fmt.Errorf("HTTPS port change not allowed during reconfigure: existing=%s, new=%s. Catalog is already configured with HTTPS port %s", existingHTTPSPort, newPortStr, existingHTTPSPort)
+	}
+
+	// Always validate base directory
+	if existingBaseDir != baseDir {
+		return fmt.Errorf("base directory change not allowed during reconfigure: existing=%s, new=%s. Please delete the catalog deployment and reconfigure fresh to change base directory", existingBaseDir, baseDir)
 	}
 
 	return nil

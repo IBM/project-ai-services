@@ -105,7 +105,12 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 
 	logger.Infof("Catalog pod already exists: %v\n", existingResources)
 
-	return caddyCtx, nil
+	// Load SSL certificates if provided
+	if err := caddyCtx.LoadSSLCertificates(opts.BaseDir, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
+		return err
+	}
+
+	return handlePostDeployment(caddyCtx, deployCtx)
 }
 
 // handlePostDeployment handles route registration and next steps display after catalog deployment.

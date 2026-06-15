@@ -95,35 +95,20 @@ func (c *caddyManager) RegisterRoute(route Route) error {
 		return err
 	}
 
+	// Check if route already exists
 	checkResp, err := c.httpClient.R().Get(idURL)
 	if err != nil {
-		return fmt.Errorf("failed to check route: %w", err)
+		return fmt.Errorf("failed to check route existence: %w", err)
 	}
 
-	switch checkResp.StatusCode() {
-	case http.StatusOK:
-		return c.updateRoute(idURL, routeConfig)
-	case http.StatusNotFound:
-		return c.createRoute(routeConfig)
-	default:
-		return fmt.Errorf("unexpected status checking route: %d", checkResp.StatusCode())
-	}
-}
-
-// Helper to update an existing route via its specific ID URL.
-func (c *caddyManager) updateRoute(idURL string, routeConfig map[string]any) error {
-	resp, err := c.httpClient.R().
-		SetHeader("Content-Type", "application/json").
-		SetBody(routeConfig).
-		Put(idURL)
-	if err != nil {
-		return fmt.Errorf("failed to update route: %w", err)
-	}
-	if resp.StatusCode() != http.StatusOK && resp.StatusCode() != http.StatusCreated {
-		return fmt.Errorf("caddy returned status %d on update: %s", resp.StatusCode(), resp.String())
+	if checkResp.StatusCode() == http.StatusOK {
+		// Route already exists, skip registration
+		logger.Infof("Route %s already exists, skipping registration\n", route.ID, logger.VerbosityLevelDebug)
+		return nil
 	}
 
-	return nil
+	// Route doesn't exist, create it
+	return c.createRoute(routeConfig)
 }
 
 // Helper to append a new route to the server's route array.
