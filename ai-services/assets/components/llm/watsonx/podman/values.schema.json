@@ -18,19 +18,19 @@
     },
     "watsonxApiKey": {
       "type": "string",
-      "title": "watsonx API Key",
+      "title": "API Key",
       "format": "password",
-      "description": "watsonx API Key for LiteLLM integration"
+      "description": "API key for accessing watsonx"
     },
     "watsonxProjectId": {
       "type": "string",
-      "title": "watsonx Project ID",
-      "description": "watsonx Project ID for LiteLLM integration"
+      "title": "Project ID",
+      "description": "Find your ID on the watsonx cloud site when you create a project\n\n[Open project](https://dataplatform.cloud.ibm.com/projects/?context=wx)"
     },
     "watsonxUrl": {
       "type": "string",
-      "title": "watsonx Base URL",
-      "description": "watsonx Base URL for LiteLLM integration"
+      "title": "API Endpoint",
+      "description": "API Endpoint for accessing watsonx"
     }
   }
 }
