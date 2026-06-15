@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
-	"google.golang.org/grpc/balancer/base"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
