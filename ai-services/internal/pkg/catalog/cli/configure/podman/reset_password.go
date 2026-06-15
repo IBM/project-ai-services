@@ -24,9 +24,10 @@ func ResetCatalogPassword() error {
 	}
 
 	// Collect new password
-	// Terminate reset process when failed to collect password
-	passwordHash, err := collectAndHashPassword(deployCtx.Runtime)
+	passwordHash, err := promptAndHashPassword()
 	if err != nil {
+		// Terminate reset password process if failed to collect password
+
 		return err
 	}
 
