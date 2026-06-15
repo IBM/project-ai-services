@@ -9,17 +9,41 @@
   :global(.cds--data-table) {
     width: 100%;
 
-    // Make first 4 columns compact (sized to content)
-    :global(th:not(:last-child)),
-    :global(td:not(:last-child)) {
+    // Make first 3 columns compact (sized to content) - name, status, uptime
+    :global(th:nth-child(1)),
+    :global(td:nth-child(1)),
+    :global(th:nth-child(2)),
+    :global(td:nth-child(2)),
+    :global(th:nth-child(3)),
+    :global(td:nth-child(3)) {
       width: 1%;
       white-space: nowrap;
     }
 
-    // Last column takes remaining space and aligns content to right
+    // Service column - compact but allow wrapping if needed
+    :global(th:nth-child(4)),
+    :global(td:nth-child(4)) {
+      width: 1%;
+      white-space: nowrap;
+    }
+
+    // Messages column header - keep nowrap for header
+    :global(th:nth-child(5)) {
+      white-space: nowrap;
+    }
+
+    // Messages column cells - allow text wrapping to take available space
+    :global(td:nth-child(5)) {
+      white-space: normal;
+      word-wrap: break-word;
+      word-break: break-word;
+    }
+
+    // Last column (actions) - fixed width for action buttons
     :global(th:last-child),
     :global(td:last-child) {
-      width: 100%;
+      width: 1%;
+      white-space: nowrap;
       text-align: right;
     }
 
@@ -129,13 +153,30 @@
 
 .messageWithIcon {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: spacing.$spacing-03;
+}
+
+.messageWrapper {
+  display: inline-block;
+  cursor: help;
+}
+
+.messageText {
+  flex: 1;
+  word-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .messageIconError {
   flex-shrink: 0;
   color: theme.$support-error;
+}
+
+.messageIconSuccess {
+  flex-shrink: 0;
+  color: theme.$support-success;
 }
 
 .messageIconInfo {
