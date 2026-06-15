@@ -4,8 +4,8 @@
   "properties": {
     "model": {
       "type": "string",
-      "title": "Large Language Model (LLM)",
-      "description": "Large Language Model (LLM)",
+      "title": "Large language model (LLM)",
+      "description": "Large language model (LLM)",
       "oneOf": [
         {
           "const": "ibm-granite/granite-3.3-8b-instruct",

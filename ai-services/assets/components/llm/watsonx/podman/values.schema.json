@@ -5,7 +5,7 @@
   "properties": {
     "model": {
       "type": "string",
-      "title": "Large Language Model (LLM)",
+      "title": "Large language model (LLM)",
       "description": "Chat/Instruct model name for WatsonX",
       "oneOf": [
         {

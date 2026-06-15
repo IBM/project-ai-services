@@ -167,7 +167,7 @@ type Component struct {
 	Description   string `yaml:"description" json:"description"`
 	Type          string `yaml:"type" json:"type"`                     // "component"
 	ComponentType string `yaml:"component_type" json:"component_type"` // "vector_store", "embedding", "llm", etc.
-	ComponentName string `yaml:"component_name" json:"component_name"` // Display name for component type (e.g., "Vector Store", "LLM Model")
+	ComponentName string `yaml:"component_name" json:"component_name"` // Display name for component type (e.g., "Vector store", "Large language model")
 }
 
 // ComponentSummary represents a component for list API responses.
