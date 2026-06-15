@@ -44,7 +44,7 @@ func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
 		return err
 	}
 
-	deployCtx, caddyCtx, err := ExecuteCatalogDeployment(ctx, deployCtx, opts, passwordHash)
+	caddyCtx, err := executeCatalogDeployment(ctx, deployCtx, opts, passwordHash)
 	if err != nil {
 		return err
 	}
@@ -57,7 +57,7 @@ func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
 	return handlePostDeployment(caddyCtx, deployCtx)
 }
 
-func ExecuteCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts PodmanConfigureOptions, passwordHash string) (*deploy.DeployContext, *caddy.Context, error) {
+func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts PodmanConfigureOptions, passwordHash string) (*caddy.Context, error) {
 	logger.Infoln("started configuring catalog service...", logger.VerbosityLevelDebug)
 
 	s := spinner.New("Configuring catalog service...")
@@ -70,7 +70,7 @@ func ExecuteCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 	if err != nil {
 		s.Fail("failed while setting up caddy context")
 
-		return nil, nil, err
+		return nil, err
 	}
 
 	logger.Infoln("checking for existing resources...", logger.VerbosityLevelDebug)
@@ -80,7 +80,7 @@ func ExecuteCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 	if err != nil {
 		s.Fail("failed to check existing resources")
 
-		return nil, nil, fmt.Errorf("failed to check existing resources: %w", err)
+		return nil, fmt.Errorf("failed to check existing resources: %w", err)
 	}
 
 	if !isDeployed {
@@ -89,14 +89,14 @@ func ExecuteCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 		if err != nil {
 			s.Fail("failed to load param values")
 
-			return nil, nil, err
+			return nil, err
 		}
 
 		// Execute pod templates
 		if err := deployCtx.ExecutePodLayers(opts.BaseDir, caddyCtx, existingResources); err != nil {
 			s.Fail("failed to deploy catalog pod")
 
-			return nil, nil, err
+			return nil, err
 		}
 
 		s.Stop("Catalog service deployed successfully")
@@ -105,7 +105,7 @@ func ExecuteCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 
 	logger.Infof("Catalog pod already exists: %v\n", existingResources)
 
-	return deployCtx, caddyCtx, nil
+	return caddyCtx, nil
 }
 
 // handlePostDeployment handles route registration and next steps display after catalog deployment.

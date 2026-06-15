@@ -23,7 +23,7 @@ func ResetCatalogPassword() error {
 		return err
 	}
 
-	// Collect new password
+	// Collect new catalog password
 	passwordHash, err := promptAndHashPassword()
 	if err != nil {
 		// Terminate reset password process if failed to collect password
@@ -37,7 +37,7 @@ func ResetCatalogPassword() error {
 		return fmt.Errorf("failed to delete existing catalog secret: %w", err)
 	}
 
-	podEnv, err := processCatalogPod(deployCtx.Runtime)
+	podEnv, err := getAndDeleteCatalogPod(deployCtx.Runtime)
 	if err != nil {
 		return fmt.Errorf("failed to get existing catalog pod details: %w", err)
 	}
@@ -49,7 +49,7 @@ func ResetCatalogPassword() error {
 		HttpsPort:  httpsPort,
 	}
 
-	_, _, err = ExecuteCatalogDeployment(context.Background(), deployCtx, opts, passwordHash)
+	 _, err = executeCatalogDeployment(context.Background(), deployCtx, opts, passwordHash)
 	if err != nil {
 		return fmt.Errorf("failed to deploy catalog pod: %w", err)
 	}
@@ -57,7 +57,7 @@ func ResetCatalogPassword() error {
 	return nil
 }
 
-func processCatalogPod(rt runtime.Runtime) (map[string]string, error) {
+func getAndDeleteCatalogPod(rt runtime.Runtime) (map[string]string, error) {
 	// Build filter to find all pods using the catalog secret via label
 	logger.Infof("Getting catalog pod details")
 	filter := map[string][]string{

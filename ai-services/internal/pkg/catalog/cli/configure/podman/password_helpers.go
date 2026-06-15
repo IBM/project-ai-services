@@ -22,18 +22,6 @@ func collectAndHashPassword(rt runtime.Runtime) (string, error) {
 		return "", nil
 	}
 
-	// Prompt for admin password if secret doesn't exist
-	// adminPassword, err := promptForPassword()
-	// if err != nil {
-	// 	return "", fmt.Errorf("failed to read admin password: %w", err)
-	// }
-
-	// // Hash the password immediately after collection
-	// passwordHash, err := catalogutils.HashPasswordPBKDF2(adminPassword, defaultPasswordIterations)
-	// if err != nil {
-	// 	return "", fmt.Errorf("failed to hash password: %w", err)
-	// }
-
 	return promptAndHashPassword()
 }
 

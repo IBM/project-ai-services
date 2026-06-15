@@ -291,7 +291,7 @@ func configureConfigureFlags(cmd *cobra.Command) {
 }
 
 func runResetPassword() error {
-	logger.Warningf("Resetting password will lead to restart of catalog UI and Backend pod.")
+	logger.Warningf("Resetting password will reload catalog pod!")
 	// Confirm deletion
 	confirmed, err := utils.ConfirmAction("\nDo you want to continue, with password reset?")
 	if err != nil {
