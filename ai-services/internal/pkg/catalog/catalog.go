@@ -847,5 +847,4 @@ func (p *CatalogProvider) LoadServicesMD(serviceID string) (map[string]*texttemp
 	return templates, nil
 }
 
-
 // Made with Bob
