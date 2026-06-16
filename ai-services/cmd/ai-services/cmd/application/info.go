@@ -125,7 +125,7 @@ func printServicesInfo(services []catalogTypes.ApplicationService, appPS *catalo
 
 		tmpls, err := catalogProvider.LoadServicesMD(service.CatalogID)
 		if err != nil {
-			return fmt.Errorf("failed to load service readme: %w", err)
+			return fmt.Errorf("failed to load service md files: %w", err)
 		}
 
 		err = printInfo(tmpls, params, service.CatalogID)
