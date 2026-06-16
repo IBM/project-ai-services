@@ -8,12 +8,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -117,7 +116,7 @@ func runConfigure() error {
 }
 
 func validateResetFlag(cmd *cobra.Command, flagName string) error {
-	if err := validateRuntimeFlag(); err != nil {
+	if err := common.InitAndValidateRuntimeFlag(runtimeType); err != nil {
 		return err
 	}
 
@@ -139,7 +138,7 @@ func validateResetFlag(cmd *cobra.Command, flagName string) error {
 
 // validateConfigureFlags validates the configure command flags and initializes runtime.
 func validateConfigureFlags() error {
-	if err := validateRuntimeFlag(); err != nil {
+	if err := common.InitAndValidateRuntimeFlag(runtimeType); err != nil {
 		return err
 	}
 
@@ -151,24 +150,6 @@ func validateConfigureFlags() error {
 	// Validate HTTPS port range
 	if httpsPort < 1 || httpsPort > 65535 {
 		return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
-	}
-
-	return nil
-}
-
-func validateRuntimeFlag() error {
-	// Initialize runtime factory based on flag
-	rt := types.RuntimeType(runtimeType)
-	if !rt.Valid() {
-		return fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift'). Please specify runtime using --runtime flag", runtimeType)
-	}
-
-	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-	logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
-
-	// Check if podman runtime is being used on unsupported platform
-	if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
-		return err
 	}
 
 	return nil
@@ -228,7 +209,7 @@ func validateSSLCertificates() error {
 }
 
 func validateResetCertificateFlags(cmd *cobra.Command, flagName string) error {
-	if err := validateRuntimeFlag(); err != nil {
+	if err := common.InitAndValidateRuntimeFlag(runtimeType); err != nil {
 		return err
 	}
 
@@ -273,8 +254,7 @@ func runResetCertificate() error {
 // configureConfigureFlags configures the flags for the configure command.
 func configureConfigureFlags(cmd *cobra.Command) {
 	// Add runtime flag as required
-	cmd.Flags().StringVarP(&runtimeType, constants.RuntimeFlag, "r", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
-	_ = cmd.MarkFlagRequired(constants.RuntimeFlag)
+	common.ConfigureRuntimeFlag(cmd, &runtimeType)
 
 	// Add basedir flag
 	cmd.Flags().StringVar(

@@ -1,15 +1,10 @@
 package catalog
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
@@ -38,7 +33,7 @@ Examples:
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
-			return validateUninstallFlags()
+			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return uninstall.Uninstall(uninstall.UninstallOptions{
@@ -54,28 +49,9 @@ Examples:
 	return cmd
 }
 
-// validateUninstallFlags validates the uninstall command flags and initializes runtime.
-func validateUninstallFlags() error {
-	// Initialize runtime factory based on flag
-	rt := types.RuntimeType(runtimeType)
-	if !rt.Valid() {
-		return fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift'). Please specify runtime using --runtime flag", runtimeType)
-	}
-
-	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-	logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
-
-	if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 // configureUninstallFlags configures the flags for the uninstall command.
 func configureUninstallFlags(cmd *cobra.Command) {
-	cmd.Flags().StringVarP(&runtimeType, "runtime", "r", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
-	_ = cmd.MarkFlagRequired("runtime")
+	common.ConfigureRuntimeFlag(cmd, &runtimeType)
 	cmd.Flags().BoolVarP(&uninstallAutoYes, "yes", "y", false, "Automatically accept all confirmation prompts (default=false)")
 	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "Skip deleting catalog db data (default=false)")
 }

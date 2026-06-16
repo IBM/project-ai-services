@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/migrations"
@@ -14,12 +15,13 @@ import (
 // NewMigrateCmd returns the cobra command for database migration operations.
 func NewMigrateCmd() *cobra.Command {
 	var (
-		dbHost     string
-		dbPort     int
-		dbUser     string
-		dbPassword string
-		dbName     string
-		dbSSLMode  string
+		dbHost      string
+		dbPort      int
+		dbUser      string
+		dbPassword  string
+		dbName      string
+		dbSSLMode   string
+		runtimeType string
 	)
 
 	migrateCmd := &cobra.Command{
@@ -28,6 +30,9 @@ func NewMigrateCmd() *cobra.Command {
 		Long: `Manage database migrations for the catalog service.
 This command provides subcommands to initialize the database, run migrations,
 check migration status, and rollback migrations.`,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			return common.InitAndValidateRuntimeFlag(runtimeType)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
@@ -40,6 +45,7 @@ check migration status, and rollback migrations.`,
 	migrateCmd.PersistentFlags().StringVar(&dbPassword, "db-password", "", "Database password")
 	migrateCmd.PersistentFlags().StringVar(&dbName, "db-name", constants.DefaultDBName, "Database name")
 	migrateCmd.PersistentFlags().StringVar(&dbSSLMode, "db-sslmode", constants.DefaultSSLMode, "Database SSL mode (disable, require, verify-ca, verify-full)")
+	common.ConfigureRuntimeFlag(migrateCmd, &runtimeType)
 
 	// Helper function to get database config from flags
 	getDBConfig := func() db.Config {
