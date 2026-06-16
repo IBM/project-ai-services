@@ -1,10 +1,7 @@
 package caddy
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -114,56 +111,6 @@ func stageCertificates(baseDir, sslCertPath, sslKeyPath string) (string, string,
 	}
 
 	return certFilename, keyFilename, nil
-}
-
-// CertificatesNeedUpdate checks if new certificates differ from existing staged certificates.
-// Returns true if certificates need to be updated, false if they are identical.
-// Assumes staged certificates exist (caller validates this).
-func CertificatesNeedUpdate(newCertPath, newKeyPath, stagedCertPath, stagedKeyPath string) (bool, error) {
-	// Compare certificate hashes
-	newCertHash, err := computeFileHash(newCertPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to compute hash for new certificate: %w", err)
-	}
-
-	stagedCertHash, err := computeFileHash(stagedCertPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to compute hash for staged certificate: %w", err)
-	}
-
-	// Compare key hashes
-	newKeyHash, err := computeFileHash(newKeyPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to compute hash for new key: %w", err)
-	}
-
-	stagedKeyHash, err := computeFileHash(stagedKeyPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to compute hash for staged key: %w", err)
-	}
-
-	// If either cert or key differs, need update
-	return newCertHash != stagedCertHash || newKeyHash != stagedKeyHash, nil
-}
-
-// computeFileHash computes SHA256 hash of a file.
-func computeFileHash(filePath string) (string, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to open file: %w", err)
-	}
-	defer func() {
-		if closeErr := file.Close(); closeErr != nil {
-			logger.Warningf("Failed to close file %s: %v", filePath, closeErr)
-		}
-	}()
-
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", fmt.Errorf("failed to compute hash: %w", err)
-	}
-
-	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // Made with Bob
