@@ -92,21 +92,6 @@ const renderCell = ({
   );
 };
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const isTransientRefreshError = (error: unknown) => {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("socket hang up") ||
-    message.includes("network error") ||
-    message.includes("failed to fetch")
-  );
-};
-
 const DigitalAssistantsPage = () => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
@@ -183,25 +168,6 @@ const DigitalAssistantsPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalogId, state.rowsData.length]);
 
-  const refreshApplicationsWithRetry = async () => {
-    const retryDelays = [2000, 3000, 5000];
-
-    for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
-      try {
-        await sleep(retryDelays[attempt]);
-        await loadApplications();
-        return;
-      } catch (error) {
-        if (
-          attempt === retryDelays.length - 1 ||
-          !isTransientRefreshError(error)
-        ) {
-          throw error;
-        }
-      }
-    }
-  };
-
   const handleDeploySubmit = () => {
     loadApplications();
   };
@@ -231,7 +197,7 @@ const DigitalAssistantsPage = () => {
     try {
       await deleteApplication(state.selectedRowId);
       dispatch({ type: ACTION_TYPES.CLOSE_DELETE_DIALOG });
-      await refreshApplicationsWithRetry();
+      await loadApplications();
     } catch (err) {
       const msg =
         err instanceof Error
