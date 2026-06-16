@@ -813,7 +813,7 @@ func (p *CatalogProvider) LoadServicesMD(serviceID string) (map[string]*texttemp
 			return nil
 		}
 
-		// Only process .tmpl and .yaml.tmpl files
+		// Only process .md files
 		if !strings.HasSuffix(path, ".md") {
 			return nil
 		}
