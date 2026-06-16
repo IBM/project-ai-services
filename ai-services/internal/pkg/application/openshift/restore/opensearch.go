@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -15,8 +16,7 @@ import (
 )
 
 const (
-	defaultOpenSearchHost = "localhost:9200"
-	containerBackupPath   = "/tmp/opensearch_backup"
+	containerBackupPath = "/tmp/opensearch_backup"
 )
 
 // RestoreOpenSearch restores OpenSearch data for OpenShift runtime.
@@ -47,12 +47,18 @@ func RestoreOpenSearch(ctx context.Context, applicationID, backupFile string) er
 	logger.Infof("Namespace: %s\n", namespace, 0)
 	logger.Infof("OpenSearch Pod: %s\n", podName, 0)
 
+	// Get OpenSearch service name
+	serviceName, err := common.GetOpenSearchService(applicationID, namespace)
+	if err != nil {
+		return fmt.Errorf("failed to get OpenSearch service: %w", err)
+	}
+
 	// Create sidecar pod and perform restore
-	return manageSidecarPod(ctx, namespace, backupDir)
+	return manageSidecarPod(ctx, namespace, serviceName, backupDir)
 }
 
 // manageSidecarPod manages the lifecycle of a sidecar pod for restore operations.
-func manageSidecarPod(ctx context.Context, namespace, backupDir string) error {
+func manageSidecarPod(ctx context.Context, namespace, serviceName, backupDir string) error {
 	sidecarName := common.GenerateSidecarName("opensearch-restore-sidecar")
 
 	// Create sidecar pod
@@ -67,11 +73,11 @@ func manageSidecarPod(ctx context.Context, namespace, backupDir string) error {
 	}
 
 	// Perform restore operations
-	return performRestore(ctx, sidecarName, namespace, backupDir)
+	return performRestore(ctx, sidecarName, namespace, serviceName, backupDir)
 }
 
 // performRestore performs the actual restore operations in the sidecar pod.
-func performRestore(ctx context.Context, podName, namespace, backupDir string) error {
+func performRestore(ctx context.Context, podName, namespace, serviceName, backupDir string) error {
 	// Get OpenSearch password
 	osPassword, err := common.GetOpenSearchPasswordFromSecret(namespace)
 	if err != nil {
@@ -89,8 +95,12 @@ func performRestore(ctx context.Context, podName, namespace, backupDir string) e
 		return err
 	}
 
+	// Construct OpenSearch host using service name and port
+	osHost := fmt.Sprintf("%s:9200", serviceName)
+	logger.Infof("OpenSearch host: %s\n", osHost, 0)
+
 	// Perform restore with curl
-	if err := performRestoreWithCurl(ctx, podName, namespace, defaultOpenSearchHost, osPassword, containerBackupPath); err != nil {
+	if err := performRestoreWithCurl(ctx, podName, namespace, osHost, osPassword, containerBackupPath); err != nil {
 		return fmt.Errorf("restore failed: %w", err)
 	}
 
@@ -120,17 +130,22 @@ func determineBackupPaths(backupDir string) (string, string, error) {
 func copyBackupToSidecar(podName, namespace, backupOSDir, containerBackupPath string) error {
 	logger.Infof("Copying backup files to sidecar pod...\n", 0)
 
-	// Use oc cp to copy the backup directory
+	// Create backup directory in pod
 	script := fmt.Sprintf("mkdir -p %s", containerBackupPath)
-	if err := common.ExecInPod(podName, namespace, script); err != nil {
-		return fmt.Errorf("failed to create backup directory in pod: %w", err)
+	cmd := exec.Command("oc", "exec", podName, "-n", namespace, "--", "sh", "-c", script)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to create backup directory in pod: %w, output: %s", err, string(output))
 	}
 
-	// Copy files using oc rsync or cp
-	// Note: This is a simplified version - in production, you might want to use oc rsync
-	script = fmt.Sprintf("oc cp %s %s/%s:%s -n %s", backupOSDir, namespace, podName, containerBackupPath, namespace)
-	if err := common.ExecInPod(podName, namespace, script); err != nil {
-		return fmt.Errorf("failed to copy backup files: %w", err)
+	// Copy files using oc cp command (executed on host, not in pod)
+	// Use "/." suffix to copy directory contents, not the directory itself
+	// Format: oc cp <local-path>/. <namespace>/<pod-name>:<remote-path>
+	backupOSDirWithContents := backupOSDir + "/."
+	cmd = exec.Command("oc", "cp", backupOSDirWithContents, fmt.Sprintf("%s/%s:%s", namespace, podName, containerBackupPath), "-n", namespace)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to copy backup files: %w, output: %s", err, string(output))
 	}
 
 	return nil
