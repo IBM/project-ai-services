@@ -34,7 +34,7 @@ func ResetPodmanAuth() error {
 	if err != nil {
 		return fmt.Errorf("failed to get existing catalog pod details: %w", err)
 	}
-	
+
 	_, err = executeCatalogDeployment(context.Background(), deployCtx, *opts, "")
 	if err != nil {
 		return fmt.Errorf("failed to deploy catalog pod: %w", err)

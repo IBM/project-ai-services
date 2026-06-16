@@ -56,9 +56,9 @@ Examples:
 			cmd.SilenceUsage = true
 
 			if resetPasswordFlag {
-				return validateResetPasswordFlags(cmd)
+				return validateResetFlag(cmd, "reset-password")
 			} else if resetPodmanAuthFlag {
-				return validateResetAuthFlags(cmd)
+				return validateResetFlag(cmd, "reset-podman-auth")
 			}
 
 			return validateConfigureFlags()
@@ -75,6 +75,7 @@ Examples:
 	}
 
 	configureConfigureFlags(cmd)
+	configureResetFlags(cmd)
 
 	return cmd
 }
@@ -117,23 +118,11 @@ func runConfigure() error {
 	return configure.Run(vars.RuntimeFactory.GetRuntimeType(), aiServicesDir, domainName, cleanCertPath, cleanKeyPath, httpsPort)
 }
 
-func validateResetPasswordFlags(cmd *cobra.Command) error {
-	if err := validateRuntimeFlag(); err != nil {
-		return err
-	}
-
-	return validateResetFlag(cmd, "reset-password")
-}
-
-func validateResetAuthFlags(cmd *cobra.Command) error {
-	if err := validateRuntimeFlag(); err != nil {
-		return err
-	}
-
-	return validateResetFlag(cmd, "reset-podman-auth")
-}
-
 func validateResetFlag(cmd *cobra.Command, flagName string) error {
+	if err := validateRuntimeFlag(); err != nil {
+		return err
+	}
+
 	// Check that no configuration parameters are provided with reset flag
 	// List of flags that cannot be used with reset flag
 	var invalidFlags []string
@@ -294,7 +283,9 @@ func configureConfigureFlags(cmd *cobra.Command) {
 			"Must be used together with --ssl-cert.\n"+
 			"Example: --ssl-key /path/to/key.pem\n",
 	)
+}
 
+func configureResetFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(
 		&resetPasswordFlag,
 		"reset-password",
