@@ -218,6 +218,11 @@
       background-color: $field-02 !important;
     }
   }
+
+  // Only make system prompt textarea full width
+  > div:has(.systemPromptTextArea) {
+    grid-column: 1 / -1;
+  }
 }
 
 .readonlyField {
@@ -351,8 +356,87 @@
     min-width: 0; // Prevent grid blowout
   }
 
-  // Full width for textareas
+  // Full width for textareas and controlled textareas
   :global(.cds--text-area__wrapper) {
     grid-column: 1 / -1;
   }
+
+  // Checkbox that controls other fields should be full width
+  :global(.cds--checkbox-wrapper) {
+    grid-column: 1 / -1;
+  }
+
+  // When containing controlled fields, use single column layout
+  &:has(.systemPromptTextArea) {
+    grid-template-columns: 1fr;
+  }
+}
+
+// Controlled textarea (appears below checkbox) should be full width
+.systemPromptTextArea {
+  grid-column: 1 / -1 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+
+  :global(.cds--text-area__wrapper) {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  :global(.cds--text-area) {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  :global(.cds--text-area__field-wrapper) {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+// Model Description Accordion Styles
+.modelDescriptionSection {
+  margin-top: $spacing-05;
+  margin-bottom: $spacing-05;
+}
+
+.modelDescriptionContent {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-06;
+}
+
+.modelDescriptionFullWidth {
+  width: 100%;
+}
+
+.modelDescriptionRow {
+  display: flex;
+  gap: $spacing-05;
+  width: 100%;
+
+  @include breakpoint-down(md) {
+    flex-direction: column;
+  }
+}
+
+.modelDescriptionHalf {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+}
+
+.modelDescriptionTitle {
+  @include type-style("heading-compact-01");
+  margin: 0;
+  color: $text-primary;
+}
+
+.modelDescriptionText {
+  @include type-style("body-compact-01");
+  margin: 0;
+  color: $text-secondary;
+  white-space: pre-line;
 }

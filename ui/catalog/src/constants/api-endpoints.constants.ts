@@ -14,6 +14,7 @@ export const DIGITAL_ASSISTANTS_ENDPOINTS = {
     `/architectures/${architectureId}/deploy-options`,
   PROVIDER_PARAMS: (componentType: string, providerId: string) =>
     `/components/${componentType}/providers/${providerId}/params`,
+  SERVICE_PARAMS: (serviceId: string) => `/services/${serviceId}/params`,
   RESOURCES: "/resources",
 };
 

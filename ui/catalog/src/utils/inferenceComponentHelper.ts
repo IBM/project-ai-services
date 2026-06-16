@@ -26,36 +26,39 @@ function providerExpectsModelInput(provider: Provider): boolean {
 
     return false;
   } catch {
-    // Schema might be a URL or invalid JSON, not a JSON schema
+    // Schema is URL or invalid JSON - can't determine from schema alone
     return false;
   }
 }
 
-// Determines if component is an inference component (multiple providers with model input)
+// Determines if component is an inference component
+// Uses schema-based detection first, with type-based fallback for safety
 export function isInferenceComponent(component: Component): boolean {
-  if (component.providers.length <= 1) {
-    return false;
+  // Primary: Generic detection based on schema (any provider with model input)
+  const hasModelInput = component.providers.some(providerExpectsModelInput);
+  if (hasModelInput) {
+    return true;
   }
-  return component.providers.some(providerExpectsModelInput);
+
+  // Fallback: Known inference component types for backward compatibility
+  // This ensures LLM/reranker always work even with:
+  // - Single provider
+  // - URL schemas
+  // - Schema parse failures
+  if (component.type === "llm" || component.type === "reranker") {
+    return true;
+  }
+
+  return false;
 }
 
 // Gets default inference backend provider ID for a service
-// Returns the first component with multiple providers that has model input
+// Returns the provider ID of the first inference component found
 export function getDefaultInferenceBackendProviderId(
   components: Component[],
 ): string | undefined {
   for (const component of components) {
     if (isInferenceComponent(component)) {
-      const defaultProvider =
-        component.providers.find((p) => p.default) || component.providers[0];
-      return defaultProvider?.id;
-    }
-  }
-
-  // Fallback: if no component with model input found, check for any component with multiple providers
-  // This handles cases where schema parsing fails but we still want to show inference backend
-  for (const component of components) {
-    if (component.providers.length > 1) {
       const defaultProvider =
         component.providers.find((p) => p.default) || component.providers[0];
       return defaultProvider?.id;

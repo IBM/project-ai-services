@@ -43,6 +43,9 @@ interface DeployState {
   // Provider params cache - persisted (configuration data)
   providerParams: Record<string, ProviderParamsCache>;
 
+  // Service params cache - persisted (configuration data)
+  serviceParams: Record<string, ProviderParamsCache>;
+
   // Architecture actions
   setArchitectures: (data: ArchitectureSummary[]) => void;
   setSelectedArchitectureId: (id: string | null) => void;
@@ -88,6 +91,11 @@ interface DeployState {
   isProviderParamsStale: (componentType: string, providerId: string) => boolean;
   clearProviderParams: () => void;
 
+  // Service params actions
+  setServiceParams: (serviceId: string, data: Record<string, unknown>) => void;
+  getServiceParams: (serviceId: string) => Record<string, unknown> | null;
+  clearServiceParams: () => void;
+
   // Check if cache is stale (older than 5 minutes) - only for resources
   isResourcesStale: () => boolean;
 
@@ -129,6 +137,9 @@ export const useDeployStore = create<DeployState>()(
 
       // Provider params state
       providerParams: {},
+
+      // Service params state
+      serviceParams: {},
 
       // Architectures actions
       setArchitectures: (data) =>
@@ -273,6 +284,26 @@ export const useDeployStore = create<DeployState>()(
 
       clearProviderParams: () => set({ providerParams: {} }),
 
+      // Service params actions
+      setServiceParams: (serviceId, data) => {
+        set((state) => ({
+          serviceParams: {
+            ...state.serviceParams,
+            [serviceId]: {
+              data,
+            },
+          },
+        }));
+      },
+
+      getServiceParams: (serviceId) => {
+        const cached = get().serviceParams[serviceId];
+        if (!cached) return null;
+        return cached.data;
+      },
+
+      clearServiceParams: () => set({ serviceParams: {} }),
+
       // Cache staleness check - only for resources (5 minutes)
       isResourcesStale: () => {
         const { resourcesFetchedAt } = get();
@@ -296,6 +327,7 @@ export const useDeployStore = create<DeployState>()(
           resourcesError: null,
           resourcesFetchedAt: null,
           providerParams: {},
+          serviceParams: {},
         });
       },
     }),
@@ -303,13 +335,14 @@ export const useDeployStore = create<DeployState>()(
       name: "deploy-storage",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        // Only persist static configuration data (architectures, serviceSummaries, architectureDetails, deployOptions, and providerParams)
+        // Only persist static configuration data (architectures, serviceSummaries, architectureDetails, deployOptions, providerParams, and serviceParams)
         architectures: state.architectures,
         selectedArchitectureId: state.selectedArchitectureId,
         serviceSummaries: state.serviceSummaries,
         architectureDetails: state.architectureDetails,
         deployOptions: state.deployOptions,
         providerParams: state.providerParams,
+        serviceParams: state.serviceParams,
       }),
     },
   ),

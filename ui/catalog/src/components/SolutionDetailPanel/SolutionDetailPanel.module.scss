@@ -133,29 +133,6 @@
   overflow: hidden;
 }
 
-.storyCardContent {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-
-  @include breakpoint.breakpoint(md) {
-    flex-direction: row;
-  }
-}
-
-.storyCardImage {
-  flex-shrink: 0;
-  width: 100%;
-  height: 200px;
-
-  @include breakpoint.breakpoint(md) {
-    width: 120px;
-    height: auto;
-    min-height: 120px;
-    align-self: stretch;
-  }
-}
-
 .story {
   display: flex;
   flex-direction: column;
@@ -174,13 +151,6 @@
 .demoButton {
   justify-content: flex-start;
   max-width: fit-content;
-}
-
-.storyImage {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
 }
 
 .storyCardText {

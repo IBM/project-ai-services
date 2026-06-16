@@ -1,5 +1,11 @@
 import { Fragment, useMemo, useState } from "react";
-import { Button, Dropdown, TextInput } from "@carbon/react";
+import {
+  Button,
+  Dropdown,
+  TextInput,
+  Accordion,
+  AccordionItem,
+} from "@carbon/react";
 import { ProductiveCard } from "@carbon/ibm-products";
 import { Checkmark, Edit, View, ViewOff } from "@carbon/icons-react";
 import styles from "../DeployFlow.module.scss";
@@ -10,8 +16,10 @@ import type { useBatchProviderParams } from "@/hooks/useProviderParams";
 import { DynamicSchemaFields } from "./DynamicSchemaFields";
 import type { Component } from "@/types/digitalAssistants";
 import { parseSchema, validateField } from "@/utils/schemaParser";
+import { useServiceParams } from "@/hooks/useServiceParams";
 
 interface ServiceConfigCardProps {
+  serviceId: string;
   serviceName: string;
   config: ServiceConfig;
   description: string;
@@ -31,6 +39,7 @@ interface ServiceConfigCardProps {
 }
 
 export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
+  serviceId,
   serviceName,
   config,
   description,
@@ -49,6 +58,99 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
     {},
   );
   const [hasValidationError, setHasValidationError] = useState(false);
+
+  // Fetch service-level schema
+  const { params: serviceSchema } = useServiceParams(serviceId);
+
+  // Helper function to get model description from provider schema
+  const getModelDescription = (
+    componentType: string,
+    providerId: string | undefined,
+    modelId: string | undefined,
+  ) => {
+    if (!modelId || !providerId) {
+      return null;
+    }
+
+    const paramsMap = providerParamsByType[componentType]?.paramsMap || {};
+    const providerSchema = paramsMap[providerId];
+
+    if (
+      !providerSchema ||
+      !providerSchema.properties ||
+      typeof providerSchema.properties !== "object"
+    ) {
+      return null;
+    }
+
+    const properties = providerSchema.properties as Record<
+      string,
+      {
+        oneOf?: Array<{
+          const?: string;
+          description?: string;
+        }>;
+      }
+    >;
+
+    if (!properties.model?.oneOf) {
+      return null;
+    }
+
+    const modelOption = properties.model.oneOf.find(
+      (option) => option.const === modelId,
+    );
+
+    return modelOption?.description || null;
+  };
+
+  // Helper function to parse model description into structured sections
+  const parseModelDescription = (description: string) => {
+    const sections: {
+      introduction?: string;
+      useCases?: string;
+      languages?: string;
+      strengths?: string;
+    } = {};
+
+    // Split by ** markers to find section titles
+    const parts = description.split(/\*\*(.*?)\*\*/g);
+
+    // First part (index 0) is the introduction text before any ** markers
+    if (parts[0] && parts[0].trim()) {
+      sections.introduction = parts[0].trim();
+    }
+
+    // Process the rest of the parts (section titles and content)
+    for (let i = 1; i < parts.length; i += 2) {
+      const title = parts[i].trim().replace(/:$/, ""); // Remove trailing colon
+      let content = parts[i + 1]?.trim() || "";
+
+      // Remove leading colon and whitespace from content
+      content = content.replace(/^:\s*/, "");
+
+      if (title && content) {
+        // Map section titles to keys
+        if (title.toLowerCase().includes("use case")) {
+          sections.useCases = content;
+        } else if (title.toLowerCase().includes("language")) {
+          sections.languages = content;
+        } else if (title.toLowerCase().includes("strength")) {
+          sections.strengths = content;
+        }
+      }
+    }
+
+    return sections;
+  };
+
+  // Parse service-level schema fields
+  const serviceFields = useMemo(() => {
+    if (!serviceSchema) return [];
+    return parseSchema(
+      serviceSchema as import("@/utils/schemaParser").JSONSchema,
+    );
+  }, [serviceSchema]);
 
   const togglePasswordVisibility = (key: string) => {
     setShowPasswords((prev) => ({
@@ -306,8 +408,13 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
 
               if (!schema?.properties) return null;
 
+              // Filter out params that are already shown in service-level schema fields
+              const serviceFieldKeys = new Set(serviceFields.map((f) => f.key));
+
               return Object.entries(config.params)
-                .filter(([key]) => key !== "model")
+                .filter(
+                  ([key]) => key !== "model" && !serviceFieldKeys.has(key),
+                )
                 .map(([key, value]) => {
                   const property = (
                     schema.properties as Record<
@@ -359,6 +466,161 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     </div>
                   );
                 });
+            })()}
+
+          {/* Render service-level schema fields (only non-UI-only fields with non-default values) */}
+          {serviceFields
+            .filter((field) => {
+              // Skip UI-only fields in view mode
+              if (field.uiOnly) return false;
+
+              // Only show controlled fields if they differ from default
+              if (field.controlledBy) {
+                const currentValue = config.params?.[field.key];
+                const hasValue =
+                  currentValue !== undefined && currentValue !== null;
+                const isDifferentFromDefault =
+                  hasValue && currentValue !== field.defaultValue;
+                return isDifferentFromDefault;
+              }
+
+              // Show other fields if they have a value
+              return config.params?.[field.key] !== undefined;
+            })
+            .map((field) => {
+              const value = config.params?.[field.key];
+              const isPassword = field.type === "password";
+
+              return (
+                <div
+                  key={`service-field-${field.key}`}
+                  className={styles.serviceConfigItem}
+                >
+                  <span className={styles.serviceConfigItemLabel}>
+                    {field.label}
+                  </span>
+                  <span className={styles.serviceConfigItemValue}>
+                    {isPassword ? (
+                      <>
+                        <span className={styles.apiKeyValue}>
+                          {showPasswords[`service-field-${field.key}`]
+                            ? String(value)
+                            : "•".repeat(20)}
+                        </span>
+                        <Button
+                          kind="ghost"
+                          size="sm"
+                          hasIconOnly
+                          renderIcon={
+                            showPasswords[`service-field-${field.key}`]
+                              ? ViewOff
+                              : View
+                          }
+                          iconDescription={
+                            showPasswords[`service-field-${field.key}`]
+                              ? "Hide"
+                              : "Show"
+                          }
+                          onClick={() =>
+                            togglePasswordVisibility(
+                              `service-field-${field.key}`,
+                            )
+                          }
+                          className={styles.apiKeyToggle}
+                        />
+                      </>
+                    ) : (
+                      String(value)
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+
+          {/* Model Description Accordion - Visible in both view and edit modes */}
+          {(llmComponent || rerankerComponent) &&
+            (() => {
+              const componentType = llmComponent ? "llm" : "reranker";
+              const providerId =
+                currentConfig?.components?.[componentType]?.providerId;
+              const modelId = currentConfig?.components?.[componentType]?.params
+                ?.model as string | undefined;
+
+              if (!modelId || !providerId) return null;
+
+              const modelDescription = getModelDescription(
+                componentType,
+                providerId,
+                modelId,
+              );
+
+              if (!modelDescription) return null;
+
+              const sections = parseModelDescription(modelDescription);
+
+              if (
+                !sections.introduction &&
+                !sections.useCases &&
+                !sections.strengths &&
+                !sections.languages
+              ) {
+                return null;
+              }
+
+              return (
+                <div className={styles.modelDescriptionSection}>
+                  <Accordion>
+                    <AccordionItem title="What is this model good at?">
+                      <div className={styles.modelDescriptionContent}>
+                        {/* Introduction - Full width at top */}
+                        {sections.introduction && (
+                          <div className={styles.modelDescriptionFullWidth}>
+                            <p className={styles.modelDescriptionText}>
+                              {sections.introduction}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Use Cases - Full width (if exists separately) */}
+                        {sections.useCases && (
+                          <div className={styles.modelDescriptionFullWidth}>
+                            <p className={styles.modelDescriptionText}>
+                              {sections.useCases}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Strengths and Languages - Side by side */}
+                        {(sections.strengths || sections.languages) && (
+                          <div className={styles.modelDescriptionRow}>
+                            {sections.strengths && (
+                              <div className={styles.modelDescriptionHalf}>
+                                <h5 className={styles.modelDescriptionTitle}>
+                                  Model strengths
+                                </h5>
+                                <p className={styles.modelDescriptionText}>
+                                  {sections.strengths}
+                                </p>
+                              </div>
+                            )}
+
+                            {sections.languages && (
+                              <div className={styles.modelDescriptionHalf}>
+                                <h5 className={styles.modelDescriptionTitle}>
+                                  Supported languages
+                                </h5>
+                                <p className={styles.modelDescriptionText}>
+                                  {sections.languages}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </AccordionItem>
+                  </Accordion>
+                </div>
+              );
             })()}
         </div>
       ) : (
@@ -512,6 +774,123 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                       />
                     </div>
                   </Fragment>
+                );
+              })()}
+
+            {/* Render service-level schema fields in edit mode */}
+            {serviceFields.length > 0 && serviceSchema && (
+              <div style={{ gridColumn: "1 / -1", width: "100%" }}>
+                <DynamicSchemaFields
+                  componentType={serviceId}
+                  providerId={serviceId}
+                  values={currentConfig?.params || {}}
+                  onChange={(params) => {
+                    // Clear validation error when user makes changes
+                    if (hasValidationError) {
+                      setHasValidationError(false);
+                    }
+                    onUpdateConfig({
+                      params: {
+                        ...currentConfig?.params,
+                        ...params,
+                      },
+                    });
+                  }}
+                  providerParamsMap={{
+                    [serviceId]:
+                      serviceSchema as import("@/utils/schemaParser").JSONSchema,
+                  }}
+                  hasValidationError={hasValidationError}
+                />
+              </div>
+            )}
+
+            {/* Model Description Accordion - In edit mode */}
+            {(llmComponent || rerankerComponent) &&
+              (() => {
+                const componentType = llmComponent ? "llm" : "reranker";
+                const providerId =
+                  currentConfig?.components?.[componentType]?.providerId;
+                const modelId = currentConfig?.components?.[componentType]
+                  ?.params?.model as string | undefined;
+
+                if (!modelId || !providerId) return null;
+
+                const modelDescription = getModelDescription(
+                  componentType,
+                  providerId,
+                  modelId,
+                );
+
+                if (!modelDescription) return null;
+
+                const sections = parseModelDescription(modelDescription);
+
+                if (
+                  !sections.introduction &&
+                  !sections.useCases &&
+                  !sections.strengths &&
+                  !sections.languages
+                ) {
+                  return null;
+                }
+
+                return (
+                  <div
+                    style={{ gridColumn: "1 / -1" }}
+                    className={styles.modelDescriptionSection}
+                  >
+                    <Accordion>
+                      <AccordionItem title="What is this model good at?">
+                        <div className={styles.modelDescriptionContent}>
+                          {/* Introduction - Full width at top */}
+                          {sections.introduction && (
+                            <div className={styles.modelDescriptionFullWidth}>
+                              <p className={styles.modelDescriptionText}>
+                                {sections.introduction}
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Use Cases - Full width (if exists separately) */}
+                          {sections.useCases && (
+                            <div className={styles.modelDescriptionFullWidth}>
+                              <p className={styles.modelDescriptionText}>
+                                {sections.useCases}
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Strengths and Languages - Side by side */}
+                          {(sections.strengths || sections.languages) && (
+                            <div className={styles.modelDescriptionRow}>
+                              {sections.strengths && (
+                                <div className={styles.modelDescriptionHalf}>
+                                  <h5 className={styles.modelDescriptionTitle}>
+                                    Model strengths
+                                  </h5>
+                                  <p className={styles.modelDescriptionText}>
+                                    {sections.strengths}
+                                  </p>
+                                </div>
+                              )}
+
+                              {sections.languages && (
+                                <div className={styles.modelDescriptionHalf}>
+                                  <h5 className={styles.modelDescriptionTitle}>
+                                    Supported languages
+                                  </h5>
+                                  <p className={styles.modelDescriptionText}>
+                                    {sections.languages}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </AccordionItem>
+                    </Accordion>
+                  </div>
                 );
               })()}
           </div>

@@ -112,14 +112,6 @@ export const AboutTab: React.FC<AboutTabProps> = ({ onDeployClick }) => {
               <h4 className={styles.aboutSectionTitle}>{section.title}</h4>
               {section.sections.map((demo, idx) => (
                 <div className={styles.demoCard} key={idx}>
-                  {demo.image?.source && (
-                    // TODO: Update image here
-                    <img
-                      src={demo.image.source}
-                      alt={demo.title || "Demo"}
-                      className={styles.demoImage}
-                    />
-                  )}
                   <div className={styles.demoContent}>
                     {demo.title && (
                       <h5 className={styles.demoTitle}>{demo.title}</h5>
