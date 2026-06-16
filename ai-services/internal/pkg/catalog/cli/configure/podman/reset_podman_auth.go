@@ -25,7 +25,7 @@ func ResetPodmanAuth() error {
 
 	// Delete podman auth secret.
 	logger.Infof("Deleting catalog podman auth secret %s", catalogConstant.CatalogPodmanAuthSecretName)
-	err = deployCtx.Runtime.DeleteSecret(catalogConstant.CatalogSecretName)
+	err = deployCtx.Runtime.DeleteSecret(catalogConstant.CatalogPodmanAuthSecretName)
 	if err != nil {
 		return fmt.Errorf("failed to delete existing catalog podman auth secret: %w", err)
 	}
