@@ -62,7 +62,7 @@ Examples:
 			} else if resetPodmanAuthFlag {
 				return validateResetFlag(cmd, "reset-podman-auth")
 			} else if resetCertificateFlag {
-				return validateResetCertificateFlags(cmd)
+				return validateResetCertificateFlags(cmd, "reset-certificate")
 			}
 
 			return validateConfigureFlags()
@@ -122,7 +122,19 @@ func validateResetFlag(cmd *cobra.Command, flagName string) error {
 	}
 
 	// Check that no configuration parameters are provided with reset flag
-	return checkIncompatibleFlags(cmd, flagName)
+	var invalidFlags []string
+	cmd.Flags().Visit(func(f *pflag.Flag) {
+		if f.Name == flagName || f.Name == constants.RuntimeFlag {
+			// Skip reset flag and runtime parameter
+			return
+		}
+		invalidFlags = append(invalidFlags, "--"+f.Name)
+	})
+	if len(invalidFlags) > 0 {
+		return fmt.Errorf("the following flags cannot be used with --%s: %v", flagName, invalidFlags)
+	}
+
+	return nil
 }
 
 // validateConfigureFlags validates the configure command flags and initializes runtime.
@@ -215,7 +227,7 @@ func validateSSLCertificates() error {
 	return nil
 }
 
-func validateResetCertificateFlags(cmd *cobra.Command) error {
+func validateResetCertificateFlags(cmd *cobra.Command, flagName string) error {
 	if err := validateRuntimeFlag(); err != nil {
 		return err
 	}
@@ -232,28 +244,15 @@ func validateResetCertificateFlags(cmd *cobra.Command) error {
 
 	// Check that no other configuration parameters are provided with reset-certificate flag
 	// Allow ssl-cert and ssl-key since they are required for this operation
-	return checkIncompatibleFlags(cmd, "reset-certificate", "ssl-cert", "ssl-key")
-}
-
-// checkIncompatibleFlags validates that only allowed flags are used with a specific flag.
-// Returns an error if any incompatible flags are found, nil otherwise.
-func checkIncompatibleFlags(cmd *cobra.Command, flagName string, allowedFlags ...string) error {
-	// Create a map of allowed flags for quick lookup
-	allowed := make(map[string]bool)
-	allowed[flagName] = true
-	allowed["runtime"] = true // runtime is always allowed
-	for _, flag := range allowedFlags {
-		allowed[flag] = true
-	}
-
-	// Check that no configuration parameters are provided with the specified flag
 	var invalidFlags []string
 	cmd.Flags().Visit(func(f *pflag.Flag) {
-		if !allowed[f.Name] {
-			invalidFlags = append(invalidFlags, "--"+f.Name)
+		if f.Name == flagName || f.Name == constants.RuntimeFlag ||
+			f.Name == "ssl-cert" || f.Name == "ssl-key" {
+			// Skip reset flag, runtime parameter, and required SSL flags
+			return
 		}
+		invalidFlags = append(invalidFlags, "--"+f.Name)
 	})
-
 	if len(invalidFlags) > 0 {
 		return fmt.Errorf("the following flags cannot be used with --%s: %v", flagName, invalidFlags)
 	}
