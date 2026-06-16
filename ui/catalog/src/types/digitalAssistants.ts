@@ -190,7 +190,7 @@ export interface ResourceAllocation {
   unit: string;
 }
 
-export interface AcceleratorCard {
+export interface AcceleratorCards {
   id: string;
   label: string;
 }
@@ -201,7 +201,7 @@ export interface DeploymentDetails {
   status: string;
   type: string;
   resources: ResourceAllocation[];
-  acceleratorCards?: AcceleratorCard[];
+  acceleratorCards?: AcceleratorCards[];
 }
 
 export interface DeploymentServiceData {

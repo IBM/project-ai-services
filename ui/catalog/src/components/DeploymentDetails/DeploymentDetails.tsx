@@ -28,7 +28,7 @@ import type {
   DeployIntegrationEndpoints,
   ResourcesApiResponse,
   ApplicationDetailsApiResponse,
-  AcceleratorCard,
+  AcceleratorCards as AcceleratorCardType,
 } from "@/types/digitalAssistants";
 import styles from "./DeploymentDetails.module.scss";
 import { api } from "@/api/axios";
@@ -57,9 +57,9 @@ const DeploymentDetails = ({
   const [integrationEndpoints, setIntegrationEndpoints] = useState<
     DeployIntegrationEndpoints[]
   >([]);
-  const [acceleratorCards, setAcceleratorCards] = useState<AcceleratorCard[]>(
-    [],
-  );
+  const [acceleratorCards, setAcceleratorCards] = useState<
+    AcceleratorCardType[]
+  >([]);
   const [editedName, setEditedName] = useState(deployment.name);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -111,7 +111,7 @@ const DeploymentDetails = ({
           const spyreCards = response.data.accelerators["ibm.com/spyre_pf"];
 
           if (Array.isArray(spyreCards) && spyreCards.length > 0) {
-            const cards: AcceleratorCard[] = spyreCards.map((cardId) => ({
+            const cards: AcceleratorCardType[] = spyreCards.map((cardId) => ({
               id: cardId,
               label: cardId,
             }));

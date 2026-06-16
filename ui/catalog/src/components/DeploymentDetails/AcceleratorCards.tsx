@@ -2,13 +2,13 @@ import { Grid, Column } from "@carbon/react";
 import { ProductiveCard } from "@carbon/ibm-products";
 import styles from "./DeploymentDetails.module.scss";
 
-interface AcceleratorCard {
+interface AcceleratorCards {
   id: string;
   label: string;
 }
 
 interface AcceleratorCardsProps {
-  cards: AcceleratorCard[];
+  cards: AcceleratorCards[];
 }
 
 /**
