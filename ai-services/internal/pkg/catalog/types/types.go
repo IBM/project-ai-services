@@ -165,9 +165,10 @@ type Component struct {
 	ID            string `yaml:"id" json:"id"`
 	Name          string `yaml:"name" json:"name"`
 	Description   string `yaml:"description" json:"description"`
-	Type          string `yaml:"type" json:"type"`                     // "component"
-	ComponentType string `yaml:"component_type" json:"component_type"` // "vector_store", "embedding", "llm", etc.
-	ComponentName string `yaml:"component_name" json:"component_name"` // Display name for component type (e.g., "Vector Store", "LLM Model")
+	Type          string `yaml:"type" json:"type"`                           // "component"
+	ComponentType string `yaml:"component_type" json:"component_type"`       // "vector_store", "embedding", "llm", etc.
+	ComponentName string `yaml:"component_name" json:"component_name"`       // Display name for component type (e.g., "Vector store", "Large language model")
+	Default       bool   `yaml:"default,omitempty" json:"default,omitempty"` // Whether this is the default provider for this component type
 }
 
 // ComponentSummary represents a component for list API responses.

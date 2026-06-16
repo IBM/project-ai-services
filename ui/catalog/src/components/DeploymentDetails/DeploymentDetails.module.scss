@@ -251,6 +251,11 @@
   justify-content: flex-start;
 }
 
+.saveError {
+  margin-bottom: $spacing-05;
+  color: $support-error;
+}
+
 .placeholderContent {
   padding: $spacing-07;
   text-align: center;
@@ -451,4 +456,25 @@
   :global(svg) {
     fill: $text-secondary;
   }
+}
+
+// Accelerator cards styles
+.acceleratorCardsGrid {
+  margin: 0;
+  padding: 0;
+  row-gap: 0;
+}
+
+.acceleratorCardsList {
+  list-style-type: decimal;
+  list-style-position: inside;
+  padding: 0;
+  margin: 0;
+  @include type-style("body-compact-01");
+  color: $text-primary;
+}
+
+.acceleratorCardItem {
+  padding: $spacing-02 0;
+  color: $text-primary;
 }

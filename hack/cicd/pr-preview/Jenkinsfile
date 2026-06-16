@@ -1,13 +1,15 @@
+import groovy.json.JsonOutput
 // Jenkins Pipeline for PR Preview Deployment
 // This pipeline deploys AI services applications for PR testing and validation
+
 pipeline {
-    agent { label 'onprem-ai-services-4-spyre-cards' }
+    agent { label 'onprem-ai-services-stelar-machine' }
 
     environment {
         // Project configuration
         PROJECT_NAME = 'project-ai-services'
         AI_SERVICES_DIR = 'ai-services'
-        AI_SERVICES_BINARY = './bin/ai-services'
+        AI_SERVICES_BINARY = './bin/ai-services-linux-ppc64le'
         AI_SERVICES_REPO_URL = 'https://github.com/IBM/project-ai-services.git'
 
         // Slack notification settings
@@ -26,11 +28,16 @@ pipeline {
         POLLER_LOGS = '/root/cicd/queue_poller.logs'
         POLLER_SCRIPT = '/root/cicd/queue_poller.sh'
         POLLER_TIMEOUT_IN_MINS = '150'
+        
+        // icr.io auth file
+        REGISTRY_AUTH_FILE = "/run/containers/0/auth.json"
+
     }
 
     // Prevent concurrent builds to ensure only one deployment at a time
     options {
         disableConcurrentBuilds()
+        withBuildUser()
     }
 
     parameters {
@@ -41,7 +48,7 @@ pipeline {
         // If 'auto' is selected, deployment proceeds based on detected code changes
         choice(
             name: 'DEPLOY_APP',
-            choices: ['auto', 'rag-dev'],
+            choices: ['rag-dev', 'auto'],
             description: 'Select the application to deploy'
         )
     }
@@ -49,24 +56,68 @@ pipeline {
     stages {
         stage('Pre Steps') {
             steps {
-                // Start queue poller to detect and abort duplicate builds
+                script {
+                    env.JOB_NAME_SHORT = env.JOB_NAME?.tokenize('/')?.last() ?: ''
+                    
+                    // Validate that CHECKOUT parameter is provided
+                    if (!params.CHECKOUT.trim()) {
+                        error('PR number or commit hash must be provided')
+                    }
+                    
+                    // Resolve commit SHA from CHECKOUT parameter (PR number or commit hash)
+                    // This ensures we always have the full commit SHA for duplicate detection
+                    env.COMMIT_SHA = resolveCommitShaFromCheckout(params.CHECKOUT, env.AI_SERVICES_REPO_URL)
+                    echo "Resolved Commit SHA: ${env.COMMIT_SHA}"
+                }
+                
+                // Start queue poller to detect and manage duplicate builds
+                // The poller now uses both PR number and commit SHA for intelligent duplicate detection
                 withCredentials([usernamePassword(
                     credentialsId: 'jenkins-api',
                     usernameVariable: 'username',
                     passwordVariable: 'password'
                 )]) {
-                    sh '''
-                    nohup $POLLER_SCRIPT $JENKINS_URL CHECKOUT=$CHECKOUT $BUILD_URL $username $password $POLLER_TIMEOUT_IN_MINS >> $POLLER_LOGS 2>&1 &
-                    echo "Queue poller process id: $!"
-                    '''
+                    script {
+                        sh """
+                        nohup "\${POLLER_SCRIPT}" "\${JENKINS_URL}" CHECKOUT="${params.CHECKOUT}" "\${BUILD_URL}" "\${username}" "\${password}" "\${POLLER_TIMEOUT_IN_MINS}" "\${JOB_NAME_SHORT}" "\${COMMIT_SHA}" "\${AI_SERVICES_REPO_URL}" >> "\${POLLER_LOGS}" 2>&1 &
+                        echo "Queue poller process id: \$!"
+                        """
+                        
+                        // Give poller a moment to start and validate parameters
+                        sleep(time: 3, unit: 'SECONDS')
+                        
+                        // Capture poller PID for health monitoring
+                        env.POLLER_PID = sh(
+                            script: """
+                                pgrep -f "queue_poller.sh.*${BUILD_URL}" | head -n1 || echo ""
+                            """,
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (!env.POLLER_PID) {
+                            error('Queue poller failed to start or exited during validation. Check logs at: ' + env.POLLER_LOGS)
+                        }
+                        
+                        echo "Queue poller started successfully (PID: ${env.POLLER_PID})"
+                        
+                        // Verify poller is still running after initial validation
+                        sleep(time: 2, unit: 'SECONDS')
+                        def pollerRunning = sh(
+                            script: "ps -p ${env.POLLER_PID} > /dev/null 2>&1 && echo 'true' || echo 'false'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (pollerRunning != 'true') {
+                            def lastLogs = sh(
+                                script: "tail -20 ${env.POLLER_LOGS} || echo 'Could not read logs'",
+                                returnStdout: true
+                            ).trim()
+                            error("Queue poller exited unexpectedly during startup.\n\nLast log entries:\n${lastLogs}")
+                        }
+                    }
                 }
 
                 script {
-                    // Validate that CHECKOUT parameter is provided
-                    if (!params.CHECKOUT.trim()) {
-                        error('PR number or commit hash must be provided')
-                    }
-
                     // Set application name with CICD suffix if app is explicitly selected
                     if (params.DEPLOY_APP) {
                         env.APP_NAME = "${params.DEPLOY_APP}-cicd"
@@ -105,7 +156,7 @@ pipeline {
                 }
             }
         }
-
+        
         stage('Build Images') {
             steps {
                 script {
@@ -124,7 +175,7 @@ pipeline {
                 script {
                     // Compile AI services binary from source
                     dir("${PROJECT_NAME}/${AI_SERVICES_DIR}") {
-                        sh 'make bin'
+                        sh 'make binaries PLATFORMS=linux/ppc64le'
                         sh "${AI_SERVICES_BINARY} --version"
                     }
                 }
@@ -140,15 +191,29 @@ pipeline {
             }
         }
 
+        stage('Registry Login') {
+          steps {
+            script {
+              icrLogin('icr-iam-creds')
+              redHatRegistryLogin('rh-registry-cred')
+
+              // Mirror auth file into root's default lookup location to support tools
+              // that don't preserve REGISTRY_AUTH_FILE / don't pass --authfile.
+              mirrorAuthFileForRoot()
+            }
+          }
+        }
+
         stage('Deploy Application') {
             steps {
                 script {
                     dir("${env.PROJECT_NAME}/${env.AI_SERVICES_DIR}") {
                         // List current applications
-                        sh "${env.AI_SERVICES_BINARY} application ps"
-                        
+                        sh "${env.AI_SERVICES_BINARY} application ps --runtime podman"
+                        sh "whoami"
+                        sh "pwd"
                         // Create and deploy the application
-                        sh "${env.AI_SERVICES_BINARY} application create ${env.APP_NAME} -t ${env.DEPLOY_APP} --params ui.port=${env.RAG_CHAT_BOT_PORT} --skip-validation numa"
+                        sh "sudo --preserve-env=REGISTRY_AUTH_FILE ${env.AI_SERVICES_BINARY} application create ${env.APP_NAME} -t ${env.DEPLOY_APP} --params ui.port=${env.RAG_CHAT_BOT_PORT} --runtime podman --skip-validation spyre"
                     }
                 }
             }
@@ -160,7 +225,7 @@ pipeline {
                     sh "cp -r /root/cicd-app-doc/${APP_NAME}/* /var/lib/ai-services/applications/${APP_NAME}/docs/"
                     println 'Starting document ingestion pod'
                     dir("${PROJECT_NAME}/${AI_SERVICES_DIR}") {
-                        sh "${AI_SERVICES_BINARY} application start ${APP_NAME} --pod=${APP_NAME}--ingest-docs -y"
+                        sh "${AI_SERVICES_BINARY} application start ${APP_NAME} --pod=${APP_NAME}--ingest-docs --runtime podman -y"
                     }
                 }
             }
@@ -188,14 +253,53 @@ pipeline {
                 script {
                     // Poll to check if the application is manually deleted by the user
                     // This allows users to test the deployment before automatic cleanup
+                    // Added continuous queue poller health monitoring
+                    
+                    echo "Starting application testing period with queue poller health monitoring"
+                    echo "Poller PID: ${env.POLLER_PID}"
+                    
                     for (int i = 0; i < env.MAX_APP_RUN_TIME_IN_MINS.toInteger(); i++) {
+                        // Check if app is deleted by user
                         def deployedAppName = getDeployedApplicationName()
                         if (deployedAppName.isEmpty()) {
                             println 'Application has been deleted by user. Exiting wait loop.'
                             break
                         }
-                        sh 'sleep 60s'
+                        
+                        // Monitor queue poller health every minute
+                        def pollerRunning = sh(
+                            script: "ps -p ${env.POLLER_PID} > /dev/null 2>&1 && echo 'true' || echo 'false'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (pollerRunning != 'true') {
+                            // Poller died - capture diagnostic information
+                            def lastLogs = sh(
+                                script: "tail -30 ${env.POLLER_LOGS} | grep -i 'error\\|exit\\|failed\\|stopped' || tail -30 ${env.POLLER_LOGS}",
+                                returnStdout: true
+                            ).trim()
+                            
+                            error("""
+                                Queue poller died unexpectedly (PID: ${env.POLLER_PID})!
+                                
+                                This job is being stopped to prevent duplicate builds from queuing.
+                                
+                                Last relevant log entries from ${env.POLLER_LOGS}:
+                                ${lastLogs}
+                                
+                                Please investigate the poller logs for the root cause.
+                            """)
+                        }
+                        
+                        // Log health check status periodically
+                        if (i % 5 == 0) {
+                            echo "Health check (${i}/${env.MAX_APP_RUN_TIME_IN_MINS} min): Application running, Poller healthy (PID: ${env.POLLER_PID})"
+                        }
+                        
+                        sleep 60
                     }
+                    
+                    echo "Testing period completed. Application will be cleaned up."
                 }
             }
         }
@@ -244,6 +348,8 @@ def sendSlackNotification(String color, String message) {
             *Build URL     :* ${env.BUILD_URL}
             *Host          :* ${hostname}
             *CommitHash/PR :* ${params.CHECKOUT}
+            *Triggered By. :* @${env.BUILD_USER_EMAIL}
+            *Commit SHA    :* ${env.COMMIT_SHA}
         """.stripIndent()
     )
 }
@@ -252,7 +358,7 @@ def getDeployedApplicationName() {
     String appName = ''
     dir("${env.PROJECT_NAME}/${env.AI_SERVICES_DIR}") {
         def appsOutput = sh(
-            script: "${AI_SERVICES_BINARY} application ps 2>&1",
+            script: "${AI_SERVICES_BINARY} application ps --runtime podman 2>&1",
             returnStdout: true
         ).trim()
         
@@ -277,9 +383,18 @@ def checkoutRepository(String checkoutRef) {
                 git checkout pr-${checkoutRef}
             """
         } else {
-            // Treat as commit hash
+            // Treat as commit hash (short or full SHA)
             println "Checking out commit hash: ${checkoutRef}"
-            sh "git rev-parse --verify ${checkoutRef}"
+            
+            // Fetch all branches AND all PR refs to ensure any commit is available
+            // git fetch --all only fetches branches, not PRs
+            println "Fetching all branches and PR refs to locate commit..."
+            sh """
+                git fetch origin '+refs/heads/*:refs/remotes/origin/*' --quiet
+                git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*' --quiet
+            """
+            
+            // Now checkout the commit
             sh "git checkout ${checkoutRef}"
         }
     }
@@ -290,7 +405,7 @@ def deleteCicdApplication() {
     dir("${env.PROJECT_NAME}/${env.AI_SERVICES_DIR}") {
         if (appName.contains('cicd')) {
             println "Cleaning up ${appName} which was deployed by the pipeline."
-            sh "${AI_SERVICES_BINARY} application delete ${appName} -y"
+            sh "${AI_SERVICES_BINARY} application delete ${appName} --runtime podman -y"
         }
     }
 }
@@ -392,4 +507,158 @@ def updateApplicationYamlFile(String appName, String imageValue, String yamlPath
         sh "yq e '${yamlPath} = \"${imageValue}\"' -i ${valuesFilePath}"
         println "Updated values.yaml for ${appName}: ${yamlPath} = ${imageValue}"
     }
+}
+
+// Helper function to resolve the Commit SHA based on PR number or commit hash
+def resolveCommitShaFromCheckout(String checkoutValue, String repoUrl) {
+    checkoutValue = (checkoutValue ?: '').trim()
+    repoUrl       = (repoUrl ?: '').trim()
+
+    if (!checkoutValue) {
+        error("resolveCommitShaFromCheckout: checkoutValue cannot be empty.")
+    }
+    if (!repoUrl) {
+        error("resolveCommitShaFromCheckout: repoUrl cannot be empty.")
+    }
+
+    // Case 1: PR number (digits only)
+    if (checkoutValue ==~ /^\d+$/) {
+        def prNum = checkoutValue
+        def sha = sh(
+            script: """#!/usr/bin/env bash
+set -euo pipefail
+git ls-remote "${repoUrl}" "refs/pull/${prNum}/head" | awk '{print \$1}'
+""",
+            returnStdout: true
+        ).trim()
+
+        if (!sha) {
+            error("Could not find HEAD commit for PR #${prNum} in ${repoUrl}.")
+        }
+        return sha
+    }
+
+    // Case 2: Looks like a SHA (short or full)
+    if (checkoutValue ==~ /^[0-9a-fA-F]{7,40}$/) {
+        def prefix = checkoutValue
+        // Try to expand to a full 40-char SHA by scanning remote refs
+        def sha = sh(
+            script: """#!/usr/bin/env bash
+set -euo pipefail
+git ls-remote "${repoUrl}" | awk '{print \$1}' | grep -i "^${prefix}" | head -n1 || true
+""",
+            returnStdout: true
+        ).trim()
+
+        if (sha) {
+            return sha
+        } else {
+            // Fall back to the provided value if we can't resolve (might still be valid)
+            if (!(prefix ==~ /^[0-9a-fA-F]{40}$/)) {
+                echo "Warning: Using provided commit prefix '${prefix}' (not resolved to full 40-char SHA)."
+            }
+            return prefix
+        }
+    }
+    
+    if (checkoutValue == "main")
+       return checkoutValue
+    // Otherwise invalid
+    error("CHECKOUT value '${checkoutValue}' is neither a PR number nor a commit SHA/prefix.")
+}
+
+/**
+ * Logs into IBM Container Registry (icr.io) using Podman
+ * with per-build authfile isolation
+ */
+/**
+ *
+ * @param credentialsId Jenkins credentials ID (username/password)
+ * @param registry      Container registry (default: icr.io)
+ */
+def icrLogin(String credentialsId, String registry = 'icr.io') {
+  echo "Forcing fresh Podman login for ${registry} using ${env.REGISTRY_AUTH_FILE}"
+
+  withCredentials([usernamePassword(
+    credentialsId: credentialsId,
+    usernameVariable: 'ICR_USERNAME',
+    passwordVariable: 'ICR_PASSWORD'
+  )]) {
+    sh '''#!/usr/bin/env bash
+set -euo pipefail
+
+sudo --preserve-env=REGISTRY_AUTH_FILE,ICR_USERNAME,ICR_PASSWORD bash -lc '
+  set -euo pipefail
+
+  # Deterministic: remove any existing credential entry for this registry
+  podman logout --authfile "$REGISTRY_AUTH_FILE" icr.io >/dev/null 2>&1 || true
+
+  # Fresh login
+  echo "$ICR_PASSWORD" | podman login icr.io \
+    --authfile "$REGISTRY_AUTH_FILE" \
+    -u "$ICR_USERNAME" \
+    --password-stdin
+'
+'''
+  }
+
+  echo "ICR login completed (fresh)"
+}
+
+/**
+ * Logs into Red Hat Container Registry (registry.redhat.io) using Podman
+ * - Skips login if already authenticated
+ *
+ * @param credentialsId Jenkins credentials ID (username/password)
+ * @param registry      Container registry (default: registry.redhat.io)
+ */
+def redHatRegistryLogin(String credentialsId, String registry = 'registry.redhat.io') {
+  echo "Forcing fresh Podman login for ${registry} using ${env.REGISTRY_AUTH_FILE}"
+
+  withCredentials([usernamePassword(
+    credentialsId: credentialsId,
+    usernameVariable: 'RH_USERNAME',
+    passwordVariable: 'RH_PASSWORD'
+  )]) {
+    sh '''#!/usr/bin/env bash
+set -euo pipefail
+
+sudo --preserve-env=REGISTRY_AUTH_FILE,RH_USERNAME,RH_PASSWORD bash -lc '
+  set -euo pipefail
+
+  # Deterministic: remove any existing credential entry for this registry
+  podman logout --authfile "$REGISTRY_AUTH_FILE" registry.redhat.io >/dev/null 2>&1 || true
+
+  # Fresh login
+  echo "$RH_PASSWORD" | podman login registry.redhat.io \
+    --authfile "$REGISTRY_AUTH_FILE" \
+    -u "$RH_USERNAME" \
+    --password-stdin
+'
+'''
+  }
+
+  echo "Red Hat registry login completed (fresh)"
+}
+
+
+/**
+ *  Copies auth.json to the right location so that image pulls from redhat registry are successfull
+ */
+
+def mirrorAuthFileForRoot() {
+  echo "Mirroring ${env.REGISTRY_AUTH_FILE} to /root/.config/containers/auth.json for fallback credential lookup"
+
+  sh '''#!/usr/bin/env bash
+set -euo pipefail
+
+sudo --preserve-env=REGISTRY_AUTH_FILE bash -lc '
+  set -euo pipefail
+  mkdir -p /root/.config/containers
+
+  # Copy the consolidated authfile (contains both ICR + Red Hat entries)
+  cp -f "$REGISTRY_AUTH_FILE" /root/.config/containers/auth.json
+  chmod 600 /root/.config/containers/auth.json
+'
+'''
 }

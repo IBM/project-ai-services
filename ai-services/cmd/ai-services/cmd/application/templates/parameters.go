@@ -166,10 +166,16 @@ func displaySchemaParameters(schema map[string]any, prefix string) {
 }
 
 // displayPropertiesRecursive recursively displays properties, handling nested objects.
+// It skips fields marked with "x-ui-only": true (UI-only fields with no CLI meaning).
 func displayPropertiesRecursive(properties map[string]any, prefix string) {
 	for paramName, propValue := range properties {
 		prop, ok := propValue.(map[string]any)
 		if !ok {
+			continue
+		}
+
+		// Skip fields explicitly marked as UI-only
+		if uiOnly, _ := prop["x-ui-only"].(bool); uiOnly {
 			continue
 		}
 

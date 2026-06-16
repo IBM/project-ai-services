@@ -1,11 +1,11 @@
 Day N:
 
-{{- if ne .SIMILARITY_API_PORT "" }}
-{{- if eq .SIMILARITY_API_STATUS "running" }}
+{{- if ne .API_URL "" }}
+{{- if eq .API_STATUS "running" }}
 
-- Similarity Search API is available to use at http://{{ .HOST_IP }}:{{ .SIMILARITY_API_PORT }}.
+- {{ .SERVICE_NAME }} Search API is available to use at {{ .API_URL }}
 {{- else }}
 
-- Similarity Search API is unavailable to use. Please make sure '{{ .AppName }}--similarity-api' pod is running.
+- {{ .SERVICE_NAME }} Search API is unavailable to use. Please make sure 'similarity-api' pod is running.
 {{- end }}
 {{- end }}

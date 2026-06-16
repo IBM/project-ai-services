@@ -97,26 +97,27 @@ func (d *PodmanDeployer) ExecuteDeployment(
 
 	// Step 1.a: Pull container images for all components and services
 	if err := d.pullImagesForDeployment(plan); err != nil {
-		d.handleDeploymentError(ctx, plan.ApplicationID, "Image pull failed", err)
+		d.handleDeploymentStepError(ctx, plan.ApplicationID, "Image pull failed", err)
 
 		return fmt.Errorf("failed to pull images: %w", err)
 	}
 
 	// Step 1.b: Download models specified in parameters
 	if err := d.downloadModelsForDeployment(plan); err != nil {
-		d.handleDeploymentError(ctx, plan.ApplicationID, "Model download failed", err)
+		d.handleDeploymentStepError(ctx, plan.ApplicationID, "Model download failed", err)
 
 		return fmt.Errorf("failed to download models: %w", err)
 	}
 
 	// Update application status to Deploying before starting deployment
-	deployMsg := "Deploying application"
-	d.updateStatusIgnoreError(ctx, plan.ApplicationID, models.ApplicationStatusDeploying, deployMsg)
+	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusDeploying, "Deploying application"); err != nil {
+		logger.Errorf("Failed to update application status to Deploying: %v\n", err)
+	}
 
 	// Step 2: Deploy components if any
 	if len(plan.Components) > 0 {
 		if err := d.deployComponents(plan); err != nil {
-			d.handleDeploymentError(ctx, plan.ApplicationID, "Component deployment failed", err)
+			d.handleDeploymentStepError(ctx, plan.ApplicationID, "Component deployment failed", err)
 
 			return fmt.Errorf("failed to deploy components: %w", err)
 		}
@@ -125,7 +126,7 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	// Step 4: Deploy services if any
 	if len(plan.Services) > 0 {
 		if err := d.deployServices(ctx, plan); err != nil {
-			d.handleDeploymentError(ctx, plan.ApplicationID, "Service deployment failed", err)
+			d.handleDeploymentStepError(ctx, plan.ApplicationID, "Service deployment failed", err)
 
 			return fmt.Errorf("failed to deploy services: %w", err)
 		}
@@ -133,31 +134,26 @@ func (d *PodmanDeployer) ExecuteDeployment(
 
 	// Step 5: Register routes with Caddy proxy
 	if err := d.registerApplicationRoutes(ctx, plan); err != nil {
-		d.handleDeploymentError(ctx, plan.ApplicationID, "Failed to register application routes", err)
+		d.handleDeploymentStepError(ctx, plan.ApplicationID, "Failed to register application routes", err)
 
 		return fmt.Errorf("failed to register application routes: %w", err)
 	}
 
 	// Step 6: Update application status to Running
-	d.updateStatusIgnoreError(ctx, plan.ApplicationID, models.ApplicationStatusRunning, "Deployment completed successfully")
+	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusRunning, "Deployment completed successfully"); err != nil {
+		logger.Errorf("Failed to update application status to Running: %v\n", err)
+	}
 
 	logger.Infof("Deployment completed successfully for '%s'\n", plan.ApplicationName)
 
 	return nil
 }
 
-// handleDeploymentError updates application status on error and logs any update failures.
-func (d *PodmanDeployer) handleDeploymentError(ctx context.Context, appID uuid.UUID, message string, err error) {
-	fullMessage := fmt.Sprintf("%s: %v", message, err)
-	if updateErr := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, appID, models.ApplicationStatusError, fullMessage); updateErr != nil {
+// handleDeploymentStepError updates application status to Error and logs the failure.
+func (d *PodmanDeployer) handleDeploymentStepError(ctx context.Context, appID uuid.UUID, context string, err error) {
+	errMsg := fmt.Sprintf("%s: %v", context, err)
+	if updateErr := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, appID, models.ApplicationStatusError, errMsg); updateErr != nil {
 		logger.Errorf("Failed to update application status: %v\n", updateErr)
-	}
-}
-
-// updateStatusIgnoreError updates application status and logs any failures without returning error.
-func (d *PodmanDeployer) updateStatusIgnoreError(ctx context.Context, appID uuid.UUID, status models.ApplicationStatus, message string) {
-	if err := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, appID, status, message); err != nil {
-		logger.Errorf("Failed to update application status: %v\n", err)
 	}
 }
 
@@ -357,12 +353,18 @@ func (d *PodmanDeployer) deployComponentsConcurrently(components map[string]*Com
 		go func(h string, c *ComponentPlan) {
 			defer wg.Done()
 			if err := d.deployComponent(h, c, plan, &mu); err != nil {
-				d.handleComponentDeploymentError(h, c, err)
+				errMsg := fmt.Sprintf("Component deployment failed: %v", err)
+				if updateErr := catalogutils.UpdateComponentStatus(context.Background(), d.componentRepo, c.DatabaseID, models.ComponentStatusError, errMsg); updateErr != nil {
+					logger.Errorf("Failed to update component %s status: %v\n", h, updateErr)
+				}
 				errChan <- fmt.Errorf("failed to deploy component %s: %w", h, err)
 
 				return
 			}
-			d.handleComponentDeploymentSuccess(h, c)
+			// Update component status to Running after successful deployment
+			if err := catalogutils.UpdateComponentStatus(context.Background(), d.componentRepo, c.DatabaseID, models.ComponentStatusRunning, "Component deployed successfully"); err != nil {
+				logger.Errorf("Failed to update component %s status to Running: %v\n", h, err)
+			}
 		}(hash, comp)
 	}
 
@@ -411,27 +413,6 @@ func (d *PodmanDeployer) deployComponent(hash string, comp *ComponentPlan, plan 
 	logger.Infof("Component %s deployed successfully\n", comp.ComponentType)
 
 	return nil
-}
-
-// handleComponentDeploymentError updates component status to Error when deployment fails.
-func (d *PodmanDeployer) handleComponentDeploymentError(hash string, comp *ComponentPlan, err error) {
-	if comp.DatabaseID == uuid.Nil {
-		return
-	}
-	errMsg := fmt.Sprintf("Component deployment failed: %v", err)
-	if updateErr := d.componentRepo.UpdateStatus(context.Background(), comp.DatabaseID, models.ComponentStatusError, errMsg); updateErr != nil {
-		logger.Errorf("Failed to update component %s status: %v\n", hash, updateErr)
-	}
-}
-
-// handleComponentDeploymentSuccess updates component status to Running after successful deployment.
-func (d *PodmanDeployer) handleComponentDeploymentSuccess(hash string, comp *ComponentPlan) {
-	if comp.DatabaseID == uuid.Nil {
-		return
-	}
-	if err := d.componentRepo.UpdateStatus(context.Background(), comp.DatabaseID, models.ComponentStatusRunning, "Component deployed successfully"); err != nil {
-		logger.Errorf("Failed to update component %s status to Running: %v\n", hash, err)
-	}
 }
 
 // loadComponentResources loads all necessary resources for a component.
@@ -604,11 +585,9 @@ func (d *PodmanDeployer) deployServices(ctx context.Context, plan *DeploymentPla
 
 			if err := d.deployService(ctx, plan, sID, service); err != nil {
 				// Update service status to Error
-				if service.DatabaseID != uuid.Nil {
-					errMsg := fmt.Sprintf("Service deployment failed: %v", err)
-					if updateErr := d.serviceRepo.UpdateStatus(ctx, service.DatabaseID, models.ServiceStatusError, errMsg); updateErr != nil {
-						logger.Errorf("Failed to update service %s status: %v\n", sID, updateErr)
-					}
+				errMsg := fmt.Sprintf("Service deployment failed: %v", err)
+				if updateErr := catalogutils.UpdateServiceStatus(ctx, d.serviceRepo, service.DatabaseID, models.ServiceStatusError, errMsg); updateErr != nil {
+					logger.Errorf("Failed to update service %s status: %v\n", sID, updateErr)
 				}
 				errCh <- fmt.Errorf("failed to deploy service %s: %w", sID, err)
 
@@ -616,11 +595,9 @@ func (d *PodmanDeployer) deployServices(ctx context.Context, plan *DeploymentPla
 			}
 
 			// Update service status to Running after successful deployment
-			if service.DatabaseID != uuid.Nil {
-				if err := d.serviceRepo.UpdateStatus(ctx, service.DatabaseID, models.ServiceStatusRunning, "Service deployed successfully"); err != nil {
-					logger.Errorf("Failed to update service %s status to Running: %v\n", sID, err)
-					// Don't fail the deployment if status update fails
-				}
+			if err := catalogutils.UpdateServiceStatus(ctx, d.serviceRepo, service.DatabaseID, models.ServiceStatusRunning, "Service deployed successfully"); err != nil {
+				logger.Errorf("Failed to update service %s status to Running: %v\n", sID, err)
+				// Don't fail the deployment if status update fails
 			}
 		}(serviceID, svc)
 	}
@@ -648,7 +625,7 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 	logger.Infof("Deploying service %s...\n", serviceID)
 
 	// Update service status to Initializing in database
-	if err := d.serviceRepo.UpdateStatus(ctx, svc.DatabaseID, models.ServiceStatusInitializing, "Deploying service"); err != nil {
+	if err := catalogutils.UpdateServiceStatus(ctx, d.serviceRepo, svc.DatabaseID, models.ServiceStatusInitializing, "Deploying service"); err != nil {
 		logger.Errorf("Failed to update service status to Initializing: %v\n", err)
 		// Don't fail the deployment if status update fails
 	}

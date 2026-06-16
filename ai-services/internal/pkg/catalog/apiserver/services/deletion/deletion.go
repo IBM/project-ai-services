@@ -54,7 +54,7 @@ func (s *DeletionService) PerformDeletion(ctx context.Context, appID uuid.UUID, 
 	rt, err := vars.RuntimeFactory.Create("")
 	if err != nil {
 		logger.Errorf("failed to init runtime client for app %s: %s", appID, err)
-		_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, "failed to init runtime client")
+		_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, "failed to init runtime client")
 
 		return
 	}
@@ -63,7 +63,7 @@ func (s *DeletionService) PerformDeletion(ctx context.Context, appID uuid.UUID, 
 	proxyManager, err := proxy.GetCaddyProxyManager()
 	if err != nil {
 		logger.Errorf("failed to get Caddy proxy manager for app %s: %s", appID, err)
-		_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, fmt.Sprintf("failed to get Caddy proxy manager: %s", err))
+		_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, fmt.Sprintf("failed to get Caddy proxy manager: %s", err))
 
 		return
 	}
@@ -86,7 +86,7 @@ func (s *DeletionService) PerformDeletion(ctx context.Context, appID uuid.UUID, 
 	if err := s.appRepo.Delete(ctx, appID); err != nil {
 		errMsg := fmt.Sprintf("failed to delete application: %s", err)
 		logger.Errorf("application %s: %s", appID, errMsg)
-		_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, errMsg)
+		_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, errMsg)
 
 		return
 	}
@@ -124,7 +124,7 @@ func (s *DeletionService) collectComponentCandidates(ctx context.Context, appID 
 		deps, err := s.serviceDependencyRepo.GetDependenciesByServiceID(ctx, svc.ID)
 		if err != nil {
 			logger.Errorf("failed to get dependencies for service %s: %s", svc.ID, err)
-			_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, "failed to get service dependencies")
+			_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, "failed to get service dependencies")
 
 			return nil, err
 		}
@@ -184,7 +184,7 @@ func (s *DeletionService) unregisterServiceRoutes(ctx context.Context, proxyMana
 		svc.ID.String(),
 	); err != nil {
 		// Update DB status with route cleanup failure
-		_ = s.serviceRepo.UpdateStatus(ctx, svc.ID, models.ServiceStatusError,
+		_ = catalogutils.UpdateServiceStatus(ctx, s.serviceRepo, svc.ID, models.ServiceStatusError,
 			fmt.Sprintf("route unregistration failed: %v", err))
 
 		return err
@@ -208,7 +208,7 @@ func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime
 		if err != nil {
 			errMsg := fmt.Sprintf("service %s: failed to list pods: %s", svc.ID, err)
 			errorMessages = append(errorMessages, errMsg)
-			_ = s.serviceRepo.UpdateStatus(ctx, svc.ID, models.ServiceStatusError, fmt.Sprintf("failed to list pods: %s", err))
+			_ = catalogutils.UpdateServiceStatus(ctx, s.serviceRepo, svc.ID, models.ServiceStatusError, fmt.Sprintf("failed to list pods: %s", err))
 
 			continue
 		}
@@ -233,7 +233,7 @@ func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime
 			hasDeletionErrors = true
 			errMsg := fmt.Sprintf("service %s: failed to delete %d pod(s)", svc.ID, len(podErrors))
 			errorMessages = append(errorMessages, errMsg)
-			_ = s.serviceRepo.UpdateStatus(ctx, svc.ID, models.ServiceStatusError, fmt.Sprintf("failed to delete %d pod(s)", len(podErrors)))
+			_ = catalogutils.UpdateServiceStatus(ctx, s.serviceRepo, svc.ID, models.ServiceStatusError, fmt.Sprintf("failed to delete %d pod(s)", len(podErrors)))
 		}
 
 		// Delete volumes only after pods are deleted and only when keepData is false.
@@ -253,7 +253,7 @@ func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime
 		if err := s.serviceRepo.Delete(ctx, svc.ID); err != nil {
 			errMsg := fmt.Sprintf("service %s: failed to delete from DB: %s", svc.ID, err)
 			errorMessages = append(errorMessages, errMsg)
-			_ = s.serviceRepo.UpdateStatus(ctx, svc.ID, models.ServiceStatusError, fmt.Sprintf("failed to delete from DB: %s", err))
+			_ = catalogutils.UpdateServiceStatus(ctx, s.serviceRepo, svc.ID, models.ServiceStatusError, fmt.Sprintf("failed to delete from DB: %s", err))
 		}
 	}
 
@@ -294,7 +294,7 @@ func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runti
 		if err != nil {
 			errMsg := fmt.Sprintf("component %s: failed to list pods: %s", componentID, err)
 			errorMessages = append(errorMessages, errMsg)
-			_ = s.componentRepo.UpdateStatus(ctx, componentID, models.ComponentStatusError, fmt.Sprintf("failed to list pods: %s", err))
+			_ = catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, models.ComponentStatusError, fmt.Sprintf("failed to list pods: %s", err))
 
 			continue
 		}
@@ -312,7 +312,7 @@ func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runti
 			hasDeletionErrors = true
 			errMsg := fmt.Sprintf("component %s: failed to delete %d pod(s)", componentID, len(podErrors))
 			errorMessages = append(errorMessages, errMsg)
-			_ = s.componentRepo.UpdateStatus(ctx, componentID, models.ComponentStatusError, fmt.Sprintf("failed to delete %d pod(s)", len(podErrors)))
+			_ = catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, models.ComponentStatusError, fmt.Sprintf("failed to delete %d pod(s)", len(podErrors)))
 		}
 
 		// Delete component volumes only after pods are deleted and only when keepData is false.
@@ -332,7 +332,7 @@ func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runti
 		if err := s.componentRepo.Delete(ctx, componentID); err != nil {
 			errMsg := fmt.Sprintf("component %s: failed to delete from DB: %s", componentID, err)
 			errorMessages = append(errorMessages, errMsg)
-			_ = s.componentRepo.UpdateStatus(ctx, componentID, models.ComponentStatusError, fmt.Sprintf("failed to delete from DB: %s", err))
+			_ = catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, models.ComponentStatusError, fmt.Sprintf("failed to delete from DB: %s", err))
 		}
 	}
 
@@ -343,7 +343,7 @@ func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runti
 func (s *DeletionService) handleDeletionFailure(ctx context.Context, appID uuid.UUID, errorMessages []string) {
 	errMsg := fmt.Sprintf("Application deletion failed with %d error(s), application not deleted", len(errorMessages))
 	logger.Errorf("application %s: %s", appID, errMsg)
-	_ = s.appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, errMsg)
+	_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, errMsg)
 }
 
 // deleteVolumesFromPods extracts volume names from pod labels and deletes them using the runtime client.
