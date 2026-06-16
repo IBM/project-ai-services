@@ -19,6 +19,16 @@ const (
 	compProviderParamsRoute = "/api/v1/components/%s/providers/%s/params"
 )
 
+// HTTPError represents an HTTP error with status code.
+type HTTPError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Message)
+}
+
 // ApplicationClient provides methods for interacting with the applications API.
 type ApplicationClient struct {
 	client *Client
@@ -74,7 +84,10 @@ func (c *ApplicationClient) ListApplications(params *ListApplicationsParams) (*t
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("list applications: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
 	}
 
 	return &result, nil
@@ -92,7 +105,10 @@ func (c *ApplicationClient) GetApplicationPS(id string) (*types.ApplicationPSRes
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("get application ps: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
 	}
 
 	return &result, nil
@@ -123,7 +139,10 @@ func (c *ApplicationClient) DeleteApplication(id string, params *DeleteApplicati
 	}
 
 	if resp.IsError() {
-		return fmt.Errorf("delete application: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+		return &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
 	}
 
 	return nil
@@ -140,7 +159,10 @@ func (c *ApplicationClient) GetApplication(id string) (*types.Application, error
 	}
 
 	if resp.IsError() {
-		return nil, fmt.Errorf("get application: server returned HTTP %d: %s", resp.StatusCode(), utils.ParseErrorResponse(resp))
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode(),
+			Message:    utils.ParseErrorResponse(resp),
+		}
 	}
 
 	return &result, nil
