@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
@@ -30,6 +31,8 @@ var (
 	httpsPort int
 	// Reset password flag for catalog configure command.
 	resetPasswordFlag bool
+	// Reset podman auth secret for catalog configure command.
+	resetPodmanAuthFlag bool
 )
 
 const (
@@ -53,7 +56,9 @@ Examples:
 			cmd.SilenceUsage = true
 
 			if resetPasswordFlag {
-				return validateResetFlags(cmd)
+				return validateResetPasswordFlags(cmd)
+			} else if resetPodmanAuthFlag {
+				return validateResetAuthFlags(cmd)
 			}
 
 			return validateConfigureFlags()
@@ -61,6 +66,8 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if resetPasswordFlag {
 				return runResetPassword()
+			} else if resetPodmanAuthFlag {
+				return runResetPodmanAuth()
 			}
 
 			return runConfigure()
@@ -110,7 +117,7 @@ func runConfigure() error {
 	return configure.Run(vars.RuntimeFactory.GetRuntimeType(), aiServicesDir, domainName, cleanCertPath, cleanKeyPath, httpsPort)
 }
 
-func validateResetFlags(cmd *cobra.Command) error {
+func validateResetPasswordFlags(cmd *cobra.Command) error {
 	if err := validateRuntimeFlag(); err != nil {
 		return err
 	}
@@ -133,6 +140,32 @@ func validateResetFlags(cmd *cobra.Command) error {
 	// Check if SSL certificate flags were set
 	if sslCertPath != "" || sslKeyPath != "" {
 		return fmt.Errorf("--ssl-cert and --ssl-key cannot be used with --reset-password")
+	}
+
+	return nil
+}
+
+func validateResetAuthFlags(cmd *cobra.Command) error {
+	if err := validateRuntimeFlag(); err != nil {
+		return err
+	}
+
+	return validateResetFlag(cmd, "reset-podman-auth")
+}
+
+func validateResetFlag(cmd *cobra.Command, flagName string) error {
+	// Check that no configuration parameters are provided with --reset-password
+	// List of flags that cannot be used with --reset-password
+	var invalidFlags []string
+	cmd.Flags().Visit(func(f *pflag.Flag) {
+		if f.Name == flagName || f.Name == "runtime" {
+			// Skip valid flags
+			return
+		}
+		invalidFlags = append(invalidFlags, "--"+f.Name)
+	})
+	if len(invalidFlags) > 0 {
+		return fmt.Errorf("the following flags cannot be used with --%s: %v", flagName, invalidFlags)
 	}
 
 	return nil
@@ -288,6 +321,13 @@ func configureConfigureFlags(cmd *cobra.Command) {
 		false,
 		"Reset the password for the admin user",
 	)
+
+	cmd.Flags().BoolVar(
+		&resetPodmanAuthFlag,
+		"reset-podman-auth",
+		false,
+		"Reset podman authentication using the system's current auth.json.",
+	)
 }
 
 func runResetPassword() error {
@@ -305,6 +345,23 @@ func runResetPassword() error {
 	}
 
 	return catalogPodman.ResetCatalogPassword()
+}
+
+func runResetPodmanAuth() error {
+	logger.Warningf("Resetting podman auth will reload catalog pod!")
+	// Confirm deletion
+	confirmed, err := utils.ConfirmAction("\nDo you want to continue, with auth reset?")
+	if err != nil {
+		return fmt.Errorf("failed to get confirmation: %w", err)
+	}
+
+	if !confirmed {
+		logger.Infoln("Catalog podman auth reset cancelled")
+
+		return nil
+	}
+
+	return catalogPodman.ResetPodmanAuth()
 }
 
 // Made with Bob
