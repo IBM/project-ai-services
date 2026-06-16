@@ -25,18 +25,18 @@ about:
     sections:
       - title: "Version"
         value: "1.0.0"
-      - title: "Large Language Model (LLM)"
+      - title: "Large language model (LLM)"
         value: "granite-3.3-8b-instruct"
       - title: "Inference backend"
         values:
           - "RedHat AI Inference with Spyre"
           - "AI Inference on CPU"
           - "IBM watsonx.ai on IBM Cloud"
-      - title: "Embedding Model"
+      - title: "Embedding model"
         value: "granite-embedding-278m-multilingual"
-      - title: "Reranker Model"
+      - title: "Reranker model"
         value: "bge-reranker-v2-m3"
-      - title: "Vector Store"
+      - title: "Vector store"
         value: "OpenSearch"
 
   - title: "Inputs and outputs"

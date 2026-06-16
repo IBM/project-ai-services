@@ -29,11 +29,11 @@ about:
         values:
           - "RedHat AI Inference with Spyre"
           - "AI Inference on CPU"
-      - title: "Embedding Model"
+      - title: "Embedding model"
         value: "granite-embedding-278m-multilingual"
-      - title: "Reranker Model"
+      - title: "Reranker model"
         value: "bge-reranker-v2-m3"
-      - title: "Vector Store"
+      - title: "Vector store"
         value: "OpenSearch"
 
   - title: "Inputs and outputs"

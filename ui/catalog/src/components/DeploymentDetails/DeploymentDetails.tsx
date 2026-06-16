@@ -37,12 +37,14 @@ interface DeploymentDetailsProps {
   deployment: DeploymentDetailsType;
   onBack: () => void;
   deploymentSource: string;
+  onNameUpdate?: (newName: string) => void;
 }
 
 const DeploymentDetails = ({
   deployment,
   onBack,
   deploymentSource,
+  onNameUpdate,
 }: DeploymentDetailsProps) => {
   const [activeSection, setActiveSection] = useState("details");
   const [resources, setResources] = useState<
@@ -53,6 +55,13 @@ const DeploymentDetails = ({
   const [integrationEndpoints, setIntegrationEndpoints] = useState<
     DeployIntegrationEndpoints[]
   >([]);
+  const [editedName, setEditedName] = useState(deployment.name);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  useEffect(() => {
+    setEditedName(deployment.name);
+    setSaveError("");
+  }, [deployment.name]);
 
   useEffect(() => {
     const fetchResources = async () => {
@@ -284,6 +293,42 @@ const DeploymentDetails = ({
     return Math.round((used / allocated) * 100);
   };
 
+  const handleSave = async () => {
+    // Validate name
+    if (editedName.length < 3 || editedName.length > 100) {
+      setSaveError("Name must be between 3 and 100 characters");
+      return;
+    }
+
+    // Check if name actually changed
+    if (editedName === deployment.name) {
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveError("");
+
+    try {
+      await api.put(APPLICATION_ENDPOINTS.UPDATE_APPLICATION(deployment.id), {
+        name: editedName,
+      });
+      onNameUpdate?.(editedName);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Failed to update deployment name";
+      setSaveError(errorMessage);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setEditedName(deployment.name);
+    setSaveError("");
+  };
+
   return (
     <>
       <div>
@@ -390,9 +435,20 @@ const DeploymentDetails = ({
                             className={styles.labelColor}
                             id="deployment-name"
                             labelText="Name"
-                            value={deployment.name}
-                            invalid={false}
-                            invalidText=""
+                            value={editedName}
+                            onChange={(e) => {
+                              setEditedName(e.target.value);
+                              setSaveError("");
+                            }}
+                            invalid={
+                              editedName.length < 3 || editedName.length > 100
+                            }
+                            invalidText={
+                              editedName.length < 3
+                                ? "Name must be at least 3 characters"
+                                : "Name must be at most 100 characters"
+                            }
+                            disabled={isSaving}
                           />
                         )}
                       </Column>
@@ -489,9 +545,29 @@ const DeploymentDetails = ({
 
               <Grid className={styles.actionsGrid}>
                 <Column sm={4} md={8} lg={16}>
+                  {saveError && (
+                    <div className={styles.saveError}>{saveError}</div>
+                  )}
                   <div className={styles.actionButtons}>
-                    <Button kind="secondary">Cancel</Button>
-                    <Button kind="primary">Save</Button>
+                    <Button
+                      kind="secondary"
+                      onClick={handleCancel}
+                      disabled={isSaving}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      kind="primary"
+                      onClick={handleSave}
+                      disabled={
+                        isSaving ||
+                        editedName === deployment.name ||
+                        editedName.length < 3 ||
+                        editedName.length > 100
+                      }
+                    >
+                      {isSaving ? "Saving..." : "Save"}
+                    </Button>
                   </div>
                 </Column>
               </Grid>
