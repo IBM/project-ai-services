@@ -14,9 +14,9 @@ import (
 
 // Restore restores application data from a backup file for OpenShift runtime.
 func (o *OpenshiftApplication) Restore(ctx context.Context, opts types.RestoreOptions) error {
-	logger.Infof("Starting restore for application: %s\n", opts.Name, 0)
-	logger.Infof("Target: %s\n", opts.Target, 0)
-	logger.Infof("Backup file: %s\n", opts.BackupFile, 0)
+	logger.Infof("Starting restore for application: %s\n", opts.Name)
+	logger.Infof("Target: %s\n", opts.Target)
+	logger.Infof("Backup file: %s\n", opts.BackupFile)
 
 	// For OpenShift, use the name as-is (namespace convention)
 	applicationID := opts.Name
