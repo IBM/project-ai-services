@@ -100,7 +100,7 @@ func (s *SyncService) performSync() {
 	// Check if a sync is already running
 	s.syncMutex.Lock()
 	if s.isSyncing {
-		logger.Infof("Sync already in progress, skipping this cycle", logger.VerbosityLevelDebug)
+		logger.Debugln("Sync already in progress, skipping this cycle")
 		s.syncMutex.Unlock()
 
 		return
@@ -117,7 +117,7 @@ func (s *SyncService) performSync() {
 
 	ctx := context.Background()
 
-	logger.Infof("Starting DB-Pod sync cycle", logger.VerbosityLevelDebug)
+	logger.Debugln("Starting DB-Pod sync cycle")
 
 	// Get all applications with Running or Error status
 	filters := &dbrepo.ApplicationFilters{}
@@ -137,7 +137,7 @@ func (s *SyncService) performSync() {
 		}
 	}
 
-	logger.Infof("Completed DB-Pod sync cycle", logger.VerbosityLevelDebug)
+	logger.Debugln("Completed DB-Pod sync cycle")
 }
 
 // syncApplication syncs a single application using bottom-up approach:

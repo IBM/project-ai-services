@@ -103,7 +103,7 @@ func (c *caddyManager) RegisterRoute(route Route) error {
 
 	if checkResp.StatusCode() == http.StatusOK {
 		// Route already exists, skip registration
-		logger.Infof("Route %s already exists, skipping registration\n", route.ID, logger.VerbosityLevelDebug)
+		logger.Debugf("Route %s already exists, skipping registration\n", route.ID)
 
 		return nil
 	}

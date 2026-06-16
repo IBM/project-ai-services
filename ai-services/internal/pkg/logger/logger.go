@@ -7,7 +7,6 @@ import (
 	"os"
 	"runtime"
 	"strings"
-	"sync"
 
 	"github.com/spf13/cobra"
 	logsv1 "k8s.io/component-base/logs/api/v1"
@@ -57,9 +56,6 @@ var isServiceEnv bool
 
 // activeMinLevel tracks the active numeric severity level for filtering.
 var activeMinLevel int
-
-// requestIDMap stores request IDs per goroutine ID for concurrent request handling
-var requestIDMap sync.Map
 
 // logOptions holds the Kubernetes logging configuration
 var logOptions *logsv1.LoggingConfiguration
@@ -116,43 +112,9 @@ func Init() {
 	flag.Parse()
 }
 
-// SetRequestID sets the request ID in the logger context for the current goroutine
-func SetRequestID(ctx context.Context) {
-	gid := getGoroutineID()
-	requestIDMap.Store(gid, ctx)
-}
-
-// ClearRequestID clears the request ID from the logger context for the current goroutine
-func ClearRequestID() {
-	gid := getGoroutineID()
-	requestIDMap.Delete(gid)
-}
-
-// getGoroutineID returns the current goroutine ID
-func getGoroutineID() uint64 {
-	var buf [64]byte
-	n := runtime.Stack(buf[:], false)
-	// Parse goroutine ID from stack trace: "goroutine 123 [running]:"
-	var gid uint64
-	fmt.Sscanf(string(buf[:n]), "goroutine %d ", &gid)
-	return gid
-}
-
-// getRequestContext returns the context for the current goroutine if available
-// TODO: To be removed once we migrate to have the context based Logger methods
-func getRequestContext() context.Context {
-	gid := getGoroutineID()
-	if ctx, ok := requestIDMap.Load(gid); ok {
-		if requestIDContext, ok := ctx.(context.Context); ok {
-			return requestIDContext
-		}
-	}
-	return nil
-}
-
 // buildKV builds key-value pairs for structured logging with level, caller, and requestID
 // depth specifies how many stack frames to skip when capturing the caller location
-func buildKV(level string, depth int) []any {
+func buildKV(ctx context.Context, level string, depth int) []any {
 	var kv []any
 	kv = append(kv, "level", level)
 
@@ -163,8 +125,7 @@ func buildKV(level string, depth int) []any {
 		kv = append(kv, "caller", fmt.Sprintf("%s:%d", file, line))
 	}
 
-	// Extract requestID from goroutine-local context if available
-	ctx := getRequestContext()
+	// Extract requestID from context if available
 	if ctx != nil {
 		if id, ok := ctx.Value(RequestIDKey).(string); ok && id != "" {
 			kv = append(kv, "requestID", id)
@@ -183,81 +144,132 @@ func Flush() {
 	klog.Flush()
 }
 
-func Warningln(msg string) {
+// Context-aware logging methods (new API)
+
+func WarninglnCtx(ctx context.Context, msg string) {
 	if activeMinLevel > LevelRankWarn {
 		return
 	}
 	if isServiceEnv {
-		klog.InfoSDepth(1, msg, buildKV(LogLevelWarn, 1)...)
+		klog.InfoSDepth(1, msg, buildKV(ctx, LogLevelWarn, 1)...)
 	} else {
 		klog.WarningDepth(1, "WARNING: ", msg)
 	}
 }
 
-func Warningf(format string, args ...any) {
+func WarningfCtx(ctx context.Context, format string, args ...any) {
 	if activeMinLevel > LevelRankWarn {
 		return
 	}
 	formattedMsg := fmt.Sprintf(format, args...)
 	if isServiceEnv {
-		klog.InfoSDepth(1, formattedMsg, buildKV(LogLevelWarn, 1)...)
+		klog.InfoSDepth(1, formattedMsg, buildKV(ctx, LogLevelWarn, 1)...)
 	} else {
 		klog.WarningDepth(1, "WARNING: ", formattedMsg)
 	}
 }
 
-func Errorln(msg string) {
+func ErrorlnCtx(ctx context.Context, msg string) {
 	if isServiceEnv {
-		klog.InfoSDepth(1, msg, buildKV(LogLevelError, 1)...)
+		klog.InfoSDepth(1, msg, buildKV(ctx, LogLevelError, 1)...)
 	} else {
 		klog.ErrorDepth(1, "ERROR: ", msg)
 	}
 }
 
-func Errorf(format string, args ...any) {
+func ErrorfCtx(ctx context.Context, format string, args ...any) {
 	formattedMsg := fmt.Sprintf(format, args...)
 	if isServiceEnv {
-		klog.InfoSDepth(1, formattedMsg, buildKV(LogLevelError, 1)...)
+		klog.InfoSDepth(1, formattedMsg, buildKV(ctx, LogLevelError, 1)...)
 	} else {
 		klog.ErrorDepth(1, "ERROR: ", formattedMsg)
 	}
 }
 
-func Infoln(msg string, verbose ...int) {
+func InfolnCtx(ctx context.Context, msg string) {
 	if activeMinLevel > LevelRankInfo {
 		return
-	}
-
-	v := 0
-	if len(verbose) > 0 {
-		v = verbose[0]
 	}
 
 	if isServiceEnv {
-		klog.V(klog.Level(v)).InfoSDepth(1, msg, buildKV(LogLevelInfo, 1)...)
+		klog.InfoSDepth(1, msg, buildKV(ctx, LogLevelInfo, 1)...)
 	} else {
-		klog.V(klog.Level(v)).InfoDepth(1, msg)
+		klog.InfoDepth(1, msg)
 	}
 }
 
-func Infof(format string, args ...any) {
+func InfofCtx(ctx context.Context, format string, args ...any) {
 	if activeMinLevel > LevelRankInfo {
 		return
-	}
-
-	v := 0
-	// Extract trailing verbosity argument safely to preserve backward compatibility
-	if len(args) > 0 {
-		if verbosity, ok := args[len(args)-1].(int); ok {
-			v = verbosity
-			args = args[:len(args)-1]
-		}
 	}
 
 	formattedMsg := fmt.Sprintf(format, args...)
 	if isServiceEnv {
-		klog.V(klog.Level(v)).InfoSDepth(1, formattedMsg, buildKV(LogLevelInfo, 1)...)
+		klog.InfoSDepth(1, formattedMsg, buildKV(ctx, LogLevelInfo, 1)...)
 	} else {
-		klog.V(klog.Level(v)).InfoDepth(1, formattedMsg)
+		klog.InfoDepth(1, formattedMsg)
 	}
+}
+
+// DebuglnCtx logs a debug message with context and newline (verbosity level 2)
+func DebuglnCtx(ctx context.Context, msg string) {
+	if activeMinLevel > LevelRankDebug {
+		return
+	}
+
+	if isServiceEnv {
+		klog.V(klog.Level(VerbosityLevelDebug)).InfoSDepth(1, msg, buildKV(ctx, LogLevelDebug, 1)...)
+	} else {
+		klog.V(klog.Level(VerbosityLevelDebug)).InfoDepth(1, msg)
+	}
+}
+
+// DebugfCtx logs a formatted debug message with context (verbosity level 2)
+func DebugfCtx(ctx context.Context, format string, args ...any) {
+	if activeMinLevel > LevelRankDebug {
+		return
+	}
+
+	formattedMsg := fmt.Sprintf(format, args...)
+	if isServiceEnv {
+		klog.V(klog.Level(VerbosityLevelDebug)).InfoSDepth(1, formattedMsg, buildKV(ctx, LogLevelDebug, 1)...)
+	} else {
+		klog.V(klog.Level(VerbosityLevelDebug)).InfoDepth(1, formattedMsg)
+	}
+}
+
+// Backward-compatible methods (old API) - these use context.Background()
+
+func Warningln(msg string) {
+	WarninglnCtx(context.Background(), msg)
+}
+
+func Warningf(format string, args ...any) {
+	WarningfCtx(context.Background(), format, args...)
+}
+
+func Errorln(msg string) {
+	ErrorlnCtx(context.Background(), msg)
+}
+
+func Errorf(format string, args ...any) {
+	ErrorfCtx(context.Background(), format, args...)
+}
+
+func Infoln(msg string) {
+	InfolnCtx(context.Background(), msg)
+}
+
+func Infof(format string, args ...any) {
+	InfofCtx(context.Background(), format, args...)
+}
+
+// Debugln logs a debug message with newline using context.Background()
+func Debugln(msg string) {
+	DebuglnCtx(context.Background(), msg)
+}
+
+// Debugf logs a formatted debug message using context.Background()
+func Debugf(format string, args ...any) {
+	DebugfCtx(context.Background(), format, args...)
 }

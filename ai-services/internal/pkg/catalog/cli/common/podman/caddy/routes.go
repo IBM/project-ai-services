@@ -38,7 +38,7 @@ func RegisterCatalogRoutes(runtime *podman.PodmanClient, caddyCtx *Context, rout
 	// Register routes for each template that has them
 	var registrationErrors []error
 	for _, info := range routeInfos {
-		logger.Infof("Registering routes for pod: %s\n", info.PodName, logger.VerbosityLevelDebug)
+		logger.Debugf("Registering routes for pod: %s\n", info.PodName)
 
 		// Register routes and get the built routes back
 		routes, err := proxy.RegisterRoutesForAppAndReturn(constants.CatalogAppName, proxyManager, info.RoutesAnnotation, caddyCtx.GetDomainSuffix(), info.PodName)

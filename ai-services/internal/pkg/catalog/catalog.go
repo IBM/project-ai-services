@@ -88,7 +88,7 @@ func processMetadataFile(path string, items map[string]*catalogItem) error {
 
 	data, readErr := assets.CatalogFS.ReadFile(path)
 	if readErr != nil {
-		logger.Infof("failed to read metadata at %s: %v", path, readErr, logger.VerbosityLevelDebug)
+		logger.Debugf("failed to read metadata at %s: %v", path, readErr)
 
 		return nil
 	}
@@ -128,7 +128,7 @@ func parseAndStoreMetadata(catalogType, path, appPath string, data []byte, items
 func parseArchitecture(path, appPath string, data []byte, items map[string]*catalogItem) error {
 	var arch types.Architecture
 	if unmarshalErr := yaml.Unmarshal(data, &arch); unmarshalErr != nil {
-		logger.Infof("failed to parse architecture at %s: %v", path, unmarshalErr, logger.VerbosityLevelDebug)
+		logger.Debugf("failed to parse architecture at %s: %v", path, unmarshalErr)
 
 		return nil
 	}
@@ -145,7 +145,7 @@ func parseArchitecture(path, appPath string, data []byte, items map[string]*cata
 func parseService(path, appPath string, data []byte, items map[string]*catalogItem) error {
 	var svc types.Service
 	if unmarshalErr := yaml.Unmarshal(data, &svc); unmarshalErr != nil {
-		logger.Infof("failed to parse service at %s: %v", path, unmarshalErr, logger.VerbosityLevelDebug)
+		logger.Debugf("failed to parse service at %s: %v", path, unmarshalErr)
 
 		return nil
 	}
@@ -162,7 +162,7 @@ func parseService(path, appPath string, data []byte, items map[string]*catalogIt
 func parseComponent(path, appPath string, data []byte, items map[string]*catalogItem) error {
 	var comp types.Component
 	if unmarshalErr := yaml.Unmarshal(data, &comp); unmarshalErr != nil {
-		logger.Infof("failed to parse component at %s: %v", path, unmarshalErr, logger.VerbosityLevelDebug)
+		logger.Debugf("failed to parse component at %s: %v", path, unmarshalErr)
 
 		return nil
 	}

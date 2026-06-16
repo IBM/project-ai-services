@@ -25,13 +25,13 @@ func ListCards() ([]string, error) {
 		if pciDev == "" {
 			continue
 		}
-		logger.Infoln("Spyre card detected", logger.VerbosityLevelDebug)
+		logger.Debugln("Spyre card detected")
 		devID := strings.Split(pciDev, " ")[0]
-		logger.Infof("PCI id: %s\n", devID, logger.VerbosityLevelDebug)
+		logger.Debugf("PCI id: %s\n", devID)
 		spyreDeviceIDsList = append(spyreDeviceIDsList, devID)
 	}
 
-	logger.Infoln("List of discovered Spyre cards: "+strings.Join(spyreDeviceIDsList, ", "), logger.VerbosityLevelDebug)
+	logger.Debugln("List of discovered Spyre cards: " + strings.Join(spyreDeviceIDsList, ", "))
 
 	return spyreDeviceIDsList, nil
 }
@@ -52,12 +52,12 @@ func FindFreeCards() ([]string, error) {
 		}
 		f, err := os.Open("/dev/vfio/" + devFile.Name())
 		if err != nil {
-			logger.Infof("Device or resource busy, skipping.., err: %v", err, logger.VerbosityLevelDebug)
+			logger.Debugf("Device or resource busy, skipping.., err: %v", err)
 
 			continue
 		}
 		if err := f.Close(); err != nil {
-			logger.Infoln("Failed to close the device file handle", logger.VerbosityLevelDebug)
+			logger.Debugln("Failed to close the device file handle")
 		}
 
 		// free card available to use

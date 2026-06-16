@@ -100,7 +100,7 @@ func runConfigure() error {
 		}
 	}
 
-	logger.Infof("Using base directory: %s\n", aiServicesDir, logger.VerbosityLevelDebug)
+	logger.Debugf("Using base directory: %s\n", aiServicesDir)
 
 	// create model directory
 	modelPath := filepath.Join(aiServicesDir, "models")

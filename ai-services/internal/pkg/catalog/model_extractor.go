@@ -88,7 +88,7 @@ func (p *CatalogProvider) collectComponentsByTypeModels(componentType string, co
 		excluded := false
 		for _, excludedID := range excludeComponentProviders {
 			if strings.EqualFold(comp.ID, excludedID) {
-				logger.Infof("Skipping model extraction for excluded component: %s/%s\n", comp.ComponentType, comp.ID, logger.VerbosityLevelDebug)
+				logger.Debugf("Skipping model extraction for excluded component: %s/%s\n", comp.ComponentType, comp.ID)
 				excluded = true
 
 				break
@@ -117,7 +117,7 @@ func (p *CatalogProvider) addComponentModels(componentType, componentID string, 
 
 	// If schema is empty, skip this component
 	if len(schema) == 0 {
-		logger.Infof("No schema found for component %s/%s, skipping model extraction\n", componentType, componentID, logger.VerbosityLevelDebug)
+		logger.Debugf("No schema found for component %s/%s, skipping model extraction\n", componentType, componentID)
 
 		return nil
 	}

@@ -303,7 +303,7 @@ func shouldSkipOrUpdateRHODSResource(c *openshift.OpenshiftClient, object *unstr
 	}
 	existingResource, exists, err := utils.GetExistingCustomResource(c, gvk)
 	if err != nil {
-		logger.Infof("Error checking for existing %s: %v", kind, err, logger.VerbosityLevelDebug)
+		logger.Debugf("Error checking for existing %s: %v", kind, err)
 
 		return false
 	}
@@ -314,13 +314,13 @@ func shouldSkipOrUpdateRHODSResource(c *openshift.OpenshiftClient, object *unstr
 	}
 
 	existingName := existingResource.GetName()
-	logger.Infof("Found existing %s named '%s'", kind, existingName, logger.VerbosityLevelDebug)
+	logger.Debugf("Found existing %s named '%s'", kind, existingName)
 
 	// Check if resource has re-apply annotation set to false
 	annotations := object.GetAnnotations()
 	if annotations != nil {
 		if reApply, ok := annotations["ai-services.io/re-apply"]; ok && reApply == "false" {
-			logger.Infof("Skipping %s as re-apply annotation is set to false", kind, logger.VerbosityLevelDebug)
+			logger.Debugf("Skipping %s as re-apply annotation is set to false", kind)
 
 			return true
 		}

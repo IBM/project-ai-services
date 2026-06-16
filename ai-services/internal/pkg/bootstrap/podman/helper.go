@@ -20,11 +20,11 @@ import (
 
 // configureSpyre validates and repairs Spyre card configuration.
 func configureSpyre() error {
-	logger.Infoln("Running Spyre configuration validation and repair...", logger.VerbosityLevelDebug)
+	logger.Debugln("Running Spyre configuration validation and repair...")
 
 	// Check if Spyre cards are present
 	if !spyre.IsApplicable() {
-		logger.Infoln("No Spyre cards detected. Validation not applicable.", logger.VerbosityLevelDebug)
+		logger.Debugln("No Spyre cards detected. Validation not applicable.")
 
 		return nil
 	}
@@ -44,7 +44,7 @@ func configureSpyre() error {
 		return fmt.Errorf("some Spyre configuration checks still failed after repair")
 	}
 
-	logger.Infoln("✓ All Spyre configuration checks passed", logger.VerbosityLevelDebug)
+	logger.Debugln("✓ All Spyre configuration checks passed")
 
 	return nil
 }
@@ -80,13 +80,13 @@ func checkValidationResults(checks []check.CheckResult) bool {
 
 // attemptRepairs attempts to repair failed checks and re-validates.
 func attemptRepairs(checks []check.CheckResult) bool {
-	logger.Infoln("Attempting automatic repairs...", logger.VerbosityLevelDebug)
+	logger.Debugln("Attempting automatic repairs...")
 	results := spyre.Repair(checks)
 
 	logRepairResults(results)
 
 	// Re-run checks after repair
-	logger.Infoln("Re-running validation...", logger.VerbosityLevelDebug)
+	logger.Debugln("Re-running validation...")
 	checks = spyre.RunChecks()
 
 	allPassed := true
@@ -167,7 +167,7 @@ func setupPodman() error {
 		}
 	}
 
-	logger.Infoln("Waiting for podman socket to be ready...", logger.VerbosityLevelDebug)
+	logger.Debugln("Waiting for podman socket to be ready...")
 	time.Sleep(podmanSocketWaitDuration) // wait for socket to be ready
 
 	if err := utils.PodmanHealthCheck(); err != nil {
@@ -210,38 +210,38 @@ func setupSMTLevel() error {
 		return fmt.Errorf("failed to get current SMT level: %w", err)
 	}
 
-	logger.Infof("Current SMT level is %d", currentSMTLevel, logger.VerbosityLevelDebug)
+	logger.Debugf("Current SMT level is %d", currentSMTLevel)
 
 	// 1. Enable smtstate.service
 	if err := systemctl("enable", "smtstate.service"); err != nil {
 		return fmt.Errorf("failed to enable smtstate.service: %w", err)
 	}
-	logger.Infoln("smtstate.service enabled successfully", logger.VerbosityLevelDebug)
+	logger.Debugln("smtstate.service enabled successfully")
 
 	// 2. Start smtstate.service
 	if err := systemctl("start", "smtstate.service"); err != nil {
 		return fmt.Errorf("failed to start smtstate.service: %w", err)
 	}
-	logger.Infoln("smtstate.service started successfully", logger.VerbosityLevelDebug)
+	logger.Debugln("smtstate.service started successfully")
 
 	// 3. Set SMT level to 2
 	if currentSMTLevel != constants.SMTLevel {
-		logger.Infof("Setting SMT level from %d to %d", currentSMTLevel, constants.SMTLevel, logger.VerbosityLevelDebug)
+		logger.Debugf("Setting SMT level from %d to %d", currentSMTLevel, constants.SMTLevel)
 		cmd = exec.Command("ppc64_cpu", fmt.Sprintf("--smt=%d", constants.SMTLevel))
 		out, err = cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("failed to set SMT level to %d: %v, output: %s", constants.SMTLevel, err, string(out))
 		}
-		logger.Infof("SMT level set to %d", constants.SMTLevel, logger.VerbosityLevelDebug)
+		logger.Debugf("SMT level set to %d", constants.SMTLevel)
 	} else {
-		logger.Infof("SMT level is already set to %d", constants.SMTLevel, logger.VerbosityLevelDebug)
+		logger.Debugf("SMT level is already set to %d", constants.SMTLevel)
 	}
 
 	// 4. Restart smtstate.service to persist the setting
 	if err := systemctl("restart", "smtstate.service"); err != nil {
 		return fmt.Errorf("failed to restart smtstate.service: %w", err)
 	}
-	logger.Infoln("smtstate.service restarted successfully", logger.VerbosityLevelDebug)
+	logger.Debugln("smtstate.service restarted successfully")
 
 	// 5. Verify the SMT level is set correctly
 	cmd = exec.Command("ppc64_cpu", "--smt")
@@ -254,7 +254,7 @@ func setupSMTLevel() error {
 	if err != nil {
 		return fmt.Errorf("failed to get current SMT level: %w", err)
 	}
-	logger.Infof("SMT level verified: %d", smtLevel, logger.VerbosityLevelDebug)
+	logger.Debugf("SMT level verified: %d", smtLevel)
 
 	return nil
 }

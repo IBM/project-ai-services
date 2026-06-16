@@ -107,7 +107,7 @@ func (d *DeployContext) ExtractRouteInfos() ([]caddy.TemplateRouteInfo, error) {
 // ExecutePodLayers executes all pod template layers.
 func (d *DeployContext) ExecutePodLayers(baseDir string, caddyCtx *caddy.Context,
 	existingResources []string) error {
-	logger.Infoln("executing catalog service resources...", logger.VerbosityLevelDebug)
+	logger.Debugln("executing catalog service resources...")
 
 	for i, layer := range d.appMetadata.PodTemplateExecutions {
 		logger.Infof("\n Executing Layer %d/%d: %v\n", i+1, len(d.appMetadata.PodTemplateExecutions), layer)

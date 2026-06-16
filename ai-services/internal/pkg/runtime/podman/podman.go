@@ -46,7 +46,7 @@ func NewPodmanClient() (*PodmanClient, error) {
 	euid := os.Geteuid()
 	if euid != 0 && os.Getenv("XDG_RUNTIME_DIR") == "" {
 		uid := os.Getuid()
-		logger.Infof("Running as non-root user %d, setting XDG_RUNTIME_DIR", uid, logger.VerbosityLevelDebug)
+		logger.Debugf("Running as non-root user %d, setting XDG_RUNTIME_DIR", uid)
 		if err := os.Setenv("XDG_RUNTIME_DIR", fmt.Sprintf("/run/user/%d", uid)); err != nil {
 			return nil, fmt.Errorf("failed to set XDG_RUNTIME_DIR: %w", err)
 		}
@@ -731,13 +731,13 @@ func (pc *PodmanClient) ManageSidecarLifecycle(podID, sidecarName, image string,
 
 	// Ensure cleanup happens
 	defer func() {
-		logger.Infof("Cleaning up sidecar container...\n", 0)
+		logger.Infoln("Cleaning up sidecar container...")
 		stopErr := pc.StopContainer(containerID)
 		if stopErr != nil {
 			logger.Warningf("Failed to stop sidecar container %s: %v\n", containerID, stopErr)
 		}
 		// Note: Container has Remove=true, so it will be auto-removed when stopped
-		logger.Infof("Sidecar container cleanup completed\n", 0)
+		logger.Infoln("Sidecar container cleanup completed")
 	}()
 
 	// Execute the provided function with the sidecar

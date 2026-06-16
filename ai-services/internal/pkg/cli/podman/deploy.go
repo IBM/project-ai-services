@@ -27,7 +27,7 @@ func DeployPodAndReadinessCheck(rt runtime.Runtime, podSpec *models.PodSpec,
 		return fmt.Errorf("failed pod creation: %w", err)
 	}
 
-	logger.Infof("'%s': Successfully ran podman kube play\n", podTemplateName, logger.VerbosityLevelDebug)
+	logger.Debugf("'%s': Successfully ran podman kube play\n", podTemplateName)
 
 	// ---- Pod Readiness Checks ----
 	for _, pod := range pods {
@@ -92,7 +92,7 @@ func doContainerReadinessCheck(rt runtime.Runtime, podTemplateName, podName, con
 	}
 
 	if startPeriod == -1 {
-		logger.Infof("No container health check is set for '%s'. Hence skipping readiness check\n", cInfo.Name, logger.VerbosityLevelDebug)
+		logger.Debugf("No container health check is set for '%s'. Hence skipping readiness check\n", cInfo.Name)
 
 		return nil
 	}

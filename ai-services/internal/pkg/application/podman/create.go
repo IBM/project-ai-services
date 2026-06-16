@@ -230,7 +230,7 @@ func (p *PodmanApplication) calculateReqSpyreCards(tp templates.Template, podTem
 		}
 
 		if exists {
-			logger.Infof("Pod %s already exists, skipping spyre cards calculation", podSpec.Name, logger.VerbosityLevelDebug)
+			logger.Debugf("Pod %s already exists, skipping spyre cards calculation", podSpec.Name)
 
 			continue
 		}

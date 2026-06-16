@@ -29,7 +29,7 @@ func Retry(
 	}
 
 	for i := range attempts {
-		logger.Infof("\n[Retry] Attempt %d/%d...\n", i+1, attempts, 0)
+		logger.Debugf("\n[Retry] Attempt %d/%d...\n", i+1, attempts)
 
 		if err = fn(); err == nil {
 			return nil
@@ -41,7 +41,7 @@ func Retry(
 		}
 
 		// Sleep till delay
-		logger.Infof("[Retry] Sleeping %v before retrying...\n", delay, logger.VerbosityLevelDebug)
+		logger.Debugf("[Retry] Sleeping %v before retrying...\n", delay)
 		time.Sleep(delay)
 
 		// Apply backoff if provided
