@@ -20,7 +20,7 @@
       "type": "string",
       "title": "API Key",
       "format": "password",
-      "description": "API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication."
+      "description": "Optional API key for securing the vLLM service. If provided, **store it securely**—you will need to enter this key when accessing the Question and Answer service. Leave empty to disable authentication."
     }
   }
 }
