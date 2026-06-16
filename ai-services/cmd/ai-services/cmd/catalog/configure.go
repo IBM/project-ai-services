@@ -302,7 +302,7 @@ func configureResetFlags(cmd *cobra.Command) {
 }
 
 func runResetPassword() error {
-	logger.Warningf("Resetting password will reload catalog pod!")
+	logger.Warningf("Resetting password will reload the catalog pod, catalog service will be temporarily unavailable during this time!")
 	// Confirm deletion
 	confirmed, err := utils.ConfirmAction("\nDo you want to continue, with password reset?")
 	if err != nil {
@@ -319,7 +319,7 @@ func runResetPassword() error {
 }
 
 func runResetPodmanAuth() error {
-	logger.Warningf("Resetting podman auth will reload catalog pod!")
+	logger.Warningf("Resetting Podman auth will reload the catalog pod, catalog service will be temporarily unavailable during this time!")
 	// Confirm deletion
 	confirmed, err := utils.ConfirmAction("\nDo you want to continue, with podman auth reset?")
 	if err != nil {

@@ -3,6 +3,7 @@ package podman
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
 	catalogConstant "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
