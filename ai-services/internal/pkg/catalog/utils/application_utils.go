@@ -126,46 +126,4 @@ func CalculateComponentHash(componentType string, providerID string, params map[
 	return fmt.Sprintf("%x", hash[:16]) // Use first 16 bytes (32 hex chars)
 }
 
-// HandleApplicationDeploymentError updates application status to Error when deployment fails.
-func HandleApplicationDeploymentError(ctx context.Context, appRepo dbrepo.ApplicationRepository, appID uuid.UUID, err error) error {
-	if appID == uuid.Nil {
-		return nil
-	}
-
-	errMsg := fmt.Sprintf("Application deployment failed: %v", err)
-	if updateErr := appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, errMsg); updateErr != nil {
-		return fmt.Errorf("failed to update application status: %w", updateErr)
-	}
-
-	return nil
-}
-
-// HandleServiceDeploymentError updates service status to Error when deployment fails.
-func HandleServiceDeploymentError(ctx context.Context, serviceRepo dbrepo.ServiceRepository, serviceID uuid.UUID, err error) error {
-	if serviceID == uuid.Nil {
-		return nil
-	}
-
-	errMsg := fmt.Sprintf("Service deployment failed: %v", err)
-	if updateErr := serviceRepo.UpdateStatus(ctx, serviceID, models.ServiceStatusError, errMsg); updateErr != nil {
-		return fmt.Errorf("failed to update service status: %w", updateErr)
-	}
-
-	return nil
-}
-
-// HandleComponentDeploymentError updates component status to Error when deployment fails.
-func HandleComponentDeploymentError(ctx context.Context, componentRepo dbrepo.ComponentRepository, componentID uuid.UUID, err error) error {
-	if componentID == uuid.Nil {
-		return nil
-	}
-
-	errMsg := fmt.Sprintf("Component deployment failed: %v", err)
-	if updateErr := componentRepo.UpdateStatus(ctx, componentID, models.ComponentStatusError, errMsg); updateErr != nil {
-		return fmt.Errorf("failed to update component status: %w", updateErr)
-	}
-
-	return nil
-}
-
 // Made with Bob
