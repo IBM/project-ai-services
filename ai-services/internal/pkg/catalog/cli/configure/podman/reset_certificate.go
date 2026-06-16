@@ -46,7 +46,7 @@ func ResetCatalogCertificate(sslCertPath, sslKeyPath string) error {
 	}
 
 	if err := proxyManager.HealthCheck(); err != nil {
-		return fmt.Errorf("Caddy health check failed - Admin API is not accessible: %w", err)
+		return fmt.Errorf("caddy health check failed - admin API is not accessible: %w", err)
 	}
 
 	// Load new SSL certificates to Caddy
