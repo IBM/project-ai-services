@@ -61,9 +61,7 @@ Examples:
 				return validateResetFlag(cmd, "reset-password")
 			} else if resetPodmanAuthFlag {
 				return validateResetFlag(cmd, "reset-podman-auth")
-			}
-
-			if resetCertificateFlag {
+			} else if resetCertificateFlag {
 				return validateResetCertificateFlags(cmd)
 			}
 
@@ -74,9 +72,7 @@ Examples:
 				return runResetPassword()
 			} else if resetPodmanAuthFlag {
 				return runResetPodmanAuth()
-			}
-
-			if resetCertificateFlag {
+			} else if resetCertificateFlag {
 				return runResetCertificate()
 			}
 
@@ -240,14 +236,6 @@ func validateResetCertificateFlags(cmd *cobra.Command) error {
 }
 
 // checkIncompatibleFlags validates that only allowed flags are used with a specific flag.
-// It checks all flags that were explicitly set by the user and returns an error if any
-// incompatible flags are found.
-//
-// Parameters:
-//   - cmd: The cobra command to check flags on
-//   - flagName: The name of the flag being validated (e.g., "reset-password")
-//   - allowedFlags: Optional list of flag names that are allowed to be used with flagName
-//
 // Returns an error if any incompatible flags are found, nil otherwise.
 func checkIncompatibleFlags(cmd *cobra.Command, flagName string, allowedFlags ...string) error {
 	// Create a map of allowed flags for quick lookup
