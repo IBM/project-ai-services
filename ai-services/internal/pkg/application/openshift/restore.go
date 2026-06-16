@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	commonrestore "github.com/project-ai-services/ai-services/internal/pkg/application/common/restore"
+	"github.com/project-ai-services/ai-services/internal/pkg/application/openshift/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -17,6 +18,9 @@ func (o *OpenshiftApplication) Restore(ctx context.Context, opts types.RestoreOp
 	logger.Infof("Target: %s\n", opts.Target)
 	logger.Infof("Backup file: %s\n", opts.BackupFile)
 
+	// For OpenShift, use the name as-is (namespace convention)
+	applicationID := opts.Name
+
 	// Get absolute path to backup file
 	absFilename, err := filepath.Abs(opts.BackupFile)
 	if err != nil {
@@ -25,10 +29,12 @@ func (o *OpenshiftApplication) Restore(ctx context.Context, opts types.RestoreOp
 
 	// Execute restore based on target
 	switch opts.Target {
+	case "opensearch":
+		return restore.RestoreOpenSearch(ctx, applicationID, absFilename)
 	case "digitize":
 		return o.restoreDigitize(ctx, opts.Name, absFilename)
 	default:
-		return fmt.Errorf("unsupported target for OpenShift: %s (only 'digitize' is supported)", opts.Target)
+		return fmt.Errorf("unsupported target: %s", opts.Target)
 	}
 }
 
@@ -93,3 +99,5 @@ func (o *OpenshiftApplication) getDigitizeAPIURL(ctx context.Context, appName st
 
 	return apiURL, nil
 }
+
+// Made with Bob
