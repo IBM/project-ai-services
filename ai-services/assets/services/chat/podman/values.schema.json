@@ -21,7 +21,7 @@
           "description": "Custom initial system prompt for conversational RAG",
           "default": "You are a helpful, conversational AI assistant. Engage naturally with users across multiple turns of conversation. Provide clear, accurate, and contextually relevant responses. Reference previous exchanges when appropriate to maintain conversation flow.",
           "minLength": 10,
-          "maxLength": 2500,
+          "maxLength": 5000,
           "x-ui-controlled-by": "editSystemPrompt"
         }
       }
