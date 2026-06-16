@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	commonBackup "github.com/project-ai-services/ai-services/internal/pkg/application/common/backup"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/podman/backup"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/podman/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
@@ -103,18 +104,10 @@ func (p *PodmanApplication) backupDigitize(ctx context.Context, appName, backupF
 	}
 	logger.Infof("Application ID: %s\n", appDetails.ID, 0)
 
-	if backupFile == "" {
-		timestamp := time.Now().Format("20060102_150405")
-		backupFile = fmt.Sprintf("%s_digitize_backup_%s.tar.gz", appName, timestamp)
-	}
-
-	if !strings.HasSuffix(backupFile, ".tar.gz") {
-		backupFile += ".tar.gz"
-	}
-
-	absBackupFile, err := filepath.Abs(backupFile)
+	// Generate backup filename if not provided
+	absBackupFile, err := commonBackup.GetBackupFile(backupFile, appName)
 	if err != nil {
-		return fmt.Errorf("failed to get absolute path for backup file: %w", err)
+		return err
 	}
 
 	digitizeURL, err := restore.GetDigitizeAPIURL(appDetails)
@@ -125,13 +118,13 @@ func (p *PodmanApplication) backupDigitize(ctx context.Context, appName, backupF
 	logger.Infof("Digitize API URL: %s\n", digitizeURL, 0)
 
 	// Create digitize backup client and call Export API
-	client := backup.NewDigitizeBackupClient(digitizeURL)
+	client := commonBackup.NewDigitizeBackupClient(digitizeURL)
 	exportResponse, err := client.CallExportAPI()
 	if err != nil {
 		return err
 	}
 
-	if err := backup.CreateDigitizeBackupArchive(absBackupFile, exportResponse); err != nil {
+	if err := commonBackup.CreateDigitizeBackupArchive(absBackupFile, exportResponse); err != nil {
 		return err
 	}
 
@@ -141,7 +134,7 @@ func (p *PodmanApplication) backupDigitize(ctx context.Context, appName, backupF
 	return nil
 }
 
-func logDigitizeBackupSummary(exportResponse *backup.DigitizeExportResponse) {
+func logDigitizeBackupSummary(exportResponse *commonBackup.DigitizeExportResponse) {
 	if exportResponse == nil {
 		return
 	}

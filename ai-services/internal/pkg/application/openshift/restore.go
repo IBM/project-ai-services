@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
+	commonrestore "github.com/project-ai-services/ai-services/internal/pkg/application/common/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -37,15 +37,7 @@ func (o *OpenshiftApplication) restoreDigitize(ctx context.Context, appName, bac
 	logger.Infof("Restoring digitize metadata\n")
 	logger.Infof("Digitize Import (API-based Approach)\n")
 
-	// Extract and locate backup directory
-	backupDir, cleanup, err := restore.ExtractAndLocateBackup(backupFile)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-
-	// Construct metadata from cache files
-	importPayload, err := restore.ConstructMetadataFromCache(backupDir)
+	importPayload, err := commonrestore.GetDigitizeData(backupFile)
 	if err != nil {
 		return err
 	}
@@ -59,7 +51,7 @@ func (o *OpenshiftApplication) restoreDigitize(ctx context.Context, appName, bac
 	logger.Infof("Digitize API URL: %s\n", digitizeURL)
 
 	// Create digitize restore client and call Import API
-	client := restore.NewDigitizeRestoreClient(digitizeURL)
+	client := commonrestore.NewDigitizeRestoreClient(digitizeURL)
 	if err := client.CallImportAPI(importPayload); err != nil {
 		return err
 	}

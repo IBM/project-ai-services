@@ -3,11 +3,8 @@ package openshift
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"strings"
-	"time"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/application/podman/backup"
+	commonBackup "github.com/project-ai-services/ai-services/internal/pkg/application/common/backup"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -32,20 +29,9 @@ func (o *OpenshiftApplication) backupDigitize(ctx context.Context, appName, back
 	logger.Infof("Digitize Export (API-based Approach)\n")
 
 	// Generate backup filename if not provided
-	if backupFile == "" {
-		timestamp := time.Now().Format("20060102_150405")
-		backupFile = fmt.Sprintf("%s_digitize_backup_%s.tar.gz", appName, timestamp)
-	}
-
-	// Ensure .tar.gz extension
-	if !strings.HasSuffix(backupFile, ".tar.gz") {
-		backupFile += ".tar.gz"
-	}
-
-	// Get absolute path for backup file
-	absBackupFile, err := filepath.Abs(backupFile)
+	absBackupFile, err := commonBackup.GetBackupFile(backupFile, appName)
 	if err != nil {
-		return fmt.Errorf("failed to get absolute path for backup file: %w", err)
+		return err
 	}
 
 	// Get digitize service API URL from OpenShift routes
@@ -57,7 +43,7 @@ func (o *OpenshiftApplication) backupDigitize(ctx context.Context, appName, back
 	logger.Infof("Digitize API URL: %s\n", digitizeURL)
 
 	// Create digitize backup client and call Export API
-	client := backup.NewDigitizeBackupClient(digitizeURL)
+	client := commonBackup.NewDigitizeBackupClient(digitizeURL)
 
 	exportResponse, err := client.CallExportAPI()
 	if err != nil {
@@ -65,7 +51,7 @@ func (o *OpenshiftApplication) backupDigitize(ctx context.Context, appName, back
 	}
 
 	// Create backup archive using shared function
-	if err := backup.CreateDigitizeBackupArchive(absBackupFile, exportResponse); err != nil {
+	if err := commonBackup.CreateDigitizeBackupArchive(absBackupFile, exportResponse); err != nil {
 		return err
 	}
 
@@ -77,7 +63,7 @@ func (o *OpenshiftApplication) backupDigitize(ctx context.Context, appName, back
 }
 
 // logDigitizeBackupSummary logs the backup summary from the export response.
-func logDigitizeBackupSummary(exportResponse *backup.DigitizeExportResponse) {
+func logDigitizeBackupSummary(exportResponse *commonBackup.DigitizeExportResponse) {
 	if exportResponse == nil {
 		return
 	}
