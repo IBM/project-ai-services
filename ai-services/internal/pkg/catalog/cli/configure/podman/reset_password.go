@@ -97,13 +97,13 @@ func getCatalogPodDetails(rt runtime.Runtime) (*PodmanConfigureOptions, string, 
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
 		}
-		getEnvValues(cInfo.Env, opts)
+		setConfigureOptions(cInfo.Env, opts)
 	}
 
 	return opts, pod.ID, nil
 }
 
-func getEnvValues(podEnv map[string]string, opts *PodmanConfigureOptions) {
+func setConfigureOptions(podEnv map[string]string, opts *PodmanConfigureOptions) {
 	// Setting required 3 envs
 	if value, ok := podEnv["AI_SERVICES_BASE_DIR"]; ok {
 		opts.BaseDir = value
