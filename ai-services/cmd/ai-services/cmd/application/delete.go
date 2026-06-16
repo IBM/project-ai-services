@@ -1,7 +1,9 @@
 package application
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -153,7 +155,7 @@ func deleteApplication(appName string) error {
 
 	// Poll to verify deletion is complete
 	logger.Infof("Waiting for application %s to be deleted...\n", appName)
-	if err := waitForApplicationDeletion(appClient, app.ID, app.Name); err != nil {
+	if err := waitForApplicationDeletion(appClient, app.ID); err != nil {
 		return fmt.Errorf("failed to verify application deletion: %w", err)
 	}
 
@@ -163,7 +165,7 @@ func deleteApplication(appName string) error {
 }
 
 // waitForApplicationDeletion polls the application status until it's fully deleted.
-func waitForApplicationDeletion(appClient *catalogClient.ApplicationClient, appID, appName string) error {
+func waitForApplicationDeletion(appClient *catalogClient.ApplicationClient, appID string) error {
 	const (
 		pollInterval = 5 * time.Second
 		maxAttempts  = 12
@@ -173,8 +175,10 @@ func waitForApplicationDeletion(appClient *catalogClient.ApplicationClient, appI
 		// Check if application still exists via API
 		app, err := appClient.GetApplication(appID)
 		if err != nil {
-			// If application is not found, it's been successfully deleted
-			if err.Error() == fmt.Sprintf("application with name '%s' not found", appName) {
+			// Check if it's an HTTPError with 404 status code
+			var httpErr *catalogClient.HTTPError
+			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+				// Application not found (HTTP 404) - successfully deleted
 				return nil
 			}
 

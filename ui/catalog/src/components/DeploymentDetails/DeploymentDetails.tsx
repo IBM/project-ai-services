@@ -28,10 +28,12 @@ import type {
   DeployIntegrationEndpoints,
   ResourcesApiResponse,
   ApplicationDetailsApiResponse,
+  AcceleratorCards as AcceleratorCardType,
 } from "@/types/digitalAssistants";
 import styles from "./DeploymentDetails.module.scss";
 import { api } from "@/api/axios";
 import { APPLICATION_ENDPOINTS, SERVICE_ENDPOINTS } from "@/constants";
+import AcceleratorCards from "./AcceleratorCards";
 
 interface DeploymentDetailsProps {
   deployment: DeploymentDetailsType;
@@ -55,9 +57,13 @@ const DeploymentDetails = ({
   const [integrationEndpoints, setIntegrationEndpoints] = useState<
     DeployIntegrationEndpoints[]
   >([]);
+  const [acceleratorCards, setAcceleratorCards] = useState<
+    AcceleratorCardType[]
+  >([]);
   const [editedName, setEditedName] = useState(deployment.name);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+
   useEffect(() => {
     setEditedName(deployment.name);
     setSaveError("");
@@ -81,28 +87,6 @@ const DeploymentDetails = ({
             unit: "cores",
           },
           {
-            name: "Spyre cards",
-            used:
-              response.data.accelerators &&
-              Object.keys(response.data.accelerators).length > 0
-                ? Object.values(response.data.accelerators).reduce(
-                    (sum: number, val: { used?: number; total?: number }) =>
-                      sum + (val?.used || 0),
-                    0,
-                  )
-                : 0,
-            allocated:
-              response.data.accelerators &&
-              Object.keys(response.data.accelerators).length > 0
-                ? Object.values(response.data.accelerators).reduce(
-                    (sum: number, val: { used?: number; total?: number }) =>
-                      sum + (val?.total || 0),
-                    0,
-                  )
-                : 0,
-            unit: "cards",
-          },
-          {
             name: "Memory",
             used:
               Math.round(
@@ -117,9 +101,31 @@ const DeploymentDetails = ({
         ];
 
         setResources(transformedResources);
+
+        // Extract accelerator card IDs from the response
+        if (
+          response.data.accelerators &&
+          Object.keys(response.data.accelerators).length > 0
+        ) {
+          // Get the array of PCI addresses from ibm.com/spyre_pf
+          const spyreCards = response.data.accelerators["ibm.com/spyre_pf"];
+
+          if (Array.isArray(spyreCards) && spyreCards.length > 0) {
+            const cards: AcceleratorCardType[] = spyreCards.map((cardId) => ({
+              id: cardId,
+              label: cardId,
+            }));
+            setAcceleratorCards(cards);
+          } else {
+            setAcceleratorCards([]);
+          }
+        } else {
+          setAcceleratorCards([]);
+        }
       } catch (error) {
         console.error("Error fetching application resources:", error);
         setResources([]);
+        setAcceleratorCards([]);
       } finally {
         setIsLoadingResources(false);
       }
@@ -542,6 +548,11 @@ const DeploymentDetails = ({
                   </ProductiveCard>
                 </Column>
               </Grid>
+
+              {/* Accelerator Cards Section */}
+              {acceleratorCards.length > 0 && (
+                <AcceleratorCards cards={acceleratorCards} />
+              )}
 
               <Grid className={styles.actionsGrid}>
                 <Column sm={4} md={8} lg={16}>
