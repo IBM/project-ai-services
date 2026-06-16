@@ -37,11 +37,19 @@ func ResetCatalogCertificate(sslCertPath, sslKeyPath string) error {
 	}
 
 	// Create Caddy context for certificate operations
-	// The LoadSSLCertificates method will verify Caddy health internally when getting admin URL
 	caddyCtx := caddy.NewContext(caddyPodName, "")
 
-	// Load new SSL certificates to Caddy (this will check Caddy health via admin API)
-	logger.Infoln("loading new SSL certificates to Caddy...", logger.VerbosityLevelDebug)
+	// Check Caddy health before attempting to load certificates
+	proxyManager, err := caddyCtx.CreateProxyManager()
+	if err != nil {
+		return fmt.Errorf("failed to create proxy manager: %w", err)
+	}
+
+	if err := proxyManager.HealthCheck(); err != nil {
+		return fmt.Errorf("Caddy health check failed - Admin API is not accessible: %w", err)
+	}
+
+	// Load new SSL certificates to Caddy
 	if err := caddyCtx.LoadSSLCertificates(opts.BaseDir, sslCertPath, sslKeyPath); err != nil {
 		return fmt.Errorf("failed to load certificates: %w", err)
 	}
