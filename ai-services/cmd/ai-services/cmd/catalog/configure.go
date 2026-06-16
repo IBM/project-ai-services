@@ -330,7 +330,7 @@ func runResetPassword() error {
 func runResetPodmanAuth() error {
 	logger.Warningf("Resetting podman auth will reload catalog pod!")
 	// Confirm deletion
-	confirmed, err := utils.ConfirmAction("\nDo you want to continue, with auth reset?")
+	confirmed, err := utils.ConfirmAction("\nDo you want to continue, with podman auth reset?")
 	if err != nil {
 		return fmt.Errorf("failed to get confirmation: %w", err)
 	}
