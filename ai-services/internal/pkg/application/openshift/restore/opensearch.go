@@ -190,6 +190,7 @@ func listBackupIndices(podName, namespace, backupDir string) ([]string, error) {
 		}
 		if err := appcommon.ValidateIndexName(indexName); err != nil {
 			logger.Warningf("Skipping invalid index name %s: %v\n", indexName, err)
+
 			continue
 		}
 		validIndices = append(validIndices, indexName)
@@ -218,6 +219,7 @@ func restoreAllIndices(ctx context.Context, podName, namespace, osHost, osPasswo
 		if err := restoreIndex(podName, namespace, osHost, osPassword, backupDir, indexName); err != nil {
 			logger.Errorf("Failed to restore index %s: %v\n", indexName, err)
 			errors = append(errors, fmt.Errorf("index %s: %w", indexName, err))
+
 			continue
 		}
 		restoredCount++
