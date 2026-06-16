@@ -34,13 +34,8 @@ Flags:
                If not specified, a filename will be auto-generated with timestamp
 
 Supported targets:
-  - opensearch: Backup OpenSearch indices and data (Podman only)
+  - opensearch: Backup OpenSearch indices and data (Podman and OpenShift)
   - digitize:   Backup digitize metadata (jobs and documents) (Podman and OpenShift)
-
-Note:
-  - OpenSearch backup is currently only supported for Podman runtime
-  - Digitize backup is supported for both Podman and OpenShift runtimes
-
 Examples:
   # Backup OpenSearch data with Podman (auto-generated filename)
   ai-services application backup myapp --target opensearch --runtime podman
@@ -96,11 +91,6 @@ Examples:
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
 		logger.Infof("Runtime: %s\n", rt, 0)
-
-		// Check if OpenShift runtime is being used with unsupported targets
-		if rt == "openshift" && backupTarget != "digitize" {
-			return fmt.Errorf("backup for target '%s' is not yet supported for OpenShift runtime (only 'digitize' is supported)", backupTarget)
-		}
 
 		// Get absolute path to backup file if provided
 		var absFilename string

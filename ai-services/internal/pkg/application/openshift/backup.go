@@ -3,8 +3,12 @@ package openshift
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
 
 	commonBackup "github.com/project-ai-services/ai-services/internal/pkg/application/common/backup"
+	"github.com/project-ai-services/ai-services/internal/pkg/application/openshift/backup"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -16,11 +20,44 @@ func (o *OpenshiftApplication) Backup(ctx context.Context, opts types.BackupOpti
 
 	// Execute backup based on target
 	switch opts.Target {
+	case "opensearch":
+		return o.backupOpenSearch(ctx, opts.Name, opts.BackupFile)
 	case "digitize":
 		return o.backupDigitize(ctx, opts.Name, opts.BackupFile)
 	default:
-		return fmt.Errorf("unsupported target for OpenShift: %s (only 'digitize' is supported)", opts.Target)
+		return fmt.Errorf("unsupported target for OpenShift: %s", opts.Target)
 	}
+}
+
+// backupOpenSearch performs OpenSearch backup using a sidecar pod.
+func (o *OpenshiftApplication) backupOpenSearch(ctx context.Context, appName, backupFile string) error {
+	logger.Infof("Backing up OpenSearch data for application: %s\n", appName, 0)
+
+	// Generate backup filename if not provided
+	if backupFile == "" {
+		timestamp := time.Now().Format("20060102_150405")
+		backupFile = fmt.Sprintf("%s_opensearch_backup_%s.tar.gz", appName, timestamp)
+	}
+
+	// Ensure .tar.gz extension
+	if !strings.HasSuffix(backupFile, ".tar.gz") {
+		backupFile += ".tar.gz"
+	}
+
+	// Get absolute path for backup file
+	absBackupFile, err := filepath.Abs(backupFile)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path for backup file: %w", err)
+	}
+
+	// Perform backup using the backup package
+	if err := backup.BackupOpenSearch(ctx, appName, absBackupFile); err != nil {
+		return err
+	}
+
+	logger.Infof("✅ Backup completed successfully: %s\n", absBackupFile, 0)
+
+	return nil
 }
 
 // backupDigitize backs up digitize metadata using the Export API for OpenShift.
