@@ -2,7 +2,6 @@ package podman
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -78,25 +77,21 @@ func validateConfigParameters(existingOpts *PodmanConfigureOptions, newOpts *Pod
 
 // validateCertificateChanges prevents switching from custom certificates back to Caddy self-signed certificates.
 // Allows updating custom certificate content (e.g., for expiry or renewal).
+// Uses glob patterns to detect timestamped certificate files.
 func validateCertificateChanges(opts *PodmanConfigureOptions) error {
-	// Define staged certificate paths
-	stagedCertPath := filepath.Join(opts.BaseDir, "common", "caddy", certsDirName, "tls.crt")
-	stagedKeyPath := filepath.Join(opts.BaseDir, "common", "caddy", certsDirName, "tls.key")
+	// Define staged certificate directory
+	certDir := filepath.Join(opts.BaseDir, "common", "caddy", certsDirName)
 
-	// Check if staged certificates exist from previous deployment
-	stagedCertExists := false
-	stagedKeyExists := false
+	// Check if any timestamped certificates exist from previous deployment
+	stagedCerts, _ := filepath.Glob(filepath.Join(certDir, "tls-*.crt"))
+	stagedKeys, _ := filepath.Glob(filepath.Join(certDir, "tls-*.key"))
 
-	if _, err := os.Stat(stagedCertPath); err == nil {
-		stagedCertExists = true
-	}
-	if _, err := os.Stat(stagedKeyPath); err == nil {
-		stagedKeyExists = true
-	}
+	stagedCertExists := len(stagedCerts) > 0
+	stagedKeyExists := len(stagedKeys) > 0
 
 	// If no SSL paths provided in new config but staged certs exist, block cert type change
 	if (opts.SSLCertPath == "" || opts.SSLKeyPath == "") && stagedCertExists && stagedKeyExists {
-		return fmt.Errorf("certificate type change not allowed. Cannot switch to Caddy self-signed certificates during reconfigure. Please uninstall the catalog deployment and re-run configure to change certificate type")
+		return fmt.Errorf("certificate type change not allowed: custom certificates are already configured. Cannot switch to Caddy self-signed certificates during reconfigure. Please uninstall the catalog deployment and re-run configure to change certificate type")
 	}
 
 	// Allow all other scenarios:
