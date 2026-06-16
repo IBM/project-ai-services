@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -253,7 +254,7 @@ func (s *SyncService) syncServicePod(ctx context.Context, rt runtime.Runtime, se
 		message := fmt.Sprintf("Pod not found or error: %v", err)
 
 		if service.Status != newStatus {
-			if err := s.serviceRepo.UpdateStatus(ctx, service.ID, newStatus, message); err != nil {
+			if err := catalogutils.UpdateServiceStatus(ctx, s.serviceRepo, service.ID, newStatus, message); err != nil {
 				return "", fmt.Errorf("failed to update service status: %w", err)
 			}
 			logger.Infof("Updated service %s status to %s", service.ID, newStatus)
@@ -267,7 +268,7 @@ func (s *SyncService) syncServicePod(ctx context.Context, rt runtime.Runtime, se
 
 	// Update only if status changed
 	if service.Status != newStatus {
-		if err := s.serviceRepo.UpdateStatus(ctx, service.ID, newStatus, message); err != nil {
+		if err := catalogutils.UpdateServiceStatus(ctx, s.serviceRepo, service.ID, newStatus, message); err != nil {
 			return "", fmt.Errorf("failed to update service status: %w", err)
 		}
 		logger.Infof("Updated service %s status to %s", service.ID, newStatus)
@@ -301,7 +302,7 @@ func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, 
 		message := fmt.Sprintf("Pod not found or error: %v", err)
 
 		if component.Status != newStatus {
-			if err := s.componentRepo.UpdateStatus(ctx, componentID, newStatus, message); err != nil {
+			if err := catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, newStatus, message); err != nil {
 				return newStatus, "", fmt.Errorf("failed to update component status: %w", err)
 			}
 			logger.Infof("Updated component %s status to %s", componentID, newStatus)
@@ -315,7 +316,7 @@ func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, 
 
 	// Update only if status changed
 	if component.Status != newStatus {
-		if err := s.componentRepo.UpdateStatus(ctx, componentID, newStatus, message); err != nil {
+		if err := catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, newStatus, message); err != nil {
 			return newStatus, "", fmt.Errorf("failed to update component status: %w", err)
 		}
 		logger.Infof("Updated component %s status to %s", componentID, newStatus)
@@ -424,7 +425,7 @@ func (s *SyncService) updateApplicationStatus(ctx context.Context, app *models.A
 
 	// Update only if status changed
 	if app.Status != newStatus {
-		if err := s.appRepo.UpdateStatus(ctx, app.ID, newStatus, message); err != nil {
+		if err := catalogutils.UpdateApplicationStatus(ctx, s.appRepo, app.ID, newStatus, message); err != nil {
 			return fmt.Errorf("failed to update application status: %w", err)
 		}
 		logger.Infof("Updated application %s status to %s", app.Name, newStatus)

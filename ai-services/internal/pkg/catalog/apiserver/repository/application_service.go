@@ -650,7 +650,7 @@ func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID
 		}
 	}
 
-	if err := s.appRepo.UpdateStatus(ctx, id, models.ApplicationStatusDeleting, "Deletion initiated"); err != nil {
+	if err := utils.UpdateApplicationStatus(ctx, s.appRepo, id, models.ApplicationStatusDeleting, "Deletion initiated"); err != nil {
 		return nil, err
 	}
 

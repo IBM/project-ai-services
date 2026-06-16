@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/google/uuid"
@@ -34,8 +33,6 @@ func UpdateApplicationStatus(ctx context.Context, appRepo dbrepo.ApplicationRepo
 	case string:
 		appUUID, err = uuid.Parse(id)
 		if err != nil {
-			log.Printf("Failed to parse application ID %s: %v", id, err)
-
 			return fmt.Errorf("invalid application ID: %w", err)
 		}
 	case uuid.UUID:
@@ -46,12 +43,34 @@ func UpdateApplicationStatus(ctx context.Context, appRepo dbrepo.ApplicationRepo
 
 	// Update the application status in the database
 	if err := appRepo.UpdateStatus(ctx, appUUID, status, message); err != nil {
-		log.Printf("Failed to update application %s status in database: %v", appUUID, err)
-
 		return fmt.Errorf("failed to update application status: %w", err)
 	}
 
-	log.Printf("Application %s status updated: %s - %s", appUUID, status, message)
+	return nil
+}
+
+// UpdateServiceStatus updates service status in the database.
+func UpdateServiceStatus(ctx context.Context, serviceRepo dbrepo.ServiceRepository, serviceID uuid.UUID, status models.ServiceStatus, message string) error {
+	if serviceID == uuid.Nil {
+		return nil
+	}
+
+	if err := serviceRepo.UpdateStatus(ctx, serviceID, status, message); err != nil {
+		return fmt.Errorf("failed to update service status: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateComponentStatus updates component status in the database.
+func UpdateComponentStatus(ctx context.Context, componentRepo dbrepo.ComponentRepository, componentID uuid.UUID, status models.ComponentStatus, message string) error {
+	if componentID == uuid.Nil {
+		return nil
+	}
+
+	if err := componentRepo.UpdateStatus(ctx, componentID, status, message); err != nil {
+		return fmt.Errorf("failed to update component status: %w", err)
+	}
 
 	return nil
 }
@@ -105,6 +124,48 @@ func CalculateComponentHash(componentType string, providerID string, params map[
 	hash := sha256.Sum256([]byte(hashInput))
 
 	return fmt.Sprintf("%x", hash[:16]) // Use first 16 bytes (32 hex chars)
+}
+
+// HandleApplicationDeploymentError updates application status to Error when deployment fails.
+func HandleApplicationDeploymentError(ctx context.Context, appRepo dbrepo.ApplicationRepository, appID uuid.UUID, err error) error {
+	if appID == uuid.Nil {
+		return nil
+	}
+
+	errMsg := fmt.Sprintf("Application deployment failed: %v", err)
+	if updateErr := appRepo.UpdateStatus(ctx, appID, models.ApplicationStatusError, errMsg); updateErr != nil {
+		return fmt.Errorf("failed to update application status: %w", updateErr)
+	}
+
+	return nil
+}
+
+// HandleServiceDeploymentError updates service status to Error when deployment fails.
+func HandleServiceDeploymentError(ctx context.Context, serviceRepo dbrepo.ServiceRepository, serviceID uuid.UUID, err error) error {
+	if serviceID == uuid.Nil {
+		return nil
+	}
+
+	errMsg := fmt.Sprintf("Service deployment failed: %v", err)
+	if updateErr := serviceRepo.UpdateStatus(ctx, serviceID, models.ServiceStatusError, errMsg); updateErr != nil {
+		return fmt.Errorf("failed to update service status: %w", updateErr)
+	}
+
+	return nil
+}
+
+// HandleComponentDeploymentError updates component status to Error when deployment fails.
+func HandleComponentDeploymentError(ctx context.Context, componentRepo dbrepo.ComponentRepository, componentID uuid.UUID, err error) error {
+	if componentID == uuid.Nil {
+		return nil
+	}
+
+	errMsg := fmt.Sprintf("Component deployment failed: %v", err)
+	if updateErr := componentRepo.UpdateStatus(ctx, componentID, models.ComponentStatusError, errMsg); updateErr != nil {
+		return fmt.Errorf("failed to update component status: %w", updateErr)
+	}
+
+	return nil
 }
 
 // Made with Bob
