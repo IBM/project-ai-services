@@ -17,7 +17,7 @@ func ResetPodmanAuth() error {
 		return err
 	}
 
-	// Verify auth file path before deleting secret
+	// Verify auth file path exists before deleting secret
 	_, err = utils.GetAuthFilePath()
 	if err != nil {
 		return err
@@ -30,19 +30,12 @@ func ResetPodmanAuth() error {
 		return fmt.Errorf("failed to delete existing catalog podman auth secret: %w", err)
 	}
 
-	podEnv, err := getAndDeleteCatalogPod(deployCtx.Runtime)
+	opts, err := getAndDeleteCatalogPod(deployCtx.Runtime)
 	if err != nil {
 		return fmt.Errorf("failed to get existing catalog pod details: %w", err)
 	}
-
-	baseDir, domainName, httpsPort := getFlagValues(podEnv)
-	opts := PodmanConfigureOptions{
-		BaseDir:    baseDir,
-		DomainName: domainName,
-		HttpsPort:  httpsPort,
-	}
-
-	_, err = executeCatalogDeployment(context.Background(), deployCtx, opts, "")
+	
+	_, err = executeCatalogDeployment(context.Background(), deployCtx, *opts, "")
 	if err != nil {
 		return fmt.Errorf("failed to deploy catalog pod: %w", err)
 	}
