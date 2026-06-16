@@ -15,6 +15,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/power"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/rhn"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/spyre"
+	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/ulimits"
+	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/usergroup"
 )
 
 // Initialize the default registry with built-in rules.
@@ -25,6 +27,8 @@ func init() {
 	PodmanRegistry.Register(power.NewPowerRule())
 	PodmanRegistry.Register(rhn.NewRHNRule())
 	PodmanRegistry.Register(spyre.NewSpyreRule())
+	PodmanRegistry.Register(usergroup.NewUsergroupRule())
+	PodmanRegistry.Register(ulimits.NewUlimitsRule())
 
 	// OpenshiftChecks
 	OpenshiftRegistry.Register(kubeconfig.NewKubeconfigRule())

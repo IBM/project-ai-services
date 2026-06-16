@@ -164,6 +164,196 @@ func ensureSentientGroupExists() error {
 	return nil
 }
 
+// configureUlimits configures both memlock and nofile ulimits for the sentient group.
+func configureUlimits() error {
+	if err := configureMemlockLimit(); err != nil {
+		return err
+	}
+
+	if err := configureNofileLimit(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// configureMemlockLimit configures memlock ulimit for the sentient group.
+func configureMemlockLimit() error {
+	const (
+		memlockConfFile    = "/etc/security/limits.d/memlock.conf"
+		memlockConfContent = "@sentient - memlock unlimited\n"
+		filePermissions    = 0644
+	)
+
+	// Check if configuration already exists and is valid
+	if isMemlockConfigValid(memlockConfFile) {
+		logger.Infoln("memlock configuration already exists", logger.VerbosityLevelDebug)
+
+		return nil
+	}
+
+	// Read and filter existing content
+	existingContent, err := getFilteredMemlockContent(memlockConfFile)
+	if err != nil {
+		return err
+	}
+
+	// Write configuration
+	content := existingContent + memlockConfContent
+	if err := os.WriteFile(memlockConfFile, []byte(content), filePermissions); err != nil {
+		return fmt.Errorf("failed to write memlock configuration: %w", err)
+	}
+
+	logger.Infoln("memlock configuration created successfully", logger.VerbosityLevelDebug)
+
+	return nil
+}
+
+// isMemlockConfigValid checks if memlock configuration already exists.
+func isMemlockConfigValid(confFile string) bool {
+	if !utils.FileExists(confFile) {
+		return false
+	}
+
+	lines, err := utils.ReadFileLines(confFile)
+	if err != nil {
+		return false
+	}
+
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "@sentient - memlock unlimited" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// getFilteredMemlockContent reads and filters existing memlock configuration.
+func getFilteredMemlockContent(confFile string) (string, error) {
+	if !utils.FileExists(confFile) {
+		return "", nil
+	}
+
+	lines, err := utils.ReadFileLines(confFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read existing memlock.conf: %w", err)
+	}
+
+	var filteredLines []string
+	for _, line := range lines {
+		if !strings.HasPrefix(strings.TrimSpace(line), "@sentient") {
+			filteredLines = append(filteredLines, line)
+		}
+	}
+
+	if len(filteredLines) > 0 {
+		return strings.Join(filteredLines, "\n") + "\n", nil
+	}
+
+	return "", nil
+}
+
+// configureNofileLimit configures nofile ulimit for the sentient group.
+func configureNofileLimit() error {
+	const (
+		nofileConfFile     = "/etc/security/limits.conf"
+		minNofileLimit     = 134217728
+		nofileConfTemplate = "@sentient hard nofile %d\n"
+		filePermissions    = 0644
+		nofileFieldCount   = 4
+	)
+
+	// Check if configuration already exists and is valid
+	if isNofileConfigValid(nofileConfFile, minNofileLimit) {
+		logger.Infoln("nofile configuration already exists with sufficient limit", logger.VerbosityLevelDebug)
+
+		return nil
+	}
+
+	// Read and filter existing content
+	existingContent, err := getFilteredNofileContent(nofileConfFile)
+	if err != nil {
+		return err
+	}
+
+	// Write configuration
+	nofileConf := fmt.Sprintf(nofileConfTemplate, minNofileLimit)
+	content := existingContent + nofileConf
+	if err := os.WriteFile(nofileConfFile, []byte(content), filePermissions); err != nil {
+		return fmt.Errorf("failed to write nofile configuration: %w", err)
+	}
+
+	logger.Infoln("nofile configuration created successfully", logger.VerbosityLevelDebug)
+
+	return nil
+}
+
+// isNofileConfigValid checks if nofile configuration already exists with sufficient limit.
+func isNofileConfigValid(confFile string, minLimit int) bool {
+	if !utils.FileExists(confFile) {
+		return false
+	}
+
+	lines, err := utils.ReadFileLines(confFile)
+	if err != nil {
+		return false
+	}
+
+	for _, line := range lines {
+		if isValidNofileLine(strings.TrimSpace(line), minLimit) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isValidNofileLine checks if a line contains valid nofile configuration.
+func isValidNofileLine(line string, minLimit int) bool {
+	const nofileFieldCount = 4
+
+	if !strings.HasPrefix(line, "@sentient") || !strings.Contains(line, "nofile") {
+		return false
+	}
+
+	parts := strings.Fields(line)
+	if len(parts) < nofileFieldCount {
+		return false
+	}
+
+	value, err := strconv.Atoi(parts[3])
+
+	return err == nil && value >= minLimit
+}
+
+// getFilteredNofileContent reads and filters existing nofile configuration.
+func getFilteredNofileContent(confFile string) (string, error) {
+	if !utils.FileExists(confFile) {
+		return "", nil
+	}
+
+	lines, err := utils.ReadFileLines(confFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read existing limits.conf: %w", err)
+	}
+
+	var filteredLines []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "@sentient") && strings.Contains(trimmed, "nofile") {
+			continue
+		}
+		filteredLines = append(filteredLines, line)
+	}
+
+	if len(filteredLines) > 0 {
+		return strings.Join(filteredLines, "\n") + "\n", nil
+	}
+
+	return "", nil
+}
+
 func installPodman() error {
 	cmd := exec.Command("dnf", "-y", "install", "podman")
 	out, err := cmd.CombinedOutput()
@@ -400,6 +590,22 @@ func ensureUsergroupConfigured(ctx context.Context) error {
 		return err
 	}
 	s.Stop("User groups configured successfully")
+
+	return nil
+}
+
+// ensureUlimitsConfigured configures ulimits (memlock and nofile) for the sentient group.
+// This is required for both Spyre and non-Spyre setups to allow pods to run properly.
+func ensureUlimitsConfigured(ctx context.Context) error {
+	s := spinner.New("Configuring ulimits")
+	s.Start(ctx)
+
+	if err := configureUlimits(); err != nil {
+		s.Fail("failed to configure ulimits")
+
+		return err
+	}
+	s.Stop("Ulimits configured successfully")
 
 	return nil
 }
