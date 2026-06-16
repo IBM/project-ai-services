@@ -33,7 +33,7 @@ func HandleBackupResults(backedUpCount, totalCount int, lastErr error) error {
 	if lastErr != nil {
 		logger.Warningf("Backup completed with errors. Successfully backed up %d/%d indices\n", backedUpCount, totalCount)
 	} else {
-		logger.Infof("✓ Backup completed successfully. Backed up %d indices\n", backedUpCount, 0)
+		logger.Infof("✓ Backup completed successfully. Backed up %d indices\n", backedUpCount)
 	}
 
 	return nil
@@ -144,7 +144,7 @@ func GenerateCountDocumentsScript(backupDir, indexName string) string {
 func LogDocumentCount(output string, err error) {
 	if err == nil {
 		docCount := strings.TrimSpace(output)
-		logger.Infof("    ✓ %s documents\n", docCount, 0)
+		logger.Infof("    ✓ %s documents\n", docCount)
 	}
 }
 

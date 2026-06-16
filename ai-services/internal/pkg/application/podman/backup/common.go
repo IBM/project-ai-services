@@ -12,7 +12,7 @@ import (
 
 // CopyAndTarBackup copies backup files from container to host and creates tar archive on host.
 func CopyAndTarBackup(ctx context.Context, containerID, containerBackupPath, backupFile string) error {
-	logger.Infof("Copying backup files from container to host...\n", 0)
+	logger.Infof("Copying backup files from container to host...\n")
 
 	// Create temporary directory on host for backup files
 	tempDir, err := os.MkdirTemp("", "opensearch-backup-*")
@@ -49,10 +49,10 @@ func CopyAndTarBackup(ctx context.Context, containerID, containerBackupPath, bac
 		return fmt.Errorf("failed to copy backup directory: %w, output: %s", err, string(output))
 	}
 
-	logger.Infof("✓ Backup files copied to host\n", 0)
+	logger.Infof("✓ Backup files copied to host\n")
 
 	// Create tar.gz archive on host
-	logger.Infof("Creating tar.gz archive on host...\n", 0)
+	logger.Infof("Creating tar.gz archive on host...\n")
 
 	if err := CreateTarGzArchive(tempDir, backupFile, []string{"backup_info.json", "opensearch_backup"}); err != nil {
 		return err

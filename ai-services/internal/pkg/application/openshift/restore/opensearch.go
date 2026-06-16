@@ -21,9 +21,9 @@ const (
 
 // RestoreOpenSearch restores OpenSearch data for OpenShift runtime.
 func RestoreOpenSearch(ctx context.Context, applicationID, backupFile string) error {
-	logger.Infof("Restoring OpenSearch data for OpenShift application: %s\n", applicationID, 0)
-	logger.Infof("Backup file: %s\n", backupFile, 0)
-	logger.Infof("OpenSearch Import (Sidecar Pod Approach)\n", 0)
+	logger.Infof("Restoring OpenSearch data for OpenShift application: %s\n", applicationID)
+	logger.Infof("Backup file: %s\n", backupFile)
+	logger.Infoln("OpenSearch Import (Sidecar Pod Approach)")
 
 	// Get absolute path to backup file
 	absFilename, err := filepath.Abs(backupFile)
@@ -44,8 +44,8 @@ func RestoreOpenSearch(ctx context.Context, applicationID, backupFile string) er
 		return err
 	}
 
-	logger.Infof("Namespace: %s\n", namespace, 0)
-	logger.Infof("OpenSearch Pod: %s\n", podName, 0)
+	logger.Infof("Namespace: %s\n", namespace)
+	logger.Infof("OpenSearch Pod: %s\n", podName)
 
 	// Get OpenSearch service name
 	serviceName, err := common.GetOpenSearchService(applicationID, namespace)
@@ -97,14 +97,14 @@ func performRestore(ctx context.Context, podName, namespace, serviceName, backup
 
 	// Construct OpenSearch host using service name and port
 	osHost := fmt.Sprintf("%s:9200", serviceName)
-	logger.Infof("OpenSearch host: %s\n", osHost, 0)
+	logger.Infof("OpenSearch host: %s\n", osHost)
 
 	// Perform restore with curl
 	if err := performRestoreWithCurl(ctx, podName, namespace, osHost, osPassword, containerBackupPath); err != nil {
 		return fmt.Errorf("restore failed: %w", err)
 	}
 
-	logger.Infof("OpenSearch import completed!\n", 0)
+	logger.Infoln("OpenSearch import completed!")
 
 	return nil
 }
@@ -128,7 +128,7 @@ func determineBackupPaths(backupDir string) (string, string, error) {
 
 // copyBackupToSidecar copies backup files to the sidecar pod using oc cp.
 func copyBackupToSidecar(podName, namespace, backupOSDir, containerBackupPath string) error {
-	logger.Infof("Copying backup files to sidecar pod...\n", 0)
+	logger.Infoln("Copying backup files to sidecar pod...")
 
 	// Create backup directory in pod
 	script := fmt.Sprintf("mkdir -p %s", containerBackupPath)
@@ -159,7 +159,7 @@ func performRestoreWithCurl(ctx context.Context, podName, namespace, osHost, osP
 		return err
 	}
 
-	logger.Infof("Found %d indices to restore\n", len(indices), 0)
+	logger.Infof("Found %d indices to restore\n", len(indices))
 
 	// Restore each index with error tracking
 	return restoreAllIndices(ctx, podName, namespace, osHost, osPassword, backupDir, indices)
@@ -232,7 +232,7 @@ func restoreAllIndices(ctx context.Context, podName, namespace, osHost, osPasswo
 	if len(errors) > 0 {
 		logger.Warningf("Restore completed with %d errors. Successfully restored %d/%d indices\n", len(errors), restoredCount, len(indices))
 	} else {
-		logger.Infof("✓ Restore completed successfully. Restored %d indices\n", restoredCount, 0)
+		logger.Infof("✓ Restore completed successfully. Restored %d indices\n", restoredCount)
 	}
 
 	return nil
@@ -240,35 +240,35 @@ func restoreAllIndices(ctx context.Context, podName, namespace, osHost, osPasswo
 
 // restoreIndex restores a single index using curl in the pod.
 func restoreIndex(podName, namespace, osHost, osPassword, backupDir, indexName string) error {
-	logger.Infof("  Restoring index: %s\n", indexName, 0)
+	logger.Infof("  Restoring index: %s\n", indexName)
 
 	// Step 1: Delete existing index if it exists
-	logger.Infof("    Cleaning up existing index...\n", 0)
+	logger.Infoln("    Cleaning up existing index...")
 	deleteScript := opensearch.GenerateDeleteIndexScript(osHost, indexName)
 	wrappedDelete := opensearch.WrapScriptWithPassword(osPassword, deleteScript)
 	if err := common.ExecInPod(podName, namespace, wrappedDelete); err != nil {
 		logger.Warningf("    Failed to delete existing index (may not exist): %v\n", err)
 	} else {
-		logger.Infof("    ✓ Existing index cleaned up\n", 0)
+		logger.Infoln("    ✓ Existing index cleaned up")
 	}
 
 	// Step 2: Create index with settings and mappings
-	logger.Infof("    Creating index with mappings...\n", 0)
+	logger.Infoln("    Creating index with mappings...")
 	createScript := opensearch.GenerateCreateIndexScript(osHost, backupDir, indexName)
 	wrappedCreate := opensearch.WrapScriptWithPassword(osPassword, createScript)
 	if err := common.ExecInPod(podName, namespace, wrappedCreate); err != nil {
 		return fmt.Errorf("failed to create index: %w", err)
 	}
-	logger.Infof("    ✓ Index created\n", 0)
+	logger.Infoln("    ✓ Index created")
 
 	// Step 3: Insert data - Bulk index documents
-	logger.Infof("    Inserting documents...\n", 0)
+	logger.Infoln("    Inserting documents...")
 	bulkScript := opensearch.GenerateBulkIndexScript(osHost, backupDir, indexName)
 	wrappedBulk := opensearch.WrapScriptWithPassword(osPassword, bulkScript)
 	if err := common.ExecInPod(podName, namespace, wrappedBulk); err != nil {
 		return fmt.Errorf("failed to bulk index documents: %w", err)
 	}
-	logger.Infof("    ✓ Documents inserted\n", 0)
+	logger.Infoln("    ✓ Documents inserted")
 
 	// Step 4: Refresh index to make documents searchable
 	refreshScript := opensearch.GenerateRefreshIndexScript(osHost, indexName)
@@ -277,7 +277,7 @@ func restoreIndex(podName, namespace, osHost, osPassword, backupDir, indexName s
 		return fmt.Errorf("failed to refresh index: %w", err)
 	}
 
-	logger.Infof("    ✓ Index restored successfully\n", 0)
+	logger.Infoln("    ✓ Index restored successfully")
 
 	return nil
 }

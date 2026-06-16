@@ -14,10 +14,10 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// ContextKey is a custom type for context keys to avoid collisions
+// ContextKey is a custom type for context keys to avoid collisions.
 type ContextKey string
 
-// RequestIDKey is the context key for storing request ID
+// RequestIDKey is the context key for storing request ID.
 const RequestIDKey ContextKey = "request_id"
 
 // Log levels following standard production hierarchy.
@@ -25,10 +25,13 @@ const (
 	// VerbosityLevelDebug is the klog verbosity level for debug logs (2).
 	VerbosityLevelDebug = 2
 
-	// Log level string constants (lowercase for env var, uppercase for JSON output)
+	// LogLevelDebug is the string constant for debug severity level.
 	LogLevelDebug = "DEBUG"
-	LogLevelInfo  = "INFO"
-	LogLevelWarn  = "WARNING"
+	// LogLevelInfo is the string constant for info severity level.
+	LogLevelInfo = "INFO"
+	// LogLevelWarn is the string constant for warning severity level.
+	LogLevelWarn = "WARNING"
+	// LogLevelError is the string constant for error severity level.
 	LogLevelError = "ERROR"
 
 	// EnvLogLevel is the environment variable name for log severity level (e.g., "info", "debug").
@@ -57,7 +60,7 @@ var isServiceEnv bool
 // activeMinLevel tracks the active numeric severity level for filtering.
 var activeMinLevel int
 
-// logOptions holds the Kubernetes logging configuration
+// logOptions holds the Kubernetes logging configuration.
 var logOptions *logsv1.LoggingConfiguration
 
 // Init initializes the logger with appropriate settings based on environment.
@@ -90,7 +93,7 @@ func Init() {
 	// 5. Apply Severity Thresholds and set active minimum level
 	switch logLevel {
 	case LogLevelDebug:
-		logOptions.Verbosity = logsv1.VerbosityLevel(2)
+		logOptions.Verbosity = logsv1.VerbosityLevel(VerbosityLevelDebug)
 		activeMinLevel = LevelRankDebug
 	case LogLevelWarn:
 		activeMinLevel = LevelRankWarn
@@ -113,7 +116,7 @@ func Init() {
 }
 
 // buildKV builds key-value pairs for structured logging with level, caller, and requestID
-// depth specifies how many stack frames to skip when capturing the caller location
+// depth specifies how many stack frames to skip when capturing the caller location.
 func buildKV(ctx context.Context, level string, depth int) []any {
 	var kv []any
 	kv = append(kv, "level", level)
@@ -131,6 +134,7 @@ func buildKV(ctx context.Context, level string, depth int) []any {
 			kv = append(kv, "requestID", id)
 		}
 	}
+
 	return kv
 }
 
@@ -144,7 +148,7 @@ func Flush() {
 	klog.Flush()
 }
 
-// Context-aware logging methods (new API)
+// Context-aware logging methods (new API).
 
 func WarninglnCtx(ctx context.Context, msg string) {
 	if activeMinLevel > LevelRankWarn {
@@ -211,7 +215,7 @@ func InfofCtx(ctx context.Context, format string, args ...any) {
 	}
 }
 
-// DebuglnCtx logs a debug message with context and newline (verbosity level 2)
+// DebuglnCtx logs a debug message with context and newline (verbosity level 2).
 func DebuglnCtx(ctx context.Context, msg string) {
 	if activeMinLevel > LevelRankDebug {
 		return
@@ -224,7 +228,7 @@ func DebuglnCtx(ctx context.Context, msg string) {
 	}
 }
 
-// DebugfCtx logs a formatted debug message with context (verbosity level 2)
+// DebugfCtx logs a formatted debug message with context (verbosity level 2).
 func DebugfCtx(ctx context.Context, format string, args ...any) {
 	if activeMinLevel > LevelRankDebug {
 		return
@@ -264,12 +268,12 @@ func Infof(format string, args ...any) {
 	InfofCtx(context.Background(), format, args...)
 }
 
-// Debugln logs a debug message with newline using context.Background()
+// Debugln logs a debug message with newline using context.Background().
 func Debugln(msg string) {
 	DebuglnCtx(context.Background(), msg)
 }
 
-// Debugf logs a formatted debug message using context.Background()
+// Debugf logs a formatted debug message using context.Background().
 func Debugf(format string, args ...any) {
 	DebugfCtx(context.Background(), format, args...)
 }

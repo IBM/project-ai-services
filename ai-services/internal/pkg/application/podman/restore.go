@@ -15,16 +15,16 @@ import (
 
 // Restore restores application data from a backup file for Podman runtime.
 func (p *PodmanApplication) Restore(ctx context.Context, opts types.RestoreOptions) error {
-	logger.Infof("Starting restore for application: %s\n", opts.Name, 0)
-	logger.Infof("Target: %s\n", opts.Target, 0)
-	logger.Infof("Backup file: %s\n", opts.BackupFile, 0)
+	logger.Infof("Starting restore for application: %s\n", opts.Name)
+	logger.Infof("Target: %s\n", opts.Target)
+	logger.Infof("Backup file: %s\n", opts.BackupFile)
 
 	// Get application details from catalog API using existing utility
 	appDetails, err := cliUtils.GetAppDetailsWithComponents(opts.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get application details: %w", err)
 	}
-	logger.Infof("Application ID: %s\n", appDetails.ID, 0)
+	logger.Infof("Application ID: %s\n", appDetails.ID)
 
 	// Get absolute path to backup file
 	absFilename, err := filepath.Abs(opts.BackupFile)
@@ -40,7 +40,7 @@ func (p *PodmanApplication) Restore(ctx context.Context, opts types.RestoreOptio
 		if err != nil {
 			return fmt.Errorf("failed to get component ID: %w", err)
 		}
-		logger.Infof("Component ID: %s\n", componentID, 0)
+		logger.Infof("Component ID: %s\n", componentID)
 
 		return p.restoreOpenSearch(ctx, componentID, absFilename)
 	case "digitize":
@@ -64,8 +64,8 @@ func (p *PodmanApplication) restoreOpenSearch(ctx context.Context, templateID, b
 
 // restoreDigitize restores digitize metadata using the Import API.
 func (p *PodmanApplication) restoreDigitize(ctx context.Context, appDetails *catalogTypes.Application, backupFile string) error {
-	logger.Infof("Restoring digitize metadata\n", 0)
-	logger.Infof("Digitize Import (API-based Approach)\n", 0)
+	logger.Infoln("Restoring digitize metadata")
+	logger.Infoln("Digitize Import (API-based Approach)")
 
 	importPayload, err := commonrestore.GetDigitizeData(backupFile)
 	if err != nil {
@@ -78,7 +78,7 @@ func (p *PodmanApplication) restoreDigitize(ctx context.Context, appDetails *cat
 		return err
 	}
 
-	logger.Infof("Digitize API URL: %s\n", digitizeURL, 0)
+	logger.Infof("Digitize API URL: %s\n", digitizeURL)
 
 	// Create digitize restore client and call Import API
 	client := commonrestore.NewDigitizeRestoreClient(digitizeURL)
@@ -86,7 +86,7 @@ func (p *PodmanApplication) restoreDigitize(ctx context.Context, appDetails *cat
 		return err
 	}
 
-	logger.Infof("✓ Digitize metadata restore completed successfully\n", 0)
+	logger.Infoln("✓ Digitize metadata restore completed successfully")
 
 	return nil
 }

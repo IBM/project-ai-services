@@ -22,7 +22,7 @@ func constructMetadataFromCache(backupDir string) (map[string]interface{}, error
 		return nil, fmt.Errorf("cache directory not found in backup at: %s", cacheDir)
 	}
 
-	logger.Infof("Constructing metadata from cache files at: %s\n", cacheDir, 0)
+	logger.Infof("Constructing metadata from cache files at: %s\n", cacheDir)
 
 	// Read job files
 	jobs, err := readJobFiles(filepath.Join(cacheDir, "jobs"))
@@ -40,7 +40,7 @@ func constructMetadataFromCache(backupDir string) (map[string]interface{}, error
 		return nil, fmt.Errorf("no jobs or documents found in cache")
 	}
 
-	logger.Infof("Constructed metadata: %d job(s) and %d document(s)\n", len(jobs), len(documents), 0)
+	logger.Infof("Constructed metadata: %d job(s) and %d document(s)\n", len(jobs), len(documents))
 
 	// Construct the payload in Import API format
 	payload := map[string]interface{}{
@@ -57,7 +57,7 @@ func constructMetadataFromCache(backupDir string) (map[string]interface{}, error
 func readJobFiles(jobsDir string) ([]interface{}, error) {
 	// Check if jobs directory exists
 	if _, err := os.Stat(jobsDir); os.IsNotExist(err) {
-		logger.Infof("No jobs directory found, skipping job import\n", 0)
+		logger.Infoln("No jobs directory found, skipping job import")
 
 		return nil, nil
 	}
@@ -92,7 +92,7 @@ func readJobFiles(jobsDir string) ([]interface{}, error) {
 		jobs = append(jobs, job)
 	}
 
-	logger.Infof("Read %d job(s) from cache\n", len(jobs), 0)
+	logger.Infof("Read %d job(s) from cache", len(jobs))
 
 	return jobs, nil
 }
@@ -101,7 +101,7 @@ func readJobFiles(jobsDir string) ([]interface{}, error) {
 func readDocumentFiles(docsDir string) ([]interface{}, error) {
 	// Check if docs directory exists
 	if _, err := os.Stat(docsDir); os.IsNotExist(err) {
-		logger.Infof("No docs directory found, skipping document import\n", 0)
+		logger.Infoln("No docs directory found, skipping document import")
 
 		return nil, nil
 	}
@@ -136,7 +136,7 @@ func readDocumentFiles(docsDir string) ([]interface{}, error) {
 		documents = append(documents, doc)
 	}
 
-	logger.Infof("Read %d document(s) from cache\n", len(documents), 0)
+	logger.Infof("Read %d document(s) from cache", len(documents))
 
 	return documents, nil
 }
@@ -157,13 +157,13 @@ func NewDigitizeRestoreClient(serviceURL string) *DigitizeRestoreClient {
 
 // CallImportAPI calls the digitize service Import API with the metadata payload.
 func (c *DigitizeRestoreClient) CallImportAPI(payload map[string]interface{}) error {
-	logger.Infof("Calling digitize Import API...\n", 0)
+	logger.Infoln("Calling digitize Import API...")
 
 	// Prepare response container
 	var importResponse map[string]interface{}
 
 	// Make the API call using the reusable HTTP client
-	logger.Infof("Sending import request to: /v1/import\n", 0)
+	logger.Infoln("Sending import request to: /v1/import")
 	resp, err := c.client.R().
 		SetBody(payload).
 		SetResult(&importResponse).
@@ -191,16 +191,16 @@ func logImportSummary(importResponse map[string]interface{}) {
 		return
 	}
 
-	logger.Infof("Import summary:\n", 0)
+	logger.Infoln("Import summary:")
 
 	if jobs, ok := summary["jobs"].(map[string]interface{}); ok {
 		logger.Infof("  Jobs - imported: %d, skipped: %d, failed: %d\n",
-			utils.GetNumericValFromMap(jobs, "imported"), utils.GetNumericValFromMap(jobs, "skipped"), utils.GetNumericValFromMap(jobs, "failed"), 0)
+			utils.GetNumericValFromMap(jobs, "imported"), utils.GetNumericValFromMap(jobs, "skipped"), utils.GetNumericValFromMap(jobs, "failed"))
 	}
 
 	if docs, ok := summary["documents"].(map[string]interface{}); ok {
 		logger.Infof("  Documents - imported: %d, skipped: %d, failed: %d\n",
-			utils.GetNumericValFromMap(docs, "imported"), utils.GetNumericValFromMap(docs, "skipped"), utils.GetNumericValFromMap(docs, "failed"), 0)
+			utils.GetNumericValFromMap(docs, "imported"), utils.GetNumericValFromMap(docs, "skipped"), utils.GetNumericValFromMap(docs, "failed"))
 	}
 }
 
@@ -225,7 +225,7 @@ func logImportWarnings(importResponse map[string]interface{}) {
 		return
 	}
 
-	logger.Infof("Import completed with %d warning(s)\n", len(warnings), 0)
+	logger.Infof("Import completed with %d warning(s)\n", len(warnings))
 }
 
 func GetDigitizeData(backupFile string) (map[string]interface{}, error) {

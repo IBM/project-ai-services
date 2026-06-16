@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	// CtxRequestIDKey is the key used to store the request ID in the Gin context
+	// CtxRequestIDKey is the key used to store the request ID in the Gin context.
 	CtxRequestIDKey = "request_id"
-	// HeaderRequestID is the HTTP header name for the request ID
+	// HeaderRequestID is the HTTP header name for the request ID.
 	HeaderRequestID = "X-Request-ID"
 )
 
@@ -20,7 +20,7 @@ const (
 // it will be used; otherwise, a new UUID will be generated. The request ID is then:
 // - Set in the Gin context for use by downstream handlers
 // - Added to the response headers
-// - Set in the logger context so all logs include the request ID (when AI_SERVICES_LOG_FORMAT=service)
+// - Set in the logger context so all logs include the request ID (when AI_SERVICES_LOG_FORMAT=service).
 func RequestIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Check if request ID is already provided in the header
