@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
 
@@ -77,35 +76,35 @@ func validateConfigParameters(existingOpts *PodmanConfigureOptions, newOpts *Pod
 	return nil
 }
 
-// validateCertificateChanges checks if certificate content has changed during reconfigure.
+// validateCertificateChanges prevents switching from custom certificates back to Caddy self-signed certificates.
+// Allows updating custom certificate content (e.g., for expiry or renewal).
 func validateCertificateChanges(opts *PodmanConfigureOptions) error {
-	if opts.SSLCertPath == "" || opts.SSLKeyPath == "" {
-		return nil
-	}
-
 	// Define staged certificate paths
 	stagedCertPath := filepath.Join(opts.BaseDir, "common", "caddy", certsDirName, "tls.crt")
 	stagedKeyPath := filepath.Join(opts.BaseDir, "common", "caddy", certsDirName, "tls.key")
 
-	// Check if both staged certificates exist from previous successful deployment
-	if _, err := os.Stat(stagedCertPath); os.IsNotExist(err) {
-		return nil
+	// Check if staged certificates exist from previous deployment
+	stagedCertExists := false
+	stagedKeyExists := false
+
+	if _, err := os.Stat(stagedCertPath); err == nil {
+		stagedCertExists = true
 	}
-	if _, err := os.Stat(stagedKeyPath); os.IsNotExist(err) {
-		return nil
+	if _, err := os.Stat(stagedKeyPath); err == nil {
+		stagedKeyExists = true
 	}
 
-	// Staged certificates exist - compare content
-	needsUpdate, err := caddy.CertificatesNeedUpdate(opts.SSLCertPath, opts.SSLKeyPath, stagedCertPath, stagedKeyPath)
-	if err != nil {
-		return fmt.Errorf("failed to check certificate status: %w", err)
+	// If no SSL paths provided in new config but staged certs exist, block cert type change
+	if (opts.SSLCertPath == "" || opts.SSLKeyPath == "") && stagedCertExists && stagedKeyExists {
+		return fmt.Errorf("certificate type change not allowed. Cannot switch to Caddy self-signed certificates during reconfigure. Please uninstall the catalog deployment and re-run configure to change certificate type")
 	}
 
-	if needsUpdate {
-		// Certificates differ - block update
-		return fmt.Errorf("certificate content change not allowed during reconfigure. Please reset cert")
-	}
-
+	// Allow all other scenarios:
+	// - First run with Caddy certs (no SSL paths, no staged certs)
+	// - First run with custom certs (SSL paths provided, no staged certs)
+	// - Reconfigure with same custom certs (content matches)
+	// - Reconfigure with updated custom certs (content differs - allow for cert renewal/expiry)
+	// - Caddy self-signed to custom certs transition
 	return nil
 }
 
