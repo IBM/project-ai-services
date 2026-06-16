@@ -581,7 +581,7 @@ func printNextStepsMD(tmpls map[string]*template.Template, params map[string]str
 	}
 
 	// Print the info command for all services
-	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s --runtime podman`\n", appName)
+	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s`\n", appName)
 
 	return nil
 }
