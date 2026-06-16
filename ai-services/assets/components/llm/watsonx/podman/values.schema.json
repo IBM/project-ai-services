@@ -1,36 +1,37 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
+  "additionalProperties": false,
   "required": ["watsonxApiKey", "watsonxProjectId", "watsonxUrl"],
   "properties": {
     "model": {
       "type": "string",
-      "title": "Large Language Model (LLM)",
+      "title": "Large language model (LLM)",
       "description": "Chat/Instruct model name for WatsonX",
       "oneOf": [
         {
           "const": "ibm/granite-4-h-small",
           "title": "granite-4-h-small",
-          "description": "IBM Granite 4 H Small model on Watsonx for chat and instruct workloads"
+          "description": "An 8-parameter instruction-tuned LLM used for natural language understanding and generation tasks. In this project, it powers tasks such as prompt-based reasoning, summarization, answer generation, and other LLM-driven functionalities.\n\n**Model strengths**: reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.\n\n**Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more."
         }
       ],
       "default": "ibm/granite-4-h-small"
     },
     "watsonxApiKey": {
       "type": "string",
-      "title": "watsonx API Key",
+      "title": "API Key",
       "format": "password",
-      "description": "watsonx API Key for LiteLLM integration"
+      "description": "API key for accessing watsonx"
     },
     "watsonxProjectId": {
       "type": "string",
-      "title": "watsonx Project ID",
-      "description": "watsonx Project ID for LiteLLM integration"
+      "title": "Project ID",
+      "description": "Find your ID on the watsonx cloud site when you create a project\n\n[Open project](https://dataplatform.cloud.ibm.com/projects/?context=wx)"
     },
     "watsonxUrl": {
       "type": "string",
-      "title": "watsonx Base URL",
-      "description": "watsonx Base URL for LiteLLM integration"
+      "title": "API Endpoint",
+      "description": "API Endpoint for accessing watsonx"
     }
   }
 }
