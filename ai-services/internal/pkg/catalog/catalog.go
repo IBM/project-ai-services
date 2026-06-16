@@ -837,11 +837,11 @@ func (p *CatalogProvider) LoadServicesMD(serviceID string) (map[string]*texttemp
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to load service readme: %w", err)
+		return nil, fmt.Errorf("failed to load service md files: %w", err)
 	}
 
 	if len(templates) == 0 {
-		return nil, fmt.Errorf("no readme found in %s", catalogPath)
+		return nil, fmt.Errorf("no md files found in %s", catalogPath)
 	}
 
 	return templates, nil

@@ -143,7 +143,7 @@ func getContainerStatus(services []catalogTypes.Pod, catalogID string) (string, 
 	for _, servicePod := range services {
 		if strings.HasPrefix(servicePod.PodName, catalogID) {
 			for _, podContainer := range servicePod.Containers {
-				// TODO: Update container status in info.md generically
+				// TODO: Set the container status in info.md generically
 				uiContainerName := fmt.Sprintf("%s-ui", servicePod.PodName)
 				apiContainerName := ""
 				if strings.Contains(podContainer.Name, "backend-server") {
