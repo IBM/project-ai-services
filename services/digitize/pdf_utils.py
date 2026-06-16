@@ -241,7 +241,7 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
     Convert a document to DoclingDocument, processing in 100-page chunks.
 
     Args:
-        path: Path to the PDF file to convert
+        path: Path to the document file to convert
         cache_dir: Optional cache directory for storing chunk results.
                    Will be cleaned up after processing.
 
@@ -257,10 +257,10 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
     doc_converter: DocumentConverter = get_doc_converter()
 
     # Get total page count
-    total_pages = get_pdf_page_count(path)
+    total_pages = get_document_page_count(str(path))
 
     # If document has configured chunk size pages or fewer, convert normally
-    if total_pages <= settings.digitize.pdf_chunk_size:
+    if total_pages <= settings.digitize.doc_chunk_size:
         logger.debug(f"Converting {path} document with {total_pages} pages in single pass")
 
         @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
@@ -277,10 +277,10 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
     # Process in chunks
     # Calculate total chunks using ceiling division for the configured PDF chunk size.
     # This ensures all pages are covered even if the last chunk is smaller.
-    total_chunks = (total_pages + settings.digitize.pdf_chunk_size - 1) // settings.digitize.pdf_chunk_size
+    total_chunks = (total_pages + settings.digitize.doc_chunk_size - 1) // settings.digitize.doc_chunk_size
     logger.debug(
         f"Converting {path} document with {total_pages} pages in {total_chunks} "
-        f"chunks of {settings.digitize.pdf_chunk_size}"
+        f"chunks of {settings.digitize.doc_chunk_size}"
     )
 
     # Determine cache directory for storing chunk results
@@ -295,9 +295,9 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
         # Process document in chunks and save each chunk
         chunk_files = []
 
-        for start_page in range(1, total_pages + 1, settings.digitize.pdf_chunk_size):
-            end_page = min(start_page + settings.digitize.pdf_chunk_size - 1, total_pages)
-            chunk_num = (start_page - 1) // settings.digitize.pdf_chunk_size + 1
+        for start_page in range(1, total_pages + 1, settings.digitize.doc_chunk_size):
+            end_page = min(start_page + settings.digitize.doc_chunk_size - 1, total_pages)
+            chunk_num = (start_page - 1) // settings.digitize.doc_chunk_size + 1
 
             logger.debug(f"Processing {path}'s chunk {chunk_num}/{total_chunks} (pages {start_page}-{end_page})")
             chunk_file = convert_chunk(doc_converter, path, chunk_num, start_page, end_page, chunk_cache_dir)
