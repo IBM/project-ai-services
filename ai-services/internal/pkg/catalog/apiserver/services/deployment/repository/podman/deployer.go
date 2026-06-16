@@ -97,20 +97,14 @@ func (d *PodmanDeployer) ExecuteDeployment(
 
 	// Step 1.a: Pull container images for all components and services
 	if err := d.pullImagesForDeployment(plan); err != nil {
-		errMsg := fmt.Sprintf("Image pull failed: %v", err)
-		if updateErr := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusError, errMsg); updateErr != nil {
-			logger.Errorf("Failed to update application status: %v\n", updateErr)
-		}
+		d.handleDeploymentStepError(ctx, plan.ApplicationID, "Image pull failed", err)
 
 		return fmt.Errorf("failed to pull images: %w", err)
 	}
 
 	// Step 1.b: Download models specified in parameters
 	if err := d.downloadModelsForDeployment(plan); err != nil {
-		errMsg := fmt.Sprintf("Model download failed: %v", err)
-		if updateErr := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusError, errMsg); updateErr != nil {
-			logger.Errorf("Failed to update application status: %v\n", updateErr)
-		}
+		d.handleDeploymentStepError(ctx, plan.ApplicationID, "Model download failed", err)
 
 		return fmt.Errorf("failed to download models: %w", err)
 	}
@@ -123,10 +117,7 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	// Step 2: Deploy components if any
 	if len(plan.Components) > 0 {
 		if err := d.deployComponents(plan); err != nil {
-			errMsg := fmt.Sprintf("Component deployment failed: %v", err)
-			if updateErr := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusError, errMsg); updateErr != nil {
-				logger.Errorf("Failed to update application status: %v\n", updateErr)
-			}
+			d.handleDeploymentStepError(ctx, plan.ApplicationID, "Component deployment failed", err)
 
 			return fmt.Errorf("failed to deploy components: %w", err)
 		}
@@ -135,10 +126,7 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	// Step 4: Deploy services if any
 	if len(plan.Services) > 0 {
 		if err := d.deployServices(ctx, plan); err != nil {
-			errMsg := fmt.Sprintf("Service deployment failed: %v", err)
-			if updateErr := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusError, errMsg); updateErr != nil {
-				logger.Errorf("Failed to update application status: %v\n", updateErr)
-			}
+			d.handleDeploymentStepError(ctx, plan.ApplicationID, "Service deployment failed", err)
 
 			return fmt.Errorf("failed to deploy services: %w", err)
 		}
@@ -146,10 +134,7 @@ func (d *PodmanDeployer) ExecuteDeployment(
 
 	// Step 5: Register routes with Caddy proxy
 	if err := d.registerApplicationRoutes(ctx, plan); err != nil {
-		errMsg := fmt.Sprintf("Failed to register application routes: %v", err)
-		if updateErr := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, plan.ApplicationID, models.ApplicationStatusError, errMsg); updateErr != nil {
-			logger.Errorf("Failed to update application status: %v\n", updateErr)
-		}
+		d.handleDeploymentStepError(ctx, plan.ApplicationID, "Failed to register application routes", err)
 
 		return fmt.Errorf("failed to register application routes: %w", err)
 	}
@@ -162,6 +147,14 @@ func (d *PodmanDeployer) ExecuteDeployment(
 	logger.Infof("Deployment completed successfully for '%s'\n", plan.ApplicationName)
 
 	return nil
+}
+
+// handleDeploymentStepError updates application status to Error and logs the failure.
+func (d *PodmanDeployer) handleDeploymentStepError(ctx context.Context, appID uuid.UUID, context string, err error) {
+	errMsg := fmt.Sprintf("%s: %v", context, err)
+	if updateErr := catalogutils.UpdateApplicationStatus(ctx, d.appRepo, appID, models.ApplicationStatusError, errMsg); updateErr != nil {
+		logger.Errorf("Failed to update application status: %v\n", updateErr)
+	}
 }
 
 // downloadModelsForDeployment downloads all models specified in component and service parameters.
