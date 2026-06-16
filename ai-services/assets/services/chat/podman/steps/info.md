@@ -1,21 +1,21 @@
 Day N:
 
-{{- if ne .UI_PORT "" }}
+{{- if ne .UI_URL "" }}
 {{- if eq .UI_STATUS "running" }}
 
-- Q&A Chatbot is available to use at http://{{ .HOST_IP }}:{{ .UI_PORT }}.
+- {{ .SERVICE_NAME }} is available to use at {{ .UI_URL }}.
 {{- else }}
 
-- Q&A Chatbot is unavailable to use. Please make sure '{{ .AppName }}--chat-bot' pod is running.
+- {{ .SERVICE_NAME }} is unavailable to use. Please make sure 'chat-bot' pod is running.
 {{- end }}
 {{- end }}
 
-{{- if ne .BACKEND_PORT "" }}
-{{- if eq .BACKEND_STATUS "running" }}
+{{- if ne .API_URL "" }}
+{{- if eq .API_STATUS "running" }}
 
-- Q&A API is available to use at http://{{ .HOST_IP }}:{{ .BACKEND_PORT }}.
+- {{ .SERVICE_NAME }} API is available to use at {{ .API_URL }}.
 {{- else }}
 
-- Q&A API is unavailable to use. Please make sure '{{ .AppName }}--chat-bot' pod is running.
+- {{ .SERVICE_NAME }} API is unavailable to use. Please make sure 'chat-bot' pod is running.
 {{- end }}
 {{- end }}

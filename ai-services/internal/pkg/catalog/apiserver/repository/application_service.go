@@ -514,10 +514,12 @@ func (s *ApplicationService) buildGetApplicationResponse(ctx context.Context, ap
 	appresponse := &types.Application{
 		ID:             app.ID.String(),
 		Name:           app.Name,
+		CatalogID:      app.CatalogID,
 		DeploymentType: string(app.DeploymentType),
 		Type:           typeName,
 		Status:         string(app.Status),
 		Message:        app.Message,
+		Version:        app.Version,
 		CreatedAt:      app.CreatedAt.Format(constants.RFC3339WithTimezone),
 		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
 	}
@@ -538,11 +540,18 @@ func (s *ApplicationService) loadApplicationServices(ctx context.Context, servic
 	appServices := []types.ApplicationService{}
 	for _, service := range services {
 		// Build application service response
+		serviceDisplayName := service.CatalogID
+		if service, err := s.provider.LoadService(service.CatalogID); err == nil && service.Name != "" {
+			serviceDisplayName = service.Name
+		}
+
 		appService := types.ApplicationService{
 			ID:        service.ID.String(),
-			Type:      service.CatalogID,
+			Type:      serviceDisplayName,
+			CatalogID: service.CatalogID,
 			Endpoints: service.Endpoints,
 			Version:   service.Version,
+			Status:    string(service.Status),
 			CreatedAt: service.CreatedAt.Format(constants.RFC3339WithTimezone),
 			UpdatedAt: service.UpdatedAt.Format(constants.RFC3339WithTimezone),
 		}
