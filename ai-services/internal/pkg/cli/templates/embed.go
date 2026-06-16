@@ -310,7 +310,6 @@ func (e *embedTemplateProvider) LoadMetadata(app string, isRuntime bool, target 
 func (e *embedTemplateProvider) LoadMdFiles(app string) (map[string]*template.Template, error) {
 	tmpls := make(map[string]*template.Template)
 	completePath := e.buildPath(app, getRuntime(), "steps")
-	
 	err := fs.WalkDir(e.fs, completePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
