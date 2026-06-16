@@ -1,6 +1,7 @@
 package templates
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -72,7 +73,7 @@ func displayServiceParameters(provider *catalog.CatalogProvider, serviceID strin
 	logger.Infof("Supported Parameters for '%s':", serviceID)
 
 	// Display service's own parameters
-	schema, err := provider.GetServiceParams(serviceID)
+	schema, err := provider.GetServiceParams(context.Background(), serviceID)
 	if err == nil && schema != nil {
 		displaySchemaParameters(schema, serviceID)
 	}
@@ -107,7 +108,7 @@ func displayServiceInArchitecture(provider *catalog.CatalogProvider, serviceID s
 	}
 
 	// Display service parameters
-	schema, err := provider.GetServiceParams(serviceID)
+	schema, err := provider.GetServiceParams(context.Background(), serviceID)
 	if err == nil && schema != nil {
 		displaySchemaParameters(schema, serviceID)
 	}
@@ -142,7 +143,7 @@ func displayComponentsParameters(provider *catalog.CatalogProvider, dependencies
 					displayedComponents[componentKey] = true
 				}
 
-				schema, err := provider.GetComponentProviderParams(comp.ComponentType, comp.ID)
+				schema, err := provider.GetComponentProviderParams(context.Background(), comp.ComponentType, comp.ID)
 				if err == nil && schema != nil {
 					displaySchemaParameters(schema, componentKey)
 				}

@@ -1,6 +1,7 @@
 package caddy
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -41,7 +42,7 @@ func RegisterCatalogRoutes(runtime *podman.PodmanClient, caddyCtx *Context, rout
 		logger.Debugf("Registering routes for pod: %s\n", info.PodName)
 
 		// Register routes and get the built routes back
-		routes, err := proxy.RegisterRoutesForAppAndReturn(constants.CatalogAppName, proxyManager, info.RoutesAnnotation, caddyCtx.GetDomainSuffix(), info.PodName)
+		routes, err := proxy.RegisterRoutesForAppAndReturn(context.Background(), constants.CatalogAppName, proxyManager, info.RoutesAnnotation, caddyCtx.GetDomainSuffix(), info.PodName)
 		if err != nil {
 			registrationErrors = append(registrationErrors, fmt.Errorf("pod %s: %w", info.PodName, err))
 

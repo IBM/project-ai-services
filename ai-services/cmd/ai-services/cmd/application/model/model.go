@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"slices"
 
@@ -54,7 +55,7 @@ func getCatalogModels(templateID string, excludeComponentProviders ...string) ([
 		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
 	}
 
-	models, err := provider.GetCatalogModels(templateID, excludeComponentProviders...)
+	models, err := provider.GetCatalogModels(context.Background(), templateID, excludeComponentProviders...)
 	if err != nil {
 		return nil, err
 	}

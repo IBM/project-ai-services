@@ -1,6 +1,7 @@
 package validators
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -33,12 +34,12 @@ func NewApplicationValidator(provider *catalog.CatalogProvider) *ApplicationVali
 }
 
 // ValidateDeploymentRequest validates the entire deployment request.
-func (v *ApplicationValidator) ValidateDeploymentRequest(req apimodels.CreateApplicationRequest) error {
+func (v *ApplicationValidator) ValidateDeploymentRequest(ctx context.Context, req apimodels.CreateApplicationRequest) error {
 	// Validate based on deployment type
 	if v.provider.ArchitectureExists(req.CatalogID) {
-		return v.ValidateArchitectureDeployment(req)
+		return v.ValidateArchitectureDeployment(ctx, req)
 	} else if v.provider.ServiceExists(req.CatalogID) {
-		return v.ValidateServiceDeployment(req)
+		return v.ValidateServiceDeployment(ctx, req)
 	} else {
 		return &ValidationError{
 			Code:    http.StatusNotFound,
@@ -48,7 +49,7 @@ func (v *ApplicationValidator) ValidateDeploymentRequest(req apimodels.CreateApp
 }
 
 // ValidateArchitectureDeployment validates an architecture deployment request.
-func (v *ApplicationValidator) ValidateArchitectureDeployment(req apimodels.CreateApplicationRequest) error {
+func (v *ApplicationValidator) ValidateArchitectureDeployment(ctx context.Context, req apimodels.CreateApplicationRequest) error {
 	// Load architecture
 	architecture, err := v.provider.LoadArchitecture(req.CatalogID)
 	if err != nil {
@@ -75,7 +76,7 @@ func (v *ApplicationValidator) ValidateArchitectureDeployment(req apimodels.Crea
 	}
 
 	// Validate services
-	return v.ValidateServices(req.Services, architecture)
+	return v.ValidateServices(ctx, req.Services, architecture)
 }
 
 // validateVersion is a validator that accepts a version string and metadata loader.
@@ -145,28 +146,28 @@ func (v *ApplicationValidator) validateParamsWithSchema(
 }
 
 // ValidateServiceParams validates service-level parameters against schema.
-func (v *ApplicationValidator) ValidateServiceParams(serviceID string, params map[string]any) error {
+func (v *ApplicationValidator) ValidateServiceParams(ctx context.Context, serviceID string, params map[string]any) error {
 	return v.validateParamsWithSchema(params, func() (map[string]any, error) {
-		return v.provider.GetServiceParams(serviceID)
+		return v.provider.GetServiceParams(ctx, serviceID)
 	}, fmt.Sprintf("service '%s'", serviceID))
 }
 
 // ValidateComponentParams validates component parameters against schema.
-func (v *ApplicationValidator) ValidateComponentParams(componentType, providerID string, params map[string]any) error {
+func (v *ApplicationValidator) ValidateComponentParams(ctx context.Context, componentType, providerID string, params map[string]any) error {
 	return v.validateParamsWithSchema(params, func() (map[string]any, error) {
-		return v.provider.GetComponentProviderParams(componentType, providerID)
+		return v.provider.GetComponentProviderParams(ctx, componentType, providerID)
 	}, fmt.Sprintf("component '%s/%s'", componentType, providerID))
 }
 
 // validateServiceComponents validates all components in a service.
-func (v *ApplicationValidator) validateServiceComponents(components []apimodels.Component) error {
+func (v *ApplicationValidator) validateServiceComponents(ctx context.Context, components []apimodels.Component) error {
 	// Check for duplicate components (same component_type + provider_id combination)
 	if err := v.validateNoDuplicateComponents(components); err != nil {
 		return err
 	}
 
 	for _, component := range components {
-		if err := v.ValidateSingleComponent(component); err != nil {
+		if err := v.ValidateSingleComponent(ctx, component); err != nil {
 			return err
 		}
 	}
@@ -229,7 +230,7 @@ func (v *ApplicationValidator) validateComponentsMatchDependencies(
 }
 
 // validateServiceCore performs core validation for a service (existence, version, params, components).
-func (v *ApplicationValidator) validateServiceCore(service apimodels.Service) error {
+func (v *ApplicationValidator) validateServiceCore(ctx context.Context, service apimodels.Service) error {
 	// Verify service exists in catalog
 	catalogService, err := v.provider.LoadService(service.CatalogID)
 	if err != nil {
@@ -245,7 +246,7 @@ func (v *ApplicationValidator) validateServiceCore(service apimodels.Service) er
 	}
 
 	// Validate service-level parameters
-	if err := v.ValidateServiceParams(service.CatalogID, service.Params); err != nil {
+	if err := v.ValidateServiceParams(ctx, service.CatalogID, service.Params); err != nil {
 		return err
 	}
 
@@ -255,11 +256,11 @@ func (v *ApplicationValidator) validateServiceCore(service apimodels.Service) er
 	}
 
 	// Validate all components
-	return v.validateServiceComponents(service.Components)
+	return v.validateServiceComponents(ctx, service.Components)
 }
 
 // ValidateSingleComponent validates a single component (existence, version, and parameters).
-func (v *ApplicationValidator) ValidateSingleComponent(component apimodels.Component) error {
+func (v *ApplicationValidator) ValidateSingleComponent(ctx context.Context, component apimodels.Component) error {
 	// Verify component provider exists
 	_, err := v.provider.LoadComponent(component.ComponentType, component.ProviderID)
 	if err != nil {
@@ -275,11 +276,11 @@ func (v *ApplicationValidator) ValidateSingleComponent(component apimodels.Compo
 	}
 
 	// Validate component parameters
-	return v.ValidateComponentParams(component.ComponentType, component.ProviderID, component.Params)
+	return v.ValidateComponentParams(ctx, component.ComponentType, component.ProviderID, component.Params)
 }
 
 // ValidateServiceDeployment validates a single service deployment request.
-func (v *ApplicationValidator) ValidateServiceDeployment(req apimodels.CreateApplicationRequest) error {
+func (v *ApplicationValidator) ValidateServiceDeployment(ctx context.Context, req apimodels.CreateApplicationRequest) error {
 	// Load service metadata from catalog
 	catalogService, err := v.provider.LoadService(req.CatalogID)
 	if err != nil {
@@ -319,7 +320,7 @@ func (v *ApplicationValidator) ValidateServiceDeployment(req apimodels.CreateApp
 	}
 
 	// Perform core service validation
-	if err := v.validateServiceCore(service); err != nil {
+	if err := v.validateServiceCore(ctx, service); err != nil {
 		return err
 	}
 
@@ -328,7 +329,7 @@ func (v *ApplicationValidator) ValidateServiceDeployment(req apimodels.CreateApp
 }
 
 // ValidateSingleServiceInArchitecture validates a single service within an architecture deployment.
-func (v *ApplicationValidator) ValidateSingleServiceInArchitecture(service apimodels.Service, validServiceIDs map[string]bool, architectureID string) error {
+func (v *ApplicationValidator) ValidateSingleServiceInArchitecture(ctx context.Context, service apimodels.Service, validServiceIDs map[string]bool, architectureID string) error {
 	// Verify service is compatible with architecture
 	if !validServiceIDs[service.CatalogID] {
 		return &ValidationError{
@@ -338,11 +339,11 @@ func (v *ApplicationValidator) ValidateSingleServiceInArchitecture(service apimo
 	}
 
 	// Perform core service validation (existence, version, params, components)
-	return v.validateServiceCore(service)
+	return v.validateServiceCore(ctx, service)
 }
 
 // ValidateServices validates all services in the request.
-func (v *ApplicationValidator) ValidateServices(services []apimodels.Service, architecture *types.Architecture) error {
+func (v *ApplicationValidator) ValidateServices(ctx context.Context, services []apimodels.Service, architecture *types.Architecture) error {
 	// Validate that services array is not empty (defensive check)
 	if len(services) == 0 {
 		return &ValidationError{
@@ -362,7 +363,7 @@ func (v *ApplicationValidator) ValidateServices(services []apimodels.Service, ar
 
 	for _, service := range services {
 		// Validate single service
-		if err := v.ValidateSingleServiceInArchitecture(service, validServiceIDs, architecture.ID); err != nil {
+		if err := v.ValidateSingleServiceInArchitecture(ctx, service, validServiceIDs, architecture.ID); err != nil {
 			return err
 		}
 

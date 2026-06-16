@@ -102,8 +102,8 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 		serviceDependencyRepo,
 		sync.DefaultSyncInterval,
 	)
-	syncService.Start()
-	defer syncService.Stop()
+	syncService.Start(ctx)
+	defer syncService.Stop(ctx)
 
 	catalogProvider, err := catalog.NewCatalogProvider()
 	if err != nil {

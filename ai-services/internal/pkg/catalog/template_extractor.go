@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -25,6 +26,7 @@ type PodSpecProcessor func(templateName string, podSpec *models.PodSpec) error
 // Spyre card counting, etc.) to reuse the same template rendering logic.
 // Returns an error if any template fails to render, parse, or process.
 func (p *CatalogProvider) ProcessTemplates(
+	ctx context.Context,
 	templates map[string]*texttemplate.Template,
 	values map[string]any,
 	instanceSlug string,
@@ -46,7 +48,7 @@ func (p *CatalogProvider) ProcessTemplates(
 		// Render the template
 		var rendered bytes.Buffer
 		if err := tmpl.Execute(&rendered, initialParams); err != nil {
-			logger.Errorf("Failed to render template %s: %v", templateName, err)
+			logger.ErrorfCtx(ctx, "Failed to render template %s: %v", templateName, err)
 			errorResponses = append(errorResponses, err)
 
 			continue
@@ -55,7 +57,7 @@ func (p *CatalogProvider) ProcessTemplates(
 		// Parse the rendered template as Pod spec
 		var podSpec models.PodSpec
 		if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
-			logger.Errorf("Failed to parse rendered template %s: %v", templateName, err)
+			logger.ErrorfCtx(ctx, "Failed to parse rendered template %s: %v", templateName, err)
 			errorResponses = append(errorResponses, err)
 
 			continue
@@ -79,6 +81,7 @@ func (p *CatalogProvider) ProcessTemplates(
 // and adds them directly to the provided imageSet map.
 // This is a convenience wrapper around ProcessTemplates for image extraction.
 func (p *CatalogProvider) CollectImagesFromTemplates(
+	ctx context.Context,
 	templates map[string]*texttemplate.Template,
 	values map[string]any,
 	imageSet map[string]bool,
@@ -102,13 +105,14 @@ func (p *CatalogProvider) CollectImagesFromTemplates(
 		return nil
 	}
 
-	return p.ProcessTemplates(templates, values, "image-extraction", processor)
+	return p.ProcessTemplates(ctx, templates, values, "image-extraction", processor)
 }
 
 // CollectSpyreCardsFromTemplates extracts Spyre card requirements from a set of pre-loaded templates
 // by analyzing pod annotations. Returns the total number of Spyre cards required.
 // This is a convenience wrapper around ProcessTemplates for Spyre card counting.
 func (p *CatalogProvider) CollectSpyreCardsFromTemplates(
+	ctx context.Context,
 	templates map[string]*texttemplate.Template,
 	values map[string]any,
 ) (int, error) {
@@ -124,14 +128,14 @@ func (p *CatalogProvider) CollectSpyreCardsFromTemplates(
 
 		totalSpyreCards += spyreCards
 		if spyreCards > 0 {
-			logger.Infof("Template %s requires %d Spyre cards\n", templateName, spyreCards)
+			logger.InfofCtx(ctx, "Template %s requires %d Spyre cards\n", templateName, spyreCards)
 		}
 
 		return nil
 	}
 
 	// Use the generic ProcessTemplates function
-	if err := p.ProcessTemplates(templates, values, "spyre-card-calculation", processor); err != nil {
+	if err := p.ProcessTemplates(ctx, templates, values, "spyre-card-calculation", processor); err != nil {
 		return 0, fmt.Errorf("failed to process templates for Spyre card calculation: %w", err)
 	}
 

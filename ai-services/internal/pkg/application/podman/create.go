@@ -56,7 +56,7 @@ func (p *PodmanApplication) Create(ctx context.Context, opts types.CreateOptions
 	}
 
 	// Check if resources already exists with the given application name
-	existingResources, err := helpers.CheckExistingResourcesForApplication(p.runtime, opts.Name, nil)
+	existingResources, err := helpers.CheckExistingResourcesForApplication(ctx, p.runtime, opts.Name, nil)
 	if err != nil {
 		return fmt.Errorf("failed while checking existing pods for application: %w", err)
 	}
@@ -138,7 +138,7 @@ func (p *PodmanApplication) deployApplication(ctx context.Context, opts types.Cr
 	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 
 	// execute the pod Templates
-	if err := p.executePodTemplates(tp, opts.Name, appMetadata, tmpls, pciAddresses, existingResources, opts.ValuesFiles, opts.ArgParams); err != nil {
+	if err := p.executePodTemplates(ctx, tp, opts.Name, appMetadata, tmpls, pciAddresses, existingResources, opts.ValuesFiles, opts.ArgParams); err != nil {
 		return err
 	}
 
@@ -172,7 +172,7 @@ func (p *PodmanApplication) downloadModels(ctx context.Context, templateName, ap
 
 	for _, model := range models {
 		s.UpdateMessage("Downloading model: " + model + "...")
-		err = utils.Retry(vars.RetryCount, vars.RetryInterval, nil, func() error {
+		err = utils.Retry(ctx, vars.RetryCount, vars.RetryInterval, nil, func() error {
 			return helpers.DownloadModel(model, utils.GetModelsPath())
 		})
 		if err != nil {
@@ -296,7 +296,7 @@ func (p *PodmanApplication) downloadImagesForTemplate(templateName, appName stri
 	return img.Run(imagePullPolicy)
 }
 
-func (p *PodmanApplication) executePodTemplates(tp templates.Template,
+func (p *PodmanApplication) executePodTemplates(ctx context.Context, tp templates.Template,
 	appName string, appMetadata *templates.AppMetadata,
 	tmpls map[string]*template.Template, pciAddresses []string, existingPods []string,
 	valuesFiles []string, argParams map[string]string) error {
@@ -329,7 +329,7 @@ func (p *PodmanApplication) executePodTemplates(tp templates.Template,
 			wg.Add(1)
 			go func(t string) {
 				defer wg.Done()
-				if err := p.executePodTemplateLayer(tp, tmpls, globalParams, pciAddresses, existingPods, podTemplateName, appName, valuesFiles, argParams); err != nil {
+				if err := p.executePodTemplateLayer(ctx, tp, tmpls, globalParams, pciAddresses, existingPods, podTemplateName, appName, valuesFiles, argParams); err != nil {
 					errCh <- err
 				}
 			}(podTemplateName)
@@ -355,7 +355,7 @@ func (p *PodmanApplication) executePodTemplates(tp templates.Template,
 	return nil
 }
 
-func (p *PodmanApplication) executePodTemplateLayer(tp templates.Template, tmpls map[string]*template.Template,
+func (p *PodmanApplication) executePodTemplateLayer(ctx context.Context, tp templates.Template, tmpls map[string]*template.Template,
 	globalParams map[string]any, pciAddresses []string, existingPods []string, podTemplateName, appName string,
 	valuesFiles []string, argParams map[string]string) error {
 	logger.Infof("'%s': Processing template...\n", podTemplateName)
@@ -396,7 +396,7 @@ func (p *PodmanApplication) executePodTemplateLayer(tp templates.Template, tmpls
 	reader := bytes.NewReader(rendered.Bytes())
 
 	// Deploy the Pod and do Readiness check
-	if err := clipodman.DeployPodAndReadinessCheck(p.runtime, podSpec, podTemplateName, reader, clipodman.ConstructPodDeployOptions(podAnnotations)); err != nil {
+	if err := clipodman.DeployPodAndReadinessCheck(ctx, p.runtime, podSpec, podTemplateName, reader, clipodman.ConstructPodDeployOptions(podAnnotations)); err != nil {
 		return fmt.Errorf("'%s': Failed to deploy pod and do readiness check: %w", podTemplateName, err)
 	}
 

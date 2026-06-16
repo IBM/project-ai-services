@@ -36,21 +36,20 @@ func RequestIDMiddleware() gin.HandlerFunc {
 		// Add request ID to response headers
 		c.Header(HeaderRequestID, requestID)
 
-		// Create a context with the request ID and set it in the logger
-		ctx := context.WithValue(context.Background(), logger.RequestIDKey, requestID)
-		logger.SetRequestID(ctx)
+		// Create a context with the request ID for logging
+		ctx := context.WithValue(c.Request.Context(), logger.RequestIDKey, requestID)
 
-		// Log the incoming request
-		logger.Infof("Incoming request: %s %s", c.Request.Method, c.Request.URL.Path)
+		// Update the request context
+		c.Request = c.Request.WithContext(ctx)
+
+		// Log the incoming request with context
+		logger.InfofCtx(ctx, "Incoming request: %s %s", c.Request.Method, c.Request.URL.Path)
 
 		// Continue processing the request
 		c.Next()
 
-		// Log the response status
-		logger.Infof("Request completed: %s %s - Status: %d", c.Request.Method, c.Request.URL.Path, c.Writer.Status())
-
-		// Clear the request ID from logger after request is complete
-		logger.ClearRequestID()
+		// Log the response status with context
+		logger.InfofCtx(ctx, "Request completed: %s %s - Status: %d", c.Request.Method, c.Request.URL.Path, c.Writer.Status())
 	}
 }
 
