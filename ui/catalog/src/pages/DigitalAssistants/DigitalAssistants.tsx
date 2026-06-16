@@ -244,6 +244,12 @@ const DigitalAssistantsPage = () => {
         deployment={state.selectedDeployment}
         onBack={() => dispatch({ type: ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS })}
         deploymentSource="Digital assistants"
+        onNameUpdate={(newName) =>
+          dispatch({
+            type: ACTION_TYPES.UPDATE_DEPLOYMENT_NAME,
+            payload: newName,
+          })
+        }
       />
     );
   }
