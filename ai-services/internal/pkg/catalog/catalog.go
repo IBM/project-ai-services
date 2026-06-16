@@ -785,4 +785,66 @@ func (p *CatalogProvider) LoadServiceTemplates(serviceID string) (map[string]*te
 	return templates, nil
 }
 
+// LoadServicesMD loads all steps md files for a service.
+// Returns a map of template name to parsed template.
+func (p *CatalogProvider) LoadServicesMD(serviceID string) (map[string]*texttemplate.Template, error) {
+	// Get service path from catalog
+	servicePath, err := p.GetCatalogItemPath(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service path: %w", err)
+	}
+
+	// Get runtime
+	runtime := vars.RuntimeFactory.GetRuntimeType()
+	runtimeStr := string(runtime)
+
+	// Build catalog path with runtime
+	catalogPath := filepath.Join(servicePath, runtimeStr, "steps")
+
+	// Load all template files
+	templates := make(map[string]*texttemplate.Template)
+
+	err = fs.WalkDir(&assets.CatalogFS, catalogPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		// Only process .md files
+		if !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+
+		// Read template file
+		templateData, err := assets.CatalogFS.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read template %s: %w", path, err)
+		}
+
+		// Parse template
+		templateName := filepath.Base(path)
+		tmpl, err := texttemplate.New(templateName).Parse(string(templateData))
+		if err != nil {
+			return fmt.Errorf("failed to parse template %s: %w", templateName, err)
+		}
+
+		templates[templateName] = tmpl
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to load service md files: %w", err)
+	}
+
+	if len(templates) == 0 {
+		return nil, fmt.Errorf("no md files found in %s", catalogPath)
+	}
+
+	return templates, nil
+}
+
 // Made with Bob

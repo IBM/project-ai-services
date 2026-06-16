@@ -101,9 +101,16 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 
 		s.Stop("Catalog service deployed successfully")
 		logger.Infoln("-------")
-	}
+	} else {
+		s.Stop("Catalog service already deployed")
+		logger.Infof("Existing resources: %v\n", existingResources)
+		// Validate domain, HTTPS port, base directory, and certificates haven't changed
+		if err := validateReconfigureParameters(deployCtx.Runtime, &opts, caddyCtx.GetDomainSuffix()); err != nil {
+			s.Fail("validation failed during reconfigure")
 
-	logger.Infof("Catalog pod already exists: %v\n", existingResources)
+			return nil, fmt.Errorf("reconfigure validation failed: %w", err)
+		}
+	}
 
 	return caddyCtx, nil
 }
@@ -168,13 +175,22 @@ func generateArgParams(passwordHash string, httpsPort int) (map[string]string, e
 
 	// Determine auth file path
 	// Read and encode auth file content for secret
+	// If auth file doesn't exist, use empty content
 	authFilePath, err := utils.GetAuthFilePath()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get auth file path: %w", err)
 	}
+
 	authFileContent, err := os.ReadFile(authFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read auth file from %s: %w", authFilePath, err)
+		if os.IsNotExist(err) {
+			// Auth file doesn't exist - user hasn't logged into podman
+			logger.Warningln("Podman auth file not found. Deployment may fail since deployment may require pulling images.")
+			logger.Warningln("If you need to update registry credentials later, you can use the '--reset-podman-auth' flag after running 'podman login'.")
+			authFileContent = []byte{}
+		} else {
+			return nil, fmt.Errorf("failed to read auth file from %s: %w", authFilePath, err)
+		}
 	}
 
 	// Base64 encode the auth file content for Kubernetes secret

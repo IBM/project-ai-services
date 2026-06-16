@@ -23,7 +23,7 @@ about:
     sections:
       - title: "Version"
         value: "1.0.0"
-      - title: "Large Language Model (LLM)"
+      - title: "Large language model (LLM)"
         value: "granite-3.3-8b-instruct"
       - title: "Inference backend"
         values:

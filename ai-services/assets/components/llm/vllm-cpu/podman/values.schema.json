@@ -1,16 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
+  "additionalProperties": false,
   "properties": {
     "model": {
       "type": "string",
-      "title": "Large Language Model (LLM)",
-      "description": "Large Language Model (LLM)",
+      "title": "Large language model (LLM)",
+      "description": "Large language model (LLM)",
       "oneOf": [
         {
           "const": "ibm-granite/granite-3.3-8b-instruct",
           "title": "granite-3.3-8b-instruct",
-          "description": "**Languages:** English, with multilingual capabilities\n\n**Use Cases:** General-purpose instruction following, Question answering and reasoning, Code generation and explanation, Content creation and summarization\n\n**Strengths:** Balanced performance and efficiency with 8B parameters, Strong instruction following capabilities, Optimized for CPU inference, Suitable for enterprise applications"
+          "description": "An 8-parameter instruction-tuned LLM used for natural language understanding and generation tasks. In this project, it powers tasks such as prompt-based reasoning, summarization, answer generation, and other LLM-driven functionalities.\n\n**Model strengths**: reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.\n\n**Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more."
         }
       ],
       "default": "ibm-granite/granite-3.3-8b-instruct"
@@ -19,7 +20,7 @@
       "type": "string",
       "title": "API Key",
       "format": "password",
-      "description": "API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication."
+      "description": "Optional API key for securing the vLLM service. If provided, **store it securely**—you will need to enter this key when accessing the Question and Answer service. Leave empty to disable authentication."
     }
   }
 }

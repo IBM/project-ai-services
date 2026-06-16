@@ -12,7 +12,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -37,19 +36,24 @@ Flags:
 	 -y, --yes  : Automatically accept confirmation prompt (default=false)
 
 Supported targets:
-  - opensearch: Restore OpenSearch indices and data (Podman only)
-  - digitize:   Restore digitize metadata (jobs and documents) (Podman only)
+  - opensearch: Restore OpenSearch indices and data (Podman and OpenShift)
+  - digitize:   Restore digitize metadata (jobs and documents) (Podman and OpenShift)
 
 Note:
-	 - OpenSearch restore is currently only supported for Podman runtime
 	 - WARNING: Restore will overwrite existing data
 
 Examples:
 	 # Restore OpenSearch data with Podman
 	 ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime podman
 	 
+	 # Restore OpenSearch data with OpenShift
+	 ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime openshift
+
+	 # Restore digitize data with OpenShift
+	 ai-services application restore myapp --target digitize --filename digitize_backup.tar.gz --runtime openshift
+	 
 	 # Restore with automatic confirmation
-	 ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime podman --yes
+	 ai-services application restore myapp --target digitize --filename backup.tar.gz --runtime podman --yes
 `,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -91,11 +95,6 @@ Examples:
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
 		logger.Infof("Runtime: %s\n", rt, 0)
-
-		// Check if OpenShift runtime is being used
-		if rt == types.RuntimeTypeOpenShift {
-			return fmt.Errorf("restore is not yet supported for OpenShift runtime")
-		}
 
 		// Get absolute path to backup file
 		absFilename, err := filepath.Abs(restoreFilename)

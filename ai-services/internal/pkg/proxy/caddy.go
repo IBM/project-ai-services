@@ -95,35 +95,21 @@ func (c *caddyManager) RegisterRoute(route Route) error {
 		return err
 	}
 
+	// Check if route already exists
 	checkResp, err := c.httpClient.R().Get(idURL)
 	if err != nil {
-		return fmt.Errorf("failed to check route: %w", err)
+		return fmt.Errorf("failed to check route existence: %w", err)
 	}
 
-	switch checkResp.StatusCode() {
-	case http.StatusOK:
-		return c.updateRoute(idURL, routeConfig)
-	case http.StatusNotFound:
-		return c.createRoute(routeConfig)
-	default:
-		return fmt.Errorf("unexpected status checking route: %d", checkResp.StatusCode())
-	}
-}
+	if checkResp.StatusCode() == http.StatusOK {
+		// Route already exists, skip registration
+		logger.Infof("Route %s already exists, skipping registration\n", route.ID, logger.VerbosityLevelDebug)
 
-// Helper to update an existing route via its specific ID URL.
-func (c *caddyManager) updateRoute(idURL string, routeConfig map[string]any) error {
-	resp, err := c.httpClient.R().
-		SetHeader("Content-Type", "application/json").
-		SetBody(routeConfig).
-		Put(idURL)
-	if err != nil {
-		return fmt.Errorf("failed to update route: %w", err)
-	}
-	if resp.StatusCode() != http.StatusOK && resp.StatusCode() != http.StatusCreated {
-		return fmt.Errorf("caddy returned status %d on update: %s", resp.StatusCode(), resp.String())
+		return nil
 	}
 
-	return nil
+	// Route doesn't exist, create it
+	return c.createRoute(routeConfig)
 }
 
 // Helper to append a new route to the server's route array.
@@ -175,13 +161,11 @@ func extractDomainFromRoute(rawRoute map[string]any) (string, error) {
 
 // GetRouteByID retrieves a specific route by its ID from Caddy.
 func (c *caddyManager) GetRouteByID(routeID string) (*Route, error) {
-	// Build URL to get specific route by ID
 	idURL, err := url.JoinPath(c.adminURL, "id", routeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build route ID URL: %w", err)
 	}
 
-	// Query Caddy for the specific route
 	var rawRoute map[string]any
 	resp, err := c.httpClient.R().
 		SetResult(&rawRoute).
@@ -198,13 +182,11 @@ func (c *caddyManager) GetRouteByID(routeID string) (*Route, error) {
 		return nil, fmt.Errorf("caddy returned status %d for route %s", resp.StatusCode(), routeID)
 	}
 
-	// Extract domain using helper function
 	domain, err := extractDomainFromRoute(rawRoute)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract domain from route %s: %w", routeID, err)
 	}
 
-	// Build Route object with ID and Domain
 	return &Route{
 		ID:     routeID,
 		Domain: domain,
@@ -325,6 +307,10 @@ func UnregisterRoutesFromEndpoints(
 
 // extractRouteIDsFromEndpoints extracts unique route IDs from endpoints.
 func extractRouteIDsFromEndpoints(endpoints []map[string]any) map[string]bool {
+	if len(endpoints) == 0 {
+		return nil
+	}
+
 	routesToUnregister := make(map[string]bool)
 
 	for _, endpoint := range endpoints {

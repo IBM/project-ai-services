@@ -646,6 +646,7 @@ func buildServiceEntryWithDeployOptions(appClient *catalogClient.ApplicationClie
 // extractServiceParams extracts service-level parameters from argParams, excluding component params.
 // Format: {serviceID}.{param} -> {param}.
 // Excludes: {serviceID}.{componentType}.{param} (those are component params).
+// Nested dot-notation keys (e.g. backend.systemPrompt) are expanded into nested maps.
 func extractServiceParams(serviceID string, components []catalogTypes.DeployOptionsComponent, allParams map[string]string) map[string]any {
 	serviceParams := make(map[string]any)
 	servicePrefix := serviceID + "."
@@ -667,11 +668,30 @@ func extractServiceParams(serviceID string, components []catalogTypes.DeployOpti
 
 		// Only add to service params if it's not a component param.
 		if !isComponentParam {
-			serviceParams[after] = value
+			setNestedParam(serviceParams, after, value)
 		}
 	}
 
 	return serviceParams
+}
+
+// setNestedParam sets a value in a nested map using a dot-notation key.
+// e.g. setNestedParam(m, "backend.systemPrompt", "hello") → m["backend"]["systemPrompt"] = "hello".
+func setNestedParam(m map[string]any, dotKey string, value string) {
+	parts := strings.SplitN(dotKey, ".", paramSplitParts)
+	if len(parts) == 1 {
+		m[dotKey] = value
+
+		return
+	}
+
+	nested, ok := m[parts[0]].(map[string]any)
+	if !ok {
+		nested = make(map[string]any)
+		m[parts[0]] = nested
+	}
+
+	setNestedParam(nested, parts[1], value)
 }
 
 // isComponentParameter checks if a parameter belongs to a component.
@@ -813,9 +833,10 @@ func applySchemaDefaults(appClient *catalogClient.ApplicationClient, componentTy
 	maps.Copy(result, defaults)
 
 	// Override with user-provided params (excluding 'provider' key)
+	// Support nested parameters using dot notation (e.g., auth.password)
 	for k, v := range userParams {
 		if k != "provider" {
-			result[k] = v
+			setNestedParam(result, k, v)
 		}
 	}
 

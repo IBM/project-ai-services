@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -27,11 +26,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
-)
-
-var (
-	ErrApplicationNotFound = errors.New("application not found")
-	ErrUnauthorized        = errors.New("user not authorized")
 )
 
 // ApplicationService provides business logic for application operations.
@@ -231,10 +225,16 @@ func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID
 		return nil, fmt.Errorf("failed to get application: %w", err)
 	}
 	if app == nil {
-		return nil, ErrApplicationNotFound
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
 	}
 	if app.CreatedBy != userID {
-		return nil, ErrUnauthorized
+		return nil, &ValidationError{
+			Code:    http.StatusForbidden,
+			Message: ErrMsgUserNotOwner,
+		}
 	}
 	err = s.appRepo.UpdateDeploymentName(ctx, id, newName)
 	if err != nil {
@@ -245,7 +245,10 @@ func (s *ApplicationService) UpdateApplication(ctx context.Context, id uuid.UUID
 		return nil, fmt.Errorf("failed to fetch updated application %w", err)
 	}
 	if updatedApp == nil {
-		return nil, ErrApplicationNotFound
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
 	}
 
 	appData, err := s.buildApplication(*updatedApp)
@@ -269,7 +272,7 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 		// Application with this name already exists - return conflict error
 		return nil, &ValidationError{
 			Code:    http.StatusConflict,
-			Message: fmt.Sprintf("application with name '%s' already exists", req.Name),
+			Message: fmt.Sprintf(ErrMsgApplicationNameExists, req.Name),
 		}
 	}
 
@@ -491,7 +494,10 @@ func (s *ApplicationService) GetApplicationByID(ctx context.Context, id uuid.UUI
 		return nil, fmt.Errorf("failed to get application: %w", err)
 	}
 	if app == nil {
-		return nil, ErrApplicationNotFound
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
 	}
 	// Build complete response with services and components
 	return s.buildGetApplicationResponse(ctx, app)
@@ -508,10 +514,12 @@ func (s *ApplicationService) buildGetApplicationResponse(ctx context.Context, ap
 	appresponse := &types.Application{
 		ID:             app.ID.String(),
 		Name:           app.Name,
+		CatalogID:      app.CatalogID,
 		DeploymentType: string(app.DeploymentType),
 		Type:           typeName,
 		Status:         string(app.Status),
 		Message:        app.Message,
+		Version:        app.Version,
 		CreatedAt:      app.CreatedAt.Format(constants.RFC3339WithTimezone),
 		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
 	}
@@ -532,11 +540,18 @@ func (s *ApplicationService) loadApplicationServices(ctx context.Context, servic
 	appServices := []types.ApplicationService{}
 	for _, service := range services {
 		// Build application service response
+		serviceDisplayName := service.CatalogID
+		if service, err := s.provider.LoadService(service.CatalogID); err == nil && service.Name != "" {
+			serviceDisplayName = service.Name
+		}
+
 		appService := types.ApplicationService{
 			ID:        service.ID.String(),
-			Type:      service.CatalogID,
+			Type:      serviceDisplayName,
+			CatalogID: service.CatalogID,
 			Endpoints: service.Endpoints,
 			Version:   service.Version,
+			Status:    string(service.Status),
 			CreatedAt: service.CreatedAt.Format(constants.RFC3339WithTimezone),
 			UpdatedAt: service.UpdatedAt.Format(constants.RFC3339WithTimezone),
 		}
@@ -615,15 +630,24 @@ func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID
 		return nil, fmt.Errorf("failed to get application: %w", err)
 	}
 	if app == nil {
-		return nil, fmt.Errorf("not found: application does not exist")
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
 	}
 
 	if app.CreatedBy != user {
-		return nil, fmt.Errorf("forbidden: user does not own this application")
+		return nil, &ValidationError{
+			Code:    http.StatusForbidden,
+			Message: ErrMsgUserNotOwner,
+		}
 	}
 
 	if app.Status == models.ApplicationStatusDeleting {
-		return nil, fmt.Errorf("conflict: application is already being deleted")
+		return nil, &ValidationError{
+			Code:    http.StatusConflict,
+			Message: ErrMsgApplicationAlreadyDeleting,
+		}
 	}
 
 	if err := s.appRepo.UpdateStatus(ctx, id, models.ApplicationStatusDeleting, "Deletion initiated"); err != nil {
@@ -718,7 +742,10 @@ func (s *ApplicationService) GetApplicationResources(ctx context.Context, id uui
 		return nil, fmt.Errorf("failed to get application: %w", err)
 	}
 	if app == nil {
-		return nil, ErrApplicationNotFound
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
 	}
 
 	// Create runtime client
@@ -984,7 +1011,10 @@ func (s *ApplicationService) ApplicationsPs(ctx context.Context, appID uuid.UUID
 		return nil, fmt.Errorf("failed to get application: %w", err)
 	}
 	if app == nil {
-		return nil, ErrApplicationNotFound
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: ErrMsgApplicationNotFound,
+		}
 	}
 
 	// Initialize runtime client for pod operations

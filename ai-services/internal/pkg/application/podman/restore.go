@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	commonrestore "github.com/project-ai-services/ai-services/internal/pkg/application/common/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
@@ -66,15 +67,7 @@ func (p *PodmanApplication) restoreDigitize(ctx context.Context, appDetails *cat
 	logger.Infof("Restoring digitize metadata\n", 0)
 	logger.Infof("Digitize Import (API-based Approach)\n", 0)
 
-	// Extract and locate backup directory
-	backupDir, cleanup, err := restore.ExtractAndLocateBackup(backupFile)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-
-	// Construct metadata from cache files
-	importPayload, err := restore.ConstructMetadataFromCache(backupDir)
+	importPayload, err := commonrestore.GetDigitizeData(backupFile)
 	if err != nil {
 		return err
 	}
@@ -88,7 +81,7 @@ func (p *PodmanApplication) restoreDigitize(ctx context.Context, appDetails *cat
 	logger.Infof("Digitize API URL: %s\n", digitizeURL, 0)
 
 	// Create digitize restore client and call Import API
-	client := restore.NewDigitizeRestoreClient(digitizeURL)
+	client := commonrestore.NewDigitizeRestoreClient(digitizeURL)
 	if err := client.CallImportAPI(importPayload); err != nil {
 		return err
 	}

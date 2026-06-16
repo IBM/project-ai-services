@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
+  "additionalProperties": false,
   "properties": {
     "model": {
       "type": "string",
@@ -10,7 +11,7 @@
         {
           "const": "BAAI/bge-reranker-v2-m3",
           "title": "bge-reranker-v2-m3",
-          "description": "**Languages:** Multilingual (100+ languages)\n\n**Use Cases:** Search result reranking, Document relevance scoring, Query-document matching refinement, RAG pipeline optimization\n\n**Strengths:** State-of-the-art reranking performance, Excellent multilingual support, Efficient inference on CPU, Improved retrieval accuracy for RAG applications"
+          "description": "A multilingual, cross‑encoder–based reranker model used to improve retrieval quality by scoring and ranking candidate documents. It enhances search relevance by providing high‑accuracy reranking on top of initial vector retrieval.\n\n**Model strengths**: Reliable instruction-following, contextual reasoning, and accurate response generation across a wide range of natural language tasks from summarization and question answering to prompt-driven workflows.\n\n**Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 90+ more"
         }
       ],
       "default": "BAAI/bge-reranker-v2-m3"

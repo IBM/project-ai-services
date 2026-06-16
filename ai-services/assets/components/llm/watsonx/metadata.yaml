@@ -6,6 +6,6 @@ description: "Deploy llm models using watsonx"
 
 # Component type this provider belongs to
 component_type: llm
-component_name: "Large Language Model (LLM)"
+component_name: "Large language model (LLM)"
 
 # Made with Bob

@@ -248,6 +248,7 @@ func (p *CatalogProvider) buildProvider(comp types.Component, componentType stri
 		Name:        comp.Name,
 		Description: comp.Description,
 		Version:     providerVersion,
+		Default:     comp.Default,
 		Resources:   resources,
 	}
 
