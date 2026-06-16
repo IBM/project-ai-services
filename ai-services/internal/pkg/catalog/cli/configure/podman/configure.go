@@ -179,7 +179,7 @@ func generateArgParams(passwordHash string, httpsPort int) (map[string]string, e
 		if os.IsNotExist(err) {
 			// Auth file doesn't exist - user hasn't logged into podman
 			logger.Warningln("Podman auth file not found. Deployment may fail since deployment may require pulling images.")
-			logger.Warningln("Run 'podman login' to authenticate with container registries before deploying services.")
+			logger.Warningln("If you need to update registry credentials later, you can use the '--reset-podman-auth' flag after running 'podman login'.")
 			authFileContent = []byte{}
 		} else {
 			return nil, fmt.Errorf("failed to read auth file from %s: %w", authFilePath, err)
