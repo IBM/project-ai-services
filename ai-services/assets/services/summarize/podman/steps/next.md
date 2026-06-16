@@ -1,1 +1,3 @@
-- Use the Summarize API at http://{{ .HOST_IP }}:{{ .SUMMARIZE_API_PORT }}.
+{{- if ne .API_URL "" }}
+- Use the Summarize API at {{ .API_URL }}.
+{{- end }}

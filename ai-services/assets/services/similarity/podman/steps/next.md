@@ -1,1 +1,3 @@
-- Use the Similarity Search API at http://{{ .HOST_IP }}:{{ .SIMILARITY_API_PORT }}.
+{{- if ne .API_URL "" }}
+- Use the Similarity Search API at {{ .API_URL }}.
+{{- end }}
