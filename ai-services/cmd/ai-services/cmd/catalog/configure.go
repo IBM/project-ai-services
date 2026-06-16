@@ -127,7 +127,7 @@ func validateResetFlag(cmd *cobra.Command, flagName string) error {
 	// List of flags that cannot be used with reset flag
 	var invalidFlags []string
 	cmd.Flags().Visit(func(f *pflag.Flag) {
-		if f.Name == flagName || f.Name == "runtime" {
+		if f.Name == flagName || f.Name == constants.RuntimeFlag {
 			// Skip reset flag and runtime parameter
 			return
 		}
@@ -233,8 +233,8 @@ func validateSSLCertificates() error {
 // configureConfigureFlags configures the flags for the configure command.
 func configureConfigureFlags(cmd *cobra.Command) {
 	// Add runtime flag as required
-	cmd.Flags().StringVarP(&runtimeType, "runtime", "r", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
-	_ = cmd.MarkFlagRequired("runtime")
+	cmd.Flags().StringVarP(&runtimeType, constants.RuntimeFlag, "r", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
+	_ = cmd.MarkFlagRequired(constants.RuntimeFlag)
 
 	// Add basedir flag
 	cmd.Flags().StringVar(

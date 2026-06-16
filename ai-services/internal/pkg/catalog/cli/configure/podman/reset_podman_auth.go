@@ -7,18 +7,11 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
 	catalogConstant "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 func ResetPodmanAuth() error {
 	// Create deployment context without argParams for status check
 	deployCtx, err := deploy.NewDeployContext()
-	if err != nil {
-		return err
-	}
-
-	// Verify auth file path exists before deleting secret
-	_, err = utils.GetAuthFilePath()
 	if err != nil {
 		return err
 	}
