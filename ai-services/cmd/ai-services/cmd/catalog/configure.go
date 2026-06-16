@@ -33,6 +33,8 @@ var (
 	resetPasswordFlag bool
 	// Reset podman auth secret for catalog configure command.
 	resetPodmanAuthFlag bool
+	// Reset certificate flag for catalog configure command.
+	resetCertificateFlag bool
 )
 
 const (
@@ -61,6 +63,10 @@ Examples:
 				return validateResetFlag(cmd, "reset-podman-auth")
 			}
 
+			if resetCertificateFlag {
+				return validateResetCertificateFlags(cmd)
+			}
+
 			return validateConfigureFlags()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -68,6 +74,10 @@ Examples:
 				return runResetPassword()
 			} else if resetPodmanAuthFlag {
 				return runResetPodmanAuth()
+			}
+
+			if resetCertificateFlag {
+				return runResetCertificate()
 			}
 
 			return runConfigure()
@@ -105,15 +115,7 @@ func runConfigure() error {
 	}
 
 	// Sanitize SSL certificate paths to prevent path traversal attacks
-	// Only clean if paths are provided (filepath.Clean("") returns ".")
-	cleanCertPath := ""
-	cleanKeyPath := ""
-	if sslCertPath != "" {
-		cleanCertPath = filepath.Clean(sslCertPath)
-	}
-	if sslKeyPath != "" {
-		cleanKeyPath = filepath.Clean(sslKeyPath)
-	}
+	cleanCertPath, cleanKeyPath := sanitizeSSLPaths(sslCertPath, sslKeyPath)
 
 	return configure.Run(vars.RuntimeFactory.GetRuntimeType(), aiServicesDir, domainName, cleanCertPath, cleanKeyPath, httpsPort)
 }
@@ -124,20 +126,7 @@ func validateResetFlag(cmd *cobra.Command, flagName string) error {
 	}
 
 	// Check that no configuration parameters are provided with reset flag
-	// List of flags that cannot be used with reset flag
-	var invalidFlags []string
-	cmd.Flags().Visit(func(f *pflag.Flag) {
-		if f.Name == flagName || f.Name == constants.RuntimeFlag {
-			// Skip reset flag and runtime parameter
-			return
-		}
-		invalidFlags = append(invalidFlags, "--"+f.Name)
-	})
-	if len(invalidFlags) > 0 {
-		return fmt.Errorf("the following flags cannot be used with --%s: %v", flagName, invalidFlags)
-	}
-
-	return nil
+	return checkIncompatibleFlags(cmd, flagName)
 }
 
 // validateConfigureFlags validates the configure command flags and initializes runtime.
@@ -230,6 +219,70 @@ func validateSSLCertificates() error {
 	return nil
 }
 
+func validateResetCertificateFlags(cmd *cobra.Command) error {
+	if err := validateRuntimeFlag(); err != nil {
+		return err
+	}
+
+	// Require SSL certificate flags with reset-certificate
+	if sslCertPath == "" || sslKeyPath == "" {
+		return fmt.Errorf("--ssl-cert and --ssl-key are required when using --reset-certificate")
+	}
+
+	// Validate SSL certificate flags
+	if err := validateSSLFlags(); err != nil {
+		return err
+	}
+
+	// Check that no other configuration parameters are provided with reset-certificate flag
+	// Allow ssl-cert and ssl-key since they are required for this operation
+	return checkIncompatibleFlags(cmd, "reset-certificate", "ssl-cert", "ssl-key")
+}
+
+// checkIncompatibleFlags validates that only allowed flags are used with a specific flag.
+// It checks all flags that were explicitly set by the user and returns an error if any
+// incompatible flags are found.
+//
+// Parameters:
+//   - cmd: The cobra command to check flags on
+//   - flagName: The name of the flag being validated (e.g., "reset-password")
+//   - allowedFlags: Optional list of flag names that are allowed to be used with flagName
+//
+// Returns an error if any incompatible flags are found, nil otherwise.
+func checkIncompatibleFlags(cmd *cobra.Command, flagName string, allowedFlags ...string) error {
+	// Create a map of allowed flags for quick lookup
+	allowed := make(map[string]bool)
+	allowed[flagName] = true
+	allowed["runtime"] = true // runtime is always allowed
+	for _, flag := range allowedFlags {
+		allowed[flag] = true
+	}
+
+	// Check that no configuration parameters are provided with the specified flag
+	var invalidFlags []string
+	cmd.Flags().Visit(func(f *pflag.Flag) {
+		if !allowed[f.Name] {
+			invalidFlags = append(invalidFlags, "--"+f.Name)
+		}
+	})
+
+	if len(invalidFlags) > 0 {
+		return fmt.Errorf("the following flags cannot be used with --%s: %v", flagName, invalidFlags)
+	}
+
+	return nil
+}
+
+func runResetCertificate() error {
+	logger.Infof("Resetting certificates and reloading catalog pod...")
+
+	// Sanitize SSL certificate paths to prevent path traversal attacks
+	cleanCertPath, cleanKeyPath := sanitizeSSLPaths(sslCertPath, sslKeyPath)
+
+	// Call ResetCatalogCertificate with certificate paths
+	return catalogPodman.ResetCatalogCertificate(cleanCertPath, cleanKeyPath)
+}
+
 // configureConfigureFlags configures the flags for the configure command.
 func configureConfigureFlags(cmd *cobra.Command) {
 	// Add runtime flag as required
@@ -299,6 +352,17 @@ func configureResetFlags(cmd *cobra.Command) {
 		false,
 		"Reset podman authentication using the system's current auth.json.",
 	)
+
+	cmd.Flags().BoolVar(
+		&resetCertificateFlag,
+		"reset-certificate",
+		false,
+		"Reset the Caddy SSL certificates by loading new custom certificates.\n"+
+			"Requires --ssl-cert and --ssl-key flags to specify the new certificate files.\n"+
+			"This will reload the certificates in Caddy without restarting the pod.\n"+
+			"Example:\n"+
+			"  ai-services catalog configure --runtime podman --reset-certificate --ssl-cert /path/to/cert.pem --ssl-key /path/to/key.pem\n",
+	)
 }
 
 func runResetPassword() error {
@@ -333,6 +397,23 @@ func runResetPodmanAuth() error {
 	}
 
 	return catalogPodman.ResetPodmanAuth()
+}
+
+// sanitizeSSLPaths sanitizes SSL certificate and key paths to prevent path traversal attacks.
+// Only cleans if paths are provided (filepath.Clean("") returns ".").
+// Returns cleaned cert path and cleaned key path.
+func sanitizeSSLPaths(certPath, keyPath string) (string, string) {
+	cleanCertPath := ""
+	cleanKeyPath := ""
+
+	if certPath != "" {
+		cleanCertPath = filepath.Clean(certPath)
+	}
+	if keyPath != "" {
+		cleanKeyPath = filepath.Clean(keyPath)
+	}
+
+	return cleanCertPath, cleanKeyPath
 }
 
 // Made with Bob
