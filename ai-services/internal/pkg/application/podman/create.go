@@ -3,439 +3,604 @@ package podman
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"slices"
-	"strconv"
-	"sync"
+	"maps"
+	"strings"
 	"text/template"
+	"time"
 
-	"github.com/project-ai-services/ai-services/assets"
-	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
-	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/image"
+	apiModels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	cliutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/models"
-	"github.com/project-ai-services/ai-services/internal/pkg/specs"
-	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 )
 
-var (
-	envMutex sync.Mutex
+const (
+	// Polling configuration.
+	pollInterval       = 20 * time.Second
+	pollTimeout        = 20 * time.Minute
+	paramSplitParts    = 2
+	expectedParamParts = 2
 )
 
-// Create deploys a new application based on a template.
+// Create deploys a new application using catalog API.
 func (p *PodmanApplication) Create(ctx context.Context, opts types.CreateOptions) error {
-	// Proceed to create application
-	logger.Infof("Creating application '%s' using template '%s'\n", opts.Name, opts.TemplateName)
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
+	// 1. Initialize catalog client
+	appClient, err := catalogClient.NewApplicationClient()
+	if err != nil {
+		return fmt.Errorf("failed to create application client: %w", err)
+	}
 
-	// validate whether the provided template name is correct
-	if err := tp.AppTemplateExist(opts.TemplateName); err != nil {
+	// 2. Check if application already exists
+	if err := p.checkApplicationExists(appClient, opts.Name); err != nil {
 		return err
 	}
 
-	tmpls, err := tp.LoadAllTemplates(opts.TemplateName)
-	if err != nil {
-		return fmt.Errorf("failed to parse the templates: %w", err)
-	}
-
-	// load metadata.yml to read the app metadata
-	var appMetadata templates.AppMetadata
-	if err := tp.LoadMetadata(opts.TemplateName, true, &appMetadata); err != nil {
-		return fmt.Errorf("failed to read the app metadata: %w", err)
-	}
-
-	if err := p.verifyPodTemplateExists(tmpls, &appMetadata); err != nil {
-		return fmt.Errorf("failed to verify pod template: %w", err)
-	}
-
-	// Check if resources already exists with the given application name
-	existingResources, err := helpers.CheckExistingResourcesForApplication(p.runtime, opts.Name, nil)
-	if err != nil {
-		return fmt.Errorf("failed while checking existing pods for application: %w", err)
-	}
-
-	// if all the pods for given application are already deployed, just log and do not proceed further
-	if len(existingResources) == len(tmpls) {
-		logger.Infof("Pods for given app: %s are already deployed. Please use 'ai-services application ps %s' to see the pods deployed\n", opts.Name, opts.Name)
-
-		return nil
-	}
-
-	// ---- Validate Spyre card Requirements ----
-	pciAddresses, err := p.validateAndAllocateSpyreCards(opts.TemplateName, opts.Name, tmpls)
+	// 3. Build the catalog API payload
+	payload, err := p.buildCatalogPayload(opts.Name, opts.TemplateName, opts.ArgParams)
 	if err != nil {
 		return err
 	}
 
-	if err := p.prepareApplicationArtifacts(ctx, opts); err != nil {
-		return err
+	// 4. Create application via catalog API
+	logger.Infof("Creating application '%s' using template '%s'...\n", opts.Name, opts.TemplateName)
+	resp, err := appClient.CreateApplication(payload)
+	if err != nil {
+		return fmt.Errorf("failed to create application: %w", err)
 	}
 
-	// Loop through all pod templates, render and run kube play
-	logger.Infof("Total Pod Templates to be processed: %d\n", len(tmpls))
+	logger.Infof("Application creation initiated (ID: %s)\n", resp.ID)
 
-	return p.deployApplication(ctx, opts, tmpls, &appMetadata, pciAddresses, existingResources)
+	// 5. Poll for application status
+	return p.pollApplicationStatus(appClient, opts.Name)
 }
 
-func (p *PodmanApplication) validateAndAllocateSpyreCards(templateName, appName string, tmpls map[string]*template.Template) ([]string, error) {
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
-
-	reqSpyreCardsCount, err := p.calculateReqSpyreCards(tp, utils.ExtractMapKeys(tmpls), templateName, appName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to calculateReqSpyreCards: %w", err)
-	}
-
-	if reqSpyreCardsCount == 0 {
-		return nil, nil
-	}
-
-	// calculate the actual available spyre cards
-	pciAddresses, err := helpers.FindFreeSpyreCards()
-	if err != nil {
-		return nil, fmt.Errorf("failed to find free Spyre Cards: %w", err)
-	}
-
-	actualSpyreCardsCount := len(pciAddresses)
-
-	// validate spyre card requirements
-	if err := p.validateSpyreCardRequirements(reqSpyreCardsCount, actualSpyreCardsCount); err != nil {
-		return nil, err
-	}
-
-	return pciAddresses, nil
-}
-
-func (p *PodmanApplication) prepareApplicationArtifacts(ctx context.Context, opts types.CreateOptions) error {
-	// Download Container Images
-	if err := p.downloadImagesForTemplate(opts.TemplateName, opts.Name, opts.ImagePullPolicy); err != nil {
+// checkApplicationExists checks if an application with the given name already exists.
+func (p *PodmanApplication) checkApplicationExists(appClient *catalogClient.ApplicationClient, appName string) error {
+	existingApp, err := cliutils.GetAppByName(appClient, appName)
+	if err != nil && !strings.Contains(err.Error(), "not found") {
 		return err
 	}
 
-	// Download models if flag is set to true(default: true)
-	if !opts.SkipModelDownload {
-		if err := p.downloadModels(ctx, opts.TemplateName, opts.Name); err != nil {
-			return err
-		}
+	if existingApp != nil {
+		return fmt.Errorf("application with name '%s' already exists", appName)
 	}
 
 	return nil
 }
 
-func (p *PodmanApplication) deployApplication(ctx context.Context, opts types.CreateOptions, tmpls map[string]*template.Template,
-	appMetadata *templates.AppMetadata, pciAddresses []string, existingResources []string) error {
-	logger.Infof("Total Pod Templates to be processed: %d\n", len(tmpls))
-
-	s := spinner.New("Deploying application '" + opts.Name + "'...")
-	s.Start(ctx)
-
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
-
-	// execute the pod Templates
-	if err := p.executePodTemplates(tp, opts.Name, appMetadata, tmpls, pciAddresses, existingResources, opts.ValuesFiles, opts.ArgParams); err != nil {
-		return err
+// buildCatalogPayload builds the catalog API payload for the given template.
+func (p *PodmanApplication) buildCatalogPayload(appName, templateName string, argParams map[string]string) (*apiModels.CreateApplicationRequest, error) {
+	// Initialize catalog provider
+	provider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
 	}
 
-	s.Stop("Application '" + opts.Name + "' deployed successfully")
+	// Determine if template is architecture or service
+	isArchitecture := provider.ArchitectureExists(templateName)
+	isService := provider.ServiceExists(templateName)
 
+	if !isArchitecture && !isService {
+		return nil, fmt.Errorf("template '%s' not found as architecture or service", templateName)
+	}
+
+	// Build the payload
+	if isArchitecture {
+		return p.buildArchitecturePayload(provider, templateName, appName, argParams)
+	}
+
+	return p.buildServicePayload(templateName, appName, argParams)
+}
+
+// pollApplicationStatus polls the application status until it's ready or fails.
+func (p *PodmanApplication) pollApplicationStatus(appClient *catalogClient.ApplicationClient, appName string) error {
+	logger.Infof("Waiting for application '%s' to be ready...\n", appName)
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	timeout := time.After(pollTimeout)
+
+	for {
+		select {
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for application '%s' to be ready", appName)
+
+		case <-ticker.C:
+			app, err := cliutils.GetAppByName(appClient, appName)
+			if err != nil {
+				return fmt.Errorf("failed to get application status: %w", err)
+			}
+
+			done, err := p.handleApplicationStatus(app, appName)
+			if err != nil {
+				return err
+			}
+			if done {
+				return nil
+			}
+		}
+	}
+}
+
+// handleApplicationStatus handles the application status and returns (done, error).
+func (p *PodmanApplication) handleApplicationStatus(app *catalogTypes.Application, appName string) (bool, error) {
+	// Status values from ai-services/internal/pkg/catalog/db/models/application.go.
+	switch app.Status {
+	case "Running":
+		logger.Infof("Application '%s' is ready!\n", appName)
+
+		// Print next steps after successful deployment
+		if err := p.printNextSteps(app); err != nil {
+			logger.Warningf("Failed to display next steps: %v\n", err)
+		}
+
+		return true, nil
+
+	case "Error":
+		if app.Message != "" {
+			return false, fmt.Errorf("application deployment failed: %s", app.Message)
+		}
+
+		return false, fmt.Errorf("application deployment failed")
+
+	case "Downloading", "Deploying":
+		// Still in progress, continue polling.
+		logger.Infof("Deploying application: %s, Status: %s, Message: %s\n", appName, app.Status, app.Message)
+
+		return false, nil
+
+	case "Deleting":
+		return false, fmt.Errorf("application is being deleted")
+
+	default:
+		logger.Infof("Status: %s\n", app.Status)
+
+		return false, nil
+	}
+}
+
+// printNextSteps prints the next steps for the deployed application.
+func (p *PodmanApplication) printNextSteps(app *catalogTypes.Application) error {
+	appClient, err := catalogClient.NewApplicationClient()
+	if err != nil {
+		return fmt.Errorf("failed to create application client: %w", err)
+	}
+
+	// Get full application details with services
+	application, err := appClient.GetApplication(app.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get application: %w", err)
+	}
+
+	catalogProvider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		return fmt.Errorf("failed to create catalog provider: %w", err)
+	}
+
+	logger.Infoln("\nNext Steps:")
 	logger.Infoln("-------")
 
-	// print the next steps to be performed at the end of create
-	if err := helpers.PrintNextSteps(tp, p.runtime, opts.Name, opts.TemplateName); err != nil {
-		// do not want to fail the overall create if we cannot print next steps
-		logger.Infof("failed to display next steps: %v\n", err)
+	for _, service := range application.Services {
+		params := map[string]string{}
+		params["SERVICE_NAME"] = service.Type
 
-		return nil //nolint:nilerr // intentionally swallow error for non-critical step
-	}
+		// Add endpoint URLs to params
+		for _, endpoint := range service.Endpoints {
+			urlType, urlTypeOk := endpoint["type"].(string)
+			url, urlOk := endpoint["url"].(string)
+			if urlTypeOk && urlOk {
+				params[strings.ToUpper(urlType)+"_URL"] = url
+			}
+		}
 
-	return nil
-}
-
-func (p *PodmanApplication) downloadModels(ctx context.Context, templateName, appName string) error {
-	s := spinner.New("Downloading models as part of application creation...")
-	s.Start(ctx)
-
-	models, err := helpers.ListModels(templateName, appName)
-	if err != nil {
-		s.Fail("failed to list models")
-
-		return err
-	}
-
-	logger.Infoln("Downloading models required for application template " + templateName + ":")
-
-	for _, model := range models {
-		s.UpdateMessage("Downloading model: " + model + "...")
-		err = utils.Retry(vars.RetryCount, vars.RetryInterval, nil, func() error {
-			return helpers.DownloadModel(model, utils.GetModelsPath())
-		})
+		tmpls, err := catalogProvider.LoadServicesMD(service.CatalogID)
 		if err != nil {
-			s.Fail("failed to download model: " + model)
-
-			return fmt.Errorf("failed to download model: %w", err)
-		}
-	}
-
-	s.Stop("Model download completed.")
-
-	return nil
-}
-
-func (p *PodmanApplication) verifyPodTemplateExists(tmpls map[string]*template.Template, appMetadata *templates.AppMetadata) error {
-	flattenPodTemplateExecutions := utils.FlattenArray(appMetadata.PodTemplateExecutions)
-
-	if len(flattenPodTemplateExecutions) != len(tmpls) {
-		return errors.New("number of values specified in podTemplateExecutions under metadata.yml is mismatched. Please ensure all the pod template file names are specified")
-	}
-
-	// Make sure the podTemplateExecution mentioned in metadata.yaml is valid (corresponding pod template is present)
-	for _, podTemplate := range flattenPodTemplateExecutions {
-		if _, ok := tmpls[podTemplate]; !ok {
-			return fmt.Errorf("value: %s specified in podTemplateExecutions under metadata.yml is invalid. Please ensure corresponding template file exists", podTemplate)
-		}
-	}
-
-	return nil
-}
-
-func (p *PodmanApplication) validateSpyreCardRequirements(req int, actual int) error {
-	if actual < req {
-		return fmt.Errorf("insufficient spyre cards. Require: %d spyre cards to proceed", req)
-	}
-
-	return nil
-}
-
-func (p *PodmanApplication) calculateReqSpyreCards(tp templates.Template, podTemplateFileNames []string, appTemplateName, appName string) (int, error) {
-	totalReqSpyreCounts := 0
-
-	// Calculate Req Spyre Counts
-	for _, podTemplateFileName := range podTemplateFileNames {
-		// fetch pod spec
-		podSpec, err := p.fetchPodSpec(tp, appTemplateName, podTemplateFileName, appName, nil, nil)
-		if err != nil {
-			return totalReqSpyreCounts, fmt.Errorf("failed to load pod Template: '%s' for appTemplate: '%s' with error: %w", podTemplateFileName, appTemplateName, err)
-		}
-
-		// check if pod already exists and skip counting if it does exists
-		exists, err := p.runtime.PodExists(podSpec.Name)
-		if err != nil {
-			return totalReqSpyreCounts, fmt.Errorf("failed to check pod status: %w", err)
-		}
-
-		if exists {
-			logger.Infof("Pod %s already exists, skipping spyre cards calculation", podSpec.Name, logger.VerbosityLevelDebug)
+			logger.Warningf("Failed to load next steps for service '%s': %v\n", service.CatalogID, err)
 
 			continue
 		}
 
-		// fetch the spyreCount for all containers from the annotations
-		spyreCount, _, err := p.fetchSpyreCardsFromPodAnnotations(podSpec.Annotations)
+		err = p.printNextStepsMD(tmpls, params, application.Name)
 		if err != nil {
-			return totalReqSpyreCounts, err
+			logger.Warningf("Failed to render next steps for service '%s': %v\n", service.CatalogID, err)
 		}
-
-		totalReqSpyreCounts += spyreCount
-	}
-
-	return totalReqSpyreCounts, nil
-}
-
-func (p *PodmanApplication) fetchPodSpec(tp templates.Template, appTemplateName, podTemplateFileName, appName string, valuesFiles []string, argParams map[string]string) (*models.PodSpec, error) {
-	podSpec, err := tp.LoadPodTemplateWithValues(appTemplateName, podTemplateFileName, appName, valuesFiles, argParams)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load pod Template: '%s' for appTemplate: '%s' with error: %w", podTemplateFileName, appTemplateName, err)
-	}
-
-	return podSpec, nil
-}
-
-func (p *PodmanApplication) fetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[string]int, error) {
-	var spyreCards int
-	// spyreCardContainerMap: Key -> containerName, Value -> SpyreCardCounts
-	spyreCardContainerMap := map[string]int{}
-
-	isSpyreCardAnnotation := func(annotation string) (string, bool) {
-		matches := vars.SpyreCardAnnotationRegex.FindStringSubmatch(annotation)
-		if matches == nil {
-			return "", false
-		}
-
-		return matches[1], true
-	}
-
-	for annotationKey, val := range annotations {
-		if containerName, ok := isSpyreCardAnnotation(annotationKey); ok {
-			valInt, err := strconv.Atoi(val)
-			if err != nil {
-				return 0, spyreCardContainerMap, fmt.Errorf("failed to convert to int. Provided val: %s is not of int type", val)
-			}
-			// Replace with container name
-			spyreCardContainerMap[containerName] = valInt
-			spyreCards += valInt
-		}
-	}
-
-	return spyreCards, spyreCardContainerMap, nil
-}
-
-func (p *PodmanApplication) downloadImagesForTemplate(templateName, appName string, imagePullPolicy image.ImagePullPolicy) error {
-	// create Images struct and run with the specified policy
-	img := &image.Images{
-		Runtime:     p.runtime,
-		App:         appName,
-		AppTemplate: templateName,
-	}
-
-	return img.Run(imagePullPolicy)
-}
-
-func (p *PodmanApplication) executePodTemplates(tp templates.Template,
-	appName string, appMetadata *templates.AppMetadata,
-	tmpls map[string]*template.Template, pciAddresses []string, existingPods []string,
-	valuesFiles []string, argParams map[string]string) error {
-	// Load values for template rendering
-	values, err := tp.LoadValues(appMetadata.Name, valuesFiles, argParams)
-	if err != nil {
-		return fmt.Errorf("failed to load params for application: %w", err)
-	}
-
-	globalParams := map[string]any{
-		"AppName":         appName,
-		"AppTemplateName": appMetadata.Name,
-		"Version":         appMetadata.Version,
-		"BaseDir":         utils.GetBaseDir(),
-		"Values":          values,
-		// Key -> container name
-		// Value -> range of key-value env pairs
-		"env": map[string]map[string]string{},
-	}
-
-	// looping over each layer of podTemplateExecutions
-	for i, layer := range appMetadata.PodTemplateExecutions {
-		logger.Infof("\n Executing Layer %d/%d: %v\n", i+1, len(appMetadata.PodTemplateExecutions), layer)
-		logger.Infoln("-------")
-		var wg sync.WaitGroup
-		errCh := make(chan error, len(layer))
-
-		// for each layer, fetch all the pod Template Names and do the pod deploy
-		for _, podTemplateName := range layer {
-			wg.Add(1)
-			go func(t string) {
-				defer wg.Done()
-				if err := p.executePodTemplateLayer(tp, tmpls, globalParams, pciAddresses, existingPods, podTemplateName, appName, valuesFiles, argParams); err != nil {
-					errCh <- err
-				}
-			}(podTemplateName)
-		}
-
-		wg.Wait()
-		close(errCh)
-
-		// collect all errors for this layer
-		var errs []error
-		for e := range errCh {
-			errs = append(errs, fmt.Errorf("layer %d: %w", i+1, e))
-		}
-
-		// If an error exist for a given layer, then return (do not process further layers)
-		if len(errs) > 0 {
-			return errors.Join(errs...)
-		}
-
-		logger.Infof("Layer %d completed\n", i+1)
 	}
 
 	return nil
 }
 
-func (p *PodmanApplication) executePodTemplateLayer(tp templates.Template, tmpls map[string]*template.Template,
-	globalParams map[string]any, pciAddresses []string, existingPods []string, podTemplateName, appName string,
-	valuesFiles []string, argParams map[string]string) error {
-	logger.Infof("'%s': Processing template...\n", podTemplateName)
-
-	// Shallow Copy globalParams Map
-	params := utils.CopyMap(globalParams)
-
-	// fetch pod Spec
-	podSpec, err := p.fetchPodSpec(tp, globalParams["AppTemplateName"].(string), podTemplateName, appName, valuesFiles, argParams)
-	if err != nil {
-		return err
-	}
-
-	if slices.Contains(existingPods, podSpec.Name) {
-		logger.Infof("%s: Skipping pod deploy as '%s' it already exists", podTemplateName, podSpec.Name)
-
+// printNextStepsMD renders and prints the next.md template for a service.
+func (p *PodmanApplication) printNextStepsMD(tmpls map[string]*template.Template, params map[string]string, appName string) error {
+	tmpl, ok := tmpls["next.md"]
+	if !ok {
+		// next.md doesn't exist for this service, return nil
 		return nil
 	}
 
-	// fetch annotations from pod Spec
-	podAnnotations := p.fetchPodAnnotations(podSpec)
-
-	// get the env params for a given pod
-	env, err := p.returnEnvParamsForPod(podSpec, podAnnotations, &pciAddresses)
-	if err != nil {
-		return fmt.Errorf("'%s': Failed to fetch env params: %w", podTemplateName, err)
-	}
-	params["env"] = env
-
-	podTemplate := tmpls[podTemplateName]
-
 	var rendered bytes.Buffer
-	if err := podTemplate.Execute(&rendered, params); err != nil {
-		return fmt.Errorf("'%s': Failed to parse pod template: %w", podTemplateName, err)
+	if err := tmpl.Execute(&rendered, params); err != nil {
+		return fmt.Errorf("failed to execute next.md: %w", err)
 	}
 
-	// Wrap the bytes in a bytes.Reader
-	reader := bytes.NewReader(rendered.Bytes())
+	value := rendered.String()
 
-	// Deploy the Pod and do Readiness check
-	if err := clipodman.DeployPodAndReadinessCheck(p.runtime, podSpec, podTemplateName, reader, clipodman.ConstructPodDeployOptions(podAnnotations)); err != nil {
-		return fmt.Errorf("'%s': Failed to deploy pod and do readiness check: %w", podTemplateName, err)
+	// Print the template content if available
+	if strings.TrimSpace(value) != "" {
+		logger.Infof(value)
 	}
+
+	// Print the info command for all services
+	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s --runtime podman`\n", appName)
 
 	return nil
 }
 
-func (p *PodmanApplication) fetchPodAnnotations(podSpec *models.PodSpec) map[string]string {
-	return specs.FetchPodAnnotations(*podSpec)
+// buildArchitecturePayload builds the payload for an architecture deployment.
+func (p *PodmanApplication) buildArchitecturePayload(provider *catalog.CatalogProvider, archID, appName string, argParams map[string]string) (*apiModels.CreateApplicationRequest, error) {
+	// Load architecture metadata
+	arch, err := provider.LoadArchitecture(archID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load architecture: %w", err)
+	}
+
+	// Create application client for API calls
+	appClient, err := catalogClient.NewApplicationClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create application client: %w", err)
+	}
+
+	// Get deploy options for the architecture
+	deployOptions, err := appClient.GetArchitectureDeployOptions(archID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get deploy options: %w", err)
+	}
+
+	// Build services list using deploy options
+	services := make([]apiModels.Service, 0, len(arch.Services))
+	for _, svcRef := range arch.Services {
+		// Find the corresponding deploy options service
+		var svcDeployOpts *catalogTypes.DeployOptionsService
+		for i := range deployOptions.Services {
+			if deployOptions.Services[i].ID == svcRef.ID {
+				svcDeployOpts = &deployOptions.Services[i]
+
+				break
+			}
+		}
+
+		if svcDeployOpts == nil {
+			return nil, fmt.Errorf("deploy options not found for service '%s'", svcRef.ID)
+		}
+
+		svc, err := p.buildServiceEntryWithDeployOptions(appClient, svcRef.ID, svcDeployOpts, argParams)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build service '%s': %w", svcRef.ID, err)
+		}
+		services = append(services, svc)
+	}
+
+	return &apiModels.CreateApplicationRequest{
+		CatalogID: archID,
+		Name:      appName,
+		Services:  services,
+		Version:   arch.Version,
+	}, nil
 }
 
-func (p *PodmanApplication) returnEnvParamsForPod(podSpec *models.PodSpec, podAnnotations map[string]string, pciAddresses *[]string) (map[string]map[string]string, error) {
-	env := map[string]map[string]string{}
-	podContainerNames := specs.FetchContainerNames(*podSpec)
-
-	// populate env with empty map
-	for _, containerName := range podContainerNames {
-		env[containerName] = map[string]string{}
-	}
-
-	// fetch the spyre cards and spyre card count required for each container in a pod
-	spyreCards, spyreCardContainerMap, err := p.fetchSpyreCardsFromPodAnnotations(podAnnotations)
+// buildServicePayload builds the payload for a standalone service deployment.
+func (p *PodmanApplication) buildServicePayload(serviceID, appName string, argParams map[string]string) (*apiModels.CreateApplicationRequest, error) {
+	// Create application client for API calls
+	appClient, err := catalogClient.NewApplicationClient()
 	if err != nil {
-		return env, err
+		return nil, fmt.Errorf("failed to create application client: %w", err)
 	}
 
-	if spyreCards == 0 {
-		// The pod doesn't require any spyre cards. // populate the given container with empty map
-		return env, nil
+	// Get deploy options for the service
+	deployOptions, err := appClient.GetServiceDeployOptions(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get deploy options: %w", err)
 	}
 
-	// Construct env for a given pod
-	// Since this is a critical section as both requires pciAddresses and modifies -> wrap it in mutex
-	envMutex.Lock()
-	for container, spyreCount := range spyreCardContainerMap {
-		if spyreCount != 0 {
-			env[container] = map[string]string{string(constants.PCIAddressKey): utils.JoinAndRemove(pciAddresses, spyreCount, " ")}
+	svc, err := p.buildServiceEntryWithDeployOptions(appClient, serviceID, deployOptions, argParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build service: %w", err)
+	}
+
+	return &apiModels.CreateApplicationRequest{
+		CatalogID: serviceID,
+		Name:      appName,
+		Services:  []apiModels.Service{svc},
+		Version:   svc.Version,
+	}, nil
+}
+
+// buildServiceEntryWithDeployOptions builds a single service entry with its components using deploy options.
+func (p *PodmanApplication) buildServiceEntryWithDeployOptions(appClient *catalogClient.ApplicationClient, serviceID string, deployOptions *catalogTypes.DeployOptionsService, argParams map[string]string) (apiModels.Service, error) {
+	// Build components list from deploy options
+	components := make([]apiModels.Component, 0, len(deployOptions.Components))
+	for _, compDeployOpt := range deployOptions.Components {
+		// Get component configuration from argParams (provider-specific params)
+		providerParams := extractComponentParamsForService(serviceID, compDeployOpt.Type, argParams)
+
+		// Determine provider ID and get its params
+		providerID, userParams := selectProviderFromDeployOptions(compDeployOpt, providerParams)
+		if providerID == "" {
+			return apiModels.Service{}, fmt.Errorf("no provider found for component type '%s'", compDeployOpt.Type)
+		}
+
+		// Find the selected provider to get its version
+		var providerVersion string
+		var providerFound bool
+		for _, prov := range compDeployOpt.Providers {
+			if prov.ID == providerID {
+				providerVersion = prov.Version
+				providerFound = true
+
+				break
+			}
+		}
+
+		// If provider not found in deploy options, return error
+		if !providerFound {
+			return apiModels.Service{}, fmt.Errorf("provider '%s' not found in deploy options for component type '%s'", providerID, compDeployOpt.Type)
+		}
+
+		// Fetch schema and apply defaults, merging with user params
+		componentParamsAny, err := p.applySchemaDefaults(appClient, compDeployOpt.Type, providerID, userParams)
+		if err != nil {
+			logger.Warningf("Failed to apply schema defaults for %s/%s: %v\n", compDeployOpt.Type, providerID, err)
+			// Continue with user-provided params only
+			componentParamsAny = make(map[string]any)
+			for k, v := range userParams {
+				componentParamsAny[k] = v
+			}
+		}
+
+		components = append(components, apiModels.Component{
+			ComponentType: compDeployOpt.Type,
+			ProviderID:    providerID,
+			Params:        componentParamsAny,
+			Version:       providerVersion,
+		})
+	}
+
+	// Extract service-level parameters (excluding component params)
+	serviceParams := extractServiceParams(serviceID, deployOptions.Components, argParams)
+
+	return apiModels.Service{
+		CatalogID:  serviceID,
+		Components: components,
+		Params:     serviceParams,
+		Version:    deployOptions.Version,
+	}, nil
+}
+
+// extractServiceParams extracts service-level parameters from argParams, excluding component params.
+// Format: {serviceID}.{param} -> {param}.
+// Excludes: {serviceID}.{componentType}.{param} (those are component params).
+// Nested dot-notation keys (e.g. backend.systemPrompt) are expanded into nested maps.
+func extractServiceParams(serviceID string, components []catalogTypes.DeployOptionsComponent, allParams map[string]string) map[string]any {
+	serviceParams := make(map[string]any)
+	servicePrefix := serviceID + "."
+
+	// Build a set of component types for this service.
+	componentTypes := make(map[string]bool)
+	for _, comp := range components {
+		componentTypes[comp.Type] = true
+	}
+
+	for key, value := range allParams {
+		after, ok := strings.CutPrefix(key, servicePrefix)
+		if !ok {
+			continue
+		}
+
+		// Check if this is a component parameter by seeing if it starts with a known component type.
+		isComponentParam := isComponentParameter(after, componentTypes)
+
+		// Only add to service params if it's not a component param.
+		if !isComponentParam {
+			setNestedParam(serviceParams, after, value)
 		}
 	}
-	envMutex.Unlock()
 
-	return env, nil
+	return serviceParams
 }
+
+// setNestedParam sets a value in a nested map using a dot-notation key.
+// e.g. setNestedParam(m, "backend.systemPrompt", "hello") → m["backend"]["systemPrompt"] = "hello".
+func setNestedParam(m map[string]any, dotKey string, value string) {
+	parts := strings.SplitN(dotKey, ".", paramSplitParts)
+	if len(parts) == 1 {
+		m[dotKey] = value
+
+		return
+	}
+
+	nested, ok := m[parts[0]].(map[string]any)
+	if !ok {
+		nested = make(map[string]any)
+		m[parts[0]] = nested
+	}
+
+	setNestedParam(nested, parts[1], value)
+}
+
+// isComponentParameter checks if a parameter belongs to a component.
+func isComponentParameter(param string, componentTypes map[string]bool) bool {
+	for compType := range componentTypes {
+		if strings.HasPrefix(param, compType+".") {
+			return true
+		}
+	}
+
+	return false
+}
+
+// extractComponentParamsForService extracts parameters for a specific component type from argParams.
+// Supports provider-specific params:
+// - Provider only: {componentType}.{providerID} (e.g., llm.vllm-cpu) - selects provider with defaults.
+// - Provider with params: {componentType}.{providerID}.{param} (e.g., llm.vllm-cpu.model).
+// - Service-specific: {serviceID}.{componentType}.{providerID}[.{param}] (e.g., chat.llm.vllm-cpu or chat.llm.vllm-cpu.model).
+// Returns a map with provider as key and params as value.
+func extractComponentParamsForService(serviceID string, componentType string, allParams map[string]string) map[string]map[string]string {
+	providerParams := make(map[string]map[string]string)
+
+	// Extract global component params: {componentType}.{providerID}[.{param}].
+	extractProviderParams(componentType+".", allParams, providerParams)
+
+	// Extract service-specific component params (these override global).
+	extractProviderParams(serviceID+"."+componentType+".", allParams, providerParams)
+
+	return providerParams
+}
+
+// extractProviderParams extracts provider parameters from allParams with the given prefix.
+func extractProviderParams(prefix string, allParams map[string]string, providerParams map[string]map[string]string) {
+	for key, value := range allParams {
+		after, ok := strings.CutPrefix(key, prefix)
+		if !ok {
+			continue
+		}
+
+		// Split to get providerID and optional param.
+		parts := strings.SplitN(after, ".", paramSplitParts)
+		if len(parts) < 1 {
+			continue
+		}
+
+		providerID := parts[0]
+		if providerParams[providerID] == nil {
+			providerParams[providerID] = make(map[string]string)
+		}
+
+		// If there's a param name, add it; otherwise just mark provider as selected.
+		if len(parts) == expectedParamParts {
+			paramName := parts[1]
+			providerParams[providerID][paramName] = value
+		}
+	}
+}
+
+// selectProviderFromDeployOptions determines the provider ID for a component using deploy options.
+// Priority:
+// 1. If user provided provider-specific params (e.g., llm.vllm-cpu.model), use that provider.
+// 2. For LLM and reranker components: Use vllm-spyre by default.
+// 3. Default provider marked in deploy options.
+// 4. First available provider.
+func selectProviderFromDeployOptions(compDeployOpt catalogTypes.DeployOptionsComponent, providerParams map[string]map[string]string) (string, map[string]string) {
+	// Check if user specified params for a specific provider.
+	if providerID, params := findUserSpecifiedProvider(compDeployOpt, providerParams); providerID != "" {
+		return providerID, params
+	}
+
+	// Special logic for LLM and reranker component types - prefer Spyre acceleration.
+	if providerID := findSpyreProvider(compDeployOpt); providerID != "" {
+		return providerID, make(map[string]string)
+	}
+
+	// Use default provider if marked.
+	if providerID := findDefaultProvider(compDeployOpt); providerID != "" {
+		return providerID, make(map[string]string)
+	}
+
+	// Fall back to first available provider.
+	if len(compDeployOpt.Providers) > 0 {
+		return compDeployOpt.Providers[0].ID, make(map[string]string)
+	}
+
+	return "", make(map[string]string)
+}
+
+// findUserSpecifiedProvider checks if user specified params for a specific provider.
+func findUserSpecifiedProvider(compDeployOpt catalogTypes.DeployOptionsComponent, providerParams map[string]map[string]string) (string, map[string]string) {
+	for providerID := range providerParams {
+		// Verify this provider exists in deploy options.
+		for _, prov := range compDeployOpt.Providers {
+			if prov.ID == providerID {
+				return providerID, providerParams[providerID]
+			}
+		}
+	}
+
+	return "", nil
+}
+
+// findSpyreProvider finds vllm-spyre provider if available for the component.
+func findSpyreProvider(compDeployOpt catalogTypes.DeployOptionsComponent) string {
+	for _, prov := range compDeployOpt.Providers {
+		if prov.ID == "vllm-spyre" {
+			return prov.ID
+		}
+	}
+
+	return ""
+}
+
+// findDefaultProvider finds the default provider marked in deploy options.
+func findDefaultProvider(compDeployOpt catalogTypes.DeployOptionsComponent) string {
+	for _, prov := range compDeployOpt.Providers {
+		if prov.Default {
+			return prov.ID
+		}
+	}
+
+	return ""
+}
+
+// applySchemaDefaults fetches the component provider schema and applies default values.
+// User-provided params override defaults.
+func (p *PodmanApplication) applySchemaDefaults(appClient *catalogClient.ApplicationClient, componentType, providerID string, userParams map[string]string) (map[string]any, error) {
+	// Fetch schema from API
+	schema, err := appClient.GetComponentProviderParams(componentType, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch schema: %w", err)
+	}
+
+	// Extract defaults from schema
+	defaults := extractDefaultsFromSchema(schema)
+
+	// Merge: start with defaults, override with user params
+	result := make(map[string]any)
+	maps.Copy(result, defaults)
+
+	// Override with user-provided params (excluding 'provider' key)
+	// Support nested parameters using dot notation (e.g., auth.password)
+	for k, v := range userParams {
+		if k != "provider" {
+			setNestedParam(result, k, v)
+		}
+	}
+
+	return result, nil
+}
+
+// extractDefaultsFromSchema extracts default values from a JSON schema.
+func extractDefaultsFromSchema(schema map[string]any) map[string]any {
+	defaults := make(map[string]any)
+
+	// Check if schema has properties
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return defaults
+	}
+
+	// Extract default value for each property
+	for propName, propValue := range properties {
+		if propMap, ok := propValue.(map[string]any); ok {
+			if defaultValue, hasDefault := propMap["default"]; hasDefault {
+				defaults[propName] = defaultValue
+			}
+		}
+	}
+
+	return defaults
+}
+
+// Made with Bob
