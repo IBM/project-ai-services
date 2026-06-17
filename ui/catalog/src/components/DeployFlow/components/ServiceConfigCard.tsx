@@ -790,10 +790,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                       setHasValidationError(false);
                     }
                     onUpdateConfig({
-                      params: {
-                        ...currentConfig?.params,
-                        ...params,
-                      },
+                      params,
                     });
                   }}
                   providerParamsMap={{

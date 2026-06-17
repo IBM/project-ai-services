@@ -92,6 +92,8 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
     setServiceSummaries,
     setServiceSummariesLoading,
     setServiceSummariesError,
+    providerParams,
+    serviceParams,
   } = useDeployStore();
 
   useEffect(() => {
@@ -229,6 +231,8 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
       const deploymentPayload = transformToDeploymentPayload(
         state.formData,
         deployOptions,
+        providerParams,
+        serviceParams,
       );
       await deployApplication(deploymentPayload);
 

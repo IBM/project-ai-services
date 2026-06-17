@@ -160,87 +160,50 @@ function buildDeploymentComponent(
 
 /**
  * Separates inference backend params from service-level params
- * Uses a heuristic based on common inference backend parameter patterns
- * Inference backend params: model, apiKey, and provider-specific auth/config params
- * Service-level params: application logic params like systemPrompt, temperature overrides, etc.
+ * Uses provider and service schemas to accurately classify parameters
+ * Inference backend params: defined in provider schema (model, apiKey, etc.)
+ * Service-level params: defined in service schema under backend.properties (systemPrompt, etc.)
  */
 function separateParams(
   allParams: Record<string, unknown>,
-  inferenceBackendProviderId: string | undefined,
-  componentType: string,
-  serviceDefinition: Service | undefined,
-  deployOptions: DeployOptionsResponse,
+  providerSchemaData: Record<string, unknown> | null,
+  serviceSchemaData: Record<string, unknown> | null,
 ): {
   inferenceBackendParams: Record<string, unknown>;
   serviceParams: Record<string, unknown>;
 } {
-  if (
-    !inferenceBackendProviderId ||
-    !allParams ||
-    Object.keys(allParams).length === 0
-  ) {
+  if (!allParams || Object.keys(allParams).length === 0) {
     return { inferenceBackendParams: {}, serviceParams: allParams || {} };
   }
 
-  // Find the inference backend provider's component definition
-  let componentDefinition: Component | undefined;
-  if (serviceDefinition) {
-    componentDefinition = serviceDefinition.components.find(
-      (c) => c.type === componentType,
-    );
-  }
-  if (!componentDefinition) {
-    componentDefinition = deployOptions.global_components.find(
-      (c) => c.type === componentType,
-    );
+  // Extract provider param names from cached schema
+  const providerParamNames = new Set<string>();
+  if (providerSchemaData?.properties) {
+    Object.keys(
+      providerSchemaData.properties as Record<string, unknown>,
+    ).forEach((key) => providerParamNames.add(key));
   }
 
-  if (!componentDefinition) {
-    return { inferenceBackendParams: {}, serviceParams: allParams };
+  // Extract service param names from cached schema (under backend.properties)
+  const serviceParamNames = new Set<string>();
+  if (serviceSchemaData?.properties) {
+    const properties = serviceSchemaData.properties as Record<string, unknown>;
+    if (properties.backend) {
+      const backend = properties.backend as Record<string, unknown>;
+      if (backend.properties) {
+        Object.keys(backend.properties as Record<string, unknown>).forEach(
+          (key) => serviceParamNames.add(key),
+        );
+      }
+    }
   }
 
-  // Get the inference backend provider
-  const provider = componentDefinition.providers.find(
-    (p) => p.id === inferenceBackendProviderId,
-  );
-
-  // If no provider schema info, assume all params are service-level
-  if (!provider?.schema) {
-    return { inferenceBackendParams: {}, serviceParams: allParams };
-  }
-
-  // Heuristic for separating params:
-  // Inference backend params are typically provider-specific configuration:
-  // - model: the model identifier
-  // - apiKey, api_key: authentication
-  // - *Url, *Endpoint: API endpoints
-  // - *ProjectId, *Region: cloud provider configs
-  //
-  // Service-level params are application logic:
-  // - systemPrompt, temperature, maxTokens: application behavior
-  // - editSystemPrompt: UI control flags
+  // Classify parameters based on schema definitions
   const inferenceBackendParams: Record<string, unknown> = {};
   const serviceParams: Record<string, unknown> = {};
 
-  const inferenceBackendParamPatterns = [
-    "model",
-    "apikey",
-    "api_key",
-    "url",
-    "endpoint",
-    "projectid",
-    "project_id",
-    "region",
-    "watsonx", // watsonx-specific params
-  ];
-
   for (const [key, value] of Object.entries(allParams)) {
-    const lowerKey = key.toLowerCase();
-    const isInferenceBackendParam = inferenceBackendParamPatterns.some(
-      (pattern) => lowerKey.includes(pattern),
-    );
-
-    if (isInferenceBackendParam) {
+    if (providerParamNames.has(key)) {
       inferenceBackendParams[key] = value;
     } else {
       serviceParams[key] = value;
@@ -251,76 +214,19 @@ function separateParams(
 }
 
 /**
- * Collects all inference backend params across all enabled services
- * Groups by provider + model combination to ensure consistent params
- * Backend requirement: same provider + same model = same API key
- */
-function collectInferenceBackendParams(
-  formData: DeployFormData,
-  deployOptions: DeployOptionsResponse,
-): Record<string, Record<string, unknown>> {
-  const backendParamsMap: Record<string, Record<string, unknown>> = {};
-
-  for (const [serviceId, serviceConfig] of Object.entries(formData.services)) {
-    if (!serviceConfig.enabled || !serviceConfig.inferenceBackend) continue;
-
-    const serviceDefinition = deployOptions.services.find(
-      (s) => s.id === serviceId,
-    );
-    if (!serviceDefinition) continue;
-
-    // Find the component type that uses the inference backend (llm or reranker)
-    let componentType = "llm";
-    const hasReranker = serviceDefinition.components.some(
-      (c) => c.type === "reranker",
-    );
-    if (hasReranker && serviceConfig.components?.reranker) {
-      componentType = "reranker";
-    }
-
-    // Get the model being used
-    const componentConfig = serviceConfig.components?.[componentType];
-    const model = componentConfig?.params?.model;
-
-    // Separate params for this service
-    const { inferenceBackendParams } = separateParams(
-      serviceConfig.params || {},
-      serviceConfig.inferenceBackend,
-      componentType,
-      serviceDefinition,
-      deployOptions,
-    );
-
-    // Store params by provider + model combination
-    if (Object.keys(inferenceBackendParams).length > 0 && model) {
-      const key = `${serviceConfig.inferenceBackend}:${model}`;
-      // Merge params, later services override earlier ones
-      backendParamsMap[key] = {
-        ...(backendParamsMap[key] || {}),
-        ...inferenceBackendParams,
-      };
-    }
-  }
-
-  return backendParamsMap;
-}
-
-/**
  * Transforms form data into deployment payload format
  * Completely dynamic - works with any service/component configuration
  * All data comes from formData - no API calls needed
+ *
+ * Note: Each service sends its own parameters. The backend validates that services
+ * sharing the same provider+model have identical parameters and returns an error if not.
  */
 export function transformToDeploymentPayload(
   formData: DeployFormData,
   deployOptions: DeployOptionsResponse,
+  providerParamsCache: Record<string, Record<string, unknown>>,
+  serviceParamsCache: Record<string, Record<string, unknown>>,
 ): DeploymentPayload {
-  // First, collect all inference backend params across all services
-  // This ensures consistent params for shared inference backends
-  const sharedInferenceBackendParams = collectInferenceBackendParams(
-    formData,
-    deployOptions,
-  );
-
   const services: DeploymentService[] = [];
 
   // Process each enabled service dynamically
@@ -345,25 +251,22 @@ export function transformToDeploymentPayload(
       componentType = "reranker";
     }
 
-    // Get the model being used
-    const componentConfig = serviceConfig.components?.[componentType];
-    const model = componentConfig?.params?.model;
+    // Get cached schemas - extract .data from cache objects
+    const providerKey = `${componentType}:${serviceConfig.inferenceBackend}`;
+    const providerSchemaData =
+      (providerParamsCache[providerKey]?.data as Record<string, unknown>) ||
+      null;
+    const serviceSchemaData =
+      (serviceParamsCache[serviceId]?.data as Record<string, unknown>) || null;
 
-    // Separate inference backend params from service-level params
-    const { serviceParams } = separateParams(
+    // Separate inference backend params from service-level params for this service
+    // Each service keeps its own parameters - no merging/sharing
+    // Backend will validate consistency for services using same provider+model
+    const { inferenceBackendParams, serviceParams } = separateParams(
       serviceConfig.params || {},
-      serviceConfig.inferenceBackend,
-      componentType,
-      serviceDefinition,
-      deployOptions,
+      providerSchemaData,
+      serviceSchemaData,
     );
-
-    // Get shared inference backend params for this service's backend + model combination
-    let inferenceBackendParams: Record<string, unknown> = {};
-    if (serviceConfig.inferenceBackend && model) {
-      const key = `${serviceConfig.inferenceBackend}:${model}`;
-      inferenceBackendParams = sharedInferenceBackendParams[key] || {};
-    }
 
     const components: DeploymentComponent[] = [];
 
