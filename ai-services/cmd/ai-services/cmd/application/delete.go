@@ -21,9 +21,9 @@ import (
 )
 
 var (
-	skipCleanup        bool
-	deleteTimeout      time.Duration
-	experimentalDelete bool
+	skipCleanup   bool
+	deleteTimeout time.Duration
+	legacyDelete  bool
 )
 
 var deleteCmd = &cobra.Command{
@@ -42,7 +42,7 @@ Arguments
 		}
 
 		appName := args[0]
-		if !experimentalDelete {
+		if legacyDelete {
 			return utils.VerifyAppName(appName)
 		}
 
@@ -56,13 +56,33 @@ Arguments
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
 
-		// When experimentalDelete is true and runtime is podman, validate application name using catalog API
-		// For openshift runtime, always use the older/stable code path regardless of experimental flag
-		if experimentalDelete && rt == types.RuntimeTypePodman {
+		// When legacyDelete is true and runtime is podman, use the older/stable code path
+		// For openshift runtime, always use the older/stable code path regardless of legacy flag
+		if legacyDelete && rt == types.RuntimeTypePodman {
+			// Create application instance using factory
+			factory := application.NewFactory(rt)
+			app, err := factory.Create(applicationName)
+			if err != nil {
+				return fmt.Errorf("failed to create application instance: %w", err)
+			}
+
+			opts := appTypes.DeleteOptions{
+				Name:        applicationName,
+				AutoYes:     autoYes,
+				SkipCleanup: skipCleanup,
+				Timeout:     deleteTimeout,
+			}
+
+			return app.Delete(cmd.Context(), opts)
+		}
+
+		// Default: use new implementation (validate application name using catalog API)
+		// For openshift runtime, always use the older/stable code path
+		if rt == types.RuntimeTypePodman {
 			return deleteApplication(applicationName)
 		}
 
-		// Create application instance using factory
+		// OpenShift runtime uses the older implementation
 		factory := application.NewFactory(rt)
 		app, err := factory.Create(applicationName)
 		if err != nil {
@@ -89,7 +109,7 @@ func init() {
 func initDeleteCommonFlags() {
 	deleteCmd.Flags().BoolVar(&skipCleanup, appFlags.Delete.SkipCleanup, false, "Skip deleting application data (default=false)")
 	deleteCmd.Flags().BoolVarP(&autoYes, appFlags.Delete.AutoYes, "y", false, "Automatically accept all confirmation prompts (default=false)")
-	deleteCmd.Flags().BoolVar(&experimentalDelete, "experimental", false, "Include experimental application delete")
+	deleteCmd.Flags().BoolVar(&legacyDelete, "legacy", false, "Use legacy application delete implementation")
 }
 
 func initDeleteOpenShiftFlags() {
