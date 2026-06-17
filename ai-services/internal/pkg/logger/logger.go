@@ -22,8 +22,8 @@ const RequestIDKey ContextKey = "request_id"
 
 // Log levels following standard production hierarchy.
 const (
-	// VerbosityLevelDebug is the klog verbosity level for debug logs (2).
-	VerbosityLevelDebug = 2
+	// verbosityLevelDebug is the klog verbosity level for debug logs (2).
+	verbosityLevelDebug = 2
 
 	// LogLevelDebug is the string constant for debug severity level.
 	LogLevelDebug = "DEBUG"
@@ -93,7 +93,7 @@ func Init() {
 	// 5. Apply Severity Thresholds and set active minimum level
 	switch logLevel {
 	case LogLevelDebug:
-		logOptions.Verbosity = logsv1.VerbosityLevel(VerbosityLevelDebug)
+		logOptions.Verbosity = logsv1.VerbosityLevel(verbosityLevelDebug)
 		activeMinLevel = LevelRankDebug
 	case LogLevelWarn:
 		activeMinLevel = LevelRankWarn
@@ -222,9 +222,9 @@ func DebuglnCtx(ctx context.Context, msg string) {
 	}
 
 	if isServiceEnv {
-		klog.V(klog.Level(VerbosityLevelDebug)).InfoSDepth(1, msg, buildKV(ctx, LogLevelDebug, 1)...)
+		klog.V(klog.Level(verbosityLevelDebug)).InfoSDepth(1, msg, buildKV(ctx, LogLevelDebug, 1)...)
 	} else {
-		klog.V(klog.Level(VerbosityLevelDebug)).InfoDepth(1, msg)
+		klog.V(klog.Level(verbosityLevelDebug)).InfoDepth(1, msg)
 	}
 }
 
@@ -236,9 +236,9 @@ func DebugfCtx(ctx context.Context, format string, args ...any) {
 
 	formattedMsg := fmt.Sprintf(format, args...)
 	if isServiceEnv {
-		klog.V(klog.Level(VerbosityLevelDebug)).InfoSDepth(1, formattedMsg, buildKV(ctx, LogLevelDebug, 1)...)
+		klog.V(klog.Level(verbosityLevelDebug)).InfoSDepth(1, formattedMsg, buildKV(ctx, LogLevelDebug, 1)...)
 	} else {
-		klog.V(klog.Level(VerbosityLevelDebug)).InfoDepth(1, formattedMsg)
+		klog.V(klog.Level(verbosityLevelDebug)).InfoDepth(1, formattedMsg)
 	}
 }
 
