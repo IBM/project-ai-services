@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"fmt"
-	"log"
 	"math"
 	"net/http"
 	"strings"
@@ -311,13 +310,13 @@ func (s *ApplicationService) executeDeploymentAsync(plan *deployment.DeploymentP
 	// Defer panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Panic recovered in deployment goroutine for application %s: %v", plan.ApplicationName, r)
+			ctx := context.Background()
+			logger.ErrorfCtx(ctx, "Panic recovered in deployment goroutine for application %s: %v", plan.ApplicationName, r)
 
 			// Attempt to update application status to Error
-			ctx := context.Background()
 			errMsg := fmt.Sprintf("Deployment panic: %v", r)
 			if updateErr := utils.UpdateApplicationStatus(ctx, s.appRepo, plan.ApplicationID.String(), models.ApplicationStatusError, errMsg); updateErr != nil {
-				log.Printf("Failed to update application status after panic: %v", updateErr)
+				logger.ErrorfCtx(ctx, "Failed to update application status after panic: %v", updateErr)
 			}
 		}
 	}()
@@ -331,17 +330,17 @@ func (s *ApplicationService) executeDeploymentAsync(plan *deployment.DeploymentP
 	// Execute deployment using the existing plan
 	err := s.deploymentExecutor.ExecuteWithPlan(ctx, plan, req, runtimeType)
 	if err != nil {
-		log.Printf("Deployment failed for application %s: %v", plan.ApplicationName, err)
+		logger.ErrorfCtx(ctx, "Deployment failed for application %s: %v", plan.ApplicationName, err)
 
 		// Update application status to Error
 		if updateErr := utils.UpdateApplicationStatus(ctx, s.appRepo, plan.ApplicationID.String(), models.ApplicationStatusError, err.Error()); updateErr != nil {
-			log.Printf("Failed to update application status to Error: %v", updateErr)
+			logger.ErrorfCtx(ctx, "Failed to update application status to Error: %v", updateErr)
 		}
 
 		return
 	}
 
-	log.Printf("Deployment completed successfully for application %s", plan.ApplicationName)
+	logger.InfolnCtx(ctx, fmt.Sprintf("Deployment completed successfully for application %s", plan.ApplicationName))
 }
 
 // insertDeploymentRecords inserts all database records for the deployment plan.

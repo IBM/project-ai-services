@@ -464,19 +464,19 @@ func (pc *PodmanClient) GetSystemInfo() (*models.SystemInfo, error) {
 	}
 
 	// Populate accelerator information (Spyre cards)
-	sysInfo.Accelerators = getAcceleratorInfo()
+	sysInfo.Accelerators = getAcceleratorInfo(pc.Context)
 
 	return sysInfo, nil
 }
 
 // getAcceleratorInfo retrieves accelerator availability information for Podman.
-func getAcceleratorInfo() map[string]*models.AcceleratorInfo {
+func getAcceleratorInfo(ctx context.Context) map[string]*models.AcceleratorInfo {
 	accelerators := make(map[string]*models.AcceleratorInfo)
 
 	// Get total Spyre cards
-	totalCards, err := spyre.ListCards()
+	totalCards, err := spyre.ListCards(ctx)
 	if err != nil {
-		logger.Errorf("Could not list Spyre cards: %v", err)
+		logger.ErrorfCtx(ctx, "Could not list Spyre cards: %v", err)
 		// Return empty map when error occurs
 		return accelerators
 	}
@@ -488,9 +488,9 @@ func getAcceleratorInfo() map[string]*models.AcceleratorInfo {
 	}
 
 	// Get available Spyre cards
-	availableCards, err := spyre.FindFreeCards()
+	availableCards, err := spyre.FindFreeCards(ctx)
 	if err != nil {
-		logger.Errorf("Could not find available Spyre cards: %v", err)
+		logger.ErrorfCtx(ctx, "Could not find available Spyre cards: %v", err)
 		accelerators["ibm.com/spyre_pf"] = &models.AcceleratorInfo{
 			Total:     totalCount,
 			Available: 0,

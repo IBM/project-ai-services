@@ -217,7 +217,7 @@ func (p *DeploymentPlanner) calculateAndAllocateSpyreCards(ctx context.Context, 
 	logger.InfofCtx(ctx, "Total Spyre cards required: %d\n", totalRequired)
 
 	// Find available Spyre cards
-	pciAddresses, err := helpers.FindFreeSpyreCards()
+	pciAddresses, err := helpers.FindFreeSpyreCards(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to find free Spyre cards: %w", err)
 	}

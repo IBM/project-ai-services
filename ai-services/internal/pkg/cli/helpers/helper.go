@@ -89,14 +89,14 @@ func FetchContainerStartPeriod(runtime runtime.Runtime, containerNameOrId string
 
 // ListSpyreCards lists all Spyre cards attached to the system.
 // This is a wrapper around spyre.ListCards for backward compatibility.
-func ListSpyreCards() ([]string, error) {
-	return spyre.ListCards()
+func ListSpyreCards(ctx context.Context) ([]string, error) {
+	return spyre.ListCards(ctx)
 }
 
 // FindFreeSpyreCards finds available (free) Spyre cards.
 // This is a wrapper around spyre.FindFreeCards for backward compatibility.
-func FindFreeSpyreCards() ([]string, error) {
-	return spyre.FindFreeCards()
+func FindFreeSpyreCards(ctx context.Context) ([]string, error) {
+	return spyre.FindFreeCards(ctx)
 }
 
 func ParseSkipChecks(skipChecks []string) map[string]bool {

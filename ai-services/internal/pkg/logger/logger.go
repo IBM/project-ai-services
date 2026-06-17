@@ -115,8 +115,8 @@ func Init() {
 	flag.Parse()
 }
 
-// buildKV builds key-value pairs for structured logging with level, caller, and requestID
-// depth specifies how many stack frames to skip when capturing the caller location.
+// buildKV builds key-value pairs for structured logging with level, caller_fullpath, and requestID
+// depth specifies how many stack frames to skip when capturing the caller_fullpath location.
 func buildKV(ctx context.Context, level string, depth int) []any {
 	var kv []any
 	kv = append(kv, "level", level)
@@ -125,7 +125,7 @@ func buildKV(ctx context.Context, level string, depth int) []any {
 	// depth+1 accounts for buildKV itself in the call stack
 	if _, file, line, ok := runtime.Caller(depth + 1); ok {
 		// Add absolute file path with line number
-		kv = append(kv, "caller", fmt.Sprintf("%s:%d", file, line))
+		kv = append(kv, "caller_fullpath", fmt.Sprintf("%s:%d", file, line))
 	}
 
 	// Extract requestID from context if available

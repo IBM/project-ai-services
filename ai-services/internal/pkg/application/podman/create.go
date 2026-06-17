@@ -69,7 +69,7 @@ func (p *PodmanApplication) Create(ctx context.Context, opts types.CreateOptions
 	}
 
 	// ---- Validate Spyre card Requirements ----
-	pciAddresses, err := p.validateAndAllocateSpyreCards(opts.TemplateName, opts.Name, tmpls)
+	pciAddresses, err := p.validateAndAllocateSpyreCards(ctx, opts.TemplateName, opts.Name, tmpls)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func (p *PodmanApplication) Create(ctx context.Context, opts types.CreateOptions
 	return p.deployApplication(ctx, opts, tmpls, &appMetadata, pciAddresses, existingResources)
 }
 
-func (p *PodmanApplication) validateAndAllocateSpyreCards(templateName, appName string, tmpls map[string]*template.Template) ([]string, error) {
+func (p *PodmanApplication) validateAndAllocateSpyreCards(ctx context.Context, templateName, appName string, tmpls map[string]*template.Template) ([]string, error) {
 	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 
 	reqSpyreCardsCount, err := p.calculateReqSpyreCards(tp, utils.ExtractMapKeys(tmpls), templateName, appName)
@@ -97,7 +97,7 @@ func (p *PodmanApplication) validateAndAllocateSpyreCards(templateName, appName 
 	}
 
 	// calculate the actual available spyre cards
-	pciAddresses, err := helpers.FindFreeSpyreCards()
+	pciAddresses, err := helpers.FindFreeSpyreCards(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find free Spyre Cards: %w", err)
 	}

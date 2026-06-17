@@ -27,7 +27,7 @@ PLATFORMS := \
 	linux/amd64 \
 	linux/ppc64le
 
-BUILD_CMD = CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build $(BUILDFLAGS) \
+BUILD_CMD = CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -trimpath $(BUILDFLAGS) \
      -o $(BIN)/ai-services-$(GOOS)-$(GOARCH) \
      -tags "$(BUILDTAGS)" \
      -ldflags " \

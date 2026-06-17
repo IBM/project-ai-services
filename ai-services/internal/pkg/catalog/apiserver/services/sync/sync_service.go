@@ -3,7 +3,6 @@ package sync
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -75,7 +74,7 @@ func (s *SyncService) syncLoop(ctx context.Context) {
 	// Defer panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Panic recovered in sync goroutine: %v", r)
+			logger.ErrorfCtx(ctx, "Panic recovered in sync goroutine: %v", r)
 		}
 	}()
 
