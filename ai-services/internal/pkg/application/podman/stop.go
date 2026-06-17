@@ -62,7 +62,8 @@ func (p *PodmanApplication) Stop(opts appTypes.StopOptions) error {
 
 // listApplicationPods retrieves pods for the given application.
 func (p *PodmanApplication) listApplicationPods(opts appTypes.StopOptions) ([]types.Pod, error) {
-	if !opts.Experimental {
+	// if legacy flag is set, get pods from runtime; otherwise use catalog API
+	if opts.Legacy {
 		pods, err := p.runtime.ListPods(map[string][]string{
 			"label": {fmt.Sprintf("ai-services.io/application=%s", opts.Name)},
 		})

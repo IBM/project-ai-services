@@ -48,10 +48,10 @@ type StartOptions struct {
 
 // StopOptions contains parameters for stopping an application.
 type StopOptions struct {
-	Name         string
-	PodNames     []string
-	AutoYes      bool
-	Experimental bool
+	Name     string
+	PodNames []string
+	AutoYes  bool
+	Legacy   bool
 }
 
 // ListOptions contains parameters for listing applications.
