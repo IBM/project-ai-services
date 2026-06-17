@@ -1,10 +1,12 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"maps"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -478,6 +480,11 @@ func handleApplicationStatus(app *catalogTypes.Application, appName string) (boo
 	case "Running":
 		logger.Infof("Application '%s' is ready!\n", appName)
 
+		// Print next steps after successful deployment
+		if err := printNextSteps(app); err != nil {
+			logger.Warningf("Failed to display next steps: %v\n", err)
+		}
+
 		return true, nil
 
 	case "Error":
@@ -501,6 +508,82 @@ func handleApplicationStatus(app *catalogTypes.Application, appName string) (boo
 
 		return false, nil
 	}
+}
+
+// printNextSteps prints the next steps for the deployed application.
+func printNextSteps(app *catalogTypes.Application) error {
+	appClient, err := catalogClient.NewApplicationClient()
+	if err != nil {
+		return fmt.Errorf("failed to create application client: %w", err)
+	}
+
+	// Get full application details with services
+	application, err := appClient.GetApplication(app.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get application: %w", err)
+	}
+
+	catalogProvider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		return fmt.Errorf("failed to create catalog provider: %w", err)
+	}
+
+	logger.Infoln("\nNext Steps:")
+	logger.Infoln("-------")
+
+	for _, service := range application.Services {
+		params := map[string]string{}
+		params["SERVICE_NAME"] = service.Type
+
+		// Add endpoint URLs to params
+		for _, endpoint := range service.Endpoints {
+			urlType, urlTypeOk := endpoint["type"].(string)
+			url, urlOk := endpoint["url"].(string)
+			if urlTypeOk && urlOk {
+				params[strings.ToUpper(urlType)+"_URL"] = url
+			}
+		}
+
+		tmpls, err := catalogProvider.LoadServicesMD(service.CatalogID)
+		if err != nil {
+			logger.Warningf("Failed to load next steps for service '%s': %v\n", service.CatalogID, err)
+
+			continue
+		}
+
+		err = printNextStepsMD(tmpls, params, application.Name)
+		if err != nil {
+			logger.Warningf("Failed to render next steps for service '%s': %v\n", service.CatalogID, err)
+		}
+	}
+
+	return nil
+}
+
+// printNextStepsMD renders and prints the next.md template for a service.
+func printNextStepsMD(tmpls map[string]*template.Template, params map[string]string, appName string) error {
+	tmpl, ok := tmpls["next.md"]
+	if !ok {
+		// next.md doesn't exist for this service, return nil
+		return nil
+	}
+
+	var rendered bytes.Buffer
+	if err := tmpl.Execute(&rendered, params); err != nil {
+		return fmt.Errorf("failed to execute next.md: %w", err)
+	}
+
+	value := rendered.String()
+
+	// Print the template content if available
+	if strings.TrimSpace(value) != "" {
+		logger.Infof(value)
+	}
+
+	// Print the info command for all services
+	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s --runtime podman`\n", appName)
+
+	return nil
 }
 
 // buildArchitecturePayload builds the payload for an architecture deployment.
