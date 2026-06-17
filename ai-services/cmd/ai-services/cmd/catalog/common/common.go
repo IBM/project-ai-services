@@ -21,7 +21,7 @@ func InitAndValidateRuntimeFlag(runtimeType string) error {
 	}
 
 	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-	logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
+	logger.Debugf("Using runtime: %s\n", rt)
 
 	// Check if podman runtime is being used on unsupported platform
 	if err := utils.CheckPodmanPlatformSupport(rt); err != nil {
