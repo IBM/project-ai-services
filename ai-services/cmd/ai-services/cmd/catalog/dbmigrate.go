@@ -24,7 +24,7 @@ func NewMigrateCmd() *cobra.Command {
 	)
 
 	migrateCmd := &cobra.Command{
-		Use:   "db-migrate",
+		Use:   "dbmigrate",
 		Short: "Manage database migrations for the catalog service",
 		Long: `Manage database migrations for the catalog service.
 This command provides subcommands to initialize the database, run migrations,
