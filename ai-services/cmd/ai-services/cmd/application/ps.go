@@ -18,8 +18,8 @@ import (
 )
 
 var (
-	output         string
-	experimentalPs bool
+	output   string
+	legacyPs bool
 )
 
 func isOutputWide() bool {
@@ -56,13 +56,31 @@ Arguments
 			OutputWide:      isOutputWide(),
 		}
 
-		// When experimentalTemplates is true and runtime is podman, use experimental catalog ps api
-		// For openshift runtime, always use the older/stable code path regardless of experimental flag
-		if experimentalPs && rt == types.RuntimeTypePodman {
+		// When legacyPs is true and runtime is podman, use the older/stable code path
+		// For openshift runtime, always use the older/stable code path regardless of legacy flag
+		if legacyPs && rt == types.RuntimeTypePodman {
+			// Create application instance using factory
+			factory := application.NewFactory(rt)
+			app, err := factory.Create(applicationName)
+			if err != nil {
+				return fmt.Errorf("failed to create application instance: %w", err)
+			}
+
+			_, err = app.List(opts)
+			if err != nil {
+				return fmt.Errorf("failed to fetch application: %w", err)
+			}
+
+			return nil
+		}
+
+		// Default: use new implementation via catalog
+		// For openshift runtime, always use the older/stable code path
+		if rt == types.RuntimeTypePodman {
 			return renderApplicationPS(opts)
 		}
 
-		// Create application instance using factory
+		// OpenShift runtime uses the older implementation
 		factory := application.NewFactory(rt)
 		app, err := factory.Create(applicationName)
 		if err != nil {
@@ -84,10 +102,10 @@ func init() {
 
 func initPsCommonFlags() {
 	psCmd.Flags().BoolVar(
-		&experimentalPs,
-		"experimental",
+		&legacyPs,
+		"legacy",
 		false,
-		"Include experimental application templates",
+		"Use legacy application ps implementation",
 	)
 
 	psCmd.Flags().StringVarP(
