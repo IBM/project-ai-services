@@ -243,6 +243,7 @@ export function transformToDeploymentPayload(
     }
 
     // Find the component type that uses the inference backend (llm or reranker)
+    // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
     let componentType = "llm";
     const hasReranker = serviceDefinition.components.some(
       (c) => c.type === "reranker",

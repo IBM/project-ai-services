@@ -165,6 +165,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       return true; // No params to validate
     }
 
+    // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
     const componentType = llmComponent ? "llm" : "reranker";
     const paramsMap = providerParamsByType[componentType]?.paramsMap || {};
     const schema = paramsMap[currentConfig.inferenceBackend];
@@ -211,6 +212,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
     const component = llmComponent || rerankerComponent;
     if (!component) return null;
 
+    // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
     const componentType = llmComponent ? "llm" : "reranker";
     const selectedModel =
       currentConfig?.components?.[componentType]?.params?.model;
@@ -401,6 +403,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
             config.params &&
             Object.keys(config.params).length > 0 &&
             (() => {
+              // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
               const componentType = llmComponent ? "llm" : "reranker";
               const paramsMap =
                 providerParamsByType[componentType]?.paramsMap || {};
@@ -540,6 +543,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
           {/* Model Description Accordion - Visible in both view and edit modes */}
           {(llmComponent || rerankerComponent) &&
             (() => {
+              // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
               const componentType = llmComponent ? "llm" : "reranker";
               const providerId =
                 currentConfig?.components?.[componentType]?.providerId;
@@ -805,6 +809,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
             {/* Model Description Accordion - In edit mode */}
             {(llmComponent || rerankerComponent) &&
               (() => {
+                // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
                 const componentType = llmComponent ? "llm" : "reranker";
                 const providerId =
                   currentConfig?.components?.[componentType]?.providerId;

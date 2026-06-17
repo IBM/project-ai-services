@@ -45,6 +45,7 @@ export function isInferenceComponent(component: Component): boolean {
   // - Single provider
   // - URL schemas
   // - Schema parse failures
+  // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
   if (component.type === "llm" || component.type === "reranker") {
     return true;
   }
