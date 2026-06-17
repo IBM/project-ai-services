@@ -299,10 +299,7 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
       kind: "primary" as const,
       onClick: isLastStep ? handleSubmit : handleNext,
       disabled:
-        state.isLoading ||
-        state.isDeploying ||
-        (isLastStep && state.isEditing) ||
-        (isLastStep && state.hasInsufficientResources),
+        state.isLoading || state.isDeploying || (isLastStep && state.isEditing),
     },
   ];
 
