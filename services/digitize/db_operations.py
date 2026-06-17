@@ -38,6 +38,37 @@ from digitize.db.connection import engine
 logger = get_logger("db_operations")
 
 # ============================================================================
+# Helper Functions
+# ============================================================================
+
+def _format_timestamp_with_utc(dt: Optional[datetime]) -> Optional[str]:
+    """
+    Format a datetime object to ISO 8601 string with 'Z' suffix for UTC.
+    
+    Ensures all timestamps sent to the frontend have proper timezone indicator
+    to avoid timezone interpretation issues in JavaScript.
+    
+    Args:
+        dt: datetime object (can be timezone-aware or naive)
+        
+    Returns:
+        ISO 8601 formatted string with 'Z' suffix, or None if dt is None
+    """
+    if dt is None:
+        return None
+    
+    iso_str = dt.isoformat()
+    
+    # If already has 'Z' or timezone offset, replace +00:00 with Z
+    if iso_str.endswith('Z'):
+        return iso_str
+    elif '+' in iso_str or '-' in iso_str[-6:]:  # Has timezone offset
+        return iso_str.replace("+00:00", "Z")
+    else:
+        # Timezone-naive datetime, assume UTC and add 'Z'
+        return iso_str + 'Z'
+
+# ============================================================================
 # Import/Export Lock Management
 # ============================================================================
 
@@ -240,14 +271,14 @@ def get_job(job_id: str) -> Optional[dict]:
                 for doc in documents
             ]
 
-            # Create JobState object
+            # Create JobState object with properly formatted timestamps
             job_state = JobState(
                 job_id=job.job_id,
                 job_name=job.job_name,
                 operation=job.operation,
                 status=JobStatus(job.status),
-                submitted_at=job.submitted_at.isoformat().replace("+00:00", "Z"),
-                completed_at=job.completed_at.isoformat().replace("+00:00", "Z") if job.completed_at else None,
+                submitted_at=_format_timestamp_with_utc(job.submitted_at),
+                completed_at=_format_timestamp_with_utc(job.completed_at),
                 documents=doc_summaries,
                 stats=JobStats(**job.stats),
                 error=job.error
@@ -307,14 +338,14 @@ def get_all_jobs(
                 for doc in documents
             ]
 
-            # Create JobState object
+            # Create JobState object with properly formatted timestamps
             job_state = JobState(
                 job_id=job.job_id,
                 job_name=job.job_name,
                 operation=job.operation,
                 status=JobStatus(job.status),
-                submitted_at=job.submitted_at.isoformat().replace("+00:00", "Z"),
-                completed_at=job.completed_at.isoformat().replace("+00:00", "Z") if job.completed_at else None,
+                submitted_at=_format_timestamp_with_utc(job.submitted_at),
+                completed_at=_format_timestamp_with_utc(job.completed_at),
                 documents=doc_summaries,
                 stats=JobStats(**job.stats),
                 error=job.error
@@ -417,8 +448,8 @@ def get_document(doc_id: str, include_details: bool = True) -> DocumentDetailRes
                 "type": doc.type,
                 "status": doc.status,
                 "output_format": doc.output_format,
-                "submitted_at": doc.submitted_at.isoformat().replace("+00:00", "Z"),
-                "completed_at": doc.completed_at.isoformat().replace("+00:00", "Z") if doc.completed_at else None,
+                "submitted_at": _format_timestamp_with_utc(doc.submitted_at),
+                "completed_at": _format_timestamp_with_utc(doc.completed_at),
                 "error": doc.error,
                 "metadata": doc.doc_metadata
             }
@@ -478,7 +509,7 @@ def get_all_documents_paginated(
                 "name": doc.name,
                 "type": doc.type,
                 "status": doc.status,
-                "submitted_at": doc.submitted_at.isoformat().replace("+00:00", "Z")
+                "submitted_at": _format_timestamp_with_utc(doc.submitted_at)
             }
             for doc in documents
         ]
@@ -563,11 +594,6 @@ def _parse_iso_datetime(timestamp: Optional[str]) -> Optional[datetime]:
     return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
 
 
-def _serialize_datetime(timestamp: Optional[datetime]) -> Optional[str]:
-    """Serialize datetime to ISO-8601 string with Z suffix."""
-    if timestamp is None:
-        return None
-    return timestamp.isoformat().replace("+00:00", "Z")
 
 
 def _build_import_summary(total_jobs: int, total_documents: int) -> ImportSummary:
@@ -655,8 +681,8 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
             operation=job.operation,
             status=job.status,
             job_name=job.job_name,
-            submitted_at=_serialize_datetime(job.submitted_at) or "",
-            completed_at=_serialize_datetime(job.completed_at),
+            submitted_at=_format_timestamp_with_utc(job.submitted_at) or "",
+            completed_at=_format_timestamp_with_utc(job.completed_at),
             stats=job.stats or {},
             error=job.error,
         )
@@ -671,8 +697,8 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
             type=doc.type,
             status=doc.status,
             output_format=doc.output_format,
-            submitted_at=_serialize_datetime(doc.submitted_at) or "",
-            completed_at=_serialize_datetime(doc.completed_at),
+            submitted_at=_format_timestamp_with_utc(doc.submitted_at) or "",
+            completed_at=_format_timestamp_with_utc(doc.completed_at),
             error=doc.error,
             metadata=doc.doc_metadata or {},
         )
@@ -698,7 +724,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
                 failed=sum(1 for doc in exported_documents if doc.status == DocStatus.FAILED.value),
             ),
         ),
-        export_timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        export_timestamp=_format_timestamp_with_utc(datetime.now(timezone.utc)),
         duration_seconds=round(perf_counter() - started_at, 4),
         pagination=ExportPagination(
             limit=effective_limit,
