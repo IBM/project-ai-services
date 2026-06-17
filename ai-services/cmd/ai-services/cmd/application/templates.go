@@ -18,10 +18,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-var (
-	experimentalTemplates bool
-)
-
 var templatesCmd = &cobra.Command{
 	Use:   "templates",
 	Short: "Lists the offered application templates and their supported parameters",
@@ -30,13 +26,12 @@ var templatesCmd = &cobra.Command{
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		// When experimentalTemplates is true and runtime is podman, use experimental catalog templates
-		// For openshift runtime, always use the older/stable code path regardless of experimental flag
-		if experimentalTemplates && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
-			// Use experimental catalog templates listing (architectures and services)
+		// For Podman runtime, use catalog templates
+		if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
 			return listCatalogTemplates(cmd)
 		}
 
+		// For OpenShift runtime, use embedded templates
 		tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 
 		appTemplateNames, err := tp.ListApplications(hiddenTemplates)
@@ -93,8 +88,6 @@ var templatesCmd = &cobra.Command{
 }
 
 func init() {
-	templatesCmd.Flags().BoolVar(&experimentalTemplates, "experimental", false, "Include experimental application templates")
-
 	// Add parameters subcommand
 	templatesCmd.AddCommand(appTemplates.NewParametersCmd())
 }
