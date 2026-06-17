@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver"
 	apirepository "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
@@ -16,10 +17,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
 
@@ -104,8 +102,8 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 		serviceDependencyRepo,
 		sync.DefaultSyncInterval,
 	)
-	syncService.Start()
-	defer syncService.Stop()
+	syncService.Start(ctx)
+	defer syncService.Stop(ctx)
 
 	catalogProvider, err := catalog.NewCatalogProvider()
 	if err != nil {
@@ -142,15 +140,7 @@ func NewAPIServerCmd() *cobra.Command {
 		Short: "Manage AI Services API server",
 		Long:  `The apiserver command allows you to manage the AI Services API server, including starting, stopping, and checking the status of the server.`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			rt := types.RuntimeType(runtimeType)
-			if !rt.Valid() {
-				return fmt.Errorf("invalid runtime type: %s (must be '%s' or '%s')", runtimeType, types.RuntimeTypePodman, types.RuntimeTypeOpenShift)
-			}
-
-			vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-			logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
-
-			return nil
+			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAPIServer(port, defaultAccessTokenTTL, defaultRefreshTokenTTL, adminUserName, adminPasswordHash)
@@ -162,7 +152,7 @@ func NewAPIServerCmd() *cobra.Command {
 	apiserverCmd.Flags().DurationVarP(&defaultRefreshTokenTTL, "refresh-token-ttl", "", defaultRefreshTokenTTL, "Time-to-live for refresh tokens")
 	apiserverCmd.Flags().StringVar(&adminUserName, "admin-username", "admin", "Username for the default admin user")
 	apiserverCmd.Flags().StringVar(&adminPasswordHash, "admin-password-hash", "", "Precomputed hash of the password for the default admin user")
-	apiserverCmd.Flags().StringVar(&runtimeType, "runtime", string(types.RuntimeTypePodman), fmt.Sprintf("Runtime to use (options: %s, %s)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
+	common.ConfigureRuntimeFlag(apiserverCmd, &runtimeType)
 
 	return apiserverCmd
 }

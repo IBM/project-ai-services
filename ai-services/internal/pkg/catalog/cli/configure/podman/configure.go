@@ -58,12 +58,12 @@ func DeployCatalog(ctx context.Context, opts PodmanConfigureOptions) error {
 }
 
 func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts PodmanConfigureOptions, passwordHash string) (*caddy.Context, error) {
-	logger.Infoln("started configuring catalog service...", logger.VerbosityLevelDebug)
+	logger.Debugln("started configuring catalog service...")
 
 	s := spinner.New("Configuring catalog service...")
 	s.Start(ctx)
 
-	logger.Infoln("setting up caddy context...", logger.VerbosityLevelDebug)
+	logger.Debugln("setting up caddy context...")
 
 	// Setup Caddy context with domain configuration and Caddyfile generation
 	caddyCtx, err := setupCaddyContext(deployCtx, opts, s)
@@ -73,7 +73,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 		return nil, err
 	}
 
-	logger.Infoln("checking for existing resources...", logger.VerbosityLevelDebug)
+	logger.Debugln("checking for existing resources...")
 
 	// Check existing deployment status
 	isDeployed, existingResources, err := deployCtx.CheckStatus()
@@ -117,7 +117,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 
 // handlePostDeployment handles route registration and next steps display after catalog deployment.
 func handlePostDeployment(caddyCtx *caddy.Context, deployCtx *deploy.DeployContext) error {
-	logger.Infoln("handling post deployment steps...", logger.VerbosityLevelDebug)
+	logger.Debugln("handling post deployment steps...")
 
 	// Extract route infos from deployment context
 	routeInfos, err := deployCtx.ExtractRouteInfos()
@@ -148,7 +148,7 @@ func handlePostDeployment(caddyCtx *caddy.Context, deployCtx *deploy.DeployConte
 
 // prepareCatalogDeployment prepares all necessary data for deployment including domain suffix computation.
 func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash string, httpsPort int) error {
-	logger.Infoln("loading catalog service param values...", logger.VerbosityLevelDebug)
+	logger.Debugln("loading catalog service param values...")
 
 	// Generate argument parameters
 	argParams, err := generateArgParams(passwordHash, httpsPort)
@@ -240,7 +240,7 @@ func setupCaddyContext(deployCtx *deploy.DeployContext, opts PodmanConfigureOpti
 		return nil, err
 	}
 
-	logger.Infof("Using domain suffix: %s\n", domainSuffix, logger.VerbosityLevelDebug)
+	logger.Debugf("Using domain suffix: %s\n", domainSuffix)
 
 	// Create Caddy context with pod name and domain suffix (NO template dependencies)
 	caddyCtx := caddy.NewContext(caddyPodName, domainSuffix)

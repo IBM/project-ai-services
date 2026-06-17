@@ -577,7 +577,7 @@ func printNextStepsMD(tmpls map[string]*template.Template, params map[string]str
 
 	// Print the template content if available
 	if strings.TrimSpace(value) != "" {
-		logger.Infof(value)
+		logger.Infoln(value)
 	}
 
 	// Print the info command for all services

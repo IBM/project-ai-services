@@ -92,7 +92,7 @@ func renderApplicationInfo(appName string) error {
 
 	logger.Infoln("Application Name: " + application.Name)
 	logger.Infoln("Application Template: " + application.CatalogID)
-	logger.Infof("Application Version: " + application.Version)
+	logger.Infoln("Application Version: " + application.Version)
 
 	return printServicesInfo(application.Services, appPS)
 }
@@ -179,7 +179,7 @@ func printInfo(tmpls map[string]*template.Template, params map[string]string, ap
 	}
 	value := rendered.String()
 	value = strings.ReplaceAll(value, "Day N:\n", "")
-	logger.Infof(value)
+	logger.Infoln(value)
 
 	return nil
 }

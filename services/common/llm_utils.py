@@ -15,6 +15,38 @@ logger = get_logger("LLM")
 
 is_debug = logger.isEnabledFor(logging.DEBUG)
 
+def apply_token_buffer(max_tokens: int, token_buffer_ratio: float | None = None, context: str = "LLM") -> int:
+    """
+    Apply token buffer to give LLM breathing room to respect prompt word limits.
+    
+    The prompt instructs the LLM to limit to max_tokens, but we reduce the API limit
+    by token_buffer_ratio to ensure the LLM can naturally complete before hitting the hard limit.
+    
+    Args:
+        max_tokens: The maximum tokens specified in the prompt instruction
+        token_buffer_ratio: Buffer ratio to apply (0.0-0.5). If None, uses settings.llm.token_buffer_ratio
+        context: Context string for logging (e.g., "chatbot", "summarization")
+    
+    Returns:
+        Effective max tokens with buffer applied
+    
+    Example:
+        >>> apply_token_buffer(512, 0.15)
+        435  # 512 * (1 - 0.15) = 435 tokens, leaving 77 token buffer
+    """
+    if token_buffer_ratio is None:
+        token_buffer_ratio = settings.llm.token_buffer_ratio
+    
+    effective_max_tokens = int(max_tokens * (1 - token_buffer_ratio))
+    
+    logger.debug(
+        f"{context} token budget: prompt instructs {max_tokens} tokens, "
+        f"API limit set to {effective_max_tokens} tokens "
+        f"(buffer: {token_buffer_ratio*100:.1f}%)"
+    )
+    
+    return effective_max_tokens
+
 def tqdm_wrapper(iterable, **kwargs):
     """Wrapper for tqdm that only shows progress bar in debug mode."""
     if is_debug:
@@ -172,6 +204,7 @@ def query_vllm_payload(
     api_key: str | None = None,
     previous_messages: list | None = None,
     rephrased_query: str | None = None,
+    token_buffer_ratio: float | None = None,
 ):
     # Lazy import to avoid circular dependencies
     from chatbot.settings import settings as chatbot_settings
@@ -181,9 +214,31 @@ def query_vllm_payload(
 
     logger.debug(f"Original Context: {context}")
 
+    match lang:
+        case "DE":
+            system_prompt = chatbot_settings.chatbot.german.system_prompt
+            query_system_prompt = chatbot_settings.chatbot.german.query_system_prompt
+        case "IT":
+            system_prompt = chatbot_settings.chatbot.italian.system_prompt
+            query_system_prompt = chatbot_settings.chatbot.italian.query_system_prompt
+        case "FR":
+            system_prompt = chatbot_settings.chatbot.french.system_prompt
+            query_system_prompt = chatbot_settings.chatbot.french.query_system_prompt
+        case _:
+            system_prompt = chatbot_settings.chatbot.english.system_prompt
+            query_system_prompt = chatbot_settings.chatbot.english.query_system_prompt
+
+    # Calculate token counts
     question_token_count = len(tokenize_with_llm(question, llm_endpoint))
     context_tokens = tokenize_with_llm(context, llm_endpoint)
     context_token_count = len(context_tokens)
+    initial_system_token_overhead = len(tokenize_with_llm(system_prompt, llm_endpoint))
+    query_system_prompt_sample = query_system_prompt.format(
+        context="",
+        rephrased_query="",
+        max_tokens=max_new_tokens,
+    )
+    rag_system_token_overhead = len(tokenize_with_llm(query_system_prompt_sample, llm_endpoint))
 
     llm_max_model_len = resolve_model_max_len(
         llm_endpoint,
@@ -194,8 +249,8 @@ def query_vllm_payload(
 
     # Calculate budget for context first (prioritize context over history)
     budget_for_context = llm_max_model_len - (
-        chatbot_settings.chatbot.initial_system_token_overhead +
-        chatbot_settings.chatbot.rag_system_token_overhead +
+        initial_system_token_overhead +
+        rag_system_token_overhead +
         question_token_count +
         max_new_tokens
     )
@@ -221,20 +276,6 @@ def query_vllm_payload(
 
     logger.debug(f"Truncated Context: {context}")
 
-    match lang:
-        case "DE":
-            system_prompt = chatbot_settings.chatbot.german.system_prompt
-            query_system_prompt = chatbot_settings.chatbot.german.query_system_prompt
-        case "IT":
-            system_prompt = chatbot_settings.chatbot.italian.system_prompt
-            query_system_prompt = chatbot_settings.chatbot.italian.query_system_prompt
-        case "FR":
-            system_prompt = chatbot_settings.chatbot.french.system_prompt
-            query_system_prompt = chatbot_settings.chatbot.french.query_system_prompt
-        case _:
-            system_prompt = chatbot_settings.chatbot.english.system_prompt
-            query_system_prompt = chatbot_settings.chatbot.english.query_system_prompt
-
     message_array = [
         {
             "role": "system",
@@ -252,9 +293,12 @@ def query_vllm_payload(
         if truncated_messages:
             message_array.extend(truncated_messages)
 
+    effective_max_tokens = apply_token_buffer(max_new_tokens, token_buffer_ratio, context="Chatbot")
+
     final_system_content = query_system_prompt.format(
         context=context,
         rephrased_query=rephrased_query or question,
+        max_tokens=effective_max_tokens,
     )
     message_array.append({
         "role": "system",

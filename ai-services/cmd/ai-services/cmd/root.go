@@ -22,7 +22,7 @@ var RootCmd = &cobra.Command{
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 		// Ensures logs flush after each command run
-		logger.Infoln("Logger initialized (PersistentPreRun)", logger.VerbosityLevelDebug)
+		logger.Debugln("Logger initialized (PersistentPreRun)")
 
 		return nil
 	},

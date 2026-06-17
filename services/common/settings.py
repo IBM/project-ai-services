@@ -49,6 +49,19 @@ class LLMConfig(BaseSettings):
         description="API key for vLLM authentication (optional, read from LLM_API_KEY env var)",
     )
 
+    token_buffer_ratio: float = Field(
+        default=0.15,
+        ge=0.0,
+        le=0.5,
+        description=(
+            "Token buffer ratio to apply when calling LLM APIs. "
+            "Reduces max_tokens by this ratio to give the LLM breathing room to respect prompt word limits. "
+            "For example, 0.15 means the API limit is set to 85% of the requested tokens, "
+            "allowing the LLM to naturally complete before hitting the hard limit. "
+            "Range: 0.0 (no buffer) to 0.5 (50% buffer)."
+        ),
+    )
+
 
 class EmbeddingConfig(BaseSettings):
     """Embedding model configuration."""

@@ -53,7 +53,7 @@ func (s *DeletionService) PerformDeletion(ctx context.Context, appID uuid.UUID, 
 	// Initialize runtime client
 	rt, err := vars.RuntimeFactory.Create("")
 	if err != nil {
-		logger.Errorf("failed to init runtime client for app %s: %s", appID, err)
+		logger.ErrorfCtx(ctx, "failed to init runtime client for app %s: %s", appID, err)
 		_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, "failed to init runtime client")
 
 		return
@@ -62,7 +62,7 @@ func (s *DeletionService) PerformDeletion(ctx context.Context, appID uuid.UUID, 
 	// Get Caddy proxy manager - fail if CADDY_ADMIN_URL not set
 	proxyManager, err := proxy.GetCaddyProxyManager()
 	if err != nil {
-		logger.Errorf("failed to get Caddy proxy manager for app %s: %s", appID, err)
+		logger.ErrorfCtx(ctx, "failed to get Caddy proxy manager for app %s: %s", appID, err)
 		_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, fmt.Sprintf("failed to get Caddy proxy manager: %s", err))
 
 		return
@@ -85,13 +85,13 @@ func (s *DeletionService) PerformDeletion(ctx context.Context, appID uuid.UUID, 
 	// Delete application from DB only if no errors occurred
 	if err := s.appRepo.Delete(ctx, appID); err != nil {
 		errMsg := fmt.Sprintf("failed to delete application: %s", err)
-		logger.Errorf("application %s: %s", appID, errMsg)
+		logger.ErrorfCtx(ctx, "application %s: %s", appID, errMsg)
 		_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, errMsg)
 
 		return
 	}
 
-	logger.Infof("Application %s deleted successfully", appID)
+	logger.InfofCtx(ctx, "Application %s deleted successfully", appID)
 }
 
 // identifyOrphanedComponents identifies components that will become orphaned after service deletion.
@@ -123,7 +123,7 @@ func (s *DeletionService) collectComponentCandidates(ctx context.Context, appID 
 	for _, svc := range services {
 		deps, err := s.serviceDependencyRepo.GetDependenciesByServiceID(ctx, svc.ID)
 		if err != nil {
-			logger.Errorf("failed to get dependencies for service %s: %s", svc.ID, err)
+			logger.ErrorfCtx(ctx, "failed to get dependencies for service %s: %s", svc.ID, err)
 			_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, "failed to get service dependencies")
 
 			return nil, err
@@ -156,7 +156,7 @@ func (s *DeletionService) filterOrphanedComponents(ctx context.Context, componen
 func (s *DeletionService) isComponentOrphaned(ctx context.Context, componentID uuid.UUID, serviceIDs map[uuid.UUID]bool) bool {
 	dependentServices, err := s.serviceDependencyRepo.GetServicesByDependency(ctx, componentID, models.DependencyTypeComponent)
 	if err != nil {
-		logger.Errorf("failed to check component %s orphan status: %s", componentID, err)
+		logger.ErrorfCtx(ctx, "failed to check component %s orphan status: %s", componentID, err)
 
 		return false
 	}
@@ -178,6 +178,7 @@ func (s *DeletionService) unregisterServiceRoutes(ctx context.Context, proxyMana
 	}
 
 	if err := proxy.UnregisterRoutesFromEndpoints(
+		ctx,
 		proxyManager,
 		svc.Endpoints,
 		"service",
@@ -221,13 +222,13 @@ func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime
 		}
 
 		// Delete service secrets
-		secretErrors := s.deleteSecretsFromPods(rt, pods, keepData, "service", svc.ID)
+		secretErrors := s.deleteSecretsFromPods(ctx, rt, pods, keepData, "service", svc.ID)
 		if len(secretErrors) > 0 {
 			errorMessages = append(errorMessages, secretErrors...)
 		}
 
 		// Delete service pods first so runtime releases attached volumes.
-		podErrors := s.deletePods(rt, pods, forceDelete)
+		podErrors := s.deletePods(ctx, rt, pods, forceDelete)
 		hasDeletionErrors := false
 		if len(podErrors) > 0 {
 			hasDeletionErrors = true
@@ -238,7 +239,7 @@ func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime
 
 		// Delete volumes only after pods are deleted and only when keepData is false.
 		if !keepData {
-			volumeErrors := s.deleteVolumesFromPods(rt, pods, "service", svc.ID)
+			volumeErrors := s.deleteVolumesFromPods(ctx, rt, pods, "service", svc.ID)
 			if len(volumeErrors) > 0 {
 				hasDeletionErrors = true
 				errorMessages = append(errorMessages, volumeErrors...)
@@ -261,13 +262,13 @@ func (s *DeletionService) deleteServices(ctx context.Context, rt runtime.Runtime
 }
 
 // deletePods deletes all pods and returns any error messages.
-func (s *DeletionService) deletePods(rt runtime.Runtime, pods []runtimeTypes.Pod, forceDelete bool) []string {
+func (s *DeletionService) deletePods(ctx context.Context, rt runtime.Runtime, pods []runtimeTypes.Pod, forceDelete bool) []string {
 	var podErrors []string
 	for _, pod := range pods {
 		if err := rt.DeletePod(pod.ID, &forceDelete); err != nil {
 			// Ignore "not found" errors - pod already deleted or never existed
 			if catalogutils.IsNotFoundError(err) {
-				logger.Infof("Pod %s already deleted or does not exist", pod.ID)
+				logger.InfofCtx(ctx, "Pod %s already deleted or does not exist", pod.ID)
 
 				continue
 			}
@@ -300,13 +301,13 @@ func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runti
 		}
 
 		// Delete component secrets
-		secretErrors := s.deleteSecretsFromPods(rt, pods, keepData, "component", componentID)
+		secretErrors := s.deleteSecretsFromPods(ctx, rt, pods, keepData, "component", componentID)
 		if len(secretErrors) > 0 {
 			errorMessages = append(errorMessages, secretErrors...)
 		}
 
 		// Delete component pods first so runtime releases attached volumes.
-		podErrors := s.deletePods(rt, pods, forceDelete)
+		podErrors := s.deletePods(ctx, rt, pods, forceDelete)
 		hasDeletionErrors := false
 		if len(podErrors) > 0 {
 			hasDeletionErrors = true
@@ -317,7 +318,7 @@ func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runti
 
 		// Delete component volumes only after pods are deleted and only when keepData is false.
 		if !keepData {
-			volumeErrors := s.deleteVolumesFromPods(rt, pods, "component", componentID)
+			volumeErrors := s.deleteVolumesFromPods(ctx, rt, pods, "component", componentID)
 			if len(volumeErrors) > 0 {
 				hasDeletionErrors = true
 				errorMessages = append(errorMessages, volumeErrors...)
@@ -342,7 +343,7 @@ func (s *DeletionService) deleteOrphanedComponents(ctx context.Context, rt runti
 // handleDeletionFailure updates application status when deletion fails.
 func (s *DeletionService) handleDeletionFailure(ctx context.Context, appID uuid.UUID, errorMessages []string) {
 	errMsg := fmt.Sprintf("Application deletion failed with %d error(s), application not deleted", len(errorMessages))
-	logger.Errorf("application %s: %s", appID, errMsg)
+	logger.ErrorfCtx(ctx, "application %s: %s", appID, errMsg)
 	_ = catalogutils.UpdateApplicationStatus(ctx, s.appRepo, appID, models.ApplicationStatusError, errMsg)
 }
 
@@ -350,7 +351,7 @@ func (s *DeletionService) handleDeletionFailure(ctx context.Context, appID uuid.
 // Volumes are always deleted when keepData=false. This method is only called when keepData=false.
 //
 // Returns a list of error messages for any volumes that failed to delete.
-func (s *DeletionService) deleteVolumesFromPods(rt runtime.Runtime, pods []runtimeTypes.Pod, instanceType string, instanceID uuid.UUID) []string {
+func (s *DeletionService) deleteVolumesFromPods(ctx context.Context, rt runtime.Runtime, pods []runtimeTypes.Pod, instanceType string, instanceID uuid.UUID) []string {
 	var errorMessages []string
 	volumesToDelete := make(map[string]bool) // Use map to avoid duplicates
 
@@ -373,22 +374,22 @@ func (s *DeletionService) deleteVolumesFromPods(rt runtime.Runtime, pods []runti
 		return nil
 	}
 
-	logger.Infof("Deleting %d volume(s) for %s %s", len(volumesToDelete), instanceType, instanceID)
+	logger.InfofCtx(ctx, "Deleting %d volume(s) for %s %s", len(volumesToDelete), instanceType, instanceID)
 
 	// Delete each unique volume using the runtime client
 	for volumeName := range volumesToDelete {
 		if err := rt.DeleteVolume(volumeName); err != nil {
 			// Ignore "not found" errors - volume already deleted or never existed
 			if catalogutils.IsNotFoundError(err) {
-				logger.Infof("Volume %s already deleted or does not exist", volumeName)
+				logger.InfofCtx(ctx, "Volume %s already deleted or does not exist", volumeName)
 
 				continue
 			}
 			errMsg := fmt.Sprintf("%s %s: failed to delete volume %s: %s", instanceType, instanceID, volumeName, err)
 			errorMessages = append(errorMessages, errMsg)
-			logger.Errorf("%s %s: failed to delete volume %s: %s", instanceType, instanceID, volumeName, err)
+			logger.ErrorfCtx(ctx, "%s %s: failed to delete volume %s: %s", instanceType, instanceID, volumeName, err)
 		} else {
-			logger.Infof("Successfully deleted volume: %s", volumeName)
+			logger.InfofCtx(ctx, "Successfully deleted volume: %s", volumeName)
 		}
 	}
 
@@ -403,7 +404,7 @@ func (s *DeletionService) deleteVolumesFromPods(rt runtime.Runtime, pods []runti
 //     Preserve secrets WITH skip-cleanup="true" (e.g., DB credentials)
 //
 // Returns a list of error messages for any secrets that failed to delete.
-func (s *DeletionService) deleteSecretsFromPods(rt runtime.Runtime, pods []runtimeTypes.Pod, keepData bool, instanceType string, instanceID uuid.UUID) []string {
+func (s *DeletionService) deleteSecretsFromPods(ctx context.Context, rt runtime.Runtime, pods []runtimeTypes.Pod, keepData bool, instanceType string, instanceID uuid.UUID) []string {
 	var errorMessages []string
 	secretsToDelete := make(map[string]bool) // Use map to avoid duplicates
 
@@ -427,22 +428,22 @@ func (s *DeletionService) deleteSecretsFromPods(rt runtime.Runtime, pods []runti
 		return errorMessages
 	}
 
-	logger.Infof("Deleting %d secret(s) for %s %s (keepData=%v)", len(secretsToDelete), instanceType, instanceID, keepData)
+	logger.InfofCtx(ctx, "Deleting %d secret(s) for %s %s (keepData=%v)", len(secretsToDelete), instanceType, instanceID, keepData)
 
 	// Delete each unique secret
 	for secretName := range secretsToDelete {
 		if err := rt.DeleteSecret(secretName); err != nil {
 			// Ignore "not found" errors - secret already deleted or never existed
 			if catalogutils.IsNotFoundError(err) {
-				logger.Infof("Secret %s already deleted or does not exist", secretName)
+				logger.InfofCtx(ctx, "Secret %s already deleted or does not exist", secretName)
 
 				continue
 			}
 			errMsg := fmt.Sprintf("%s %s: failed to delete secret %s: %s", instanceType, instanceID, secretName, err)
 			errorMessages = append(errorMessages, errMsg)
-			logger.Errorf("%s %s: failed to delete secret %s: %s", instanceType, instanceID, secretName, err)
+			logger.ErrorfCtx(ctx, "%s %s: failed to delete secret %s: %s", instanceType, instanceID, secretName, err)
 		} else {
-			logger.Infof("Successfully deleted secret: %s", secretName)
+			logger.InfofCtx(ctx, "Successfully deleted secret: %s", secretName)
 		}
 	}
 

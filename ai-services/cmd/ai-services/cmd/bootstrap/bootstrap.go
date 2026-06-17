@@ -56,7 +56,7 @@ func bootstrapPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	}
 
 	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-	logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
+	logger.Debugf("Using runtime: %s\n", rt)
 
 	// Check if podman runtime is being used on unsupported platform
 	return utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType())

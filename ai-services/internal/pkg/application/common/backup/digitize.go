@@ -77,11 +77,11 @@ func NewDigitizeBackupClient(serviceURL string) *DigitizeBackupClient {
 
 // CallExportAPI calls the digitize Export API.
 func (c *DigitizeBackupClient) CallExportAPI() (*DigitizeExportResponse, error) {
-	logger.Infof("Calling digitize Export API...\n", 0)
+	logger.Infoln("Calling digitize Export API...")
 
 	var exportResponse DigitizeExportResponse
 
-	logger.Infof("Sending export request to: /v1/export?limit=-1\n", 0)
+	logger.Infoln("Sending export request to: /v1/export?limit=-1")
 	resp, err := c.client.R().
 		SetQueryParam("limit", ExportAllRecordsLimit).
 		SetResult(&exportResponse).
@@ -100,7 +100,7 @@ func (c *DigitizeBackupClient) CallExportAPI() (*DigitizeExportResponse, error) 
 
 // CreateDigitizeBackupArchive creates a backup archive from the export response.
 func CreateDigitizeBackupArchive(backupFile string, exportResponse *DigitizeExportResponse) error {
-	logger.Infof("Creating digitize backup archive...\n", 0)
+	logger.Infoln("Creating digitize backup archive...")
 
 	tempDir, err := os.MkdirTemp("", "digitize-backup-*")
 	if err != nil {
@@ -301,12 +301,12 @@ func LogArchiveSize(backupFile string) {
 	fileInfo, err := os.Stat(backupFile)
 	if err == nil {
 		sizeMB := float64(fileInfo.Size()) / bytesPerMB
-		logger.Infof("✓ Tar archive created: %s (%.2f MB)\n", backupFile, sizeMB, 0)
+		logger.Infof("✓ Tar archive created: %s (%.2f MB)\n", backupFile, sizeMB)
 
 		return
 	}
 
-	logger.Infof("✓ Tar archive created: %s\n", backupFile, 0)
+	logger.Infof("✓ Tar archive created: %s\n", backupFile)
 }
 
 func GetBackupFile(backupFile string, appName string) (string, error) {

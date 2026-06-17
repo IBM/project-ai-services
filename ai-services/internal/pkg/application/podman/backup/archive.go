@@ -120,12 +120,12 @@ func LogArchiveSize(backupFile string) {
 	fileInfo, err := os.Stat(backupFile)
 	if err == nil {
 		sizeMB := float64(fileInfo.Size()) / bytesPerMB
-		logger.Infof("✓ Tar archive created: %s (%.2f MB)\n", backupFile, sizeMB, 0)
+		logger.Infof("✓ Tar archive created: %s (%.2f MB)\n", backupFile, sizeMB)
 
 		return
 	}
 
-	logger.Infof("✓ Tar archive created: %s\n", backupFile, 0)
+	logger.Infof("✓ Tar archive created: %s\n", backupFile)
 }
 
 // Made with Bob

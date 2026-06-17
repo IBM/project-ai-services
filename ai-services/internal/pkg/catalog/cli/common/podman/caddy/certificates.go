@@ -21,7 +21,7 @@ const (
 // Certificate validation is done in the CLI command's PreRunE hook before calling this function.
 // Uses timestamped filenames to ensure Caddy loads fresh certificates without requiring a restart.
 func (c *Context) LoadSSLCertificates(baseDir, sslCertPath, sslKeyPath string) error {
-	logger.Infoln("loading ssl certificate to caddy...", logger.VerbosityLevelDebug)
+	logger.Debugln("loading ssl certificate to caddy...")
 	if sslCertPath == "" || sslKeyPath == "" {
 		return nil
 	}

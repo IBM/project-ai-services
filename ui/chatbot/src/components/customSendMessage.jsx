@@ -61,14 +61,7 @@ async function customSendMessage(
   };
 
   function finalizeResponse(fullText) {
-    let trimmed = fullText.trim(); // to remove trailing white-space
-    // Define acceptable sentence-ending punctuation (both Hindi + English)
-    const validEndings = ['।', '.', '?', '!', '…']; // also includes ellipsis itself
-    const lastChar = trimmed.charAt(trimmed.length - 1);
-    if (!validEndings.includes(lastChar)) {
-      trimmed += ' ...';
-    }
-    return trimmed;
+    return fullText.trim();
   }
 
   if (userInput === '') {

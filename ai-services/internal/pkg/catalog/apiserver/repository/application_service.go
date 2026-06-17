@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"fmt"
-	"log"
 	"math"
 	"net/http"
 	"strings"
@@ -277,7 +276,7 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 	}
 
 	// Phase 2: Validate request payload
-	if err := s.validator.ValidateDeploymentRequest(req); err != nil {
+	if err := s.validator.ValidateDeploymentRequest(ctx, req); err != nil {
 		return nil, err
 	}
 
@@ -294,7 +293,8 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 	}
 
 	// Phase 5: Spawn goroutine for async deployment execution with panic recovery
-	go s.executeDeploymentAsync(plan, req)
+	// Preserve requestID from the original context for tracing async operations
+	go s.executeDeploymentAsync(ctx, plan, req)
 
 	// Phase 6: Return 202 Accepted immediately with application ID
 	response := &apimodels.CreateApplicationResponse{
@@ -307,23 +307,33 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 // executeDeploymentAsync executes the deployment in a background goroutine.
 // It updates the application status in the database based on deployment outcome.
 // Includes panic recovery to prevent crashes.
-func (s *ApplicationService) executeDeploymentAsync(plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest) {
+// The context parameter should contain the requestID from the original HTTP request for tracing.
+func (s *ApplicationService) executeDeploymentAsync(parentCtx context.Context, plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest) {
+	// Extract requestID from parent context to preserve it across the async boundary
+	var requestID string
+	if id, ok := parentCtx.Value(logger.RequestIDKey).(string); ok {
+		requestID = id
+	}
+
+	// Create a new background context for the async operation (not tied to the HTTP request lifecycle)
+	// but preserve the requestID for tracing
+	ctx := context.Background()
+	if requestID != "" {
+		ctx = context.WithValue(ctx, logger.RequestIDKey, requestID)
+	}
+
 	// Defer panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Panic recovered in deployment goroutine for application %s: %v", plan.ApplicationName, r)
+			logger.ErrorfCtx(ctx, "Panic recovered in deployment goroutine for application %s: %v", plan.ApplicationName, r)
 
 			// Attempt to update application status to Error
-			ctx := context.Background()
 			errMsg := fmt.Sprintf("Deployment panic: %v", r)
 			if updateErr := utils.UpdateApplicationStatus(ctx, s.appRepo, plan.ApplicationID.String(), models.ApplicationStatusError, errMsg); updateErr != nil {
-				log.Printf("Failed to update application status after panic: %v", updateErr)
+				logger.ErrorfCtx(ctx, "Failed to update application status after panic: %v", updateErr)
 			}
 		}
 	}()
-
-	// Create a new context for the async operation (not tied to the HTTP request context)
-	ctx := context.Background()
 
 	// Determine runtime type (currently only Podman is supported)
 	runtimeType := runtimeTypes.RuntimeTypePodman
@@ -331,17 +341,17 @@ func (s *ApplicationService) executeDeploymentAsync(plan *deployment.DeploymentP
 	// Execute deployment using the existing plan
 	err := s.deploymentExecutor.ExecuteWithPlan(ctx, plan, req, runtimeType)
 	if err != nil {
-		log.Printf("Deployment failed for application %s: %v", plan.ApplicationName, err)
+		logger.ErrorfCtx(ctx, "Deployment failed for application %s: %v", plan.ApplicationName, err)
 
 		// Update application status to Error
 		if updateErr := utils.UpdateApplicationStatus(ctx, s.appRepo, plan.ApplicationID.String(), models.ApplicationStatusError, err.Error()); updateErr != nil {
-			log.Printf("Failed to update application status to Error: %v", updateErr)
+			logger.ErrorfCtx(ctx, "Failed to update application status to Error: %v", updateErr)
 		}
 
 		return
 	}
 
-	log.Printf("Deployment completed successfully for application %s", plan.ApplicationName)
+	logger.InfolnCtx(ctx, fmt.Sprintf("Deployment completed successfully for application %s", plan.ApplicationName))
 }
 
 // insertDeploymentRecords inserts all database records for the deployment plan.
@@ -405,7 +415,7 @@ func (s *ApplicationService) insertComponentRecords(
 		instanceUUID := uuid.New()
 
 		// Filter metadata to exclude sensitive data based on schema
-		metadata, err := s.filterComponentMetadata(comp.ComponentType, comp.ProviderID, comp.Params)
+		metadata, err := s.filterComponentMetadata(ctx, comp.ComponentType, comp.ProviderID, comp.Params)
 		if err != nil {
 			return nil, fmt.Errorf("failed to filter component metadata for %s: %w", hash, err)
 		}
@@ -654,7 +664,19 @@ func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID
 		return nil, err
 	}
 
-	go s.deletionService.PerformDeletion(context.Background(), id, app.Services, keepData)
+	// Extract requestID from context to preserve it across the async boundary
+	var requestID string
+	if reqID, ok := ctx.Value(logger.RequestIDKey).(string); ok {
+		requestID = reqID
+	}
+
+	// Create a new background context for the async operation but preserve the requestID
+	deletionCtx := context.Background()
+	if requestID != "" {
+		deletionCtx = context.WithValue(deletionCtx, logger.RequestIDKey, requestID)
+	}
+
+	go s.deletionService.PerformDeletion(deletionCtx, id, app.Services, keepData)
 
 	return &DeleteApplicationResponse{
 		ID:      id.String(),
@@ -666,13 +688,13 @@ func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID
 // filterComponentMetadata filters component parameters to exclude sensitive data.
 // It reads the component's schema and excludes fields marked as sensitive (e.g., format: "password").
 // Returns an error if the schema cannot be loaded or parsed.
-func (s *ApplicationService) filterComponentMetadata(componentType, providerID string, params map[string]any) (map[string]any, error) {
+func (s *ApplicationService) filterComponentMetadata(ctx context.Context, componentType, providerID string, params map[string]any) (map[string]any, error) {
 	if params == nil {
 		return nil, nil
 	}
 
 	// Load component schema to determine which fields are sensitive
-	schema, err := s.provider.GetComponentProviderParams(componentType, providerID)
+	schema, err := s.provider.GetComponentProviderParams(ctx, componentType, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load schema for component %s/%s: %w", componentType, providerID, err)
 	}
@@ -684,7 +706,7 @@ func (s *ApplicationService) filterComponentMetadata(componentType, providerID s
 	}
 
 	// Filter out sensitive fields recursively
-	metadata, err := s.filterSensitiveFields(params, properties)
+	metadata, err := s.filterSensitiveFields(ctx, params, properties)
 	if err != nil {
 		return nil, fmt.Errorf("failed to filter sensitive fields: %w", err)
 	}
@@ -694,7 +716,7 @@ func (s *ApplicationService) filterComponentMetadata(componentType, providerID s
 
 // filterSensitiveFields recursively filters out sensitive fields from params based on schema properties.
 // Returns an error if there are issues processing nested structures.
-func (s *ApplicationService) filterSensitiveFields(params map[string]any, properties map[string]any) (map[string]any, error) {
+func (s *ApplicationService) filterSensitiveFields(ctx context.Context, params map[string]any, properties map[string]any) (map[string]any, error) {
 	metadata := make(map[string]any)
 
 	for key, value := range params {
@@ -707,7 +729,7 @@ func (s *ApplicationService) filterSensitiveFields(params map[string]any, proper
 
 		// Check if field is marked as sensitive (format: "password")
 		if format, hasFormat := fieldSchema["format"].(string); hasFormat && format == "password" {
-			logger.Infof("Excluding sensitive field '%s' from component metadata", key)
+			logger.DebugfCtx(ctx, "Excluding sensitive field '%s' from component metadata", key)
 
 			continue
 		}
@@ -717,7 +739,7 @@ func (s *ApplicationService) filterSensitiveFields(params map[string]any, proper
 			// Check if the field schema has nested properties
 			if nestedProps, hasNestedProps := fieldSchema["properties"].(map[string]any); hasNestedProps {
 				// Recursively filter nested object
-				filteredNested, err := s.filterSensitiveFields(valueMap, nestedProps)
+				filteredNested, err := s.filterSensitiveFields(ctx, valueMap, nestedProps)
 				if err != nil {
 					return nil, fmt.Errorf("failed to filter nested field '%s': %w", key, err)
 				}
@@ -1061,14 +1083,14 @@ func (s *ApplicationService) collectServicePods(
 		pod, err := loadApplicationPods(rt, service.ID.String())
 		if err != nil {
 			// Log error but continue with other services (fault-tolerant)
-			logger.Errorf("Failed to load service pod: %v", err)
+			logger.ErrorfCtx(ctx, "Failed to load service pod: %v", err)
 
 			continue
 		}
 		servicePods = append(servicePods, pod...)
 	}
 
-	logger.Infof("Successfully collected %d service pods", len(servicePods))
+	logger.InfofCtx(ctx, "Successfully collected %d service pods", len(servicePods))
 
 	return servicePods, nil
 }
@@ -1089,7 +1111,7 @@ func (s *ApplicationService) collectComponentPods(
 		// Fetch service dependencies from database
 		serviceDependencies, err := s.serviceDependencyRepo.GetDependenciesByServiceID(ctx, service.ID)
 		if err != nil {
-			logger.Errorf("Failed to get dependencies for service %s: %v", service.ID, err)
+			logger.ErrorfCtx(ctx, "Failed to get dependencies for service %s: %v", service.ID, err)
 
 			continue
 		}
@@ -1110,7 +1132,7 @@ func (s *ApplicationService) collectComponentPods(
 			// Load component pod from runtime
 			componentPod, err := loadApplicationPods(rt, componentID)
 			if err != nil {
-				logger.Errorf("Failed to load component pod: %v", err)
+				logger.ErrorfCtx(ctx, "Failed to load component pod: %v", err)
 
 				continue
 			}
@@ -1126,7 +1148,7 @@ func (s *ApplicationService) collectComponentPods(
 		componentPods = append(componentPods, podDetails...)
 	}
 
-	logger.Infof("Successfully collected %d unique component pods", len(componentPods))
+	logger.InfofCtx(ctx, "Successfully collected %d unique component pods", len(componentPods))
 
 	return componentPods, nil
 }

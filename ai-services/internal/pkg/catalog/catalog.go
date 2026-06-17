@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -41,7 +42,7 @@ var (
 func NewCatalogProvider() (*CatalogProvider, error) {
 	once.Do(func() {
 		sharedItems = make(map[string]*catalogItem)
-		loadErr = loadCatalogItems(sharedItems)
+		loadErr = loadCatalogItems(context.Background(), sharedItems)
 	})
 
 	if loadErr != nil {
@@ -52,7 +53,7 @@ func NewCatalogProvider() (*CatalogProvider, error) {
 }
 
 // loadCatalogItems loads all catalog items into the provided map.
-func loadCatalogItems(items map[string]*catalogItem) error {
+func loadCatalogItems(ctx context.Context, items map[string]*catalogItem) error {
 	// Walk the catalog filesystem to find all metadata.yaml files
 	err := fs.WalkDir(&assets.CatalogFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -63,7 +64,7 @@ func loadCatalogItems(items map[string]*catalogItem) error {
 			return nil
 		}
 
-		return processMetadataFile(path, items)
+		return processMetadataFile(ctx, path, items)
 	})
 
 	if err != nil {
@@ -74,7 +75,7 @@ func loadCatalogItems(items map[string]*catalogItem) error {
 }
 
 // processMetadataFile processes a single metadata.yaml file.
-func processMetadataFile(path string, items map[string]*catalogItem) error {
+func processMetadataFile(ctx context.Context, path string, items map[string]*catalogItem) error {
 	parts := strings.Split(path, "/")
 	if len(parts) < constants.MinPathPartsForArchOrService {
 		return nil
@@ -88,14 +89,14 @@ func processMetadataFile(path string, items map[string]*catalogItem) error {
 
 	data, readErr := assets.CatalogFS.ReadFile(path)
 	if readErr != nil {
-		logger.Infof("failed to read metadata at %s: %v", path, readErr, logger.VerbosityLevelDebug)
+		logger.DebugfCtx(ctx, "failed to read metadata at %s: %v", path, readErr)
 
 		return nil
 	}
 
 	appPath := filepath.Dir(path)
 
-	return parseAndStoreMetadata(catalogType, path, appPath, data, items)
+	return parseAndStoreMetadata(ctx, catalogType, path, appPath, data, items)
 }
 
 // isValidMetadataPath checks if the metadata file path is valid for the catalog type.
@@ -111,24 +112,24 @@ func isValidMetadataPath(catalogType string, pathLength int) bool {
 }
 
 // parseAndStoreMetadata parses metadata and stores it in the items map.
-func parseAndStoreMetadata(catalogType, path, appPath string, data []byte, items map[string]*catalogItem) error {
+func parseAndStoreMetadata(ctx context.Context, catalogType, path, appPath string, data []byte, items map[string]*catalogItem) error {
 	switch catalogType {
 	case constants.CatalogTypeArchitectures:
-		return parseArchitecture(path, appPath, data, items)
+		return parseArchitecture(ctx, path, appPath, data, items)
 	case constants.CatalogTypeServices:
-		return parseService(path, appPath, data, items)
+		return parseService(ctx, path, appPath, data, items)
 	case constants.CatalogTypeComponents:
-		return parseComponent(path, appPath, data, items)
+		return parseComponent(ctx, path, appPath, data, items)
 	}
 
 	return nil
 }
 
 // parseArchitecture parses and stores an architecture.
-func parseArchitecture(path, appPath string, data []byte, items map[string]*catalogItem) error {
+func parseArchitecture(ctx context.Context, path, appPath string, data []byte, items map[string]*catalogItem) error {
 	var arch types.Architecture
 	if unmarshalErr := yaml.Unmarshal(data, &arch); unmarshalErr != nil {
-		logger.Infof("failed to parse architecture at %s: %v", path, unmarshalErr, logger.VerbosityLevelDebug)
+		logger.DebugfCtx(ctx, "failed to parse architecture at %s: %v", path, unmarshalErr)
 
 		return nil
 	}
@@ -142,10 +143,10 @@ func parseArchitecture(path, appPath string, data []byte, items map[string]*cata
 }
 
 // parseService parses and stores a service.
-func parseService(path, appPath string, data []byte, items map[string]*catalogItem) error {
+func parseService(ctx context.Context, path, appPath string, data []byte, items map[string]*catalogItem) error {
 	var svc types.Service
 	if unmarshalErr := yaml.Unmarshal(data, &svc); unmarshalErr != nil {
-		logger.Infof("failed to parse service at %s: %v", path, unmarshalErr, logger.VerbosityLevelDebug)
+		logger.DebugfCtx(ctx, "failed to parse service at %s: %v", path, unmarshalErr)
 
 		return nil
 	}
@@ -159,10 +160,10 @@ func parseService(path, appPath string, data []byte, items map[string]*catalogIt
 }
 
 // parseComponent parses and stores a component.
-func parseComponent(path, appPath string, data []byte, items map[string]*catalogItem) error {
+func parseComponent(ctx context.Context, path, appPath string, data []byte, items map[string]*catalogItem) error {
 	var comp types.Component
 	if unmarshalErr := yaml.Unmarshal(data, &comp); unmarshalErr != nil {
-		logger.Infof("failed to parse component at %s: %v", path, unmarshalErr, logger.VerbosityLevelDebug)
+		logger.DebugfCtx(ctx, "failed to parse component at %s: %v", path, unmarshalErr)
 
 		return nil
 	}

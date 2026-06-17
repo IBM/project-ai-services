@@ -1,6 +1,7 @@
 package podman
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -20,14 +21,14 @@ const (
 )
 
 // DeployPodAndReadinessCheck deploys a pod and performs readiness checks on its containers.
-func DeployPodAndReadinessCheck(rt runtime.Runtime, podSpec *models.PodSpec,
+func DeployPodAndReadinessCheck(ctx context.Context, rt runtime.Runtime, podSpec *models.PodSpec,
 	podTemplateName string, body io.Reader, opts map[string]string) error {
 	pods, err := rt.CreatePod(body, opts)
 	if err != nil {
 		return fmt.Errorf("failed pod creation: %w", err)
 	}
 
-	logger.Infof("'%s': Successfully ran podman kube play\n", podTemplateName, logger.VerbosityLevelDebug)
+	logger.DebugfCtx(ctx, "'%s': Successfully ran podman kube play\n", podTemplateName)
 
 	// ---- Pod Readiness Checks ----
 	for _, pod := range pods {
@@ -38,52 +39,52 @@ func DeployPodAndReadinessCheck(rt runtime.Runtime, podSpec *models.PodSpec,
 
 		podName := pInfo.Name
 
-		logger.Infof("'%s', '%s': Starting Pod Readiness check...\n", podTemplateName, podName)
+		logger.InfofCtx(ctx, "'%s', '%s': Starting Pod Readiness check...\n", podTemplateName, podName)
 
 		// Step1: ---- Containers Creation Check ----
-		if err := doContainersCreationCheck(rt, podSpec, podTemplateName, pInfo.Name, pInfo.ID); err != nil {
+		if err := doContainersCreationCheck(ctx, rt, podSpec, podTemplateName, pInfo.Name, pInfo.ID); err != nil {
 			return err
 		}
 
 		// Step2: ---- Containers Readiness Check ----
 		for _, container := range pInfo.Containers {
-			if err := doContainerReadinessCheck(rt, podTemplateName, pInfo.Name, container.ID); err != nil {
+			if err := doContainerReadinessCheck(ctx, rt, podTemplateName, pInfo.Name, container.ID); err != nil {
 				return err
 			}
-			logger.Infoln("-------")
+			logger.InfolnCtx(ctx, "-------")
 		}
-		logger.Infof("'%s', '%s': Pod has been successfully deployed and ready!\n", podTemplateName, podName)
-		logger.Infoln("-------")
+		logger.InfofCtx(ctx, "'%s', '%s': Pod has been successfully deployed and ready!\n", podTemplateName, podName)
+		logger.InfolnCtx(ctx, "-------")
 	}
 
-	logger.Infoln("-------\n-------")
+	logger.InfolnCtx(ctx, "-------\n-------")
 
 	return nil
 }
 
-func doContainersCreationCheck(rt runtime.Runtime, podSpec *models.PodSpec, podTemplateName, podName, podID string) error {
-	logger.Infof("'%s', '%s': Performing Containers Creation check for pod...\n", podTemplateName, podName)
+func doContainersCreationCheck(ctx context.Context, rt runtime.Runtime, podSpec *models.PodSpec, podTemplateName, podName, podID string) error {
+	logger.InfofCtx(ctx, "'%s', '%s': Performing Containers Creation check for pod...\n", podTemplateName, podName)
 
 	expectedContainerCount := len(specs.FetchContainerNames(*podSpec))
 
-	logger.Infof("'%s', '%s': Waiting for Containers Creation... Timeout set: %s\n", podTemplateName, podName, containerCreationTimeout)
+	logger.InfofCtx(ctx, "'%s', '%s': Waiting for Containers Creation... Timeout set: %s\n", podTemplateName, podName, containerCreationTimeout)
 	// wait for all containers for a given pod are created
 	if err := helpers.WaitForContainersCreation(rt, podID, expectedContainerCount, containerCreationTimeout); err != nil {
 		return fmt.Errorf("containers creation check failed for pod: '%s' with error: %w", podName, err)
 	}
 
-	logger.Infof("'%s', '%s': Containers creation check for pod is completed\n", podTemplateName, podName)
+	logger.InfofCtx(ctx, "'%s', '%s': Containers creation check for pod is completed\n", podTemplateName, podName)
 
 	return nil
 }
 
-func doContainerReadinessCheck(rt runtime.Runtime, podTemplateName, podName, containerID string) error {
+func doContainerReadinessCheck(ctx context.Context, rt runtime.Runtime, podTemplateName, podName, containerID string) error {
 	cInfo, err := rt.InspectContainer(containerID)
 	if err != nil {
 		return fmt.Errorf("failed to do container inspect for containerID: '%s' with error: %w", containerID, err)
 	}
 
-	logger.Infof("'%s', '%s', '%s': Performing Container Readiness check...\n", podTemplateName, podName, cInfo.Name)
+	logger.InfofCtx(ctx, "'%s', '%s', '%s': Performing Container Readiness check...\n", podTemplateName, podName, cInfo.Name)
 
 	// getting the Start Period set for a container
 	startPeriod, err := helpers.FetchContainerStartPeriod(rt, containerID)
@@ -92,7 +93,7 @@ func doContainerReadinessCheck(rt runtime.Runtime, podTemplateName, podName, con
 	}
 
 	if startPeriod == -1 {
-		logger.Infof("No container health check is set for '%s'. Hence skipping readiness check\n", cInfo.Name, logger.VerbosityLevelDebug)
+		logger.DebugfCtx(ctx, "No container health check is set for '%s'. Hence skipping readiness check\n", cInfo.Name)
 
 		return nil
 	}
@@ -100,12 +101,12 @@ func doContainerReadinessCheck(rt runtime.Runtime, podTemplateName, podName, con
 	// configure readiness timeout by appending start period with additional extra timeout
 	readinessTimeout := startPeriod + extraContainerReadinessTimeout
 
-	logger.Infof("'%s', '%s', '%s': Waiting for Container Readiness... Timeout set: %s\n", podTemplateName, podName, cInfo.Name, readinessTimeout)
+	logger.InfofCtx(ctx, "'%s', '%s', '%s': Waiting for Container Readiness... Timeout set: %s\n", podTemplateName, podName, cInfo.Name, readinessTimeout)
 
 	if err := helpers.WaitForContainerReadiness(rt, containerID, readinessTimeout); err != nil {
 		return fmt.Errorf("readiness check failed for container: '%s'!: %w", cInfo.Name, err)
 	}
-	logger.Infof("'%s', '%s', '%s': Readiness Check for the container is completed!\n", podTemplateName, podName, cInfo.Name)
+	logger.InfofCtx(ctx, "'%s', '%s', '%s': Readiness Check for the container is completed!\n", podTemplateName, podName, cInfo.Name)
 
 	return nil
 }

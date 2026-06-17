@@ -75,7 +75,7 @@ spec:
 	podCreated := true
 
 	// Wait for pod to be ready
-	logger.Infof("Waiting for pod to be ready...\n", 0)
+	logger.Infoln("Waiting for pod to be ready...")
 	cmd = exec.Command("oc", "wait", "--for=condition=Ready",
 		fmt.Sprintf("pod/%s", podName), "-n", namespace, "--timeout=120s")
 	output, err = cmd.CombinedOutput()
@@ -83,20 +83,20 @@ spec:
 		return podCreated, fmt.Errorf("pod failed to become ready: %w, output: %s", err, string(output))
 	}
 
-	logger.Infof("Sidecar pod is ready\n", 0)
+	logger.Infoln("Sidecar pod is ready")
 
 	return podCreated, nil
 }
 
 // CleanupPod deletes an OpenShift pod.
 func CleanupPod(podName, namespace string) {
-	logger.Infof("Cleaning up sidecar pod...\n", 0)
+	logger.Infoln("Cleaning up sidecar pod...")
 	cmd := exec.Command("oc", "delete", "pod", podName, "-n", namespace, "--wait=false")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		logger.Warningf("Failed to cleanup sidecar pod %s: %v, output: %s\n", podName, err, string(output))
 	} else {
-		logger.Infof("Sidecar pod cleanup initiated\n", 0)
+		logger.Infoln("Sidecar pod cleanup initiated")
 	}
 }
 

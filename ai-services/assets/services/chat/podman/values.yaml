@@ -1,10 +1,10 @@
 ui:
   port: ""
-  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.40
+  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.41
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/chatbot-service:v0.0.17
+  image: icr.io/ai-services-cicd/chatbot-service:v0.0.18
   log_level: "INFO"
   chatbot:
     searchMode: "hybrid"
