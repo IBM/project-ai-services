@@ -194,7 +194,7 @@ export const ServicesDeployFlow = ({
     }
 
     // Get the provider schema for the selected LLM provider
-    const schemaKey = `${state.selectedServiceId}-llm-${llmComponent.providerId}`;
+    const schemaKey = `${state.selectedServiceId}:llm:${llmComponent.providerId}`;
     const providerSchema = providerSchemas[schemaKey];
 
     if (!providerSchema || !providerSchema.required) {
@@ -386,7 +386,6 @@ export const ServicesDeployFlow = ({
     state.isDeploying ||
     (state.currentStep === 0 && !state.selectedServiceId) || // Block on step 0 if no service selected
     (isLastStep && state.isEditing) ||
-    (isLastStep && state.hasInsufficientResources) || // Block deployment if insufficient resources
     (isLastStep && !areAllRequiredFieldsFilled); // Block deployment if required fields are not filled
 
   const actions = [

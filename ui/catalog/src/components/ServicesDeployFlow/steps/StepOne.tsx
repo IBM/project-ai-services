@@ -46,8 +46,8 @@ export const StepOne: React.FC<StepProps> = ({
     return deployOptions.components
       ?.filter(
         (component) =>
-          serviceComponentTypes.includes(component.type) &&
-          ["version", "vector_store", "embedding"].includes(component.type),
+          serviceComponentTypes.includes(component.type) && 
+                !["llm", "reranker"].includes(component.type),
       )
       .map((component) => {
         const providerOptions = component.providers.map((provider) => ({
@@ -139,6 +139,12 @@ export const StepOne: React.FC<StepProps> = ({
     const currentComponent = serviceConfig.components[componentType];
     if (!currentComponent) return;
 
+    // Find the correct provider for this model from the store
+    const componentModels = getComponentModels(selectedServiceId, componentType);
+    const selectedModelOption = componentModels.find((m) => m.id === model);
+    
+    if (!selectedModelOption) return;
+
     onChange({
       services: {
         ...formData.services,
@@ -148,6 +154,7 @@ export const StepOne: React.FC<StepProps> = ({
             ...serviceConfig.components,
             [componentType]: {
               ...currentComponent,
+              providerId: selectedModelOption.providerId, // Update provider to match model
               params: {
                 ...currentComponent.params,
                 model, // Set the model parameter
