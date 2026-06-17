@@ -32,17 +32,22 @@ func (p *PodmanBootstrap) Configure() error {
 		return err
 	}
 
-	// 2. Spyre cards – validate and repair spyre configurations
+	// 2. Enable podman-restart service for auto-start on reboot
+	if err := ensurePodmanRestartServiceEnabled(ctx); err != nil {
+		return err
+	}
+
+	// 3. Spyre cards – validate and repair spyre configurations
 	if err := ensureSpyreConfigured(ctx); err != nil {
 		return err
 	}
 
-	// 3. Configure SMT level to 2 and persist via systemd
+	// 4. Configure SMT level to 2 and persist via systemd
 	if err := ensureSMTConfigured(ctx); err != nil {
 		return err
 	}
 
-	// 4. Configure SELinux policy for Podman socket access
+	// 5. Configure SELinux policy for Podman socket access
 	if err := ensureSELinuxPolicyConfigured(ctx); err != nil {
 		return err
 	}

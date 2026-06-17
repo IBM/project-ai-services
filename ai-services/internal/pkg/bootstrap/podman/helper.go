@@ -388,3 +388,19 @@ func ensureSELinuxPolicyConfigured(ctx context.Context) error {
 
 	return nil
 }
+
+// ensurePodmanRestartServiceEnabled enables and starts the podman-restart.service
+// to automatically restart pods with restart policy on system boot.
+func ensurePodmanRestartServiceEnabled(ctx context.Context) error {
+	s := spinner.New("Enabling podman-restart service")
+	s.Start(ctx)
+
+	if err := systemctl("enable", "podman-restart.service", "--now"); err != nil {
+		s.Fail("failed to enable podman-restart service")
+
+		return err
+	}
+	s.Stop("Podman-restart service enabled successfully")
+
+	return nil
+}

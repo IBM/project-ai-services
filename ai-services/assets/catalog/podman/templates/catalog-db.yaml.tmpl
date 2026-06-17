@@ -13,6 +13,7 @@ metadata:
   annotations:
     io.podman.annotations.pids-limit/postgresql: "4096"
 spec:
+  restartPolicy: always
   containers:
   - name: postgresql
     image: "{{ .Values.db.image }}"
