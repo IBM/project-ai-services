@@ -12,7 +12,7 @@ charset-normalizer==3.4.7
 click==8.4.0
 cohere==7.0.3
 colorlog==6.10.1
-cryptography==48.0.1
+cryptography==49.0.0
 defusedxml==0.7.1
 dill==0.4.1
 distro==1.9.0
