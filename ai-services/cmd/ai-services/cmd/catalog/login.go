@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -22,6 +23,7 @@ func NewLoginCmd() *cobra.Command {
 		username      string
 		passwordStdin bool
 		insecure      bool
+		runtimeType   string
 	)
 
 	cmd := &cobra.Command{
@@ -41,14 +43,18 @@ To get the Catalog backend endpoint, use: ai-services catalog info
 
 Examples:
 		# Interactive login (password is prompted securely)
-		ai-services catalog login --server <catalog_backend_endpoint> --username admin
+		ai-services catalog login --server <catalog_backend_endpoint> --username admin --runtime podman
 
 		# Non-interactive login via stdin pipe (password not recorded in shell history)
-		echo "$MY_PASSWORD" | ai-services catalog login --server <catalog_backend_endpoint> --username admin --password-stdin
+		echo "$MY_PASSWORD" | ai-services catalog login --server <catalog_backend_endpoint> --username admin --password-stdin --runtime podman
 
 		# Login with insecure TLS (skip certificate verification)
-		ai-services catalog login --server <catalog_backend_endpoint> --username admin --insecure`,
+		ai-services catalog login --server <catalog_backend_endpoint> --username admin --insecure --runtime podman`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := common.InitAndValidateRuntimeFlag(runtimeType); err != nil {
+				return err
+			}
+
 			return validateServerURL(serverURL)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -60,6 +66,7 @@ Examples:
 	cmd.Flags().StringVar(&username, "username", "", "Username to authenticate with (required)")
 	cmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "Read password from stdin instead of an interactive prompt")
 	cmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification (NOT for production use)")
+	common.ConfigureRuntimeFlag(cmd, &runtimeType)
 
 	_ = cmd.MarkFlagRequired("server")
 	_ = cmd.MarkFlagRequired("username")

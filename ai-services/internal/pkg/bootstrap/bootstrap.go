@@ -25,12 +25,12 @@ func NewBootstrapFactory(runtimeType types.RuntimeType) *BootstrapFactory {
 func (f *BootstrapFactory) Create() (Bootstrap, error) {
 	switch f.runtimeType {
 	case types.RuntimeTypePodman:
-		logger.Infof("Initializing Podman bootstrap\n", logger.VerbosityLevelDebug)
+		logger.Debugf("Initializing Podman bootstrap\n")
 
 		return podman.NewPodmanBootstrap(), nil
 
 	case types.RuntimeTypeOpenShift:
-		logger.Infof("Initializing OpenShift bootstrap\n", logger.VerbosityLevelDebug)
+		logger.Debugf("Initializing OpenShift bootstrap\n")
 
 		return openshift.NewOpenshiftBootstrap(), nil
 

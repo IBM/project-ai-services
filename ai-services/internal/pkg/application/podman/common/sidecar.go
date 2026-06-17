@@ -85,7 +85,7 @@ func GetPodID(ctx context.Context, containerName string) (string, error) {
 
 // CreateAndStartSidecar creates and starts a sidecar container.
 func CreateAndStartSidecar(ctx context.Context, sidecarName, podID string) (string, error) {
-	logger.Infof("Starting sidecar container...\n", 0)
+	logger.Infoln("Starting sidecar container...")
 
 	s := &specgen.SpecGenerator{
 		ContainerBasicConfig: specgen.ContainerBasicConfig{
@@ -141,7 +141,7 @@ func GetOpenSearchPasswordFromSecret(ctx context.Context, containerID string) (s
 		return "", err
 	}
 
-	logger.Infof("Reading password from secret: %s\n", secretName, 0)
+	logger.Infof("Reading password from secret: %s\n", secretName)
 
 	secretData, err := fetchSecretData(ctx, secretName)
 	if err != nil {
@@ -153,7 +153,7 @@ func GetOpenSearchPasswordFromSecret(ctx context.Context, containerID string) (s
 		return "", err
 	}
 
-	logger.Infof("Successfully retrieved password from secret\n", 0)
+	logger.Infoln("Successfully retrieved password from secret")
 
 	return password, nil
 }

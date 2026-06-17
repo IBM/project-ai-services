@@ -25,7 +25,7 @@ func (r *SpyreRule) Description() string {
 
 // Verify performs comprehensive Spyre validation.
 func (r *SpyreRule) Verify() error {
-	logger.Infoln("Running comprehensive Spyre validation...", logger.VerbosityLevelDebug)
+	logger.Debugln("Running comprehensive Spyre validation...")
 
 	// Check if Spyre cards are present
 	if !spyre.IsApplicable() {
@@ -51,7 +51,7 @@ func (r *SpyreRule) Verify() error {
 			strings.Join(validationErrors, "\n"))
 	}
 
-	logger.Infoln("✓ All Spyre configuration checks passed", logger.VerbosityLevelDebug)
+	logger.Debugln("✓ All Spyre configuration checks passed")
 
 	return nil
 }

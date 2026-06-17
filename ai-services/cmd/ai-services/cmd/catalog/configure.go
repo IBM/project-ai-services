@@ -6,13 +6,13 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -30,6 +30,10 @@ var (
 	httpsPort int
 	// Reset password flag for catalog configure command.
 	resetPasswordFlag bool
+	// Reset podman auth secret for catalog configure command.
+	resetPodmanAuthFlag bool
+	// Reset certificate flag for catalog configure command.
+	resetCertificateFlag bool
 )
 
 const (
@@ -53,7 +57,11 @@ Examples:
 			cmd.SilenceUsage = true
 
 			if resetPasswordFlag {
-				return validateResetFlags(cmd)
+				return validateResetFlag(cmd, "reset-password")
+			} else if resetPodmanAuthFlag {
+				return validateResetFlag(cmd, "reset-podman-auth")
+			} else if resetCertificateFlag {
+				return validateResetCertificateFlags(cmd, "reset-certificate")
 			}
 
 			return validateConfigureFlags()
@@ -61,6 +69,10 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if resetPasswordFlag {
 				return runResetPassword()
+			} else if resetPodmanAuthFlag {
+				return runResetPodmanAuth()
+			} else if resetCertificateFlag {
+				return runResetCertificate()
 			}
 
 			return runConfigure()
@@ -68,6 +80,7 @@ Examples:
 	}
 
 	configureConfigureFlags(cmd)
+	configureResetFlags(cmd)
 
 	return cmd
 }
@@ -87,7 +100,7 @@ func runConfigure() error {
 		}
 	}
 
-	logger.Infof("Using base directory: %s\n", aiServicesDir, logger.VerbosityLevelDebug)
+	logger.Debugf("Using base directory: %s\n", aiServicesDir)
 
 	// create model directory
 	modelPath := filepath.Join(aiServicesDir, "models")
@@ -97,42 +110,27 @@ func runConfigure() error {
 	}
 
 	// Sanitize SSL certificate paths to prevent path traversal attacks
-	// Only clean if paths are provided (filepath.Clean("") returns ".")
-	cleanCertPath := ""
-	cleanKeyPath := ""
-	if sslCertPath != "" {
-		cleanCertPath = filepath.Clean(sslCertPath)
-	}
-	if sslKeyPath != "" {
-		cleanKeyPath = filepath.Clean(sslKeyPath)
-	}
+	cleanCertPath, cleanKeyPath := sanitizeSSLPaths(sslCertPath, sslKeyPath)
 
 	return configure.Run(vars.RuntimeFactory.GetRuntimeType(), aiServicesDir, domainName, cleanCertPath, cleanKeyPath, httpsPort)
 }
 
-func validateResetFlags(cmd *cobra.Command) error {
-	if err := validateRuntimeFlag(); err != nil {
+func validateResetFlag(cmd *cobra.Command, flagName string) error {
+	if err := common.InitAndValidateRuntimeFlag(runtimeType); err != nil {
 		return err
 	}
 
-	// Check if basedir was explicitly setn
-	if baseDir != "" {
-		return fmt.Errorf("--base-dir cannot be used with --reset-password")
-	}
-
-	// Check if domain-name was explicitly set
-	if domainName != "" {
-		return fmt.Errorf("--domain-name cannot be used with --reset-password")
-	}
-
-	// Check if https-port was explicitly set by the user
-	if cmd.Flags().Changed("https-port") {
-		return fmt.Errorf("--https-port cannot be used with --reset-password")
-	}
-
-	// Check if SSL certificate flags were set
-	if sslCertPath != "" || sslKeyPath != "" {
-		return fmt.Errorf("--ssl-cert and --ssl-key cannot be used with --reset-password")
+	// Check that no configuration parameters are provided with reset flag
+	var invalidFlags []string
+	cmd.Flags().Visit(func(f *pflag.Flag) {
+		if f.Name == flagName || f.Name == constants.RuntimeFlag {
+			// Skip reset flag and runtime parameter
+			return
+		}
+		invalidFlags = append(invalidFlags, "--"+f.Name)
+	})
+	if len(invalidFlags) > 0 {
+		return fmt.Errorf("the following flags cannot be used with --%s: %v", flagName, invalidFlags)
 	}
 
 	return nil
@@ -140,7 +138,7 @@ func validateResetFlags(cmd *cobra.Command) error {
 
 // validateConfigureFlags validates the configure command flags and initializes runtime.
 func validateConfigureFlags() error {
-	if err := validateRuntimeFlag(); err != nil {
+	if err := common.InitAndValidateRuntimeFlag(runtimeType); err != nil {
 		return err
 	}
 
@@ -152,24 +150,6 @@ func validateConfigureFlags() error {
 	// Validate HTTPS port range
 	if httpsPort < 1 || httpsPort > 65535 {
 		return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
-	}
-
-	return nil
-}
-
-func validateRuntimeFlag() error {
-	// Initialize runtime factory based on flag
-	rt := types.RuntimeType(runtimeType)
-	if !rt.Valid() {
-		return fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift'). Please specify runtime using --runtime flag", runtimeType)
-	}
-
-	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-	logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
-
-	// Check if podman runtime is being used on unsupported platform
-	if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
-		return err
 	}
 
 	return nil
@@ -228,11 +208,53 @@ func validateSSLCertificates() error {
 	return nil
 }
 
+func validateResetCertificateFlags(cmd *cobra.Command, flagName string) error {
+	if err := common.InitAndValidateRuntimeFlag(runtimeType); err != nil {
+		return err
+	}
+
+	// Require SSL certificate flags with reset-certificate
+	if sslCertPath == "" || sslKeyPath == "" {
+		return fmt.Errorf("--ssl-cert and --ssl-key are required when using --reset-certificate")
+	}
+
+	// Validate SSL certificate flags
+	if err := validateSSLFlags(); err != nil {
+		return err
+	}
+
+	// Check that no other configuration parameters are provided with reset-certificate flag
+	// Allow ssl-cert and ssl-key since they are required for this operation
+	var invalidFlags []string
+	cmd.Flags().Visit(func(f *pflag.Flag) {
+		if f.Name == flagName || f.Name == constants.RuntimeFlag ||
+			f.Name == "ssl-cert" || f.Name == "ssl-key" {
+			// Skip reset flag, runtime parameter, and required SSL flags
+			return
+		}
+		invalidFlags = append(invalidFlags, "--"+f.Name)
+	})
+	if len(invalidFlags) > 0 {
+		return fmt.Errorf("the following flags cannot be used with --%s: %v", flagName, invalidFlags)
+	}
+
+	return nil
+}
+
+func runResetCertificate() error {
+	logger.Infof("Resetting certificates and reloading catalog pod...")
+
+	// Sanitize SSL certificate paths to prevent path traversal attacks
+	cleanCertPath, cleanKeyPath := sanitizeSSLPaths(sslCertPath, sslKeyPath)
+
+	// Call ResetCatalogCertificate with certificate paths
+	return catalogPodman.ResetCatalogCertificate(cleanCertPath, cleanKeyPath)
+}
+
 // configureConfigureFlags configures the flags for the configure command.
 func configureConfigureFlags(cmd *cobra.Command) {
 	// Add runtime flag as required
-	cmd.Flags().StringVarP(&runtimeType, "runtime", "r", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
-	_ = cmd.MarkFlagRequired("runtime")
+	common.ConfigureRuntimeFlag(cmd, &runtimeType)
 
 	// Add basedir flag
 	cmd.Flags().StringVar(
@@ -281,17 +303,37 @@ func configureConfigureFlags(cmd *cobra.Command) {
 			"Must be used together with --ssl-cert.\n"+
 			"Example: --ssl-key /path/to/key.pem\n",
 	)
+}
 
+func configureResetFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(
 		&resetPasswordFlag,
 		"reset-password",
 		false,
 		"Reset the password for the admin user",
 	)
+
+	cmd.Flags().BoolVar(
+		&resetPodmanAuthFlag,
+		"reset-podman-auth",
+		false,
+		"Reset podman authentication using the system's current auth.json.",
+	)
+
+	cmd.Flags().BoolVar(
+		&resetCertificateFlag,
+		"reset-certificate",
+		false,
+		"Reset the Caddy SSL certificates by loading new custom certificates.\n"+
+			"Requires --ssl-cert and --ssl-key flags to specify the new certificate files.\n"+
+			"This will reload the certificates in Caddy without restarting the pod.\n"+
+			"Example:\n"+
+			"  ai-services catalog configure --runtime podman --reset-certificate --ssl-cert /path/to/cert.pem --ssl-key /path/to/key.pem\n",
+	)
 }
 
 func runResetPassword() error {
-	logger.Warningf("Resetting password will reload catalog pod!")
+	logger.Warningf("Resetting password will reload the catalog pod, catalog service will be temporarily unavailable during this time!")
 	// Confirm deletion
 	confirmed, err := utils.ConfirmAction("\nDo you want to continue, with password reset?")
 	if err != nil {
@@ -305,6 +347,40 @@ func runResetPassword() error {
 	}
 
 	return catalogPodman.ResetCatalogPassword()
+}
+
+func runResetPodmanAuth() error {
+	logger.Warningf("Resetting Podman auth will reload the catalog pod, catalog service will be temporarily unavailable during this time!")
+	// Confirm deletion
+	confirmed, err := utils.ConfirmAction("\nDo you want to continue, with podman auth reset?")
+	if err != nil {
+		return fmt.Errorf("failed to get confirmation: %w", err)
+	}
+
+	if !confirmed {
+		logger.Infoln("Catalog podman auth reset cancelled")
+
+		return nil
+	}
+
+	return catalogPodman.ResetPodmanAuth()
+}
+
+// sanitizeSSLPaths sanitizes SSL certificate and key paths to prevent path traversal attacks.
+// Only cleans if paths are provided (filepath.Clean("") returns ".").
+// Returns cleaned cert path and cleaned key path.
+func sanitizeSSLPaths(certPath, keyPath string) (string, string) {
+	cleanCertPath := ""
+	cleanKeyPath := ""
+
+	if certPath != "" {
+		cleanCertPath = filepath.Clean(certPath)
+	}
+	if keyPath != "" {
+		cleanKeyPath = filepath.Clean(keyPath)
+	}
+
+	return cleanCertPath, cleanKeyPath
 }
 
 // Made with Bob

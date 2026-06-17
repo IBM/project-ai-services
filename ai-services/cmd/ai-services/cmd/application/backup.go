@@ -34,18 +34,17 @@ Flags:
                If not specified, a filename will be auto-generated with timestamp
 
 Supported targets:
-  - opensearch: Backup OpenSearch indices and data (Podman only)
-  - digitize:   Backup digitize metadata (jobs and documents) (Podman only)
-
-Note:
-  - Backup is currently only supported for Podman runtime
-
+  - opensearch: Backup OpenSearch indices and data (Podman and OpenShift)
+  - digitize:   Backup digitize metadata (jobs and documents) (Podman and OpenShift)
 Examples:
   # Backup OpenSearch data with Podman (auto-generated filename)
   ai-services application backup myapp --target opensearch --runtime podman
 
-  # Backup OpenSearch data with custom filename
-  ai-services application backup myapp --target opensearch --filename mybackup.tar.gz --runtime podman
+  # Backup digitize data with OpenShift
+  ai-services application backup myapp --target digitize --runtime openshift
+
+  # Backup digitize data with custom filename
+  ai-services application backup myapp --target digitize --filename mybackup.tar.gz --runtime podman
 `,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -91,12 +90,7 @@ Examples:
 		cmd.SilenceUsage = true
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
-		logger.Infof("Runtime: %s\n", rt, 0)
-
-		// Check if OpenShift runtime is being used
-		if rt == "openshift" {
-			return fmt.Errorf("backup is not yet supported for OpenShift runtime")
-		}
+		logger.Infof("Runtime: %s\n", rt)
 
 		// Get absolute path to backup file if provided
 		var absFilename string

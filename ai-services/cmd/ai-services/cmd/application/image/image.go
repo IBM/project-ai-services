@@ -1,6 +1,7 @@
 package image
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -30,7 +31,7 @@ func getCatalogImages(templateID string) ([]string, error) {
 		return nil, fmt.Errorf("failed to create catalog provider: %w", err)
 	}
 
-	images, err := provider.GetCatalogImages(templateID)
+	images, err := provider.GetCatalogImages(context.Background(), templateID)
 	if err != nil {
 		return nil, err
 	}

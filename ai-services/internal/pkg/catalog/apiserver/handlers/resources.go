@@ -40,7 +40,7 @@ func (h *ResourcesHandler) GetResources(c *gin.Context) {
 	// Create runtime client
 	runtimeClient, err := vars.RuntimeFactory.Create("")
 	if err != nil {
-		logger.Errorf("Could not create runtime client: %v", err)
+		logger.ErrorfCtx(c.Request.Context(), "Could not create runtime client: %v", err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to create runtime client: %v", err),
 		})
@@ -51,7 +51,7 @@ func (h *ResourcesHandler) GetResources(c *gin.Context) {
 	// Get system info from runtime
 	sysInfo, err := runtimeClient.GetSystemInfo()
 	if err != nil {
-		logger.Errorf("Could not get system info: %v", err)
+		logger.ErrorfCtx(c.Request.Context(), "Could not get system info: %v", err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get system information: %v", err),
 		})

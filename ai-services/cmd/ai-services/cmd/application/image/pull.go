@@ -1,6 +1,7 @@
 package image
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -51,7 +52,7 @@ func pull(template string) error {
 	}
 
 	// Use shared helper function with retry logic
-	return image.PullImageFromRegistry(runtimeClient, images)
+	return image.PullImageFromRegistry(context.Background(), runtimeClient, images)
 }
 
 // pullCatalogImages pulls container images for services or architectures from the catalog.
@@ -75,7 +76,7 @@ func pullCatalogImages(templateID string) error {
 	}
 
 	// Use shared helper function with retry logic
-	if err := image.PullImageFromRegistry(runtimeClient, images); err != nil {
+	if err := image.PullImageFromRegistry(context.Background(), runtimeClient, images); err != nil {
 		return err
 	}
 

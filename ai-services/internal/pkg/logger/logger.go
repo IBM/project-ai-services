@@ -1,29 +1,38 @@
 package logger
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"runtime"
-	"time"
+	"strings"
 
 	"github.com/spf13/cobra"
+	logsv1 "k8s.io/component-base/logs/api/v1"
+	_ "k8s.io/component-base/logs/json/register" // Installs JSON driver into logsv1 engine registry
 	"k8s.io/klog/v2"
 )
 
+// ContextKey is a custom type for context keys to avoid collisions.
+type ContextKey string
+
+// RequestIDKey is the context key for storing request ID.
+const RequestIDKey ContextKey = "request_id"
+
 // Log levels following standard production hierarchy.
 const (
-	// VerbosityLevelDebug is the klog verbosity level for debug logs (2).
-	VerbosityLevelDebug = 2
+	// verbosityLevelDebug is the klog verbosity level for debug logs (2).
+	verbosityLevelDebug = 2
 
 	// LogLevelDebug is the string constant for debug severity level.
-	LogLevelDebug = "debug"
+	LogLevelDebug = "DEBUG"
 	// LogLevelInfo is the string constant for info severity level.
-	LogLevelInfo = "info"
+	LogLevelInfo = "INFO"
 	// LogLevelWarn is the string constant for warning severity level.
-	LogLevelWarn = "warning"
+	LogLevelWarn = "WARNING"
 	// LogLevelError is the string constant for error severity level.
-	LogLevelError = "error"
+	LogLevelError = "ERROR"
 
 	// EnvLogLevel is the environment variable name for log severity level (e.g., "info", "debug").
 	EnvLogLevel = "AI_SERVICES_LOG_LEVEL"
@@ -35,13 +44,6 @@ const (
 	// LogFormatService is the string constant for service format mode.
 	LogFormatService = "service"
 
-	// LogLevelInfoIndicator is the output indicator for info level logs ("I").
-	LogLevelInfoIndicator = "I"
-	// LogLevelWarningIndicator is the output indicator for warning level logs ("W").
-	LogLevelWarningIndicator = "W"
-	// LogLevelErrorIndicator is the output indicator for error level logs ("E").
-	LogLevelErrorIndicator = "E"
-
 	// LevelRankDebug is the numeric rank for debug severity level (0).
 	LevelRankDebug = iota
 	// LevelRankInfo is the numeric rank for info severity level (1).
@@ -52,18 +54,15 @@ const (
 	LevelRankError
 )
 
-// Global state to track whether we are in a service context.
-var isServiceEnv bool
-
-// activeMinLevel tracks the active numeric severity level for filtering.
-var activeMinLevel int
+// Global state tracking log configurations.
+var (
+	isServiceEnv   bool
+	activeMinLevel int
+	logOptions     *logsv1.LoggingConfiguration
+)
 
 // Init initializes the logger with appropriate settings based on environment.
 func Init() {
-	klog.InitFlags(flag.CommandLine)
-	_ = flag.CommandLine.Set("alsologtostderr", "true")
-	_ = flag.CommandLine.Set("skip_log_backtrace_at", ":0")
-
 	// 1. Resolve Log Format (Defaults to CLI for terminal users)
 	logFormat := os.Getenv(EnvLogFormat)
 	if logFormat == "" {
@@ -71,55 +70,74 @@ func Init() {
 	}
 	isServiceEnv = logFormat == LogFormatService
 
-	// 2. Resolve Log Severity Level (Defaults to "info")
-	logLevel := os.Getenv(EnvLogLevel)
+	// 2. Resolve Log Severity Level (Defaults to "INFO")
+	logLevel := strings.ToUpper(os.Getenv(EnvLogLevel))
 	if logLevel == "" {
 		logLevel = LogLevelInfo
 	}
 
-	// 3. Apply Format Configuration
-	if logFormat == LogFormatCLI {
-		_ = flag.CommandLine.Set("skip_headers", "true")
-		_ = flag.CommandLine.Set("skip_log_headers", "true")
+	// 3. Initialize standard Kubernetes Logging Configuration Struct
+	logOptions = logsv1.NewLoggingConfiguration()
+
+	// 4. Programmatically apply environment overrides into the API fields
+	if isServiceEnv {
+		logOptions.Format = "json" // Canonical identifier for JSON driver mapping
+		logOptions.Verbosity = logsv1.VerbosityLevel(0)
 	} else {
-		_ = flag.CommandLine.Set("skip_headers", "true") // Still true because custom wrapper handles the metadata
-		_ = flag.CommandLine.Set("logtostderr", "true")
+		logOptions.Format = "text"
+		logOptions.Verbosity = logsv1.VerbosityLevel(0)
+
+		// Bypasses the default klog boilerplate format in CLI environments
+		// This removes timestamps, PIDs, and source file metadata headers [1]
+		fs := flag.NewFlagSet("klog-override", flag.ContinueOnError)
+		klog.InitFlags(fs)
+		_ = fs.Set("logtostderr", "true")
+		_ = fs.Set("skip_headers", "true") // Strip default klog headers [1]
 	}
 
-	// 4. Apply Severity Thresholds and set active minimum level
+	// 5. Apply Severity Thresholds and set active minimum level
 	switch logLevel {
 	case LogLevelDebug:
-		_ = flag.CommandLine.Set("v", "2")
+		logOptions.Verbosity = logsv1.VerbosityLevel(verbosityLevelDebug)
 		activeMinLevel = LevelRankDebug
 	case LogLevelWarn:
-		_ = flag.CommandLine.Set("v", "0")
 		activeMinLevel = LevelRankWarn
 	case LogLevelError:
-		_ = flag.CommandLine.Set("v", "0")
 		activeMinLevel = LevelRankError
 	case LogLevelInfo:
 		fallthrough
 	default:
-		_ = flag.CommandLine.Set("v", "0")
 		activeMinLevel = LevelRankInfo
+	}
+
+	// 6. Bind runtime engine configurations using the official components pipeline
+	// This validation step wires up the underlying pluggable JSON encoders
+	if err := logsv1.ValidateAndApply(logOptions, nil); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to apply component-base logging configurations: %v\n", err)
 	}
 }
 
-// getCallerContext generates absolute paths and timestamps if service mode is active.
-func getCallerContext(skipDepth int, severity string) string {
-	if !isServiceEnv {
-		return ""
-	}
-	_, file, line, ok := runtime.Caller(skipDepth + 1)
-	if !ok {
-		return ""
+// buildKV builds key-value pairs for structured logging with level, caller_fullpath, and requestID.
+// depth specifies how many stack frames to skip when capturing the caller_fullpath location.
+func buildKV(ctx context.Context, level string, depth int) []any {
+	var kv []any
+	kv = append(kv, "level", level)
+
+	// Capture absolute path and line number cleanly
+	// depth+1 accounts for buildKV itself in the call stack
+	if _, file, line, ok := runtime.Caller(depth + 1); ok {
+		// Add absolute file path with line number
+		kv = append(kv, "caller_fullpath", fmt.Sprintf("%s:%d", file, line))
 	}
 
-	// Use standard klog MMDD format matching production specs
-	timestamp := time.Now().UTC().Format("0102 15:04:05.000000")
+	// Extract requestID from context if available
+	if ctx != nil {
+		if id, ok := ctx.Value(RequestIDKey).(string); ok && id != "" {
+			kv = append(kv, "requestID", id)
+		}
+	}
 
-	// Standardized output shape: "I0610 19:31:44.190447 /path/to/file.go:200] "
-	return fmt.Sprintf("%s%s %s:%d] ", severity, timestamp, file, line)
+	return kv
 }
 
 func InitFlags(cmd *cobra.Command) {
@@ -132,81 +150,132 @@ func Flush() {
 	klog.Flush()
 }
 
-func Warningln(msg string) {
+// Context-aware logging methods (new API).
+
+func WarninglnCtx(ctx context.Context, msg string) {
 	if activeMinLevel > LevelRankWarn {
 		return
 	}
-	ctx := getCallerContext(1, LogLevelWarningIndicator)
-	if ctx == "" {
-		klog.WarningDepth(1, "WARNING: ", msg)
+	if isServiceEnv {
+		klog.InfoSDepth(1, msg, buildKV(ctx, LogLevelWarn, 1)...)
 	} else {
-		klog.WarningDepth(1, ctx, msg)
+		klog.WarningDepth(1, "WARNING: ", msg)
 	}
+}
+
+func WarningfCtx(ctx context.Context, format string, args ...any) {
+	if activeMinLevel > LevelRankWarn {
+		return
+	}
+	formattedMsg := fmt.Sprintf(format, args...)
+	if isServiceEnv {
+		klog.InfoSDepth(1, formattedMsg, buildKV(ctx, LogLevelWarn, 1)...)
+	} else {
+		klog.WarningDepth(1, "WARNING: ", formattedMsg)
+	}
+}
+
+func ErrorlnCtx(ctx context.Context, msg string) {
+	if isServiceEnv {
+		klog.InfoSDepth(1, msg, buildKV(ctx, LogLevelError, 1)...)
+	} else {
+		klog.ErrorDepth(1, "ERROR: ", msg)
+	}
+}
+
+func ErrorfCtx(ctx context.Context, format string, args ...any) {
+	formattedMsg := fmt.Sprintf(format, args...)
+	if isServiceEnv {
+		klog.InfoSDepth(1, formattedMsg, buildKV(ctx, LogLevelError, 1)...)
+	} else {
+		klog.ErrorDepth(1, "ERROR: ", formattedMsg)
+	}
+}
+
+func InfolnCtx(ctx context.Context, msg string) {
+	if activeMinLevel > LevelRankInfo {
+		return
+	}
+
+	if isServiceEnv {
+		klog.InfoSDepth(1, msg, buildKV(ctx, LogLevelInfo, 1)...)
+	} else {
+		klog.InfoDepth(1, msg)
+	}
+}
+
+func InfofCtx(ctx context.Context, format string, args ...any) {
+	if activeMinLevel > LevelRankInfo {
+		return
+	}
+
+	formattedMsg := fmt.Sprintf(format, args...)
+	if isServiceEnv {
+		klog.InfoSDepth(1, formattedMsg, buildKV(ctx, LogLevelInfo, 1)...)
+	} else {
+		klog.InfoDepth(1, formattedMsg)
+	}
+}
+
+// DebuglnCtx logs a debug message with context and newline (verbosity level 2).
+func DebuglnCtx(ctx context.Context, msg string) {
+	if activeMinLevel > LevelRankDebug {
+		return
+	}
+
+	if isServiceEnv {
+		klog.V(klog.Level(verbosityLevelDebug)).InfoSDepth(1, msg, buildKV(ctx, LogLevelDebug, 1)...)
+	} else {
+		klog.V(klog.Level(verbosityLevelDebug)).InfoDepth(1, msg)
+	}
+}
+
+// DebugfCtx logs a formatted debug message with context (verbosity level 2).
+func DebugfCtx(ctx context.Context, format string, args ...any) {
+	if activeMinLevel > LevelRankDebug {
+		return
+	}
+
+	formattedMsg := fmt.Sprintf(format, args...)
+	if isServiceEnv {
+		klog.V(klog.Level(verbosityLevelDebug)).InfoSDepth(1, formattedMsg, buildKV(ctx, LogLevelDebug, 1)...)
+	} else {
+		klog.V(klog.Level(verbosityLevelDebug)).InfoDepth(1, formattedMsg)
+	}
+}
+
+// Backward-compatible methods (old API) - these use context.Background()
+
+func Warningln(msg string) {
+	WarninglnCtx(context.Background(), msg)
 }
 
 func Warningf(format string, args ...any) {
-	if activeMinLevel > LevelRankWarn {
-		return
-	}
-	ctx := getCallerContext(1, LogLevelWarningIndicator)
-	formattedMsg := fmt.Sprintf(format, args...)
-	if ctx == "" {
-		klog.WarningDepth(1, "WARNING: ", formattedMsg)
-	} else {
-		klog.WarningDepth(1, ctx, formattedMsg)
-	}
+	WarningfCtx(context.Background(), format, args...)
 }
 
 func Errorln(msg string) {
-	ctx := getCallerContext(1, LogLevelErrorIndicator)
-	if ctx == "" {
-		klog.ErrorDepth(1, "ERROR: ", msg)
-	} else {
-		klog.ErrorDepth(1, ctx, msg)
-	}
+	ErrorlnCtx(context.Background(), msg)
 }
 
 func Errorf(format string, args ...any) {
-	ctx := getCallerContext(1, LogLevelErrorIndicator)
-	formattedMsg := fmt.Sprintf(format, args...)
-	if ctx == "" {
-		klog.ErrorDepth(1, "ERROR: ", formattedMsg)
-	} else {
-		klog.ErrorDepth(1, ctx, formattedMsg)
-	}
+	ErrorfCtx(context.Background(), format, args...)
 }
 
-func Infoln(msg string, verbose ...int) {
-	// 1. Drop logs early if the environment is explicitly set to warning or error
-	if activeMinLevel > LevelRankInfo {
-		return
-	}
-
-	v := 0
-	if len(verbose) > 0 {
-		v = verbose[0]
-	}
-
-	ctx := getCallerContext(1, LogLevelInfoIndicator)
-	klog.V(klog.Level(v)).InfoDepth(1, ctx, msg)
+func Infoln(msg string) {
+	InfolnCtx(context.Background(), msg)
 }
 
 func Infof(format string, args ...any) {
-	// 1. Drop logs early if the environment is explicitly set to warning or error
-	if activeMinLevel > LevelRankInfo {
-		return
-	}
+	InfofCtx(context.Background(), format, args...)
+}
 
-	v := 0
-	// 2. Extract trailing verbosity argument safely to preserve backward compatibility
-	if len(args) > 0 {
-		if verbosity, ok := args[len(args)-1].(int); ok {
-			v = verbosity
-			args = args[:len(args)-1]
-		}
-	}
+// Debugln logs a debug message with newline using context.Background().
+func Debugln(msg string) {
+	DebuglnCtx(context.Background(), msg)
+}
 
-	ctx := getCallerContext(1, LogLevelInfoIndicator)
-	formattedMsg := fmt.Sprintf(format, args...)
-	klog.V(klog.Level(v)).InfoDepth(1, ctx, formattedMsg)
+// Debugf logs a formatted debug message using context.Background().
+func Debugf(format string, args ...any) {
+	DebugfCtx(context.Background(), format, args...)
 }

@@ -33,7 +33,7 @@ var ApplicationCmd = &cobra.Command{
 		}
 
 		vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-		logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
+		logger.Debugf("Using runtime: %s\n", rt)
 
 		return nil
 	},

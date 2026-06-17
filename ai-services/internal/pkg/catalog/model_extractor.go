@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -13,13 +14,13 @@ import (
 // This is the main entry point for catalog-based model collection from CLI or API.
 // excludeComponentProviders is a variadic parameter that allows excluding specific components provider by ID.
 // Note: Only components have models in their schemas; services do not define models.
-func (p *CatalogProvider) GetCatalogModels(templateID string, excludeComponentProviders ...string) ([]string, error) {
+func (p *CatalogProvider) GetCatalogModels(ctx context.Context, templateID string, excludeComponentProviders ...string) ([]string, error) {
 	allModels := make(map[string]bool)
 
 	// Try to load as architecture first
 	arch, err := p.LoadArchitecture(templateID)
 	if err == nil {
-		if err := p.collectArchitectureModels(arch.Services, allModels, excludeComponentProviders); err != nil {
+		if err := p.collectArchitectureModels(ctx, arch.Services, allModels, excludeComponentProviders); err != nil {
 			return nil, err
 		}
 
@@ -30,7 +31,7 @@ func (p *CatalogProvider) GetCatalogModels(templateID string, excludeComponentPr
 	service, err := p.LoadService(templateID)
 	if err == nil {
 		// Only collect component models (services don't have models in schemas)
-		if err := p.collectComponentsModels(service.Dependencies, allModels, excludeComponentProviders); err != nil {
+		if err := p.collectComponentsModels(ctx, service.Dependencies, allModels, excludeComponentProviders); err != nil {
 			return nil, err
 		}
 
@@ -41,7 +42,7 @@ func (p *CatalogProvider) GetCatalogModels(templateID string, excludeComponentPr
 }
 
 // collectArchitectureModels collects models from all component dependencies across all services in an architecture.
-func (p *CatalogProvider) collectArchitectureModels(services []types.ServiceReference, allModels map[string]bool, excludeComponentProviders []string) error {
+func (p *CatalogProvider) collectArchitectureModels(ctx context.Context, services []types.ServiceReference, allModels map[string]bool, excludeComponentProviders []string) error {
 	for _, svcRef := range services {
 		service, err := p.LoadService(svcRef.ID)
 		if err != nil {
@@ -49,7 +50,7 @@ func (p *CatalogProvider) collectArchitectureModels(services []types.ServiceRefe
 		}
 
 		// Collect component models from service dependencies
-		if err := p.collectComponentsModels(service.Dependencies, allModels, excludeComponentProviders); err != nil {
+		if err := p.collectComponentsModels(ctx, service.Dependencies, allModels, excludeComponentProviders); err != nil {
 			return fmt.Errorf("failed to collect models for service %s: %w", svcRef.ID, err)
 		}
 	}
@@ -58,7 +59,7 @@ func (p *CatalogProvider) collectArchitectureModels(services []types.ServiceRefe
 }
 
 // collectComponentsModels collects models for components based on dependencies.
-func (p *CatalogProvider) collectComponentsModels(dependencies []types.DependencyReference, allModels map[string]bool, excludeComponentProviders []string) error {
+func (p *CatalogProvider) collectComponentsModels(ctx context.Context, dependencies []types.DependencyReference, allModels map[string]bool, excludeComponentProviders []string) error {
 	if len(dependencies) == 0 {
 		return nil
 	}
@@ -69,7 +70,7 @@ func (p *CatalogProvider) collectComponentsModels(dependencies []types.Dependenc
 	}
 
 	for _, dep := range dependencies {
-		if err := p.collectComponentsByTypeModels(dep.ID, components, allModels, excludeComponentProviders); err != nil {
+		if err := p.collectComponentsByTypeModels(ctx, dep.ID, components, allModels, excludeComponentProviders); err != nil {
 			return err
 		}
 	}
@@ -78,7 +79,7 @@ func (p *CatalogProvider) collectComponentsModels(dependencies []types.Dependenc
 }
 
 // collectComponentsByTypeModels collects models for all components of a specific type.
-func (p *CatalogProvider) collectComponentsByTypeModels(componentType string, components []types.Component, allModels map[string]bool, excludeComponentProviders []string) error {
+func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, componentType string, components []types.Component, allModels map[string]bool, excludeComponentProviders []string) error {
 	for _, comp := range components {
 		if comp.ComponentType != componentType {
 			continue
@@ -88,7 +89,7 @@ func (p *CatalogProvider) collectComponentsByTypeModels(componentType string, co
 		excluded := false
 		for _, excludedID := range excludeComponentProviders {
 			if strings.EqualFold(comp.ID, excludedID) {
-				logger.Infof("Skipping model extraction for excluded component: %s/%s\n", comp.ComponentType, comp.ID, logger.VerbosityLevelDebug)
+				logger.DebugfCtx(ctx, "Skipping model extraction for excluded component: %s/%s\n", comp.ComponentType, comp.ID)
 				excluded = true
 
 				break
@@ -98,7 +99,7 @@ func (p *CatalogProvider) collectComponentsByTypeModels(componentType string, co
 			continue
 		}
 
-		if err := p.addComponentModels(comp.ComponentType, comp.ID, allModels); err != nil {
+		if err := p.addComponentModels(ctx, comp.ComponentType, comp.ID, allModels); err != nil {
 			return fmt.Errorf("failed to collect models for component %s/%s: %w", comp.ComponentType, comp.ID, err)
 		}
 	}
@@ -108,16 +109,16 @@ func (p *CatalogProvider) collectComponentsByTypeModels(componentType string, co
 
 // addComponentModels adds component models to the provided map.
 // For components, models are read from values.schema.json file using GetComponentProviderParams.
-func (p *CatalogProvider) addComponentModels(componentType, componentID string, allModels map[string]bool) error {
+func (p *CatalogProvider) addComponentModels(ctx context.Context, componentType, componentID string, allModels map[string]bool) error {
 	// Use existing GetComponentProviderParams to load the schema
-	schema, err := p.GetComponentProviderParams(componentType, componentID)
+	schema, err := p.GetComponentProviderParams(ctx, componentType, componentID)
 	if err != nil {
 		return fmt.Errorf("failed to get component schema for %s/%s: %w", componentType, componentID, err)
 	}
 
 	// If schema is empty, skip this component
 	if len(schema) == 0 {
-		logger.Infof("No schema found for component %s/%s, skipping model extraction\n", componentType, componentID, logger.VerbosityLevelDebug)
+		logger.DebugfCtx(ctx, "No schema found for component %s/%s, skipping model extraction\n", componentType, componentID)
 
 		return nil
 	}

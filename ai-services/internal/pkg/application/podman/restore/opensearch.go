@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	appcommon "github.com/project-ai-services/ai-services/internal/pkg/application/common"
+	"github.com/project-ai-services/ai-services/internal/pkg/application/common/opensearch"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/podman/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
@@ -17,22 +19,21 @@ import (
 const (
 	defaultOpenSearchHost = "localhost:9200"
 	containerBackupPath   = "/tmp/opensearch_backup"
-	maxIndexNameLength    = 255
 )
 
 // RestoreOpenSearch restores OpenSearch data using podman sidecar approach.
 func RestoreOpenSearch(ctx context.Context, templateID, backupFile string) error {
-	logger.Infof("Restoring OpenSearch data for template: %s\n", templateID, 0)
-	logger.Infof("OpenSearch Import (Sidecar Container Approach)\n", 0)
+	logger.Infof("Restoring OpenSearch data for template: %s\n", templateID)
+	logger.Infoln("OpenSearch Import (Sidecar Container Approach)")
 
-	// Find OpenSearch container and get pod ID
-	containerName, podID, err := findContainerAndPod(ctx, templateID)
+	// Find OpenSearch container and get pod ID using common function
+	containerName, podID, err := common.FindContainerAndPod(ctx, templateID)
 	if err != nil {
 		return err
 	}
 
-	logger.Infof("Container: %s\n", containerName, 0)
-	logger.Infof("Pod ID: %s\n", podID, 0)
+	logger.Infof("Container: %s\n", containerName)
+	logger.Infof("Pod ID: %s\n", podID)
 
 	// Extract and locate backup directory
 	backupDir, cleanup, err := ExtractAndLocateBackup(backupFile)
@@ -43,11 +44,6 @@ func RestoreOpenSearch(ctx context.Context, templateID, backupFile string) error
 
 	// Manage sidecar lifecycle and perform restore
 	return manageSidecarWithGo(ctx, podID, backupDir)
-}
-
-// findContainerAndPod finds the OpenSearch container and its pod ID.
-func findContainerAndPod(ctx context.Context, templateID string) (string, string, error) {
-	return common.FindContainerAndPod(ctx, templateID)
 }
 
 // manageSidecarWithGo manages the lifecycle of a podman sidecar container using runtime package.
@@ -99,7 +95,7 @@ func prepareSidecarAndRestore(ctx context.Context, containerID, backupDir string
 		return fmt.Errorf("restore failed: %w", err)
 	}
 
-	logger.Infof("OpenSearch import completed!\n", 0)
+	logger.Infoln("OpenSearch import completed!")
 
 	return nil
 }
@@ -123,7 +119,7 @@ func determineBackupPaths(backupDir string) (string, string, error) {
 
 // copyBackupToSidecar copies backup files to the sidecar container.
 func copyBackupToSidecar(pc *podman.PodmanClient, containerID, backupOSDir, containerBackupPath string) error {
-	logger.Infof("Copying backup files to sidecar...\n", 0)
+	logger.Infoln("Copying backup files to sidecar...")
 
 	if err := pc.CopyDirToContainer(containerID, backupOSDir, containerBackupPath); err != nil {
 		return fmt.Errorf("failed to copy backup files: %w", err)
@@ -150,7 +146,7 @@ func performRestoreWithCurl(ctx context.Context, pc *podman.PodmanClient, contai
 		return err
 	}
 
-	logger.Infof("Found %d indices to restore\n", len(indices), 0)
+	logger.Infof("Found %d indices to restore\n", len(indices))
 
 	// Restore each index with error tracking
 	return restoreAllIndices(ctx, pc, containerID, osHost, osPassword, backupDir, indices)
@@ -189,7 +185,7 @@ func listBackupIndices(pc *podman.PodmanClient, containerID, backupDir string) (
 		if indexName == "" {
 			continue
 		}
-		if err := validateIndexName(indexName); err != nil {
+		if err := appcommon.ValidateIndexName(indexName); err != nil {
 			logger.Warningf("Skipping invalid index name %s: %v\n", indexName, err)
 
 			continue
@@ -202,62 +198,6 @@ func listBackupIndices(pc *podman.PodmanClient, containerID, backupDir string) (
 	}
 
 	return validIndices, nil
-}
-
-// validateIndexName validates an index name to prevent command injection.
-func validateIndexName(indexName string) error {
-	if err := validateIndexNameLength(indexName); err != nil {
-		return err
-	}
-
-	if err := validateIndexNameCharacters(indexName); err != nil {
-		return err
-	}
-
-	if err := validateIndexNamePrefix(indexName); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// validateIndexNameLength checks if the index name length is valid.
-func validateIndexNameLength(indexName string) error {
-	if len(indexName) == 0 || len(indexName) > maxIndexNameLength {
-		return fmt.Errorf("invalid index name length: %d", len(indexName))
-	}
-
-	return nil
-}
-
-// validateIndexNameCharacters checks if all characters in the index name are valid.
-func validateIndexNameCharacters(indexName string) error {
-	// OpenSearch index names must be lowercase and can contain: letters, numbers, -, _, +, .
-	// Reject any characters that could be used for command injection
-	for _, char := range indexName {
-		if !isValidIndexChar(char) {
-			return fmt.Errorf("invalid character in index name: %c", char)
-		}
-	}
-
-	return nil
-}
-
-// isValidIndexChar checks if a character is valid for an index name.
-func isValidIndexChar(char rune) bool {
-	return (char >= 'a' && char <= 'z') ||
-		(char >= '0' && char <= '9') ||
-		char == '-' || char == '_' || char == '+' || char == '.'
-}
-
-// validateIndexNamePrefix checks if the index name starts with a valid character.
-func validateIndexNamePrefix(indexName string) error {
-	// Reject names starting with special characters that could be problematic
-	if indexName[0] == '-' || indexName[0] == '_' || indexName[0] == '+' {
-		return fmt.Errorf("index name cannot start with special character")
-	}
-
-	return nil
 }
 
 // restoreAllIndices restores all indices and tracks errors.
@@ -289,7 +229,7 @@ func restoreAllIndices(ctx context.Context, pc *podman.PodmanClient, containerID
 	if len(errors) > 0 {
 		logger.Warningf("Restore completed with %d errors. Successfully restored %d/%d indices\n", len(errors), restoredCount, len(indices))
 	} else {
-		logger.Infof("✓ Restore completed successfully. Restored %d indices\n", restoredCount, 0)
+		logger.Infof("✓ Restore completed successfully. Restored %d indices\n", restoredCount)
 	}
 
 	return nil
@@ -299,7 +239,7 @@ func restoreAllIndices(ctx context.Context, pc *podman.PodmanClient, containerID
 // Password is passed via environment variable to avoid exposure in process lists.
 // The restore process follows: cleanup (delete existing) -> create -> insert data.
 func restoreIndexWithCurl(ctx context.Context, pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir, indexName string) error {
-	logger.Infof("  Restoring index: %s\n", indexName, 0)
+	logger.Infof("  Restoring index: %s\n", indexName)
 
 	// Verify required backup files exist
 	if err := verifyBackupFiles(pc, containerID, backupDir, indexName); err != nil {
@@ -307,33 +247,33 @@ func restoreIndexWithCurl(ctx context.Context, pc *podman.PodmanClient, containe
 	}
 
 	// Step 1: Cleanup - Delete existing index if it exists
-	logger.Infof("    Cleaning up existing index...\n", 0)
+	logger.Infoln("    Cleaning up existing index...")
 	if err := deleteExistingIndex(pc, containerID, osHost, osPassword, indexName); err != nil {
 		logger.Warningf("    Failed to delete existing index (may not exist): %v\n", err)
 	} else {
-		logger.Infof("    ✓ Existing index cleaned up\n", 0)
+		logger.Infof("    ✓ Existing index cleaned up\n")
 	}
 
 	// Step 2: Create index with settings and mappings
-	logger.Infof("    Creating index with mappings...\n", 0)
+	logger.Infof("    Creating index with mappings...\n")
 	if err := createIndexWithMappings(pc, containerID, osHost, osPassword, backupDir, indexName); err != nil {
 		return err
 	}
-	logger.Infof("    ✓ Index created\n", 0)
+	logger.Infof("    ✓ Index created\n")
 
 	// Step 3: Insert data - Bulk index documents
-	logger.Infof("    Inserting documents...\n", 0)
+	logger.Infof("    Inserting documents...\n")
 	if err := bulkIndexDocuments(pc, containerID, osHost, osPassword, backupDir, indexName); err != nil {
 		return err
 	}
-	logger.Infof("    ✓ Documents inserted\n", 0)
+	logger.Infof("    ✓ Documents inserted\n")
 
 	// Step 4: Refresh index to make documents searchable
 	if err := refreshIndex(pc, containerID, osHost, osPassword, indexName); err != nil {
 		return err
 	}
 
-	logger.Infof("    ✓ Index restored successfully\n", 0)
+	logger.Infof("    ✓ Index restored successfully\n")
 
 	return nil
 }
@@ -358,50 +298,24 @@ func verifyBackupFiles(pc *podman.PodmanClient, containerID, backupDir, indexNam
 
 // deleteExistingIndex deletes an existing index if it exists.
 func deleteExistingIndex(pc *podman.PodmanClient, containerID, osHost, osPassword, indexName string) error {
-	// Use environment variable for password to avoid exposure in process list
-	// Check if index exists first, then delete it
-	deleteScript := fmt.Sprintf(`
-# Check if index exists
-RESPONSE=$(curl -k -u "admin:${OS_PASSWORD}" "https://%s/%s" -X HEAD -s -w "%%{http_code}" -o /dev/null)
-if [ "$RESPONSE" = "200" ]; then
-	# Index exists, delete it
-	DELETE_RESPONSE=$(curl -k -u "admin:${OS_PASSWORD}" "https://%s/%s" -X DELETE -s -w "\n%%{http_code}")
-	HTTP_CODE=$(echo "$DELETE_RESPONSE" | tail -n 1)
-	if [ "$HTTP_CODE" != "200" ]; then
-		echo "Failed to delete index. HTTP code: $HTTP_CODE" >&2
-		exit 1
-	fi
-	echo "Index deleted successfully"
-else
-	echo "Index does not exist, skipping delete"
-fi
-`, osHost, indexName, osHost, indexName)
+	// Generate delete script using common function
+	deleteScript := opensearch.GenerateDeleteIndexScript(osHost, indexName)
 
-	return pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, deleteScript)
+	// Wrap with password environment variable
+	wrappedScript := opensearch.WrapScriptWithPassword(osPassword, deleteScript)
+
+	return pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, wrappedScript)
 }
 
 // createIndexWithMappings creates an index with settings and mappings.
 func createIndexWithMappings(pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir, indexName string) error {
-	// Use environment variable for password and validate HTTP response
-	createScript := fmt.Sprintf(`
-MAPPING=$(cat %s/%s_mapping.json | jq -c '."%s".mappings')
-SETTINGS=$(cat %s/%s_settings.json | jq -c '."%s".settings.index | del(.creation_date, .uuid, .version, .provided_name)')
-BODY=$(jq -n --argjson settings "{\"index\": $SETTINGS}" --argjson mappings "$MAPPING" '{settings: $settings, mappings: $mappings}')
-RESPONSE=$(curl -k -u "admin:${OS_PASSWORD}" "https://%s/%s" -X PUT -H "Content-Type: application/json" -d "$BODY" -s -w "\n%%{http_code}")
-HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
-BODY=$(echo "$RESPONSE" | head -n -1)
-if [ "$HTTP_CODE" != "200" ]; then
-	echo "Failed to create index. HTTP code: $HTTP_CODE, Response: $BODY" >&2
-	exit 1
-fi
-# Validate response contains acknowledged field
-if ! echo "$BODY" | jq -e '.acknowledged == true' > /dev/null 2>&1; then
-	echo "Index creation not acknowledged. Response: $BODY" >&2
-	exit 1
-fi
-`, backupDir, indexName, indexName, backupDir, indexName, indexName, osHost, indexName)
+	// Generate create index script using common function
+	createScript := opensearch.GenerateCreateIndexScript(osHost, backupDir, indexName)
 
-	if err := pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, createScript); err != nil {
+	// Wrap with password environment variable
+	wrappedScript := opensearch.WrapScriptWithPassword(osPassword, createScript)
+
+	if err := pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, wrappedScript); err != nil {
 		return fmt.Errorf("failed to create index: %w", err)
 	}
 
@@ -410,55 +324,13 @@ fi
 
 // bulkIndexDocuments performs bulk indexing of documents.
 func bulkIndexDocuments(pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir, indexName string) error {
-	// Use environment variable for password and validate HTTP response
-	// Process documents in batches of 1000 to balance speed and request size limits
-	bulkScript := fmt.Sprintf(`
-# Batch size for bulk indexing (increased for faster processing)
-BATCH_SIZE=1000
-DATA_FILE="%s/%s_data.json"
-INDEX_NAME="%s"
-OS_HOST="%s"
+	// Generate bulk index script using common function
+	bulkScript := opensearch.GenerateBulkIndexScript(osHost, backupDir, indexName)
 
-# Count total documents
-TOTAL_DOCS=$(jq 'length' "$DATA_FILE")
-echo "Total documents to index: $TOTAL_DOCS"
+	// Wrap with password environment variable
+	wrappedScript := opensearch.WrapScriptWithPassword(osPassword, bulkScript)
 
-# Calculate number of batches
-BATCHES=$(( ($TOTAL_DOCS + $BATCH_SIZE - 1) / $BATCH_SIZE ))
-echo "Processing in $BATCHES batch(es) of up to $BATCH_SIZE documents"
-
-# Process each batch
-BATCH_NUM=0
-while [ $BATCH_NUM -lt $BATCHES ]; do
-	START_IDX=$(( $BATCH_NUM * $BATCH_SIZE ))
-	echo "Processing batch $(( $BATCH_NUM + 1 ))/$BATCHES (starting at document $START_IDX)..."
-	
-	# Extract batch and format for bulk API
-	BATCH_DATA=$(jq -c ".[$START_IDX:$START_IDX+$BATCH_SIZE] | .[] | {\"index\": {\"_index\": \"$INDEX_NAME\", \"_id\": ._id}}, ._source" "$DATA_FILE")
-	
-	# Send batch to OpenSearch
-	RESPONSE=$(echo "$BATCH_DATA" | curl -k -u "admin:${OS_PASSWORD}" "https://$OS_HOST/_bulk" -X POST -H "Content-Type: application/x-ndjson" --data-binary @- -s -w "\n%%{http_code}")
-	HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
-	BODY=$(echo "$RESPONSE" | head -n -1)
-	
-	if [ "$HTTP_CODE" != "200" ]; then
-		echo "Failed to bulk index documents. HTTP code: $HTTP_CODE, Response: $BODY" >&2
-		exit 1
-	fi
-	
-	# Validate response for errors
-	if echo "$BODY" | jq -e '.errors == true' > /dev/null 2>&1; then
-		echo "Bulk indexing had errors in batch $(( $BATCH_NUM + 1 )). Response: $BODY" >&2
-		exit 1
-	fi
-	
-	BATCH_NUM=$(( $BATCH_NUM + 1 ))
-done
-
-echo "Successfully indexed all $TOTAL_DOCS documents in $BATCHES batch(es)"
-`, backupDir, indexName, indexName, osHost)
-
-	if err := pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, bulkScript); err != nil {
+	if err := pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, wrappedScript); err != nil {
 		return fmt.Errorf("failed to bulk index documents: %w", err)
 	}
 
@@ -467,9 +339,13 @@ echo "Successfully indexed all $TOTAL_DOCS documents in $BATCHES batch(es)"
 
 // refreshIndex refreshes an index to make documents searchable.
 func refreshIndex(pc *podman.PodmanClient, containerID, osHost, osPassword, indexName string) error {
-	refreshScript := fmt.Sprintf(`curl -k -u "admin:${OS_PASSWORD}" "https://%s/%s/_refresh" -X POST -s -o /dev/null`, osHost, indexName)
+	// Generate refresh script using common function
+	refreshScript := opensearch.GenerateRefreshIndexScript(osHost, indexName)
 
-	if err := pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, refreshScript); err != nil {
+	// Wrap with password environment variable
+	wrappedScript := opensearch.WrapScriptWithPassword(osPassword, refreshScript)
+
+	if err := pc.ExecInContainerWithEnv(containerID, map[string]string{"OS_PASSWORD": osPassword}, wrappedScript); err != nil {
 		return fmt.Errorf("failed to refresh index: %w", err)
 	}
 
