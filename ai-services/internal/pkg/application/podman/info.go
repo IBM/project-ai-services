@@ -1,56 +1,139 @@
 package podman
 
 import (
+	"bytes"
 	"fmt"
+	"strings"
+	"text/template"
 
-	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // Info displays detailed information about an application.
 func (p *PodmanApplication) Info(opts types.InfoOptions) error {
-	// Step1: Do List pods and filter for given application name
-
-	listFilters := map[string][]string{}
-	if opts.Name != "" {
-		listFilters["label"] = []string{fmt.Sprintf("ai-services.io/application=%s", opts.Name)}
-	}
-
-	pods, err := p.runtime.ListPods(listFilters)
+	appClient, err := catalogClient.NewApplicationClient()
 	if err != nil {
-		return fmt.Errorf("failed to list pods: %w", err)
+		return fmt.Errorf("failed to create application client: %w", err)
 	}
 
-	// If there exists no pod for given application name, then fail saying application for given application name doesnt exist
-	if len(pods) == 0 {
-		logger.Infof("Application: '%s' does not exist.", opts.Name)
+	app, err := cliUtils.GetAppByName(appClient, opts.Name)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			logger.Warningf("Application: '%s' does not exist", opts.Name)
 
-		return nil
+			return nil
+		}
+
+		return err
 	}
 
-	logger.Infoln("Application Name: " + opts.Name)
+	application, err := appClient.GetApplication(app.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get application: %w", err)
+	}
 
-	// Step2: From one of the pod, fetch and print the template and version label values
+	appPS, err := appClient.GetApplicationPS(app.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get application pods: %w", err)
+	}
 
-	appTemplate := pods[0].Labels[string(vars.TemplateLabel)]
-	logger.Infoln("Application Template: " + appTemplate)
+	logger.Infoln("Application Name: " + application.Name)
+	logger.Infoln("Application Template: " + application.CatalogID)
+	logger.Infof("Application Version: " + application.Version)
 
-	version := pods[0].Labels[string(vars.VersionLabel)]
-	logger.Infoln("Version: " + version)
+	return printServicesInfo(application.Services, appPS)
+}
 
-	// Step3: Read and print the info.md file
-	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
+func printServicesInfo(services []catalogTypes.ApplicationService, appPS *catalogTypes.ApplicationPSResponse) error {
+	catalogProvider, err := catalog.NewCatalogProvider()
+	if err != nil {
+		return fmt.Errorf("failed to create catalog provider: %w", err)
+	}
 
-	if err := helpers.PrintInfo(tp, p.runtime, opts.Name, appTemplate); err != nil {
-		// not failing if overall info command, if we cannot display Info
-		logger.Errorf("failed to display info: %v\n", err)
+	logger.Infoln("Info:")
+	logger.Infoln("-------")
+	logger.Infoln("Day N: ")
 
-		return nil
+	for _, service := range services {
+		params := map[string]string{}
+		params["SERVICE_NAME"] = service.Type
+
+		uiStatus, apiSatatus := getContainerStatus(appPS.Services, service.CatalogID)
+		params["UI_STATUS"] = uiStatus
+		params["API_STATUS"] = apiSatatus
+
+		for _, endpoint := range service.Endpoints {
+			urlType, urlTypeOk := endpoint["type"].(string)
+			url, urlOk := endpoint["url"].(string)
+			if urlTypeOk && urlOk {
+				params[strings.ToUpper(urlType)+"_URL"] = url
+			}
+		}
+
+		tmpls, err := catalogProvider.LoadServicesMD(service.CatalogID)
+		if err != nil {
+			return fmt.Errorf("failed to load service md files: %w", err)
+		}
+
+		err = printInfo(tmpls, params, service.CatalogID)
+		if err != nil {
+			return fmt.Errorf("failed to load application info: %w", err)
+		}
 	}
 
 	return nil
 }
+
+func getContainerStatus(services []catalogTypes.Pod, catalogID string) (string, string) {
+	uiStatus, apiStatus := "", ""
+
+	for _, servicePod := range services {
+		if strings.HasPrefix(servicePod.PodName, catalogID) {
+			for _, podContainer := range servicePod.Containers {
+				// TODO: Set the container status in info.md generically
+				uiContainerName := fmt.Sprintf("%s-ui", servicePod.PodName)
+				apiContainerName := ""
+				if strings.Contains(podContainer.Name, "backend-server") {
+					apiContainerName = podContainer.Name
+				} else {
+					apiContainerName = fmt.Sprintf("%s-%s-api", servicePod.PodName, catalogID)
+				}
+
+				if podContainer.Name == uiContainerName && podContainer.Healthy {
+					uiStatus = "running"
+				}
+				if podContainer.Name == apiContainerName && podContainer.Healthy {
+					apiStatus = "running"
+				}
+			}
+		}
+	}
+
+	return uiStatus, apiStatus
+}
+
+func printInfo(tmpls map[string]*template.Template, params map[string]string, appTemplate string) error {
+	tmpl, ok := tmpls["info.md"]
+	if !ok {
+		logger.Warningf("failed to find info.md template")
+
+		return nil
+	}
+
+	var rendered bytes.Buffer
+	if err := tmpl.Execute(&rendered, params); err != nil {
+		return fmt.Errorf("failed to execute info.md: %w", err)
+	}
+	value := rendered.String()
+	value = strings.ReplaceAll(value, "Day N:\n", "")
+	logger.Infof(value)
+
+	return nil
+}
+
+// Made with Bob
