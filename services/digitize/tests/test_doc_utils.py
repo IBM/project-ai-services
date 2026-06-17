@@ -403,7 +403,7 @@ class TestProcessTableLanguageSelection:
         with patch.object(Path, 'write_text'):
             process_table(
                 converted_doc=converted_doc,
-                pdf_path="sample.pdf",
+                doc_path="sample.pdf",
                 out_path=Path("/tmp/out.json"),
                 gen_model="test-model",
                 gen_endpoint="http://llm",
@@ -475,7 +475,7 @@ class TestProcessTableLanguageSelection:
         with patch.object(Path, 'write_text'):
             process_table(
                 converted_doc=converted_doc,
-                pdf_path="sample.pdf",
+                doc_path="sample.pdf",
                 out_path=Path("/tmp/out.json"),
                 gen_model="test-model",
                 gen_endpoint="http://llm",
@@ -548,7 +548,7 @@ class TestProcessTableLanguageSelection:
         with patch.object(Path, 'write_text'):
             process_table(
                 converted_doc=converted_doc,
-                pdf_path="sample.pdf",
+                doc_path="sample.pdf",
                 out_path=Path("/tmp/out.json"),
                 gen_model="test-model",
                 gen_endpoint="http://llm",
@@ -622,7 +622,7 @@ class TestProcessTableLanguageSelection:
         with patch.object(Path, 'write_text'):
             process_table(
                 converted_doc=converted_doc,
-                pdf_path="sample.pdf",
+                doc_path="sample.pdf",
                 out_path=Path("/tmp/out.json"),
                 gen_model="test-model",
                 gen_endpoint="http://llm",

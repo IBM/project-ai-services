@@ -327,10 +327,10 @@ class RAGConfig(BaseSettings):
         
         DEFAULT_SYSTEM_PROMPT: ClassVar[str] = (
             "You are a helpful, conversational AI assistant. "
-            "The conversation language is fixed to be English"
+            "The conversation language is fixed to be English. "
             "Engage naturally with users across multiple turns of conversation. "
             "Provide clear, accurate, and contextually relevant responses. "
-            "Reference previous exchanges when appropriate to maintain conversation flow."
+            "Reference previous exchanges when appropriate to maintain conversation flow. "
             "Answer only the specific question asked. Do not add conversational filler, offer additional assistance, suggest follow-up steps, or ask follow-up questions at the end of your response. End your response immediately once the question has been answered."
         )
         
@@ -347,7 +347,8 @@ class RAGConfig(BaseSettings):
                 "Instructions: Answer the user's question based on the retrieved context above. "
                 "Consider the conversation history to provide contextually relevant responses. "
                 "Be conversational and reference previous exchanges when relevant. "
-                "If the context doesn't contain enough information, acknowledge this clearly."
+                "If the context doesn't contain enough information, acknowledge this clearly. "
+                "IMPORTANT: Limit your response to a maximum of {max_tokens} tokens. Be concise and focused."
             ),
             description="RAG system prompt template with context and rephrased query",
         )
@@ -379,7 +380,8 @@ class RAGConfig(BaseSettings):
                 "Anweisungen: Beantworten Sie die aktuelle Frage des Nutzers anhand des oben abgerufenen Kontexts. "
                 "Halten Sie einen natürlichen Gesprächsfluss aufrecht und beziehen Sie frühere Gesprächsbeiträge ein, wenn sie relevant sind. "
                 "Antworten Sie ausschließlich auf Deutsch, weil die Sitzungssprache anhand der ersten Nachricht des Nutzers festgelegt wurde. "
-                "Wenn der abgerufene Kontext nicht genügend Informationen enthält, sagen Sie das klar."
+                "Wenn der abgerufene Kontext nicht genügend Informationen enthält, sagen Sie das klar. "
+                "WICHTIG: Begrenzen Sie Ihre Antwort auf maximal {max_tokens} Token. Seien Sie prägnant und fokussiert."
             ),
             description="German conversational RAG system prompt template with context and search query",
         )
@@ -476,7 +478,8 @@ class RAGConfig(BaseSettings):
                 "Istruzioni: Rispondi alla domanda attuale dell'utente in base al contesto recuperato sopra. "
                 "Mantieni un flusso conversazionale naturale e fai riferimento ai messaggi precedenti quando sono rilevanti. "
                 "Rispondi esclusivamente in italiano, perché la lingua della sessione è stata fissata in base al primo messaggio dell'utente. "
-                "Se il contesto recuperato non contiene informazioni sufficienti, dichiaralo chiaramente."
+                "Se il contesto recuperato non contiene informazioni sufficienti, dichiaralo chiaramente. "
+                "IMPORTANTE: Limita la tua risposta a un massimo di {max_tokens} token. Sii conciso e mirato."
             ),
             description="Italian conversational RAG system prompt template with context and search query",
         )
@@ -508,7 +511,8 @@ class RAGConfig(BaseSettings):
                 "Instructions: Répondez à la question actuelle de l'utilisateur en vous basant sur le contexte récupéré ci-dessus. "
                 "Maintenez un flux conversationnel naturel et faites référence aux messages précédents lorsqu'ils sont pertinents. "
                 "Répondez exclusivement en français, car la langue de session a été fixée en fonction du premier message de l'utilisateur. "
-                "Si le contexte récupéré ne contient pas suffisamment d'informations, indiquez-le clairement."
+                "Si le contexte récupéré ne contient pas suffisamment d'informations, indiquez-le clairement. "
+                "IMPORTANT: Limitez votre réponse à un maximum de {max_tokens} tokens. Soyez concis et ciblé."
             ),
             description="French conversational RAG system prompt template with context and search query",
         )

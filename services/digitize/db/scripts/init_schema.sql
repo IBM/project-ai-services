@@ -6,11 +6,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     job_name VARCHAR(500),
     operation VARCHAR(50) NOT NULL,
     status VARCHAR(50) NOT NULL,
-    submitted_at TIMESTAMP NOT NULL,  -- When user submitted the job
-    completed_at TIMESTAMP,           -- When job finished processing
+    submitted_at TIMESTAMP WITH TIME ZONE NOT NULL,  -- When user submitted the job (UTC)
+    completed_at TIMESTAMP WITH TIME ZONE,           -- When job finished processing (UTC)
     error TEXT,
     stats JSONB NOT NULL DEFAULT '{"total_documents": 0, "completed": 0, "failed": 0, "in_progress": 0}',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- Last modification time
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
     CONSTRAINT chk_job_status CHECK (status IN ('accepted', 'in_progress', 'completed', 'failed')),
     CONSTRAINT chk_job_operation CHECK (operation IN ('ingestion', 'digitization'))
 );
@@ -22,11 +22,11 @@ CREATE TABLE IF NOT EXISTS documents (
     type VARCHAR(50) NOT NULL,
     status VARCHAR(50) NOT NULL,
     output_format VARCHAR(10) NOT NULL,
-    submitted_at TIMESTAMP NOT NULL,  -- When user submitted the document as part of job
-    completed_at TIMESTAMP,           -- When document finished processing
+    submitted_at TIMESTAMP WITH TIME ZONE NOT NULL,  -- When user submitted the document as part of job (UTC)
+    completed_at TIMESTAMP WITH TIME ZONE,           -- When document finished processing (UTC)
     error TEXT,
     metadata JSONB NOT NULL DEFAULT '{}',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- Last modification time
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
     CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'failed')),
     CONSTRAINT chk_doc_type CHECK (type IN ('ingestion', 'digitization')),
     CONSTRAINT chk_output_format CHECK (output_format IN ('txt', 'md', 'json'))

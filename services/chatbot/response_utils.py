@@ -46,7 +46,7 @@ class ChatCompletionRequest(BaseModel):
         ...,
         description="List of messages in the conversation. Supports both single-turn (one message) and multi-turn (conversation history) interactions. The last message is treated as the current query."
     )
-    max_tokens: int = Field(default=settings.llm.english.max_tokens, description="Maximum number of tokens to generate")
+    max_tokens: Optional[int] = Field(default=None, gt=0, description="Maximum number of tokens to generate. Must be greater than 0 if provided. If omitted, a language-specific default is used")
     temperature: float = Field(default=settings.llm.temperature, description="Sampling temperature (0.0 to 2.0)")
     stop: Optional[list[str]] = Field(default=None, description="Stop sequences for generation")
     stream: bool = Field(default=False, description="Whether to stream the response")

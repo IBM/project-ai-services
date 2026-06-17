@@ -454,8 +454,8 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
             APIError.raise_error(ErrorCode.INVALID_PARAMETER, error_msg)
 
         max_tokens = req.max_tokens
-        # giving priority to max_tokens passed in the request, otherwise according to query language
-        if not max_tokens:
+        # Give priority to max_tokens passed in the request; otherwise use language-specific defaults.
+        if max_tokens is None:
             max_tokens = get_max_tokens_map().get(query_lang, settings.llm.english.max_tokens)
 
         rephrased_query = current_query
