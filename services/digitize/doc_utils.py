@@ -2,7 +2,6 @@ import json
 import time
 import logging
 import os
-import re
 import shutil
 import random
 
@@ -24,9 +23,10 @@ from common.thread_utils import ContextAwareThreadPoolExecutor
 from common.llm_utils import summarize_and_classify_tables, tokenize_with_llm, tqdm_wrapper
 from common.misc_utils import get_logger, text_suffix, table_suffix, text_chunk_suffix, table_chunk_suffix, get_utc_timestamp
 from common.lang_utils import detect_language, get_prompt_for_language, to_sentence_splitter_lang, LanguageCodes
-from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, convert_doc, get_document_page_count
+from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_document_page_count
 from digitize.docx_utils import get_docx_toc, estimate_docx_page_count, recover_table_caption_from_body_context
-from digitize.models import DocStatus, JobStatus, OutputFormat
+from digitize.docling_utils import convert_document
+from digitize.models import DocStatus, JobStatus
 from digitize.settings import settings
 from digitize.db_operations import get_status_manager
 
@@ -529,28 +529,6 @@ def process_converted_document(converted_json_path, doc_path, out_path, gen_mode
         logger.error(f"Error processing converted document: {doc_path}. Details: {e}", exc_info=True)
 
         return None, None, None, None, None, None
-
-def convert_document(doc_path, out_path, file_name):
-    """
-    Convert a single document to JSON format.
-    This function runs in a separate process via ProcessPoolExecutor.
-    """
-    try:
-        logger.info(f"Processing '{doc_path}'")
-        converted_json = (Path(out_path) / f"{file_name}.json")
-        converted_json_f = str(converted_json)
-        logger.debug(f"Converting '{doc_path}'")
-        t0 = time.time()
-
-        converted_doc: DoclingDocument = convert_doc(doc_path, cache_dir=out_path / file_name)
-        converted_doc.save_as_json(str(converted_json_f))
-
-        conversion_time = time.time() - t0
-        logger.debug(f"'{doc_path}' converted")
-        return converted_json_f, conversion_time
-    except Exception as e:
-        logger.error(f"Error converting '{doc_path}': {e}")
-    return None, None
 
 def clean_intermediate_files(doc_id, out_path):
     # Remove intermediate files but keep <doc_id>.json
@@ -1323,31 +1301,3 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
 
     return combined_docs
 
-def convert_document_format(doc_path: str, out_path: Path, doc_id: str, output_format: OutputFormat):
-    logger.info(f"Processing '{doc_path}'")
-
-    out_dir = Path(out_path)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    t0 = time.time()
-
-    # Convert document → DoclingDocument
-    doc_obj = convert_doc(doc_path, cache_dir=out_path / doc_id)
-
-    conversion_time = time.time() - t0
-
-    # Save requested format
-    if output_format == OutputFormat.JSON:
-        out_file = out_dir / f"{doc_id}.json"
-        doc_obj.save_as_json(str(out_file))
-
-    elif output_format == OutputFormat.MD:
-        out_file = out_dir / f"{doc_id}.md"
-        out_file.write_text(doc_obj.export_to_markdown(), encoding="utf-8")
-
-    elif output_format == OutputFormat.TEXT:
-        out_file = out_dir / f"{doc_id}.txt"
-        out_file.write_text(doc_obj.export_to_text(), encoding="utf-8")
-
-    logger.debug(f"Saved converted file to '{out_file}'")
-    return str(out_file), conversion_time

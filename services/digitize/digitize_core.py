@@ -3,7 +3,7 @@ from pathlib import Path
 from common.misc_utils import get_utc_timestamp
 from digitize.models import JobStatus, DocStatus, OutputFormat
 from digitize.pdf_utils import get_pdf_page_count, get_document_page_count
-from digitize.doc_utils import convert_document_format
+from digitize.docling_utils import convert_document_format
 from digitize.db_operations import get_status_manager
 from concurrent.futures import ProcessPoolExecutor
 
