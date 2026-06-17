@@ -1,29 +1,21 @@
 package application
 
 import (
-	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
-	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	appFlags "github.com/project-ai-services/ai-services/internal/pkg/cli/constants/application"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
-	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 var (
-	skipCleanup        bool
-	deleteTimeout      time.Duration
-	experimentalDelete bool
+	skipCleanup   bool
+	deleteTimeout time.Duration
 )
 
 var deleteCmd = &cobra.Command{
@@ -37,16 +29,8 @@ Arguments
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// Build and run flag validator
 		flagValidator := buildDeleteFlagValidator()
-		if err := flagValidator.Validate(cmd); err != nil {
-			return err
-		}
 
-		appName := args[0]
-		if !experimentalDelete {
-			return utils.VerifyAppName(appName)
-		}
-
-		return nil
+		return flagValidator.Validate(cmd)
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		applicationName := args[0]
@@ -55,12 +39,6 @@ Arguments
 		cmd.SilenceUsage = true
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
-
-		// When experimentalDelete is true and runtime is podman, validate application name using catalog API
-		// For openshift runtime, always use the older/stable code path regardless of experimental flag
-		if experimentalDelete && rt == types.RuntimeTypePodman {
-			return deleteApplication(applicationName)
-		}
 
 		// Create application instance using factory
 		factory := application.NewFactory(rt)
@@ -77,7 +55,6 @@ Arguments
 		}
 
 		return app.Delete(cmd.Context(), opts)
-
 	},
 }
 
@@ -89,7 +66,6 @@ func init() {
 func initDeleteCommonFlags() {
 	deleteCmd.Flags().BoolVar(&skipCleanup, appFlags.Delete.SkipCleanup, false, "Skip deleting application data (default=false)")
 	deleteCmd.Flags().BoolVarP(&autoYes, appFlags.Delete.AutoYes, "y", false, "Automatically accept all confirmation prompts (default=false)")
-	deleteCmd.Flags().BoolVar(&experimentalDelete, "experimental", false, "Include experimental application delete")
 }
 
 func initDeleteOpenShiftFlags() {
@@ -118,92 +94,4 @@ func buildDeleteFlagValidator() *flagvalidator.FlagValidator {
 		AddOpenShiftFlag(appFlags.Delete.Timeout, nil)
 
 	return builder.Build()
-}
-
-func deleteApplication(appName string) error {
-	appClient, err := catalogClient.NewApplicationClient()
-	if err != nil {
-		return fmt.Errorf("failed to create application client: %w", err)
-	}
-	app, err := cliUtils.GetAppByName(appClient, appName)
-	if err != nil {
-		return err
-	}
-	if app == nil {
-		return fmt.Errorf("application not found: %s", appName)
-	}
-
-	if !autoYes {
-		confirmDelete, err := deleteConfirmation()
-		if err != nil {
-			return err
-		}
-		if !confirmDelete {
-			logger.Infoln("Deletion cancelled")
-
-			return nil
-		}
-	}
-
-	deleteParams := catalogClient.DeleteApplicationParams{
-		KeepData: skipCleanup,
-	}
-
-	if err := appClient.DeleteApplication(app.ID, &deleteParams); err != nil {
-		return fmt.Errorf("failed to delete application: %w", err)
-	}
-
-	// Poll to verify deletion is complete
-	logger.Infof("Waiting for application %s to be deleted...\n", appName)
-	if err := waitForApplicationDeletion(appClient, app.ID); err != nil {
-		return fmt.Errorf("failed to verify application deletion: %w", err)
-	}
-
-	logger.Infof("Application %s deleted successfully.", appName)
-
-	return nil
-}
-
-// waitForApplicationDeletion polls the application status until it's fully deleted.
-func waitForApplicationDeletion(appClient *catalogClient.ApplicationClient, appID string) error {
-	const (
-		pollInterval = 5 * time.Second
-		maxAttempts  = 12
-	)
-
-	for range maxAttempts {
-		// Check if application still exists via API
-		app, err := appClient.GetApplication(appID)
-		if err != nil {
-			// Check if it's an HTTPError with 404 status code
-			var httpErr *catalogClient.HTTPError
-			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
-				// Application not found (HTTP 404) - successfully deleted
-				return nil
-			}
-
-			return fmt.Errorf("failed to fetch application: %w", err)
-		}
-
-		// If application exists, check its status
-		if app != nil {
-			logger.Infof("Application status: %s, message: %s\n", app.Status, app.Message)
-			// Application still exists, continue polling
-		}
-
-		// Wait before next poll
-		time.Sleep(pollInterval)
-	}
-
-	return fmt.Errorf("timeout waiting for application deletion after %v", maxAttempts*pollInterval)
-}
-
-func deleteConfirmation() (bool, error) {
-	confirmActionPrompt := "Are you sure you want to delete the application? "
-	confirmDelete, err := utils.ConfirmAction(confirmActionPrompt)
-	if err != nil {
-		return confirmDelete, fmt.Errorf("failed to take user input: %w", err)
-	}
-
-	return confirmDelete, nil
 }
