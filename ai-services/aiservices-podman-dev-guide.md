@@ -197,7 +197,7 @@ assets/
 2. Update the image reference in `assets/catalog/podman/values.yaml`
 3. Rebuild the binary: `make bin`
 4. Delete all existing applications: `./bin/ai-services application delete <app-name> --runtime podman`
-5. Verify no applications exist: `./bin/ai-services application list --runtime podman`
+5. Verify no applications exist: `./bin/ai-services application ps --runtime podman`
 6. Uninstall existing catalog: `./bin/ai-services catalog uninstall --runtime podman`
 7. Reconfigure catalog: `./bin/ai-services catalog configure --runtime podman`
 
