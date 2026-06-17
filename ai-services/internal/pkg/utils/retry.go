@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -14,6 +15,7 @@ type BackoffFunc func(currentDelay time.Duration) time.Duration
 // Does exponentialBackOff based on the provided BackoffFunc.
 // Set backoff func to nil, if exponentialBackoff is not required.
 func Retry(
+	ctx context.Context,
 	attempts int,
 	initialDelay time.Duration,
 	backoff BackoffFunc,
@@ -29,7 +31,7 @@ func Retry(
 	}
 
 	for i := range attempts {
-		logger.Infof("\n[Retry] Attempt %d/%d...\n", i+1, attempts, 0)
+		logger.DebugfCtx(ctx, "\n[Retry] Attempt %d/%d...\n", i+1, attempts)
 
 		if err = fn(); err == nil {
 			return nil
@@ -41,7 +43,7 @@ func Retry(
 		}
 
 		// Sleep till delay
-		logger.Infof("[Retry] Sleeping %v before retrying...\n", delay, logger.VerbosityLevelDebug)
+		logger.DebugfCtx(ctx, "[Retry] Sleeping %v before retrying...\n", delay)
 		time.Sleep(delay)
 
 		// Apply backoff if provided

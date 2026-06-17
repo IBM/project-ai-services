@@ -94,7 +94,7 @@ Examples:
 		ctx := context.Background()
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
-		logger.Infof("Runtime: %s\n", rt, 0)
+		logger.Infof("Runtime: %s\n", rt)
 
 		// Get absolute path to backup file
 		absFilename, err := filepath.Abs(restoreFilename)
@@ -137,7 +137,7 @@ Examples:
 			return fmt.Errorf("failed to restore %s for application %s: %w", restoreTarget, applicationName, err)
 		}
 
-		logger.Infof("✓ Restore completed successfully for application %s\n", applicationName, 0)
+		logger.Infof("✓ Restore completed successfully for application %s\n", applicationName)
 
 		return nil
 	},

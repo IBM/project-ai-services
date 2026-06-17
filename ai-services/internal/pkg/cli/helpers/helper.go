@@ -1,6 +1,7 @@
 package helpers
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -88,14 +89,14 @@ func FetchContainerStartPeriod(runtime runtime.Runtime, containerNameOrId string
 
 // ListSpyreCards lists all Spyre cards attached to the system.
 // This is a wrapper around spyre.ListCards for backward compatibility.
-func ListSpyreCards() ([]string, error) {
-	return spyre.ListCards()
+func ListSpyreCards(ctx context.Context) ([]string, error) {
+	return spyre.ListCards(ctx)
 }
 
 // FindFreeSpyreCards finds available (free) Spyre cards.
 // This is a wrapper around spyre.FindFreeCards for backward compatibility.
-func FindFreeSpyreCards() ([]string, error) {
-	return spyre.FindFreeCards()
+func FindFreeSpyreCards(ctx context.Context) ([]string, error) {
+	return spyre.FindFreeCards(ctx)
 }
 
 func ParseSkipChecks(skipChecks []string) map[string]bool {
@@ -114,15 +115,15 @@ func ParseSkipChecks(skipChecks []string) map[string]bool {
 }
 
 // CheckExistingResourcesForApplication checks if there are resources already existing for the given application name.
-func CheckExistingResourcesForApplication(runtime runtime.Runtime, appName string, secretNames []string) ([]string, error) {
+func CheckExistingResourcesForApplication(ctx context.Context, runtime runtime.Runtime, appName string, secretNames []string) ([]string, error) {
 	// check existing pods for the application
-	podsToSkip, err := existingPods(runtime, appName)
+	podsToSkip, err := existingPods(ctx, runtime, appName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check existing pods: %w", err)
 	}
 
 	// check existing secrets for the application
-	secretsToSkip, err := existingSecrets(runtime, secretNames)
+	secretsToSkip, err := existingSecrets(ctx, runtime, secretNames)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check existing secrets: %w", err)
 	}
@@ -132,7 +133,7 @@ func CheckExistingResourcesForApplication(runtime runtime.Runtime, appName strin
 	return resourcesToSkip, nil
 }
 
-func existingPods(runtime runtime.Runtime, appName string) ([]string, error) {
+func existingPods(ctx context.Context, runtime runtime.Runtime, appName string) ([]string, error) {
 	//nolint:prealloc // as capacity is unknown and depends on runtime.ListPods response
 	var podsToSkip []string
 	pods, err := runtime.ListPods(map[string][]string{
@@ -147,16 +148,16 @@ func existingPods(runtime runtime.Runtime, appName string) ([]string, error) {
 		return nil, nil
 	}
 
-	logger.Infoln("Checking status of existing pods...")
+	logger.InfolnCtx(ctx, "Checking status of existing pods...")
 	for _, pod := range pods {
-		logger.Infof("Existing pod found: %s with status: %s\n", pod.Name, pod.Status)
+		logger.InfofCtx(ctx, "Existing pod found: %s with status: %s\n", pod.Name, pod.Status)
 		podsToSkip = append(podsToSkip, pod.Name)
 	}
 
 	return podsToSkip, nil
 }
 
-func existingSecrets(runtime runtime.Runtime, secretNames []string) ([]string, error) {
+func existingSecrets(ctx context.Context, runtime runtime.Runtime, secretNames []string) ([]string, error) {
 	secretsToSkip := make([]string, 0, len(secretNames))
 	for _, secretName := range secretNames {
 		secret, err := runtime.ListSecrets(map[string][]string{
@@ -166,7 +167,7 @@ func existingSecrets(runtime runtime.Runtime, secretNames []string) ([]string, e
 			return nil, fmt.Errorf("failed to list secrets: %w", err)
 		}
 		if len(secret) != 0 {
-			logger.Infof("Existing secret found: %s\n", secret[0])
+			logger.InfofCtx(ctx, "Existing secret found: %s\n", secret[0])
 			secretsToSkip = append(secretsToSkip, secretName)
 		}
 	}

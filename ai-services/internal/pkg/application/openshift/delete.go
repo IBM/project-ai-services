@@ -62,7 +62,7 @@ func (o *OpenshiftApplication) Delete(ctx context.Context, opts types.DeleteOpti
 	s.Stop("Application '" + app + "' deleted successfully")
 
 	if !opts.SkipCleanup {
-		logger.Infoln("Cleaning up Persistent Volume Claims...", logger.VerbosityLevelDebug)
+		logger.Debugln("Cleaning up Persistent Volume Claims...")
 
 		if err := o.runtime.DeletePVCs(fmt.Sprintf("ai-services.io/application=%s", app)); err != nil {
 			return fmt.Errorf("failed to cleanup PVCs: %w", err)

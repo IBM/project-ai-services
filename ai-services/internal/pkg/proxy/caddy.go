@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -75,7 +76,7 @@ func (c *caddyManager) HealthCheck() error {
 	return nil
 }
 
-func (c *caddyManager) RegisterRoute(route Route) error {
+func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) error {
 	if route.ID == "" {
 		return fmt.Errorf("cannot register route: route ID is empty")
 	}
@@ -103,7 +104,7 @@ func (c *caddyManager) RegisterRoute(route Route) error {
 
 	if checkResp.StatusCode() == http.StatusOK {
 		// Route already exists, skip registration
-		logger.Infof("Route %s already exists, skipping registration\n", route.ID, logger.VerbosityLevelDebug)
+		logger.DebugfCtx(ctx, "Route %s already exists, skipping registration\n", route.ID)
 
 		return nil
 	}
@@ -235,6 +236,7 @@ func (c *caddyManager) UnregisterRoute(routeID string) error {
 //   - []Route: List of successfully built and registered routes
 //   - error: nil if routes were registered successfully, error otherwise
 func RegisterRoutesForAppAndReturn(
+	ctx context.Context,
 	appName string,
 	proxyManager ProxyManager,
 	routesAnnotation string,
@@ -258,7 +260,7 @@ func RegisterRoutesForAppAndReturn(
 	// Step 3: Register each route with Caddy
 	var registrationErrors []error
 	for _, route := range routes {
-		if err := proxyManager.RegisterRoute(route); err != nil {
+		if err := proxyManager.RegisterRoute(ctx, route); err != nil {
 			registrationErrors = append(registrationErrors, fmt.Errorf("route %s: %w", route.ID, err))
 		}
 	}
@@ -283,6 +285,7 @@ func RegisterRoutesForAppAndReturn(
 // Returns:
 //   - error: nil if all routes were unregistered successfully, error otherwise
 func UnregisterRoutesFromEndpoints(
+	ctx context.Context,
 	proxyManager ProxyManager,
 	endpoints []map[string]any,
 	instanceType string,
@@ -295,14 +298,14 @@ func UnregisterRoutesFromEndpoints(
 	routesToUnregister := extractRouteIDsFromEndpoints(endpoints)
 
 	if len(routesToUnregister) == 0 {
-		logger.Infof("%s %s: no routes found to unregister", instanceType, instanceID)
+		logger.InfofCtx(ctx, "%s %s: no routes found to unregister", instanceType, instanceID)
 
 		return nil
 	}
 
-	logger.Infof("Unregistering %d route(s) for %s %s", len(routesToUnregister), instanceType, instanceID)
+	logger.InfofCtx(ctx, "Unregistering %d route(s) for %s %s", len(routesToUnregister), instanceType, instanceID)
 
-	return unregisterRoutes(proxyManager, routesToUnregister, instanceType, instanceID)
+	return unregisterRoutes(ctx, proxyManager, routesToUnregister, instanceType, instanceID)
 }
 
 // extractRouteIDsFromEndpoints extracts unique route IDs from endpoints.
@@ -343,17 +346,17 @@ func extractRouteIDsFromEndpoints(endpoints []map[string]any) map[string]bool {
 	return routesToUnregister
 }
 
-// unregisterRoutes unregisters routes and returns error if any fail.
-func unregisterRoutes(proxyManager ProxyManager, routeIDs map[string]bool, instanceType, instanceID string) error {
+// unregisterRoutes unregisterroutes and returns error if any fail.
+func unregisterRoutes(ctx context.Context, proxyManager ProxyManager, routeIDs map[string]bool, instanceType, instanceID string) error {
 	var failedRoutes []string
 
 	for routeID := range routeIDs {
 		if err := proxyManager.UnregisterRoute(routeID); err == nil {
-			logger.Infof("%s %s: Successfully unregistered route: %s", instanceType, instanceID, routeID)
+			logger.InfofCtx(ctx, "%s %s: Successfully unregistered route: %s", instanceType, instanceID, routeID)
 		} else if errors.Is(err, ErrRouteNotFound) {
-			logger.Infof("%s %s: Route not configured for %s (already unregistered)", instanceType, instanceID, routeID)
+			logger.InfofCtx(ctx, "%s %s: Route not configured for %s (already unregistered)", instanceType, instanceID, routeID)
 		} else {
-			logger.Errorf("%s %s: Error unregistering route %s: %v", instanceType, instanceID, routeID, err)
+			logger.ErrorfCtx(ctx, "%s %s: Error unregistering route %s: %v", instanceType, instanceID, routeID, err)
 			failedRoutes = append(failedRoutes, routeID)
 		}
 	}

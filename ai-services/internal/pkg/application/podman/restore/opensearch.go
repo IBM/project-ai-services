@@ -23,8 +23,8 @@ const (
 
 // RestoreOpenSearch restores OpenSearch data using podman sidecar approach.
 func RestoreOpenSearch(ctx context.Context, templateID, backupFile string) error {
-	logger.Infof("Restoring OpenSearch data for template: %s\n", templateID, 0)
-	logger.Infof("OpenSearch Import (Sidecar Container Approach)\n", 0)
+	logger.Infof("Restoring OpenSearch data for template: %s\n", templateID)
+	logger.Infoln("OpenSearch Import (Sidecar Container Approach)")
 
 	// Find OpenSearch container and get pod ID using common function
 	containerName, podID, err := common.FindContainerAndPod(ctx, templateID)
@@ -32,8 +32,8 @@ func RestoreOpenSearch(ctx context.Context, templateID, backupFile string) error
 		return err
 	}
 
-	logger.Infof("Container: %s\n", containerName, 0)
-	logger.Infof("Pod ID: %s\n", podID, 0)
+	logger.Infof("Container: %s\n", containerName)
+	logger.Infof("Pod ID: %s\n", podID)
 
 	// Extract and locate backup directory
 	backupDir, cleanup, err := ExtractAndLocateBackup(backupFile)
@@ -95,7 +95,7 @@ func prepareSidecarAndRestore(ctx context.Context, containerID, backupDir string
 		return fmt.Errorf("restore failed: %w", err)
 	}
 
-	logger.Infof("OpenSearch import completed!\n", 0)
+	logger.Infoln("OpenSearch import completed!")
 
 	return nil
 }
@@ -119,7 +119,7 @@ func determineBackupPaths(backupDir string) (string, string, error) {
 
 // copyBackupToSidecar copies backup files to the sidecar container.
 func copyBackupToSidecar(pc *podman.PodmanClient, containerID, backupOSDir, containerBackupPath string) error {
-	logger.Infof("Copying backup files to sidecar...\n", 0)
+	logger.Infoln("Copying backup files to sidecar...")
 
 	if err := pc.CopyDirToContainer(containerID, backupOSDir, containerBackupPath); err != nil {
 		return fmt.Errorf("failed to copy backup files: %w", err)
@@ -146,7 +146,7 @@ func performRestoreWithCurl(ctx context.Context, pc *podman.PodmanClient, contai
 		return err
 	}
 
-	logger.Infof("Found %d indices to restore\n", len(indices), 0)
+	logger.Infof("Found %d indices to restore\n", len(indices))
 
 	// Restore each index with error tracking
 	return restoreAllIndices(ctx, pc, containerID, osHost, osPassword, backupDir, indices)
@@ -229,7 +229,7 @@ func restoreAllIndices(ctx context.Context, pc *podman.PodmanClient, containerID
 	if len(errors) > 0 {
 		logger.Warningf("Restore completed with %d errors. Successfully restored %d/%d indices\n", len(errors), restoredCount, len(indices))
 	} else {
-		logger.Infof("✓ Restore completed successfully. Restored %d indices\n", restoredCount, 0)
+		logger.Infof("✓ Restore completed successfully. Restored %d indices\n", restoredCount)
 	}
 
 	return nil
@@ -239,7 +239,7 @@ func restoreAllIndices(ctx context.Context, pc *podman.PodmanClient, containerID
 // Password is passed via environment variable to avoid exposure in process lists.
 // The restore process follows: cleanup (delete existing) -> create -> insert data.
 func restoreIndexWithCurl(ctx context.Context, pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir, indexName string) error {
-	logger.Infof("  Restoring index: %s\n", indexName, 0)
+	logger.Infof("  Restoring index: %s\n", indexName)
 
 	// Verify required backup files exist
 	if err := verifyBackupFiles(pc, containerID, backupDir, indexName); err != nil {
@@ -247,33 +247,33 @@ func restoreIndexWithCurl(ctx context.Context, pc *podman.PodmanClient, containe
 	}
 
 	// Step 1: Cleanup - Delete existing index if it exists
-	logger.Infof("    Cleaning up existing index...\n", 0)
+	logger.Infoln("    Cleaning up existing index...")
 	if err := deleteExistingIndex(pc, containerID, osHost, osPassword, indexName); err != nil {
 		logger.Warningf("    Failed to delete existing index (may not exist): %v\n", err)
 	} else {
-		logger.Infof("    ✓ Existing index cleaned up\n", 0)
+		logger.Infof("    ✓ Existing index cleaned up\n")
 	}
 
 	// Step 2: Create index with settings and mappings
-	logger.Infof("    Creating index with mappings...\n", 0)
+	logger.Infof("    Creating index with mappings...\n")
 	if err := createIndexWithMappings(pc, containerID, osHost, osPassword, backupDir, indexName); err != nil {
 		return err
 	}
-	logger.Infof("    ✓ Index created\n", 0)
+	logger.Infof("    ✓ Index created\n")
 
 	// Step 3: Insert data - Bulk index documents
-	logger.Infof("    Inserting documents...\n", 0)
+	logger.Infof("    Inserting documents...\n")
 	if err := bulkIndexDocuments(pc, containerID, osHost, osPassword, backupDir, indexName); err != nil {
 		return err
 	}
-	logger.Infof("    ✓ Documents inserted\n", 0)
+	logger.Infof("    ✓ Documents inserted\n")
 
 	// Step 4: Refresh index to make documents searchable
 	if err := refreshIndex(pc, containerID, osHost, osPassword, indexName); err != nil {
 		return err
 	}
 
-	logger.Infof("    ✓ Index restored successfully\n", 0)
+	logger.Infof("    ✓ Index restored successfully\n")
 
 	return nil
 }

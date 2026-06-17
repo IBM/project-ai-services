@@ -12,7 +12,7 @@ import (
 // ExtractAndLocateBackup extracts the backup archive and locates the backup directory.
 // This function is shared between digitize and opensearch restore operations.
 func ExtractAndLocateBackup(backupFile string) (string, func(), error) {
-	logger.Infof("Extracting backup archive...\n", 0)
+	logger.Infoln("Extracting backup archive...")
 
 	tempDir, err := os.MkdirTemp("", "restore-*")
 	if err != nil {

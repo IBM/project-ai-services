@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -81,7 +82,7 @@ func downloadCatalogModels(templateID string) error {
 	for _, model := range models {
 		logger.Infof("Downloading model: %s\n", model)
 
-		if err := helpers.DownloadModelContainer(model, modelDirectory); err != nil {
+		if err := helpers.DownloadModelContainer(context.Background(), model, modelDirectory); err != nil {
 			return fmt.Errorf("failed to download model %s: %w", model, err)
 		}
 	}

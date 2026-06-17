@@ -20,8 +20,8 @@ const (
 
 // BackupOpenSearch performs OpenSearch backup for OpenShift using a sidecar pod.
 func BackupOpenSearch(ctx context.Context, applicationID, backupFile string) error {
-	logger.Infof("Backing up OpenSearch data for OpenShift application: %s\n", applicationID, 0)
-	logger.Infof("OpenSearch Backup (Sidecar Pod Approach)\n", 0)
+	logger.Infof("Backing up OpenSearch data for OpenShift application: %s\n", applicationID)
+	logger.Infoln("OpenSearch Backup (Sidecar Pod Approach)")
 
 	// Find OpenSearch pod
 	namespace, podName, err := common.FindOpenSearchPod(applicationID)
@@ -29,8 +29,8 @@ func BackupOpenSearch(ctx context.Context, applicationID, backupFile string) err
 		return err
 	}
 
-	logger.Infof("Namespace: %s\n", namespace, 0)
-	logger.Infof("OpenSearch Pod: %s\n", podName, 0)
+	logger.Infof("Namespace: %s\n", namespace)
+	logger.Infof("OpenSearch Pod: %s\n", podName)
 
 	// Get OpenSearch service name
 	serviceName, err := common.GetOpenSearchService(applicationID, namespace)
@@ -76,7 +76,7 @@ func performBackup(ctx context.Context, podName, namespace, serviceName, backupF
 
 	// Construct OpenSearch host using service name and port
 	osHost := fmt.Sprintf("%s:9200", serviceName)
-	logger.Infof("OpenSearch host: %s\n", osHost, 0)
+	logger.Infof("OpenSearch host: %s\n", osHost)
 
 	// Perform backup with curl
 	if err := performBackupWithCurl(ctx, podName, namespace, osHost, osPassword, containerBackupPath); err != nil {
@@ -88,7 +88,7 @@ func performBackup(ctx context.Context, podName, namespace, serviceName, backupF
 		return fmt.Errorf("failed to copy and archive backup: %w", err)
 	}
 
-	logger.Infof("OpenSearch backup completed!\n", 0)
+	logger.Infoln("OpenSearch backup completed!")
 
 	return nil
 }
@@ -107,7 +107,7 @@ func createBackupDirectory(podName, namespace string) error {
 
 // performBackupWithCurl performs the OpenSearch backup using curl commands in the pod.
 func performBackupWithCurl(ctx context.Context, podName, namespace, osHost, osPassword, backupDir string) error {
-	logger.Infof("Exporting OpenSearch indices...\n", 0)
+	logger.Infof("Exporting OpenSearch indices...")
 
 	indices, err := listRagIndices(podName, namespace, osHost, osPassword)
 	if err != nil {
@@ -120,7 +120,7 @@ func performBackupWithCurl(ctx context.Context, podName, namespace, osHost, osPa
 		return nil
 	}
 
-	logger.Infof("Found %d indices to backup\n", len(indices), 0)
+	logger.Infof("Found %d indices to backup\n", len(indices))
 
 	backedUpCount, lastErr := backupIndices(ctx, podName, namespace, osHost, osPassword, backupDir, indices)
 
@@ -184,7 +184,7 @@ func handleBackupResults(backedUpCount, totalCount int, lastErr error) error {
 
 // backupIndexWithCurl backs up a single index using curl in the pod.
 func backupIndexWithCurl(podName, namespace, osHost, osPassword, backupDir, indexName string) error {
-	logger.Infof("  Exporting index: %s\n", indexName, 0)
+	logger.Infof("  Exporting index: %s\n", indexName)
 
 	if err := exportIndexMetadata(podName, namespace, osHost, osPassword, backupDir, indexName); err != nil {
 		return err
@@ -253,7 +253,7 @@ func createBackupInfo(podName, namespace, backupDir string) error {
 
 // copyAndTarBackup copies backup files from pod to host and creates tar archive on host.
 func copyAndTarBackup(ctx context.Context, podName, namespace, containerBackupPath, backupFile string) error {
-	logger.Infof("Copying backup files from pod to host...\n", 0)
+	logger.Infof("Copying backup files from pod to host...")
 
 	// Create temporary directory on host for backup files
 	tempDir, err := os.MkdirTemp("", "opensearch-backup-*")
@@ -288,10 +288,10 @@ func copyAndTarBackup(ctx context.Context, podName, namespace, containerBackupPa
 		return fmt.Errorf("failed to copy backup directory: %w, output: %s", err, string(output))
 	}
 
-	logger.Infof("✓ Backup files copied to host\n", 0)
+	logger.Infoln("✓ Backup files copied to host")
 
 	// Create tar.gz archive on host using shared function
-	logger.Infof("Creating tar.gz archive on host...\n", 0)
+	logger.Infoln("Creating tar.gz archive on host...")
 
 	if err := podmanBackup.CreateTarGzArchive(tempDir, backupFile, []string{"backup_info.json", "opensearch_backup"}); err != nil {
 		return err

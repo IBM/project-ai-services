@@ -1,6 +1,6 @@
 REGISTRY?=icr.io/ai-services-private
 IMAGE=ai-services
-TAG?=v0.0.104
+TAG?=v0.0.111
 CONTAINER_BUILDER?=podman
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
@@ -27,7 +27,7 @@ PLATFORMS := \
 	linux/amd64 \
 	linux/ppc64le
 
-BUILD_CMD = CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build $(BUILDFLAGS) \
+BUILD_CMD = CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -trimpath $(BUILDFLAGS) \
      -o $(BIN)/ai-services-$(GOOS)-$(GOARCH) \
      -tags "$(BUILDTAGS)" \
      -ldflags " \

@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -86,7 +87,7 @@ func (d *DeployContext) CheckStatus() (bool, []string, error) {
 		return false, nil, err
 	}
 
-	existingResources, err := helpers.CheckExistingResourcesForApplication(d.Runtime, catalogconstants.CatalogAppName, catalogSecrets)
+	existingResources, err := helpers.CheckExistingResourcesForApplication(context.Background(), d.Runtime, catalogconstants.CatalogAppName, catalogSecrets)
 	if err != nil {
 		return false, nil, err
 	}
@@ -107,7 +108,7 @@ func (d *DeployContext) ExtractRouteInfos() ([]caddy.TemplateRouteInfo, error) {
 // ExecutePodLayers executes all pod template layers.
 func (d *DeployContext) ExecutePodLayers(baseDir string, caddyCtx *caddy.Context,
 	existingResources []string) error {
-	logger.Infoln("executing catalog service resources...", logger.VerbosityLevelDebug)
+	logger.Debugln("executing catalog service resources...")
 
 	for i, layer := range d.appMetadata.PodTemplateExecutions {
 		logger.Infof("\n Executing Layer %d/%d: %v\n", i+1, len(d.appMetadata.PodTemplateExecutions), layer)
@@ -200,7 +201,7 @@ func (d *DeployContext) executePodTemplate(podTemplateName string,
 	reader := bytes.NewReader(rendered.Bytes())
 	podDeployOptions := clipodman.ConstructPodDeployOptions(specs.FetchPodAnnotations(*podSpec))
 
-	if err := clipodman.DeployPodAndReadinessCheck(d.Runtime, podSpec, podTemplateName, reader, podDeployOptions); err != nil {
+	if err := clipodman.DeployPodAndReadinessCheck(context.Background(), d.Runtime, podSpec, podTemplateName, reader, podDeployOptions); err != nil {
 		return fmt.Errorf("failed to deploy pod: %w", err)
 	}
 

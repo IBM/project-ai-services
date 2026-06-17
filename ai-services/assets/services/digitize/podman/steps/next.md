@@ -1,5 +1,7 @@
-- Add documents to your RAG application using the web interface at http://{{ .HOST_IP }}:{{ .DIGITIZE_UI_PORT }}.
-
-- Use the Digitize API for programmatic document upload at http://{{ .HOST_IP }}:{{ .DIGITIZE_API_PORT }}.
-
-- These documents are consumed by Q&A service.
+{{- if ne .UI_URL "" }}
+- Add documents to your RAG application using the web interface at {{ .UI_URL }}.
+{{- end }}
+{{- if ne .API_URL "" }}
+OR
+- Use the {{ .SERVICE_NAME }} API for programmatic document upload at {{ .API_URL }}.
+{{- end }}

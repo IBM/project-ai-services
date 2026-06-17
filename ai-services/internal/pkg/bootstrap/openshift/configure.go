@@ -197,7 +197,7 @@ func fetchSCPSpec(client *openshift.OpenshiftClient) (map[string]any, error) {
 func modifySpec(spec map[string]any, s *spinner.Spinner) error {
 	expMode, ok := spec[experimentalMode].([]any)
 	if !ok {
-		logger.Infof("%s not found, proceeding with deployment of SpyreClusterPolicy", experimentalMode, logger.VerbosityLevelDebug)
+		logger.Debugf("%s not found, proceeding with deployment of SpyreClusterPolicy", experimentalMode)
 
 		return nil
 	}
@@ -267,7 +267,7 @@ func waitForSpyreClusterPolicy(client *openshift.OpenshiftClient) error {
 	return wait.PollUntilContextTimeout(client.Ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(ctx context.Context) (bool, error) {
 		if err := client.Client.Get(ctx, k8stypes.NamespacedName{Name: "spyreclusterpolicy"}, obj); err != nil {
 			if apierrors.IsNotFound(err) {
-				logger.Infof("SpyreClusterPolicy not found yet, waiting...", logger.VerbosityLevelDebug)
+				logger.Debugln("SpyreClusterPolicy not found yet, waiting...")
 
 				return false, nil
 			}
@@ -276,7 +276,7 @@ func waitForSpyreClusterPolicy(client *openshift.OpenshiftClient) error {
 			}
 			// Handle rate limiting and other transient errors as retryable
 			if utils.IsTransientK8sError(err) {
-				logger.Infof("Transient error getting SpyreClusterPolicy (rate limit or timeout), retrying...", logger.VerbosityLevelDebug)
+				logger.Debugln("Transient error getting SpyreClusterPolicy (rate limit or timeout), retrying...")
 
 				return false, nil
 			}
@@ -293,7 +293,7 @@ func waitForSpyreClusterPolicy(client *openshift.OpenshiftClient) error {
 			if !found {
 				state = "unknown"
 			}
-			logger.Infof("SpyreClusterPolicy not ready yet (status.state: %s), waiting...", state, logger.VerbosityLevelDebug)
+			logger.Debugf("SpyreClusterPolicy not ready yet (status.state: %s), waiting...", state)
 
 			return false, nil
 		}
@@ -314,7 +314,7 @@ func waitForRHODSResource(client *openshift.OpenshiftClient, kind string) error 
 		if err != nil {
 			// Handle rate limiting and other transient errors as retryable
 			if utils.IsTransientK8sError(err) {
-				logger.Infof("Transient error getting %s (rate limit or timeout), retrying...", kind, logger.VerbosityLevelDebug)
+				logger.Debugf("Transient error getting %s (rate limit or timeout), retrying...", kind)
 
 				return false, nil
 			}
@@ -323,7 +323,7 @@ func waitForRHODSResource(client *openshift.OpenshiftClient, kind string) error 
 		}
 
 		if !exists {
-			logger.Infof("%s not found yet, waiting...", kind, logger.VerbosityLevelDebug)
+			logger.Debugf("%s not found yet, waiting...", kind)
 
 			return false, nil
 		}
@@ -338,7 +338,7 @@ func waitForRHODSResource(client *openshift.OpenshiftClient, kind string) error 
 			if !found {
 				phase = "unknown"
 			}
-			logger.Infof("%s not ready yet (status.phase: %s), waiting...", kind, phase, logger.VerbosityLevelDebug)
+			logger.Debugf("%s not ready yet (status.phase: %s), waiting...", kind, phase)
 
 			return false, nil
 		}

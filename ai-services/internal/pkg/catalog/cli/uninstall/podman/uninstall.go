@@ -29,6 +29,9 @@ func UninstallCatalog(ctx context.Context, autoYes, skipCleanup bool) error {
 		return err
 	}
 
+	// Warn about potential application staleness
+	logger.Warningln("Ensure no applications are running before uninstalling the catalog, as they may go stale when the catalog is uninstalled and will need to be deleted manually")
+
 	// Confirm deletion if not auto-yes
 	if !autoYes {
 		if confirmed, err := confirmDeletion(pods); !confirmed || err != nil {

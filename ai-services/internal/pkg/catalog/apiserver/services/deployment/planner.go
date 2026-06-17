@@ -82,7 +82,7 @@ func (p *DeploymentPlanner) PlanDeployment(
 	}
 
 	// Calculate and allocate Spyre cards after all components are planned
-	if err := p.calculateAndAllocateSpyreCards(plan); err != nil {
+	if err := p.calculateAndAllocateSpyreCards(ctx, plan); err != nil {
 		return nil, fmt.Errorf("failed to allocate Spyre cards: %w", err)
 	}
 
@@ -193,37 +193,37 @@ func (p *DeploymentPlanner) processComponent(
 }
 
 // calculateAndAllocateSpyreCards calculates required Spyre cards and creates allocation pool.
-func (p *DeploymentPlanner) calculateAndAllocateSpyreCards(plan *DeploymentPlan) error {
+func (p *DeploymentPlanner) calculateAndAllocateSpyreCards(ctx context.Context, plan *DeploymentPlan) error {
 	totalRequired := 0
 
 	// Calculate total required Spyre cards from all components
 	for _, comp := range plan.Components {
-		required, err := p.getRequiredSpyreCardsForComponent(comp)
+		required, err := p.getRequiredSpyreCardsForComponent(ctx, comp)
 		if err != nil {
 			return fmt.Errorf("failed to get Spyre card requirements for component %s: %w", comp.ComponentType, err)
 		}
 		totalRequired += required
 		if required > 0 {
-			logger.Infof("Component %s/%s requires %d Spyre cards\n", comp.ComponentType, comp.ProviderID, required)
+			logger.InfofCtx(ctx, "Component %s/%s requires %d Spyre cards\n", comp.ComponentType, comp.ProviderID, required)
 		}
 	}
 
 	if totalRequired == 0 {
-		logger.Infof("No Spyre cards required for this deployment\n")
+		logger.InfofCtx(ctx, "No Spyre cards required for this deployment\n")
 
 		return nil
 	}
 
-	logger.Infof("Total Spyre cards required: %d\n", totalRequired)
+	logger.InfofCtx(ctx, "Total Spyre cards required: %d\n", totalRequired)
 
 	// Find available Spyre cards
-	pciAddresses, err := helpers.FindFreeSpyreCards()
+	pciAddresses, err := helpers.FindFreeSpyreCards(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to find free Spyre cards: %w", err)
 	}
 
 	availableCount := len(pciAddresses)
-	logger.Infof("Available Spyre cards: %d\n", availableCount)
+	logger.InfofCtx(ctx, "Available Spyre cards: %d\n", availableCount)
 
 	// Validate we have enough Spyre cards
 	if availableCount < totalRequired {
@@ -239,7 +239,7 @@ func (p *DeploymentPlanner) calculateAndAllocateSpyreCards(plan *DeploymentPlan)
 }
 
 // getRequiredSpyreCardsForComponent calculates Spyre cards needed for a component.
-func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(comp *ComponentPlan) (int, error) {
+func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(ctx context.Context, comp *ComponentPlan) (int, error) {
 	// Load component templates using catalog provider
 	tmpls, err := p.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
 	if err != nil {
@@ -248,7 +248,7 @@ func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(comp *ComponentPla
 
 	// Use the catalog provider's CollectSpyreCardsFromTemplates function
 	// Use comp.Values instead of comp.Params to include defaults from values.yaml
-	totalSpyreCards, err := p.catalogProvider.CollectSpyreCardsFromTemplates(tmpls, comp.Values)
+	totalSpyreCards, err := p.catalogProvider.CollectSpyreCardsFromTemplates(ctx, tmpls, comp.Values)
 	if err != nil {
 		return 0, fmt.Errorf("failed to collect Spyre cards from templates: %w", err)
 	}

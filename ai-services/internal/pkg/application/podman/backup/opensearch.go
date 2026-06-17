@@ -60,14 +60,14 @@ func prepareSidecarAndBackup(ctx context.Context, pc *podman.PodmanClient, conta
 		return fmt.Errorf("failed to copy and archive backup: %w", err)
 	}
 
-	logger.Infof("OpenSearch backup completed!\n", 0)
+	logger.Infoln("OpenSearch backup completed!")
 
 	return nil
 }
 
 // performBackupWithCurl performs the OpenSearch backup using curl commands in container.
 func performBackupWithCurl(ctx context.Context, pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir string) error {
-	logger.Infof("Exporting OpenSearch indices...\n", 0)
+	logger.Infoln("Exporting OpenSearch indices...")
 
 	indices, err := listRagIndices(pc, containerID, osHost, osPassword)
 	if err != nil {
@@ -80,7 +80,7 @@ func performBackupWithCurl(ctx context.Context, pc *podman.PodmanClient, contain
 		return nil
 	}
 
-	logger.Infof("Found %d indices to backup\n", len(indices), 0)
+	logger.Infof("Found %d indices to backup\n", len(indices))
 
 	backedUpCount, lastErr := backupIndices(ctx, pc, containerID, osHost, osPassword, backupDir, indices)
 
@@ -144,7 +144,7 @@ func handleBackupResults(backedUpCount, totalCount int, lastErr error) error {
 
 // backupIndexWithCurl backs up a single index using curl in container.
 func backupIndexWithCurl(ctx context.Context, pc *podman.PodmanClient, containerID, osHost, osPassword, backupDir, indexName string) error {
-	logger.Infof("  Exporting index: %s\n", indexName, 0)
+	logger.Infof("  Exporting index: %s\n", indexName)
 
 	if err := exportIndexMetadata(pc, containerID, osHost, osPassword, backupDir, indexName); err != nil {
 		return err

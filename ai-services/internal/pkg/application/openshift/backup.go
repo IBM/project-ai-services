@@ -31,7 +31,7 @@ func (o *OpenshiftApplication) Backup(ctx context.Context, opts types.BackupOpti
 
 // backupOpenSearch performs OpenSearch backup using a sidecar pod.
 func (o *OpenshiftApplication) backupOpenSearch(ctx context.Context, appName, backupFile string) error {
-	logger.Infof("Backing up OpenSearch data for application: %s\n", appName, 0)
+	logger.Infof("Backing up OpenSearch data for application: %s\n", appName)
 
 	// Generate backup filename if not provided
 	if backupFile == "" {
@@ -55,7 +55,7 @@ func (o *OpenshiftApplication) backupOpenSearch(ctx context.Context, appName, ba
 		return err
 	}
 
-	logger.Infof("✅ Backup completed successfully: %s\n", absBackupFile, 0)
+	logger.Infof("✅ Backup completed successfully: %s\n", absBackupFile)
 
 	return nil
 }
@@ -111,14 +111,14 @@ func logDigitizeBackupSummary(exportResponse *commonBackup.DigitizeExportRespons
 		logger.Infof("  Jobs - exported: %d, completed: %d, failed: %d\n",
 			exportResponse.Summary.Jobs.TotalExported,
 			exportResponse.Summary.Jobs.Completed,
-			exportResponse.Summary.Jobs.Failed, 0)
+			exportResponse.Summary.Jobs.Failed)
 	}
 
 	if exportResponse.Summary.Documents.TotalExported > 0 || exportResponse.Summary.Documents.Completed > 0 || exportResponse.Summary.Documents.Failed > 0 {
 		logger.Infof("  Documents - exported: %d, completed: %d, failed: %d\n",
 			exportResponse.Summary.Documents.TotalExported,
 			exportResponse.Summary.Documents.Completed,
-			exportResponse.Summary.Documents.Failed, 0)
+			exportResponse.Summary.Documents.Failed)
 	}
 
 	logger.Infof("  Returned records: %d\n", exportResponse.Pagination.ReturnedRecords)

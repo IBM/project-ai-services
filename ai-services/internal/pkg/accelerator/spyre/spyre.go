@@ -1,8 +1,8 @@
 package spyre
 
 import (
+	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -11,7 +11,7 @@ import (
 )
 
 // ListCards lists all Spyre cards attached to the system.
-func ListCards() ([]string, error) {
+func ListCards(ctx context.Context) ([]string, error) {
 	spyreDeviceIDsList := []string{}
 	cmd := exec.Command("lspci", "-d", "1014:06a7")
 	out, err := cmd.CombinedOutput()
@@ -25,25 +25,23 @@ func ListCards() ([]string, error) {
 		if pciDev == "" {
 			continue
 		}
-		logger.Infoln("Spyre card detected", logger.VerbosityLevelDebug)
+		logger.DebuglnCtx(ctx, "Spyre card detected")
 		devID := strings.Split(pciDev, " ")[0]
-		logger.Infof("PCI id: %s\n", devID, logger.VerbosityLevelDebug)
+		logger.DebugfCtx(ctx, "PCI id: %s\n", devID)
 		spyreDeviceIDsList = append(spyreDeviceIDsList, devID)
 	}
 
-	logger.Infoln("List of discovered Spyre cards: "+strings.Join(spyreDeviceIDsList, ", "), logger.VerbosityLevelDebug)
+	logger.DebuglnCtx(ctx, "List of discovered Spyre cards: "+strings.Join(spyreDeviceIDsList, ", "))
 
 	return spyreDeviceIDsList, nil
 }
 
 // FindFreeCards finds available (free) Spyre cards.
-func FindFreeCards() ([]string, error) {
+func FindFreeCards(ctx context.Context) ([]string, error) {
 	freeSpyreDevIDList := []string{}
 	devFiles, err := os.ReadDir("/dev/vfio")
 	if err != nil {
-		log.Fatalf("failed to check device files under /dev/vfio. Error: %v", err)
-
-		return freeSpyreDevIDList, err
+		return freeSpyreDevIDList, fmt.Errorf("failed to check device files under /dev/vfio: %w", err)
 	}
 
 	for _, devFile := range devFiles {
@@ -52,12 +50,12 @@ func FindFreeCards() ([]string, error) {
 		}
 		f, err := os.Open("/dev/vfio/" + devFile.Name())
 		if err != nil {
-			logger.Infof("Device or resource busy, skipping.., err: %v", err, logger.VerbosityLevelDebug)
+			logger.DebugfCtx(ctx, "Device or resource busy, skipping.., err: %v", err)
 
 			continue
 		}
 		if err := f.Close(); err != nil {
-			logger.Infoln("Failed to close the device file handle", logger.VerbosityLevelDebug)
+			logger.DebuglnCtx(ctx, "Failed to close the device file handle")
 		}
 
 		// free card available to use

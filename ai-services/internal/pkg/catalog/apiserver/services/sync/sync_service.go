@@ -3,7 +3,6 @@ package sync
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -58,23 +58,23 @@ func NewSyncService(
 }
 
 // Start begins the sync goroutine.
-func (s *SyncService) Start() {
-	go s.syncLoop()
-	logger.Infoln("Sync service started")
+func (s *SyncService) Start(ctx context.Context) {
+	go s.syncLoop(ctx)
+	logger.InfolnCtx(ctx, "Sync service started")
 }
 
 // Stop gracefully stops the sync goroutine.
-func (s *SyncService) Stop() {
+func (s *SyncService) Stop(ctx context.Context) {
 	close(s.stopChan)
-	logger.Infoln("Sync service stopped")
+	logger.InfolnCtx(ctx, "Sync service stopped")
 }
 
 // syncLoop runs the periodic sync operation.
-func (s *SyncService) syncLoop() {
+func (s *SyncService) syncLoop(ctx context.Context) {
 	// Defer panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Panic recovered in sync goroutine: %v", r)
+			logger.ErrorfCtx(ctx, "Panic recovered in sync goroutine: %v", r)
 		}
 	}()
 
@@ -82,12 +82,12 @@ func (s *SyncService) syncLoop() {
 	defer ticker.Stop()
 
 	// Run initial sync immediately
-	s.performSync()
+	s.performSync(ctx)
 
 	for {
 		select {
 		case <-ticker.C:
-			s.performSync()
+			s.performSync(ctx)
 		case <-s.stopChan:
 			return
 		}
@@ -95,11 +95,11 @@ func (s *SyncService) syncLoop() {
 }
 
 // performSync executes the synchronization logic.
-func (s *SyncService) performSync() {
+func (s *SyncService) performSync(ctx context.Context) {
 	// Check if a sync is already running
 	s.syncMutex.Lock()
 	if s.isSyncing {
-		logger.Infof("Sync already in progress, skipping this cycle", logger.VerbosityLevelDebug)
+		logger.DebuglnCtx(ctx, "Sync already in progress, skipping this cycle")
 		s.syncMutex.Unlock()
 
 		return
@@ -114,15 +114,13 @@ func (s *SyncService) performSync() {
 		s.syncMutex.Unlock()
 	}()
 
-	ctx := context.Background()
-
-	logger.Infof("Starting DB-Pod sync cycle", logger.VerbosityLevelDebug)
+	logger.DebuglnCtx(ctx, "Starting DB-Pod sync cycle")
 
 	// Get all applications with Running or Error status
 	filters := &dbrepo.ApplicationFilters{}
 	applications, err := s.appRepo.GetAll(ctx, filters)
 	if err != nil {
-		logger.Errorf("Failed to fetch applications for sync: %v", err)
+		logger.ErrorfCtx(ctx, "Failed to fetch applications for sync: %v", err)
 
 		return
 	}
@@ -131,12 +129,12 @@ func (s *SyncService) performSync() {
 	for _, app := range applications {
 		if app.Status == models.ApplicationStatusRunning || app.Status == models.ApplicationStatusError {
 			if err := s.syncApplication(ctx, &app); err != nil {
-				logger.Errorf("Failed to sync application %s: %v", app.Name, err)
+				logger.ErrorfCtx(ctx, "Failed to sync application %s: %v", app.Name, err)
 			}
 		}
 	}
 
-	logger.Infof("Completed DB-Pod sync cycle", logger.VerbosityLevelDebug)
+	logger.DebuglnCtx(ctx, "Completed DB-Pod sync cycle")
 }
 
 // syncApplication syncs a single application using bottom-up approach:
@@ -150,7 +148,7 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 		return fmt.Errorf("failed to create runtime client: %w", err)
 	}
 
-	logger.Infof("Syncing application: %s (ID: %s)", app.Name, app.ID)
+	logger.InfofCtx(ctx, "Syncing application: %s (ID: %s)", app.Name, app.ID)
 
 	// Track errors during sync
 	errorMessages := []string{}
@@ -175,7 +173,7 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 		return fmt.Errorf("failed to update application status: %w", err)
 	}
 
-	logger.Infof("Completed sync for application: %s", app.Name)
+	logger.InfofCtx(ctx, "Completed sync for application: %s", app.Name)
 
 	return nil
 }
@@ -190,7 +188,7 @@ func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime,
 	for _, service := range app.Services {
 		dependencies, err := s.serviceDepsRepo.GetDependenciesByServiceID(ctx, service.ID)
 		if err != nil {
-			logger.Errorf("Failed to get dependencies for service %s: %v", service.ID, err)
+			logger.ErrorfCtx(ctx, "Failed to get dependencies for service %s: %v", service.ID, err)
 
 			continue
 		}
@@ -208,7 +206,7 @@ func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime,
 			// Sync component pod status
 			status, componentMsg, err := s.syncComponentPod(ctx, rt, dep.DependencyID)
 			if err != nil {
-				logger.Errorf("Failed to sync component %s: %v", dep.DependencyID, err)
+				logger.ErrorfCtx(ctx, "Failed to sync component %s: %v", dep.DependencyID, err)
 			} else if status == models.ComponentStatusError && componentMsg != "" {
 				// Collect error messages for application status
 				errorMessages = append(errorMessages, componentMsg)
@@ -230,7 +228,7 @@ func (s *SyncService) syncAllServices(ctx context.Context, rt runtime.Runtime, a
 	for _, service := range app.Services {
 		serviceMsg, err := s.syncServicePod(ctx, rt, service)
 		if err != nil {
-			logger.Errorf("Failed to sync service %s: %v", service.ID, err)
+			logger.ErrorfCtx(ctx, "Failed to sync service %s: %v", service.ID, err)
 			// Continue with other services even if one fails
 		}
 		// Collect error messages for application status
@@ -253,10 +251,10 @@ func (s *SyncService) syncServicePod(ctx context.Context, rt runtime.Runtime, se
 		message := fmt.Sprintf("Pod not found or error: %v", err)
 
 		if service.Status != newStatus {
-			if err := s.serviceRepo.UpdateStatus(ctx, service.ID, newStatus, message); err != nil {
+			if err := catalogutils.UpdateServiceStatus(ctx, s.serviceRepo, service.ID, newStatus, message); err != nil {
 				return "", fmt.Errorf("failed to update service status: %w", err)
 			}
-			logger.Infof("Updated service %s status to %s", service.ID, newStatus)
+			logger.InfofCtx(ctx, "Updated service %s status to %s", service.ID, newStatus)
 		}
 
 		return message, nil
@@ -267,10 +265,10 @@ func (s *SyncService) syncServicePod(ctx context.Context, rt runtime.Runtime, se
 
 	// Update only if status changed
 	if service.Status != newStatus {
-		if err := s.serviceRepo.UpdateStatus(ctx, service.ID, newStatus, message); err != nil {
+		if err := catalogutils.UpdateServiceStatus(ctx, s.serviceRepo, service.ID, newStatus, message); err != nil {
 			return "", fmt.Errorf("failed to update service status: %w", err)
 		}
-		logger.Infof("Updated service %s status to %s", service.ID, newStatus)
+		logger.InfofCtx(ctx, "Updated service %s status to %s", service.ID, newStatus)
 	}
 
 	// Return error message if service is in error state
@@ -301,10 +299,10 @@ func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, 
 		message := fmt.Sprintf("Pod not found or error: %v", err)
 
 		if component.Status != newStatus {
-			if err := s.componentRepo.UpdateStatus(ctx, componentID, newStatus, message); err != nil {
+			if err := catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, newStatus, message); err != nil {
 				return newStatus, "", fmt.Errorf("failed to update component status: %w", err)
 			}
-			logger.Infof("Updated component %s status to %s", componentID, newStatus)
+			logger.InfofCtx(ctx, "Updated component %s status to %s", componentID, newStatus)
 		}
 		// Return formatted message for application status
 		return newStatus, fmt.Sprintf("Component %s/%s: %s", component.Type, component.Provider, message), nil
@@ -315,10 +313,10 @@ func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, 
 
 	// Update only if status changed
 	if component.Status != newStatus {
-		if err := s.componentRepo.UpdateStatus(ctx, componentID, newStatus, message); err != nil {
+		if err := catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, newStatus, message); err != nil {
 			return newStatus, "", fmt.Errorf("failed to update component status: %w", err)
 		}
-		logger.Infof("Updated component %s status to %s", componentID, newStatus)
+		logger.InfofCtx(ctx, "Updated component %s status to %s", componentID, newStatus)
 	}
 
 	// Return formatted message for application status if component is in error
@@ -424,10 +422,10 @@ func (s *SyncService) updateApplicationStatus(ctx context.Context, app *models.A
 
 	// Update only if status changed
 	if app.Status != newStatus {
-		if err := s.appRepo.UpdateStatus(ctx, app.ID, newStatus, message); err != nil {
+		if err := catalogutils.UpdateApplicationStatus(ctx, s.appRepo, app.ID, newStatus, message); err != nil {
 			return fmt.Errorf("failed to update application status: %w", err)
 		}
-		logger.Infof("Updated application %s status to %s", app.Name, newStatus)
+		logger.InfofCtx(ctx, "Updated application %s status to %s", app.Name, newStatus)
 	}
 
 	return nil

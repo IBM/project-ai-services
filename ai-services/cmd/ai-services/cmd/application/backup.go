@@ -90,7 +90,7 @@ Examples:
 		cmd.SilenceUsage = true
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
-		logger.Infof("Runtime: %s\n", rt, 0)
+		logger.Infof("Runtime: %s\n", rt)
 
 		// Get absolute path to backup file if provided
 		var absFilename string

@@ -24,7 +24,7 @@ func (r *RHNRule) Description() string {
 }
 
 func (r *RHNRule) Verify() error {
-	logger.Infoln("Validating RHN registration...", logger.VerbosityLevelDebug)
+	logger.Debugln("Validating RHN registration...")
 	cmd := exec.Command("dnf", "repolist")
 	output, err := cmd.CombinedOutput()
 
