@@ -54,14 +54,12 @@ const (
 	LevelRankError
 )
 
-// Global state to track whether we are in a service context.
-var isServiceEnv bool
-
-// activeMinLevel tracks the active numeric severity level for filtering.
-var activeMinLevel int
-
-// logOptions holds the Kubernetes logging configuration.
-var logOptions *logsv1.LoggingConfiguration
+// Global state tracking log configurations.
+var (
+	isServiceEnv   bool
+	activeMinLevel int
+	logOptions     *logsv1.LoggingConfiguration
+)
 
 // Init initializes the logger with appropriate settings based on environment.
 func Init() {
@@ -88,6 +86,13 @@ func Init() {
 	} else {
 		logOptions.Format = "text"
 		logOptions.Verbosity = logsv1.VerbosityLevel(0)
+
+		// Bypasses the default klog boilerplate format in CLI environments
+		// This removes timestamps, PIDs, and source file metadata headers [1]
+		fs := flag.NewFlagSet("klog-override", flag.ContinueOnError)
+		klog.InitFlags(fs)
+		_ = fs.Set("logtostderr", "true")
+		_ = fs.Set("skip_headers", "true") // Strip default klog headers [1]
 	}
 
 	// 5. Apply Severity Thresholds and set active minimum level
@@ -110,12 +115,9 @@ func Init() {
 	if err := logsv1.ValidateAndApply(logOptions, nil); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to apply component-base logging configurations: %v\n", err)
 	}
-
-	// 7. Parse flags to apply all settings
-	flag.Parse()
 }
 
-// buildKV builds key-value pairs for structured logging with level, caller_fullpath, and requestID
+// buildKV builds key-value pairs for structured logging with level, caller_fullpath, and requestID.
 // depth specifies how many stack frames to skip when capturing the caller_fullpath location.
 func buildKV(ctx context.Context, level string, depth int) []any {
 	var kv []any

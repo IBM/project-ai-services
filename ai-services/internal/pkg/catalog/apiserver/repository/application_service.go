@@ -293,7 +293,8 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 	}
 
 	// Phase 5: Spawn goroutine for async deployment execution with panic recovery
-	go s.executeDeploymentAsync(plan, req)
+	// Preserve requestID from the original context for tracing async operations
+	go s.executeDeploymentAsync(ctx, plan, req)
 
 	// Phase 6: Return 202 Accepted immediately with application ID
 	response := &apimodels.CreateApplicationResponse{
@@ -306,11 +307,24 @@ func (s *ApplicationService) CreateApplication(ctx context.Context, req apimodel
 // executeDeploymentAsync executes the deployment in a background goroutine.
 // It updates the application status in the database based on deployment outcome.
 // Includes panic recovery to prevent crashes.
-func (s *ApplicationService) executeDeploymentAsync(plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest) {
+// The context parameter should contain the requestID from the original HTTP request for tracing.
+func (s *ApplicationService) executeDeploymentAsync(parentCtx context.Context, plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest) {
+	// Extract requestID from parent context to preserve it across the async boundary
+	var requestID string
+	if id, ok := parentCtx.Value(logger.RequestIDKey).(string); ok {
+		requestID = id
+	}
+
+	// Create a new background context for the async operation (not tied to the HTTP request lifecycle)
+	// but preserve the requestID for tracing
+	ctx := context.Background()
+	if requestID != "" {
+		ctx = context.WithValue(ctx, logger.RequestIDKey, requestID)
+	}
+
 	// Defer panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			ctx := context.Background()
 			logger.ErrorfCtx(ctx, "Panic recovered in deployment goroutine for application %s: %v", plan.ApplicationName, r)
 
 			// Attempt to update application status to Error
@@ -320,9 +334,6 @@ func (s *ApplicationService) executeDeploymentAsync(plan *deployment.DeploymentP
 			}
 		}
 	}()
-
-	// Create a new context for the async operation (not tied to the HTTP request context)
-	ctx := context.Background()
 
 	// Determine runtime type (currently only Podman is supported)
 	runtimeType := runtimeTypes.RuntimeTypePodman
@@ -653,7 +664,19 @@ func (s *ApplicationService) DeleteApplication(ctx context.Context, id uuid.UUID
 		return nil, err
 	}
 
-	go s.deletionService.PerformDeletion(context.Background(), id, app.Services, keepData)
+	// Extract requestID from context to preserve it across the async boundary
+	var requestID string
+	if reqID, ok := ctx.Value(logger.RequestIDKey).(string); ok {
+		requestID = reqID
+	}
+
+	// Create a new background context for the async operation but preserve the requestID
+	deletionCtx := context.Background()
+	if requestID != "" {
+		deletionCtx = context.WithValue(deletionCtx, logger.RequestIDKey, requestID)
+	}
+
+	go s.deletionService.PerformDeletion(deletionCtx, id, app.Services, keepData)
 
 	return &DeleteApplicationResponse{
 		ID:      id.String(),
