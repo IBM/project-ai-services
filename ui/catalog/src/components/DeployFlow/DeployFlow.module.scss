@@ -125,6 +125,16 @@
   color: $support-warning;
 }
 
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
 .resourceLoading {
   padding: $spacing-05 0;
 }

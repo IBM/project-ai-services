@@ -117,7 +117,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
         logger.error(f"Error summarizing/classifying table: {e}")
         return "No summary.", False
 
-def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, prompt_template: str, max_tokens: int = 1024, max_workers=32):
+def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, prompt_template: str, max_tokens: int = 1024, max_workers=32):
     """
     Combined function to summarize and classify tables using a single prompt.
     Returns tuple: (summaries, decisions)
@@ -132,7 +132,7 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, pdf_path, 
             for idx, prompt in enumerate(all_prompts)
         }
         for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts),
-                                   desc=f"Summarizing and classifying tables of '{pdf_path}'"):
+                                   desc=f"Summarizing and classifying tables of '{doc_path}'"):
             idx = futures[future]
             results[idx] = future.result()
 

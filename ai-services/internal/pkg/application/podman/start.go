@@ -16,8 +16,8 @@ import (
 func (p *PodmanApplication) Start(opts appTypes.StartOptions) error {
 	var pods []types.Pod
 	var err error
-	// if experimental flag is set, get pods from applications-ps
-	if !opts.Experimental {
+	// if legacy flag is set, get pods from runtime; otherwise use catalog API
+	if opts.Legacy {
 		pods, err = p.fetchPodsFromRuntime(opts.Name)
 		if err != nil {
 			return err
