@@ -87,7 +87,6 @@ function getProviderVersion(
 function mergeParamsWithUserValues(
   schemaParams: Record<string, unknown>,
   userValues: Record<string, unknown>,
-  componentType: string,
 ): Record<string, unknown> {
   const merged = { ...schemaParams };
 
@@ -96,12 +95,6 @@ function mergeParamsWithUserValues(
     if (value !== undefined && value !== null && value !== "") {
       merged[key] = value;
     }
-  }
-
-  // CRITICAL FIX: vector_store components should never have a model parameter
-  // Remove it even if it comes from schema defaults or user values
-  if (componentType === "vector_store" && "model" in merged) {
-    delete merged.model;
   }
 
   return merged;
@@ -122,7 +115,6 @@ async function buildDeploymentComponent(
   const params = mergeParamsWithUserValues(
     schemaParams,
     componentConfig.params,
-    componentType,
   );
 
   // Build base component

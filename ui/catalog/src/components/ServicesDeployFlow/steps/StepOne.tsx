@@ -46,8 +46,8 @@ export const StepOne: React.FC<StepProps> = ({
     return deployOptions.components
       ?.filter(
         (component) =>
-          serviceComponentTypes.includes(component.type) && 
-                !["llm", "reranker"].includes(component.type),
+          serviceComponentTypes.includes(component.type) &&
+          !["llm", "reranker"].includes(component.type),
       )
       .map((component) => {
         const providerOptions = component.providers.map((provider) => ({
@@ -140,9 +140,12 @@ export const StepOne: React.FC<StepProps> = ({
     if (!currentComponent) return;
 
     // Find the correct provider for this model from the store
-    const componentModels = getComponentModels(selectedServiceId, componentType);
+    const componentModels = getComponentModels(
+      selectedServiceId,
+      componentType,
+    );
     const selectedModelOption = componentModels.find((m) => m.id === model);
-    
+
     if (!selectedModelOption) return;
 
     onChange({

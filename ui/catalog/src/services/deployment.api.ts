@@ -511,29 +511,17 @@ export const fetchComponentModelsWithSchemas = async (
           }
         }
 
-        // Fallback: if no schema or no model in schema, return provider info
-        return [
-          {
-            id: provider.id,
-            text: provider.name,
-            providerId: provider.id,
-            providerName: provider.name,
-          },
-        ];
+        // Fallback: if no schema or no model in schema
+        // Return empty array - components without schemas don't have model parameters
+        // The provider selection will be handled separately in the UI
+        return [];
       } catch (error) {
         console.error(
           `Failed to fetch schema for ${componentType} provider ${provider.id}:`,
           error,
         );
-        // Return provider info as fallback
-        return [
-          {
-            id: provider.id,
-            text: provider.name,
-            providerId: provider.id,
-            providerName: provider.name,
-          },
-        ];
+        // Return empty array as fallback - components without schemas don't have model parameters
+        return [];
       }
     });
 
