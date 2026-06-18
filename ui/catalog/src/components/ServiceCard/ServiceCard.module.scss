@@ -15,6 +15,12 @@
   padding-left: spacing.$spacing-05;
   padding-right: spacing.$spacing-05;
   padding-bottom: spacing.$spacing-05;
+  background-color: theme.$layer;
+  // transition: background-color 150ms ease-in-out;
+
+  &:hover {
+    background-color: theme.$layer-hover;
+  }
 
   :global(.c4p--card__header) {
     padding: 0;
@@ -39,6 +45,8 @@
     width: fit-content;
     height: auto;
     box-shadow: none;
+    position: relative;
+    z-index: 2;
   }
 
   :global(.c4p--card__footer button:last-child) {
@@ -46,6 +54,8 @@
     color: var(--cds-text-primary);
     border: none;
     box-shadow: none;
+    position: relative;
+    z-index: 2;
 
     &:hover {
       background-color: transparent;

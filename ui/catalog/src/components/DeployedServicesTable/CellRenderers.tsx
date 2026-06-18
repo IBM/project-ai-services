@@ -1,4 +1,4 @@
-import { Link, Tag, OverflowMenu, OverflowMenuItem } from "@carbon/react";
+import { Tag, OverflowMenu, OverflowMenuItem } from "@carbon/react";
 import {
   Delete,
   CheckmarkFilled,
@@ -28,7 +28,13 @@ const STATUS_CONFIG = {
     icon: PauseOutline,
     className: styles.statusTagSecondary,
   },
-  "Deploying...": {
+
+  Deploying: {
+    tagType: "blue" as const,
+    icon: InProgress,
+    className: styles.statusTagInfo,
+  },
+  Downloading: {
     tagType: "blue" as const,
     icon: InProgress,
     className: styles.statusTagInfo,
@@ -51,32 +57,39 @@ interface CellRendererProps {
   value: unknown;
   rowId: string;
   dispatch: Dispatch<AppAction>;
+  rowData?: { status: string };
 }
 
-export const ActionCell = ({ rowId, dispatch }: CellRendererProps) => (
-  <OverflowMenu size="lg" flipped aria-label="Actions">
-    <OverflowMenuItem
-      itemText={
-        <div className={styles.deleteMenuItem}>
-          <span>Delete</span>
-          <Delete size={16} />
-        </div>
-      }
-      isDelete
-      onClick={() => {
-        dispatch({
-          type: ACTION_TYPES.DEPLOYED_SERVICES_OPEN_DELETE_DIALOG,
-          payload: rowId,
-        });
-      }}
-    />
-  </OverflowMenu>
-);
+export const ActionCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
+  // Enable delete button only for "error" or "running" status
+  const status = rowData?.status?.toLowerCase() || "";
+  const isDeleteEnabled = status === "error" || status === "running";
+
+  return (
+    <OverflowMenu size="lg" flipped aria-label="Actions">
+      <OverflowMenuItem
+        itemText={
+          <div className={styles.deleteMenuItem}>
+            <span>Delete</span>
+            <Delete size={16} />
+          </div>
+        }
+        isDelete
+        disabled={!isDeleteEnabled}
+        onClick={() => {
+          dispatch({
+            type: ACTION_TYPES.DEPLOYED_SERVICES_OPEN_DELETE_DIALOG,
+            payload: rowId,
+          });
+        }}
+      />
+    </OverflowMenu>
+  );
+};
 
 export const NameCell = ({ value }: CellRendererProps) => (
-  <Link href="#">{String(value)}</Link>
+  <span style={{ fontWeight: 500 }}>{String(value)}</span>
 );
-
 export const StatusCell = ({ value }: CellRendererProps) => {
   const status = String(value);
   const config =
@@ -95,23 +108,35 @@ export const StatusCell = ({ value }: CellRendererProps) => {
   );
 };
 
-export const MessageCell = ({ value }: CellRendererProps) => {
+export const MessageCell = ({ value, rowData }: CellRendererProps) => {
   const message = String(value || "");
+  const status = rowData?.status || "";
 
-  if (!message) {
-    return <span>{message}</span>;
+  // Don't show message if status is Running
+  if (status === "Running" || !message) {
+    return <span></span>;
   }
 
-  const isError = message.toLowerCase().includes("error");
-  const MessageIcon = isError ? ErrorFilled : InProgress;
+  const isError =
+    message.toLowerCase().includes("error") ||
+    message.toLowerCase().includes("failed");
+  const isSuccess = message.toLowerCase().includes("completed successfully");
+
+  let MessageIcon = InProgress;
+  let iconClassName = styles.messageIconInfo;
+
+  if (isError) {
+    MessageIcon = ErrorFilled;
+    iconClassName = styles.messageIconError;
+  } else if (isSuccess) {
+    MessageIcon = CheckmarkFilled;
+    iconClassName = styles.messageIconSuccess;
+  }
 
   return (
     <div className={styles.messageWithIcon}>
-      <MessageIcon
-        size={16}
-        className={isError ? styles.messageIconError : styles.messageIconInfo}
-      />
-      <span>{message}</span>
+      <MessageIcon size={16} className={iconClassName} />
+      <span className={styles.messageText}>{message}</span>
     </div>
   );
 };

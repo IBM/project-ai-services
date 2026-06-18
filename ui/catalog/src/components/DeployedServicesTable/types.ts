@@ -9,8 +9,11 @@ export interface ApplicationService {
 export interface ApplicationApiResponse {
   id: string;
   name: string;
+  deployment_type: string;
+  type: string;
   status: "Deploying..." | "Deleting..." | "Error" | "Stopped" | "Running";
   created_at: string;
+  updated_at: string;
   message?: string;
   services?: ApplicationService[];
 }
@@ -165,7 +168,7 @@ export type AppAction =
 
 // Table headers - Messages column moved after Service
 export const HEADERS: DataTableHeader[] = [
-  { header: "Deployment name", key: "name" },
+  { header: "Name", key: "name" },
   { header: "Status", key: "status" },
   { header: "Uptime", key: "uptime" },
   { header: "Service", key: "service" },
