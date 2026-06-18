@@ -16,6 +16,11 @@ export interface SchemaProperty {
   maxLength?: number;
   minimum?: number;
   maximum?: number;
+  "x-ui-only"?: boolean;
+  "x-ui-controls"?: string;
+  "x-ui-controlled-by"?: string;
+  properties?: Record<string, SchemaProperty>;
+  required?: string[];
   [key: string]: unknown;
 }
 
@@ -34,6 +39,9 @@ export interface ParsedField {
     min?: number;
     max?: number;
   };
+  uiOnly?: boolean;
+  controls?: string;
+  controlledBy?: string;
 }
 
 export interface JSONSchema {
@@ -46,6 +54,7 @@ export interface JSONSchema {
 
 /**
  * Parses JSON Schema and extracts field definitions
+ * Handles nested properties by flattening them
  */
 export function parseSchema(schema: JSONSchema): ParsedField[] {
   if (!schema.properties) {
@@ -56,9 +65,22 @@ export function parseSchema(schema: JSONSchema): ParsedField[] {
   const requiredFields = new Set(schema.required || []);
 
   for (const [key, property] of Object.entries(schema.properties)) {
-    const field = parseSchemaProperty(key, property, requiredFields.has(key));
-    if (field) {
-      fields.push(field);
+    // Check if this is a nested object with properties
+    if (property.type === "object" && property.properties) {
+      // Recursively parse nested properties
+      const nestedSchema: JSONSchema = {
+        type: "object",
+        properties: property.properties as Record<string, SchemaProperty>,
+        required: property.required as string[] | undefined,
+      };
+      const nestedFields = parseSchema(nestedSchema);
+      fields.push(...nestedFields);
+    } else {
+      // Regular field
+      const field = parseSchemaProperty(key, property, requiredFields.has(key));
+      if (field) {
+        fields.push(field);
+      }
     }
   }
 
@@ -96,6 +118,14 @@ function parseSchemaProperty(
   else if (property.format === "password") {
     fieldType = "password";
   } else if (property.format === "textarea" || property.type === "textarea") {
+    fieldType = "textarea";
+  }
+  // Automatically render long text fields as textareas
+  else if (
+    property.type === "string" &&
+    property.maxLength &&
+    property.maxLength >= 500
+  ) {
     fieldType = "textarea";
   }
   // Handle basic types
@@ -136,6 +166,9 @@ function parseSchemaProperty(
     defaultValue: property.default,
     options,
     validation,
+    uiOnly: property["x-ui-only"],
+    controls: property["x-ui-controls"],
+    controlledBy: property["x-ui-controlled-by"],
   };
 }
 

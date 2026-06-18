@@ -20,7 +20,7 @@ import (
 )
 
 var (
-	experimentalInfo bool
+	legacyInfo bool
 )
 
 var infoCmd = &cobra.Command{
@@ -40,11 +40,30 @@ var infoCmd = &cobra.Command{
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
 
-		if experimentalInfo && rt == types.RuntimeTypePodman {
+		// When legacyInfo is true and runtime is podman, use the older/stable code path
+		// For openshift runtime, always use the older/stable code path regardless of legacy flag
+		if legacyInfo && rt == types.RuntimeTypePodman {
+			// Create application instance using factory
+			factory := application.NewFactory(rt)
+			app, err := factory.Create(applicationName)
+			if err != nil {
+				return fmt.Errorf("failed to create application instance: %w", err)
+			}
+
+			opts := appTypes.InfoOptions{
+				Name: applicationName,
+			}
+
+			return app.Info(opts)
+		}
+
+		// Default: use new implementation using catalog
+		// For openshift runtime, always use the older/stable code path
+		if rt == types.RuntimeTypePodman {
 			return renderApplicationInfo(applicationName)
 		}
 
-		// Create application instance using factory
+		// OpenShift runtime uses the older implementation
 		factory := application.NewFactory(rt)
 		app, err := factory.Create(applicationName)
 		if err != nil {
@@ -60,7 +79,7 @@ var infoCmd = &cobra.Command{
 }
 
 func init() {
-	infoCmd.Flags().BoolVar(&experimentalInfo, "experimental", false, "Include experimental application info")
+	infoCmd.Flags().BoolVar(&legacyInfo, "legacy", false, "Use legacy application info implementation")
 }
 
 func renderApplicationInfo(appName string) error {

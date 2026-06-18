@@ -1,10 +1,8 @@
 # Standard library imports
 import logging
-import shutil
-import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 # Third-party PDF processing libraries
 import pdfplumber
@@ -14,15 +12,8 @@ from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser, PDFSyntaxError
 from rapidfuzz import fuzz
 
-# Docling document conversion libraries
-from docling.datamodel.document import ConversionResult
-from docling.document_converter import DocumentConverter
-from docling_core.types.doc.document import DoclingDocument
-
 # Local application imports
-from common.misc_utils import get_logger, DoclingConversionError
-from common.retry_utils import retry_on_transient_error
-from digitize.settings import settings
+from common.misc_utils import get_logger
 
 # To suppress the warnings raised from pdfminer package while extracting the font size
 logging.getLogger("pdfminer").propagate = False
@@ -52,7 +43,6 @@ def get_document_page_count(file_path: str) -> int:
     Returns:
         Page count (int), or 0 if unable to determine
     """
-    from pathlib import Path
     from digitize.docx_utils import estimate_docx_page_count
 
     try:
@@ -118,7 +108,6 @@ def load_pdf_pages(pdf_path):
     Load PDF pages for text extraction.
     Returns empty list for non-PDF files (e.g., DOCX).
     """
-    from pathlib import Path
     
     # Check if file is actually a PDF
     file_ext = Path(pdf_path).suffix.lower()
@@ -201,156 +190,3 @@ def find_text_font_size(
         logger.error(f"Error extracting font size: {e}")
 
     return matches
-
-@retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-def convert_chunk(doc_converter: DocumentConverter, path: Path, chunk_num: int, start_page: int, end_page: int, chunk_cache_dir: Path):
-    """Convert a single chunk of a PDF document.
-
-    Args:
-        doc_converter: DocumentConverter instance
-        path: Path to the PDF file
-        chunk_num: Chunk number for logging
-        start_page: Starting page number (1-based)
-        end_page: Ending page number (1-based, inclusive)
-        chunk_cache_dir: Directory to save chunk results
-
-    Returns:
-        Path to the saved chunk JSON file
-
-    Raises:
-        DoclingConversionError: If conversion or saving fails
-    """
-    try:
-        # Convert this chunk
-        conv_res: ConversionResult = doc_converter.convert(source=path, page_range=(start_page, end_page))
-
-        # Save chunk result to cache
-        chunk_filename = chunk_cache_dir / f"chunk_{chunk_num:04d}.json"
-        conv_res.document.save_as_json(str(chunk_filename))
-        logger.debug(f"Saved chunk of {path}'s chunk {chunk_num} to {chunk_filename}")
-
-        return chunk_filename
-    except Exception as e:
-        # Wrap any exception in DoclingConversionError for retry handling
-        error_msg = f"Failed to convert chunk {chunk_num} (pages {start_page}-{end_page}) of {path}: {str(e)}"
-        logger.error(error_msg)
-        raise DoclingConversionError(error_msg) from e
-
-def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDocument:
-    """
-    Convert a document to DoclingDocument, processing in 100-page chunks.
-
-    Args:
-        path: Path to the PDF file to convert
-        cache_dir: Optional cache directory for storing chunk results.
-                   Will be cleaned up after processing.
-
-    Returns:
-        DoclingDocument containing the concatenated result
-    """
-
-    # Input validation
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Document not found: {path}")
-
-    doc_converter: DocumentConverter = get_doc_converter()
-
-    # Get total page count
-    total_pages = get_pdf_page_count(path)
-
-    # If document has configured chunk size pages or fewer, convert normally
-    if total_pages <= settings.digitize.pdf_chunk_size:
-        logger.debug(f"Converting {path} document with {total_pages} pages in single pass")
-
-        @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
-        def _convert_single_doc():
-            try:
-                return doc_converter.convert(source=path).document
-            except Exception as e:
-                error_msg = f"Failed to convert document {path}: {str(e)}"
-                logger.error(error_msg)
-                raise DoclingConversionError(error_msg) from e
-
-        return _convert_single_doc()
-
-    # Process in chunks
-    # Calculate total chunks using ceiling division for the configured PDF chunk size.
-    # This ensures all pages are covered even if the last chunk is smaller.
-    total_chunks = (total_pages + settings.digitize.pdf_chunk_size - 1) // settings.digitize.pdf_chunk_size
-    logger.debug(
-        f"Converting {path} document with {total_pages} pages in {total_chunks} "
-        f"chunks of {settings.digitize.pdf_chunk_size}"
-    )
-
-    # Determine cache directory for storing chunk results
-    if cache_dir is None:
-        chunk_cache_dir = Path(tempfile.mkdtemp(prefix="docling_chunks_"))
-    else:
-        chunk_cache_dir = Path(cache_dir)
-
-    chunk_cache_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        # Process document in chunks and save each chunk
-        chunk_files = []
-
-        for start_page in range(1, total_pages + 1, settings.digitize.pdf_chunk_size):
-            end_page = min(start_page + settings.digitize.pdf_chunk_size - 1, total_pages)
-            chunk_num = (start_page - 1) // settings.digitize.pdf_chunk_size + 1
-
-            logger.debug(f"Processing {path}'s chunk {chunk_num}/{total_chunks} (pages {start_page}-{end_page})")
-            chunk_file = convert_chunk(doc_converter, path, chunk_num, start_page, end_page, chunk_cache_dir)
-            chunk_files.append(chunk_file)
-
-        # Load all chunk documents and concatenate
-        docs = [DoclingDocument.load_from_json(filename=f) for f in chunk_files]
-        concatenated_doc = DoclingDocument.concatenate(docs=docs)
-
-        logger.debug(f"Successfully concatenated {path}'s {len(docs)} chunks into single document")
-        
-        return concatenated_doc
-
-    finally:
-        # Always cleanup cache directory
-        try:
-            shutil.rmtree(chunk_cache_dir)
-            logger.debug(f"Cleaned up cache directory: {chunk_cache_dir}")
-        except Exception as e:
-            logger.warning(f"Failed to cleanup cache directory {chunk_cache_dir}: {e}")
-
-def get_doc_converter():
-    import os
-    from pathlib import Path
-    from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import PdfPipelineOptions
-    from docling.document_converter import DocumentConverter, PdfFormatOption
-
-    # Accelerator & pipeline options
-    pipeline_options = PdfPipelineOptions()
-    
-    # Only set artifacts_path if DOCLING_MODELS_PATH environment variable is set
-    docling_models_path = os.environ.get('DOCLING_MODELS_PATH')
-    if docling_models_path:
-        artifacts_path = Path(docling_models_path)
-        if artifacts_path.exists():
-            pipeline_options.artifacts_path = artifacts_path
-            logger.debug(f"Using docling models from: {artifacts_path}")
-        else:
-            logger.warning(f"DOCLING_MODELS_PATH set to {artifacts_path} but directory does not exist")
-    else:
-        logger.debug("DOCLING_MODELS_PATH not set. Docling will use default model loading behavior.")
-    
-    pipeline_options.do_table_structure = True
-    pipeline_options.table_structure_options.do_cell_matching = True
-    pipeline_options.do_ocr = False
-
-    doc_converter = DocumentConverter(
-        allowed_formats=[
-            InputFormat.PDF,
-            InputFormat.DOCX
-        ],
-        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
-    )
-
-    return doc_converter

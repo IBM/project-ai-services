@@ -53,7 +53,7 @@ var (
 	skipChecks            []string
 	valuesFiles           []string
 	rawArgImagePullPolicy string
-	experimentalCreate    bool
+	legacyCreate          bool
 
 	// openshift flags.
 	timeout time.Duration
@@ -67,14 +67,17 @@ Arguments
 - [name]: Application name (Required)
 
 Examples:
-# Deploy with experimental mode (5 Spyre cards)
-ai-services application create rag --template rag --runtime podman --experimental
+# Deploy with default mode (5 Spyre cards)
+ai-services application create rag --template rag --runtime podman
 
-# Deploy with experimental mode (4 Spyre cards - reranker on CPU)
-ai-services application create rag --template rag --runtime podman --experimental --params reranker.vllm-cpu=true
+# Deploy with default mode (4 Spyre cards - reranker on CPU)
+ai-services application create rag --template rag --runtime podman --params reranker.vllm-cpu=true
 
-# Deploy with experimental mode (CPU mode)
-ai-services application create rag --template rag --runtime podman --experimental --params reranker.vllm-cpu=true,llm.vllm-cpu=true
+# Deploy with default mode (CPU mode)
+ai-services application create rag --template rag --runtime podman --params reranker.vllm-cpu=true,llm.vllm-cpu=true
+
+# Deploy with legacy mode
+ai-services application create rag --template rag --runtime podman --legacy
 	`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -105,13 +108,37 @@ ai-services application create rag --template rag --runtime podman --experimenta
 		}
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
-		// When experimentalCreate is true and runtime is podman, validate application name using catalog API
-		// For openshift runtime, always use the older/stable code path regardless of experimental flag
-		if experimentalCreate && rt == types.RuntimeTypePodman {
+		// When legacyCreate is true and runtime is podman, use the older/stable code path
+		// For openshift runtime, always use the older/stable code path regardless of legacy flag
+		if legacyCreate && rt == types.RuntimeTypePodman {
+			// Create application instance using factory
+			appFactory := application.NewFactory(rt)
+			app, err := appFactory.Create(appName)
+			if err != nil {
+				return fmt.Errorf("failed to create application instance: %w", err)
+			}
+
+			opts := appTypes.CreateOptions{
+				Name:              appName,
+				TemplateName:      templateName,
+				SkipModelDownload: skipModelDownload,
+				SkipImageDownload: skipImageDownload,
+				ArgParams:         argParams,
+				ValuesFiles:       valuesFiles,
+				ImagePullPolicy:   image.ImagePullPolicy(rawArgImagePullPolicy),
+				Timeout:           timeout,
+			}
+
+			return app.Create(ctx, opts)
+		}
+
+		// Default: use catalog way of deploying application
+		// For openshift runtime, always use the older/stable code path
+		if rt == types.RuntimeTypePodman {
 			return createApp(appName)
 		}
 
-		// Create application instance using factory
+		// OpenShift runtime uses the older implementation
 		appFactory := application.NewFactory(rt)
 		app, err := appFactory.Create(appName)
 		if err != nil {
@@ -211,7 +238,7 @@ func initCreatePodmanFlags() {
 			"- If left false in air-gapped environments → download attempt will fail\n"+
 			"Note: Supported for podman runtime only.\n",
 	)
-	createCmd.Flags().BoolVar(&experimentalCreate, "experimental", false, "Include experimental application create")
+	createCmd.Flags().BoolVar(&legacyCreate, "legacy", false, "Use legacy application create implementation")
 
 	initializeImagePullPolicyFlag()
 
@@ -279,12 +306,23 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 
 // validateTemplateFlag validates the template flag.
 func validateTemplateFlag(cmd *cobra.Command) error {
-	// Skip template validation in experimental mode for podman runtime
-	// In experimental mode, templates are validated against catalog API
-	if experimentalCreate && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+	// do template validation in legacy mode for podman runtime
+	// In default mode, templates are validated against catalog API
+	if legacyCreate && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+		tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
+		if err := tp.AppTemplateExist(templateName); err != nil {
+			return err
+		}
+
 		return nil
 	}
 
+	// Default mode for podman: skip embedded template validation (uses catalog API)
+	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+		return nil
+	}
+
+	// OpenShift runtime: validate against embedded templates
 	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 	if err := tp.AppTemplateExist(templateName); err != nil {
 		return err
@@ -305,13 +343,25 @@ func validateParamsFlag(cmd *cobra.Command) error {
 		return fmt.Errorf("invalid format: %w", err)
 	}
 
-	// Skip template validation in experimental mode for podman runtime
-	// In experimental mode, params are validated against catalog API schemas
-	if experimentalCreate && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+	// do template validation in legacy mode for podman runtime
+	// In default mode, params are validated against catalog API schemas
+	if legacyCreate && vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+		// Validate params against template values (legacy mode)
+		tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
+		_, err = tp.LoadValues(templateName, nil, argParams)
+		if err != nil {
+			return fmt.Errorf("failed to load params: %w", err)
+		}
+
 		return nil
 	}
 
-	// Validate params against template values (non-experimental mode)
+	// Default mode for podman: skip embedded template validation (uses catalog API)
+	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+		return nil
+	}
+
+	// OpenShift runtime: validate params against template values
 	tp := templates.NewEmbedTemplateProvider(&assets.ApplicationFS)
 	_, err = tp.LoadValues(templateName, nil, argParams)
 	if err != nil {

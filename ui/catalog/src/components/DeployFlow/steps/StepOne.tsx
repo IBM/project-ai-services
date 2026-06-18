@@ -52,17 +52,13 @@ export const StepOne: React.FC<StepProps> = ({
       Object.entries(paramsMap).forEach(([providerId, params]) => {
         const properties = params?.properties as Record<
           string,
-          { default?: unknown; oneOf?: Array<{ title?: string }> }
+          { oneOf?: Array<{ title?: string }> }
         >;
 
         const modelTitle = properties?.model?.oneOf?.[0]?.title;
-        const defaultModel = properties?.model?.default;
 
-        if (modelTitle && typeof modelTitle === "string") {
+        if (modelTitle) {
           newModelNames[providerId] = modelTitle;
-        } else if (defaultModel && typeof defaultModel === "string") {
-          const modelName = defaultModel.split("/").pop() || defaultModel;
-          newModelNames[providerId] = modelName;
         }
       });
     });
@@ -111,21 +107,33 @@ export const StepOne: React.FC<StepProps> = ({
     }
   }, [providerParamsByType, formData.globalComponents, onChange]);
 
-  // Build component data with deduplicated provider options
+  // Build component data with provider options, deduplicate by preferring default provider
   const globalComponentsData = useMemo(() => {
     return deployOptions.global_components.map((component) => {
-      const uniqueDisplayNames = new Set<string>();
-      const providerOptions: Array<{ id: string; text: string }> = [];
+      const providersByDisplayName = new Map<
+        string,
+        (typeof component.providers)[0]
+      >();
 
       component.providers.forEach((provider) => {
         const displayName = modelNames[provider.id] || provider.name;
-        if (!uniqueDisplayNames.has(displayName)) {
-          uniqueDisplayNames.add(displayName);
-          providerOptions.push({
-            id: provider.id,
-            text: displayName,
-          });
+
+        const existing = providersByDisplayName.get(displayName);
+        if (!existing) {
+          // First provider with this display name
+          providersByDisplayName.set(displayName, provider);
+        } else if (provider.default && !existing.default) {
+          // Replace with default provider if current one isn't default
+          providersByDisplayName.set(displayName, provider);
         }
+      });
+
+      const providerOptions: Array<{ id: string; text: string }> = [];
+      providersByDisplayName.forEach((provider, displayName) => {
+        providerOptions.push({
+          id: provider.id,
+          text: displayName,
+        });
       });
 
       const selectedProviderId =

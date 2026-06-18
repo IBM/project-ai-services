@@ -10,6 +10,9 @@
         "Digital assistant"
       ],
       "assets": [
+        "Video demos"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "demo": "https://mediacenter.ibm.com/media/IBM+Spyre+for+Power%3A+Turn-key+AI/1_etcvyc6u",
@@ -22,11 +25,14 @@
       "title": "Analyst assistant",
       "description": "Enables finance teams to investigate fraud, identify high‑value clients, and uncover non‑performing assets using their core data—without needing specialized AI or IT skills such as SQL.",
       "creator": "IBM",
-      "domain": "Banking & Finance",
+      "domain": "Banking and finance",
       "architectures": [
         "Digital assistant"
       ],
       "assets": [
+        "Video demos"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "demo": "https://mediacenter.ibm.com/media/Infusing%20AI%20into%20mission%20critical%20workloads%20with%20PowerVS%20and%20watsonx.ai/1_fzqutamr",
@@ -39,11 +45,14 @@
       "title": "BI assistant",
       "description": "Enables teams to ask a question to analyze their data, understand business logic, and uncover what's happening, why it matters, and what to do next.",
       "creator": "IBM",
-      "domain": "Enterprise Resource Planning",
+      "domain": "Enterprise resource planning",
       "architectures": [
         "Digital assistant"
       ],
       "assets": [
+        "Video demos"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "demo": "https://mediacenter.ibm.com/media/IBM%20watsonx%20BI%2C%20your%20new%20AI-powered%20business%20insights%20agent/1_402dvneq",
@@ -56,17 +65,19 @@
       "title": "Conference slide search",
       "description": "Innovates conference experiences by enabling fast access to presentation slides from current and past events through a search‑driven digital assistant.",
       "creator": "IBM",
-      "domain": "Professional Services",
+      "domain": "Professional services",
       "architectures": [
         "Digital assistant"
       ],
       "assets": [
+        "Reference stories"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "featuredArticle": {
         "company": "MIDRANGE",
         "title": "AI-Powered Search Enhances Conference Experiences on IBM i",
-        "imagePath": "images/image-placeholder.png",
         "articleUrl": "https://www.ibm.com/downloads/documents/us-en/16ddd5a53eb94e4e",
         "description": "MIDRANGE (ITP Verlag GmbH) Outcomes worked with IBM to implement an AI-powered search solution for its POW3R Conference using large language models (LLMs), opensource AI technologies, and IBM Granite Vision models. The solution enables attendees to quickly search and locate relevant content across hundreds of conference presentations, creating a smarter and more valuable conference experience."
       }
@@ -76,17 +87,19 @@
       "title": "Financial documents assistant",
       "description": "Enables conversational self-service for financial FAQs by helping customers quickly find information without digging through documents—reducing support friction.",
       "creator": "IBM",
-      "domain": "Banking & Finance",
+      "domain": "Banking and finance",
       "architectures": [
         "Digital assistant"
       ],
       "assets": [
+        "Reference stories"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "featuredArticle": {
         "company": "Portolan",
         "title": "Portolan Modernizes Financial Software with AI Search on IBM Power",
-        "imagePath": "images/image-placeholder.png",
         "articleUrl": "https://www.ibm.com/downloads/documents/us-en/1550f7e8f4d0d263"
       }
     },
@@ -95,11 +108,14 @@
       "title": "Invoice matching assistant",
       "description": "Ensures accurate, complete, and compliant financial transactions through automated multi‑way invoice matching within your ERP system.",
       "creator": "IBM",
-      "domain": "Enterprise Resource Planning",
+      "domain": "Enterprise resource planning",
       "architectures": [
         "Digital assistant"
       ],
       "assets": [
+        "Video demos"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "demo": "https://mediacenter.ibm.com/media/Intelligent%20workflow%20automation%20with%20agentic%20AI%20on%20SAP%20and%20IBM%20watsonx/1_c8dzgznk",
@@ -117,6 +133,10 @@
         "Digital assistant"
       ],
       "assets": [
+        "Video demos",
+        "Reference stories"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "demo": "https://mediacenter.ibm.com/media/IBM+Spyre+for+Power%3A+Turn-key+AI/1_etcvyc6u",
@@ -135,12 +155,15 @@
       "title": "Open account agent",
       "description": "Streamline account opening by automatically classifying onboarding documents and improving compliance with built‑in PII controls.",
       "creator": "IBM",
-      "domain": "Banking & Finance",
+      "domain": "Banking and finance",
       "architectures": [
-        "Digitize documents"
+        "Digital assistant"
       ],
       "assets": [
-        "Digitize documents"
+        "Video demos"
+      ],
+      "tag": [
+        "Digitize assistant"
       ],
       "demo": "https://mediacenter.ibm.com/media/AI+on+PowerA+IBM+Power10+Entity+Extraction+%28Demo%29/1_0r3zgnd4",
       "demoTitle": "AI on Power: IBM Power10 Entity Extraction (Demo)",
@@ -148,20 +171,25 @@
       "demoDuration": "1:36",
       "testimonial": {
         "company": "Crest Infosolutions",
-        "quote": "Personally Identifiable Information (PII) redaction helps to protect against data breach & ransom scenarios, which can cause fines on banks, insurance and other customer facing organizations, leading to loss of trust and reputation. We are planning to leverage IBM Spyre for Power for PII redaction, which we believe will decrease the amount of manual work by an organization, improving their ability to onboard customers faster and more efficiently."
+        "quote": "Personally Identifiable Information (PII) redaction helps to protect against data breach and ransom scenarios, which can cause fines on banks, insurance and other customer facing organizations, leading to loss of trust and reputation. We are planning to leverage IBM Spyre for Power for PII redaction, which we believe will decrease the amount of manual work by an organization, improving their ability to onboard customers faster and more efficiently."
       }
     },
     {
       "id": "9",
       "title": "Order processing assistant",
-      "description": "(coming soon) Streamlines order processing by automatically extracting relevant information and populating the correct ERP forms.",
+      "description": "(Coming soon...) Streamlines order processing by automatically extracting relevant information and populating the correct ERP forms.",
       "creator": "IBM",
-      "domain": "Enterprise Resource Planning",
+      "domain": "Enterprise resource planning",
       "architectures": [
         "Extract information (coming soon...)"
       ],
       "assets": [
-        "Extract information (coming soon...)"
+        "Video demos",
+        "Reference stories"
+      ],
+      "tag": [
+        "Extract information",
+        "(coming soon...)"
       ],
       "demo": "https://mediacenter.ibm.com/media/IBM+Spyre+for+Power%3A+Turn-key+AI/1_etcvyc6u",
       "demoTitle": "IBM Spyre Accelerator: Turn-key solution for AI enterprise workloads",
@@ -170,7 +198,6 @@
       "featuredArticle": {
         "company": "Hans Geis",
         "title": "Hans Geis Speeds Up Order Processing by 5X with AI on IBM i and Power",
-        "imagePath": "images/image-placeholder.png",
         "articleUrl": "https://www.ibm.com/downloads/documents/us-en/1443d5dc5ecf4367.",
         "description": "Global logistics provider and IBM Power client Hans Geis has followed the \"Deep process integration\" reference architecture with the \"Extract and tag information\" AI service within their order processing pipeline for incoming quote requests. Their end customers raise thousands of quote requests daily to ask Hans Geis and their competitors for transportation services of cargo they need to get shipped. In this competitive market, answering to requests quickly matters because logistic companies that respond timely are more likely to win an order.\n\nIn a joint project, Hans Geis and IBM have integrated the \"Extract and tag\" AI service into Hans Geis' ERP system running on IBM i, automating the order processing pipeline for quote requests. In their staging system, Hans Geis has measured a speed-up of 5x for their order processing process and an individual employee productivity gain of 80%."
       }
@@ -185,6 +212,9 @@
         "Digital assistant"
       ],
       "assets": [
+        "Reference stories"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "clientStories": [
@@ -204,12 +234,14 @@
         "Digital assistant"
       ],
       "assets": [
+        "Reference stories"
+      ],
+      "tag": [
         "Digital assistant"
       ],
       "featuredArticle": {
         "company": "Edsvard Hallbarhet AB",
         "title": "From contract headache to strategic asset: How Edsvard makes sense of unstructured real estate data with IBM Cloud and watsonx.data",
-        "imagePath": "images/image-placeholder.png",
         "articleUrl": "https://www.ibm.com/new/product-blog/how-edsvard-makes-sense-of-unstructured-real-estate-data-with-ibm-cloud-and-watsonx-data"
       },
       "partnerStories": [
@@ -234,12 +266,15 @@
         "Forecasting (coming soon...)"
       ],
       "assets": [
-        "Forecasting (coming soon...)"
+        "Reference stories"
+      ],
+      "tag": [
+        "Forecasting",
+        "(coming soon...)"
       ],
       "featuredArticle": {
         "company": "BECOM Electronics GmbH",
         "title": "AI on IBM i Optimizes Production Planning",
-        "imagePath": "images/image-placeholder.png",
         "articleUrl": "https://www.ibm.com/downloads/documents/us-en/15db45f02d520e7a"
       }
     }

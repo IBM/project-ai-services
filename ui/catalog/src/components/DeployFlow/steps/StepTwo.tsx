@@ -9,7 +9,10 @@ import {
 import { ResourceRequirements } from "../components/ResourceRequirements";
 import { ServiceConfigCard } from "../components/ServiceConfigCard";
 import { fetchResources } from "@/api/digitalAssistants";
-import { useBatchProviderParams } from "@/hooks/useProviderParams";
+import {
+  useBatchProviderParams,
+  useMultiTypeProviderParams,
+} from "@/hooks/useProviderParams";
 import { getResourceSharingKey } from "@/utils/resourceSharing";
 import { useDeployStore } from "@/store/deploy.store";
 import type { ResourcesResponse, Component } from "@/types/digitalAssistants";
@@ -361,21 +364,31 @@ export const StepTwo: React.FC<StepProps> = ({
     return result;
   }, [deployOptions.services]);
 
-  // Dynamically fetch provider parameters for all component types
-  const componentTypes = Object.keys(allProviderIds);
-  const providerParamsHooks = componentTypes.reduce(
-    (acc, type) => {
-      // eslint-disable-next-line react-hooks/rules-of-hooks
-      acc[type] = useBatchProviderParams(type, allProviderIds[type] || []);
-      return acc;
-    },
-    {} as Record<string, ReturnType<typeof useBatchProviderParams>>,
-  );
+  // Fetch provider parameters for all component types dynamically
+  // This single hook call handles all component types, respecting Rules of Hooks
+  const {
+    paramsByType,
+    isLoading: _paramsLoading,
+    errorsByType,
+  } = useMultiTypeProviderParams(allProviderIds);
 
-  const providerParamsByType = useMemo(
-    () => providerParamsHooks,
-    [providerParamsHooks],
-  );
+  // Transform to match the interface expected by the rest of the component
+  const providerParamsByType = useMemo(() => {
+    const result: Record<
+      string,
+      ReturnType<typeof useBatchProviderParams>
+    > = {};
+
+    Object.entries(paramsByType).forEach(([componentType, paramsMap]) => {
+      result[componentType] = {
+        paramsMap,
+        isLoading: false, // Already loaded by useMultiTypeProviderParams
+        errors: errorsByType[componentType] || {},
+      };
+    });
+
+    return result;
+  }, [paramsByType, errorsByType]);
 
   // Extract model names from params for display - DYNAMIC for all component types
   useEffect(() => {
@@ -388,20 +401,13 @@ export const StepTwo: React.FC<StepProps> = ({
       for (const [providerId, params] of Object.entries(paramsMap)) {
         const properties = params?.properties as Record<
           string,
-          { default?: unknown; oneOf?: Array<{ title?: string }> }
+          { oneOf?: Array<{ title?: string }> }
         >;
 
         const modelTitle = properties?.model?.oneOf?.[0]?.title;
-        const defaultModel = properties?.model?.default;
 
-        if (modelTitle && typeof modelTitle === "string") {
+        if (modelTitle) {
           modelNamesMap[providerId] = modelTitle;
-        } else if (defaultModel && typeof defaultModel === "string") {
-          const modelName =
-            componentType === "embedding"
-              ? defaultModel.split("/").pop() || defaultModel
-              : defaultModel;
-          modelNamesMap[providerId] = modelName;
         }
       }
 
@@ -542,6 +548,7 @@ export const StepTwo: React.FC<StepProps> = ({
 
     return (
       <ServiceConfigCard
+        serviceId={serviceId}
         serviceName={serviceName}
         config={config}
         description={description}
@@ -595,22 +602,33 @@ export const StepTwo: React.FC<StepProps> = ({
           rerankerComponent = component as Component;
         }
 
-        // Build provider options using Set-based deduplication with model names
+        // Build provider options with model names, deduplicate by preferring default provider
         const componentModelNames = state.modelNamesByComponent[component.type];
-        const providers: Array<{ id: string; text: string }> = [];
-        const uniqueDisplayNames = new Set<string>();
+        const providersByDisplayName = new Map<
+          string,
+          (typeof component.providers)[0]
+        >();
 
         component.providers.forEach((provider) => {
           const displayName =
             componentModelNames?.[provider.id] || provider.name;
-          // Only add if this display name hasn't been seen before
-          if (!uniqueDisplayNames.has(displayName)) {
-            uniqueDisplayNames.add(displayName);
-            providers.push({
-              id: provider.id,
-              text: displayName,
-            });
+
+          const existing = providersByDisplayName.get(displayName);
+          if (!existing) {
+            // First provider with this display name
+            providersByDisplayName.set(displayName, provider);
+          } else if (provider.default && !existing.default) {
+            // Replace with default provider if current one isn't default
+            providersByDisplayName.set(displayName, provider);
           }
+        });
+
+        const providers: Array<{ id: string; text: string }> = [];
+        providersByDisplayName.forEach((provider, displayName) => {
+          providers.push({
+            id: provider.id,
+            text: displayName,
+          });
         });
 
         // Check if this component is a global component (shared across services)

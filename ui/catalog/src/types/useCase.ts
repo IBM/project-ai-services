@@ -6,6 +6,7 @@ export interface UseCase {
   domain: string;
   architectures: string[];
   assets: string[];
+  tag: string[];
   demo?: string;
   demoTitle?: string;
   demoDescription?: string;

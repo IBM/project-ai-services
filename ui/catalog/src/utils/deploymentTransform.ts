@@ -8,6 +8,7 @@ import type {
   Component,
   Provider,
 } from "@/types/digitalAssistants";
+import { isInferenceComponent } from "./inferenceComponentHelper";
 
 interface DeploymentComponent {
   component_type: string;
@@ -20,6 +21,7 @@ interface DeploymentService {
   catalog_id: string;
   version: string;
   components: DeploymentComponent[];
+  backend?: Record<string, unknown>;
 }
 
 export interface DeploymentPayload {
@@ -74,7 +76,7 @@ function getProviderVersion(
 /**
  * Builds a deployment component from component configuration
  * All data comes from formData - no API calls needed
- * For LLM/reranker components, uses inferenceBackend as provider_id if specified
+ * For inference components (determined generically), uses inferenceBackend as provider_id if specified
  */
 function buildDeploymentComponent(
   componentType: string,
@@ -83,26 +85,45 @@ function buildDeploymentComponent(
   deployOptions: DeployOptionsResponse,
   globalComponents: Record<string, ComponentConfig>,
   inferenceBackend?: string,
-  serviceLevelParams?: Record<string, unknown>,
+  inferenceBackendParams?: Record<string, unknown>,
 ): DeploymentComponent {
-  // For LLM and reranker components, use inferenceBackend as provider if specified
+  // Determine if this is an inference component using generic logic
+  // An inference component has multiple providers with model input parameters
+  let componentDefinition: Component | undefined;
+
+  // Find component definition in service or global components
+  if (serviceDefinition) {
+    componentDefinition = serviceDefinition.components.find(
+      (c) => c.type === componentType,
+    );
+  }
+  if (!componentDefinition) {
+    componentDefinition = deployOptions.global_components.find(
+      (c) => c.type === componentType,
+    );
+  }
+
+  const isInferenceComp = componentDefinition
+    ? isInferenceComponent(componentDefinition)
+    : false;
+
+  // For inference components, use inferenceBackend as provider if specified
   // This allows the UI's "Inference Backend" dropdown to control which provider runs the model
-  const isInferenceComponent =
-    componentType === "llm" || componentType === "reranker";
   const providerId =
-    isInferenceComponent && inferenceBackend
+    isInferenceComp && inferenceBackend
       ? inferenceBackend
       : componentConfig.providerId;
 
   // Get params from component config (already populated when provider was selected)
   let params = { ...componentConfig.params };
 
-  // For inference components, merge service-level params (e.g., watsonx credentials)
-  // These are entered via DynamicSchemaFields when selecting the inference backend
-  if (isInferenceComponent && serviceLevelParams) {
+  // For inference components using inferenceBackend, merge inference backend params
+  // These are params specifically for the inference backend provider (e.g., API keys)
+  // NOT all service-level params (which may include service-specific params like systemPrompt)
+  if (isInferenceComp && inferenceBackend && inferenceBackendParams) {
     params = {
-      ...serviceLevelParams,
       ...params,
+      ...inferenceBackendParams,
     };
   }
 
@@ -138,13 +159,73 @@ function buildDeploymentComponent(
 }
 
 /**
+ * Separates inference backend params from service-level params
+ * Uses provider and service schemas to accurately classify parameters
+ * Inference backend params: defined in provider schema (model, apiKey, etc.)
+ * Service-level params: defined in service schema under backend.properties (systemPrompt, etc.)
+ */
+function separateParams(
+  allParams: Record<string, unknown>,
+  providerSchemaData: Record<string, unknown> | null,
+  serviceSchemaData: Record<string, unknown> | null,
+): {
+  inferenceBackendParams: Record<string, unknown>;
+  serviceParams: Record<string, unknown>;
+} {
+  if (!allParams || Object.keys(allParams).length === 0) {
+    return { inferenceBackendParams: {}, serviceParams: allParams || {} };
+  }
+
+  // Extract provider param names from cached schema
+  const providerParamNames = new Set<string>();
+  if (providerSchemaData?.properties) {
+    Object.keys(
+      providerSchemaData.properties as Record<string, unknown>,
+    ).forEach((key) => providerParamNames.add(key));
+  }
+
+  // Extract service param names from cached schema (under backend.properties)
+  const serviceParamNames = new Set<string>();
+  if (serviceSchemaData?.properties) {
+    const properties = serviceSchemaData.properties as Record<string, unknown>;
+    if (properties.backend) {
+      const backend = properties.backend as Record<string, unknown>;
+      if (backend.properties) {
+        Object.keys(backend.properties as Record<string, unknown>).forEach(
+          (key) => serviceParamNames.add(key),
+        );
+      }
+    }
+  }
+
+  // Classify parameters based on schema definitions
+  const inferenceBackendParams: Record<string, unknown> = {};
+  const serviceParams: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(allParams)) {
+    if (providerParamNames.has(key)) {
+      inferenceBackendParams[key] = value;
+    } else {
+      serviceParams[key] = value;
+    }
+  }
+
+  return { inferenceBackendParams, serviceParams };
+}
+
+/**
  * Transforms form data into deployment payload format
  * Completely dynamic - works with any service/component configuration
  * All data comes from formData - no API calls needed
+ *
+ * Note: Each service sends its own parameters. The backend validates that services
+ * sharing the same provider+model have identical parameters and returns an error if not.
  */
 export function transformToDeploymentPayload(
   formData: DeployFormData,
   deployOptions: DeployOptionsResponse,
+  providerParamsCache: Record<string, Record<string, unknown>>,
+  serviceParamsCache: Record<string, Record<string, unknown>>,
 ): DeploymentPayload {
   const services: DeploymentService[] = [];
 
@@ -160,6 +241,33 @@ export function transformToDeploymentPayload(
       console.warn(`Service definition not found for: ${serviceId}`);
       continue;
     }
+
+    // Find the component type that uses the inference backend (llm or reranker)
+    // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
+    let componentType = "llm";
+    const hasReranker = serviceDefinition.components.some(
+      (c) => c.type === "reranker",
+    );
+    if (hasReranker && serviceConfig.components?.reranker) {
+      componentType = "reranker";
+    }
+
+    // Get cached schemas - extract .data from cache objects
+    const providerKey = `${componentType}:${serviceConfig.inferenceBackend}`;
+    const providerSchemaData =
+      (providerParamsCache[providerKey]?.data as Record<string, unknown>) ||
+      null;
+    const serviceSchemaData =
+      (serviceParamsCache[serviceId]?.data as Record<string, unknown>) || null;
+
+    // Separate inference backend params from service-level params for this service
+    // Each service keeps its own parameters - no merging/sharing
+    // Backend will validate consistency for services using same provider+model
+    const { inferenceBackendParams, serviceParams } = separateParams(
+      serviceConfig.params || {},
+      providerSchemaData,
+      serviceSchemaData,
+    );
 
     const components: DeploymentComponent[] = [];
 
@@ -177,7 +285,7 @@ export function transformToDeploymentPayload(
             deployOptions,
             formData.globalComponents,
             serviceConfig.inferenceBackend, // Pass inference backend for LLM/reranker components
-            serviceConfig.params, // Pass service-level params (e.g., watsonx credentials)
+            inferenceBackendParams, // Pass shared inference backend params (e.g., API keys)
           ),
         );
       }
@@ -188,6 +296,11 @@ export function transformToDeploymentPayload(
       version: serviceConfig.version || formData.version,
       components,
     };
+
+    // Add backend configuration if service has service-level params
+    if (serviceParams && Object.keys(serviceParams).length > 0) {
+      deploymentService.backend = serviceParams;
+    }
 
     services.push(deploymentService);
   }
