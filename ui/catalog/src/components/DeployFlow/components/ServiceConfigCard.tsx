@@ -696,12 +696,34 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                           if (hasValidationError) {
                             setHasValidationError(false);
                           }
-                          // Merge provider params with existing params to preserve service-level params
-                          onUpdateConfig({
-                            params: {
-                              ...currentConfig?.params,
-                              ...params,
+                          // Get provider schema keys to know which params belong to provider
+                          const providerSchema =
+                            providerParamsByType[componentType]?.paramsMap?.[
+                              fieldValue || ""
+                            ];
+                          const providerKeys = new Set(
+                            providerSchema?.properties
+                              ? Object.keys(providerSchema.properties)
+                              : [],
+                          );
+
+                          // Preserve service-level params, update only provider params
+                          const mergedParams: Record<string, unknown> = {};
+                          Object.entries(currentConfig?.params || {}).forEach(
+                            ([key, value]) => {
+                              // Keep service-level params (not in provider schema)
+                              if (!providerKeys.has(key)) {
+                                mergedParams[key] = value;
+                              }
                             },
+                          );
+                          // Add/update provider params from DynamicSchemaFields
+                          Object.entries(params).forEach(([key, value]) => {
+                            mergedParams[key] = value;
+                          });
+
+                          onUpdateConfig({
+                            params: mergedParams,
                           });
                         }}
                         providerParamsMap={
@@ -730,12 +752,32 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     if (hasValidationError) {
                       setHasValidationError(false);
                     }
-                    // Merge service-level params with existing params to preserve provider params
-                    onUpdateConfig({
-                      params: {
-                        ...currentConfig?.params,
-                        ...params,
+                    // Get service schema keys to know which params belong to service
+                    const serviceSchemaTyped =
+                      serviceSchema as import("@/utils/schemaParser").JSONSchema;
+                    const serviceKeys = new Set(
+                      serviceSchemaTyped?.properties
+                        ? Object.keys(serviceSchemaTyped.properties)
+                        : [],
+                    );
+
+                    // Preserve provider params, update only service-level params
+                    const mergedParams: Record<string, unknown> = {};
+                    Object.entries(currentConfig?.params || {}).forEach(
+                      ([key, value]) => {
+                        // Keep provider params (not in service schema)
+                        if (!serviceKeys.has(key)) {
+                          mergedParams[key] = value;
+                        }
                       },
+                    );
+                    // Add/update service params from DynamicSchemaFields
+                    Object.entries(params).forEach(([key, value]) => {
+                      mergedParams[key] = value;
+                    });
+
+                    onUpdateConfig({
+                      params: mergedParams,
                     });
                   }}
                   providerParamsMap={{

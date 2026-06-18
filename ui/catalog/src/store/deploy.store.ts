@@ -13,6 +13,11 @@ interface ProviderParamsCache {
   fetchedAt: number;
 }
 
+interface DeployOptionsCache {
+  data: DeployOptionsResponse;
+  fetchedAt: number;
+}
+
 interface DeployState {
   // Cache version for invalidating stale schemas
   cacheVersion: string;
@@ -36,11 +41,10 @@ interface DeployState {
   architectureDetailsError: string | null;
   architectureDetailsFetchedAt: number | null;
 
-  // Deploy options - persisted with 15-minute cache
-  deployOptions: DeployOptionsResponse | null;
+  // Deploy options - persisted with 15-minute cache, keyed by architecture ID
+  deployOptions: Record<string, DeployOptionsCache>;
   deployOptionsLoading: boolean;
   deployOptionsError: string | null;
-  deployOptionsFetchedAt: number | null;
 
   // Resources cache - not persisted (dynamic data)
   resources: ResourcesResponse | null;
@@ -75,7 +79,11 @@ interface DeployState {
   clearArchitectureDetails: () => void;
 
   // Deploy options actions
-  setDeployOptions: (data: DeployOptionsResponse) => void;
+  setDeployOptions: (
+    architectureId: string,
+    data: DeployOptionsResponse,
+  ) => void;
+  getDeployOptions: (architectureId: string) => DeployOptionsResponse | null;
   setDeployOptionsLoading: (loading: boolean) => void;
   setDeployOptionsError: (error: string | null) => void;
   clearDeployOptions: () => void;
@@ -107,7 +115,7 @@ interface DeployState {
   isArchitecturesStale: () => boolean;
   isServiceSummariesStale: () => boolean;
   isArchitectureDetailsStale: () => boolean;
-  isDeployOptionsStale: () => boolean;
+  isDeployOptionsStale: (architectureId: string) => boolean;
   isResourcesStale: () => boolean;
   isProviderParamsStale: (componentType: string, providerId: string) => boolean;
   isServiceParamsStale: (serviceId: string) => boolean;
@@ -154,10 +162,9 @@ export const useDeployStore = create<DeployState>()(
       architectureDetailsFetchedAt: null,
 
       // Deploy options state
-      deployOptions: null,
+      deployOptions: {},
       deployOptionsLoading: false,
       deployOptionsError: null,
-      deployOptionsFetchedAt: null,
 
       // Resources state
       resources: null,
@@ -249,13 +256,23 @@ export const useDeployStore = create<DeployState>()(
         }),
 
       // Deploy options actions
-      setDeployOptions: (data) =>
-        set({
-          deployOptions: data,
+      setDeployOptions: (architectureId, data) =>
+        set((state) => ({
+          deployOptions: {
+            ...state.deployOptions,
+            [architectureId]: {
+              data,
+              fetchedAt: Date.now(),
+            },
+          },
           deployOptionsError: null,
-          deployOptionsFetchedAt: Date.now(),
           deployOptionsLoading: false,
-        }),
+        })),
+
+      getDeployOptions: (architectureId) => {
+        const cached = get().deployOptions[architectureId];
+        return cached ? cached.data : null;
+      },
 
       setDeployOptionsLoading: (loading) =>
         set({ deployOptionsLoading: loading }),
@@ -265,9 +282,8 @@ export const useDeployStore = create<DeployState>()(
 
       clearDeployOptions: () =>
         set({
-          deployOptions: null,
+          deployOptions: {},
           deployOptionsError: null,
-          deployOptionsFetchedAt: null,
         }),
 
       // Resources actions
@@ -355,12 +371,10 @@ export const useDeployStore = create<DeployState>()(
         );
       },
 
-      isDeployOptionsStale: () => {
-        const { deployOptionsFetchedAt } = get();
-        if (!deployOptionsFetchedAt) return true;
-        return (
-          Date.now() - deployOptionsFetchedAt > DEPLOY_OPTIONS_CACHE_DURATION
-        );
+      isDeployOptionsStale: (architectureId) => {
+        const cached = get().deployOptions[architectureId];
+        if (!cached || !cached.fetchedAt) return true;
+        return Date.now() - cached.fetchedAt > DEPLOY_OPTIONS_CACHE_DURATION;
       },
 
       isResourcesStale: () => {
@@ -396,9 +410,8 @@ export const useDeployStore = create<DeployState>()(
           architectureDetails: null,
           architectureDetailsError: null,
           architectureDetailsFetchedAt: null,
-          deployOptions: null,
+          deployOptions: {},
           deployOptionsError: null,
-          deployOptionsFetchedAt: null,
           resources: null,
           resourcesError: null,
           resourcesFetchedAt: null,
@@ -434,7 +447,6 @@ export const useDeployStore = create<DeployState>()(
         architectureDetails: state.architectureDetails,
         architectureDetailsFetchedAt: state.architectureDetailsFetchedAt,
         deployOptions: state.deployOptions,
-        deployOptionsFetchedAt: state.deployOptionsFetchedAt,
         providerParams: state.providerParams,
         serviceParams: state.serviceParams,
       }),
@@ -453,8 +465,7 @@ export const useDeployStore = create<DeployState>()(
             serviceSummariesFetchedAt: null,
             architectureDetails: null,
             architectureDetailsFetchedAt: null,
-            deployOptions: null,
-            deployOptionsFetchedAt: null,
+            deployOptions: {},
             providerParams: {},
             serviceParams: {},
           };
