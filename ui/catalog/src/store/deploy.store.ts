@@ -10,24 +10,31 @@ import type {
 
 interface ProviderParamsCache {
   data: Record<string, unknown>;
+  fetchedAt: number;
 }
 
 interface DeployState {
-  // Architectures - persisted (no cache expiration)
+  // Cache version for invalidating stale schemas
+  cacheVersion: string;
+
+  // Architectures - persisted with 30-minute cache
   architectures: ArchitectureSummary[];
   selectedArchitectureId: string | null;
   architecturesLoading: boolean;
   architecturesError: string | null;
+  architecturesFetchedAt: number | null;
 
-  // Services - persisted (no cache expiration)
+  // Services - persisted with 30-minute cache
   serviceSummaries: ServiceSummary[];
   serviceSummariesLoading: boolean;
   serviceSummariesError: string | null;
+  serviceSummariesFetchedAt: number | null;
 
-  // Architecture details - persisted (no cache expiration)
+  // Architecture details - persisted with 30-minute cache
   architectureDetails: ArchitectureDetailsResponse | null;
   architectureDetailsLoading: boolean;
   architectureDetailsError: string | null;
+  architectureDetailsFetchedAt: number | null;
 
   // Deploy options - persisted with 15-minute cache
   deployOptions: DeployOptionsResponse | null;
@@ -41,10 +48,10 @@ interface DeployState {
   resourcesError: string | null;
   resourcesFetchedAt: number | null;
 
-  // Provider params cache - persisted (no cache expiration)
+  // Provider params cache - persisted with 1-hour cache
   providerParams: Record<string, ProviderParamsCache>;
 
-  // Service params cache - persisted (no cache expiration)
+  // Service params cache - persisted with 1-hour cache
   serviceParams: Record<string, ProviderParamsCache>;
 
   // Architecture actions
@@ -96,35 +103,55 @@ interface DeployState {
   getServiceParams: (serviceId: string) => Record<string, unknown> | null;
   clearServiceParams: () => void;
 
-  // Check if cache is stale (only for deployOptions and resources)
+  // Check if cache is stale
+  isArchitecturesStale: () => boolean;
+  isServiceSummariesStale: () => boolean;
+  isArchitectureDetailsStale: () => boolean;
   isDeployOptionsStale: () => boolean;
   isResourcesStale: () => boolean;
+  isProviderParamsStale: (componentType: string, providerId: string) => boolean;
+  isServiceParamsStale: (serviceId: string) => boolean;
 
   // Clear all deploy store data
   clearAll: () => void;
+
+  // Initialize store and validate cache version
+  initialize: () => void;
 }
 
-const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
+// Cache version - increment when making breaking changes to cached data structure
+const CACHE_VERSION = "1.0.0";
+
+// Cache durations
+const CATALOG_CACHE_DURATION = 30 * 60 * 1000; // 30 minutes for catalog metadata
+const DEPLOY_OPTIONS_CACHE_DURATION = 15 * 60 * 1000; // 15 minutes for deploy options
+const PARAMS_CACHE_DURATION = 60 * 60 * 1000; // 1 hour for provider/service params
 const RESOURCES_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes for resources (dynamic data)
 
 export const useDeployStore = create<DeployState>()(
   persist(
     (set, get) => ({
+      // Cache version
+      cacheVersion: CACHE_VERSION,
+
       // Architectures state
       architectures: [],
       selectedArchitectureId: null,
       architecturesLoading: false,
       architecturesError: null,
+      architecturesFetchedAt: null,
 
       // Service summaries state
       serviceSummaries: [],
       serviceSummariesLoading: false,
       serviceSummariesError: null,
+      serviceSummariesFetchedAt: null,
 
       // Architecture details state
       architectureDetails: null,
       architectureDetailsLoading: false,
       architectureDetailsError: null,
+      architectureDetailsFetchedAt: null,
 
       // Deploy options state
       deployOptions: null,
@@ -151,6 +178,7 @@ export const useDeployStore = create<DeployState>()(
           selectedArchitectureId: data.length > 0 ? data[0].id : null,
           architecturesError: null,
           architecturesLoading: false,
+          architecturesFetchedAt: Date.now(),
         }),
 
       setSelectedArchitectureId: (id) => set({ selectedArchitectureId: id }),
@@ -174,6 +202,7 @@ export const useDeployStore = create<DeployState>()(
           serviceSummaries: data,
           serviceSummariesError: null,
           serviceSummariesLoading: false,
+          serviceSummariesFetchedAt: Date.now(),
         }),
 
       setServiceSummariesLoading: (loading) =>
@@ -191,6 +220,7 @@ export const useDeployStore = create<DeployState>()(
         set({
           serviceSummaries: [],
           serviceSummariesError: null,
+          serviceSummariesFetchedAt: null,
         }),
 
       // Architecture details actions
@@ -199,6 +229,7 @@ export const useDeployStore = create<DeployState>()(
           architectureDetails: data,
           architectureDetailsError: null,
           architectureDetailsLoading: false,
+          architectureDetailsFetchedAt: Date.now(),
         }),
 
       setArchitectureDetailsLoading: (loading) =>
@@ -214,6 +245,7 @@ export const useDeployStore = create<DeployState>()(
         set({
           architectureDetails: null,
           architectureDetailsError: null,
+          architectureDetailsFetchedAt: null,
         }),
 
       // Deploy options actions
@@ -267,6 +299,7 @@ export const useDeployStore = create<DeployState>()(
             ...state.providerParams,
             [key]: {
               data,
+              fetchedAt: Date.now(),
             },
           },
         }));
@@ -287,6 +320,7 @@ export const useDeployStore = create<DeployState>()(
             ...state.serviceParams,
             [serviceId]: {
               data,
+              fetchedAt: Date.now(),
             },
           },
         }));
@@ -299,12 +333,34 @@ export const useDeployStore = create<DeployState>()(
 
       clearServiceParams: () => set({ serviceParams: {} }),
 
-      // Cache staleness checks (only for deployOptions and resources)
+      // Cache staleness checks
+
+      isArchitecturesStale: () => {
+        const { architecturesFetchedAt } = get();
+        if (!architecturesFetchedAt) return true;
+        return Date.now() - architecturesFetchedAt > CATALOG_CACHE_DURATION;
+      },
+
+      isServiceSummariesStale: () => {
+        const { serviceSummariesFetchedAt } = get();
+        if (!serviceSummariesFetchedAt) return true;
+        return Date.now() - serviceSummariesFetchedAt > CATALOG_CACHE_DURATION;
+      },
+
+      isArchitectureDetailsStale: () => {
+        const { architectureDetailsFetchedAt } = get();
+        if (!architectureDetailsFetchedAt) return true;
+        return (
+          Date.now() - architectureDetailsFetchedAt > CATALOG_CACHE_DURATION
+        );
+      },
 
       isDeployOptionsStale: () => {
         const { deployOptionsFetchedAt } = get();
         if (!deployOptionsFetchedAt) return true;
-        return Date.now() - deployOptionsFetchedAt > CACHE_DURATION;
+        return (
+          Date.now() - deployOptionsFetchedAt > DEPLOY_OPTIONS_CACHE_DURATION
+        );
       },
 
       isResourcesStale: () => {
@@ -313,16 +369,33 @@ export const useDeployStore = create<DeployState>()(
         return Date.now() - resourcesFetchedAt > RESOURCES_CACHE_DURATION;
       },
 
+      isProviderParamsStale: (componentType, providerId) => {
+        const key = `${componentType}:${providerId}`;
+        const cached = get().providerParams[key];
+        if (!cached || !cached.fetchedAt) return true;
+        return Date.now() - cached.fetchedAt > PARAMS_CACHE_DURATION;
+      },
+
+      isServiceParamsStale: (serviceId) => {
+        const cached = get().serviceParams[serviceId];
+        if (!cached || !cached.fetchedAt) return true;
+        return Date.now() - cached.fetchedAt > PARAMS_CACHE_DURATION;
+      },
+
       // Clear all deploy store data
       clearAll: () => {
         set({
+          cacheVersion: CACHE_VERSION,
           architectures: [],
           selectedArchitectureId: null,
           architecturesError: null,
+          architecturesFetchedAt: null,
           serviceSummaries: [],
           serviceSummariesError: null,
+          serviceSummariesFetchedAt: null,
           architectureDetails: null,
           architectureDetailsError: null,
+          architectureDetailsFetchedAt: null,
           deployOptions: null,
           deployOptionsError: null,
           deployOptionsFetchedAt: null,
@@ -333,21 +406,61 @@ export const useDeployStore = create<DeployState>()(
           serviceParams: {},
         });
       },
+
+      // Initialize store and validate cache version at runtime
+      initialize: () => {
+        const state = get();
+        // If cache version doesn't match current version, clear all cached data
+        // This handles cases where the app is updated without a page reload
+        if (state.cacheVersion !== CACHE_VERSION) {
+          console.warn(
+            `Cache version mismatch: expected ${CACHE_VERSION}, found ${state.cacheVersion}. Clearing cache.`,
+          );
+          get().clearAll();
+        }
+      },
     }),
     {
       name: "deploy-storage",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        // Persist configuration data (only deployOptions has cache expiration)
+        // Persist configuration data with timestamps for cache invalidation
+        cacheVersion: state.cacheVersion,
         architectures: state.architectures,
         selectedArchitectureId: state.selectedArchitectureId,
+        architecturesFetchedAt: state.architecturesFetchedAt,
         serviceSummaries: state.serviceSummaries,
+        serviceSummariesFetchedAt: state.serviceSummariesFetchedAt,
         architectureDetails: state.architectureDetails,
+        architectureDetailsFetchedAt: state.architectureDetailsFetchedAt,
         deployOptions: state.deployOptions,
         deployOptionsFetchedAt: state.deployOptionsFetchedAt,
         providerParams: state.providerParams,
         serviceParams: state.serviceParams,
       }),
+      // Version check: clear cache if version mismatch
+      version: 1,
+      migrate: (persistedState: unknown) => {
+        // If cache version doesn't match, clear all cached data
+        const state = persistedState as { cacheVersion?: string } | null;
+        if (state?.cacheVersion !== CACHE_VERSION) {
+          return {
+            cacheVersion: CACHE_VERSION,
+            architectures: [],
+            selectedArchitectureId: null,
+            architecturesFetchedAt: null,
+            serviceSummaries: [],
+            serviceSummariesFetchedAt: null,
+            architectureDetails: null,
+            architectureDetailsFetchedAt: null,
+            deployOptions: null,
+            deployOptionsFetchedAt: null,
+            providerParams: {},
+            serviceParams: {},
+          };
+        }
+        return persistedState;
+      },
     },
   ),
 );

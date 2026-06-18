@@ -1,11 +1,15 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useDeployStore } from "@/store/deploy.store";
 import { fetchDeployOptions } from "@/api/digitalAssistants";
+import { dedupe } from "@/utils/requestManager";
 
 /**
  * Custom hook to fetch and cache deploy options
  * Uses Zustand store with 15-minute cache expiration
  * Deploy options can change when service versions or component providers are updated
+ *
+ * Uses request de-duping to prevent race conditions when multiple components
+ * request the same data simultaneously
  */
 export const useDeployOptions = () => {
   const {
@@ -18,8 +22,6 @@ export const useDeployOptions = () => {
     setDeployOptionsLoading,
     setDeployOptionsError,
   } = useDeployStore();
-
-  const hasFetched = useRef(false);
 
   // Determine if we should be in loading state
   // Loading if: no data AND no error AND not currently loading (will start loading in useEffect)
@@ -35,17 +37,15 @@ export const useDeployOptions = () => {
     // Check if cache is stale (older than 15 minutes)
     const isStale = isDeployOptionsStale();
 
-    // Fetch if we don't have data or if cache is stale, and we haven't already started fetching
-    if (
-      (!deployOptions || isStale) &&
-      !hasFetched.current &&
-      !deployOptionsLoading
-    ) {
-      hasFetched.current = true;
+    // Fetch if we don't have data or if cache is stale
+    // dedupe() handles preventing duplicate in-flight requests
+    if ((!deployOptions || isStale) && !deployOptionsLoading) {
       setDeployOptionsLoading(true);
       setDeployOptionsError(null);
 
-      fetchDeployOptions(selectedArchitectureId)
+      // Use dedupe to prevent simultaneous requests
+      const requestKey = `deployOptions:${selectedArchitectureId}`;
+      dedupe(requestKey, () => fetchDeployOptions(selectedArchitectureId))
         .then((data) => {
           setDeployOptions(data);
         })
@@ -55,9 +55,6 @@ export const useDeployOptions = () => {
               ? err.message
               : "Failed to load deploy options";
           setDeployOptionsError(errorMessage);
-        })
-        .finally(() => {
-          hasFetched.current = false;
         });
     }
   }, [

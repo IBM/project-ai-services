@@ -696,8 +696,12 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                           if (hasValidationError) {
                             setHasValidationError(false);
                           }
+                          // Merge provider params with existing params to preserve service-level params
                           onUpdateConfig({
-                            params,
+                            params: {
+                              ...currentConfig?.params,
+                              ...params,
+                            },
                           });
                         }}
                         providerParamsMap={
@@ -726,8 +730,12 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     if (hasValidationError) {
                       setHasValidationError(false);
                     }
+                    // Merge service-level params with existing params to preserve provider params
                     onUpdateConfig({
-                      params,
+                      params: {
+                        ...currentConfig?.params,
+                        ...params,
+                      },
                     });
                   }}
                   providerParamsMap={{
