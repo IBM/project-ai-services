@@ -205,6 +205,8 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
                 invalidText={`${field.label} is required`}
                 onChange={(e) => handleFieldChange(field.key, e.target.value)}
                 rows={4}
+                maxCount={field.validation?.maxLength}
+                enableCounter={!!field.validation?.maxLength}
               />
             </div>
           );
@@ -220,6 +222,8 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             invalidText={`${field.label} is required`}
             onChange={(e) => handleFieldChange(field.key, e.target.value)}
             rows={4}
+            maxCount={field.validation?.maxLength}
+            enableCounter={!!field.validation?.maxLength}
           />
         );
 
@@ -294,8 +298,14 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
   };
 
   return (
-    <div className={styles.dynamicSchemaFields}>
-      {fields.map((field) => renderField(field))}
-    </div>
+    <>
+      {/* Only show header for watsonx IBM provider */}
+      {providerId.toLowerCase().includes("watsonx") && (
+        <h4 className={styles.cloudCredentialsTitle}>Cloud credentials</h4>
+      )}
+      <div className={styles.dynamicSchemaFields}>
+        {fields.map((field) => renderField(field))}
+      </div>
+    </>
   );
 };

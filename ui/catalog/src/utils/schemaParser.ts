@@ -120,6 +120,14 @@ function parseSchemaProperty(
   } else if (property.format === "textarea" || property.type === "textarea") {
     fieldType = "textarea";
   }
+  // Automatically render long text fields as textareas
+  else if (
+    property.type === "string" &&
+    property.maxLength &&
+    property.maxLength >= 500
+  ) {
+    fieldType = "textarea";
+  }
   // Handle basic types
   else if (property.type === "boolean") {
     fieldType = "boolean";
