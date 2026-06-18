@@ -182,11 +182,13 @@ const DeploymentDetails = ({
             ? deploymentServices.length > 0 &&
               deploymentServices.every(
                 (service) =>
-                  serviceMetadataById[service.catalog_id]?.certifiedBy === "IBM",
+                  serviceMetadataById[service.catalog_id]?.certifiedBy ===
+                  "IBM",
               )
             : deploymentServices.some(
                 (service) =>
-                  serviceMetadataById[service.catalog_id]?.certifiedBy === "IBM",
+                  serviceMetadataById[service.catalog_id]?.certifiedBy ===
+                  "IBM",
               );
         const transformedServices: DeploymentServiceData[] =
           deploymentServices.map((service) => {
