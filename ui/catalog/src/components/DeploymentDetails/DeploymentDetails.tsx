@@ -33,7 +33,6 @@ import type {
 import styles from "./DeploymentDetails.module.scss";
 import { api } from "@/api/axios";
 import { APPLICATION_ENDPOINTS, SERVICE_ENDPOINTS } from "@/constants";
-import AcceleratorCards from "./AcceleratorCards";
 
 interface DeploymentDetailsProps {
   deployment: DeploymentDetailsType;
@@ -63,6 +62,7 @@ const DeploymentDetails = ({
   const [editedName, setEditedName] = useState(deployment.name);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [certifiedBy, setCertifiedBy] = useState<string | null>(null);
 
   useEffect(() => {
     setEditedName(deployment.name);
@@ -166,16 +166,30 @@ const DeploymentDetails = ({
           ? servicesResponse.data
           : servicesResponse.data.data;
 
-        const descriptionsById = servicesCatalog.reduce<Record<string, string>>(
-          (accumulator, service) => {
-            accumulator[service.id] = service.description;
-            return accumulator;
-          },
-          {},
-        );
+        const serviceMetadataById = servicesCatalog.reduce<
+          Record<string, { description: string; certifiedBy: string }>
+        >((accumulator, service) => {
+          accumulator[service.id] = {
+            description: service.description,
+            certifiedBy: service.certified_by,
+          };
+          return accumulator;
+        }, {});
 
+        const deploymentServices = applicationDetailsResponse.data.services;
+        const isDeploymentCertified =
+          deployment.type === "Digital Assistant"
+            ? deploymentServices.length > 0 &&
+              deploymentServices.every(
+                (service) =>
+                  serviceMetadataById[service.catalog_id]?.certifiedBy === "IBM",
+              )
+            : deploymentServices.some(
+                (service) =>
+                  serviceMetadataById[service.catalog_id]?.certifiedBy === "IBM",
+              );
         const transformedServices: DeploymentServiceData[] =
-          applicationDetailsResponse.data.services.map((service) => {
+          deploymentServices.map((service) => {
             const llmComponent = service.components.find(
               (c) => c.type === "llm",
             );
@@ -189,7 +203,8 @@ const DeploymentDetails = ({
               (c) => c.type === "reranker",
             );
             const serviceDescription =
-              descriptionsById[service.type] ?? `${service.type} service`;
+              serviceMetadataById[service.catalog_id]?.description ??
+              `${service.type} service`;
 
             return {
               id: service.id,
@@ -199,22 +214,23 @@ const DeploymentDetails = ({
               serviceVersion: service.version,
               largeLanguageModel: llmComponent?.metadata?.model,
               inferenceBackend:
-                llmComponent?.provider ||
-                embeddingComponent?.provider ||
-                rerankerComponent?.provider ||
+                llmComponent?.provider?.name ||
+                embeddingComponent?.provider?.name ||
+                rerankerComponent?.provider?.name ||
                 "Unknown",
               embeddingModel: embeddingComponent?.metadata?.model,
-              vectorStore: vectorStoreComponent?.provider,
+              vectorStore: vectorStoreComponent?.provider?.name,
               rankerModel: rerankerComponent?.metadata?.model,
             };
           });
 
         const transformedEndpoints: DeployIntegrationEndpoints[] =
-          applicationDetailsResponse.data.services.map((service) => {
+          deploymentServices.map((service) => {
             const uiEndpoint = service.endpoints.find((e) => e.type === "ui");
             const apiEndpoint = service.endpoints.find((e) => e.type === "api");
             const serviceDescription =
-              descriptionsById[service.type] ?? `${service.type} service`;
+              serviceMetadataById[service.catalog_id]?.description ??
+              `${service.type} service`;
 
             return {
               id: service.id,
@@ -233,15 +249,17 @@ const DeploymentDetails = ({
 
         setServiceData(transformedServices);
         setIntegrationEndpoints(transformedEndpoints);
+        setCertifiedBy(isDeploymentCertified ? "IBM" : null);
       } catch (error) {
         console.error("Error fetching service details:", error);
         setServiceData([]);
         setIntegrationEndpoints([]);
+        setCertifiedBy(null);
       }
     };
 
     fetchServiceDetails();
-  }, [deployment.id]);
+  }, [deployment.id, deployment.type]);
 
   const STATUS_CONFIG = {
     Initializing: {
@@ -273,6 +291,21 @@ const DeploymentDetails = ({
       tagType: "red" as const,
       icon: ErrorFilled,
       className: styles.statusTagError,
+    },
+    Stopped: {
+      tagType: "gray" as const,
+      icon: PauseOutline,
+      className: styles.statusTagSecondary,
+    },
+    "Deploying...": {
+      tagType: "blue" as const,
+      icon: InProgress,
+      className: styles.statusTagInfo,
+    },
+    "Deleting...": {
+      tagType: "blue" as const,
+      icon: InProgress,
+      className: styles.statusTagInfo,
     },
   } as const;
 
@@ -420,22 +453,14 @@ const DeploymentDetails = ({
                     title="Details"
                     className={styles.detailsCard}
                   >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "1rem",
-                      }}
-                    >
-                      <Tag size="sm" type="outline">
-                        {" "}
-                        By {deployment.type || "IBM Power"}{" "}
-                      </Tag>
+                    {certifiedBy && (
                       <span className={styles.certifiedBadge}>
                         <Badge size={16} className={styles.badgeIcon} />
-                        <span>IBM certified</span>
+                        <span className={styles.badgeName}>
+                          {certifiedBy} certified
+                        </span>
                       </span>
-                    </div>
+                    )}
 
                     <Grid className={styles.resourcesGrid}>
                       <Column lg={8} md={4} sm={2}>
@@ -477,12 +502,12 @@ const DeploymentDetails = ({
                     <Grid className={styles.resourcesInnerGrid}>
                       {isLoadingResources ? (
                         <>
-                          {[0, 1, 2].map((index) => (
+                          {[0, 1].map((index) => (
                             <Column
                               key={index}
                               sm={4}
                               md={4}
-                              lg={5}
+                              lg={8}
                               className={styles.resourceColumn}
                             >
                               <div className={styles.resourceItem}>
@@ -514,7 +539,7 @@ const DeploymentDetails = ({
                               key={index}
                               sm={4}
                               md={4}
-                              lg={5}
+                              lg={8}
                               className={styles.resourceColumn}
                             >
                               <div className={styles.resourceItem}>
@@ -550,14 +575,63 @@ const DeploymentDetails = ({
                         })
                       )}
                     </Grid>
+
+                    {/* Accelerator Cards Section - Integrated */}
+                    {acceleratorCards.length > 0 && (
+                      <Column
+                        sm={4}
+                        md={8}
+                        lg={16}
+                        className={styles.acceleratorCardsColumn}
+                      >
+                        <div className={styles.acceleratorCardsItem}>
+                          <h4 className={styles.acceleratorCardsTitle}>
+                            Accelerator cards
+                          </h4>
+                          <Grid className={styles.acceleratorCardsGrid}>
+                            <Column sm={2} md={3} lg={3}>
+                              <ol className={styles.acceleratorCardsList}>
+                                {acceleratorCards
+                                  .slice(
+                                    0,
+                                    Math.ceil(acceleratorCards.length / 2),
+                                  )
+                                  .map((card) => (
+                                    <li
+                                      key={card.id}
+                                      className={styles.acceleratorCardItem}
+                                    >
+                                      {card.label}
+                                    </li>
+                                  ))}
+                              </ol>
+                            </Column>
+                            <Column sm={2} md={3} lg={3}>
+                              <ol
+                                className={styles.acceleratorCardsList}
+                                start={
+                                  Math.ceil(acceleratorCards.length / 2) + 1
+                                }
+                              >
+                                {acceleratorCards
+                                  .slice(Math.ceil(acceleratorCards.length / 2))
+                                  .map((card) => (
+                                    <li
+                                      key={card.id}
+                                      className={styles.acceleratorCardItem}
+                                    >
+                                      {card.label}
+                                    </li>
+                                  ))}
+                              </ol>
+                            </Column>
+                          </Grid>
+                        </div>
+                      </Column>
+                    )}
                   </ProductiveCard>
                 </Column>
               </Grid>
-
-              {/* Accelerator Cards Section */}
-              {acceleratorCards.length > 0 && (
-                <AcceleratorCards cards={acceleratorCards} />
-              )}
 
               <Grid className={styles.actionsGrid}>
                 <Column sm={4} md={8} lg={16}>

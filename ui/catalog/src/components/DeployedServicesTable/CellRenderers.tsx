@@ -1,4 +1,4 @@
-import { Tag, OverflowMenu, OverflowMenuItem } from "@carbon/react";
+import { Tag, OverflowMenu, OverflowMenuItem, Link } from "@carbon/react";
 import {
   Delete,
   CheckmarkFilled,
@@ -88,7 +88,7 @@ export const ActionCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
 };
 
 export const NameCell = ({ value }: CellRendererProps) => (
-  <span style={{ fontWeight: 500 }}>{String(value)}</span>
+  <Link style={{ fontWeight: 500 }}>{String(value)}</Link>
 );
 export const StatusCell = ({ value }: CellRendererProps) => {
   const status = String(value);

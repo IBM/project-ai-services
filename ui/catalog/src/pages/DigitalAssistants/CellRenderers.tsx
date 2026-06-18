@@ -56,7 +56,7 @@ interface CellRendererProps {
   value: unknown;
   rowId: string;
   dispatch: Dispatch<AppAction>;
-  rowData?: { status?: string };
+  rowData?: { status?: string; type?: string };
 }
 
 export const ActionCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
@@ -101,7 +101,7 @@ export const NameCell = ({
           id: rowId,
           name: String(value),
           status: rowData?.status || "Unknown",
-          type: "Digital assistant",
+          type: rowData?.type || "Digital assistant",
           resources: [],
         },
       });

@@ -119,6 +119,7 @@ const DeployedServicesTable = ({
         id: app.id,
         name: app.name,
         status: app.status,
+        type: app.type,
         uptime: uptime,
         service: app.type || "",
         messages: app.message || "",
@@ -734,7 +735,7 @@ const DeployedServicesTable = ({
                                         id: rowData.id,
                                         name: rowData.name,
                                         status: rowData.status,
-                                        type: "Service",
+                                        type: rowData.type || "Service",
                                         resources: [],
                                       });
                                     }
