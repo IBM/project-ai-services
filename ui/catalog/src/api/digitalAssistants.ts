@@ -78,6 +78,32 @@ export async function fetchProviderParams(
   return response.data;
 }
 
+// Fetches configuration parameters schema for a specific service
+export async function fetchServiceParams(serviceId: string): Promise<{
+  properties?: Record<
+    string,
+    {
+      type?: string;
+      default?: unknown;
+      title?: string;
+      description?: string;
+      format?: string;
+      minLength?: number;
+      maxLength?: number;
+      "x-ui-only"?: boolean;
+      "x-ui-controls"?: string;
+      "x-ui-controlled-by"?: string;
+      [key: string]: unknown;
+    }
+  >;
+  required?: string[];
+}> {
+  const response = await api.get(
+    DIGITAL_ASSISTANTS_ENDPOINTS.SERVICE_PARAMS(serviceId),
+  );
+  return response.data;
+}
+
 // Fetches available resources for digital assistant deployments
 export async function fetchResources(): Promise<ResourcesResponse> {
   const response = await api.get<ResourcesResponse>(
@@ -121,16 +147,12 @@ export async function deployApplication(
   return response.data;
 }
 
-// Deletes an application by ID with optional force deletion flag
+// Deletes an application by ID
 export async function deleteApplication(
   id: string,
-  force: boolean = false,
 ): Promise<DeleteApplicationResponse> {
   const response = await api.delete<DeleteApplicationResponse>(
     APPLICATION_ENDPOINTS.DELETE_APPLICATION(id),
-    {
-      params: { force },
-    },
   );
   return response.data;
 }

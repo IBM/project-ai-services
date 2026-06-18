@@ -1,463 +1,325 @@
+import { useState, useEffect } from "react";
 import { SidePanel } from "@carbon/ibm-products";
-import { Button, Tag } from "@carbon/react";
+import { Button, Tag, SkeletonText, SkeletonPlaceholder } from "@carbon/react";
 import { Badge } from "@carbon/icons-react";
+import {
+  fetchServiceDetails,
+  type AboutSection,
+} from "@/services/serviceDetails.api";
+import { transformServiceDetails } from "@/utils/serviceDetailsTransform";
+import { useServiceDetailsStore } from "@/store/serviceDetails.store";
 import styles from "./ServiceDetailPanel.module.scss";
 
 export interface ServiceDetailData {
   id: string;
   title: string;
   description: string;
-  isCertified?: boolean;
+  certifiedBy?: string;
   tags?: string[];
-  demos?: {
-    version?: string;
-    inferenceBackend?: string;
-    embeddingModel?: string;
-    vectorStore?: string;
-    rerankerModel?: string;
-    llm?: string;
-    defaultInferenceBackend?: string[];
-  };
-  inputs?: string[];
-  outputs?: string[];
-  dependencies?: string[];
-  contentSupport?: {
-    languages?: string[];
-    formats?: string[];
-    content?: string[];
-    reranking?: string[];
-  };
-  resourceConsumption?: {
-    starter?: string[];
-    medium?: string[];
-    large?: string[];
-  };
-  sla?: {
-    small?: {
-      assumptions?: string[];
-      guarantees?: string[];
-    };
-    medium?: {
-      assumptions?: string[];
-      guarantees?: string[];
-    };
-    large?: {
-      assumptions?: string[];
-      guarantees?: string[];
-    };
-  };
-  assets?: {
-    architectures?: string;
-    apiUrl?: string;
-    sourceCodeUrl?: string;
-  };
+  standalone?: boolean;
+  about: AboutSection[];
 }
 
 export interface ServiceDetailPanelProps {
   open: boolean;
   onClose: () => void;
-  service: ServiceDetailData | null;
+  serviceId: string | null;
 }
+
+/**
+ * Renders a single field with title and value
+ */
+const renderField = (title: string, value: string) => (
+  <div className={styles.demoItem}>
+    <div className={styles.fieldLabel}>{title}</div>
+    <div className={styles.fieldValue}>{value}</div>
+  </div>
+);
+
+/**
+ * Renders a list of values as bullet points
+ */
+const renderValueList = (title: string, values: string[]) => (
+  <div className={styles.column}>
+    <div className={styles.columnLabel}>{title}</div>
+    <ul className={styles.bulletList}>
+      {values.map((value, index) => (
+        <li key={index}>{value}</li>
+      ))}
+    </ul>
+  </div>
+);
+
+/**
+ * Renders nested subsections with title/value pairs
+ */
+const renderNestedFields = (
+  values: Array<{ title: string; value: string }>,
+) => (
+  <div className={styles.twoColumns}>
+    {values.map((item, index) => (
+      <div key={index} className={styles.column}>
+        <ul className={styles.dashList}>
+          <li>{`${item.title}: ${item.value}`}</li>
+        </ul>
+      </div>
+    ))}
+  </div>
+);
+
+/**
+ * Dynamically renders a section based on its structure
+ */
+const renderSection = (section: AboutSection, sectionIndex: number) => {
+  // Handle single value field
+  if (section.value) {
+    return renderField(section.title, section.value);
+  }
+
+  // Handle array of values
+  if (section.values && Array.isArray(section.values)) {
+    // Check if values are objects with title/value structure
+    const firstValue = section.values[0];
+    if (
+      typeof firstValue === "object" &&
+      firstValue !== null &&
+      "title" in firstValue &&
+      "value" in firstValue
+    ) {
+      return (
+        <div key={sectionIndex}>
+          <div className={styles.columnLabel}>{section.title}</div>
+          {renderNestedFields(
+            section.values as Array<{ title: string; value: string }>,
+          )}
+        </div>
+      );
+    }
+
+    // Regular string array
+    return renderValueList(section.title, section.values as string[]);
+  }
+
+  // Handle URL/CTA button
+  if (section.url && section.ctaLabel) {
+    return (
+      <div key={sectionIndex} className={styles.assetField}>
+        <div className={styles.fieldLabel}>{section.title}</div>
+        <Button
+          kind="tertiary"
+          size="md"
+          className={styles.sourceButton}
+          onClick={() => window.open(section.url, "_blank")}
+        >
+          {section.ctaLabel}
+        </Button>
+      </div>
+    );
+  }
+
+  // Handle URL without CTA (render as link)
+  if (section.url) {
+    return (
+      <div key={sectionIndex} className={styles.assetField}>
+        <div className={styles.fieldLabel}>{section.title}</div>
+        <a
+          href={section.url}
+          className={styles.infoLink}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {section.url}
+        </a>
+      </div>
+    );
+  }
+
+  return null;
+};
+
+/**
+ * Renders a top-level about section with its subsections
+ */
+const renderAboutSection = (aboutSection: AboutSection, index: number) => {
+  if (!aboutSection.sections || aboutSection.sections.length === 0) {
+    return null;
+  }
+
+  return (
+    <div key={index}>
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>{aboutSection.title}</h2>
+
+        {/* Check if this is a grid-based section (Service details, etc.) */}
+        {aboutSection.sections.some((s) => s.value) && (
+          <div className={styles.demoGrid}>
+            {aboutSection.sections
+              .filter((s) => s.value)
+              .map((section, idx) => (
+                <div key={idx}>{renderSection(section, idx)}</div>
+              ))}
+          </div>
+        )}
+
+        {/* Render sections with values arrays */}
+        {aboutSection.sections.some((s) => s.values) && (
+          <div
+            className={
+              aboutSection.sections.length === 2
+                ? styles.twoColumns
+                : styles.threeColumns
+            }
+          >
+            {aboutSection.sections
+              .filter((s) => s.values || s.url)
+              .map((section, idx) => (
+                <div key={idx}>{renderSection(section, idx)}</div>
+              ))}
+          </div>
+        )}
+      </section>
+
+      <div className={styles.divider} />
+    </div>
+  );
+};
 
 const ServiceDetailPanel = ({
   open,
   onClose,
-  service,
+  serviceId,
 }: ServiceDetailPanelProps) => {
-  if (!service) return null;
+  const [service, setService] = useState<ServiceDetailData | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const { getServiceDetails, setServiceDetails } = useServiceDetailsStore();
+
+  useEffect(() => {
+    if (!open || !serviceId) {
+      return;
+    }
+
+    const loadServiceDetails = async () => {
+      // Check cache first
+      const cachedService = getServiceDetails(serviceId);
+      if (cachedService) {
+        setService(cachedService);
+        return;
+      }
+
+      // If not in cache, fetch from API
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const serviceData = await fetchServiceDetails(serviceId);
+        const transformedData = transformServiceDetails(serviceData);
+
+        // Store in cache
+        setServiceDetails(serviceId, transformedData);
+        setService(transformedData);
+      } catch (err) {
+        console.error("Failed to fetch service details:", err);
+        setError("Failed to load service details. Please try again.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadServiceDetails();
+  }, [open, serviceId, getServiceDetails, setServiceDetails]);
+
+  if (!open) return null;
 
   return (
     <SidePanel
       open={open}
       onRequestClose={onClose}
-      title={service.title}
+      title={service?.title || "Service Details"}
       includeOverlay
       placement="right"
       size="lg"
       className={styles.sidePanel}
     >
       <div className={styles.content}>
-        <p className={styles.description}>{service.description}</p>
+        {isLoading && (
+          <div className={styles.skeletonContainer}>
+            {/* Description skeleton */}
+            <SkeletonText
+              paragraph
+              lineCount={3}
+              className={styles.skeletonDescription}
+            />
 
-        <div className={styles.tagContainer}>
-          {service.tags?.map((tag, index) => (
-            <Tag key={index} type="outline">
-              {tag}
-            </Tag>
-          ))}
-          {service.isCertified && (
-            <div className={styles.certifiedTag}>
-              <Badge size={16} className={styles.checkIcon} />
-              IBM certified
+            {/* Tags skeleton */}
+            <div className={styles.skeletonTags}>
+              <SkeletonPlaceholder className={styles.skeletonTag} />
+              <SkeletonPlaceholder className={styles.skeletonTag} />
             </div>
-          )}
-        </div>
-
-        <div className={styles.divider} />
-
-        {service.demos && (
-          <>
-            <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Service details</h2>
-
-              <div className={styles.demoGrid}>
-                {service.demos.version && (
-                  <div className={styles.demoItem}>
-                    <div className={styles.fieldLabel}>Version</div>
-                    <div className={styles.fieldValue}>
-                      {service.demos.version}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className={styles.demoGrid}>
-                {service.demos.embeddingModel && (
-                  <div className={styles.demoItem}>
-                    <div className={styles.fieldLabel}>Embedding model</div>
-                    <div className={styles.fieldValue}>
-                      {service.demos.embeddingModel}
-                    </div>
-                  </div>
-                )}
-                {service.demos.vectorStore && (
-                  <div className={styles.demoItem}>
-                    <div className={styles.fieldLabel}>Vector store</div>
-                    <div className={styles.fieldValue}>
-                      {service.demos.vectorStore}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className={styles.demoGrid}>
-                {service.demos.llm && (
-                  <div className={styles.demoItem}>
-                    <div className={styles.fieldLabel}>
-                      Large Language Model (LLM)
-                    </div>
-                    <div className={styles.fieldValue}>{service.demos.llm}</div>
-                  </div>
-                )}
-                {service.demos.rerankerModel && (
-                  <div className={styles.demoItem}>
-                    <div className={styles.fieldLabel}>Reranker Model</div>
-                    <div className={styles.fieldValue}>
-                      {service.demos.rerankerModel}
-                    </div>
-                  </div>
-                )}
-                {service.demos.defaultInferenceBackend && (
-                  <div className={styles.column}>
-                    <div className={styles.columnLabel}>Outputs</div>
-                    <ul className={styles.bulletList}>
-                      {service.demos.defaultInferenceBackend.map(
-                        (output, index) => (
-                          <li key={index}>{output}</li>
-                        ),
-                      )}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            </section>
 
             <div className={styles.divider} />
-          </>
-        )}
 
-        {(service.inputs || service.outputs) && (
-          <>
-            <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Inputs and outputs</h2>
-
-              <div className={styles.twoColumns}>
-                {service.inputs && (
-                  <div className={styles.column}>
-                    <div className={styles.columnLabel}>Inputs</div>
-                    <ul className={styles.bulletList}>
-                      {service.inputs.map((input, index) => (
-                        <li key={index}>{input}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {service.outputs && (
-                  <div className={styles.column}>
-                    <div className={styles.columnLabel}>Outputs</div>
-                    <ul className={styles.bulletList}>
-                      {service.outputs.map((output, index) => (
-                        <li key={index}>{output}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            </section>
-
-            <div className={styles.divider} />
-          </>
-        )}
-
-        {service.dependencies && service.dependencies.length > 0 && (
-          <>
-            <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>
-                Dependencies and integration
-              </h2>
-
-              <div className={styles.columnLabel}>External dependencies</div>
-              <ul className={styles.bulletList}>
-                {service.dependencies.map((dep, index) => (
-                  <li key={index}>{dep}</li>
-                ))}
-              </ul>
-            </section>
-
-            <div className={styles.divider} />
-          </>
-        )}
-
-        {service.contentSupport && (
-          <>
-            <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>
-                Content and format support
-              </h2>
-
-              <div className={styles.threeColumns}>
-                {service.contentSupport.languages && (
-                  <div className={styles.column}>
-                    <div className={styles.columnLabel}>Languages</div>
-                    <ul className={styles.dashList}>
-                      {service.contentSupport.languages.map((lang, index) => (
-                        <li key={index}>{lang}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {service.contentSupport.formats && (
-                  <div className={styles.column}>
-                    <div className={styles.columnLabel}>Document formats</div>
-                    <ul className={styles.dashList}>
-                      {service.contentSupport.formats.map((format, index) => (
-                        <li key={index}>{format}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {service.contentSupport.content && (
-                  <div className={styles.column}>
-                    <div className={styles.columnLabel}>Content</div>
-                    <ul className={styles.dashList}>
-                      {service.contentSupport.content.map((content, index) => (
-                        <li key={index}>{content}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {service.contentSupport.reranking && (
-                  <div className={styles.column}>
-                    <div className={styles.columnLabel}>Reranking</div>
-                    <ul className={styles.dashList}>
-                      {service.contentSupport.reranking.map((rerank, index) => (
-                        <li key={index}>{rerank}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            </section>
-
-            <div className={styles.divider} />
-          </>
-        )}
-
-        {service.resourceConsumption && (
-          <>
-            <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>
-                Expected resource consumption
-              </h2>
-
-              {service.resourceConsumption.starter && (
-                <>
-                  <div className={styles.columnLabel}>
-                    Per 5 concurrent users
-                  </div>
-                  <div className={styles.twoColumns}>
-                    {service.resourceConsumption.starter?.map((item, index) => (
-                      <div key={index} className={styles.column}>
-                        <ul className={styles.dashList}>
-                          <li>{item}</li>
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </section>
-
-            <div className={styles.divider} />
-          </>
-        )}
-
-        {service.sla && (
-          <>
-            <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Service level agreements</h2>
-
-              <div
-                className={
-                  service.title === "Digitize documents"
-                    ? styles.twoColumns
-                    : styles.threeColumns
-                }
-              >
-                {service.sla.small && (
-                  <div className={styles.column}>
-                    {service.sla.small.assumptions &&
-                      service.sla.small.assumptions.length > 0 && (
-                        <>
-                          <div className={styles.subLabel}>
-                            Starter assumptions
-                          </div>
-                          <ul className={styles.dashList}>
-                            {service.sla.small.assumptions.map(
-                              (item, index) => (
-                                <li key={index}>{item}</li>
-                              ),
-                            )}
-                          </ul>
-                        </>
-                      )}
-                    {service.sla.small.guarantees &&
-                      service.sla.small.guarantees.length > 0 && (
-                        <>
-                          <div className={styles.subLabel}>Guarantees</div>
-                          <ul className={styles.dashList}>
-                            {service.sla.small.guarantees.map((item, index) => (
-                              <li key={index}>{item}</li>
-                            ))}
-                          </ul>
-                        </>
-                      )}
-                  </div>
-                )}
-                {service.sla.medium && (
-                  <div className={styles.column}>
-                    {service.sla.medium.assumptions &&
-                      service.sla.medium.assumptions.length > 0 && (
-                        <>
-                          <div className={styles.subLabel}>
-                            Production assumptions
-                          </div>
-                          <ul className={styles.dashList}>
-                            {service.sla.medium.assumptions.map(
-                              (item, index) => (
-                                <li key={index}>{item}</li>
-                              ),
-                            )}
-                          </ul>
-                        </>
-                      )}
-                    {service.sla.medium.guarantees &&
-                      service.sla.medium.guarantees.length > 0 && (
-                        <>
-                          <div className={styles.subLabel}>Guarantees</div>
-                          <ul className={styles.dashList}>
-                            {service.sla.medium.guarantees.map(
-                              (item, index) => (
-                                <li key={index}>{item}</li>
-                              ),
-                            )}
-                          </ul>
-                        </>
-                      )}
-                  </div>
-                )}
-                {service.sla.large && (
-                  <div className={styles.column}>
-                    <div className={styles.columnLabel}>Large:</div>
-                    {service.sla.large.assumptions &&
-                      service.sla.large.assumptions.length > 0 && (
-                        <>
-                          <div className={styles.subLabel}>Assumptions</div>
-                          <ul className={styles.dashList}>
-                            {service.sla.large.assumptions.map(
-                              (item, index) => (
-                                <li key={index}>{item}</li>
-                              ),
-                            )}
-                          </ul>
-                        </>
-                      )}
-                    {service.sla.large.guarantees &&
-                      service.sla.large.guarantees.length > 0 && (
-                        <>
-                          <div className={styles.subLabel}>Guarantees</div>
-                          <ul className={styles.dashList}>
-                            {service.sla.large.guarantees.map((item, index) => (
-                              <li key={index}>{item}</li>
-                            ))}
-                          </ul>
-                        </>
-                      )}
-                  </div>
-                )}
-              </div>
-            </section>
-
-            <div className={styles.divider} />
-          </>
-        )}
-
-        {service.assets && (
-          <section className={styles.section}>
-            <h2 className={styles.sectionTitle}>Assets</h2>
-
-            <div className={styles.assetsGrid}>
-              {service.assets.architectures && (
-                <div className={styles.assetField}>
-                  <div className={styles.fieldLabel}>Architectures</div>
-                  <div className={styles.assetTag}>
-                    {service.assets.architectures}
-                  </div>
+            {/* Section skeleton */}
+            <div className={styles.skeletonSection}>
+              <SkeletonText heading className={styles.skeletonSectionTitle} />
+              <div className={styles.skeletonGrid}>
+                <div>
+                  <SkeletonText lineCount={1} width="60%" />
+                  <SkeletonText lineCount={1} width="80%" />
                 </div>
-              )}
+                <div>
+                  <SkeletonText lineCount={1} width="60%" />
+                  <SkeletonText lineCount={1} width="80%" />
+                </div>
+              </div>
+            </div>
 
-              {service.assets.apiUrl && (
-                <div className={styles.assetField}>
-                  <div className={styles.fieldLabel}>API</div>
-                  <div className={styles.fieldLabel}>documentation</div>
-                  <a
-                    href={service.assets.apiUrl}
-                    className={styles.infoLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {service.assets.apiUrl}
-                  </a>
+            <div className={styles.divider} />
+
+            {/* Another section skeleton */}
+            <div className={styles.skeletonSection}>
+              <SkeletonText heading className={styles.skeletonSectionTitle} />
+              <SkeletonText paragraph lineCount={4} />
+            </div>
+
+            <div className={styles.divider} />
+
+            {/* Another section skeleton */}
+            <div className={styles.skeletonSection}>
+              <SkeletonText heading className={styles.skeletonSectionTitle} />
+              <SkeletonText paragraph lineCount={3} />
+            </div>
+          </div>
+        )}
+
+        {error && <div className={styles.errorMessage}>{error}</div>}
+
+        {!isLoading && !error && service && (
+          <>
+            <p className={styles.description}>{service.description}</p>
+
+            <div className={styles.tagContainer}>
+              {service.tags?.map((tag, index) => (
+                <Tag key={index} type="outline">
+                  {"by IBM Power"}
+                </Tag>
+              ))}
+              {service.certifiedBy && (
+                <div className={styles.certifiedTag}>
+                  <Badge size={16} className={styles.checkIcon} />
+                  {service.certifiedBy} certified
                 </div>
               )}
             </div>
 
-            {service.assets.sourceCodeUrl && (
-              <div className={styles.assetField}>
-                <div className={styles.fieldLabel}>Source code</div>
-                <Button
-                  kind="tertiary"
-                  size="md"
-                  className={styles.sourceButton}
-                  onClick={() =>
-                    window.open(service.assets?.sourceCodeUrl, "_blank")
-                  }
-                >
-                  View source code
-                </Button>
-              </div>
+            <div className={styles.divider} />
+
+            {/* Dynamically render all about sections */}
+            {service.about.map((aboutSection, index) =>
+              renderAboutSection(aboutSection, index),
             )}
-          </section>
+          </>
         )}
       </div>
     </SidePanel>
@@ -465,3 +327,5 @@ const ServiceDetailPanel = ({
 };
 
 export default ServiceDetailPanel;
+
+// Made with Bob

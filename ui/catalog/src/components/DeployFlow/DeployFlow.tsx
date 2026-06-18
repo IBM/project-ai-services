@@ -92,10 +92,17 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
     setServiceSummaries,
     setServiceSummariesLoading,
     setServiceSummariesError,
+    isServiceSummariesStale,
+    providerParams,
+    serviceParams,
   } = useDeployStore();
 
   useEffect(() => {
-    if (open && serviceSummaries.length === 0) {
+    // Fetch service summaries if not in store or if cache is stale (older than 15 minutes)
+    const shouldFetch =
+      serviceSummaries.length === 0 || isServiceSummariesStale();
+
+    if (open && shouldFetch) {
       setServiceSummariesLoading(true);
       fetchServices()
         .then((data) => {
@@ -113,6 +120,7 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
   }, [
     open,
     serviceSummaries.length,
+    isServiceSummariesStale,
     setServiceSummaries,
     setServiceSummariesLoading,
     setServiceSummariesError,
@@ -226,9 +234,22 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
     dispatch({ type: ACTION_TYPES.HIDE_DEPLOY_TOAST });
 
     try {
+      // Transform cached params to plain data objects (strip fetchedAt timestamps)
+      const providerParamsData: Record<string, Record<string, unknown>> = {};
+      for (const [key, cache] of Object.entries(providerParams)) {
+        providerParamsData[key] = cache.data;
+      }
+
+      const serviceParamsData: Record<string, Record<string, unknown>> = {};
+      for (const [key, cache] of Object.entries(serviceParams)) {
+        serviceParamsData[key] = cache.data;
+      }
+
       const deploymentPayload = transformToDeploymentPayload(
         state.formData,
         deployOptions,
+        providerParamsData,
+        serviceParamsData,
       );
       await deployApplication(deploymentPayload);
 

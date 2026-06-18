@@ -51,7 +51,6 @@ const SolutionCard = ({
   onViewDetails,
 }: SolutionCardProps) => {
   const IconComponent = categoryIcons[category] || AgricultureAnalytics;
-  const primaryTag = tags[0] || "Digital assistant";
 
   return (
     <ClickableTile className={styles.card} onClick={() => onViewDetails?.(id)}>
@@ -73,9 +72,13 @@ const SolutionCard = ({
       </div>
 
       <div className={styles.footer}>
-        <Tag type="gray" size="md">
-          {primaryTag}
-        </Tag>
+        <div className={styles.tags}>
+          {tags.map((tag, index) => (
+            <Tag type="gray" size="md" key={index}>
+              {tag}
+            </Tag>
+          ))}
+        </div>
         <ArrowRight size={20} />
       </div>
     </ClickableTile>

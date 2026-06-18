@@ -13,30 +13,35 @@ import styles from "./DigitalAssistants.module.scss";
 
 // Status configuration
 const STATUS_CONFIG = {
+  Initializing: {
+    tagType: "blue" as const,
+    icon: InProgress,
+    className: styles.statusTagInfo,
+  },
+  Downloading: {
+    tagType: "blue" as const,
+    icon: InProgress,
+    className: styles.statusTagInfo,
+  },
+  Deploying: {
+    tagType: "blue" as const,
+    icon: InProgress,
+    className: styles.statusTagInfo,
+  },
   Running: {
     tagType: "green" as const,
     icon: CheckmarkFilled,
     className: styles.statusTagSuccess,
   },
+  Deleting: {
+    tagType: "blue" as const,
+    icon: InProgress,
+    className: styles.statusTagInfo,
+  },
   Error: {
     tagType: "red" as const,
     icon: ErrorFilled,
     className: styles.statusTagError,
-  },
-  Stopped: {
-    tagType: "gray" as const,
-    icon: PauseOutline,
-    className: styles.statusTagSecondary,
-  },
-  "Deploying...": {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: styles.statusTagInfo,
-  },
-  "Deleting...": {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: styles.statusTagInfo,
   },
 } as const;
 

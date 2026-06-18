@@ -14,15 +14,21 @@ export const DIGITAL_ASSISTANTS_ENDPOINTS = {
     `/architectures/${architectureId}/deploy-options`,
   PROVIDER_PARAMS: (componentType: string, providerId: string) =>
     `/components/${componentType}/providers/${providerId}/params`,
+  SERVICE_PARAMS: (serviceId: string) => `/services/${serviceId}/params`,
   RESOURCES: "/resources",
 };
 
 export const SERVICE_ENDPOINTS = {
   GET_SERVICES: "/services",
+  GET_SERVICE_DETAILS: (id: string) => `/services/${id}`,
+  GET_SERVICE_DEPLOY_OPTIONS: (id: string) => `/services/${id}/deploy-options`,
+  GET_SERVICE_PARAMS: (id: string) => `/services/${id}/params`,
+  GET_COMPONENT_PROVIDER_PARAMS: (componentType: string, providerId: string) =>
+    `/components/${componentType}/providers/${providerId}/params`,
 };
 
 export const APPLICATION_ENDPOINTS = {
-  GET_APPLICATIONS: "/applications",
+  GET_APPLICATIONS: "/applications/",
   GET_DEPLOYED_SERVICES: "/applications?deployment_type=services",
   DELETE_APPLICATION: (id: string) => `/applications/${id}`,
   GET_APPLICATION_DETAILS: (id: string) => `/applications/${id}`,

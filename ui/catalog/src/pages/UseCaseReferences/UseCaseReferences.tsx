@@ -1,4 +1,4 @@
-import { useReducer, useMemo } from "react";
+import { useReducer, useMemo, useCallback } from "react";
 import { AccordionItem, Checkbox } from "@carbon/react";
 import CatalogBrowseLayout from "@/layouts/CatalogBrowseLayout";
 import SolutionCard from "@/components/SolutionCard";
@@ -128,6 +128,83 @@ const UseCaseReferences = () => {
     selectedSolutionId,
   } = state;
 
+  // Helper function to check if a solution matches all filters
+  // Wrapped in useCallback to maintain stable reference across renders
+  const matchesFilters = useCallback(
+    (
+      sol: (typeof solutions)[0],
+      options: {
+        checkProvider?: boolean;
+        checkDomain?: boolean;
+        checkAsset?: boolean;
+        checkArchitecture?: boolean;
+        checkSearch?: boolean;
+      } = {},
+    ) => {
+      const {
+        checkProvider = true,
+        checkDomain = true,
+        checkAsset = true,
+        checkArchitecture = true,
+        checkSearch = true,
+      } = options;
+
+      const matchesProvider =
+        !checkProvider ||
+        selectedProviders.length === 0 ||
+        (selectedProviders.includes("ibm") && sol.creator === "IBM");
+
+      const matchesDomain =
+        !checkDomain ||
+        selectedDomains.length === 0 ||
+        selectedDomains.some(
+          (domain) => normalizeString(sol.domain) === domain,
+        );
+
+      const matchesAsset =
+        !checkAsset ||
+        selectedAssets.length === 0 ||
+        sol.assets.some((asset) =>
+          selectedAssets.includes(normalizeString(asset)),
+        );
+
+      const matchesArchitecture =
+        !checkArchitecture ||
+        selectedArchitectures.length === 0 ||
+        sol.architectures.some((arch) =>
+          selectedArchitectures.includes(normalizeString(arch)),
+        );
+
+      const matchesSearch =
+        !checkSearch ||
+        !searchValue ||
+        sol.title.toLowerCase().includes(searchValue.toLowerCase()) ||
+        sol.description.toLowerCase().includes(searchValue.toLowerCase()) ||
+        sol.domain.toLowerCase().includes(searchValue.toLowerCase()) ||
+        sol.assets.some((asset) =>
+          asset.toLowerCase().includes(searchValue.toLowerCase()),
+        ) ||
+        sol.architectures.some((arch) =>
+          arch.toLowerCase().includes(searchValue.toLowerCase()),
+        );
+
+      return (
+        matchesProvider &&
+        matchesDomain &&
+        matchesAsset &&
+        matchesArchitecture &&
+        matchesSearch
+      );
+    },
+    [
+      selectedProviders,
+      selectedDomains,
+      selectedAssets,
+      selectedArchitectures,
+      searchValue,
+    ],
+  );
+
   const handleProviderChange = (checked: boolean, value: string) => {
     dispatch({ type: "TOGGLE_PROVIDER", payload: { checked, value } });
   };
@@ -154,45 +231,75 @@ const UseCaseReferences = () => {
     selectedAssets.length +
     selectedArchitectures.length;
 
-  // Calculate dynamic counts
+  // Calculate dynamic counts based on current filters and search
+  // For each filter category, count how many results would match if that option was selected
+  // while keeping other filter categories applied
+
   const ibmCount = useMemo(() => {
-    return solutions.filter((sol) => sol.creator === "IBM").length;
-  }, [solutions]);
+    return solutions.filter(
+      (sol) =>
+        sol.creator === "IBM" && matchesFilters(sol, { checkProvider: false }),
+    ).length;
+  }, [solutions, matchesFilters]);
 
   const domainCounts = useMemo(() => {
     const counts: Record<string, number> = {};
+
     solutions.forEach((sol) => {
       const key = normalizeString(sol.domain);
-      counts[key] = (counts[key] || 0) + 1;
+      // If domains are selected and this isn't one of them, count is 0
+      if (selectedDomains.length > 0 && !selectedDomains.includes(key)) {
+        counts[key] = 0;
+      } else if (matchesFilters(sol, { checkDomain: false })) {
+        counts[key] = (counts[key] || 0) + 1;
+      }
     });
+
     return counts;
-  }, [solutions]);
+  }, [solutions, matchesFilters, selectedDomains]);
 
   const assetCounts = useMemo(() => {
     const counts: Record<string, number> = {};
 
     solutions.forEach((sol) => {
-      sol.assets.forEach((asset) => {
-        const key = normalizeString(asset);
-        counts[key] = (counts[key] || 0) + 1;
-      });
+      if (matchesFilters(sol, { checkAsset: false })) {
+        sol.assets.forEach((asset) => {
+          const key = normalizeString(asset);
+          // If assets are selected and this isn't one of them, count is 0
+          if (selectedAssets.length > 0 && !selectedAssets.includes(key)) {
+            counts[key] = 0;
+          } else {
+            counts[key] = (counts[key] || 0) + 1;
+          }
+        });
+      }
     });
 
     return counts;
-  }, [solutions]);
+  }, [solutions, matchesFilters, selectedAssets]);
 
   const architectureCounts = useMemo(() => {
     const counts: Record<string, number> = {};
 
     solutions.forEach((sol) => {
-      sol.architectures.forEach((arch) => {
-        const key = normalizeString(arch);
-        counts[key] = (counts[key] || 0) + 1;
-      });
+      if (matchesFilters(sol, { checkArchitecture: false })) {
+        sol.architectures.forEach((arch) => {
+          const key = normalizeString(arch);
+          // If architectures are selected and this isn't one of them, count is 0
+          if (
+            selectedArchitectures.length > 0 &&
+            !selectedArchitectures.includes(key)
+          ) {
+            counts[key] = 0;
+          } else {
+            counts[key] = (counts[key] || 0) + 1;
+          }
+        });
+      }
     });
 
     return counts;
-  }, [solutions]);
+  }, [solutions, matchesFilters, selectedArchitectures]);
 
   // Get unique assets and architectures dynamically
   const uniqueAssets = useMemo(() => {
@@ -213,58 +320,8 @@ const UseCaseReferences = () => {
 
   // Filter solutions based on selected filters and search
   const filteredSolutions = useMemo(() => {
-    return solutions.filter((sol) => {
-      const matchesProvider =
-        selectedProviders.length === 0 ||
-        (selectedProviders.includes("ibm") && sol.creator === "IBM");
-
-      const matchesDomain =
-        selectedDomains.length === 0 ||
-        selectedDomains.some((domain) => {
-          return normalizeString(sol.domain) === domain;
-        });
-
-      const matchesAsset =
-        selectedAssets.length === 0 ||
-        sol.assets.some((asset) => {
-          return selectedAssets.includes(normalizeString(asset));
-        });
-
-      const matchesArchitecture =
-        selectedArchitectures.length === 0 ||
-        sol.architectures.some((arch) => {
-          return selectedArchitectures.includes(normalizeString(arch));
-        });
-
-      // Search in card content (title, description, domain, assets, architectures)
-      const matchesSearch =
-        !searchValue ||
-        sol.title.toLowerCase().includes(searchValue.toLowerCase()) ||
-        sol.description.toLowerCase().includes(searchValue.toLowerCase()) ||
-        sol.domain.toLowerCase().includes(searchValue.toLowerCase()) ||
-        sol.assets.some((asset) =>
-          asset.toLowerCase().includes(searchValue.toLowerCase()),
-        ) ||
-        sol.architectures.some((arch) =>
-          arch.toLowerCase().includes(searchValue.toLowerCase()),
-        );
-
-      return (
-        matchesProvider &&
-        matchesDomain &&
-        matchesAsset &&
-        matchesArchitecture &&
-        matchesSearch
-      );
-    });
-  }, [
-    solutions,
-    selectedProviders,
-    selectedDomains,
-    selectedAssets,
-    selectedArchitectures,
-    searchValue,
-  ]);
+    return solutions.filter((sol) => matchesFilters(sol));
+  }, [solutions, matchesFilters]);
 
   // Filter options
   const providerOptions = useMemo(() => {
@@ -391,7 +448,7 @@ const UseCaseReferences = () => {
           id={sol.id}
           title={sol.title}
           description={sol.description}
-          tags={sol.assets}
+          tags={sol.tag}
           category={sol.domain}
           onViewDetails={(id) => {
             dispatch({ type: "OPEN_PANEL", payload: id });
