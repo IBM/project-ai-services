@@ -32,22 +32,18 @@ export const AboutTab: React.FC<AboutTabProps> = ({ onDeployClick }) => {
   const setArchitectureDetailsError = useDeployStore(
     (state) => state.setArchitectureDetailsError,
   );
-  const isArchitectureDetailsStale = useDeployStore(
-    (state) => state.isArchitectureDetailsStale,
-  );
 
   useEffect(() => {
     const loadArchitectureDetails = async () => {
       if (!selectedArchitectureId) return;
 
-      // Check if we have data for this architecture and if it's stale
+      // Check if we have data for this architecture
       const hasCorrectData =
         architectureDetails &&
         architectureDetails.id === selectedArchitectureId;
-      const isStale = isArchitectureDetailsStale();
 
-      // Fetch if we don't have data for this architecture or if cache is stale (older than 15 minutes)
-      if (!hasCorrectData || isStale) {
+      // Fetch if we don't have data for this architecture
+      if (!hasCorrectData) {
         setArchitectureDetailsLoading(true);
         try {
           const data = await fetchArchitectureDetails(selectedArchitectureId);
@@ -66,7 +62,6 @@ export const AboutTab: React.FC<AboutTabProps> = ({ onDeployClick }) => {
   }, [
     selectedArchitectureId,
     architectureDetails,
-    isArchitectureDetailsStale,
     setArchitectureDetails,
     setArchitectureDetailsLoading,
     setArchitectureDetailsError,

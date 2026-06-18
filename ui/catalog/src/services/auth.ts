@@ -11,13 +11,10 @@ export const login = async (payload: LoginRequest): Promise<LoginResponse> => {
   const refreshToken = response.data.refresh_token;
   useAuthStore.getState().setTokens(accessToken, refreshToken);
 
-  // Fetch architectures if not in store or if cache is stale (older than 15 minutes)
+  // Fetch architectures if not in store
   const deployStore = useDeployStore.getState();
-  const shouldFetchArchitectures =
-    deployStore.architectures.length === 0 ||
-    deployStore.isArchitecturesStale();
 
-  if (shouldFetchArchitectures) {
+  if (deployStore.architectures.length === 0) {
     try {
       deployStore.setArchitecturesLoading(true);
       const architectures = await fetchArchitectures();

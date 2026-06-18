@@ -563,7 +563,7 @@ const DigitalAssistantsPage = () => {
                             {noApplications && (
                               <NoDataEmptyState
                                 title="Start by adding a digital assistant"
-                                subtitle="To deploy a digital assistant using a template, click Deploy."
+                                subtitle="To deploy a digital assistant, click Deploy."
                                 className={styles.noDataContent}
                               />
                             )}
@@ -620,7 +620,7 @@ const DigitalAssistantsPage = () => {
                     onRequestSubmit={handleDelete}
                   >
                     <p>
-                      Deleting an digital assistant deployment permanently
+                      Deleting a digital assistant deployment permanently
                       deletes all associated components, including connected
                       services, runtime metadata, and configurations will be
                       permanently deleted, and it cannot be undone.

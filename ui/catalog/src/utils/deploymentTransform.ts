@@ -1,6 +1,7 @@
 import type {
   DeployFormData,
   ComponentConfig,
+  ServiceConfig,
 } from "@/components/DeployFlow/types";
 import type {
   DeployOptionsResponse,
@@ -9,6 +10,31 @@ import type {
   Provider,
 } from "@/types/digitalAssistants";
 import { isInferenceComponent } from "./inferenceComponentHelper";
+import { shouldIncludeParam } from "./paramFilter";
+
+/**
+ * Determines the component type (llm or reranker) that uses the inference backend
+ * for a given service configuration
+ */
+function getInferenceComponentType(
+  serviceDefinition: Service,
+  serviceConfig: ServiceConfig,
+): string {
+  // Default to llm
+  let componentType = "llm";
+
+  // Check if service has reranker component
+  const hasReranker = serviceDefinition.components.some(
+    (c) => c.type === "reranker",
+  );
+
+  // Use reranker if available and enabled in config
+  if (hasReranker && serviceConfig.components?.reranker?.providerId) {
+    componentType = "reranker";
+  }
+
+  return componentType;
+}
 
 interface DeploymentComponent {
   component_type: string;
@@ -150,7 +176,8 @@ function buildDeploymentComponent(
     ),
   };
 
-  // Only include params if there are any non-empty values
+  // Only include params if there are any values
+  // Params are already filtered in separateParams based on schema defaults
   if (Object.keys(params).length > 0) {
     component.params = params;
   }
@@ -176,37 +203,44 @@ function separateParams(
     return { inferenceBackendParams: {}, serviceParams: allParams || {} };
   }
 
-  // Extract provider param names from cached schema
-  const providerParamNames = new Set<string>();
-  if (providerSchemaData?.properties) {
-    Object.keys(
-      providerSchemaData.properties as Record<string, unknown>,
-    ).forEach((key) => providerParamNames.add(key));
-  }
+  // Get provider schema properties with defaults
+  const providerProperties =
+    (providerSchemaData?.properties as Record<string, { default?: unknown }>) ||
+    {};
 
-  // Extract service param names from cached schema (under backend.properties)
-  const serviceParamNames = new Set<string>();
+  // Get service schema properties with defaults (under backend.properties)
+  const serviceProperties: Record<string, { default?: unknown }> = {};
   if (serviceSchemaData?.properties) {
     const properties = serviceSchemaData.properties as Record<string, unknown>;
     if (properties.backend) {
       const backend = properties.backend as Record<string, unknown>;
       if (backend.properties) {
-        Object.keys(backend.properties as Record<string, unknown>).forEach(
-          (key) => serviceParamNames.add(key),
+        Object.assign(
+          serviceProperties,
+          backend.properties as Record<string, { default?: unknown }>,
         );
       }
     }
   }
 
-  // Classify parameters based on schema definitions
+  // Classify and filter parameters based on schema definitions
   const inferenceBackendParams: Record<string, unknown> = {};
   const serviceParams: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(allParams)) {
-    if (providerParamNames.has(key)) {
-      inferenceBackendParams[key] = value;
-    } else {
-      serviceParams[key] = value;
+    // Check if this is a provider param or service param
+    const isProviderParam = key in providerProperties;
+    const schemaProperty = isProviderParam
+      ? providerProperties[key]
+      : serviceProperties[key];
+
+    // Use shouldIncludeParam to filter based on schema defaults
+    if (shouldIncludeParam(value, schemaProperty)) {
+      if (isProviderParam) {
+        inferenceBackendParams[key] = value;
+      } else {
+        serviceParams[key] = value;
+      }
     }
   }
 
@@ -229,40 +263,35 @@ export function transformToDeploymentPayload(
 ): DeploymentPayload {
   const services: DeploymentService[] = [];
 
-  // Process each enabled service dynamically
+  // Process each enabled service
   for (const [serviceId, serviceConfig] of Object.entries(formData.services)) {
-    if (!serviceConfig.enabled) continue;
+    if (!serviceConfig.enabled) {
+      continue;
+    }
 
     // Find the service definition in deploy options
     const serviceDefinition = deployOptions.services.find(
       (s) => s.id === serviceId,
     );
     if (!serviceDefinition) {
-      console.warn(`Service definition not found for: ${serviceId}`);
       continue;
     }
 
-    // Find the component type that uses the inference backend (llm or reranker)
+    // Determine component type (llm or reranker)
     // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
-    let componentType = "llm";
-    const hasReranker = serviceDefinition.components.some(
-      (c) => c.type === "reranker",
+    const componentType = getInferenceComponentType(
+      serviceDefinition,
+      serviceConfig,
     );
-    if (hasReranker && serviceConfig.components?.reranker) {
-      componentType = "reranker";
-    }
 
-    // Get cached schemas - extract .data from cache objects
+    // Get cached schemas from store
     const providerKey = `${componentType}:${serviceConfig.inferenceBackend}`;
     const providerSchemaData =
-      (providerParamsCache[providerKey]?.data as Record<string, unknown>) ||
-      null;
+      (providerParamsCache[providerKey] as Record<string, unknown>) || null;
     const serviceSchemaData =
-      (serviceParamsCache[serviceId]?.data as Record<string, unknown>) || null;
+      (serviceParamsCache[serviceId] as Record<string, unknown>) || null;
 
     // Separate inference backend params from service-level params for this service
-    // Each service keeps its own parameters - no merging/sharing
-    // Backend will validate consistency for services using same provider+model
     const { inferenceBackendParams, serviceParams } = separateParams(
       serviceConfig.params || {},
       providerSchemaData,
@@ -285,7 +314,7 @@ export function transformToDeploymentPayload(
             deployOptions,
             formData.globalComponents,
             serviceConfig.inferenceBackend, // Pass inference backend for LLM/reranker components
-            inferenceBackendParams, // Pass shared inference backend params (e.g., API keys)
+            inferenceBackendParams, // Pass inference backend params (e.g., API keys)
           ),
         );
       }

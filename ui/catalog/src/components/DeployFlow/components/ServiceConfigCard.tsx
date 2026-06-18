@@ -17,6 +17,7 @@ import { DynamicSchemaFields } from "./DynamicSchemaFields";
 import type { Component } from "@/types/digitalAssistants";
 import { parseSchema, validateField } from "@/utils/schemaParser";
 import { useServiceParams } from "@/hooks/useServiceParams";
+import { shouldShowParam } from "@/utils/paramFilter";
 
 interface ServiceConfigCardProps {
   serviceId: string;
@@ -342,7 +343,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
             if (!schema?.properties) return null;
 
             return Object.entries(componentConfig.params)
-              .filter(([key]) => key !== "model")
+              .filter(([key, value]) => shouldShowParam(key, value, schema))
               .map(([key, value]) => {
                 const property = (
                   schema.properties as Record<
@@ -414,9 +415,10 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
               // Filter out params that are already shown in service-level schema fields
               const serviceFieldKeys = new Set(serviceFields.map((f) => f.key));
 
+              const excludeKeys = new Set(["model", ...serviceFieldKeys]);
               return Object.entries(config.params)
-                .filter(
-                  ([key]) => key !== "model" && !serviceFieldKeys.has(key),
+                .filter(([key, value]) =>
+                  shouldShowParam(key, value, schema, excludeKeys),
                 )
                 .map(([key, value]) => {
                   const property = (
@@ -659,8 +661,26 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                         itemToString={(item) => (item ? item.text : "")}
                         selectedItem={selectedItem}
                         onChange={({ selectedItem }) => {
+                          // Get service-level param keys to preserve (dynamic, backend-driven)
+                          const serviceFieldKeys = new Set(
+                            serviceFields.map((f) => f.key),
+                          );
+
+                          // Preserve only service-level params, clear provider-specific params
+                          const preservedParams: Record<string, unknown> = {};
+                          if (currentConfig?.params) {
+                            Object.entries(currentConfig.params).forEach(
+                              ([key, value]) => {
+                                if (serviceFieldKeys.has(key)) {
+                                  preservedParams[key] = value;
+                                }
+                              },
+                            );
+                          }
+
                           onUpdateConfig({
                             inferenceBackend: selectedItem?.id || "",
+                            params: preservedParams, // Keep service-level, clear provider params
                           });
                         }}
                       />
@@ -677,10 +697,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                             setHasValidationError(false);
                           }
                           onUpdateConfig({
-                            params: {
-                              ...currentConfig?.params,
-                              ...params,
-                            },
+                            params,
                           });
                         }}
                         providerParamsMap={

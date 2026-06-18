@@ -92,17 +92,13 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
     setServiceSummaries,
     setServiceSummariesLoading,
     setServiceSummariesError,
-    isServiceSummariesStale,
     providerParams,
     serviceParams,
   } = useDeployStore();
 
   useEffect(() => {
-    // Fetch service summaries if not in store or if cache is stale (older than 15 minutes)
-    const shouldFetch =
-      serviceSummaries.length === 0 || isServiceSummariesStale();
-
-    if (open && shouldFetch) {
+    // Fetch service summaries if not in store
+    if (open && serviceSummaries.length === 0) {
       setServiceSummariesLoading(true);
       fetchServices()
         .then((data) => {
@@ -120,7 +116,6 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
   }, [
     open,
     serviceSummaries.length,
-    isServiceSummariesStale,
     setServiceSummaries,
     setServiceSummariesLoading,
     setServiceSummariesError,

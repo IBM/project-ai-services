@@ -10,19 +10,16 @@ interface UseServiceParamsResult {
 
 /**
  * Hook to fetch and cache service-level parameters
- * Uses Zustand store with 15-minute cache expiration
- * Service params can change when service definitions are updated
+ * Uses Zustand store (no cache expiration - fetches only if not in cache)
  */
 export function useServiceParams(serviceId: string): UseServiceParamsResult {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasFetched = useRef(false);
 
-  const { getServiceParams, setServiceParams, isServiceParamsStale } =
-    useDeployStore();
+  const { getServiceParams, setServiceParams } = useDeployStore();
 
   const params = getServiceParams(serviceId);
-  const isStale = isServiceParamsStale(serviceId);
 
   useEffect(() => {
     // Don't fetch if no serviceId
@@ -30,8 +27,8 @@ export function useServiceParams(serviceId: string): UseServiceParamsResult {
       return;
     }
 
-    // Fetch if we don't have data or if cache is stale, and we haven't already started fetching
-    if ((params && !isStale) || hasFetched.current) {
+    // Fetch only if we don't have data and haven't already started fetching
+    if (params || hasFetched.current) {
       return;
     }
 
@@ -55,7 +52,7 @@ export function useServiceParams(serviceId: string): UseServiceParamsResult {
     };
 
     fetchParams();
-  }, [serviceId, params, isStale, setServiceParams]);
+  }, [serviceId, params, setServiceParams]);
 
   return { params, isLoading, error };
 }
