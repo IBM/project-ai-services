@@ -539,93 +539,6 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                 </div>
               );
             })}
-
-          {/* Model Description Accordion - Visible in both view and edit modes */}
-          {(llmComponent || rerankerComponent) &&
-            (() => {
-              // TODO: [Next Release] Replace hardcoded "llm"/"reranker" with constants from a shared file
-              const componentType = llmComponent ? "llm" : "reranker";
-              const providerId =
-                currentConfig?.components?.[componentType]?.providerId;
-              const modelId = currentConfig?.components?.[componentType]?.params
-                ?.model as string | undefined;
-
-              if (!modelId || !providerId) return null;
-
-              const modelDescription = getModelDescription(
-                componentType,
-                providerId,
-                modelId,
-              );
-
-              if (!modelDescription) return null;
-
-              const sections = parseModelDescription(modelDescription);
-
-              if (
-                !sections.introduction &&
-                !sections.useCases &&
-                !sections.strengths &&
-                !sections.languages
-              ) {
-                return null;
-              }
-
-              return (
-                <div className={styles.modelDescriptionSection}>
-                  <Accordion>
-                    <AccordionItem title="What is this model good at?">
-                      <div className={styles.modelDescriptionContent}>
-                        {/* Introduction - Full width at top */}
-                        {sections.introduction && (
-                          <div className={styles.modelDescriptionFullWidth}>
-                            <p className={styles.modelDescriptionText}>
-                              {sections.introduction}
-                            </p>
-                          </div>
-                        )}
-
-                        {/* Use Cases - Full width (if exists separately) */}
-                        {sections.useCases && (
-                          <div className={styles.modelDescriptionFullWidth}>
-                            <p className={styles.modelDescriptionText}>
-                              {sections.useCases}
-                            </p>
-                          </div>
-                        )}
-
-                        {/* Strengths and Languages - Side by side */}
-                        {(sections.strengths || sections.languages) && (
-                          <div className={styles.modelDescriptionRow}>
-                            {sections.strengths && (
-                              <div className={styles.modelDescriptionHalf}>
-                                <h5 className={styles.modelDescriptionTitle}>
-                                  Model strengths
-                                </h5>
-                                <p className={styles.modelDescriptionText}>
-                                  {sections.strengths}
-                                </p>
-                              </div>
-                            )}
-
-                            {sections.languages && (
-                              <div className={styles.modelDescriptionHalf}>
-                                <h5 className={styles.modelDescriptionTitle}>
-                                  Supported languages
-                                </h5>
-                                <p className={styles.modelDescriptionText}>
-                                  {sections.languages}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </AccordionItem>
-                  </Accordion>
-                </div>
-              );
-            })()}
         </div>
       ) : (
         <>
@@ -730,6 +643,9 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     (opt) => opt.id === fieldValue,
                   ) || null;
 
+                // Dynamically determine component type based on which component exists
+                const componentType = llmComponent ? "llm" : "reranker";
+
                 return (
                   <Fragment key="inferenceBackend">
                     <div>
@@ -752,7 +668,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     <div />
                     <div style={{ gridColumn: "1 / -1" }}>
                       <DynamicSchemaFields
-                        componentType="llm"
+                        componentType={componentType}
                         providerId={fieldValue || ""}
                         values={currentConfig?.params || {}}
                         onChange={(params) => {
@@ -768,7 +684,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                           });
                         }}
                         providerParamsMap={
-                          (providerParamsByType["llm"]?.paramsMap ||
+                          (providerParamsByType[componentType]?.paramsMap ||
                             {}) as Record<
                             string,
                             import("@/utils/schemaParser").JSONSchema

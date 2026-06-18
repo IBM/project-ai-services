@@ -256,7 +256,7 @@
 }
 
 .cloudCredentialsTitle {
-  @include type-style("heading-compact-01");
+  @include type-style("body-01");
   margin-bottom: $spacing-05;
 }
 
@@ -406,7 +406,7 @@
 
 // Model Description Accordion Styles
 .modelDescriptionSection {
-  margin-top: $spacing-05;
+  margin-top: $spacing-02;
   margin-bottom: $spacing-05;
 }
 
@@ -445,7 +445,7 @@
 }
 
 .modelDescriptionText {
-  @include type-style("body-compact-01");
+  @include type-style("body-01");
   margin: 0;
   color: $text-secondary;
   white-space: pre-line;
