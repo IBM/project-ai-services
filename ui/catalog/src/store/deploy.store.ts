@@ -14,26 +14,30 @@ interface ProviderParamsCache {
 }
 
 interface DeployState {
-  // Architectures - persisted (configuration data)
+  // Architectures - persisted with 15-minute cache
   architectures: ArchitectureSummary[];
   selectedArchitectureId: string | null;
   architecturesLoading: boolean;
   architecturesError: string | null;
+  architecturesFetchedAt: number | null;
 
-  // Services - persisted (configuration data with descriptions)
+  // Services - persisted with 15-minute cache
   serviceSummaries: ServiceSummary[];
   serviceSummariesLoading: boolean;
   serviceSummariesError: string | null;
+  serviceSummariesFetchedAt: number | null;
 
-  // Architecture details - persisted (configuration data)
+  // Architecture details - persisted with 15-minute cache
   architectureDetails: ArchitectureDetailsResponse | null;
   architectureDetailsLoading: boolean;
   architectureDetailsError: string | null;
+  architectureDetailsFetchedAt: number | null;
 
-  // Deploy options - persisted (configuration data)
+  // Deploy options - persisted with 15-minute cache
   deployOptions: DeployOptionsResponse | null;
   deployOptionsLoading: boolean;
   deployOptionsError: string | null;
+  deployOptionsFetchedAt: number | null;
 
   // Resources cache - not persisted (dynamic data)
   resources: ResourcesResponse | null;
@@ -41,8 +45,11 @@ interface DeployState {
   resourcesError: string | null;
   resourcesFetchedAt: number | null;
 
-  // Provider params cache - not persisted (dynamic data)
+  // Provider params cache - persisted (configuration data)
   providerParams: Record<string, ProviderParamsCache>;
+
+  // Service params cache - persisted (configuration data)
+  serviceParams: Record<string, ProviderParamsCache>;
 
   // Architecture actions
   setArchitectures: (data: ArchitectureSummary[]) => void;
@@ -86,14 +93,28 @@ interface DeployState {
     componentType: string,
     providerId: string,
   ) => Record<string, unknown> | null;
-  isProviderParamsStale: (componentType: string, providerId: string) => boolean;
   clearProviderParams: () => void;
 
-  // Check if cache is stale (older than 5 minutes) - only for resources
+  // Service params actions
+  setServiceParams: (serviceId: string, data: Record<string, unknown>) => void;
+  getServiceParams: (serviceId: string) => Record<string, unknown> | null;
+  clearServiceParams: () => void;
+
+  // Check if cache is stale (older than 15 minutes)
+  isArchitecturesStale: () => boolean;
+  isServiceSummariesStale: () => boolean;
+  isArchitectureDetailsStale: () => boolean;
+  isDeployOptionsStale: () => boolean;
+  isProviderParamsStale: (componentType: string, providerId: string) => boolean;
+  isServiceParamsStale: (serviceId: string) => boolean;
   isResourcesStale: () => boolean;
+
+  // Clear all deploy store data
+  clearAll: () => void;
 }
 
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
+const RESOURCES_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes for resources (dynamic data)
 
 export const useDeployStore = create<DeployState>()(
   persist(
@@ -103,21 +124,25 @@ export const useDeployStore = create<DeployState>()(
       selectedArchitectureId: null,
       architecturesLoading: false,
       architecturesError: null,
+      architecturesFetchedAt: null,
 
       // Service summaries state
       serviceSummaries: [],
       serviceSummariesLoading: false,
       serviceSummariesError: null,
+      serviceSummariesFetchedAt: null,
 
       // Architecture details state
       architectureDetails: null,
       architectureDetailsLoading: false,
       architectureDetailsError: null,
+      architectureDetailsFetchedAt: null,
 
       // Deploy options state
       deployOptions: null,
       deployOptionsLoading: false,
       deployOptionsError: null,
+      deployOptionsFetchedAt: null,
 
       // Resources state
       resources: null,
@@ -128,12 +153,16 @@ export const useDeployStore = create<DeployState>()(
       // Provider params state
       providerParams: {},
 
+      // Service params state
+      serviceParams: {},
+
       // Architectures actions
       setArchitectures: (data) =>
         set({
           architectures: data,
           selectedArchitectureId: data.length > 0 ? data[0].id : null,
           architecturesError: null,
+          architecturesFetchedAt: Date.now(),
           architecturesLoading: false,
         }),
 
@@ -150,6 +179,7 @@ export const useDeployStore = create<DeployState>()(
           architectures: [],
           selectedArchitectureId: null,
           architecturesError: null,
+          architecturesFetchedAt: null,
         }),
 
       // Service summaries actions
@@ -157,6 +187,7 @@ export const useDeployStore = create<DeployState>()(
         set({
           serviceSummaries: data,
           serviceSummariesError: null,
+          serviceSummariesFetchedAt: Date.now(),
           serviceSummariesLoading: false,
         }),
 
@@ -175,6 +206,7 @@ export const useDeployStore = create<DeployState>()(
         set({
           serviceSummaries: [],
           serviceSummariesError: null,
+          serviceSummariesFetchedAt: null,
         }),
 
       // Architecture details actions
@@ -182,6 +214,7 @@ export const useDeployStore = create<DeployState>()(
         set({
           architectureDetails: data,
           architectureDetailsError: null,
+          architectureDetailsFetchedAt: Date.now(),
           architectureDetailsLoading: false,
         }),
 
@@ -198,6 +231,7 @@ export const useDeployStore = create<DeployState>()(
         set({
           architectureDetails: null,
           architectureDetailsError: null,
+          architectureDetailsFetchedAt: null,
         }),
 
       // Deploy options actions
@@ -205,6 +239,7 @@ export const useDeployStore = create<DeployState>()(
         set({
           deployOptions: data,
           deployOptionsError: null,
+          deployOptionsFetchedAt: Date.now(),
           deployOptionsLoading: false,
         }),
 
@@ -218,6 +253,7 @@ export const useDeployStore = create<DeployState>()(
         set({
           deployOptions: null,
           deployOptionsError: null,
+          deployOptionsFetchedAt: null,
         }),
 
       // Resources actions
@@ -260,7 +296,7 @@ export const useDeployStore = create<DeployState>()(
         const cached = get().providerParams[key];
         if (!cached) return null;
 
-        // Check if stale
+        // Check if stale (older than 15 minutes)
         if (Date.now() - cached.fetchedAt > CACHE_DURATION) {
           return null;
         }
@@ -277,23 +313,110 @@ export const useDeployStore = create<DeployState>()(
 
       clearProviderParams: () => set({ providerParams: {} }),
 
-      // Cache staleness check - only for resources (5 minutes)
+      // Service params actions
+      setServiceParams: (serviceId, data) => {
+        set((state) => ({
+          serviceParams: {
+            ...state.serviceParams,
+            [serviceId]: {
+              data,
+              fetchedAt: Date.now(),
+            },
+          },
+        }));
+      },
+
+      getServiceParams: (serviceId) => {
+        const cached = get().serviceParams[serviceId];
+        if (!cached) return null;
+
+        // Check if stale (older than 15 minutes)
+        if (Date.now() - cached.fetchedAt > CACHE_DURATION) {
+          return null;
+        }
+
+        return cached.data;
+      },
+
+      isServiceParamsStale: (serviceId) => {
+        const cached = get().serviceParams[serviceId];
+        if (!cached) return true;
+        return Date.now() - cached.fetchedAt > CACHE_DURATION;
+      },
+
+      clearServiceParams: () => set({ serviceParams: {} }),
+
+      // Cache staleness checks (15 minutes for config data, 5 minutes for resources)
+      isArchitecturesStale: () => {
+        const { architecturesFetchedAt } = get();
+        if (!architecturesFetchedAt) return true;
+        return Date.now() - architecturesFetchedAt > CACHE_DURATION;
+      },
+
+      isServiceSummariesStale: () => {
+        const { serviceSummariesFetchedAt } = get();
+        if (!serviceSummariesFetchedAt) return true;
+        return Date.now() - serviceSummariesFetchedAt > CACHE_DURATION;
+      },
+
+      isArchitectureDetailsStale: () => {
+        const { architectureDetailsFetchedAt } = get();
+        if (!architectureDetailsFetchedAt) return true;
+        return Date.now() - architectureDetailsFetchedAt > CACHE_DURATION;
+      },
+
+      isDeployOptionsStale: () => {
+        const { deployOptionsFetchedAt } = get();
+        if (!deployOptionsFetchedAt) return true;
+        return Date.now() - deployOptionsFetchedAt > CACHE_DURATION;
+      },
+
       isResourcesStale: () => {
         const { resourcesFetchedAt } = get();
         if (!resourcesFetchedAt) return true;
-        return Date.now() - resourcesFetchedAt > CACHE_DURATION;
+        return Date.now() - resourcesFetchedAt > RESOURCES_CACHE_DURATION;
+      },
+
+      // Clear all deploy store data
+      clearAll: () => {
+        set({
+          architectures: [],
+          selectedArchitectureId: null,
+          architecturesError: null,
+          architecturesFetchedAt: null,
+          serviceSummaries: [],
+          serviceSummariesError: null,
+          serviceSummariesFetchedAt: null,
+          architectureDetails: null,
+          architectureDetailsError: null,
+          architectureDetailsFetchedAt: null,
+          deployOptions: null,
+          deployOptionsError: null,
+          deployOptionsFetchedAt: null,
+          resources: null,
+          resourcesError: null,
+          resourcesFetchedAt: null,
+          providerParams: {},
+          serviceParams: {},
+        });
       },
     }),
     {
       name: "deploy-storage",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        // Only persist architectures, serviceSummaries, architectureDetails, and deployOptions
+        // Persist configuration data with timestamps for 15-minute cache
         architectures: state.architectures,
         selectedArchitectureId: state.selectedArchitectureId,
+        architecturesFetchedAt: state.architecturesFetchedAt,
         serviceSummaries: state.serviceSummaries,
+        serviceSummariesFetchedAt: state.serviceSummariesFetchedAt,
         architectureDetails: state.architectureDetails,
+        architectureDetailsFetchedAt: state.architectureDetailsFetchedAt,
         deployOptions: state.deployOptions,
+        deployOptionsFetchedAt: state.deployOptionsFetchedAt,
+        providerParams: state.providerParams,
+        serviceParams: state.serviceParams,
       }),
     },
   ),

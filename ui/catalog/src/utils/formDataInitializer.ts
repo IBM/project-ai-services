@@ -9,6 +9,7 @@ import type {
   ComponentConfig,
   ServiceConfig,
 } from "@/components/DeployFlow/types";
+import { getDefaultInferenceBackendProviderId } from "./inferenceComponentHelper";
 
 // Initializes form data structure from deploy options with default values
 export function initializeFormData(
@@ -36,7 +37,6 @@ export function initializeFormData(
 
   deployOptions.services.forEach((service) => {
     const components: Record<string, ComponentConfig> = {};
-    let inferenceBackendProviderId: string | undefined;
 
     // Initialize each component for the service
     service.components.forEach((component) => {
@@ -48,19 +48,14 @@ export function initializeFormData(
           providerId: defaultProvider.id,
           params: {}, // Will be populated from schema
         };
-
-        // Track LLM or reranker component's default provider for inferenceBackend
-        // LLM takes precedence if both exist
-        if (component.type === "llm") {
-          inferenceBackendProviderId = defaultProvider.id;
-        } else if (
-          component.type === "reranker" &&
-          !inferenceBackendProviderId
-        ) {
-          inferenceBackendProviderId = defaultProvider.id;
-        }
       }
     });
+
+    // Determine inference backend provider using generic logic
+    // This checks for components with multiple providers that expect model input
+    const inferenceBackendProviderId = getDefaultInferenceBackendProviderId(
+      service.components,
+    );
 
     services[service.id] = {
       enabled: true,

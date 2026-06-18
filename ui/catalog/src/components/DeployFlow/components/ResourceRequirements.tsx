@@ -5,6 +5,7 @@ import {
   ToggletipContent,
   InlineLoading,
   InlineNotification,
+  Tooltip,
 } from "@carbon/react";
 import { Help, CheckmarkFilled, WarningFilled } from "@carbon/icons-react";
 import styles from "../DeployFlow.module.scss";
@@ -75,15 +76,26 @@ export const ResourceRequirements: React.FC<ResourceRequirementsProps> = ({
                 key={`${resource.label}-${resource.acceleratorType || ""}`}
                 className={styles.resourceItem}
               >
-                <p className={styles.resourceLabel}>
+                <div className={styles.resourceLabel}>
                   <span>{resource.label}</span>
                   {status === "sufficient" && (
                     <CheckmarkFilled size={16} className={styles.green} />
                   )}
                   {status === "insufficient" && (
-                    <WarningFilled size={16} className={styles.warning} />
+                    <Tooltip
+                      align="bottom"
+                      label="Insufficient resources available"
+                    >
+                      <button
+                        type="button"
+                        className={styles.iconButton}
+                        aria-label="Insufficient resources available"
+                      >
+                        <WarningFilled size={16} className={styles.warning} />
+                      </button>
+                    </Tooltip>
                   )}
-                </p>
+                </div>
                 <p className={styles.resourceValue}>
                   <span className={styles.required}>{resource.required}</span>
                   {resource.available !== "N/A" && (

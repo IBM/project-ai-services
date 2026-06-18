@@ -1,111 +1,121 @@
-import { useEffect, useReducer } from "react";
+import { useReducer, useMemo } from "react";
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@carbon/react";
 import { PageHeader } from "@carbon/ibm-products";
 import { ServiceCard, ServiceDetailPanel } from "@/components";
+import ServiceCardSkeleton from "@/components/ServiceCard/ServiceCardSkeleton";
 import type { ServiceDetailData } from "@/components";
 import styles from "./Services.module.scss";
 import { DeployedServicesTable } from "@/components";
-import { api } from "@/api/axios";
-import { SERVICE_ENDPOINTS } from "@/constants/api-endpoints.constants";
-import { servicesReducer, INITIAL_STATE, ACTION_TYPES } from "./types";
+import { ServicesDeployFlow } from "@/components/ServicesDeployFlow";
+import DeploymentDetails from "@/components/DeploymentDetails";
+import { useServices } from "@/hooks/useServices";
+import { servicesReducer, initialState } from "./types";
+import type { Service } from "@/services/deployment.api";
+import type { DeploymentDetails as DeploymentDetailsType } from "@/types/digitalAssistants";
 
-export interface ServiceApiResponse {
-  id: string;
-  name: string;
-  description: string;
-  certified_by: string;
-  architectures: string[];
-}
+const sortServicesByDeployabilityAndName = (
+  services: ServiceDetailData[],
+): ServiceDetailData[] => {
+  return [...services].sort((serviceA, serviceB) => {
+    const serviceAIsDeployable = serviceA.standalone === true;
+    const serviceBIsDeployable = serviceB.standalone === true;
 
-export const getServices = async (): Promise<ServiceApiResponse[]> => {
-  const response = await api.get<ServiceApiResponse[]>(
-    SERVICE_ENDPOINTS.GET_SERVICES,
-  );
-  return response.data;
+    if (serviceAIsDeployable !== serviceBIsDeployable) {
+      return serviceAIsDeployable ? -1 : 1;
+    }
+
+    return serviceA.title.localeCompare(serviceB.title);
+  });
 };
 
-// Transform API response to ServiceDetailData format
-const transformServiceData = (
-  apiService: ServiceApiResponse,
-): ServiceDetailData => {
+// Transform Service to ServiceDetailData format
+const transformServiceData = (service: Service): ServiceDetailData => {
   return {
-    id: apiService.id,
-    title: apiService.name,
-    description: apiService.description,
-    isCertified: apiService.certified_by === "IBM",
-    tags: apiService.architectures,
+    id: service.id,
+    title: service.name,
+    description: service.description,
+    certifiedBy: service.certified_by,
+    tags: service.architectures || [],
+    standalone: service.standalone,
+    about: [], // About sections are loaded separately when viewing details
   };
 };
 
 const Services = () => {
-  const [state, dispatch] = useReducer(servicesReducer, INITIAL_STATE);
+  // Use unified services cache
+  const { services, isLoading, error, refetch } = useServices();
+
+  // Local UI state using useReducer
+  const [state, dispatch] = useReducer(servicesReducer, initialState);
+
+  // Transform and sort services for catalog display
+  const catalogServices = useMemo(() => {
+    const transformed = services.map(transformServiceData);
+    return sortServicesByDeployabilityAndName(transformed);
+  }, [services]);
 
   const handleCardClick = (id: string) => {
-    const service = state.mockServices.find((s) => s.id === id);
-    console.log(service);
-    if (service) {
-      dispatch({
-        type: ACTION_TYPES.SERVICES_SET_SELECTED_SERVICE,
-        payload: service,
-      });
-      dispatch({ type: ACTION_TYPES.SERVICES_SET_PANEL_OPEN, payload: true });
-    }
-  };
-
-  useEffect(() => {
-    fetch("/data/services.json")
-      .then((res) => res.json())
-      .then((data) => {
-        dispatch({
-          type: ACTION_TYPES.SERVICES_SET_MOCK_SERVICES,
-          payload: data,
-        });
-      });
-  }, []);
-
-  const fetchServices = async () => {
-    try {
-      dispatch({ type: ACTION_TYPES.SERVICES_SET_LOADING, payload: true });
-      dispatch({ type: ACTION_TYPES.SERVICES_SET_ERROR, payload: null });
-      const data = await getServices();
-      const transformedData = data.map(transformServiceData);
-      dispatch({
-        type: ACTION_TYPES.SERVICES_SET_SERVICES,
-        payload: transformedData,
-      });
-      dispatch({
-        type: ACTION_TYPES.SERVICES_SET_HAS_FETCHED_SERVICES,
-        payload: true,
-      });
-    } catch (err) {
-      console.error("Failed to fetch services:", err);
-      dispatch({
-        type: ACTION_TYPES.SERVICES_SET_ERROR,
-        payload: "Failed to load services. Please try again later.",
-      });
-    } finally {
-      dispatch({ type: ACTION_TYPES.SERVICES_SET_LOADING, payload: false });
-    }
+    dispatch({ type: "OPEN_PANEL", payload: id });
   };
 
   const handleTabChange = (evt: { selectedIndex: number }) => {
+    dispatch({ type: "SET_SELECTED_TAB", payload: evt.selectedIndex });
     // Catalog tab is at index 1
-    if (evt.selectedIndex === 1 && !state.hasFetchedServices) {
-      fetchServices();
+    // Services are static data, only fetch if not already cached
+    if (evt.selectedIndex === 1 && services.length === 0) {
+      refetch();
     }
   };
 
-  const handleDeploy = () => {};
+  const handleDeploy = (serviceId: string) => {
+    // Open DeployFlow with pre-selected service (from service card)
+    dispatch({ type: "OPEN_DEPLOY_FLOW", payload: serviceId });
+  };
 
-  const handleClosePanel = () => {
-    dispatch({ type: ACTION_TYPES.SERVICES_CLOSE_PANEL });
+  const handleDeployFromTable = () => {
+    // Open DeployFlow without pre-selected service (from table)
+    dispatch({ type: "OPEN_DEPLOY_FLOW", payload: null });
+  };
+
+  const handleCloseDeployFlow = () => {
+    dispatch({ type: "CLOSE_DEPLOY_FLOW" });
+    // Clear selected service after animation
     setTimeout(() => {
-      dispatch({
-        type: ACTION_TYPES.SERVICES_SET_SELECTED_SERVICE,
-        payload: null,
-      });
+      dispatch({ type: "CLEAR_DEPLOY_SERVICE_ID" });
     }, 300);
   };
+
+  const handleDeploySubmit = () => {
+    // Refresh deployed services table after successful deployment
+    // Switch to Deployments tab (index 0)
+    dispatch({ type: "DEPLOY_SUBMIT" });
+  };
+
+  const handleClosePanel = () => {
+    dispatch({ type: "CLOSE_PANEL" });
+    setTimeout(() => {
+      dispatch({ type: "CLEAR_SELECTED_SERVICE_ID" });
+    }, 300);
+  };
+
+  const handleShowDeploymentDetails = (deployment: DeploymentDetailsType) => {
+    dispatch({ type: "SHOW_DEPLOYMENT_DETAILS", payload: deployment });
+  };
+
+  const handleBackFromDetails = () => {
+    dispatch({ type: "HIDE_DEPLOYMENT_DETAILS" });
+  };
+
+  // If showing deployment details, render DeploymentDetails component
+  if (state.showDeploymentDetails && state.selectedDeployment) {
+    return (
+      <DeploymentDetails
+        deployment={state.selectedDeployment}
+        onBack={handleBackFromDetails}
+        deploymentSource="Services"
+      />
+    );
+  }
 
   return (
     <div className={styles.servicesContainer}>
@@ -114,7 +124,7 @@ const Services = () => {
         subtitle="Single-purpose AI capabilities designed to perform specific tasks independently or as part of larger solutions."
         className={styles.pageHeader}
       />
-      <Tabs onChange={handleTabChange}>
+      <Tabs selectedIndex={state.selectedTabIndex} onChange={handleTabChange}>
         <TabList
           aria-label="Services tabs"
           contained={false}
@@ -125,22 +135,31 @@ const Services = () => {
         </TabList>
         <TabPanels>
           <TabPanel>
-            <DeployedServicesTable />
+            <DeployedServicesTable
+              onDeploy={handleDeployFromTable}
+              refreshTrigger={state.tableRefreshTrigger}
+              onRowClick={handleShowDeploymentDetails}
+            />
           </TabPanel>
           <TabPanel>
-            {state.loading ? (
-              <div className={styles.loadingMessage}>Loading services...</div>
-            ) : state.error ? (
-              <div className={styles.errorMessage}>{state.error}</div>
+            {isLoading ? (
+              <div className={styles.catalogGrid}>
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <ServiceCardSkeleton key={`skeleton-${index}`} />
+                ))}
+              </div>
+            ) : error ? (
+              <div className={styles.errorMessage}>{error}</div>
             ) : (
               <div className={styles.catalogGrid}>
-                {state.services.map((service) => (
+                {catalogServices.map((service) => (
                   <ServiceCard
                     key={service.id}
                     id={service.id}
                     title={service.title}
                     description={service.description}
-                    isCertified={service.isCertified}
+                    certifiedBy={service.certifiedBy}
+                    standalone={service.standalone}
                     onDeploy={handleDeploy}
                     onLearnMore={handleCardClick}
                   />
@@ -154,7 +173,14 @@ const Services = () => {
       <ServiceDetailPanel
         open={state.isPanelOpen}
         onClose={handleClosePanel}
-        service={state.selectedService}
+        serviceId={state.selectedServiceId}
+      />
+
+      <ServicesDeployFlow
+        open={state.isDeployFlowOpen}
+        onClose={handleCloseDeployFlow}
+        onSubmit={handleDeploySubmit}
+        preSelectedServiceId={state.deployServiceId || undefined}
       />
     </div>
   );

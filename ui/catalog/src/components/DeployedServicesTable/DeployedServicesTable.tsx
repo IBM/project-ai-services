@@ -1,7 +1,9 @@
-import React, { useReducer, useEffect } from "react";
+import React, { useReducer, useEffect, useCallback, useRef } from "react";
 import { api } from "@/api/axios";
 import { APPLICATION_ENDPOINTS } from "@/constants";
+import { useServiceDeployStore } from "@/store/serviceDeploy.store";
 import { NoDataEmptyState } from "@carbon/ibm-products";
+import type { DeploymentDetails } from "@/types/digitalAssistants";
 import {
   DataTable,
   DataTableSkeleton,
@@ -46,6 +48,7 @@ import { CELL_RENDERERS } from "./CellRenderers";
 import { downloadCSVWithChildren } from "@/utils/csv";
 import type { Dispatch } from "react";
 import type { AppAction } from "./types";
+import { calculateUptime } from "@/services/deployment.api";
 
 // Generic cell renderer wrapper
 interface RenderCellProps {
@@ -55,6 +58,7 @@ interface RenderCellProps {
   dispatch: Dispatch<AppAction>;
   cellKey: string;
   cellProps: Record<string, unknown>;
+  rowData: DeployedServicesRow;
 }
 
 const renderCell = ({
@@ -64,13 +68,19 @@ const renderCell = ({
   dispatch,
   cellKey,
   cellProps,
+  rowData,
 }: RenderCellProps) => {
   const CellRenderer = CELL_RENDERERS[header as keyof typeof CELL_RENDERERS];
 
   return (
     <TableCell key={cellKey} {...cellProps}>
       {CellRenderer ? (
-        <CellRenderer value={value} rowId={rowId} dispatch={dispatch} />
+        <CellRenderer
+          value={value}
+          rowId={rowId}
+          dispatch={dispatch}
+          rowData={rowData}
+        />
       ) : (
         String(value || "")
       )}
@@ -78,95 +88,147 @@ const renderCell = ({
   );
 };
 
-const DeployedServicesTable = () => {
+interface DeployedServicesTableProps {
+  onDeploy?: () => void;
+  refreshTrigger?: number;
+  onRowClick?: (deployment: DeploymentDetails) => void;
+}
+
+const DeployedServicesTable = ({
+  onDeploy,
+  refreshTrigger,
+  onRowClick,
+}: DeployedServicesTableProps) => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
-  // Fetch deployed services data
-  const fetchDeployedServices = async () => {
-    dispatch({
-      type: ACTION_TYPES.DEPLOYED_SERVICES_SET_LOADING,
-      payload: true,
+  // Zustand store for deployed services caching
+  const {
+    deployedServices,
+    setDeployedServices,
+    setDeployedServicesLoading,
+    setDeployedServicesError,
+    isDeployedServicesStale,
+  } = useServiceDeployStore();
+
+  // Transform API response to table row format
+  const transformDeployedServices = (data: ApplicationApiResponse[]) => {
+    return data.map((app: ApplicationApiResponse) => {
+      // Calculate uptime from created_at
+      const uptime = calculateUptime(app.created_at);
+      return {
+        id: app.id,
+        name: app.name,
+        status: app.status,
+        uptime: uptime,
+        service: app.type || "",
+        messages: app.message || "",
+        actions: "actions",
+      };
     });
+  };
 
-    try {
-      const response = await api.get(
-        APPLICATION_ENDPOINTS.GET_DEPLOYED_SERVICES,
-      );
+  // Fetch deployed services data
+  const fetchDeployedServices = useCallback(
+    async (force = false) => {
+      // Skip if cache is fresh and not forcing refresh
+      if (!force && !isDeployedServicesStale()) {
+        const cachedServices = deployedServices;
+        if (cachedServices.length > 0) {
+          // Use cached data
+          dispatch({
+            type: ACTION_TYPES.DEPLOYED_SERVICES_SET_ROWS_DATA,
+            payload: transformDeployedServices(
+              cachedServices as ApplicationApiResponse[],
+            ),
+          });
+          // Reset loading state when using cached data
+          dispatch({
+            type: ACTION_TYPES.DEPLOYED_SERVICES_SET_LOADING,
+            payload: false,
+          });
+          setDeployedServicesLoading(false);
+          return;
+        }
+      }
 
-      // Transform API response to table row format
-      if (response.data?.data) {
-        const transformedRows = response.data.data.map(
-          (app: ApplicationApiResponse) => {
-            // Calculate uptime from created_at
-            const createdDate = new Date(app.created_at);
-            const now = new Date();
-            const diffTime = Math.abs(now.getTime() - createdDate.getTime());
-            const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+      setDeployedServicesLoading(true);
+      dispatch({
+        type: ACTION_TYPES.DEPLOYED_SERVICES_SET_LOADING,
+        payload: true,
+      });
 
-            let uptime: string;
-            if (diffDays === 0) {
-              uptime = "Today";
-            } else if (diffDays === 1) {
-              uptime = "1 day";
-            } else if (diffDays < 30) {
-              uptime = `${diffDays} days`;
-            } else {
-              uptime = createdDate.toLocaleDateString("en-US", {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-              });
-            }
-
-            // Get first service data
-            const firstService = app.services?.[0];
-            const serviceName = firstService?.type || "";
-
-            return {
-              id: app.id,
-              name: app.name,
-              status: app.status,
-              uptime: uptime,
-              service: serviceName,
-              messages: app.message || "",
-              actions: "actions",
-            };
-          },
+      try {
+        const response = await api.get(
+          APPLICATION_ENDPOINTS.GET_DEPLOYED_SERVICES,
         );
 
+        // Store raw data in Zustand
+        const rawData = response.data?.data || [];
+        setDeployedServices(rawData);
+
+        // Transform and set in local state for table
+        const transformedRows = transformDeployedServices(rawData);
         dispatch({
           type: ACTION_TYPES.DEPLOYED_SERVICES_SET_ROWS_DATA,
           payload: transformedRows,
         });
-      } else {
-        // No data returned
+
         dispatch({
-          type: ACTION_TYPES.DEPLOYED_SERVICES_SET_ROWS_DATA,
-          payload: [],
+          type: ACTION_TYPES.DEPLOYED_SERVICES_SET_LOADING,
+          payload: false,
+        });
+      } catch (error) {
+        console.error("Error fetching deployed services:", error);
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch deployed services";
+        setDeployedServicesError(errorMessage);
+        dispatch({
+          type: ACTION_TYPES.DEPLOYED_SERVICES_SET_FETCH_ERROR,
+          payload: errorMessage,
         });
       }
+    },
+    [
+      deployedServices,
+      isDeployedServicesStale,
+      setDeployedServices,
+      setDeployedServicesError,
+      setDeployedServicesLoading,
+    ],
+  );
 
-      dispatch({
-        type: ACTION_TYPES.DEPLOYED_SERVICES_SET_LOADING,
-        payload: false,
-      });
-    } catch (error) {
-      console.error("Error fetching deployed services:", error);
-      const errorMessage =
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch deployed services";
-      dispatch({
-        type: ACTION_TYPES.DEPLOYED_SERVICES_SET_FETCH_ERROR,
-        payload: errorMessage,
-      });
-    }
-  };
+  // Track if initial fetch has been done
+  const hasFetchedRef = useRef(false);
+  const prevRefreshTriggerRef = useRef(refreshTrigger);
 
-  // Fetch deployed services data on component mount
+  // Fetch deployed services data on component mount and when refreshTrigger changes
   useEffect(() => {
-    fetchDeployedServices();
-  }, []);
+    // On mount: use cache if fresh (force = false)
+    if (!hasFetchedRef.current) {
+      hasFetchedRef.current = true;
+      fetchDeployedServices(false);
+      return;
+    }
+
+    // On refreshTrigger change: force refresh to get latest data
+    if (refreshTrigger !== prevRefreshTriggerRef.current) {
+      prevRefreshTriggerRef.current = refreshTrigger;
+      fetchDeployedServices(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTrigger]);
+
+  // Auto-refresh every 2 minutes
+  useEffect(() => {
+    if (state.rowsData.length > 0) {
+      const intervalId = setInterval(() => {
+        fetchDeployedServices(true);
+      }, 120000);
+      return () => clearInterval(intervalId);
+    }
+  }, [state.rowsData.length, fetchDeployedServices]);
 
   // Auto-dismiss success toast after 5 seconds
   useEffect(() => {
@@ -432,7 +494,7 @@ const DeployedServicesTable = () => {
                             renderIcon={Renew}
                             iconDescription="Refresh"
                             size="lg"
-                            onClick={fetchDeployedServices}
+                            onClick={() => fetchDeployedServices(true)}
                           />
                           <OverflowMenu
                             renderIcon={Filter}
@@ -582,7 +644,12 @@ const DeployedServicesTable = () => {
                               </div>
                             </li>
                           </OverflowMenu>
-                          <Button kind="primary" size="lg" renderIcon={Deploy}>
+                          <Button
+                            kind="primary"
+                            size="lg"
+                            renderIcon={Deploy}
+                            onClick={onDeploy}
+                          >
                             Deploy
                           </Button>
                         </TableToolbarContent>
@@ -648,10 +715,40 @@ const DeployedServicesTable = () => {
                                 <TableRow
                                   {...rowProps}
                                   isExpanded={row.isExpanded}
+                                  onClick={(e) => {
+                                    // Don't trigger row click if clicking on interactive elements
+                                    const target = e.target as HTMLElement;
+                                    if (
+                                      target.closest("button") ||
+                                      target.closest('[role="button"]') ||
+                                      target.closest(".cds--overflow-menu")
+                                    ) {
+                                      return;
+                                    }
+
+                                    const rowData = paginatedRows.find(
+                                      (r) => r.id === row.id,
+                                    ) as DeployedServicesRow;
+                                    if (rowData && onRowClick) {
+                                      onRowClick({
+                                        id: rowData.id,
+                                        name: rowData.name,
+                                        status: rowData.status,
+                                        type: "Service",
+                                        resources: [],
+                                      });
+                                    }
+                                  }}
+                                  style={{ cursor: "pointer" }}
                                 >
                                   {row.cells.map((cell) => {
                                     const { key: cellKey, ...cellProps } =
                                       getCellProps({ cell });
+
+                                    // Find the full row data for this row
+                                    const rowData = paginatedRows.find(
+                                      (r) => r.id === row.id,
+                                    ) as DeployedServicesRow;
 
                                     return renderCell({
                                       header: cell.info.header,
@@ -660,6 +757,7 @@ const DeployedServicesTable = () => {
                                       dispatch,
                                       cellKey,
                                       cellProps,
+                                      rowData,
                                     });
                                   })}
                                 </TableRow>

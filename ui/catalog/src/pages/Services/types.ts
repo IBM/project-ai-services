@@ -1,61 +1,43 @@
-import type { ServiceDetailData } from "@/components";
+import type { DeploymentDetails } from "@/types/digitalAssistants";
 
-// Action types
-export const ACTION_TYPES = {
-  SERVICES_SET_SELECTED_SERVICE: "SERVICES_SET_SELECTED_SERVICE",
-  SERVICES_SET_PANEL_OPEN: "SERVICES_SET_PANEL_OPEN",
-  SERVICES_SET_SERVICES: "SERVICES_SET_SERVICES",
-  SERVICES_SET_LOADING: "SERVICES_SET_LOADING",
-  SERVICES_SET_ERROR: "SERVICES_SET_ERROR",
-  SERVICES_SET_MOCK_SERVICES: "SERVICES_SET_MOCK_SERVICES",
-  SERVICES_SET_HAS_FETCHED_SERVICES: "SERVICES_SET_HAS_FETCHED_SERVICES",
-  SERVICES_CLOSE_PANEL: "SERVICES_CLOSE_PANEL",
-} as const;
-
-// State interface
+// State type
 export interface ServicesState {
-  selectedService: ServiceDetailData | null;
+  selectedTabIndex: number;
+  selectedServiceId: string | null;
   isPanelOpen: boolean;
-  services: ServiceDetailData[];
-  loading: boolean;
-  error: string | null;
-  mockServices: ServiceDetailData[];
-  hasFetchedServices: boolean;
+  isDeployFlowOpen: boolean;
+  deployServiceId: string | null;
+  tableRefreshTrigger: number;
+  // DeploymentDetails state
+  selectedDeployment: DeploymentDetails | null;
+  showDeploymentDetails: boolean;
 }
-
-// Initial state
-export const INITIAL_STATE: ServicesState = {
-  selectedService: null,
-  isPanelOpen: false,
-  services: [],
-  loading: false,
-  error: null,
-  mockServices: [],
-  hasFetchedServices: false,
-};
 
 // Action types
 export type ServicesAction =
-  | {
-      type: typeof ACTION_TYPES.SERVICES_SET_SELECTED_SERVICE;
-      payload: ServiceDetailData | null;
-    }
-  | { type: typeof ACTION_TYPES.SERVICES_SET_PANEL_OPEN; payload: boolean }
-  | {
-      type: typeof ACTION_TYPES.SERVICES_SET_SERVICES;
-      payload: ServiceDetailData[];
-    }
-  | { type: typeof ACTION_TYPES.SERVICES_SET_LOADING; payload: boolean }
-  | { type: typeof ACTION_TYPES.SERVICES_SET_ERROR; payload: string | null }
-  | {
-      type: typeof ACTION_TYPES.SERVICES_SET_MOCK_SERVICES;
-      payload: ServiceDetailData[];
-    }
-  | {
-      type: typeof ACTION_TYPES.SERVICES_SET_HAS_FETCHED_SERVICES;
-      payload: boolean;
-    }
-  | { type: typeof ACTION_TYPES.SERVICES_CLOSE_PANEL };
+  | { type: "SET_SELECTED_TAB"; payload: number }
+  | { type: "OPEN_PANEL"; payload: string }
+  | { type: "CLOSE_PANEL" }
+  | { type: "OPEN_DEPLOY_FLOW"; payload: string | null }
+  | { type: "CLOSE_DEPLOY_FLOW" }
+  | { type: "CLEAR_DEPLOY_SERVICE_ID" }
+  | { type: "DEPLOY_SUBMIT" }
+  | { type: "CLEAR_SELECTED_SERVICE_ID" }
+  | { type: "SHOW_DEPLOYMENT_DETAILS"; payload: DeploymentDetails }
+  | { type: "HIDE_DEPLOYMENT_DETAILS" };
+
+// Initial state
+export const initialState: ServicesState = {
+  selectedTabIndex: 0,
+  selectedServiceId: null,
+  isPanelOpen: false,
+  isDeployFlowOpen: false,
+  deployServiceId: null,
+  tableRefreshTrigger: 0,
+  // DeploymentDetails state
+  selectedDeployment: null,
+  showDeploymentDetails: false,
+};
 
 // Reducer function
 export const servicesReducer = (
@@ -63,33 +45,43 @@ export const servicesReducer = (
   action: ServicesAction,
 ): ServicesState => {
   switch (action.type) {
-    case ACTION_TYPES.SERVICES_SET_SELECTED_SERVICE:
-      return { ...state, selectedService: action.payload };
-
-    case ACTION_TYPES.SERVICES_SET_PANEL_OPEN:
-      return { ...state, isPanelOpen: action.payload };
-
-    case ACTION_TYPES.SERVICES_SET_SERVICES:
-      return { ...state, services: action.payload };
-
-    case ACTION_TYPES.SERVICES_SET_LOADING:
-      return { ...state, loading: action.payload };
-
-    case ACTION_TYPES.SERVICES_SET_ERROR:
-      return { ...state, error: action.payload };
-
-    case ACTION_TYPES.SERVICES_SET_MOCK_SERVICES:
-      return { ...state, mockServices: action.payload };
-
-    case ACTION_TYPES.SERVICES_SET_HAS_FETCHED_SERVICES:
-      return { ...state, hasFetchedServices: action.payload };
-
-    case ACTION_TYPES.SERVICES_CLOSE_PANEL:
+    case "SET_SELECTED_TAB":
+      return { ...state, selectedTabIndex: action.payload };
+    case "OPEN_PANEL":
+      return { ...state, selectedServiceId: action.payload, isPanelOpen: true };
+    case "CLOSE_PANEL":
       return { ...state, isPanelOpen: false };
-
+    case "OPEN_DEPLOY_FLOW":
+      return {
+        ...state,
+        deployServiceId: action.payload,
+        isDeployFlowOpen: true,
+      };
+    case "CLOSE_DEPLOY_FLOW":
+      return { ...state, isDeployFlowOpen: false };
+    case "CLEAR_DEPLOY_SERVICE_ID":
+      return { ...state, deployServiceId: null };
+    case "DEPLOY_SUBMIT":
+      return {
+        ...state,
+        tableRefreshTrigger: state.tableRefreshTrigger + 1,
+        selectedTabIndex: 0,
+      };
+    case "CLEAR_SELECTED_SERVICE_ID":
+      return { ...state, selectedServiceId: null };
+    case "SHOW_DEPLOYMENT_DETAILS":
+      return {
+        ...state,
+        selectedDeployment: action.payload,
+        showDeploymentDetails: true,
+      };
+    case "HIDE_DEPLOYMENT_DETAILS":
+      return {
+        ...state,
+        selectedDeployment: null,
+        showDeploymentDetails: false,
+      };
     default:
       return state;
   }
 };
-
-// Made with Bob

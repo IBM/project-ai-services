@@ -2,7 +2,6 @@ import json
 import time
 import logging
 import os
-import re
 import shutil
 import random
 
@@ -10,7 +9,6 @@ import random
 os.environ['GRPC_VERBOSITY'] = 'ERROR'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-from tqdm import tqdm
 from pathlib import Path
 from docling_core.types.doc.document import DoclingDocument
 from concurrent.futures import as_completed, ProcessPoolExecutor
@@ -22,12 +20,13 @@ logging.getLogger('docling').setLevel(logging.CRITICAL)
 
 # Import project modules after setting log levels
 from common.thread_utils import ContextAwareThreadPoolExecutor
-from common.llm_utils import summarize_and_classify_tables, tokenize_with_llm
+from common.llm_utils import summarize_and_classify_tables, tokenize_with_llm, tqdm_wrapper
 from common.misc_utils import get_logger, text_suffix, table_suffix, text_chunk_suffix, table_chunk_suffix, get_utc_timestamp
 from common.lang_utils import detect_language, get_prompt_for_language, to_sentence_splitter_lang, LanguageCodes
-from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_pdf_page_count, convert_doc
-from digitize.docx_utils import get_docx_toc, estimate_docx_page_count
-from digitize.models import DocStatus, JobStatus, OutputFormat
+from digitize.pdf_utils import get_toc, get_matching_header_lvl, load_pdf_pages, find_text_font_size, get_document_page_count
+from digitize.docx_utils import get_docx_toc, estimate_docx_page_count, recover_table_caption_from_body_context
+from digitize.docling_utils import convert_document
+from digitize.models import DocStatus, JobStatus
 from digitize.settings import settings
 from digitize.db_operations import get_status_manager
 
@@ -35,289 +34,16 @@ logger = get_logger("doc_utils")
 
 # Load configuration from settings modules
 WORKER_SIZE = settings.digitize.doc_worker_size
-HEAVY_PDF_CONVERT_WORKER_SIZE = settings.digitize.heavy_pdf_convert_worker_size
-HEAVY_PDF_PAGE_THRESHOLD = settings.digitize.heavy_pdf_page_threshold
+HEAVY_DOC_CONVERT_WORKER_SIZE = settings.digitize.heavy_doc_convert_worker_size
+HEAVY_DOC_PAGE_THRESHOLD = settings.digitize.heavy_doc_page_threshold
 POOL_SIZE = settings.common.llm.max_batch_size
 
 is_debug = logger.isEnabledFor(logging.DEBUG)
 
-TABLE_CAPTION_PATTERN = re.compile(
-    r"^\s*table\s+\d+(?:[.-]\d+)*\s*[:.-]?\s+.+$",
-    re.IGNORECASE
-)
-
-
-def _parse_ref_index(ref: str, prefix: str) -> int | None:
-    """
-    Parse a Docling ref like '#/texts/616' or '#/tables/2' into its integer index.
-    """
-    try:
-        expected_prefix = f"#/{prefix}/"
-        if not isinstance(ref, str) or not ref.startswith(expected_prefix):
-            logger.debug(f"_parse_ref_index: ref '{ref}' does not match expected prefix '{expected_prefix}'")
-            return None
-        parsed_idx = int(ref[len(expected_prefix):])
-        logger.debug(f"_parse_ref_index: parsed ref '{ref}' with prefix '{prefix}' to index {parsed_idx}")
-        return parsed_idx
-    except Exception as e:
-        logger.debug(f"_parse_ref_index: failed to parse ref '{ref}' with prefix '{prefix}': {e}")
-        return None
-
-
-def _get_body_children_refs(converted_doc) -> list[str]:
-    """
-    Return top-level body child refs in document order.
-    """
-    try:
-        children = getattr(converted_doc.body, "children", []) or []
-        refs = []
-        logger.debug(f"_get_body_children_refs: found {len(children)} top-level body children")
-        for idx, child in enumerate(children):
-            if isinstance(child, dict) and "$ref" in child:
-                refs.append(child["$ref"])
-            else:
-                child_ref = (
-                    getattr(child, "ref", None)
-                    or getattr(child, "$ref", None)
-                    or getattr(child, "cref", None)
-                    or getattr(child, "self_ref", None)
-                )
-                if not child_ref and hasattr(child, "__dict__"):
-                    logger.debug(
-                        f"_get_body_children_refs: child[{idx}] available attrs={list(vars(child).keys())}, type={type(child)}"
-                    )
-                if child_ref:
-                    refs.append(child_ref)
-        logger.debug(f"_get_body_children_refs: extracted {len(refs)} refs")
-        return refs
-    except Exception as e:
-        logger.debug(f"_get_body_children_refs: failed to extract body children refs: {e}", exc_info=True)
-        return []
-
-
-def _get_text_value_by_ref(converted_doc, ref: str) -> str:
-    """
-    Resolve a '#/texts/<n>' ref to its text content.
-    """
-    idx = _parse_ref_index(ref, "texts")
-    if idx is None:
-        logger.debug(f"_get_text_value_by_ref: could not parse text ref '{ref}'")
-        return ""
-
-    try:
-        text_obj = converted_doc.texts[idx]
-        text = getattr(text_obj, "text", None)
-        if text:
-            resolved_text = str(text).strip()
-            logger.debug(f"_get_text_value_by_ref: resolved '{ref}' from text field -> '{resolved_text}'")
-            return resolved_text
-
-        orig = getattr(text_obj, "orig", None)
-        if orig:
-            resolved_orig = str(orig).strip()
-            logger.debug(f"_get_text_value_by_ref: resolved '{ref}' from orig field -> '{resolved_orig}'")
-            return resolved_orig
-
-        logger.debug(f"_get_text_value_by_ref: ref '{ref}' resolved to empty text/orig")
-    except Exception as e:
-        logger.debug(f"_get_text_value_by_ref: failed to resolve ref '{ref}': {e}", exc_info=True)
-
-    return ""
-
-
-def _looks_like_table_caption(text: str) -> bool:
-    """
-    Heuristic check for real table captions such as:
-    'Table 1-1 VIOS release schedule'
-    """
-    if not text:
-        logger.debug("_looks_like_table_caption: empty text -> False")
-        return False
-    text_stripped = text.strip()
-    is_match = bool(TABLE_CAPTION_PATTERN.match(text_stripped))
-    logger.debug(f"_looks_like_table_caption: text='{text_stripped}' match={is_match}")
-    return is_match
-
-
-def _get_ref_value(ref_obj) -> str | None:
-    """
-    Extract a Docling ref string from dict-like or object-like refs.
-    """
-    if isinstance(ref_obj, dict):
-        return ref_obj.get("$ref")
-    return (
-        getattr(ref_obj, "ref", None)
-        or getattr(ref_obj, "$ref", None)
-        or getattr(ref_obj, "cref", None)
-        or getattr(ref_obj, "self_ref", None)
-    )
-
-
-def _get_doc_item_by_ref(converted_doc, ref: str):
-    """
-    Resolve a Docling ref to the underlying object when possible.
-    """
-    for prefix in ("texts", "tables", "groups", "pictures"):
-        idx = _parse_ref_index(ref, prefix)
-        if idx is None:
-            continue
-        try:
-            collection = getattr(converted_doc, prefix, None)
-            if collection is not None:
-                return collection[idx]
-        except Exception as e:
-            logger.debug(f"_get_doc_item_by_ref: failed to resolve '{ref}' in '{prefix}': {e}", exc_info=True)
-            return None
-    logger.debug(f"_get_doc_item_by_ref: unsupported or unresolved ref '{ref}'")
-    return None
-
-
-def _get_parent_ref_for_table(converted_doc, table_ix: int) -> str:
-    """
-    Resolve the parent ref for a table, if any.
-    """
-    try:
-        table_obj = converted_doc.tables[table_ix]
-        parent = getattr(table_obj, "parent", None)
-        parent_ref = _get_ref_value(parent) if parent is not None else None
-        logger.debug(f"_get_parent_ref_for_table: table_ix={table_ix}, parent_ref={parent_ref}")
-        return parent_ref or ""
-    except Exception as e:
-        logger.debug(f"_get_parent_ref_for_table: failed for table_ix={table_ix}: {e}", exc_info=True)
-        return ""
-
-
-def _get_child_refs(item) -> list[str]:
-    """
-    Return child refs for a Docling item in document order.
-    """
-    try:
-        children = getattr(item, "children", []) or []
-        refs = []
-        for child in children:
-            child_ref = _get_ref_value(child)
-            if child_ref:
-                refs.append(child_ref)
-        return refs
-    except Exception as e:
-        logger.debug(f"_get_child_refs: failed to extract child refs: {e}", exc_info=True)
-        return []
-
-
-def _find_matching_caption_near_refs(converted_doc, ordered_refs: list[str], target_ref: str, search_window: int) -> str:
-    """
-    Look for a caption-like text node near the target ref inside an ordered ref list.
-    """
-    if not ordered_refs:
-        logger.debug("_find_matching_caption_near_refs: ordered_refs empty")
-        return ""
-
-    try:
-        target_pos = ordered_refs.index(target_ref)
-        logger.debug(f"_find_matching_caption_near_refs: found {target_ref} at pos={target_pos}")
-    except ValueError:
-        logger.debug(f"_find_matching_caption_near_refs: target_ref {target_ref} not found in ordered refs")
-        return ""
-
-    candidate_positions = list(range(max(0, target_pos - search_window), target_pos))
-    candidate_positions.reverse()
-    candidate_positions.extend(range(target_pos + 1, min(len(ordered_refs), target_pos + 1 + search_window)))
-
-    candidate_refs = [(pos, ordered_refs[pos]) for pos in candidate_positions]
-    logger.debug(f"_find_matching_caption_near_refs: candidate positions/refs={candidate_refs}")
-
-    for pos in candidate_positions:
-        ref = ordered_refs[pos]
-
-        if not ref.startswith("#/texts/"):
-            logger.debug(f"_find_matching_caption_near_refs: skipping non-text ref {ref}")
-            continue
-
-        text = _get_text_value_by_ref(converted_doc, ref)
-        logger.debug(f"_find_matching_caption_near_refs: resolved ref {ref} to text='{text}'")
-
-        if _looks_like_table_caption(text):
-            logger.debug(f"_find_matching_caption_near_refs: matched caption '{text}' near {target_ref}")
-            return text
-
-    logger.debug(f"_find_matching_caption_near_refs: no caption match found near {target_ref}")
-    return ""
-
-
-def _get_enclosing_section_header_for_table(converted_doc, table_ix: int) -> str:
-    """
-    Secondary fallback for DOCX-like structures where a table is nested under
-    a section/container node but has no explicit caption paragraph.
-    """
-    parent_ref = _get_parent_ref_for_table(converted_doc, table_ix)
-    if not parent_ref:
-        logger.debug(f"_get_enclosing_section_header_for_table: no parent ref for table_ix={table_ix}")
-        return ""
-
-    parent_item = _get_doc_item_by_ref(converted_doc, parent_ref)
-    if parent_item is None:
-        logger.debug(f"_get_enclosing_section_header_for_table: could not resolve parent item for {parent_ref}")
-        return ""
-
-    label = getattr(parent_item, "label", None)
-    text = (getattr(parent_item, "text", None) or getattr(parent_item, "orig", None) or "").strip()
-    logger.debug(
-        f"_get_enclosing_section_header_for_table: table_ix={table_ix}, parent_ref={parent_ref}, "
-        f"label={label}, text='{text}'"
-    )
-
-    if label == "section_header" and text:
-        return text
-
-    return ""
-
-
-def recover_table_caption_from_body_context(converted_doc, table_ix: int, search_window: int = 3) -> str:
-    """
-    Recover a table caption using layered fallbacks:
-    1. nearby caption paragraph in top-level body order
-    2. nearby caption paragraph within the enclosing parent/container children
-    3. enclosing section header text as semantic fallback
-    """
-    target_ref = f"#/tables/{table_ix}"
-    logger.debug(f"recover_table_caption_from_body_context: looking for caption near {target_ref} with search_window={search_window}")
-
-    body_refs = _get_body_children_refs(converted_doc)
-    caption = _find_matching_caption_near_refs(converted_doc, body_refs, target_ref, search_window)
-    if caption:
-        logger.debug(f"recover_table_caption_from_body_context: using body-level caption '{caption}' for {target_ref}")
-        return caption
-
-    parent_ref = _get_parent_ref_for_table(converted_doc, table_ix)
-    if parent_ref:
-        parent_item = _get_doc_item_by_ref(converted_doc, parent_ref)
-        if parent_item is not None:
-            parent_child_refs = _get_child_refs(parent_item)
-            caption = _find_matching_caption_near_refs(converted_doc, parent_child_refs, target_ref, search_window)
-            if caption:
-                logger.debug(
-                    f"recover_table_caption_from_body_context: using parent-level nearby caption '{caption}' "
-                    f"for {target_ref} within parent {parent_ref}"
-                )
-                return caption
-
-    section_header = _get_enclosing_section_header_for_table(converted_doc, table_ix)
-    if section_header:
-        logger.debug(
-            f"recover_table_caption_from_body_context: using enclosing section header '{section_header}' "
-            f"as secondary fallback for {target_ref}"
-        )
-        return section_header
-
-    logger.debug(f"recover_table_caption_from_body_context: no caption match found for {target_ref}")
-    return ""
-tqdm_wrapper = tqdm if is_debug else (lambda x, **kwargs: x)
 
 excluded_labels = {
     'page_header', 'page_footer', 'caption', 'reference', 'footnote'
 }
-
-
 def process_text_docx(converted_doc, docx_path, out_path):
     """
     Process text content from DOCX files.
@@ -393,7 +119,8 @@ def process_text_docx(converted_doc, docx_path, out_path):
     return page_count, process_time
 
 
-def process_text(converted_doc, pdf_path, out_path):
+
+def process_text(converted_doc, doc_path, out_path):
     page_count = 0
     process_time = 0.0
 
@@ -402,25 +129,25 @@ def process_text(converted_doc, pdf_path, out_path):
     
     toc_headers = None
     try:
-        toc_headers, page_count = get_toc(pdf_path)
+        toc_headers, page_count = get_toc(doc_path)
     except Exception as e:
         logger.debug(f"No TOC found or failed to load TOC: {e}")
 
     # Load pdf pages one time when TOC headers not found for retrieving the font size of header texts
     pdf_pages = None
     if not toc_headers:
-        pdf_pages = load_pdf_pages(pdf_path)
+        pdf_pages = load_pdf_pages(doc_path)
         page_count = len(pdf_pages)
 
     # --- Text Extraction ---
     if not converted_doc.texts:
-        logger.debug(f"No text content found in '{pdf_path}'")
+        logger.debug(f"No text content found in '{doc_path}'")
         out_path.write_text(json.dumps([], indent=2), encoding="utf-8")
         return page_count, process_time
 
     structured_output = []
     last_header_level = 0
-    for text_obj in tqdm_wrapper(converted_doc.texts, desc=f"Processing text content of '{pdf_path}'"):
+    for text_obj in tqdm_wrapper(converted_doc.texts, desc=f"Processing text content of '{doc_path}'"):
         label = text_obj.label
         if label in excluded_labels:
             continue
@@ -660,24 +387,24 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
 
     return merged_dict
 
-def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH):
+def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH):
     table_count = 0
     process_time = 0.0
     filtered_table_dicts = {}
     t0 = time.time()
     # --- Table Extraction ---
     if not converted_doc.tables:
-        logger.debug(f"No tables found in '{pdf_path}'")
+        logger.debug(f"No tables found in '{doc_path}'")
         out_path.write_text(json.dumps({}, indent=2), encoding="utf-8")
         return table_count, process_time
 
     # Determine if this is a DOCX file
     from pathlib import Path
-    file_ext = Path(pdf_path).suffix.lower()
+    file_ext = Path(doc_path).suffix.lower()
     is_docx = file_ext == '.docx'
     
     table_dict = {}
-    for table_ix, table in enumerate(tqdm_wrapper(converted_doc.tables, desc=f"Processing table content of '{pdf_path}'")):
+    for table_ix, table in enumerate(tqdm_wrapper(converted_doc.tables, desc=f"Processing table content of '{doc_path}'")):
         table_dict[table_ix] = {}
         # Use Markdown format for better LLM understanding
         table_dict[table_ix]["markdown"] = table.export_to_markdown(doc=converted_doc)
@@ -701,7 +428,7 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint, do
             table_dict[table_ix]["page_number"] = None
 
     # Merge tables that span multiple consecutive pages with matching headers
-    logger.debug(f"Merging tables spanning multiple pages for '{pdf_path}'")
+    logger.debug(f"Merging tables spanning multiple pages for '{doc_path}'")
     merged_table_dict = merge_consecutive_tables(table_dict)
 
     table_markdowns = [merged_table_dict[key]["markdown"] for key in sorted(merged_table_dict)]
@@ -735,7 +462,7 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint, do
 
     # Summarize and classify tables - use markdown directly
     table_summaries, decisions = summarize_and_classify_tables(
-        table_markdowns, gen_model, gen_endpoint, pdf_path,
+        table_markdowns, gen_model, gen_endpoint, doc_path,
         prompt_template=selected_prompt,
         max_tokens=selected_max_tokens,
     )
@@ -754,7 +481,7 @@ def process_table(converted_doc, pdf_path, out_path, gen_model, gen_endpoint, do
 
     return table_count, process_time
 
-def process_converted_document(converted_json_path, pdf_path, out_path, gen_model, gen_endpoint, emb_endpoint, max_tokens, doc_id):
+def process_converted_document(converted_json_path, doc_path, out_path, gen_model, gen_endpoint, emb_endpoint, max_tokens, doc_id):
     """
     Process converted document to extract text and tables.
     No caching - always process fresh.
@@ -777,11 +504,11 @@ def process_converted_document(converted_json_path, pdf_path, out_path, gen_mode
             raise Exception(f"failed to load converted json into Docling Document")
 
         # Check file type and route to appropriate processing function
-        file_ext = Path(pdf_path).suffix.lower()
+        file_ext = Path(doc_path).suffix.lower()
         if file_ext == '.docx':
-            page_count, process_time = process_text_docx(converted_doc, pdf_path, processed_text_json_path)
+            page_count, process_time = process_text_docx(converted_doc, doc_path, processed_text_json_path)
         else:
-            page_count, process_time = process_text(converted_doc, pdf_path, processed_text_json_path)
+            page_count, process_time = process_text(converted_doc, doc_path, processed_text_json_path)
         timings["process_text"] = process_time
 
         # Detect document language early using the processed text
@@ -794,36 +521,14 @@ def process_converted_document(converted_json_path, pdf_path, out_path, gen_mode
         except Exception as e:
             logger.warning(f"Failed to detect document language, using default {LanguageCodes.ENGLISH}: {e}")
 
-        table_count, process_time = process_table(converted_doc, pdf_path, processed_table_json_path, gen_model, gen_endpoint, document_language)
+        table_count, process_time = process_table(converted_doc, doc_path, processed_table_json_path, gen_model, gen_endpoint, document_language)
         timings["process_tables"] = process_time
 
         return processed_text_json_path, processed_table_json_path, page_count, table_count, timings, document_language
     except Exception as e:
-        logger.error(f"Error processing converted document for PDF: {pdf_path}. Details: {e}", exc_info=True)
+        logger.error(f"Error processing converted document: {doc_path}. Details: {e}", exc_info=True)
 
         return None, None, None, None, None, None
-
-def convert_document(pdf_path, out_path, file_name):
-    """
-    Convert a single document to JSON format.
-    This function runs in a separate process via ProcessPoolExecutor.
-    """
-    try:
-        logger.info(f"Processing '{pdf_path}'")
-        converted_json = (Path(out_path) / f"{file_name}.json")
-        converted_json_f = str(converted_json)
-        logger.debug(f"Converting '{pdf_path}'")
-        t0 = time.time()
-
-        converted_doc: DoclingDocument = convert_doc(pdf_path, cache_dir=out_path / file_name)
-        converted_doc.save_as_json(str(converted_json_f))
-
-        conversion_time = time.time() - t0
-        logger.debug(f"'{pdf_path}' converted")
-        return converted_json_f, conversion_time
-    except Exception as e:
-        logger.error(f"Error converting '{pdf_path}': {e}")
-    return None, None
 
 def clean_intermediate_files(doc_id, out_path):
     # Remove intermediate files but keep <doc_id>.json
@@ -858,8 +563,8 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
     # Partition files into light and heavy based on page count
     light_files, heavy_files = [], []
     for path in input_paths:
-        pg_count = get_pdf_page_count(path)
-        if pg_count >= HEAVY_PDF_PAGE_THRESHOLD:
+        pg_count = get_document_page_count(path)
+        if pg_count >= HEAVY_DOC_PAGE_THRESHOLD:
             heavy_files.append(path)
         else:
             light_files.append(path)
@@ -1066,7 +771,7 @@ def process_documents(input_paths, out_path, llm_model, llm_endpoint, emb_endpoi
 
         # Process Heavy Batch
         h_worker = min(WORKER_SIZE, len(heavy_files)) if heavy_files else 0
-        h_conv_worker = min(HEAVY_PDF_CONVERT_WORKER_SIZE, len(heavy_files)) if heavy_files else 0
+        h_conv_worker = min(HEAVY_DOC_CONVERT_WORKER_SIZE, len(heavy_files)) if heavy_files else 0
         h_stats = _run_batch(
             heavy_files, convert_worker=h_conv_worker, max_worker=h_worker, doc_id_dict=doc_id_dict,
             indexing_callback=indexing_callback
@@ -1596,31 +1301,3 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
 
     return combined_docs
 
-def convert_document_format(pdf_path: str, out_path: Path, doc_id: str, output_format: OutputFormat):
-    logger.info(f"Processing '{pdf_path}'")
-
-    out_dir = Path(out_path)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    t0 = time.time()
-
-    # Convert PDF → DoclingDocument
-    doc_obj = convert_doc(pdf_path, cache_dir=out_path / doc_id)
-
-    conversion_time = time.time() - t0
-
-    # Save requested format
-    if output_format == OutputFormat.JSON:
-        out_file = out_dir / f"{doc_id}.json"
-        doc_obj.save_as_json(str(out_file))
-
-    elif output_format == OutputFormat.MD:
-        out_file = out_dir / f"{doc_id}.md"
-        out_file.write_text(doc_obj.export_to_markdown(), encoding="utf-8")
-
-    elif output_format == OutputFormat.TEXT:
-        out_file = out_dir / f"{doc_id}.txt"
-        out_file.write_text(doc_obj.export_to_text(), encoding="utf-8")
-
-    logger.debug(f"Saved converted file to '{out_file}'")
-    return str(out_file), conversion_time
