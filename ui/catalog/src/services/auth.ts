@@ -2,7 +2,6 @@ import { api } from "@/api/axios";
 import { AUTH_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import { useAuthStore } from "@/store/auth.store";
 import { useDeployStore } from "@/store/deploy.store";
-import { useServiceDeployStore } from "@/store/serviceDeploy.store";
 import { fetchArchitectures } from "@/api/digitalAssistants";
 import type { LoginRequest, LoginResponse, UserInfo } from "@/types/auth";
 
