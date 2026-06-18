@@ -23,7 +23,7 @@ export const SERVICE_ENDPOINTS = {
 };
 
 export const APPLICATION_ENDPOINTS = {
-  GET_APPLICATIONS: "/applications",
+  GET_APPLICATIONS: "/applications/",
   GET_DEPLOYED_SERVICES: "/applications?deployment_type=services",
   DELETE_APPLICATION: (id: string) => `/applications/${id}`,
   GET_APPLICATION_DETAILS: (id: string) => `/applications/${id}`,

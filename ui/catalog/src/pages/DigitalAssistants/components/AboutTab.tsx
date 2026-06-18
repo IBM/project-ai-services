@@ -32,29 +32,33 @@ export const AboutTab: React.FC<AboutTabProps> = ({ onDeployClick }) => {
   const setArchitectureDetailsError = useDeployStore(
     (state) => state.setArchitectureDetailsError,
   );
+  const isArchitectureDetailsStale = useDeployStore(
+    (state) => state.isArchitectureDetailsStale,
+  );
 
   useEffect(() => {
     const loadArchitectureDetails = async () => {
       if (!selectedArchitectureId) return;
 
-      // If we already have data for this architecture, don't fetch again
-      if (
+      // Check if we have data for this architecture and if it's stale
+      const hasCorrectData =
         architectureDetails &&
-        architectureDetails.id === selectedArchitectureId
-      ) {
-        return;
-      }
+        architectureDetails.id === selectedArchitectureId;
+      const isStale = isArchitectureDetailsStale();
 
-      setArchitectureDetailsLoading(true);
-      try {
-        const data = await fetchArchitectureDetails(selectedArchitectureId);
-        setArchitectureDetails(data);
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error
-            ? error.message
-            : "Failed to load architecture details";
-        setArchitectureDetailsError(errorMessage);
+      // Fetch if we don't have data for this architecture or if cache is stale (older than 15 minutes)
+      if (!hasCorrectData || isStale) {
+        setArchitectureDetailsLoading(true);
+        try {
+          const data = await fetchArchitectureDetails(selectedArchitectureId);
+          setArchitectureDetails(data);
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error
+              ? error.message
+              : "Failed to load architecture details";
+          setArchitectureDetailsError(errorMessage);
+        }
       }
     };
 
@@ -62,6 +66,7 @@ export const AboutTab: React.FC<AboutTabProps> = ({ onDeployClick }) => {
   }, [
     selectedArchitectureId,
     architectureDetails,
+    isArchitectureDetailsStale,
     setArchitectureDetails,
     setArchitectureDetailsLoading,
     setArchitectureDetailsError,

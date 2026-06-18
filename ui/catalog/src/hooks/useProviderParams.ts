@@ -10,8 +10,8 @@ interface UseProviderParamsResult {
 
 /**
  * Hook to fetch and cache provider parameters
- * Uses Zustand store to cache data (no time-based expiration)
- * Provider params are static configuration data that only change when provider definitions are updated
+ * Uses Zustand store with 15-minute cache expiration
+ * Provider params can change when provider definitions are updated
  */
 export function useProviderParams(
   componentType: string,
@@ -21,14 +21,25 @@ export function useProviderParams(
   const [error, setError] = useState<string | null>(null);
   const hasFetched = useRef(false);
 
-  const { getProviderParams, setProviderParams } = useDeployStore();
+  const { getProviderParams, setProviderParams, isProviderParamsStale } =
+    useDeployStore();
 
   const params = getProviderParams(componentType, providerId);
+  const isStale = isProviderParamsStale(componentType, providerId);
 
   useEffect(() => {
-    // Only fetch if we don't have data and we haven't already started fetching
-    // No time-based expiration - provider params are static configuration data
-    if (params || hasFetched.current) {
+    // Fetch if we don't have data or if cache is stale, and we haven't already started fetching
+    if ((!params && !isStale) || hasFetched.current) {
+      return;
+    }
+
+    // Only fetch if stale or missing
+    if (!params || isStale) {
+      // Skip if already fetching
+      if (hasFetched.current) {
+        return;
+      }
+    } else {
       return;
     }
 
@@ -57,15 +68,15 @@ export function useProviderParams(
     };
 
     fetchParams();
-  }, [componentType, providerId, params, setProviderParams]);
+  }, [componentType, providerId, params, isStale, setProviderParams]);
 
   return { params, isLoading, error };
 }
 
 /**
  * Hook to fetch provider params for multiple providers at once
- * Uses Zustand store to cache data (no time-based expiration)
- * Provider params are static configuration data that only change when provider definitions are updated
+ * Uses Zustand store with 15-minute cache expiration
+ * Provider params can change when provider definitions are updated
  */
 export function useBatchProviderParams(
   componentType: string,
@@ -79,7 +90,8 @@ export function useBatchProviderParams(
   const [errors, setErrors] = useState<Record<string, string>>({});
   const hasFetched = useRef(false);
 
-  const { getProviderParams, setProviderParams } = useDeployStore();
+  const { getProviderParams, setProviderParams, isProviderParamsStale } =
+    useDeployStore();
 
   // Build params map from cache
   const paramsMap: Record<string, Record<string, unknown>> = {};
@@ -95,11 +107,9 @@ export function useBatchProviderParams(
       return;
     }
 
-    // Find providers that need fetching (not cached)
-    // No time-based expiration - provider params are static configuration data
+    // Find providers that need fetching (not cached or stale)
     const providersToFetch = providerIds.filter((providerId) => {
-      const cached = getProviderParams(componentType, providerId);
-      return !cached;
+      return isProviderParamsStale(componentType, providerId);
     });
 
     if (providersToFetch.length === 0) {
@@ -143,7 +153,13 @@ export function useBatchProviderParams(
     };
 
     fetchAllParams();
-  }, [componentType, providerIds, getProviderParams, setProviderParams]);
+  }, [
+    componentType,
+    providerIds,
+    getProviderParams,
+    setProviderParams,
+    isProviderParamsStale,
+  ]);
 
   return { paramsMap, isLoading, errors };
 }
@@ -151,8 +167,8 @@ export function useBatchProviderParams(
 /**
  * Hook to fetch provider params for multiple component types at once
  * This is the truly dynamic solution that respects Rules of Hooks
- * Uses Zustand store to cache data (no time-based expiration)
- * Provider params are static configuration data that only change when provider definitions are updated
+ * Uses Zustand store with 15-minute cache expiration
+ * Provider params can change when provider definitions are updated
  */
 export function useMultiTypeProviderParams(
   componentTypesWithIds: Record<string, string[]>,
@@ -167,7 +183,8 @@ export function useMultiTypeProviderParams(
   >({});
   const hasFetched = useRef(false);
 
-  const { getProviderParams, setProviderParams } = useDeployStore();
+  const { getProviderParams, setProviderParams, isProviderParamsStale } =
+    useDeployStore();
 
   // Build params map from cache for all component types
   const paramsByType: Record<
@@ -191,7 +208,7 @@ export function useMultiTypeProviderParams(
       return;
     }
 
-    // Find all providers that need fetching (not cached) across all component types
+    // Find all providers that need fetching (not cached or stale) across all component types
     const providersToFetch: Array<{
       componentType: string;
       providerId: string;
@@ -201,8 +218,7 @@ export function useMultiTypeProviderParams(
       componentTypesWithIds,
     )) {
       for (const providerId of providerIds) {
-        const cached = getProviderParams(componentType, providerId);
-        if (!cached) {
+        if (isProviderParamsStale(componentType, providerId)) {
           providersToFetch.push({ componentType, providerId });
         }
       }
@@ -256,7 +272,12 @@ export function useMultiTypeProviderParams(
     };
 
     fetchAllParams();
-  }, [componentTypesWithIds, getProviderParams, setProviderParams]);
+  }, [
+    componentTypesWithIds,
+    getProviderParams,
+    setProviderParams,
+    isProviderParamsStale,
+  ]);
 
   return { paramsByType, isLoading, errorsByType };
 }
