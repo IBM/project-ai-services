@@ -19,7 +19,7 @@ const Logout = () => {
       <div className={styles.pageContent}>
         <h1 className={styles.heading}>
           <span>
-            IBM <strong>AI Foundation for Power</strong>
+            <strong>AI Services</strong>
           </span>
           <span>You are now logged out.</span>
         </h1>

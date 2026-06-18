@@ -110,7 +110,7 @@ const AppHeader = (props: AppHeaderProps) => {
   return (
     <Theme theme="g100">
       <div className={styles.appHeader}>
-        <Header aria-label="IBM AI Foundation for Power">
+        <Header aria-label="AI Services">
           {!minimal && (
             <HeaderMenuButton
               aria-label="Open menu"
@@ -124,11 +124,11 @@ const AppHeader = (props: AppHeaderProps) => {
           )}
 
           <HeaderName
-            prefix="IBM"
+            prefix=""
             onClick={() => navigate("/")}
             className={styles.headerName}
           >
-            AI Foundation for Power
+            AI Services
           </HeaderName>
 
           {!minimal && (
@@ -173,7 +173,7 @@ const AppHeader = (props: AppHeaderProps) => {
                   size="sm"
                   primaryButtonText="Log out"
                   secondaryButtonText="Cancel"
-                  modalHeading="Are you sure you want to log out of IBM AI Foundation for Power?"
+                  modalHeading="Are you sure you want to log out of AI Services?"
                   onRequestClose={() => {
                     dispatch({ type: "CLOSE_LOGOUT_MODAL" });
                   }}

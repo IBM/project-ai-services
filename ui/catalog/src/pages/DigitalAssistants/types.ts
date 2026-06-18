@@ -122,7 +122,7 @@ export type AppAction =
 
 // Table headers
 export const HEADERS: DataTableHeader[] = [
-  { header: "Assistant name", key: "name" },
+  { header: "Name", key: "name" },
   { header: "Status", key: "status" },
   { header: "Uptime", key: "uptime" },
   { header: "Messages", key: "messages" },

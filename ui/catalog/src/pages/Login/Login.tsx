@@ -46,7 +46,7 @@ const LoginPage = () => {
         <Column lg={8} md={4} sm={4} className={styles.loginLeft}>
           <div className={styles.loginForm}>
             <h1 className={styles.heading}>
-              Log in to IBM <strong>AI Foundation for Power</strong>
+              Log in to <strong>AI Services</strong>
             </h1>
 
             <form

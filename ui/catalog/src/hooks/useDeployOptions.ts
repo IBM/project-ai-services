@@ -4,8 +4,8 @@ import { fetchDeployOptions } from "@/api/digitalAssistants";
 
 /**
  * Custom hook to fetch and cache deploy options
- * Uses Zustand store to cache data (no time-based expiration)
- * Deploy options are static catalog metadata that only change when architecture definitions are updated
+ * Uses Zustand store with 15-minute cache expiration
+ * Deploy options can change when service versions or component providers are updated
  */
 export const useDeployOptions = () => {
   const {
@@ -13,6 +13,7 @@ export const useDeployOptions = () => {
     deployOptions,
     deployOptionsLoading,
     deployOptionsError,
+    isDeployOptionsStale,
     setDeployOptions,
     setDeployOptionsLoading,
     setDeployOptionsError,
@@ -31,9 +32,15 @@ export const useDeployOptions = () => {
       return;
     }
 
-    // Only fetch if we don't have data and we haven't already started fetching
-    // No time-based expiration - deployOptions are static catalog metadata
-    if (!deployOptions && !hasFetched.current && !deployOptionsLoading) {
+    // Check if cache is stale (older than 15 minutes)
+    const isStale = isDeployOptionsStale();
+
+    // Fetch if we don't have data or if cache is stale, and we haven't already started fetching
+    if (
+      (!deployOptions || isStale) &&
+      !hasFetched.current &&
+      !deployOptionsLoading
+    ) {
       hasFetched.current = true;
       setDeployOptionsLoading(true);
       setDeployOptionsError(null);
@@ -57,6 +64,7 @@ export const useDeployOptions = () => {
     selectedArchitectureId,
     deployOptions,
     deployOptionsLoading,
+    isDeployOptionsStale,
     setDeployOptions,
     setDeployOptionsLoading,
     setDeployOptionsError,

@@ -12,9 +12,13 @@ export const login = async (payload: LoginRequest): Promise<LoginResponse> => {
   const refreshToken = response.data.refresh_token;
   useAuthStore.getState().setTokens(accessToken, refreshToken);
 
-  // Fetch architectures only if not already in persisted store
+  // Fetch architectures if not in store or if cache is stale (older than 15 minutes)
   const deployStore = useDeployStore.getState();
-  if (deployStore.architectures.length === 0) {
+  const shouldFetchArchitectures =
+    deployStore.architectures.length === 0 ||
+    deployStore.isArchitecturesStale();
+
+  if (shouldFetchArchitectures) {
     try {
       deployStore.setArchitecturesLoading(true);
       const architectures = await fetchArchitectures();
@@ -43,14 +47,8 @@ export const logout = async () => {
   useAuthStore.getState().clearTokens();
   useAuthStore.getState().clearUserInfo();
 
-  // Clear deploy store state
-  useDeployStore.getState().clearArchitectures();
-  useDeployStore.getState().clearServiceSummaries();
-  useDeployStore.getState().clearArchitectureDetails();
-  useDeployStore.getState().clearDeployOptions();
-
-  // Clear service-deploy store state
-  useServiceDeployStore.getState().clearAllCache();
+  // Clear all deploy store data
+  useDeployStore.getState().clearAll();
 };
 
 export const getUserInfo = async (): Promise<UserInfo> => {

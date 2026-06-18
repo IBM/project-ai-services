@@ -10,7 +10,8 @@ interface UseProviderParamsResult {
 
 /**
  * Hook to fetch and cache provider parameters
- * Caches results in Zustand store to avoid redundant API calls
+ * Uses Zustand store with 15-minute cache expiration
+ * Provider params can change when provider definitions are updated
  */
 export function useProviderParams(
   componentType: string,
@@ -24,13 +25,21 @@ export function useProviderParams(
     useDeployStore();
 
   const params = getProviderParams(componentType, providerId);
+  const isStale = isProviderParamsStale(componentType, providerId);
 
   useEffect(() => {
-    // Skip if already fetching or if we have fresh cached data
-    if (
-      hasFetched.current ||
-      (params && !isProviderParamsStale(componentType, providerId))
-    ) {
+    // Fetch if we don't have data or if cache is stale, and we haven't already started fetching
+    if ((!params && !isStale) || hasFetched.current) {
+      return;
+    }
+
+    // Only fetch if stale or missing
+    if (!params || isStale) {
+      // Skip if already fetching
+      if (hasFetched.current) {
+        return;
+      }
+    } else {
       return;
     }
 
@@ -54,24 +63,20 @@ export function useProviderParams(
         );
       } finally {
         setIsLoading(false);
+        hasFetched.current = false;
       }
     };
 
     fetchParams();
-  }, [
-    componentType,
-    providerId,
-    params,
-    isProviderParamsStale,
-    setProviderParams,
-  ]);
+  }, [componentType, providerId, params, isStale, setProviderParams]);
 
   return { params, isLoading, error };
 }
 
 /**
  * Hook to fetch provider params for multiple providers at once
- * Useful for batch fetching (e.g., all LLM providers)
+ * Uses Zustand store with 15-minute cache expiration
+ * Provider params can change when provider definitions are updated
  */
 export function useBatchProviderParams(
   componentType: string,
@@ -104,8 +109,7 @@ export function useBatchProviderParams(
 
     // Find providers that need fetching (not cached or stale)
     const providersToFetch = providerIds.filter((providerId) => {
-      const cached = getProviderParams(componentType, providerId);
-      return !cached || isProviderParamsStale(componentType, providerId);
+      return isProviderParamsStale(componentType, providerId);
     });
 
     if (providersToFetch.length === 0) {
@@ -145,6 +149,7 @@ export function useBatchProviderParams(
 
       setErrors(newErrors);
       setIsLoading(false);
+      hasFetched.current = false;
     };
 
     fetchAllParams();
@@ -157,4 +162,122 @@ export function useBatchProviderParams(
   ]);
 
   return { paramsMap, isLoading, errors };
+}
+
+/**
+ * Hook to fetch provider params for multiple component types at once
+ * This is the truly dynamic solution that respects Rules of Hooks
+ * Uses Zustand store with 15-minute cache expiration
+ * Provider params can change when provider definitions are updated
+ */
+export function useMultiTypeProviderParams(
+  componentTypesWithIds: Record<string, string[]>,
+): {
+  paramsByType: Record<string, Record<string, Record<string, unknown>>>;
+  isLoading: boolean;
+  errorsByType: Record<string, Record<string, string>>;
+} {
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorsByType, setErrorsByType] = useState<
+    Record<string, Record<string, string>>
+  >({});
+  const hasFetched = useRef(false);
+
+  const { getProviderParams, setProviderParams, isProviderParamsStale } =
+    useDeployStore();
+
+  // Build params map from cache for all component types
+  const paramsByType: Record<
+    string,
+    Record<string, Record<string, unknown>>
+  > = {};
+  for (const [componentType, providerIds] of Object.entries(
+    componentTypesWithIds,
+  )) {
+    paramsByType[componentType] = {};
+    for (const providerId of providerIds) {
+      const cached = getProviderParams(componentType, providerId);
+      if (cached) {
+        paramsByType[componentType][providerId] = cached;
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (hasFetched.current || Object.keys(componentTypesWithIds).length === 0) {
+      return;
+    }
+
+    // Find all providers that need fetching (not cached or stale) across all component types
+    const providersToFetch: Array<{
+      componentType: string;
+      providerId: string;
+    }> = [];
+
+    for (const [componentType, providerIds] of Object.entries(
+      componentTypesWithIds,
+    )) {
+      for (const providerId of providerIds) {
+        if (isProviderParamsStale(componentType, providerId)) {
+          providersToFetch.push({ componentType, providerId });
+        }
+      }
+    }
+
+    if (providersToFetch.length === 0) {
+      return;
+    }
+
+    const fetchAllParams = async () => {
+      hasFetched.current = true;
+      setIsLoading(true);
+      setErrorsByType({});
+
+      // Fetch all params in parallel
+      const results = await Promise.allSettled(
+        providersToFetch.map(async ({ componentType, providerId }) => {
+          const response = await fetchProviderParams(componentType, providerId);
+          return { componentType, providerId, response };
+        }),
+      );
+
+      const newErrorsByType: Record<string, Record<string, string>> = {};
+
+      results.forEach((result, index) => {
+        const { componentType, providerId } = providersToFetch[index];
+
+        if (result.status === "fulfilled") {
+          setProviderParams(componentType, providerId, result.value.response);
+        } else {
+          const errorMessage =
+            result.reason instanceof Error
+              ? result.reason.message
+              : "Failed to fetch params";
+
+          if (!newErrorsByType[componentType]) {
+            newErrorsByType[componentType] = {};
+          }
+          newErrorsByType[componentType][providerId] = errorMessage;
+
+          console.warn(
+            `Failed to fetch params for ${componentType}/${providerId}:`,
+            result.reason,
+          );
+        }
+      });
+
+      setErrorsByType(newErrorsByType);
+      setIsLoading(false);
+      hasFetched.current = false;
+    };
+
+    fetchAllParams();
+  }, [
+    componentTypesWithIds,
+    getProviderParams,
+    setProviderParams,
+    isProviderParamsStale,
+  ]);
+
+  return { paramsByType, isLoading, errorsByType };
 }
