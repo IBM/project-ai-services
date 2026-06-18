@@ -1,0 +1,15 @@
+# Trivy Vulnerability Whitelist
+# CVEs listed here will be ignored during security scans
+
+# CVE-2026-34040 - Moby Authorization Plugin Bypass
+# Severity: CRITICAL | Fixed in: v29.3.1 | Current: v28.5.2
+#
+# Cannot upgrade: Moby v29+ changed module path from github.com/docker/docker 
+# to github.com/moby/moby/v2, but Podman v5 still requires the old path.
+#
+# Risk: LOW - We don't use Docker daemon or client code. Docker is only imported 
+# for type definitions (events.Action, events.Type) via Podman. The vulnerable 
+# AuthZ plugin functionality is not accessible in our codebase.
+#
+# Action: Whitelist until Podman v6 migration (uses new module path)
+CVE-2026-34040
