@@ -4,6 +4,7 @@ import { Deploy, Code, PlayOutline } from "@carbon/icons-react";
 import styles from "../DigitalAssistants.module.scss";
 import { useDeployStore } from "@/store/deploy.store";
 import { fetchArchitectureDetails } from "@/api/digitalAssistants";
+import { dedupe } from "@/utils/requestManager";
 import type { AboutSection } from "@/types/digitalAssistants";
 
 interface AboutTabProps {
@@ -40,17 +41,23 @@ export const AboutTab: React.FC<AboutTabProps> = ({ onDeployClick }) => {
     const loadArchitectureDetails = async () => {
       if (!selectedArchitectureId) return;
 
-      // Check if we have data for this architecture and if it's stale
+      // Check if we have data for this architecture
       const hasCorrectData =
         architectureDetails &&
         architectureDetails.id === selectedArchitectureId;
+
+      // Check if cache is stale
       const isStale = isArchitectureDetailsStale();
 
-      // Fetch if we don't have data for this architecture or if cache is stale (older than 15 minutes)
+      // Fetch if we don't have data for this architecture or cache is stale
+      // dedupe() handles preventing duplicate in-flight requests
       if (!hasCorrectData || isStale) {
         setArchitectureDetailsLoading(true);
         try {
-          const data = await fetchArchitectureDetails(selectedArchitectureId);
+          const requestKey = `architectureDetails:${selectedArchitectureId}`;
+          const data = await dedupe(requestKey, () =>
+            fetchArchitectureDetails(selectedArchitectureId),
+          );
           setArchitectureDetails(data);
         } catch (error) {
           const errorMessage =
@@ -66,10 +73,10 @@ export const AboutTab: React.FC<AboutTabProps> = ({ onDeployClick }) => {
   }, [
     selectedArchitectureId,
     architectureDetails,
-    isArchitectureDetailsStale,
     setArchitectureDetails,
     setArchitectureDetailsLoading,
     setArchitectureDetailsError,
+    isArchitectureDetailsStale,
   ]);
 
   // Generic section renderer - renders sections based on their structure
