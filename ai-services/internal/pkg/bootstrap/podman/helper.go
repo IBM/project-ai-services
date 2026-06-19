@@ -166,8 +166,6 @@ func setupPodman() error {
 		return fmt.Errorf("podman health check failed after configuration: %w", err)
 	}
 
-	logger.Infof("Podman configured successfully.")
-
 	return nil
 }
 
@@ -346,7 +344,7 @@ func configurePodman(ctx context.Context) error {
 
 		return err
 	}
-	s.Stop("podman configured successfully")
+	s.Stop("Podman configured successfully")
 
 	return nil
 }
