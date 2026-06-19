@@ -5,6 +5,7 @@ import {
   Theme,
   Grid,
   Column,
+  ToastNotification,
 } from "@carbon/react";
 import { ArrowRight } from "@carbon/icons-react";
 import { useState } from "react";
@@ -12,6 +13,7 @@ import { useNavigate } from "react-router-dom";
 import styles from "./Login.module.scss";
 import { login } from "@/services/auth";
 import { ROUTES } from "@/constants/endpoints.constants";
+import axios from "axios";
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -19,11 +21,13 @@ const LoginPage = () => {
   const [username, setUsername] = useState<string>("");
   const [password, setPassword] = useState<string>("");
 
-  const [error, setError] = useState<boolean>(false);
+  const [credentialError, setCredentialError] = useState<boolean>(false);
+  const [networkError, setNetworkError] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
 
   const handleLogin = async (): Promise<void> => {
-    setError(false);
+    setCredentialError(false);
+    setNetworkError(false);
     setLoading(true);
 
     try {
@@ -33,8 +37,14 @@ const LoginPage = () => {
       });
 
       navigate(ROUTES.DIGITAL_ASSISTANTS);
-    } catch {
-      setError(true);
+    } catch (error) {
+      // Check if it's a 401 Unauthorized (wrong credentials)
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        setCredentialError(true);
+      } else {
+        // Network error or other server errors
+        setNetworkError(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -42,6 +52,16 @@ const LoginPage = () => {
 
   return (
     <Theme theme="white">
+      {networkError && (
+        <ToastNotification
+          kind="error"
+          title="Network error"
+          subtitle="Unable to connect to server. Please try again."
+          timeout={5000}
+          onClose={() => setNetworkError(false)}
+          className={styles.toastNotification}
+        />
+      )}
       <Grid fullWidth className={styles.loginPage}>
         <Column lg={8} md={4} sm={4} className={styles.loginLeft}>
           <div className={styles.loginForm}>
@@ -56,7 +76,7 @@ const LoginPage = () => {
                 handleLogin();
               }}
             >
-              {error && (
+              {credentialError && (
                 <InlineNotification
                   kind="error"
                   role="alert"
@@ -72,7 +92,7 @@ const LoginPage = () => {
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   setUsername(e.target.value)
                 }
-                invalid={error}
+                invalid={credentialError}
               />
 
               <TextInput
@@ -83,7 +103,7 @@ const LoginPage = () => {
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   setPassword(e.target.value)
                 }
-                invalid={error}
+                invalid={credentialError}
               />
 
               <Button
