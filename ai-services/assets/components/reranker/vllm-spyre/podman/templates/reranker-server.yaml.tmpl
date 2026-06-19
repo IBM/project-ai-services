@@ -8,6 +8,7 @@ metadata:
     io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
     ai-services.io/reranker--spyre-cards: "1"
 spec:
+  restartPolicy: always
   volumes:
     - name: dshm
       emptyDir:

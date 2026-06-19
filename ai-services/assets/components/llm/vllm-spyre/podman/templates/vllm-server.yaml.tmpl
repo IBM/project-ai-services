@@ -13,6 +13,7 @@ metadata:
     run.oci.keep_original_groups: "1"
     ai-services.io/llm--spyre-cards: "4"
 spec:
+  restartPolicy: always
   volumes:
     - name: dshm
       emptyDir:

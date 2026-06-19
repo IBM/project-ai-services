@@ -8,6 +8,7 @@ metadata:
     ai-services.io/routes: "7000:similarity-api-{{ .InstanceSlug }}:api"
     # ai-services.io/ports: "{{ or .Values.similarity.port }}:7000"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
+  restartPolicy: always
   containers:
     - name: similarity-api
       image: "{{ .Values.similarity.image }}"

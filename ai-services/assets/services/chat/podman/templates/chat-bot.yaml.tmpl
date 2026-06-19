@@ -8,6 +8,7 @@ metadata:
     ai-services.io/routes: "3000:chat-bot-ui-{{ .InstanceSlug }}:ui,5000:chat-bot-backend-{{ .InstanceSlug }}:api"
     # ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
+  restartPolicy: always
   containers:
     - name: ui
       image: "{{ .Values.ui.image }}"

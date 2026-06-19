@@ -13,6 +13,7 @@ metadata:
     ai-services.io/routes: "8081:catalog-ui:ui, 8080:catalog-api:api"
     # ai-services.io/ports: "{{ .Values.ui.port }}:8081, {{ .Values.backend.port }}:8080"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
+  restartPolicy: always
   initContainers:
     - name: db-migration
       image: "{{ .Values.backend.image }}"

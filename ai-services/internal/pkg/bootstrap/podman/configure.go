@@ -28,7 +28,7 @@ func (p *PodmanBootstrap) Configure() error {
 		return err
 	}
 
-	if err := ensurePodmanConfigured(ctx); err != nil {
+	if err := configurePodman(ctx); err != nil {
 		return err
 	}
 

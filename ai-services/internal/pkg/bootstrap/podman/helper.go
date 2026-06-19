@@ -154,17 +154,9 @@ func setupPodman() error {
 	euid := os.Geteuid()
 	sudoUser := os.Getenv("SUDO_USER")
 
-	// if running as root and not via sudo, enable system-wide podman socket
-	// else, enable user podman socket for the sudo user
-	if euid == 0 && sudoUser == "" {
-		if err := systemctl("enable", "podman.socket", "--now"); err != nil {
-			return fmt.Errorf("failed to enable podman socket: %w", err)
-		}
-	} else {
-		machineArg := fmt.Sprintf("--machine=%s@.host", sudoUser)
-		if err := systemctl("enable", "podman.socket", "--now", machineArg, "--user"); err != nil {
-			return fmt.Errorf("failed to enable podman socket: %w", err)
-		}
+	// Enable podman services based on user context
+	if err := enablePodmanServices(euid == 0 && sudoUser == "", sudoUser); err != nil {
+		return err
 	}
 
 	logger.Debugln("Waiting for podman socket to be ready...")
@@ -174,7 +166,25 @@ func setupPodman() error {
 		return fmt.Errorf("podman health check failed after configuration: %w", err)
 	}
 
-	logger.Infof("Podman configured successfully.")
+	return nil
+}
+
+// enablePodmanServices enables podman services for root or user context.
+func enablePodmanServices(isRoot bool, sudoUser string) error {
+	services := []string{"podman.socket", "podman-restart.service"}
+	var args []string
+
+	if isRoot {
+		args = []string{"--now"}
+	} else {
+		args = []string{"--now", fmt.Sprintf("--machine=%s@.host", sudoUser), "--user"}
+	}
+
+	for _, svc := range services {
+		if err := systemctl("enable", svc, args...); err != nil {
+			return fmt.Errorf("failed to enable %s: %w", svc, err)
+		}
+	}
 
 	return nil
 }
@@ -324,22 +334,17 @@ func ensurePodmanInstalled(ctx context.Context) error {
 	return nil
 }
 
-// ensurePodmanConfigured verifies podman configuration and sets it up if needed.
-func ensurePodmanConfigured(ctx context.Context) error {
-	s := spinner.New("Verifying podman configuration")
+// configurePodman enable podman services in the system.
+func configurePodman(ctx context.Context) error {
+	s := spinner.New("Configure podman")
 	s.Start(ctx)
 
-	if err := utils.PodmanHealthCheck(); err != nil {
-		s.UpdateMessage("Configuring podman")
-		if err := setupPodman(); err != nil {
-			s.Fail("failed to configure podman")
+	if err := setupPodman(); err != nil {
+		s.Fail("failed to configure podman")
 
-			return err
-		}
-		s.Stop("podman configured successfully")
-	} else {
-		s.Stop("Podman already configured")
+		return err
 	}
+	s.Stop("Podman configured successfully")
 
 	return nil
 }
