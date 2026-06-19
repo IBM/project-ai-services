@@ -185,11 +185,9 @@ const DeploymentDetails = ({
                   serviceMetadataById[service.catalog_id]?.certifiedBy ===
                   "IBM",
               )
-            : deploymentServices.some(
-                (service) =>
-                  serviceMetadataById[service.catalog_id]?.certifiedBy ===
-                  "IBM",
-              );
+            : deploymentServices.length > 0 &&
+              serviceMetadataById[deploymentServices[0].catalog_id]
+                ?.certifiedBy === "IBM";
         const transformedServices: DeploymentServiceData[] =
           deploymentServices.map((service) => {
             const llmComponent = service.components.find(

@@ -237,12 +237,12 @@ export const ServicesDeployFlow = ({
       const componentKey = `${state.selectedServiceId}:${component.type}`;
       const models = componentModels[componentKey] || [];
       const selectedProviderId = componentConfig.providerId;
-      const matchingModelForProvider =
-        models.find((model) => model.providerId === selectedProviderId) ||
-        models[0];
+      const matchingModelForProvider = models.find(
+        (model) => model.providerId === selectedProviderId,
+      );
 
-      // If models exist, set the model that belongs to the selected provider
-      if (models.length > 0 && matchingModelForProvider) {
+      // Only set a default model when it belongs to the currently selected provider
+      if (matchingModelForProvider) {
         updates[component.type] = {
           ...componentConfig,
           params: {

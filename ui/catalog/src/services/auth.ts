@@ -37,21 +37,24 @@ export const login = async (payload: LoginRequest): Promise<LoginResponse> => {
 
 export const logout = async () => {
   const refreshToken = useAuthStore.getState().refreshToken;
-  await api.post(AUTH_ENDPOINTS.LOGOUT, null, {
-    headers: {
-      "X-Refresh-Token": refreshToken,
-    },
-  });
 
-  // Clear auth store state
-  useAuthStore.getState().clearTokens();
-  useAuthStore.getState().clearUserInfo();
+  try {
+    await api.post(AUTH_ENDPOINTS.LOGOUT, null, {
+      headers: {
+        "X-Refresh-Token": refreshToken,
+      },
+    });
+  } finally {
+    // Clear auth store state
+    useAuthStore.getState().clearTokens();
+    useAuthStore.getState().clearUserInfo();
 
-  // Clear all deploy store data
-  useDeployStore.getState().clearAll();
+    // Clear all deploy store data
+    useDeployStore.getState().clearAll();
 
-  // Clear all service deploy store data
-  useServiceDeployStore.getState().clearAllCache();
+    // Clear all service deploy store data
+    useServiceDeployStore.getState().clearAllCache();
+  }
 };
 
 export const getUserInfo = async (): Promise<UserInfo> => {
