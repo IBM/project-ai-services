@@ -38,11 +38,16 @@ const LoginPage = () => {
 
       navigate(ROUTES.DIGITAL_ASSISTANTS);
     } catch (error) {
-      // Check if it's a 401 Unauthorized (wrong credentials)
-      if (axios.isAxiosError(error) && error.response?.status === 401) {
-        setCredentialError(true);
+      if (axios.isAxiosError(error) && error.response) {
+        // Treat 400 and 401 as credential/validation errors
+        if (error.response.status === 400 || error.response.status === 401) {
+          setCredentialError(true);
+        } else {
+          // 5xx server errors or other unexpected errors
+          setNetworkError(true);
+        }
       } else {
-        // Network error or other server errors
+        // Network error (no response from server)
         setNetworkError(true);
       }
     } finally {
