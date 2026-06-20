@@ -246,10 +246,14 @@ export interface ApplicationDetailsApiResponse {
   services: Array<{
     id: string;
     type: string;
+    catalog_id: string;
     version: string;
     components: Array<{
       type: string;
-      provider: string;
+      provider: {
+        id: string;
+        name: string;
+      };
       metadata?: { model?: string };
     }>;
     endpoints: Array<{

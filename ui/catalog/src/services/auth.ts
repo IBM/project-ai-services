@@ -4,6 +4,7 @@ import { useAuthStore } from "@/store/auth.store";
 import { useDeployStore } from "@/store/deploy.store";
 import { fetchArchitectures } from "@/api/digitalAssistants";
 import type { LoginRequest, LoginResponse, UserInfo } from "@/types/auth";
+import { useServiceDeployStore } from "@/store/serviceDeploy.store";
 
 export const login = async (payload: LoginRequest): Promise<LoginResponse> => {
   const response = await api.post(AUTH_ENDPOINTS.LOGIN, payload);
@@ -41,10 +42,15 @@ export const logout = async () => {
       },
     });
   } finally {
-    // Always clear local state, even if API fails
+    // Clear auth store state
     useAuthStore.getState().clearTokens();
     useAuthStore.getState().clearUserInfo();
+
+    // Clear all deploy store data
     useDeployStore.getState().clearAll();
+
+    // Clear all service deploy store data
+    useServiceDeployStore.getState().clearAllCache();
   }
 };
 

@@ -134,19 +134,20 @@
 }
 
 .certifiedBadge {
-  // display: flex;
-  // align-items: center;
-  // gap: $spacing-02;
-  // margin-top: $spacing-05;
-  color: $text-primary;
+  @include type-style("label-01");
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-02;
+  margin-bottom: 0;
+}
 
-  svg {
-    fill: $support-success;
-  }
+.badgeIcon {
+  color: var(--cds-support-success);
+  min-width: $spacing-05;
+}
 
-  span {
-    @include type-style("label-01");
-  }
+.badgeName {
+  color: var(--cds-text-secondary);
 }
 
 .resourcesGrid {
@@ -459,6 +460,24 @@
 }
 
 // Accelerator cards styles
+.acceleratorCardsColumn {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.acceleratorCardsItem {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+  margin-top: $spacing-06;
+}
+
+.acceleratorCardsTitle {
+  @include type-style("heading-03");
+  margin: 0 0 $spacing-03 0;
+  color: $text-primary;
+}
+
 .acceleratorCardsGrid {
   margin: 0;
   padding: 0;
@@ -467,10 +486,10 @@
 
 .acceleratorCardsList {
   list-style-type: decimal;
-  list-style-position: inside;
-  padding: 0;
+  list-style-position: outside;
+  // padding-left: $spacing-05;
   margin: 0;
-  @include type-style("body-compact-01");
+  @include type-style("body-01");
   color: $text-primary;
 }
 

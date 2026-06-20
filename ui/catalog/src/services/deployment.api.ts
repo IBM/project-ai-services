@@ -26,6 +26,7 @@ export interface Provider {
   name: string;
   description: string;
   version: string;
+  default?: boolean;
   schema?: string;
   resources?: {
     cpu: number;
@@ -157,6 +158,7 @@ export interface DeployComponent {
     id: string;
     name: string;
     description?: string;
+    default?: boolean;
     schema?: string;
     version?: string;
     resources?: {

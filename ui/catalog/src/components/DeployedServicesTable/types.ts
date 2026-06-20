@@ -22,6 +22,7 @@ export interface DeployedServicesRow {
   id: string;
   name: string;
   status: "Deploying..." | "Deleting..." | "Error" | "Stopped" | "Running";
+  type?: string;
   uptime: string;
   messages: string;
   actions: string;

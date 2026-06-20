@@ -1,4 +1,4 @@
-import { Tag, OverflowMenu, OverflowMenuItem } from "@carbon/react";
+import { Tag, OverflowMenu, OverflowMenuItem, Link } from "@carbon/react";
 import {
   Delete,
   CheckmarkFilled,
@@ -10,6 +10,7 @@ import type { Dispatch } from "react";
 import type { AppAction } from "./types";
 import { ACTION_TYPES } from "./types";
 import styles from "./DeployedServices.module.scss";
+import type { DeploymentDetails } from "@/types/digitalAssistants";
 
 // Status configuration
 const STATUS_CONFIG = {
@@ -57,7 +58,8 @@ interface CellRendererProps {
   value: unknown;
   rowId: string;
   dispatch: Dispatch<AppAction>;
-  rowData?: { status: string };
+  rowData?: { status: string; name?: string; type?: string };
+  onRowClick?: (deployment: DeploymentDetails) => void;
 }
 
 export const ActionCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
@@ -87,8 +89,29 @@ export const ActionCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
   );
 };
 
-export const NameCell = ({ value }: CellRendererProps) => (
-  <span style={{ fontWeight: 500 }}>{String(value)}</span>
+export const NameCell = ({
+  value,
+  rowId,
+  rowData,
+  onRowClick,
+}: CellRendererProps) => (
+  <Link
+    onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (onRowClick) {
+        onRowClick({
+          id: rowId,
+          name: String(value),
+          status: rowData?.status || "Unknown",
+          type: rowData?.type || "Service",
+          resources: [],
+        });
+      }
+    }}
+  >
+    {String(value)}
+  </Link>
 );
 export const StatusCell = ({ value }: CellRendererProps) => {
   const status = String(value);

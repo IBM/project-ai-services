@@ -35,7 +35,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
   onChange,
   providerParamsMap,
   hasValidationError = false,
-  className,
+  className: _className,
 }) => {
   // Parse schema to get field definitions
   const fields = useMemo(() => {
@@ -187,8 +187,24 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
     }
   };
 
+  // Group fields into rows of two
+  const fieldRows: ParsedField[][] = [];
+  for (let i = 0; i < fields.length; i += 2) {
+    fieldRows.push(fields.slice(i, i + 2));
+  }
+
   return (
-    <div className={className}>{fields.map((field) => renderField(field))}</div>
+    <>
+      {fieldRows.map((row, rowIndex) => (
+        <div key={`row-${rowIndex}`} className={styles.serviceConfigFieldRow}>
+          {row.map((field) => (
+            <div key={field.key} className={styles.serviceConfigFieldHalf}>
+              {renderField(field)}
+            </div>
+          ))}
+        </div>
+      ))}
+    </>
   );
 };
 
