@@ -11,7 +11,7 @@ CREATE TABLE services (
     version TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    CONSTRAINT fk_app_id FOREIGN KEY (app_id) REFERENCES applications(id)
+    CONSTRAINT fk_app_id FOREIGN KEY (app_id) REFERENCES applications(id) ON DELETE CASCADE
 );
 
 -- Create trigger to automatically update updated_at timestamp
