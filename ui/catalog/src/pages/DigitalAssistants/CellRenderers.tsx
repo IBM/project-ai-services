@@ -90,26 +90,35 @@ export const NameCell = ({
   rowId,
   dispatch,
   rowData,
-}: CellRendererProps) => (
-  <Link
-    href="#"
-    onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
-      e.preventDefault();
-      dispatch({
-        type: ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS,
-        payload: {
-          id: rowId,
-          name: String(value),
-          status: rowData?.status || "Unknown",
-          type: rowData?.type || "Digital assistant",
-          resources: [],
-        },
-      });
-    }}
-  >
-    {String(value)}
-  </Link>
-);
+}: CellRendererProps) => {
+  const status = rowData?.status?.toLowerCase() || "";
+  const isRunning = status === "running";
+
+  if (!isRunning) {
+    return <span className={styles.nameText}>{String(value)}</span>;
+  }
+
+  return (
+    <Link
+      href="#"
+      onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
+        e.preventDefault();
+        dispatch({
+          type: ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS,
+          payload: {
+            id: rowId,
+            name: String(value),
+            status: rowData?.status || "Unknown",
+            type: rowData?.type || "Digital assistant",
+            resources: [],
+          },
+        });
+      }}
+    >
+      {String(value)}
+    </Link>
+  );
+};
 
 export const StatusCell = ({ value }: CellRendererProps) => {
   const status = String(value);
