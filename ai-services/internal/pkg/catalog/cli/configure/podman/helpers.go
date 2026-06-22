@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
 
@@ -100,6 +101,23 @@ func validateCertificateChanges(opts *PodmanConfigureOptions) error {
 	// - Reconfigure with same custom certs (content matches)
 	// - Reconfigure with updated custom certs (content differs - allow for cert renewal/expiry)
 	// - Caddy self-signed to custom certs transition
+	return nil
+}
+
+// validateDomainUnchanged validates that the domain hasn't changed from the existing configuration.
+func validateDomainUnchanged(existingOpts *PodmanConfigureOptions, sslCertPath, sslKeyPath string) error {
+	// Compute the current domain configuration based on the provided SSL certificates
+	// This uses the same logic as initial configuration
+	currentDomainSuffix, err := caddy.ComputeDomainConfig(sslCertPath, sslKeyPath, "")
+	if err != nil {
+		return fmt.Errorf("failed to compute current domain: %w", err)
+	}
+
+	// Compare existing domain with current domain
+	if existingOpts.DomainName != currentDomainSuffix {
+		return fmt.Errorf("domain change detected: existing=%s, current=%s. Domain changes are not allowed during reset-certificate. Please uninstall the catalog deployment and re-run configure with the new domain", existingOpts.DomainName, currentDomainSuffix)
+	}
+
 	return nil
 }
 

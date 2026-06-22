@@ -30,6 +30,11 @@ func ResetCatalogCertificate(sslCertPath, sslKeyPath string) error {
 		return fmt.Errorf("AI_SERVICES_BASE_DIR not found in catalog configuration")
 	}
 
+	// Validate that domain hasn't changed
+	if err := validateDomainUnchanged(opts, sslCertPath, sslKeyPath); err != nil {
+		return err
+	}
+
 	// Get Caddy pod name from templates
 	caddyPodName, err := deployCtx.GetCaddyPodName()
 	if err != nil {
