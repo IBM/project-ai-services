@@ -80,25 +80,23 @@ Use "ai-services [command] --help" for more information about a command.
 
 ```bash
 project-ai-services/
-├── README.md          # Project documentation
-├── ai-services/       # CLI tool for project-ai-services
-│   ├── assets/        # Application template files
-├── images/            # Container base images
-│   └── service-base/   # Service base image for services
-├── services/          # Microservices (backend)
-│   ├── common/        # Shared library layer
+├── services/          # Backend microservices
+│   ├── common/        # Shared library
 │   ├── chatbot/       # RAG chatbot service
-│   ├── digitize/      # Document ingestion service
+│   ├── digitize/      # Document ingestion
 │   ├── summarize/     # Summarization service
-│   └── similarity/    # Similarity search service
+│   └── similarity/    # Similarity search
 ├── ui/                # Frontend applications
 │   ├── chatbot/       # Chatbot UI
 │   ├── digitize/      # Digitize UI
 │   └── catalog/       # Catalog UI
-├── test/              # Test assets
-│   └── golden/        # Golden dataset
-└── docs/              # Documentation
-    └── proposals/     # Architecture proposals
+├── images/            # Container base images
+│   ├── service-base/  # Renamed from rag-base
+│   ├── postgres/      # PostgreSQL image
+│   ├── litellm/       # LiteLLM proxy
+│   ├── caddy/         # Caddy proxy
+│   └── tools/         # Utility tools
+└── ai-services/       # CLI tool
 ```
 
 ### Service Architecture
