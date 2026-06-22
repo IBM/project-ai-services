@@ -7,20 +7,50 @@ import {
   Column,
 } from "@carbon/react";
 import { ArrowRight } from "@carbon/icons-react";
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import styles from "./Login.module.scss";
 import { login } from "@/services/auth";
 import { ROUTES } from "@/constants/endpoints.constants";
+import {
+  LogoutReason,
+  SESSION_STORAGE_KEYS,
+  type LoginLocationState,
+} from "@/types/navigation.types";
 
 const LoginPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [username, setUsername] = useState<string>("");
   const [password, setPassword] = useState<string>("");
 
   const [error, setError] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
+  const [showInactivityNotification, setShowInactivityNotification] =
+    useState<boolean>(false);
+
+  useEffect(() => {
+    const locationState = location.state as LoginLocationState | null;
+    const logoutReason = locationState?.logoutReason;
+    const storedReason = sessionStorage.getItem(
+      SESSION_STORAGE_KEYS.LOGOUT_REASON,
+    );
+
+    if (
+      logoutReason === LogoutReason.INACTIVITY ||
+      storedReason === LogoutReason.INACTIVITY
+    ) {
+      setShowInactivityNotification(true);
+
+      sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_REASON);
+      sessionStorage.removeItem(SESSION_STORAGE_KEYS.LOGOUT_MESSAGE);
+
+      if (locationState) {
+        navigate(location.pathname, { replace: true, state: null });
+      }
+    }
+  }, [location, navigate]);
 
   const handleLogin = async (): Promise<void> => {
     setError(false);
@@ -56,6 +86,20 @@ const LoginPage = () => {
                 handleLogin();
               }}
             >
+              {showInactivityNotification && (
+                <InlineNotification
+                  kind="warning"
+                  role="alert"
+                  title="Session expired"
+                  subtitle="You were logged out due to inactivity."
+                  lowContrast
+                  hideCloseButton={false}
+                  onCloseButtonClick={() =>
+                    setShowInactivityNotification(false)
+                  }
+                />
+              )}
+
               {error && (
                 <InlineNotification
                   kind="error"
