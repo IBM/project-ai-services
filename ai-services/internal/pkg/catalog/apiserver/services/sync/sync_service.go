@@ -552,7 +552,9 @@ func (s *SyncService) countResourcesFromTemplates(ctx context.Context, catalogID
 		return nil, err
 	}
 
-	counts := s.processTemplatesForResourceCounts(ctx, templates, values)
+	// Generate instance slug for ProcessTemplates
+	instanceSlug := catalogutils.GenerateInstanceSlug(instanceID)
+	counts := s.processTemplatesForResourceCounts(ctx, templates, values, instanceSlug)
 	if counts == nil {
 		return nil, fmt.Errorf("failed to process templates")
 	}
@@ -628,7 +630,7 @@ func (s *SyncService) loadComponentTemplatesAndValues(catalogID, instanceID stri
 }
 
 // processTemplatesForResourceCounts processes templates and counts resources.
-func (s *SyncService) processTemplatesForResourceCounts(ctx context.Context, templates map[string]*texttemplate.Template, values map[string]any) *ResourceCounts {
+func (s *SyncService) processTemplatesForResourceCounts(ctx context.Context, templates map[string]*texttemplate.Template, values map[string]any, instanceSlug string) *ResourceCounts {
 	counts := &ResourceCounts{}
 
 	processor := func(templateName string, podSpec *modelpkg.PodSpec) error {
@@ -642,7 +644,7 @@ func (s *SyncService) processTemplatesForResourceCounts(ctx context.Context, tem
 		return nil
 	}
 
-	if err := s.catalogProvider.ProcessTemplates(ctx, templates, values, "resource-counting", processor); err != nil {
+	if err := s.catalogProvider.ProcessTemplates(ctx, templates, values, instanceSlug, processor); err != nil {
 		logger.ErrorfCtx(ctx, "Failed to process templates: %v", err)
 
 		return nil
