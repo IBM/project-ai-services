@@ -243,8 +243,8 @@ func (s *SyncService) syncAllServices(ctx context.Context, rt runtime.Runtime, a
 // syncServicePod syncs a single service's pod status
 // Returns: error message (if any) and error.
 func (s *SyncService) syncServicePod(ctx context.Context, rt runtime.Runtime, service models.Service) (string, error) {
-	// Fetch pod using service ID as template label
-	pod, err := s.fetchPodByTemplateID(rt, service.ID.String())
+	// Fetch all pods using service ID as template label
+	pods, err := s.fetchPodsByTemplateID(rt, service.ID.String())
 	if err != nil {
 		// Pod not found or error - mark service as Error
 		newStatus := models.ServiceStatusError
@@ -260,8 +260,22 @@ func (s *SyncService) syncServicePod(ctx context.Context, rt runtime.Runtime, se
 		return message, nil
 	}
 
-	// Determine service status based on pod health
-	newStatus, message := s.determineServiceStatus(pod)
+	// Check all pods - if any pod is unhealthy, service is in error
+	newStatus := models.ServiceStatusRunning
+	var errorMessages []string
+
+	for _, pod := range pods {
+		isHealthy, message := s.determinePodStatus(pod)
+		if !isHealthy {
+			newStatus = models.ServiceStatusError
+			errorMessages = append(errorMessages, message)
+		}
+	}
+
+	message := ""
+	if len(errorMessages) > 0 {
+		message = strings.Join(errorMessages, "; ")
+	}
 
 	// Update only if status changed
 	if service.Status != newStatus {
@@ -291,32 +305,18 @@ func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, 
 		return models.ComponentStatusError, "", fmt.Errorf("component not found: %s", componentID)
 	}
 
-	// Fetch pod using component ID as template label
-	pod, err := s.fetchPodByTemplateID(rt, componentID.String())
+	// Fetch all pods using component ID as template label
+	pods, err := s.fetchPodsByTemplateID(rt, componentID.String())
 	if err != nil {
-		// Pod not found or error - mark component as Error
-		newStatus := models.ComponentStatusError
-		message := fmt.Sprintf("Pod not found or error: %v", err)
-
-		if component.Status != newStatus {
-			if err := catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, newStatus, message); err != nil {
-				return newStatus, "", fmt.Errorf("failed to update component status: %w", err)
-			}
-			logger.InfofCtx(ctx, "Updated component %s status to %s", componentID, newStatus)
-		}
-		// Return formatted message for application status
-		return newStatus, fmt.Sprintf("Component %s/%s: %s", component.Type, component.Provider, message), nil
+		return s.handleComponentPodFetchError(ctx, component, componentID, err)
 	}
 
-	// Determine component status based on pod health
-	newStatus, message := s.determineComponentStatus(pod)
+	// Check all pods health
+	newStatus, message := s.checkPodsHealth(pods)
 
-	// Update only if status changed
-	if component.Status != newStatus {
-		if err := catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, newStatus, message); err != nil {
-			return newStatus, "", fmt.Errorf("failed to update component status: %w", err)
-		}
-		logger.InfofCtx(ctx, "Updated component %s status to %s", componentID, newStatus)
+	// Update component status if changed
+	if err := s.updateComponentStatusIfChanged(ctx, component, componentID, newStatus, message); err != nil {
+		return newStatus, "", err
 	}
 
 	// Return formatted message for application status if component is in error
@@ -327,8 +327,57 @@ func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, 
 	return newStatus, "", nil
 }
 
-// fetchPodByTemplateID fetches a pod using the template ID label.
-func (s *SyncService) fetchPodByTemplateID(rt runtime.Runtime, templateID string) (*podStatus, error) {
+// handleComponentPodFetchError handles the case when pods cannot be fetched for a component.
+func (s *SyncService) handleComponentPodFetchError(ctx context.Context, component *models.Component, componentID uuid.UUID, fetchErr error) (models.ComponentStatus, string, error) {
+	newStatus := models.ComponentStatusError
+	message := fmt.Sprintf("Pod not found or error: %v", fetchErr)
+
+	if component.Status != newStatus {
+		if err := catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, newStatus, message); err != nil {
+			return newStatus, "", fmt.Errorf("failed to update component status: %w", err)
+		}
+		logger.InfofCtx(ctx, "Updated component %s status to %s", componentID, newStatus)
+	}
+
+	return newStatus, fmt.Sprintf("Component %s/%s: %s", component.Type, component.Provider, message), nil
+}
+
+// checkPodsHealth checks the health of all pods and returns the overall status.
+func (s *SyncService) checkPodsHealth(pods []*podStatus) (models.ComponentStatus, string) {
+	newStatus := models.ComponentStatusRunning
+	var errorMessages []string
+
+	for _, pod := range pods {
+		isHealthy, message := s.determinePodStatus(pod)
+		if !isHealthy {
+			newStatus = models.ComponentStatusError
+			errorMessages = append(errorMessages, message)
+		}
+	}
+
+	message := ""
+	if len(errorMessages) > 0 {
+		message = strings.Join(errorMessages, "; ")
+	}
+
+	return newStatus, message
+}
+
+// updateComponentStatusIfChanged updates component status only if it has changed.
+func (s *SyncService) updateComponentStatusIfChanged(ctx context.Context, component *models.Component, componentID uuid.UUID, newStatus models.ComponentStatus, message string) error {
+	if component.Status != newStatus {
+		if err := catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, newStatus, message); err != nil {
+			return fmt.Errorf("failed to update component status: %w", err)
+		}
+		logger.InfofCtx(ctx, "Updated component %s status to %s", componentID, newStatus)
+	}
+
+	return nil
+}
+
+// fetchPodsByTemplateID fetches all pods using the template ID label.
+// Returns a slice of pod statuses.
+func (s *SyncService) fetchPodsByTemplateID(rt runtime.Runtime, templateID string) ([]*podStatus, error) {
 	// Use the same logic as in ApplicationsPs - fetch pods with template label
 	filteredPods, err := common.FetchFilteredPods(rt, templateID)
 	if err != nil {
@@ -339,24 +388,26 @@ func (s *SyncService) fetchPodByTemplateID(rt runtime.Runtime, templateID string
 		return nil, fmt.Errorf("no pod found with template ID: %s", templateID)
 	}
 
-	// Take the first pod (should only be one per template ID)
-	pod := filteredPods[0]
+	// Process all pods
+	var podStatuses []*podStatus
+	for _, pod := range filteredPods {
+		processedPod, err := common.ProcessPod(rt, pod)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process pod: %w", err)
+		}
 
-	// Process pod to get status and health
-	processedPod, err := common.ProcessPod(rt, pod)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process pod: %w", err)
+		if processedPod == nil {
+			return nil, fmt.Errorf("pod processing returned nil")
+		}
+
+		podStatuses = append(podStatuses, &podStatus{
+			state:   processedPod.State,
+			health:  processedPod.Health,
+			podName: processedPod.Name,
+		})
 	}
 
-	if processedPod == nil {
-		return nil, fmt.Errorf("pod processing returned nil")
-	}
-
-	return &podStatus{
-		state:   processedPod.State,
-		health:  processedPod.Health,
-		podName: processedPod.Name,
-	}, nil
+	return podStatuses, nil
 }
 
 // podStatus holds the relevant pod status information.
@@ -367,7 +418,7 @@ type podStatus struct {
 }
 
 // determinePodStatus determines status based on pod state and health
-// Returns: isRunning (bool), errorMessage (string).
+// Returns: isHealthy (bool), errorMessage (string).
 func (s *SyncService) determinePodStatus(pod *podStatus) (bool, string) {
 	if pod.state == "Running" && pod.health == string(constants.Ready) {
 		return true, ""
@@ -378,26 +429,6 @@ func (s *SyncService) determinePodStatus(pod *podStatus) (bool, string) {
 	}
 
 	return false, fmt.Sprintf("Pod %s is in state: %s", pod.podName, pod.state)
-}
-
-// determineServiceStatus determines service status based on pod state and health.
-func (s *SyncService) determineServiceStatus(pod *podStatus) (models.ServiceStatus, string) {
-	isRunning, message := s.determinePodStatus(pod)
-	if isRunning {
-		return models.ServiceStatusRunning, message
-	}
-
-	return models.ServiceStatusError, message
-}
-
-// determineComponentStatus determines component status based on pod state and health.
-func (s *SyncService) determineComponentStatus(pod *podStatus) (models.ComponentStatus, string) {
-	isRunning, message := s.determinePodStatus(pod)
-	if isRunning {
-		return models.ComponentStatusRunning, message
-	}
-
-	return models.ComponentStatusError, message
 }
 
 // updateApplicationStatus updates application status based on collected errors during sync
