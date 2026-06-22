@@ -128,7 +128,7 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 			a.id, a.name, a.catalog_id, a.deployment_type, a.status, a.message, a.version, a.created_by, a.created_at, a.updated_at,
 			s.id, s.app_id, s.catalog_id, s.status, s.message, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM paged_applications a
-		INNER JOIN services s ON a.id = s.app_id
+		LEFT JOIN services s ON a.id = s.app_id
 		ORDER BY a.created_at DESC, s.created_at ASC
 	`
 
@@ -169,12 +169,14 @@ func (r *applicationRepo) scanApplicationsWithServices(rows pgx.Rows) ([]models.
 			appOrder = append(appOrder, appID)
 		}
 
-		// Add service to the application
-		service, err := svc.toService()
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert service: %w", err)
+		// Add service to the application only if service ID is not nil (LEFT JOIN may return NULL services)
+		if svc.id != uuid.Nil {
+			service, err := svc.toService()
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert service: %w", err)
+			}
+			appMap[appID].Services = append(appMap[appID].Services, *service)
 		}
-		appMap[appID].Services = append(appMap[appID].Services, *service)
 	}
 
 	if err := rows.Err(); err != nil {
