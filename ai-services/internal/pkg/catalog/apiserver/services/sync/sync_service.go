@@ -277,7 +277,8 @@ func (s *SyncService) syncServicePod(ctx context.Context, rt runtime.Runtime, se
 	}
 
 	// Determine service status based on pods and resources
-	newStatus, message := s.determineServiceStatusFromPods(ctx, service.CatalogID, pods, rt)
+	// For services, use AppID to generate instance slug
+	newStatus, message := s.determineServiceStatusFromPods(ctx, service.CatalogID, service.AppID.String(), pods, rt)
 
 	// Update service status if changed
 	if err := s.updateServiceStatusIfChanged(ctx, service, newStatus, message); err != nil {
@@ -308,9 +309,9 @@ func (s *SyncService) handleServicePodFetchError(ctx context.Context, service mo
 }
 
 // determineServiceStatusFromPods determines service status based on pods and resource validation.
-func (s *SyncService) determineServiceStatusFromPods(ctx context.Context, catalogID string, pods []*podStatus, rt runtime.Runtime) (models.ServiceStatus, string) {
+func (s *SyncService) determineServiceStatusFromPods(ctx context.Context, catalogID, instanceID string, pods []*podStatus, rt runtime.Runtime) (models.ServiceStatus, string) {
 	// Validate resource counts against templates
-	resourceValidationMsg := s.validateResourceCounts(ctx, catalogID, resourceItemTypeService, len(pods), rt)
+	resourceValidationMsg := s.validateResourceCounts(ctx, catalogID, instanceID, resourceItemTypeService, len(pods), rt)
 
 	// Check all pods - if any pod is unhealthy, service is in error
 	newStatus := models.ServiceStatusRunning
@@ -367,7 +368,7 @@ func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, 
 	componentCatalogID := fmt.Sprintf("%s/%s", component.Type, component.Provider)
 
 	// Validate resource counts against templates
-	resourceValidationMsg := s.validateResourceCounts(ctx, componentCatalogID, resourceItemTypeComponent, len(pods), rt)
+	resourceValidationMsg := s.validateResourceCounts(ctx, componentCatalogID, componentID.String(), resourceItemTypeComponent, len(pods), rt)
 
 	// Check all pods health
 	newStatus, message := s.checkPodsHealth(pods)
@@ -541,12 +542,12 @@ func (s *SyncService) setExpectedResourceCounts(catalogID string, counts *Resour
 }
 
 // countResourcesFromTemplates counts expected Pods and Secrets from service/component templates.
-func (s *SyncService) countResourcesFromTemplates(ctx context.Context, catalogID, itemType string) (*ResourceCounts, error) {
+func (s *SyncService) countResourcesFromTemplates(ctx context.Context, catalogID, instanceID, itemType string) (*ResourceCounts, error) {
 	if s.catalogProvider == nil {
 		return nil, fmt.Errorf("catalog provider not initialized")
 	}
 
-	templates, values, err := s.loadTemplatesAndValues(catalogID, itemType)
+	templates, values, err := s.loadTemplatesAndValues(catalogID, instanceID, itemType)
 	if err != nil {
 		return nil, err
 	}
@@ -563,24 +564,33 @@ func (s *SyncService) countResourcesFromTemplates(ctx context.Context, catalogID
 }
 
 // loadTemplatesAndValues loads templates and values based on item type.
-func (s *SyncService) loadTemplatesAndValues(catalogID, itemType string) (map[string]*texttemplate.Template, map[string]any, error) {
+func (s *SyncService) loadTemplatesAndValues(catalogID, instanceID, itemType string) (map[string]*texttemplate.Template, map[string]any, error) {
 	switch itemType {
 	case resourceItemTypeService:
-		return s.loadServiceTemplatesAndValues(catalogID)
+		return s.loadServiceTemplatesAndValues(catalogID, instanceID)
 	case resourceItemTypeComponent:
-		return s.loadComponentTemplatesAndValues(catalogID)
+		return s.loadComponentTemplatesAndValues(catalogID, instanceID)
 	default:
 		return nil, nil, fmt.Errorf("unknown item type: %s", itemType)
 	}
 }
 
 // loadServiceTemplatesAndValues loads service templates and values.
-func (s *SyncService) loadServiceTemplatesAndValues(catalogID string) (map[string]*texttemplate.Template, map[string]any, error) {
+// For services, instanceID should be the Application ID.
+func (s *SyncService) loadServiceTemplatesAndValues(catalogID, instanceID string) (map[string]*texttemplate.Template, map[string]any, error) {
 	templates, err := s.catalogProvider.LoadServiceTemplates(catalogID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load service templates: %w", err)
 	}
-	values, err := s.catalogProvider.LoadServiceValues(catalogID, nil)
+
+	// Generate instance slug from Application ID
+	instanceSlug := catalogutils.GenerateInstanceSlug(instanceID)
+	overrides := map[string]string{
+		"InstanceSlug": instanceSlug,
+		"TemplateID":   instanceID,
+	}
+
+	values, err := s.catalogProvider.LoadServiceValues(catalogID, overrides)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load service values: %w", err)
 	}
@@ -589,7 +599,8 @@ func (s *SyncService) loadServiceTemplatesAndValues(catalogID string) (map[strin
 }
 
 // loadComponentTemplatesAndValues loads component templates and values.
-func (s *SyncService) loadComponentTemplatesAndValues(catalogID string) (map[string]*texttemplate.Template, map[string]any, error) {
+// For components, instanceID should be the Component ID.
+func (s *SyncService) loadComponentTemplatesAndValues(catalogID, instanceID string) (map[string]*texttemplate.Template, map[string]any, error) {
 	parts := strings.Split(catalogID, "/")
 	if len(parts) != componentCatalogIDParts {
 		return nil, nil, fmt.Errorf("invalid component catalogID format: %s (expected format: type/provider)", catalogID)
@@ -601,7 +612,14 @@ func (s *SyncService) loadComponentTemplatesAndValues(catalogID string) (map[str
 		return nil, nil, fmt.Errorf("failed to load component templates: %w", err)
 	}
 
-	values, err := s.catalogProvider.LoadComponentValues(componentType, providerID, nil)
+	// Generate instance slug from Component ID
+	instanceSlug := catalogutils.GenerateInstanceSlug(instanceID)
+	overrides := map[string]string{
+		"InstanceSlug": instanceSlug,
+		"TemplateID":   instanceID,
+	}
+
+	values, err := s.catalogProvider.LoadComponentValues(componentType, providerID, overrides)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load component values: %w", err)
 	}
@@ -650,13 +668,13 @@ func (s *SyncService) extractResourceLabelsFromPodSpec(podSpec *modelpkg.PodSpec
 
 // validateResourceCounts validates that actual resources match expected counts from templates.
 // Returns error message if validation fails, empty string if all resources are present.
-func (s *SyncService) validateResourceCounts(ctx context.Context, catalogID, itemType string, actualPodCount int, rt runtime.Runtime) string {
+func (s *SyncService) validateResourceCounts(ctx context.Context, catalogID, instanceID, itemType string, actualPodCount int, rt runtime.Runtime) string {
 	// Get expected counts from cache
 	expectedCounts := s.getExpectedResourceCounts(catalogID)
 
 	// If not in cache, count from templates and cache it
 	if expectedCounts == nil {
-		counts, err := s.countResourcesFromTemplates(ctx, catalogID, itemType)
+		counts, err := s.countResourcesFromTemplates(ctx, catalogID, instanceID, itemType)
 		if err != nil {
 			logger.ErrorfCtx(ctx, "Failed to count resources from templates for %s %s: %v", itemType, catalogID, err)
 			// Don't fail sync if we can't count templates - just skip validation
