@@ -134,7 +134,7 @@
       ],
       "assets": [
         "Video demos",
-        "Reference stories"
+        "Client stories and testimonials"
       ],
       "tag": [
         "Digital assistant"
@@ -160,7 +160,8 @@
         "Digital assistant"
       ],
       "assets": [
-        "Video demos"
+        "Video demos",
+        "Client stories and testimonials"
       ],
       "tag": [
         "Digitize assistant"
@@ -198,7 +199,7 @@
       "featuredArticle": {
         "company": "Hans Geis",
         "title": "Hans Geis Speeds Up Order Processing by 5X with AI on IBM i and Power",
-        "articleUrl": "https://www.ibm.com/downloads/documents/us-en/1443d5dc5ecf4367.",
+        "articleUrl": "https://www-api.ibm.com/adobe/assets/urn:aaid:aem:31997c06-68e4-458f-8b7c-1ce196e4031b/original/as/hans-geis-ai-client-story-9-22-25.pdf",
         "description": "Global logistics provider and IBM Power client Hans Geis has followed the \"Deep process integration\" reference architecture with the \"Extract and tag information\" AI service within their order processing pipeline for incoming quote requests. Their end customers raise thousands of quote requests daily to ask Hans Geis and their competitors for transportation services of cargo they need to get shipped. In this competitive market, answering to requests quickly matters because logistic companies that respond timely are more likely to win an order.\n\nIn a joint project, Hans Geis and IBM have integrated the \"Extract and tag\" AI service into Hans Geis' ERP system running on IBM i, automating the order processing pipeline for quote requests. In their staging system, Hans Geis has measured a speed-up of 5x for their order processing process and an individual employee productivity gain of 80%."
       }
     },
@@ -212,7 +213,7 @@
         "Digital assistant"
       ],
       "assets": [
-        "Reference stories"
+        "Client stories and testimonials"
       ],
       "tag": [
         "Digital assistant"
@@ -234,7 +235,8 @@
         "Digital assistant"
       ],
       "assets": [
-        "Reference stories"
+        "Reference stories",
+        "Client stories and testimonials"
       ],
       "tag": [
         "Digital assistant"
