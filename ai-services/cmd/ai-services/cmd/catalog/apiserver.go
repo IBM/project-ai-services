@@ -95,13 +95,16 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 	serviceDependencyRepo := repository.NewServiceDependencyRepository(pool)
 
 	// Initialize sync service for background DB-Pod synchronization
-	syncService := sync.NewSyncService(
+	syncService, err := sync.NewSyncService(
 		applicationRepo,
 		serviceRepo,
 		componentRepo,
 		serviceDependencyRepo,
 		sync.DefaultSyncInterval,
 	)
+	if err != nil {
+		return fmt.Errorf("failed to initialize sync service: %w", err)
+	}
 	syncService.Start(ctx)
 	defer syncService.Stop(ctx)
 

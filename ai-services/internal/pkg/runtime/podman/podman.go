@@ -402,6 +402,10 @@ func (pc *PodmanClient) DeleteVolume(name string) error {
 	return nil
 }
 
+func (pc *PodmanClient) VolumeExists(nameOrID string) (bool, error) {
+	return volumes.Exists(pc.Context, nameOrID, nil)
+}
+
 func (pc *PodmanClient) ListSecrets(filters map[string][]string) ([]string, error) {
 	var listOpts secrets.ListOptions
 	if len(filters) >= 1 {

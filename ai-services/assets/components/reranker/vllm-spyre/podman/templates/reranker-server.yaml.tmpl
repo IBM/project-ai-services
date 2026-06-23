@@ -6,6 +6,8 @@ metadata:
     ai-services.io/template: "{{ .TemplateID }}"
   annotations:
     io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
+    io.podman.annotations.userns: "keep-id"
+    run.oci.keep_original_groups: "1"
     ai-services.io/reranker--spyre-cards: "1"
 spec:
   restartPolicy: always
@@ -42,6 +44,8 @@ spec:
           value: "/models/{{ .Values.model }}"
         - name: AIU_WORLD_SIZE
           value: "1"
+        - name: VLLM_SPYRE_USE_CHUNKED_PREFILL
+          value: "0"
         - name: VLLM_SPYRE_WARMUP_BATCH_SIZES
           value: "4"
         - name: VLLM_SPYRE_WARMUP_PROMPT_LENS
