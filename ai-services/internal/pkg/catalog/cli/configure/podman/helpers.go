@@ -128,9 +128,9 @@ func validateDomainUnchanged(existingOpts *catalogUtils.PodmanConfigureOptions, 
 
 // IsCatalogServiceRunning checks if the catalog service is configured and running.
 func IsCatalogServiceRunning(rt runtime.Runtime) (bool, error) {
-	_, _, err := getCatalogPodDetails(rt)
+	_, _, err := catalogUtils.GetCatalogPodConfig(rt)
 	if err != nil {
-		if errors.Is(err, ErrCatalogPodNotFound) {
+		if errors.Is(err, catalogUtils.ErrCatalogPodNotFound) {
 			logger.InfolnCtx(context.Background(), "Catalog service is not configured or running.")
 			logger.InfolnCtx(context.Background(), "Run 'ai-services catalog configure --runtime podman' to set up the catalog service.")
 
@@ -158,6 +158,32 @@ func ConfirmCatalogReset(flagName string) (bool, error) {
 	if !confirmed {
 		logger.InfofCtx(context.Background(), "Catalog %s reset cancelled", flagName)
 
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// validateCatalogServiceAndConfirmReset validates that the catalog service is running
+// and confirms the reset action with the user. Returns true if the operation should proceed.
+func validateCatalogServiceAndConfirmReset(rt runtime.Runtime, resetType string) (bool, error) {
+	// Validate catalog service is running
+	isCatalogRunning, err := IsCatalogServiceRunning(rt)
+	if err != nil {
+		return false, err
+	}
+
+	if !isCatalogRunning {
+		return false, nil
+	}
+
+	// Confirm reset action
+	confirmed, err := ConfirmCatalogReset(resetType)
+	if err != nil {
+		return false, err
+	}
+
+	if !confirmed {
 		return false, nil
 	}
 

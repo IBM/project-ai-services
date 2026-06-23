@@ -6,7 +6,9 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
 	catalogConstant "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 func ResetPodmanAuth() error {
@@ -27,15 +29,21 @@ func ResetPodmanAuth() error {
 	}
 
 	// Delete podman auth secret.
-	logger.Infof("Deleting catalog podman auth secret %s", catalogConstant.CatalogPodmanAuthSecretName)
+	logger.InfofCtx(context.Background(), "Deleting catalog podman auth secret %s", catalogConstant.CatalogPodmanAuthSecretName)
 	err = deployCtx.Runtime.DeleteSecret(catalogConstant.CatalogPodmanAuthSecretName)
 	if err != nil {
 		return fmt.Errorf("failed to delete existing catalog podman auth secret: %w", err)
 	}
 
-	opts, err := getAndDeleteCatalogPod(deployCtx.Runtime)
+	opts, podID, err := catalogUtils.GetCatalogPodConfig(deployCtx.Runtime)
 	if err != nil {
 		return fmt.Errorf("failed to get existing catalog pod details: %w", err)
+	}
+
+	logger.InfofCtx(context.Background(), "Deleting existing catalog pod %s", podID)
+	err = deployCtx.Runtime.DeletePod(podID, utils.BoolPtr(true))
+	if err != nil {
+		return fmt.Errorf("failed to delete existing catalog pod: %w", err)
 	}
 
 	_, err = executeCatalogDeployment(context.Background(), deployCtx, *opts, "")
