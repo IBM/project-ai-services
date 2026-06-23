@@ -9,6 +9,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
 
+var (
+	ErrCatalogPodNotFound = fmt.Errorf("no catalog pod found")
+)
+
 // PodmanConfigureOptions contains the configuration for configuring the catalog service on Podman runtime.
 type PodmanConfigureOptions struct {
 	BaseDir     string
@@ -37,7 +41,7 @@ func GetCatalogPodConfig(rt runtime.Runtime) (*PodmanConfigureOptions, string, e
 		return nil, "", fmt.Errorf("failed to list pods: %w", err)
 	}
 	if len(pods) == 0 {
-		return nil, "", fmt.Errorf("no catalog pod found")
+		return nil, "", ErrCatalogPodNotFound
 	}
 
 	// Inspect catalog pod
