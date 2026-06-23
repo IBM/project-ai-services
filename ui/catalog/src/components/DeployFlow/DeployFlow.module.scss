@@ -83,10 +83,6 @@
   }
 }
 
-.requiredIndicator {
-  color: $text-error;
-}
-
 .textInputLabel {
   @include type-style("label-01");
   color: $text-secondary;

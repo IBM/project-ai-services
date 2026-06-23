@@ -69,15 +69,10 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
     const isInvalid =
       hasValidationError && field.validation?.required && !value;
 
-    // Label with optional info tooltip and required indicator
+    // Label with optional info tooltip
     const labelWithInfo = field.description ? (
       <div className={styles.labelWithInfo}>
-        <span>
-          {field.label}
-          {field.validation?.required && (
-            <span className={styles.requiredIndicator}> *</span>
-          )}
-        </span>
+        <span>{field.label}</span>
         <Toggletip align="top">
           <ToggletipButton label="Additional information">
             <Information />
@@ -87,11 +82,6 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
           </ToggletipContent>
         </Toggletip>
       </div>
-    ) : field.validation?.required ? (
-      <>
-        {field.label}
-        <span className={styles.requiredIndicator}> *</span>
-      </>
     ) : (
       field.label
     );

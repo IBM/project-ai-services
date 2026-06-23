@@ -7,7 +7,6 @@ interface ServiceFieldLabelProps {
   label: string;
   description?: string;
   className?: string;
-  required?: boolean;
 }
 
 /**
@@ -19,25 +18,16 @@ export const ServiceFieldLabel: React.FC<ServiceFieldLabelProps> = ({
   label,
   description,
   className,
-  required = false,
 }) => {
-  // If no description, return plain label with optional required indicator
+  // If no description, return plain label
   if (!description) {
-    return (
-      <span className={className}>
-        {label}
-        {required && <span className={styles.requiredIndicator}> *</span>}
-      </span>
-    );
+    return <span className={className}>{label}</span>;
   }
 
-  // Return label with info tooltip and optional required indicator
+  // Return label with info tooltip
   return (
     <div className={`${styles.serviceLabelWithInfo} ${className || ""}`}>
-      <span>
-        {label}
-        {required && <span className={styles.requiredIndicator}> *</span>}
-      </span>
+      <span>{label}</span>
       <Toggletip align="top">
         <ToggletipButton label="Additional information">
           <Information />
