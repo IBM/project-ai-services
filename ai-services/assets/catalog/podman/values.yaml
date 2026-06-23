@@ -24,7 +24,7 @@ db:
       memory: "1Gi"
 
 caddy:
-  image: icr.io/ai-services-cicd/caddy:v2.11.3-0
+  image: icr.io/ai-services-cicd/caddy:v2.11.4-0
   adminPort: ""
   # @description HTTPS port for caddy. Set by configure command via --https-port flag.
   httpsPort: ""
