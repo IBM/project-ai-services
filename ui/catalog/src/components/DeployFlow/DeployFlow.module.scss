@@ -157,6 +157,7 @@
   :global(.c4p--card__description) {
     @include type-style("body-compact-01");
     margin: $spacing-05 0;
+    max-width: 75%;
   }
 }
 
