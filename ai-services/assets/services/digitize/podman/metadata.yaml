@@ -7,6 +7,6 @@ podTemplateExecutions:
 
 # Resource requirements (UI + Backend + PostgreSQL)
 resources:
-  cpu: 6 # Adjusted based on observed max usage of ~5 cores with headroom
+  cpu: 11 # Adjusted based on observed max usage of ~10.7 cores (1069% peak)
   memory: 54223978496 # 512Mi (UI) + 50Gi (Backend) = 50.5Gi in bytes
   storage: 10737418240 # 10Gi for PostgreSQL database and cache storage in bytes
