@@ -19,7 +19,7 @@
     },
     "watsonxApiKey": {
       "type": "string",
-      "title": "API Key",
+      "title": "API key",
       "format": "password",
       "description": "API key for accessing watsonx",
       "pattern": "^[A-Za-z0-9_-]{44}$",
