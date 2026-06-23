@@ -45,7 +45,7 @@ func NewConfigureCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "configure",
 		Short: "Configure the catalog service",
-		Long: `Configures the catalog service it includes reset flags to update admin credentials, podman authentication, and SSL certificates.
+		Long: `Configures the catalog service and includes reset flags to update admin credentials, podman authentication, and SSL certificates.
 
 The configure process will:
 		- Create a new admin user if one does not exist.
