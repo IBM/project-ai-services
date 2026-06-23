@@ -52,7 +52,7 @@ The configure and deploy process will:
 	- Create a new admin user if one does not exist.
 	- Sets up base directory structure for applications and models
 
-The command also supports additional parameters to configure base directories, SSL/TLS certificates, HTTPS port, and reset flags to update passwords and certificates.
+The command also supports additional parameters to configure base directories, domain name, SSL/TLS certificates, HTTPS port, and reset flags to update passwords and certificates.
 
 Examples:
 	 # Configure catalog service for podman
