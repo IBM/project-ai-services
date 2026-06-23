@@ -223,7 +223,7 @@
 .serviceConfigFieldRow {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: $spacing-05;
+  gap: $spacing-07;
   width: 100%;
 
   // White background for dropdowns and text inputs in edit mode
@@ -371,8 +371,8 @@
 .dynamicSchemaFields {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 1rem;
-  margin-top: 1rem;
+  gap: $spacing-06;
+  margin-top: $spacing-06;
 
   > * {
     min-width: 0; // Prevent grid blowout
@@ -386,6 +386,8 @@
   // Checkbox that controls other fields should be full width
   :global(.cds--checkbox-wrapper) {
     grid-column: 1 / -1;
+    margin-top: $spacing-07;
+    margin-bottom: $spacing-07;
   }
 
   // When containing controlled fields, use single column layout
@@ -418,8 +420,8 @@
 
 // Model Description Accordion Styles
 .modelDescriptionSection {
-  margin-top: $spacing-02;
-  margin-bottom: $spacing-05;
+  margin-top: $spacing-07;
+  margin-bottom: $spacing-07;
 }
 
 .modelDescriptionContent {

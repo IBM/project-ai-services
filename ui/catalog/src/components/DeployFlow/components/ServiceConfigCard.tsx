@@ -581,7 +581,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                           titleText={field.label}
                           label={`Select ${field.label.toLowerCase()}`}
                           invalid={!selectedItem}
-                          invalidText={`${field.label} is required`}
+                          invalidText={`Provide a valid ${field.label}`}
                           items={field.options}
                           itemToString={(item) => (item ? item.text : "")}
                           selectedItem={selectedItem}
@@ -654,9 +654,9 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                       <Dropdown
                         id={`${serviceName}-inferenceBackend`}
                         titleText={inferenceBackendField.label}
-                        label={`Select ${inferenceBackendField.label.toLowerCase()}`}
+                        label="Choose an option"
                         invalid={!selectedItem}
-                        invalidText={`${inferenceBackendField.label} is required`}
+                        invalidText={`Provide a valid ${inferenceBackendField.label}`}
                         items={inferenceBackendField.options}
                         itemToString={(item) => (item ? item.text : "")}
                         selectedItem={selectedItem}

@@ -107,7 +107,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             value={String(value || "")}
             required={field.validation?.required}
             invalid={isInvalid}
-            invalidText={`${field.label} is required`}
+            invalidText={`Provide a valid ${field.label}`}
             onChange={(e) => handleFieldChange(field.key, e.target.value)}
           />
         );
@@ -120,7 +120,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             labelText={labelWithInfo}
             value={String(value || "")}
             invalid={isInvalid}
-            invalidText={`${field.label} is required`}
+            invalidText={`Provide a valid ${field.label}`}
             onChange={(e) => handleFieldChange(field.key, e.target.value)}
             rows={4}
           />
@@ -135,7 +135,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             value={Number(value || field.defaultValue || 0)}
             required={field.validation?.required}
             invalid={isInvalid}
-            invalidText={`${field.label} is required`}
+            invalidText={`Provide a valid ${field.label}`}
             min={field.validation?.min}
             max={field.validation?.max}
             onChange={(_e, { value: numValue }) => {
@@ -174,7 +174,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             itemToString={(item) => (item ? item.text : "")}
             selectedItem={selectedItem}
             invalid={isInvalid}
-            invalidText={`${field.label} is required`}
+            invalidText={`Provide a valid ${field.label}`}
             onChange={({ selectedItem: item }) => {
               if (item) {
                 handleFieldChange(field.key, item.id);
@@ -194,7 +194,7 @@ export const DynamicSchemaFields: React.FC<DynamicSchemaFieldsProps> = ({
             value={String(value || "")}
             required={field.validation?.required}
             invalid={isInvalid}
-            invalidText={`${field.label} is required`}
+            invalidText={`Provide a valid ${field.label}`}
             onChange={(e) => handleFieldChange(field.key, e.target.value)}
           />
         );

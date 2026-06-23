@@ -485,7 +485,7 @@ export const StepTwo: React.FC<StepProps> = ({
                         titleText={field.label}
                         label={`Select ${field.label.toLowerCase()}`}
                         invalid={!selectedItem}
-                        invalidText={`${field.label} is required`}
+                        invalidText={`Provide a valid ${field.label}`}
                         items={field.options}
                         itemToString={(item) => (item ? item.text : "")}
                         selectedItem={selectedItem}
@@ -571,7 +571,7 @@ export const StepTwo: React.FC<StepProps> = ({
                         titleText={field.label}
                         label={`Select ${field.label.toLowerCase()}`}
                         invalid={!selectedItem}
-                        invalidText={`${field.label} is required`}
+                        invalidText={`Provide a valid ${field.label}`}
                         items={field.options}
                         itemToString={(item) => (item ? item.text : "")}
                         selectedItem={selectedItem}
