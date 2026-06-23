@@ -60,6 +60,7 @@ Examples:
 
 	 # Configure with custom HTTPS port
 	 ai-services catalog configure --runtime podman --https-port 8443`,
+		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
