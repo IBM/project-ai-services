@@ -12,11 +12,25 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
+var (
+	ErrCatalogPodNotFound = fmt.Errorf("catalog pod not found")
+)
+
 func ResetCatalogPassword() error {
 	// Create deployment context without argParams for status check
 	deployCtx, err := deploy.NewDeployContext()
 	if err != nil {
 		return err
+	}
+
+	// Validate catalog service and confirm reset action
+	shouldProceed, err := validateCatalogServiceAndConfirmReset(deployCtx.Runtime, "password")
+	if err != nil {
+		return err
+	}
+
+	if !shouldProceed {
+		return nil
 	}
 
 	// Collect new catalog password
@@ -69,4 +83,30 @@ func getCatalogPodDetails(rt runtime.Runtime) (*catalogUtils.PodmanConfigureOpti
 	}
 
 	return config, podID, nil
+}
+
+// validateCatalogServiceAndConfirmReset validates that the catalog service is running
+// and confirms the reset action with the user. Returns true if the operation should proceed.
+func validateCatalogServiceAndConfirmReset(rt runtime.Runtime, resetType string) (bool, error) {
+	// Validate catalog service is running
+	isCatalogRunning, err := IsCatalogServiceRunning(rt)
+	if err != nil {
+		return false, err
+	}
+
+	if !isCatalogRunning {
+		return false, nil
+	}
+
+	// Confirm reset action
+	confirmed, err := ConfirmCatalogReset(resetType)
+	if err != nil {
+		return false, err
+	}
+
+	if !confirmed {
+		return false, nil
+	}
+
+	return true, nil
 }

@@ -1,12 +1,16 @@
 package podman
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const certsDirName = "certs"
@@ -120,6 +124,44 @@ func validateDomainUnchanged(existingOpts *catalogUtils.PodmanConfigureOptions, 
 	}
 
 	return nil
+}
+
+// IsCatalogServiceRunning checks if the catalog service is configured and running.
+func IsCatalogServiceRunning(rt runtime.Runtime) (bool, error) {
+	_, _, err := getCatalogPodDetails(rt)
+	if err != nil {
+		if errors.Is(err, ErrCatalogPodNotFound) {
+			logger.InfolnCtx(context.Background(), "Catalog service is not configured or running.")
+			logger.InfolnCtx(context.Background(), "Run 'ai-services catalog configure --runtime podman' to set up the catalog service.")
+
+			return false, nil
+		}
+
+		return false, err
+	}
+
+	return true, nil
+}
+
+// ConfirmCatalogReset displays a warning about catalog service unavailability and prompts for user confirmation.
+// The flagName parameter is used to customize the warning and confirmation messages.
+// Returns true if user confirms, false if cancelled, or an error if confirmation fails.
+func ConfirmCatalogReset(flagName string) (bool, error) {
+	logger.WarningfCtx(context.Background(), "Resetting %s will reload the catalog pod, catalog service will be temporarily unavailable during this time!", flagName)
+
+	// Confirm action
+	confirmed, err := utils.ConfirmAction(fmt.Sprintf("\nDo you want to continue, with %s reset?", flagName))
+	if err != nil {
+		return false, fmt.Errorf("failed to get confirmation: %w", err)
+	}
+
+	if !confirmed {
+		logger.InfofCtx(context.Background(), "Catalog %s reset cancelled", flagName)
+
+		return false, nil
+	}
+
+	return true, nil
 }
 
 // Made with Bob
