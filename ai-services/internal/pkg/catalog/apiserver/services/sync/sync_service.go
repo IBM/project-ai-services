@@ -31,6 +31,9 @@ const (
 
 	// Component catalogID format: "type/provider" has 2 parts.
 	componentCatalogIDParts = 2
+
+	// Error message templates.
+	errMsgPodNotFound = "Pod not found or error: %v"
 )
 
 // ResourceCounts tracks expected resource counts and names from templates.
@@ -62,14 +65,14 @@ func NewSyncService(
 	componentRepo dbrepo.ComponentRepository,
 	serviceDepsRepo dbrepo.ServiceDependencyRepository,
 	syncInterval time.Duration,
-) *SyncService {
+) (*SyncService, error) {
 	if syncInterval == 0 {
 		syncInterval = DefaultSyncInterval
 	}
 
 	catalogProvider, err := catalogpkg.NewCatalogProvider()
 	if err != nil {
-		logger.Errorf("Failed to create catalog provider for sync service: %v", err)
+		return nil, fmt.Errorf("failed to create catalog provider for sync service: %w", err)
 	}
 
 	return &SyncService{
@@ -81,7 +84,7 @@ func NewSyncService(
 		stopChan:        make(chan struct{}),
 		resourceCache:   make(map[string]*ResourceCounts),
 		catalogProvider: catalogProvider,
-	}
+	}, nil
 }
 
 // Start begins the sync goroutine.
@@ -296,7 +299,7 @@ func (s *SyncService) syncServicePod(ctx context.Context, rt runtime.Runtime, se
 // handleServicePodFetchError handles the case when pods cannot be fetched for a service.
 func (s *SyncService) handleServicePodFetchError(ctx context.Context, service models.Service, fetchErr error) (string, error) {
 	newStatus := models.ServiceStatusError
-	message := fmt.Sprintf("Pod not found or error: %v", fetchErr)
+	message := fmt.Sprintf(errMsgPodNotFound, fetchErr)
 
 	if service.Status != newStatus {
 		if err := catalogutils.UpdateServiceStatus(ctx, s.serviceRepo, service.ID, newStatus, message); err != nil {
@@ -399,7 +402,7 @@ func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, 
 // handleComponentPodFetchError handles the case when pods cannot be fetched for a component.
 func (s *SyncService) handleComponentPodFetchError(ctx context.Context, component *models.Component, componentID uuid.UUID, fetchErr error) (models.ComponentStatus, string, error) {
 	newStatus := models.ComponentStatusError
-	message := fmt.Sprintf("Pod not found or error: %v", fetchErr)
+	message := fmt.Sprintf(errMsgPodNotFound, fetchErr)
 
 	if component.Status != newStatus {
 		if err := catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, newStatus, message); err != nil {
