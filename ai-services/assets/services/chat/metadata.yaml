@@ -1,6 +1,6 @@
 # Service identification
 id: chat
-name: "Question and Answer"
+name: "Question and answer"
 description: "Provides accurate, context-aware responses to user queries. This skill enables automated customer support, knowledge base interactions, and conversational assistance across various domains."
 type: service
 
