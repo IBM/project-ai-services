@@ -249,8 +249,6 @@ func validateResetCertificateFlags(cmd *cobra.Command, flagName string) error {
 }
 
 func runResetCertificate() error {
-	logger.Infof("Resetting certificates and reloading catalog pod...")
-
 	// Sanitize SSL certificate paths to prevent path traversal attacks
 	cleanCertPath, cleanKeyPath := sanitizeSSLPaths(sslCertPath, sslKeyPath)
 

@@ -14,7 +14,7 @@ import (
 // It stages new certificates and loads them into Caddy via the Admin API without pod restart.
 // Caddy health is verified internally when connecting to the Admin API.
 func ResetCatalogCertificate(sslCertPath, sslKeyPath string) error {
-	logger.Debugln("resetting catalog SSL certificates...")
+	logger.DebuglnCtx(context.Background(), "Resetting catalog SSL certificates...")
 
 	// Create deployment context to get runtime
 	deployCtx, err := deploy.NewDeployContext()
