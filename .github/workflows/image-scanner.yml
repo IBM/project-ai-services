@@ -40,18 +40,23 @@ jobs:
            image: digitize-ui
          - path: services/chatbot
            image: chatbot-service
+           service: chatbot
          - path: services/digitize
            image: digitize-service
+           service: digitize
          - path: services/similarity
            image: similarity-service
+           service: similarity
          - path: services/summarize
            image: summarize-service
+           service: summarize
          - path: ai-services
            image: ai-services
     uses: ./.github/workflows/scanner.yml
     with:
       path: ${{ matrix.path }}
       image: ${{ matrix.image }}
+      service: ${{ matrix.service }}
       skip-image-build: true
       ignore-unfixed: false
       skip-cves-scan: ${{ github.event_name == 'workflow_dispatch' && inputs.skip-cves-scan }}
