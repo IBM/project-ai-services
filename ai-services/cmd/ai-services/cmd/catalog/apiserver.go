@@ -141,7 +141,9 @@ func NewAPIServerCmd() *cobra.Command {
 	apiserverCmd := &cobra.Command{
 		Use:   "apiserver",
 		Short: "Manage AI Services API server",
-		Long:  `The apiserver command allows you to manage the AI Services API server, including starting, stopping, and checking the status of the server.`,
+		Long:  `Start the AI Services API server to provide REST endpoints for managing applications, services, and authentication.`,
+		Example: `  # Start the AI Services API server on port 8080
+  ai-services catalog apiserver --admin-password-hash <PASSWORD> --runtime podman`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},

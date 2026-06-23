@@ -28,33 +28,30 @@ var restoreCmd = &cobra.Command{
 	Long: `Restore application data from a tar.gz backup file.
 
 Arguments:
-	 [name] : Application name (required)
+  [name] : Application name (required)
 
 Flags:
-	 --target   : Target to restore (opensearch, digitize) (required)
-	 --filename : Path to the backup tar.gz file (required)
-	 -y, --yes  : Automatically accept confirmation prompt (default=false)
+  --target   : Target to restore (opensearch, digitize) (required)
+  --filename : Path to the backup tar.gz file (required)
+  -y, --yes  : Automatically accept confirmation prompt (default=false)
 
 Supported targets:
   - opensearch: Restore OpenSearch indices and data (Podman and OpenShift)
   - digitize:   Restore digitize metadata (jobs and documents) (Podman and OpenShift)
 
 Note:
-	 - WARNING: Restore will overwrite existing data
-
-Examples:
-	 # Restore OpenSearch data with Podman
-	 ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime podman
+  - WARNING: Restore will overwrite existing data`,
+	Example: `  # Restore OpenSearch data with Podman
+  ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime podman
 	 
-	 # Restore OpenSearch data with OpenShift
-	 ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime openshift
+  # Restore OpenSearch data with OpenShift
+  ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime openshift
 
-	 # Restore digitize data with OpenShift
-	 ai-services application restore myapp --target digitize --filename digitize_backup.tar.gz --runtime openshift
+  # Restore digitize data with OpenShift
+  ai-services application restore myapp --target digitize --filename digitize_backup.tar.gz --runtime openshift
 	 
-	 # Restore with automatic confirmation
-	 ai-services application restore myapp --target digitize --filename backup.tar.gz --runtime podman --yes
-`,
+  # Restore with automatic confirmation
+  ai-services application restore myapp --target digitize --filename backup.tar.gz --runtime podman --yes`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		target := restoreTarget

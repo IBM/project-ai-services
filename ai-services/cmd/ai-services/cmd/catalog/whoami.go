@@ -22,7 +22,7 @@ func NewWhoamiCmd() *cobra.Command {
 logged in to the catalog API server.
 
 Example:
-		ai-services catalog whoami --runtime podman`,
+  ai-services catalog whoami --runtime podman`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},

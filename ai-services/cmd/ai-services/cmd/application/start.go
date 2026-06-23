@@ -24,12 +24,12 @@ var startCmd = &cobra.Command{
 	Short: "Start an application",
 	Long: `Starts an application by name.
 
-Arguments
-  [name]: Application name (required)
+Arguments:
+  [name] : Application name (required)
 
-Note: Logs are streamed only when a single pod is specified, and only after the pod has started.
-
-Note: Supported for podman runtime only.
+Note: 
+  - Logs are streamed only when a single pod is specified, and only after the pod has started.
+  - Supported for podman runtime only.
 `,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {

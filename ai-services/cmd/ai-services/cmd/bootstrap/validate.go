@@ -76,23 +76,23 @@ Following scenarios are validated and are available for skipping using --skip-va
 }
 
 func validateExample() string {
-	return `  # Run all validation checks
-  ai-services bootstrap validate
+	return `  # Run all validation checks for podman runtime
+  ai-services bootstrap validate --runtime podman
 
   # Run all validation checks for openshift runtime
   ai-services bootstrap validate --runtime openshift
 
   # Skip RHN registration check
-  ai-services bootstrap validate --skip-validation rhn
+  ai-services bootstrap validate --skip-validation rhn --runtime podman
 
   # Skip multiple checks
-  ai-services bootstrap validate --skip-validation rhn,power
+  ai-services bootstrap validate --skip-validation rhn,power --runtime podman
 
   # Skip operators check for openshift runtime
-  ai-services bootstrap validate --runtime openshift --skip-validation opertors
+  ai-services bootstrap validate --runtime openshift --skip-validation operators
   
   # Run with verbose output
-  ai-services bootstrap validate --verbose`
+  ai-services bootstrap validate --verbose --runtime podman`
 }
 
 // generateValidationList return two validation list: podman and openshift.

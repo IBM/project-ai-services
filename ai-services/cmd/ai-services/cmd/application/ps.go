@@ -31,8 +31,9 @@ var psCmd = &cobra.Command{
 	Short: "Lists all or specified running application(s)",
 	Long: `Retrieves information about all the running applications if no name is provided
 Lists information about a specific application if the name is provided
-Arguments
-  [name]: Application name (optional)
+
+Arguments:
+  [name] : Application name (required)
 `,
 	Args: cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {

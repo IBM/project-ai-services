@@ -39,17 +39,15 @@ The stored access token is reused for subsequent commands as long as it is still
 valid. It is refreshed automatically only when it is about to expire, avoiding
 unnecessary round-trips to the server.
 
-To get the Catalog backend endpoint, use: ai-services catalog info
+To get the Catalog backend endpoint, use: ai-services catalog info`,
+		Example: `  # Interactive login (password is prompted securely)
+  ai-services catalog login --server <catalog_backend_endpoint> --username admin --runtime podman
 
-Examples:
-		# Interactive login (password is prompted securely)
-		ai-services catalog login --server <catalog_backend_endpoint> --username admin --runtime podman
+  # Non-interactive login via stdin pipe (password not recorded in shell history)
+  echo "$MY_PASSWORD" | ai-services catalog login --server <catalog_backend_endpoint> --username admin --password-stdin --runtime podman
 
-		# Non-interactive login via stdin pipe (password not recorded in shell history)
-		echo "$MY_PASSWORD" | ai-services catalog login --server <catalog_backend_endpoint> --username admin --password-stdin --runtime podman
-
-		# Login with insecure TLS (skip certificate verification)
-		ai-services catalog login --server <catalog_backend_endpoint> --username admin --insecure --runtime podman`,
+  # Login with insecure TLS (skip certificate verification)
+  ai-services catalog login --server <catalog_backend_endpoint> --username admin --insecure --runtime podman`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if err := common.InitAndValidateRuntimeFlag(runtimeType); err != nil {
 				return err

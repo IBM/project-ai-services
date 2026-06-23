@@ -22,9 +22,13 @@ var (
 
 var logsCmd = &cobra.Command{
 	Use: "logs [name]",
+	Short: "Application pod logs",
 	Long: `Displays logs from an application pod
-Arguments
-[name]: Application name (required)`,
+
+Arguments:
+  [name] : Application name (required)`,
+  Example: `  # Display logs from an application pod
+  ai-services application logs rag --pod rag --runtime podman`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// Build and run flag validator

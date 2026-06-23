@@ -22,10 +22,11 @@ var stopCmd = &cobra.Command{
 	Short: "Stops the running application",
 	Long: `Stops a running application by name.
 
-Arguments
-  [name]: Application name (required)
+Arguments:
+  [name] : Application name (required)
 
-Note: Supported for podman runtime only.
+Note: 
+  - Supported for podman runtime only.
 `,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {

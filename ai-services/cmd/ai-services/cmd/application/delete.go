@@ -31,8 +31,10 @@ var deleteCmd = &cobra.Command{
 	Short: "Delete an application",
 	Long: `Deletes an application and all associated resources.
 
-Arguments
-  [name]: Application name (required)`,
+Arguments:
+  [name] : Application name (required)`,
+  Example: `  # Delete an application
+  ai-services application delete rag --runtime podman`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// Build and run flag validator

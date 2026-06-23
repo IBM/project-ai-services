@@ -54,13 +54,17 @@ This command performs the following operations:
 
 Additional configuration options include base directory customization, domain name setup,
 SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.
+The configure and deploy process will:
+  - Deploys the catalog services.
+  - Create a new admin user if one does not exist.
+  - Sets up base directory structure for applications and models
 
-Examples:
-	 # Configure catalog service for podman
-	 ai-services catalog configure --runtime podman
+The command also supports additional parameters to configure base directories, domain name, SSL/TLS certificates, HTTPS port, and reset flags to update passwords and certificates.`,
+		Example: `  # Configure catalog service for podman
+  ai-services catalog configure --runtime podman
 
-	 # Configure with custom HTTPS port
-	 ai-services catalog configure --runtime podman --https-port 8443`,
+  # Configure with custom HTTPS port
+  ai-services catalog configure --runtime podman --https-port 8443`,
 		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
