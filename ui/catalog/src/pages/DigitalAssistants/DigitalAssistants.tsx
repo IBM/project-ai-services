@@ -1,5 +1,6 @@
 import React, { useReducer, useEffect } from "react";
 import { useDeployStore } from "@/store/deploy.store";
+import { useDeployOptions } from "@/hooks/useDeployOptions";
 import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
 import {
   DataTable,
@@ -95,9 +96,9 @@ const renderCell = ({
 const DigitalAssistantsPage = () => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
-  // Get catalog_id from deploy options in store
-  const deployOptions = useDeployStore((state) => state.deployOptions);
-  const catalogId = deployOptions?.id;
+  // Get deploy options with automatic cache management
+  const { deployOptions: deployOptionsData } = useDeployOptions();
+  const catalogId = deployOptionsData?.id;
 
   // Get architecture data from store for dynamic title and subtitle
   const architectures = useDeployStore((state) => state.architectures);
@@ -563,7 +564,7 @@ const DigitalAssistantsPage = () => {
                             {noApplications && (
                               <NoDataEmptyState
                                 title="Start by adding a digital assistant"
-                                subtitle="To deploy a digital assistant using a template, click Deploy."
+                                subtitle="To deploy a digital assistant, click Deploy."
                                 className={styles.noDataContent}
                               />
                             )}
@@ -620,7 +621,7 @@ const DigitalAssistantsPage = () => {
                     onRequestSubmit={handleDelete}
                   >
                     <p>
-                      Deleting an digital assistant deployment permanently
+                      Deleting a digital assistant deployment permanently
                       deletes all associated components, including connected
                       services, runtime metadata, and configurations will be
                       permanently deleted, and it cannot be undone.

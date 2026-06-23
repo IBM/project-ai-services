@@ -10,6 +10,7 @@ metadata:
   annotations:
     io.podman.annotations.pids-limit/opensearch: "4096"
 spec:
+  restartPolicy: always
   containers:
     - name: opensearch
       image: "{{ .Values.image }}"

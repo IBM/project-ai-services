@@ -25,6 +25,8 @@ spec:
           value: "4"
         - name: VLLM_SPYRE_WARMUP_PROMPT_LENS
           value: "1024"
+        - name: VLLM_SPYRE_USE_CHUNKED_PREFILL
+          value: "0"
       resources:
         limits:
           cpu: "8"

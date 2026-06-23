@@ -29,14 +29,21 @@ export const initializeFormData = (
   deployOptions.components?.forEach((component) => {
     const componentKey = `${selectedServiceId}:${component.type}`;
     const models = componentModels?.[componentKey] || [];
+    const defaultProvider =
+      component.providers.find((provider) => provider.default === true) ||
+      component.providers[0];
+    const defaultModelForProvider = models.find(
+      (model) => model.providerId === defaultProvider?.id,
+    );
 
-    // Only include params if there are models available
+    // Only include params if there is a model for the selected default provider
     // Components like vector_store don't have models and shouldn't have params
     const componentConfig: ComponentConfig = {
-      providerId: component.providers[0]?.id || "",
-      params: models.length > 0 ? { model: models[0].id } : {},
+      providerId: defaultProvider?.id || "",
+      params: defaultModelForProvider
+        ? { model: defaultModelForProvider.id }
+        : {},
     };
-
     serviceConfig.components[component.type] = componentConfig;
   });
 

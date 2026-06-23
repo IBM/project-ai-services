@@ -44,8 +44,15 @@ const (
 func NewConfigureCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "configure",
-		Short: "Configure the catalog service with initial configuration",
-		Long: `Deploys the catalog service with the provided configuration.
+		Short: "Configure the catalog service",
+		Long: `Configure and deploy the AI Services catalog service with the specified runtime and configuration.
+
+The configure and deploy process will:
+	- Deploys the catalog services.
+	- Create a new admin user if one does not exist.
+	- Sets up base directory structure for applications and models
+
+The command also supports additional parameters to configure base directories, domain name, SSL/TLS certificates, HTTPS port, and reset flags to update passwords and certificates.
 
 Examples:
 	 # Configure catalog service for podman

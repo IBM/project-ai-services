@@ -190,6 +190,7 @@ export function transformApplicationToRow(
     id: app.id,
     name: app.name,
     status: app.status as DigitalAssistantRow["status"],
+    type: app.type,
     uptime: calculateUptime(app.created_at),
     messages: app.status === "Running" ? "" : app.message || "",
     actions: "actions",

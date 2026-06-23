@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useDeployStore } from "@/store/deploy.store";
 import { fetchProviderParams } from "@/api/digitalAssistants";
+import { dedupe } from "@/utils/requestManager";
 
 interface UseProviderParamsResult {
   params: Record<string, unknown> | null;
@@ -10,8 +11,8 @@ interface UseProviderParamsResult {
 
 /**
  * Hook to fetch and cache provider parameters
- * Uses Zustand store with 15-minute cache expiration
- * Provider params can change when provider definitions are updated
+ * Uses Zustand store with 1-hour cache expiration
+ * Uses request de-duping to prevent race conditions
  */
 export function useProviderParams(
   componentType: string,
@@ -19,64 +20,61 @@ export function useProviderParams(
 ): UseProviderParamsResult {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const hasFetched = useRef(false);
 
   const { getProviderParams, setProviderParams, isProviderParamsStale } =
     useDeployStore();
 
   const params = getProviderParams(componentType, providerId);
-  const isStale = isProviderParamsStale(componentType, providerId);
 
   useEffect(() => {
-    // Fetch if we don't have data or if cache is stale, and we haven't already started fetching
-    if ((!params && !isStale) || hasFetched.current) {
-      return;
-    }
+    // Check if cache is stale
+    const isStale = isProviderParamsStale(componentType, providerId);
 
-    // Only fetch if stale or missing
+    // Fetch only if we don't have data or cache is stale
+    // dedupe() handles preventing duplicate in-flight requests per key
     if (!params || isStale) {
-      // Skip if already fetching
-      if (hasFetched.current) {
-        return;
-      }
-    } else {
-      return;
+      const fetchParams = async () => {
+        setIsLoading(true);
+        setError(null);
+
+        try {
+          const requestKey = `providerParams:${componentType}:${providerId}`;
+          const response = await dedupe(requestKey, () =>
+            fetchProviderParams(componentType, providerId),
+          );
+          setProviderParams(componentType, providerId, response);
+        } catch (err) {
+          const errorMessage =
+            err instanceof Error
+              ? err.message
+              : "Failed to fetch provider params";
+          setError(errorMessage);
+          console.error(
+            `Error fetching params for ${componentType}/${providerId}:`,
+            err,
+          );
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      fetchParams();
     }
-
-    const fetchParams = async () => {
-      hasFetched.current = true;
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetchProviderParams(componentType, providerId);
-        setProviderParams(componentType, providerId, response);
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error
-            ? err.message
-            : "Failed to fetch provider params";
-        setError(errorMessage);
-        console.error(
-          `Error fetching params for ${componentType}/${providerId}:`,
-          err,
-        );
-      } finally {
-        setIsLoading(false);
-        hasFetched.current = false;
-      }
-    };
-
-    fetchParams();
-  }, [componentType, providerId, params, isStale, setProviderParams]);
+  }, [
+    componentType,
+    providerId,
+    params,
+    setProviderParams,
+    isProviderParamsStale,
+  ]);
 
   return { params, isLoading, error };
 }
 
 /**
  * Hook to fetch provider params for multiple providers at once
- * Uses Zustand store with 15-minute cache expiration
- * Provider params can change when provider definitions are updated
+ * Uses Zustand store with 1-hour cache expiration
+ * Uses request de-duping to prevent race conditions
  */
 export function useBatchProviderParams(
   componentType: string,
@@ -88,7 +86,6 @@ export function useBatchProviderParams(
 } {
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const hasFetched = useRef(false);
 
   const { getProviderParams, setProviderParams, isProviderParamsStale } =
     useDeployStore();
@@ -103,13 +100,15 @@ export function useBatchProviderParams(
   }
 
   useEffect(() => {
-    if (hasFetched.current || providerIds.length === 0) {
+    if (providerIds.length === 0) {
       return;
     }
 
     // Find providers that need fetching (not cached or stale)
     const providersToFetch = providerIds.filter((providerId) => {
-      return isProviderParamsStale(componentType, providerId);
+      const cached = getProviderParams(componentType, providerId);
+      const isStale = isProviderParamsStale(componentType, providerId);
+      return !cached || isStale;
     });
 
     if (providersToFetch.length === 0) {
@@ -117,13 +116,15 @@ export function useBatchProviderParams(
     }
 
     const fetchAllParams = async () => {
-      hasFetched.current = true;
       setIsLoading(true);
       setErrors({});
 
       const results = await Promise.allSettled(
         providersToFetch.map(async (providerId) => {
-          const response = await fetchProviderParams(componentType, providerId);
+          const requestKey = `providerParams:${componentType}:${providerId}`;
+          const response = await dedupe(requestKey, () =>
+            fetchProviderParams(componentType, providerId),
+          );
           return { providerId, response };
         }),
       );
@@ -149,7 +150,6 @@ export function useBatchProviderParams(
 
       setErrors(newErrors);
       setIsLoading(false);
-      hasFetched.current = false;
     };
 
     fetchAllParams();
@@ -167,8 +167,8 @@ export function useBatchProviderParams(
 /**
  * Hook to fetch provider params for multiple component types at once
  * This is the truly dynamic solution that respects Rules of Hooks
- * Uses Zustand store with 15-minute cache expiration
- * Provider params can change when provider definitions are updated
+ * Uses Zustand store with 1-hour cache expiration
+ * Uses request de-duping to prevent race conditions
  */
 export function useMultiTypeProviderParams(
   componentTypesWithIds: Record<string, string[]>,
@@ -181,7 +181,6 @@ export function useMultiTypeProviderParams(
   const [errorsByType, setErrorsByType] = useState<
     Record<string, Record<string, string>>
   >({});
-  const hasFetched = useRef(false);
 
   const { getProviderParams, setProviderParams, isProviderParamsStale } =
     useDeployStore();
@@ -204,7 +203,7 @@ export function useMultiTypeProviderParams(
   }
 
   useEffect(() => {
-    if (hasFetched.current || Object.keys(componentTypesWithIds).length === 0) {
+    if (Object.keys(componentTypesWithIds).length === 0) {
       return;
     }
 
@@ -218,7 +217,9 @@ export function useMultiTypeProviderParams(
       componentTypesWithIds,
     )) {
       for (const providerId of providerIds) {
-        if (isProviderParamsStale(componentType, providerId)) {
+        const cached = getProviderParams(componentType, providerId);
+        const isStale = isProviderParamsStale(componentType, providerId);
+        if (!cached || isStale) {
           providersToFetch.push({ componentType, providerId });
         }
       }
@@ -229,14 +230,15 @@ export function useMultiTypeProviderParams(
     }
 
     const fetchAllParams = async () => {
-      hasFetched.current = true;
       setIsLoading(true);
       setErrorsByType({});
 
-      // Fetch all params in parallel
       const results = await Promise.allSettled(
         providersToFetch.map(async ({ componentType, providerId }) => {
-          const response = await fetchProviderParams(componentType, providerId);
+          const requestKey = `providerParams:${componentType}:${providerId}`;
+          const response = await dedupe(requestKey, () =>
+            fetchProviderParams(componentType, providerId),
+          );
           return { componentType, providerId, response };
         }),
       );
@@ -268,7 +270,6 @@ export function useMultiTypeProviderParams(
 
       setErrorsByType(newErrorsByType);
       setIsLoading(false);
-      hasFetched.current = false;
     };
 
     fetchAllParams();

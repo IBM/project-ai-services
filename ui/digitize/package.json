@@ -33,11 +33,14 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "sass": "^1.70.0",
     "typescript": "~5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.4"
   },
   "overrides": {
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "esbuild": "^0.28.1"
+    "esbuild": "^0.28.1",
+    "@babel/core": ">=7.30.0",
+    "form-data": ">=4.0.6",
+    "js-yaml": ">=4.1.2"
   }
 }

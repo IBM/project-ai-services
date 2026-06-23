@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
 import {
   Button,
   Dropdown,
@@ -31,6 +31,7 @@ export const StepTwo: React.FC<StepProps> = ({
 }) => {
   const [editingService, setEditingService] = useState<string | null>(null);
   const [tempConfig, setTempConfig] = useState<ServiceConfig | null>(null);
+  const [showValidationError, setShowValidationError] = useState(false);
 
   // Get component models from store for all component types
   const componentModels = useServiceDeployStore(
@@ -129,53 +130,23 @@ export const StepTwo: React.FC<StepProps> = ({
   }, [selectedLlmModel, llmModelsWithProviders, getComponentProviders]);
 
   // Set default LLM model if not already set and options are available
-  useEffect(() => {
-    if (
-      selectedServiceConfig &&
-      selectedServiceId &&
-      llmOptions.length > 0 &&
-      !selectedServiceConfig.components.llm?.params?.model
-    ) {
-      // Set the first LLM option as default
-      const defaultLlmModel = llmOptions[0].id;
-      onChange({
-        services: {
-          ...formData.services,
-          [selectedServiceId]: {
-            ...selectedServiceConfig,
-            components: {
-              ...selectedServiceConfig.components,
-              llm: {
-                ...selectedServiceConfig.components.llm,
-                providerId:
-                  selectedServiceConfig.components.llm?.providerId || "",
-                params: {
-                  ...selectedServiceConfig.components.llm?.params,
-                  model: defaultLlmModel,
-                },
-              },
-            },
-          },
-        },
-      });
-    }
-  }, [
-    selectedServiceConfig,
-    selectedServiceId,
-    llmOptions,
-    onChange,
-    formData.services,
-  ]);
 
   const handleEdit = () => {
     if (selectedServiceConfig && selectedServiceId) {
       setTempConfig({ ...selectedServiceConfig });
       setEditingService(selectedServiceId);
+      setShowValidationError(false);
       onEditingChange?.(true);
     }
   };
 
   const handleApply = () => {
+    // Check if required fields are filled
+    if (!areRequiredFieldsFilled()) {
+      setShowValidationError(true);
+      return; // Stay in edit mode
+    }
+
     if (tempConfig && selectedServiceId) {
       onChange({
         services: {
@@ -186,12 +157,14 @@ export const StepTwo: React.FC<StepProps> = ({
     }
     setEditingService(null);
     setTempConfig(null);
+    setShowValidationError(false);
     onEditingChange?.(false);
   };
 
   const handleCancel = () => {
     setEditingService(null);
     setTempConfig(null);
+    setShowValidationError(false);
     onEditingChange?.(false);
   };
 
@@ -249,7 +222,7 @@ export const StepTwo: React.FC<StepProps> = ({
   // Helper function to parse model description into structured sections
   const parseModelDescription = (description: string) => {
     const sections: {
-      useCases?: string;
+      mainDescription?: string;
       languages?: string;
       strengths?: string;
     } = {};
@@ -257,15 +230,19 @@ export const StepTwo: React.FC<StepProps> = ({
     // Split by ** markers to find section titles
     const parts = description.split(/\*\*(.*?)\*\*/g);
 
+    // First part (before any ** markers) is the main description
+    if (parts[0]) {
+      sections.mainDescription = parts[0].trim();
+    }
+
+    // Parse remaining sections
     for (let i = 1; i < parts.length; i += 2) {
       const title = parts[i].trim().replace(/:$/, ""); // Remove trailing colon
-      const content = parts[i + 1]?.trim() || "";
+      const content = parts[i + 1]?.trim().replace(/^:\s*/, "") || ""; // Remove leading colon and whitespace
 
       if (title && content) {
         // Map section titles to keys
-        if (title.toLowerCase().includes("use case")) {
-          sections.useCases = content;
-        } else if (title.toLowerCase().includes("language")) {
+        if (title.toLowerCase().includes("language")) {
           sections.languages = content;
         } else if (title.toLowerCase().includes("strength")) {
           sections.strengths = content;
@@ -413,7 +390,6 @@ export const StepTwo: React.FC<StepProps> = ({
               size="sm"
               renderIcon={Checkmark}
               onClick={handleApply}
-              disabled={!areRequiredFieldsFilled()}
             >
               Apply
             </Button>
@@ -674,8 +650,7 @@ export const StepTwo: React.FC<StepProps> = ({
                     });
                   }}
                   providerParamsMap={{ [currentLlmProviderId]: providerSchema }}
-                  hasValidationError={!areRequiredFieldsFilled}
-                  className={styles.serviceConfigFieldRow}
+                  hasValidationError={showValidationError}
                 />
               </div>
             )}
@@ -693,7 +668,7 @@ export const StepTwo: React.FC<StepProps> = ({
                 const sections = parseModelDescription(modelDescription);
 
                 if (
-                  !sections.useCases &&
+                  !sections.mainDescription &&
                   !sections.strengths &&
                   !sections.languages
                 ) {
@@ -705,11 +680,11 @@ export const StepTwo: React.FC<StepProps> = ({
                     <Accordion>
                       <AccordionItem title="What is this model good at?">
                         <div className={styles.modelDescriptionContent}>
-                          {/* Use Cases - Full width at top */}
-                          {sections.useCases && (
+                          {/* Main Description - Full width at top */}
+                          {sections.mainDescription && (
                             <div className={styles.modelDescriptionFullWidth}>
                               <p className={styles.modelDescriptionText}>
-                                {sections.useCases}
+                                {sections.mainDescription}
                               </p>
                             </div>
                           )}

@@ -6,10 +6,10 @@ digitize:
 
 digitizeUi:
   port: ""
-  image: icr.io/ai-services-cicd/digitize-ui:v0.0.23
+  image: icr.io/ai-services-cicd/digitize-ui:v0.0.24
 
 postgres:
-  image: icr.io/ai-services-cicd/postgres:18-2
+  image: icr.io/ai-services-cicd/postgres:18-3
   username: "postgres"
   # @generate:password
   password: ""

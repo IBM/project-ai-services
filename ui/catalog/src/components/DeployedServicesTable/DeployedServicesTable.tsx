@@ -59,6 +59,7 @@ interface RenderCellProps {
   cellKey: string;
   cellProps: Record<string, unknown>;
   rowData: DeployedServicesRow;
+  onRowClick?: (deployment: DeploymentDetails) => void;
 }
 
 const renderCell = ({
@@ -69,6 +70,7 @@ const renderCell = ({
   cellKey,
   cellProps,
   rowData,
+  onRowClick,
 }: RenderCellProps) => {
   const CellRenderer = CELL_RENDERERS[header as keyof typeof CELL_RENDERERS];
 
@@ -80,6 +82,7 @@ const renderCell = ({
           rowId={rowId}
           dispatch={dispatch}
           rowData={rowData}
+          onRowClick={header === "name" ? onRowClick : undefined}
         />
       ) : (
         String(value || "")
@@ -119,6 +122,7 @@ const DeployedServicesTable = ({
         id: app.id,
         name: app.name,
         status: app.status,
+        type: app.type,
         uptime: uptime,
         service: app.type || "",
         messages: app.message || "",
@@ -715,31 +719,6 @@ const DeployedServicesTable = ({
                                 <TableRow
                                   {...rowProps}
                                   isExpanded={row.isExpanded}
-                                  onClick={(e) => {
-                                    // Don't trigger row click if clicking on interactive elements
-                                    const target = e.target as HTMLElement;
-                                    if (
-                                      target.closest("button") ||
-                                      target.closest('[role="button"]') ||
-                                      target.closest(".cds--overflow-menu")
-                                    ) {
-                                      return;
-                                    }
-
-                                    const rowData = paginatedRows.find(
-                                      (r) => r.id === row.id,
-                                    ) as DeployedServicesRow;
-                                    if (rowData && onRowClick) {
-                                      onRowClick({
-                                        id: rowData.id,
-                                        name: rowData.name,
-                                        status: rowData.status,
-                                        type: "Service",
-                                        resources: [],
-                                      });
-                                    }
-                                  }}
-                                  style={{ cursor: "pointer" }}
                                 >
                                   {row.cells.map((cell) => {
                                     const { key: cellKey, ...cellProps } =
@@ -758,6 +737,7 @@ const DeployedServicesTable = ({
                                       cellKey,
                                       cellProps,
                                       rowData,
+                                      onRowClick,
                                     });
                                   })}
                                 </TableRow>

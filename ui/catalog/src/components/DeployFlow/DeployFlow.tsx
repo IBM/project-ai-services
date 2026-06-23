@@ -20,6 +20,7 @@ import { StepTwo } from "./steps/StepTwo";
 import { useDeployOptions } from "@/hooks/useDeployOptions";
 import { useDeployStore } from "@/store/deploy.store";
 import { initializeFormData } from "@/utils/formDataInitializer";
+import { dedupe } from "@/utils/requestManager";
 import styles from "./DeployFlow.module.scss";
 
 const getInitialState = (formData: DeployFormData): DeployFlowState => ({
@@ -95,16 +96,24 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
     isServiceSummariesStale,
     providerParams,
     serviceParams,
+    initialize,
   } = useDeployStore();
 
+  // Initialize store and validate cache version on mount
   useEffect(() => {
-    // Fetch service summaries if not in store or if cache is stale (older than 15 minutes)
-    const shouldFetch =
-      serviceSummaries.length === 0 || isServiceSummariesStale();
+    initialize();
+  }, [initialize]);
 
-    if (open && shouldFetch) {
+  useEffect(() => {
+    // Check if cache is stale
+    const isStale = isServiceSummariesStale();
+
+    // Fetch service summaries if not in store or stale
+    // dedupe() handles preventing duplicate in-flight requests
+    if (open && (serviceSummaries.length === 0 || isStale)) {
       setServiceSummariesLoading(true);
-      fetchServices()
+
+      dedupe("serviceSummaries", () => fetchServices())
         .then((data) => {
           setServiceSummaries(data);
         })
@@ -120,10 +129,10 @@ export const DeployFlow = ({ open, onClose, onSubmit }: DeployFlowProps) => {
   }, [
     open,
     serviceSummaries.length,
-    isServiceSummariesStale,
     setServiceSummaries,
     setServiceSummariesLoading,
     setServiceSummariesError,
+    isServiceSummariesStale,
   ]);
 
   const initialState = useMemo(() => {

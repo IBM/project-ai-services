@@ -10,6 +10,7 @@ metadata:
     ai-services.io/routes: "6000:summarize-api-{{ .InstanceSlug }}:api"
     # ai-services.io/ports: "{{ or .Values.summarize.port }}:6000"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
+  restartPolicy: always
   initContainers:
     - name: summarize-db-init
       image: "{{ .Values.summarize.image }}"

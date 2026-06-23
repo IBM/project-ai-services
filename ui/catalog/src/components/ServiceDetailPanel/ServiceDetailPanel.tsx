@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { SidePanel } from "@carbon/ibm-products";
-import { Button, Tag, SkeletonText, SkeletonPlaceholder } from "@carbon/react";
+import { Button, SkeletonText, SkeletonPlaceholder } from "@carbon/react";
 import { Badge } from "@carbon/icons-react";
 import {
   fetchServiceDetails,
@@ -300,11 +300,6 @@ const ServiceDetailPanel = ({
             <p className={styles.description}>{service.description}</p>
 
             <div className={styles.tagContainer}>
-              {service.tags?.map((tag, index) => (
-                <Tag key={index} type="outline">
-                  {"by IBM Power"}
-                </Tag>
-              ))}
               {service.certifiedBy && (
                 <div className={styles.certifiedTag}>
                   <Badge size={16} className={styles.checkIcon} />

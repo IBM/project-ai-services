@@ -3,10 +3,10 @@ package podman
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
 	catalogConstant "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -46,7 +46,7 @@ func ResetCatalogPassword() error {
 	return nil
 }
 
-func getAndDeleteCatalogPod(rt runtime.Runtime) (*PodmanConfigureOptions, error) {
+func getAndDeleteCatalogPod(rt runtime.Runtime) (*catalogUtils.PodmanConfigureOptions, error) {
 	opts, podID, err := getCatalogPodDetails(rt)
 	if err != nil {
 		return nil, err
@@ -62,56 +62,11 @@ func getAndDeleteCatalogPod(rt runtime.Runtime) (*PodmanConfigureOptions, error)
 }
 
 // getCatalogPodDetails retrieves catalog pod configuration by inspecting the running pod and its containers.
-func getCatalogPodDetails(rt runtime.Runtime) (*PodmanConfigureOptions, string, error) {
-	// Build filter to find all pods using the catalog secret via label
-	logger.Infof("Getting catalog pod details")
-	filter := map[string][]string{
-		"label": {fmt.Sprintf(
-			"%s=%s",
-			catalogConstant.CatalogSecretLabel,
-			catalogConstant.CatalogSecretName,
-		)},
-	}
-
-	// List all pods that reference the catalog secret
-	pods, err := rt.ListPods(filter)
+func getCatalogPodDetails(rt runtime.Runtime) (*catalogUtils.PodmanConfigureOptions, string, error) {
+	config, podID, err := catalogUtils.GetCatalogPodConfig(rt)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to list pods: %w", err)
-	}
-	if len(pods) == 0 {
-		return nil, "", fmt.Errorf("no catalog pod found")
+		return nil, "", err
 	}
 
-	// Inspect catalog pod
-	pod := pods[0]
-	pInfo, err := rt.InspectPod(pod.ID)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to inspect pod %s: %w", pod.Name, err)
-	}
-
-	opts := &PodmanConfigureOptions{}
-
-	for _, container := range pInfo.Containers {
-		// Inspect container for get hold of envs
-		cInfo, err := rt.InspectContainer(container.ID)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
-		}
-		setConfigureOptions(cInfo.Env, opts)
-	}
-
-	return opts, pod.ID, nil
-}
-
-func setConfigureOptions(podEnv map[string]string, opts *PodmanConfigureOptions) {
-	// Setting required 3 envs
-	if value, ok := podEnv["AI_SERVICES_BASE_DIR"]; ok {
-		opts.BaseDir = value
-	}
-	if value, ok := podEnv["DOMAIN_SUFFIX"]; ok {
-		opts.DomainName = value
-	}
-	if value, ok := podEnv["CADDY_HTTPS_PORT"]; ok {
-		opts.HttpsPort, _ = strconv.Atoi(value)
-	}
+	return config, podID, nil
 }
