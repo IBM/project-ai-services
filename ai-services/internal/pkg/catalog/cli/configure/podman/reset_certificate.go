@@ -5,6 +5,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
+	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -21,7 +22,7 @@ func ResetCatalogCertificate(sslCertPath, sslKeyPath string) error {
 	}
 
 	// Get existing catalog pod details
-	opts, _, err := getCatalogPodDetails(deployCtx.Runtime)
+	opts, _, err := catalogUtils.GetCatalogPodConfig(deployCtx.Runtime)
 	if err != nil {
 		return fmt.Errorf("failed to get catalog pod details: %w", err)
 	}
