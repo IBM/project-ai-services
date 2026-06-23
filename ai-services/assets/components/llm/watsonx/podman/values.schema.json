@@ -21,17 +21,22 @@
       "type": "string",
       "title": "API Key",
       "format": "password",
-      "description": "API key for accessing watsonx"
+      "description": "API key for accessing watsonx",
+      "pattern": "^[A-Za-z0-9_-]{44}$",
+      "minLength": 44,
+      "maxLength": 44
     },
     "watsonxProjectId": {
       "type": "string",
       "title": "Project ID",
-      "description": "Find your ID on the watsonx cloud site when you create a project\n\n[Open project](https://dataplatform.cloud.ibm.com/projects/?context=wx)"
+      "description": "Find your ID on the watsonx cloud site when you create a project\n\n[Open project](https://dataplatform.cloud.ibm.com/projects/?context=wx)",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     },
     "watsonxUrl": {
       "type": "string",
       "title": "API Endpoint",
-      "description": "API Endpoint for accessing watsonx"
+      "description": "API Endpoint for accessing watsonx",
+      "pattern": "^https://[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*(/.*)?$"
     }
   }
 }
